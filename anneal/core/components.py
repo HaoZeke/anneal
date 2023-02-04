@@ -8,6 +8,7 @@ import typing
 
 from anneal.core.exceptions import OutOfBounds
 
+
 @dataclass
 class NumLimit:
     """Class for tracking function bounds
@@ -18,13 +19,16 @@ class NumLimit:
     high: A list of values which the function must not exceed
     dims: This should be the same as the length of the list
     """
+
     low: npt.NDArray
     high: npt.NDArray
     dims: int = 1
 
-    def check(pos: npt.NDArray)->bool:
+    def check(pos: npt.NDArray):
         if not (np.all(pos > self.low) and np.all(pos < self.high)):
             raise OutOfBounds(f"{pos} is not within {self.low} and {self.high}")
+        return
+
 
 class ObjectiveFunction(metaclass=abc.ABCMeta):
     def __init__(self, high, low):
@@ -44,6 +48,7 @@ class ConstructNeighborhood(metaclass=abc.ABCMeta):
 class CoolingSchedule(metaclass=abc.ABCMeta):
     def __init__(self):
         pass
+
 
 class MoveClass(metaclass=abc.ABCMeta):
     def __init__(self):
