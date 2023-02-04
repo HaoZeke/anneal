@@ -41,6 +41,8 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.pdm]
+[tool.pdm.build]
+exclude  = "nb/"
 [tool.pdm.dev-dependencies]
 test = [
     "pytest>=7.2.1",
