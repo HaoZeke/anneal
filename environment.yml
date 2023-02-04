@@ -1,0 +1,15 @@
+# To use:
+#
+#   $ micromamba env create -f environment.yml  # `conda` works too for this command
+#   $ micromamba activate anneal-dev
+#
+name: anneal-dev
+channels:
+  - conda-forge
+dependencies:
+  - meson
+  - cmake
+  - ninja
+  - pkg-config
+  - openblas
+  - python>=3.10
