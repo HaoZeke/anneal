@@ -3,7 +3,7 @@ from collections import namedtuple
 import abc
 
 import numpy as np
-import nptyping as npt
+import numpy.typing as npt
 import typing
 
 from anneal.core.exceptions import OutOfBounds
