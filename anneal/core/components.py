@@ -38,8 +38,38 @@ class NumLimit:
 
 
 class ObjectiveFunction(metaclass=abc.ABCMeta):
-    def __init__(self, high, low):
+    def __init__(self, limits: NumLimit):
         pass
+
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "pointwise")
+            and callable(subclass.pointwise)
+            and hasattr(subclass, "multipoint")
+            and callable(subclass.multipoint)
+            or NotImplemented
+        )
+
+    def __call__(self, pos):
+        if pos.shape[0] != self.limits.dims:
+            return self.multipoint(pos)
+        else:
+            return self.singlepoint(pos)
+
+    @abc.abstractmethod
+    def singlepoint(self, pos):
+        """Evaluate the function at a single configuration"""
+        raise NotImplementedError(
+            "Need to be able to call the objective function on a single point"
+        )
+
+    @abc.abstractmethod
+    def multipoint(self, pos):
+        """Evaluate the function at many configurations"""
+        raise NotImplementedError
 
 
 class AcceptCriteria(metaclass=abc.ABCMeta):
