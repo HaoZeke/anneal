@@ -14,11 +14,21 @@ dependencies:
   - openblas
   - python>=3.10
   - jupytext
+  - jupyterlab
   # For R tests
+  - r-base==4.2.2
+  - xorg-libxrender
+  - libiconv
+  - libtiff
+  - r-essentials
+  - r-cairo
+  - r-devtools
+  - r-languageserver
   - r-irkernel
   - jupyterlab
   - r-tidyverse
   - r-microbenchmark
   - r-gensa
+  - r-pracma
   - r-httpgd
   - radian
