@@ -68,7 +68,10 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def multipoint(self, pos):
-        """Evaluate the function at many configurations"""
+        """Evaluate the function at many configurations
+
+        TODO: This allows for a faster implementaiton in C
+        """
         raise NotImplementedError
 
 
