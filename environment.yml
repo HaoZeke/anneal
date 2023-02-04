@@ -13,3 +13,12 @@ dependencies:
   - pkg-config
   - openblas
   - python>=3.10
+  - jupytext
+  # For R tests
+  - r-irkernel
+  - jupyterlab
+  - r-tidyverse
+  - r-microbenchmark
+  - r-gensa
+  - r-httpgd
+  - radian
