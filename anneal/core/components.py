@@ -17,16 +17,23 @@ class NumLimit:
     ----------
     low: A list of values which the function must not be below
     high: A list of values which the function must not exceed
+    slack: The amount by which bounds may be exceeded without an error
     dims: This should be the same as the length of the list
     """
 
     low: npt.NDArray
     high: npt.NDArray
+    slack: float = 1e-6
     dims: int = 1
 
-    def check(pos: npt.NDArray):
-        if not (np.all(pos > self.low) and np.all(pos < self.high)):
-            raise OutOfBounds(f"{pos} is not within {self.low} and {self.high}")
+    def check(self, pos: npt.NDArray):
+        if not (
+            np.all(pos > self.low - self.slack)
+            and np.all(pos < self.high + self.slack)
+        ):
+            raise OutOfBounds(
+                f"{pos} is not within {self.slack} of {self.low} and {self.high}"
+            )
         return
 
 
