@@ -1,0 +1,67 @@
+[project]
+name = "anneal"
+version = "0.0.1"
+authors = [
+    { name="Rohit Goswami", email="rgoswami@ieee.org" },
+    { name="Ruhila S", email="ruhila@ieee.org" },
+    { name="Amrita Goswami", email="amrita@hi.is" },
+    { name="Sonaly Goswami", email="sonaly@iitk.ac.in" },
+    { name="Debabrata Goswami", email="dgoswami@iitk.ac.in" },
+]
+maintainers = [
+    { name="Rohit Goswami", email="rgoswami@ieee.org" },
+    { name="Ruhila S", email="ruhila@ieee.org" },
+    { name="Amrita Goswami", email="amrita@hi.is" },
+]
+description = "A package for various annealing and quenching techniques"
+readme = "README.md"
+license = { file = "LICENSE.txt" }
+keywords = ["optimization", "algorithms"]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "click>=8.1.3",
+    "numpy>=1.24.1",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/HaoZeke/anneal"
+"Bug Tracker" = "https://github.com/HaoZeke/anneal/issues"
+
+[project.scripts]
+anneal = "anneal.cli.main:hello"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pdm]
+[tool.pdm.dev-dependencies]
+test = [
+    "pytest>=7.2.1",
+    "pytest-datadir>=1.4.1",
+]
+lint = [
+    "black>=23.1.0",
+]
+interactive = [
+    "ipython>=8.9.0",
+    "jupytext>=1.14.4",
+]
+docs = [
+    "sphinx>=6.1.3",
+]
+
+[tool.pdm.scripts]
+lint = "black"
+test = "pytest"
+all = {composite = ["lint anneal/", "test -v tests/"]}
+
+[tool.black]
+line-length = 80
+target-version = ['py310']
