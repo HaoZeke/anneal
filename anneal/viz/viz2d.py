@@ -1,9 +1,11 @@
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import numpy as np
 
 from anneal.funcs.obj2d import *
+from anneal.core.components import AcceptStates, Quencher
 
 
 class Plot2dObj:
@@ -30,15 +32,14 @@ class Plot2dObj:
         self.Z = self.prepVals()
         self.contourExtent = [
             np.min(plX),
-            np.max(plY),
+            np.max(plX),
             np.min(plY),
             np.max(plY),
         ]
-        self.X_min = self.X.ravel()[self.Z.argmin()]
-        self.Y_min = self.Y.ravel()[self.Z.argmin()]
-        self.X_max = self.X.ravel()[self.Z.argmax()]
-        self.Y_max = self.Y.ravel()[self.Z.argmax()]
-        self.Z_min = np.min(self.Z.ravel())
+        self.X_glob_min = self.X.ravel()[self.Z.argmin()]
+        self.Y_glob_min = self.Y.ravel()[self.Z.argmin()]
+        self.Z_glob_min = np.min(self.Z.ravel())
+        self.pdat = None
 
     def prepVals(self):
         grid_vals = [
@@ -65,16 +66,16 @@ class Plot2dObj:
         ax.view_init(elev=15, azim=220)
         if showGlob:
             ax.scatter(
-                self.X_min,
-                self.Y_min,
-                self.Z_min,
+                self.X_glob_min,
+                self.Y_glob_min,
+                self.Z_glob_min,
                 color="black",
                 alpha=1,
             )
             ax.text(
-                self.X_min,
-                self.Y_min,
-                self.Z_min,
+                self.X_glob_min,
+                self.Y_glob_min,
+                self.Z_glob_min,
                 "Global Minima",
                 color="black",
                 alpha=1,
@@ -113,15 +114,108 @@ class Plot2dObj:
         plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
         if showGlob:
             plt.plot(
-                self.X_min,
-                self.Y_min,
+                self.X_glob_min,
+                self.Y_glob_min,
                 color="white",
                 marker="x",
                 markersize=5,
             )
             ax.text(
-                self.X_min + 0.1, self.Y_min, "Global Minima", color="white"
+                self.X_glob_min + 0.1,
+                self.Y_glob_min,
+                "Global Minima",
+                color="white",
             )
+        if savePath is not None:
+            plt.savefig(savePath, dpi=300)
+        else:
+            plt.show()
+
+    def plotQuenchContour(self, quenchy: Quencher, nsamples=500, savePath=None):
+        self.pdat = pd.DataFrame(quenchy.PlotData)
+        accepted_pos = self.pdat[self.pdat.accept == AcceptStates.IMPROVED][
+            "pos"
+        ]
+        rejected_pos = self.pdat[self.pdat.accept == AcceptStates.REJECT]["pos"]
+        mhaccept_pos = self.pdat[self.pdat.accept == AcceptStates.MHACCEPT][
+            "pos"
+        ]
+        getDat = (
+            lambda posDat: pd.DataFrame.sample(posDat, n=nsamples)
+            if len(posDat) > nsamples
+            else posDat
+        )
+        inBounds = lambda point: np.all(
+            point > self.contourExtent[::2]
+        ) and np.all(point < self.contourExtent[1::2])
+        fig = plt.figure(figsize=(12, 10))
+        ax = plt.subplot()
+        plotAccept = (
+            lambda point: ax.plot(
+                point[0], point[1], marker="o", color="blue", alpha=0.5
+            )
+            if inBounds(point)
+            else None
+        )
+        plotReject = (
+            lambda point: ax.plot(
+                point[0], point[1], marker="o", color="red", alpha=0.3
+            )
+            if inBounds(point)
+            else None
+        )
+        plotMHAccept = (
+            lambda point: ax.plot(
+                point[0],
+                point[1],
+                marker="*",
+                color="yellow",
+                alpha=0.5,
+            )
+            if inBounds(point)
+            else None
+        )
+        [t.set_va("center") for t in ax.get_yticklabels()]
+        [t.set_ha("left") for t in ax.get_yticklabels()]
+        [t.set_va("center") for t in ax.get_xticklabels()]
+        [t.set_ha("right") for t in ax.get_xticklabels()]
+        plt.imshow(
+            self.Z,
+            extent=[
+                np.min(self.X.ravel()),
+                np.max(self.X.ravel()),
+                np.min(self.Y.ravel()),
+                np.max(self.Y.ravel()),
+            ],
+            origin="lower",
+            cmap="viridis",
+            alpha=0.8,
+        )
+        plt.colorbar()
+        contours = ax.contour(
+            self.X, self.Y, self.Z, 10, colors="black", alpha=0.9
+        )
+        plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
+        plt.plot(
+            self.X_glob_min,
+            self.Y_glob_min,
+            color="white",
+            marker="x",
+            markersize=5,
+        )
+        ax.plot(
+            quenchy.best.pos[0],
+            quenchy.best.pos[1],
+            marker="*",
+            color="white",
+            alpha=1,
+        )
+        for point in getDat(accepted_pos):
+            ax.plot(point[0], point[1], marker="o", color="blue", alpha=0.5)
+        for point in getDat(rejected_pos):
+            plotReject(point)
+        for point in getDat(mhaccept_pos):
+            plotMHAccept(point)
         if savePath is not None:
             plt.savefig(savePath, dpi=300)
         else:
