@@ -1,7 +1,8 @@
 # Anneal
 
-This is a `python` package for simulated annealing of various types. The design
-decisions are described in the corresponding InTechOpen article.
+This is a `python` package for simulated annealing (and quenching) in all its
+many guises. The design decisions are described in the corresponding InTechOpen
+article.
 
 ## Development
 
