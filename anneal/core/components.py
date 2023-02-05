@@ -83,20 +83,105 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
 
 
 class AcceptCriteria(metaclass=abc.ABCMeta):
+    """The acceptance criteria for selecting an unfavorable move"""
     def __init__(self):
         pass
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
+            or NotImplemented
+        )
+
+    @abc.abstractmethod
+    def __call__(self):
+        """Accept or reject"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function"""
+        raise NotImplementedError
 
 
 class ConstructNeighborhood(metaclass=abc.ABCMeta):
+    """Choosing a feasible point / direction
+
+    For most methods, this is a uniform distribution
+    """
     def __init__(self):
         pass
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
+            or NotImplemented
+        )
+
+    @abc.abstractmethod
+    def __call__(self):
+        """Yield a point"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function"""
+        raise NotImplementedError
 
 
 class CoolingSchedule(metaclass=abc.ABCMeta):
     def __init__(self):
         pass
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
+            or NotImplemented
+        )
+
+    @abc.abstractmethod
+    def __call__(self):
+        """Generate a temperature"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function"""
+        raise NotImplementedError
 
 
 class MoveClass(metaclass=abc.ABCMeta):
+    """The probability distribution for the step-size
+
+    Also called the visiting distribution.
+    """
     def __init__(self):
         pass
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
+            or NotImplemented
+        )
+
+    @abc.abstractmethod
+    def __call__(self):
+        """Generate a move"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function"""
+        raise NotImplementedError
