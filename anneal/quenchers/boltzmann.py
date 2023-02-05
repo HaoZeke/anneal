@@ -119,13 +119,11 @@ class BoltzmannQuencher(Quencher):
         self.rejections += 1
         self.samestate_time += 1
 
-    # TODO: Generalize for other functions
+    # TODO: Generalize for other kinds of convergence
     def HasConverged(self):
         if self.best.val == pytest.approx(
-            -39.1661657037 * self.ObjFunc.limits.dims, 1e-2
-        ) or self.best.pos == pytest.approx(
-            np.array([-2.9] * self.ObjFunc.limits.dims)
-        ):
+            self.ObjFunc.globmin.val, 1e-3
+        ) or self.best.pos == pytest.approx(self.ObjFunc.globmin.pos, 1e-3):
             self.fCalls = self.ObjFunc.calls
             self.ObjFunc.calls = 0
             return True

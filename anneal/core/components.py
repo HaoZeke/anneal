@@ -260,12 +260,19 @@ class Quencher(metaclass=abc.ABCMeta):
             and callable(subclass.__call__)
             and hasattr(subclass, "__repr__")
             and callable(subclass.__repr__)
+            and hasattr(subclass, "HasConverged")
+            and callable(subclass.HasConverged)
             or NotImplemented
         )
 
     @abc.abstractmethod
     def __call__(self):
         """Generate a move"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def HasConverged(self):
+        """Check for Convergence"""
         raise NotImplementedError
 
     @abc.abstractmethod
