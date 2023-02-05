@@ -11,7 +11,9 @@ from anneal.core.components import (
     MoveClass,
     NumLimit,
     MAX_LIMITS,
+    EpochLine,
     FPair,
+    AcceptStates,
 )
 
 
@@ -49,7 +51,7 @@ class BoltzmannQuencher(Quencher):
         ## Initially
         self.best = self.cur
 
-    def __call__(self):
+    def __call__(self, trackPlot=False):
         while (
             temperature := self.Cooler(self.epoch)
         ) > 0.1 and self.epoch < self.maxiter.EPOCHS:
@@ -61,11 +63,41 @@ class BoltzmannQuencher(Quencher):
                 if diff <= 0:
                     ## Better point, accept always
                     self.AcceptMove()
+                    self.PlotData.append(
+                        EpochLine(
+                            epoch=self.epoch,
+                            temperature=temperature,
+                            step=step,
+                            pos=self.candidate.pos,
+                            val=self.candidate.val,
+                            accept=AcceptStates.IMPROVED,
+                        )
+                    )
                 else:
                     if self.Accepter(diff, temperature):
                         self.AcceptMove()
+                        self.PlotData.append(
+                            EpochLine(
+                                epoch=self.epoch,
+                                temperature=temperature,
+                                step=step,
+                                pos=self.candidate.pos,
+                                val=self.candidate.val,
+                                accept=AcceptStates.MHACCEPT,
+                            )
+                        )
                     else:
                         self.RejectMove()
+                        self.PlotData.append(
+                            EpochLine(
+                                epoch=self.epoch,
+                                temperature=temperature,
+                                step=step,
+                                pos=self.candidate.pos,
+                                val=self.candidate.val,
+                                accept=AcceptStates.REJECT,
+                            )
+                        )
             print(f"{self.epoch} for {temperature} has {self.best}")
             if self.HasConverged():
                 return

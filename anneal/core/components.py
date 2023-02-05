@@ -9,6 +9,10 @@ import typing
 from anneal.core.exceptions import OutOfBounds
 
 MAX_LIMITS = namedtuple("MAX_LIMITS", ["EPOCHS", "STEPS_PER_EPOCH"])
+EpochLine = namedtuple(
+    "EpochLine", ["epoch", "temperature", "step", "pos", "val", "accept"]
+)
+AcceptStates = Enum("AcceptStates", ["IMPROVED", "MHACCEPT", "REJECT"])
 
 
 @dataclass
@@ -246,6 +250,7 @@ class Quencher(metaclass=abc.ABCMeta):
         self.rejections = 0
         self.samestate_time = 0
         self.fCalls = 0
+        self.PlotData = []
 
     @classmethod
     def __subclasshook__(cls, subclass):
