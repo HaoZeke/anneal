@@ -78,8 +78,7 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
     def __repr__(self):
-        """Name the function
-        """
+        """Name the function"""
         raise NotImplementedError
 
 
