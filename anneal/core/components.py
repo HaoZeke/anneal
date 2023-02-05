@@ -8,6 +8,8 @@ import typing
 
 from anneal.core.exceptions import OutOfBounds
 
+MAX_LIMITS = namedtuple("MAX_LIMITS", ["EPOCHS", "STEPS_PER_EPOCH"])
+
 
 @dataclass
 class FPair:
@@ -15,6 +17,9 @@ class FPair:
 
     pos: npt.NDArray
     val: float
+
+    def EvalFunc(self, ObjFunc: callable):
+        self.val = ObjFunc(self.pos)
 
 
 @dataclass
@@ -43,6 +48,17 @@ class NumLimit:
                 f"{pos} is not within {self.slack} of {self.low} and {self.high}"
             )
         return
+
+    def mkpoint(self) -> npt.NDArray:
+        """Generate a random point
+
+        TODO: Handle other constraints (undefined regions)
+        """
+        return np.random.uniform(self.low, self.high)
+
+    def clip(self, point: npt.NDArray) -> npt.NDArray:
+        """Clips values"""
+        return np.clip(point, self.low, self.high)
 
 
 class ObjectiveFunction(metaclass=abc.ABCMeta):
