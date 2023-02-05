@@ -36,6 +36,8 @@ class Plot2dObj:
         ]
         self.X_min = self.X.ravel()[self.Z.argmin()]
         self.Y_min = self.Y.ravel()[self.Z.argmin()]
+        self.X_max = self.X.ravel()[self.Z.argmax()]
+        self.Y_max = self.Y.ravel()[self.Z.argmax()]
         self.Z_min = np.min(self.Z.ravel())
 
     def prepVals(self):
