@@ -25,6 +25,7 @@ import numpy as np
 :tags: []
 
 from anneal.funcs.obj2d import *
+from anneal.funcs.objNd import *
 ```
 
 ```{code-cell} ipython3
@@ -257,6 +258,18 @@ plt.show()
 
 plttr.create3d(showGlob=True, savePath="StybTang2d_3d.pdf")
 plttr.createContour(showGlob=True, savePath="StybTang2d_contour.pdf")
+```
+
+```{code-cell} ipython3
+:tags: []
+
+ff = StybTangNd(dims=5)
+```
+
+```{code-cell} ipython3
+:tags: []
+
+ff(np.random.rand(5))
 ```
 
 ```{code-cell} ipython3
