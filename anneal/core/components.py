@@ -50,11 +50,13 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
             and callable(subclass.pointwise)
             and hasattr(subclass, "multipoint")
             and callable(subclass.multipoint)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
             or NotImplemented
         )
 
     def __call__(self, pos):
-        if pos.shape[0] != self.limits.dims:
+        if pos.ravel().shape[0] != self.limits.dims:
             return self.multipoint(pos)
         else:
             return self.singlepoint(pos)
@@ -71,6 +73,12 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
         """Evaluate the function at many configurations
 
         TODO: This allows for a faster implementaiton in C
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function
         """
         raise NotImplementedError
 
