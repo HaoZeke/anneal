@@ -10,6 +10,14 @@ from anneal.core.exceptions import OutOfBounds
 
 
 @dataclass
+class FPair:
+    """Class for handing position value pairs"""
+
+    pos: npt.NDArray
+    val: float
+
+
+@dataclass
 class NumLimit:
     """Class for tracking function bounds
 
@@ -38,9 +46,10 @@ class NumLimit:
 
 
 class ObjectiveFunction(metaclass=abc.ABCMeta):
-    def __init__(self, limits: NumLimit):
+    def __init__(self, limits: NumLimit, global_min: FPair = None):
         self.calls = 0
         self.limits = limits
+        self.globmin = global_min
 
     @classmethod
     def __subclasshook__(cls, subclass):
