@@ -24,3 +24,6 @@ class StybTangNd(ObjectiveFunction):
         return np.apply_along_axis(
             self.singlepoint, 1, pos.reshape(-1, self.limits.dims)
         )
+
+    def __repr__(self):
+        return f"{self.dims}D Styblinski-Tang"
