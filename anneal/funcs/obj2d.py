@@ -7,7 +7,7 @@ class StybTang2d(ObjectiveFunction):
     def __init__(
         self, limits=NumLimit(dims=2, low=np.ones(2) * -5, high=np.ones(2) * 5)
     ):
-        self.limits = limits
+        super().__init__(limits)
         self.glob_minma_val = -39.16599 * 2
         self.glob_minma_pos = np.array([-2.903534, -2.903534])
 

@@ -39,7 +39,8 @@ class NumLimit:
 
 class ObjectiveFunction(metaclass=abc.ABCMeta):
     def __init__(self, limits: NumLimit):
-        pass
+        self.calls = 0
+        self.limits = limits
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -56,9 +57,12 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
         )
 
     def __call__(self, pos):
+        ## TODO: calls in multipoint may be more than once
         if pos.ravel().shape[0] != self.limits.dims:
+            self.calls += 1
             return self.multipoint(pos)
         else:
+            self.calls += 1
             return self.singlepoint(pos)
 
     @abc.abstractmethod

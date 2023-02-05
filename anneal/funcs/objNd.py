@@ -13,6 +13,7 @@ class StybTangNd(ObjectiveFunction):
             low=np.ones(self.dims) * -5,
             high=np.ones(self.dims) * 5,
         )
+        super().__init__(self.limits)
         self.glob_minma_val = -39.16599 * self.dims
         self.glob_minma_pos = np.array([-2.903534] * self.dims)
 
