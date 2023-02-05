@@ -22,5 +22,5 @@ class StybTangNd(ObjectiveFunction):
 
     def multipoint(self, pos):
         return np.apply_along_axis(
-            self.singlepoint, 1, pos.reshape(self.limits.dims, -1)
+            self.singlepoint, 1, pos.reshape(-1, self.limits.dims)
         )
