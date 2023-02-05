@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from anneal.core.components import (
@@ -10,6 +11,7 @@ from anneal.core.components import (
     MoveClass,
     NumLimit,
     MAX_LIMITS,
+    FPair,
 )
 
 
@@ -92,6 +94,8 @@ class BoltzmannQuencher(Quencher):
         ) or self.best.pos == pytest.approx(
             np.array([-2.9] * self.ObjFunc.limits.dims)
         ):
+            self.fCalls = self.ObjFunc.calls
+            self.ObjFunc.calls = 0
             return True
 
     def __repr__(self):
