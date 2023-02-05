@@ -77,10 +77,13 @@ class BoltzmannQuencher(Quencher):
         self.cur = self.candidate
         if self.cur.val < self.best.val:
             self.best = self.cur
+        else:
+            self.samestate_time += 1
         self.acceptances += 1
 
     def RejectMove(self):
         self.rejections += 1
+        self.samestate_time += 1
 
     # TODO: Generalize for other functions
     def HasConverged(self):
