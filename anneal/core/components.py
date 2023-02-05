@@ -244,6 +244,7 @@ class Quencher(metaclass=abc.ABCMeta):
         self.best = FPair(None, None)
         self.acceptances = 0
         self.rejections = 0
+        self.samestate_time = 0
 
     @classmethod
     def __subclasshook__(cls, subclass):
