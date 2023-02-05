@@ -113,8 +113,10 @@ class ObjectiveFunction(metaclass=abc.ABCMeta):
 
 class AcceptCriteria(metaclass=abc.ABCMeta):
     """The acceptance criteria for selecting an unfavorable move"""
+
     def __init__(self):
         pass
+
     @classmethod
     def __subclasshook__(cls, subclass):
         return (
@@ -141,8 +143,10 @@ class ConstructNeighborhood(metaclass=abc.ABCMeta):
 
     For most methods, this is a uniform distribution
     """
+
     def __init__(self):
         pass
+
     @classmethod
     def __subclasshook__(cls, subclass):
         return (
@@ -167,6 +171,7 @@ class ConstructNeighborhood(metaclass=abc.ABCMeta):
 class CoolingSchedule(metaclass=abc.ABCMeta):
     def __init__(self):
         pass
+
     @classmethod
     def __subclasshook__(cls, subclass):
         return (
@@ -193,8 +198,53 @@ class MoveClass(metaclass=abc.ABCMeta):
 
     Also called the visiting distribution.
     """
+
     def __init__(self):
         pass
+
+    @classmethod
+    def __subclasshook__(cls, subclass):
+        return (
+            hasattr(subclass, "__call__")
+            and callable(subclass.__call__)
+            and hasattr(subclass, "__repr__")
+            and callable(subclass.__repr__)
+            or NotImplemented
+        )
+
+    @abc.abstractmethod
+    def __call__(self):
+        """Generate a move"""
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def __repr__(self):
+        """Name the function"""
+        raise NotImplementedError
+
+
+class Quencher(metaclass=abc.ABCMeta):
+    """A quenching class"""
+
+    def __init__(
+        self,
+        ObjFunc: ObjectiveFunction,
+        MkNeigh: ConstructNeighborhood,
+        Accepter: AcceptCriteria,
+        Mover: MoveClass,
+        Cooler: CoolingSchedule,
+    ):
+        self.ObjFunc = ObjFunc
+        self.MkNeigh = MkNeigh
+        self.Accepter = Accepter
+        self.Mover = Mover
+        self.Cooler = Cooler
+        self.cur = FPair(None, None)
+        self.candidate = FPair(None, None)
+        self.best = FPair(None, None)
+        self.acceptances = 0
+        self.rejections = 0
+
     @classmethod
     def __subclasshook__(cls, subclass):
         return (
