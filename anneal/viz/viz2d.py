@@ -28,6 +28,15 @@ class Plot2dObj:
         )
         self.X, self.Y = np.meshgrid(plX, plY, indexing="xy")
         self.Z = self.prepVals()
+        self.contourExtent = [
+            np.min(plX),
+            np.max(plY),
+            np.min(plY),
+            np.max(plY),
+        ]
+        self.X_min = self.X.ravel()[self.Z.argmin()]
+        self.Y_min = self.Y.ravel()[self.Z.argmin()]
+        self.Z_min = np.min(self.Z.ravel())
 
     def prepVals(self):
         grid_vals = [
@@ -36,7 +45,7 @@ class Plot2dObj:
         ]
         return np.array(grid_vals)
 
-    def create3d(self, showGlob=False, savePath=None):
+    def create3d(self, showGlob=True, savePath=None):
         fig = plt.figure(figsize=(12, 10))
         ax = plt.subplot(projection="3d")
         surf = ax.plot_surface(
@@ -54,16 +63,16 @@ class Plot2dObj:
         ax.view_init(elev=15, azim=220)
         if showGlob:
             ax.scatter(
-                self.func.glob_minma_pos[0],
-                self.func.glob_minma_pos[1],
-                self.func.glob_minma_val,
+                self.X_min,
+                self.Y_min,
+                self.Z_min,
                 color="black",
                 alpha=1,
             )
             ax.text(
-                self.func.glob_minma_pos[0],
-                self.func.glob_minma_pos[1],
-                self.func.glob_minma_val,
+                self.X_min,
+                self.Y_min,
+                self.Z_min,
                 "Global Minima",
                 color="black",
                 alpha=1,
@@ -76,26 +85,41 @@ class Plot2dObj:
         else:
             plt.show()
 
-    def createContour(self, showGlob=False, savePath=None):
+    def createContour(self, showGlob=True, savePath=None):
         fig = plt.figure(figsize=(12, 10))
         ax = plt.subplot()
         [t.set_va("center") for t in ax.get_yticklabels()]
         [t.set_ha("left") for t in ax.get_yticklabels()]
         [t.set_va("center") for t in ax.get_xticklabels()]
         [t.set_ha("right") for t in ax.get_xticklabels()]
-        ax.contourf(self.X, self.Y, self.Z)
+        plt.imshow(
+            self.Z,
+            extent=[
+                np.min(self.X.ravel()),
+                np.max(self.X.ravel()),
+                np.min(self.Y.ravel()),
+                np.max(self.Y.ravel()),
+            ],
+            origin="lower",
+            cmap="viridis",
+            alpha=0.8,
+        )
+        plt.colorbar()
+        contours = ax.contour(
+            self.X, self.Y, self.Z, 10, colors="black", alpha=0.9
+        )
+        plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
         if showGlob:
-            plt.scatter(
-                self.func.glob_minma_pos[0],
-                self.func.glob_minma_pos[1],
-                color="black",
+            plt.plot(
+                self.X_min,
+                self.Y_min,
+                color="white",
+                marker="x",
+                markersize=5,
             )
             ax.text(
-                self.func.glob_minma_pos[0],
-                self.func.glob_minma_pos[1],
-                "Global Minima",
+                self.X_min + 0.1, self.Y_min, "Global Minima", color="white"
             )
-        plt.colorbar()
         if savePath is not None:
             plt.savefig(savePath, dpi=300)
         else:
