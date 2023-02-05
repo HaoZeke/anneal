@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from collections import namedtuple
+from enum import Enum
 import abc
 
 import numpy as np
