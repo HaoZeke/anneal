@@ -73,31 +73,30 @@ class BoltzmannQuencher(Quencher):
                             accept=AcceptStates.IMPROVED,
                         )
                     )
+                elif self.Accepter(diff, temperature):
+                    self.AcceptMove()
+                    self.PlotData.append(
+                        EpochLine(
+                            epoch=self.epoch,
+                            temperature=temperature,
+                            step=step,
+                            pos=self.candidate.pos,
+                            val=self.candidate.val,
+                            accept=AcceptStates.MHACCEPT,
+                        )
+                    )
                 else:
-                    if self.Accepter(diff, temperature):
-                        self.AcceptMove()
-                        self.PlotData.append(
-                            EpochLine(
-                                epoch=self.epoch,
-                                temperature=temperature,
-                                step=step,
-                                pos=self.candidate.pos,
-                                val=self.candidate.val,
-                                accept=AcceptStates.MHACCEPT,
-                            )
+                    self.RejectMove()
+                    self.PlotData.append(
+                        EpochLine(
+                            epoch=self.epoch,
+                            temperature=temperature,
+                            step=step,
+                            pos=self.candidate.pos,
+                            val=self.candidate.val,
+                            accept=AcceptStates.REJECT,
                         )
-                    else:
-                        self.RejectMove()
-                        self.PlotData.append(
-                            EpochLine(
-                                epoch=self.epoch,
-                                temperature=temperature,
-                                step=step,
-                                pos=self.candidate.pos,
-                                val=self.candidate.val,
-                                accept=AcceptStates.REJECT,
-                            )
-                        )
+                    )
             print(f"{self.epoch} for {temperature} has {self.best}")
             if self.HasConverged():
                 return
@@ -144,8 +143,7 @@ class BoltzmannCooler(CoolingSchedule):
         """Random perturbation to ensure G&G inequality holds
         np.random.uniform(0.01, 0.5) +
         """
-        Temp = (self.c_param * self.Tinit) / (1 + np.log(epoch))
-        return Temp
+        return (self.c_param * self.Tinit) / (1 + np.log(epoch))
 
     def __repr__(self):
         return "Log schedule cooler for Boltzmann"
