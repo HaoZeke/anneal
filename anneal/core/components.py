@@ -279,3 +279,28 @@ class Quencher(metaclass=abc.ABCMeta):
     def __repr__(self):
         """Name the function"""
         raise NotImplementedError
+
+
+class BaseChainSA(metaclass=abc.ABCMeta):
+    """The Base chain for MCMC samplers used in SA"""
+
+    def __init__(
+        self,
+        ObjFunc: ObjectiveFunction,
+        Temperature,
+        Nsim=5000,
+    ):
+        """A key point is that the temperature is used to define the target probability distribution"""
+        self.ObjFunc = ObjFunc
+        self.Nsim = Nsim
+        self.Temperature = Temperature
+        self.stepNum = 0
+        self.states = np.array(
+            [self.ObjFunc.limits.mkpoint() for x in range(self.Nsim)]
+        )
+        self.status = np.empty(self.Nsim, dtype=bool)
+        self.fvals = np.zeros(self.Nsim)
+        ## This is the probability at each temperature
+        self.TargetDistrib = lambda point: np.exp(
+            -self.ObjFunc(point) / self.Temperature
+        )
