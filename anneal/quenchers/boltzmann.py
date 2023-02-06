@@ -195,7 +195,7 @@ class BoltzmannAccept(AcceptCriteria):
         self.k = 1
 
     def __call__(self, diff, Temperature):
-        metropolis = np.exp(-self.k * diff / Temperature)
+        metropolis = np.min([np.exp(-self.k * diff / Temperature), 1])
         return np.random.uniform(0, 1) < metropolis
 
     def __repr__(self):
