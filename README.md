@@ -6,8 +6,7 @@ article.
 
 ## Development
 
-We use `micromamba` to manage system dependencies, with `meson-python` (backend),
-`build` (frontend) and `twine` for managing the upload to PyPI.
+`pdm` is used throughout.
 
 ``` sh
 micromamba create -f environment.yml
