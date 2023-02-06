@@ -166,7 +166,7 @@ class BoltzmannMove(MoveClass):
 
 ## Consider np.random.normal(0, np.random.rand(1), ndim)
 class BoltzmannNeighbor(ConstructNeighborhood):
-    """For the Boltzmann this is a random direction
+    """For the Boltzmann this is a random direction, Casella and Robert (2010)
     Gall (2014) disagrees though
     """
 
