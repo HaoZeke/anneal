@@ -39,6 +39,12 @@ class Plot2dObj:
         self.X_glob_min = self.X.ravel()[self.Z.argmin()]
         self.Y_glob_min = self.Y.ravel()[self.Z.argmin()]
         self.Z_glob_min = np.min(self.Z.ravel())
+        # Set to the current grid min
+        # TODO: Handle degenerate minima
+        if isinstance(obj.globmin, type(None)):
+            obj.globmin = FPair(val = self.Z_glob_min,
+                                pos = np.array([self.X_glob_min,
+                                                self.Y_glob_min]))
         self.pdat = None
 
     def prepVals(self):
