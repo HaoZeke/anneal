@@ -209,15 +209,24 @@ class Plot2dObj:
             marker="x",
             markersize=5,
         )
-        ax.plot(
-            quenchy.best.pos[0],
-            quenchy.best.pos[1],
-            marker="*",
-            color="white",
-            alpha=1,
-        )
+        if inBounds(quenchy.best.pos):
+            ax.plot(
+                quenchy.best.pos[0],
+                quenchy.best.pos[1],
+                marker="*",
+                color="white",
+                alpha=1,
+            )
+        else:
+            ax.plot(
+                quenchy.best.pos[0],
+                quenchy.best.pos[1],
+                marker="*",
+                color="black",
+                alpha=1,
+            )
         for point in getDat(accepted_pos):
-            ax.plot(point[0], point[1], marker="o", color="blue", alpha=0.5)
+            plotAccept(point)
         for point in getDat(rejected_pos):
             plotReject(point)
         for point in getDat(mhaccept_pos):
