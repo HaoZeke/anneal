@@ -34,9 +34,10 @@ class Plot2dObj:
         # Set to the current grid min
         # TODO: Handle degenerate minima
         if isinstance(obj.globmin, type(None)):
-            obj.globmin = FPair(val = self.Z_glob_min,
-                                pos = np.array([self.X_glob_min,
-                                                self.Y_glob_min]))
+            obj.globmin = FPair(
+                val=self.Z_glob_min,
+                pos=np.array([self.X_glob_min, self.Y_glob_min]),
+            )
         self.pdat = None
 
     def prepVals(self):
