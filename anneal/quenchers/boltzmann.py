@@ -63,40 +63,17 @@ class BoltzmannQuencher(Quencher):
                 if diff <= 0:
                     ## Better point, accept always
                     self.AcceptMove()
-                    self.PlotData.append(
-                        EpochLine(
-                            epoch=self.epoch,
-                            temperature=temperature,
-                            step=step,
-                            pos=self.candidate.pos,
-                            val=self.candidate.val,
-                            accept=AcceptStates.IMPROVED,
-                        )
-                    )
+                    self.addPlotPoint(temperature, step, AcceptStates.IMPROVED)
                 else:
                     if self.Accepter(diff, temperature):
                         self.AcceptMove()
-                        self.PlotData.append(
-                            EpochLine(
-                                epoch=self.epoch,
-                                temperature=temperature,
-                                step=step,
-                                pos=self.candidate.pos,
-                                val=self.candidate.val,
-                                accept=AcceptStates.MHACCEPT,
-                            )
+                        self.addPlotPoint(
+                            temperature, step, AcceptStates.MHACCEPT
                         )
                     else:
                         self.RejectMove()
-                        self.PlotData.append(
-                            EpochLine(
-                                epoch=self.epoch,
-                                temperature=temperature,
-                                step=step,
-                                pos=self.candidate.pos,
-                                val=self.candidate.val,
-                                accept=AcceptStates.REJECT,
-                            )
+                        self.addPlotPoint(
+                            temperature, step, AcceptStates.REJECT
                         )
             print(f"{self.epoch} for {temperature} has {self.best}")
             if self.HasConverged():
