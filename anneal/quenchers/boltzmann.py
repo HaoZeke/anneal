@@ -54,7 +54,7 @@ class BoltzmannQuencher(Quencher):
     def __call__(self, trackPlot=False):
         while (
             temperature := self.Cooler(self.epoch)
-        ) > 0.1 and self.epoch < self.maxiter.EPOCHS:
+        ) > 0.01 and self.epoch < self.maxiter.EPOCHS:
             for step in range(1, self.maxiter.STEPS_PER_EPOCH + 1):
                 self.candidate = FPair(
                     pt := self.MkNeigh(self.cur.pos), self.ObjFunc(pt)
@@ -111,6 +111,7 @@ class BoltzmannQuencher(Quencher):
         self.cur = self.candidate
         if self.cur.val < self.best.val:
             self.best = self.cur
+            self.samestate_time = 0
         else:
             self.samestate_time += 1
         self.acceptances += 1
@@ -121,9 +122,13 @@ class BoltzmannQuencher(Quencher):
 
     # TODO: Generalize for other kinds of convergence
     def HasConverged(self):
-        if self.best.val == pytest.approx(
-            self.ObjFunc.globmin.val, 1e-3
-        ) or self.best.pos == pytest.approx(self.ObjFunc.globmin.pos, 1e-3):
+        if (
+            self.best.val == pytest.approx(self.ObjFunc.globmin.val, 1e-6)
+            or self.best.pos == pytest.approx(self.ObjFunc.globmin.pos, 1e-6)
+            or self.samestate_time > 1e4
+        ):
+            if self.samestate_time > 1e4:
+                print("Terminating due to too much time in state")
             self.fCalls = self.ObjFunc.calls
             self.ObjFunc.calls = 0
             return True
