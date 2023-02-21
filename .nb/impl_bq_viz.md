@@ -35,7 +35,7 @@ from anneal.core.components import AcceptStates, Quencher
 ```{code-cell} ipython3
 :tags: []
 
-bq = BoltzmannQuencher(StybTangNd(dims = 2), T_init=5)
+bq = BoltzmannQuencher(StybTangNd(dims = 2), T_init=50)
 ```
 
 ```{code-cell} ipython3
