@@ -14,27 +14,19 @@ class Plot2dObj:
     def __init__(self, obj: ObjectiveFunction, nelem: int):
         self.func = obj
         self.nelem = nelem
-        step_size_x = (
-            abs(self.func.limits.low[0] - self.func.limits.high[0]) / nelem
-        )
-        print(step_size_x)
-        step_size_y = (
-            abs(self.func.limits.low[1] - self.func.limits.high[1]) / nelem
-        )
-        print(step_size_y)
-        plX = np.arange(
-            self.func.limits.low[0], self.func.limits.high[0], step_size_x
-        )
-        plY = np.arange(
-            self.func.limits.low[1], self.func.limits.high[1], step_size_y
-        )
+        fll = self.func.limits.low
+        fhh = self.func.limits.high
+        step_size_x = abs(fll[0] - fhh[0]) / self.nelem
+        step_size_y = abs(fll[1] - fhh[1]) / self.nelem
+        plX = np.arange(fll[0], fhh[0], step_size_x)
+        plY = np.arange(fll[1], fhh[1], step_size_y)
         self.X, self.Y = np.meshgrid(plX, plY, indexing="xy")
         self.Z = self.prepVals()
         self.contourExtent = [
-            np.min(plX),
-            np.max(plX),
-            np.min(plY),
-            np.max(plY),
+            np.min(self.X.ravel()),
+            np.max(self.X.ravel()),
+            np.min(self.Y.ravel()),
+            np.max(self.Y.ravel()),
         ]
         self.X_glob_min = self.X.ravel()[self.Z.argmin()]
         self.Y_glob_min = self.Y.ravel()[self.Z.argmin()]
@@ -103,12 +95,7 @@ class Plot2dObj:
         [t.set_ha("right") for t in ax.get_xticklabels()]
         plt.imshow(
             self.Z,
-            extent=[
-                np.min(self.X.ravel()),
-                np.max(self.X.ravel()),
-                np.min(self.Y.ravel()),
-                np.max(self.Y.ravel()),
-            ],
+            extent=self.contourExtent,
             origin="lower",
             cmap="viridis",
             alpha=0.8,
@@ -187,12 +174,7 @@ class Plot2dObj:
         [t.set_ha("right") for t in ax.get_xticklabels()]
         plt.imshow(
             self.Z,
-            extent=[
-                np.min(self.X.ravel()),
-                np.max(self.X.ravel()),
-                np.min(self.Y.ravel()),
-                np.max(self.Y.ravel()),
-            ],
+            extent=self.contourExtent,
             origin="lower",
             cmap="viridis",
             alpha=0.8,
