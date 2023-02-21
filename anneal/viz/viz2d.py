@@ -134,10 +134,17 @@ class Plot2dObj:
         mhaccept_pos = self.pdat[self.pdat.accept == AcceptStates.MHACCEPT][
             "pos"
         ]
+        toNPD = (
+            lambda poscol: np.concatenate(poscol.to_list(), axis=0).reshape(
+                -1, self.func.limits.dims
+            )
+            if len(poscol) > 1
+            else poscol
+        )
         getDat = (
-            lambda posDat: pd.DataFrame.sample(posDat, n=nsamples)
+            lambda posDat: toNPD(pd.DataFrame.sample(posDat, n=nsamples))
             if len(posDat) > nsamples
-            else posDat
+            else toNPD(posDat)
         )
         inBounds = lambda point: np.all(
             point > self.contourExtent[::2]
