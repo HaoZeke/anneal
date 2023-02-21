@@ -280,6 +280,21 @@ class Quencher(metaclass=abc.ABCMeta):
         """Name the function"""
         raise NotImplementedError
 
+    # Default implementation
+    def addPlotPoint(
+        self, temperature: float, step: int, acceptState: AcceptStates
+    ):
+        self.PlotData.append(
+            EpochLine(
+                epoch=self.epoch,
+                temperature=temperature,
+                step=step,
+                pos=self.candidate.pos,
+                val=self.candidate.val,
+                accept=acceptState,
+            )
+        )
+
 
 class BaseChainSA(metaclass=abc.ABCMeta):
     """The Base chain for MCMC samplers used in SA"""
