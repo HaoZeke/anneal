@@ -152,13 +152,15 @@ class BoltzmannCooler(CoolingSchedule):
 
 
 class BoltzmannMove(MoveClass):
-    """For the Boltzmann the stepsize is random"""
+    """For the Boltzmann the stepsize is random
+    Here we take a standard Gaussian distribution
+    """
 
     def __init__(self, limits: NumLimit):
         self.limits = limits
 
     def __call__(self):
-        return self.limits.mkpoint()
+        return np.random.default_rng().normal()
 
     def __repr__(self):
         return "Random stepsize for the Boltzmann"
@@ -181,9 +183,9 @@ class BoltzmannNeighbor(ConstructNeighborhood):
             candidate * np.dot(c_pos, candidate) / np.dot(candidate, candidate)
         )
         dir_vec = proj / np.linalg.norm(proj)
-        final_cand = dir_vec * self.stepper()
+        final_cand = candidate + dir_vec * self.stepper()
         ## Clipping is not part of the original formulation
-        final_cand = self.limits.clip(final_cand)
+        # final_cand = self.limits.clip(final_cand)
         return final_cand
 
     def __repr__(self):
