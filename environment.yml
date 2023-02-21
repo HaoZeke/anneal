@@ -32,3 +32,4 @@ dependencies:
   - r-pracma
   - r-httpgd
   - radian
+  - pdm
