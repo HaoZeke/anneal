@@ -27,7 +27,7 @@ import numpy as np
 :tags: []
 
 from anneal.funcs.objNd import *
-from anneal.viz.viz2d import Plot2dObj
+from anneal.viz.viz2d import Plot2dQuench
 from anneal.quenchers.boltzmann import BoltzmannQuencher
 from anneal.core.components import AcceptStates, Quencher
 ```
@@ -155,8 +155,10 @@ getDat(pdat[pdat.accept==AcceptStates.REJECT]['pos'])
 ```{code-cell} ipython3
 :tags: []
 
-plttr = Plot2dObj(StybTangNd(2), 30)
-plttr.plotQuenchContour(bq)
+plttr = Plot2dQuench(StybTangNd(2), 30)
+plttr.plotQuenchContour(bq, 
+                        savePath="pltQuenchCont.pdf",
+                       ptitle=f"Boltzmann Quencher for {str(StybTangNd(2))}, abs(E)<1e-3")
 ```
 
 ```{code-cell} ipython3
