@@ -122,8 +122,8 @@ class BoltzmannCooler(CoolingSchedule):
 
     def __init__(self, T_init, c_param=1):
         """Salazar and Torale (1997) set c_param to T_init"""
-        self.Tinit = T_init
         self.c_param = c_param
+        super().__init__(T_init)
 
     def __call__(self, epoch):
         """Random perturbation to ensure G&G inequality holds
