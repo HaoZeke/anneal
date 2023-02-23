@@ -196,6 +196,7 @@ class Quencher(metaclass=abc.ABCMeta):
             )
         )
 
+
 # class ProbabilityDistribution:
 #     def __init__(self):
 #         pass
@@ -217,7 +218,7 @@ class BaseChainSA(metaclass=abc.ABCMeta):
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,
-        Chain, # The type of chain used
+        Chain,  # The type of chain used
         Cooler: CoolingSchedule,
         init_temp: float,
         n_sim: int = 20000,
@@ -238,15 +239,13 @@ class BaseChainSA(metaclass=abc.ABCMeta):
         self.Cooler = Cooler
 
     def mk_target(self, Temperature):
-        return lambda point: np.exp(
-            -self.ObjFunc(point) / Temperature
-        )
+        return lambda point: np.exp(-self.ObjFunc(point) / Temperature)
 
-    def __call__(self, Proposal, init_state = None):
+    def __call__(self, Proposal, init_state=None):
         if isinstance(init_state, type(None)):
             init_state = self.ObjFunc.limits.mkpoint()
         while (
-                temperature := self.Cooler(self.epoch)
+            temperature := self.Cooler(self.epoch)
         ) > 0.01 and self.epoch < self.maxiter.EPOCHS:
             target = self.mk_target(temperature)
             chain = self.Chain(target, Proposal, init_state)
@@ -267,9 +266,7 @@ class BaseChainSA(metaclass=abc.ABCMeta):
     def HasConverged(self):
         min_ee = min([x.val for x in self.epoch_best])
         self.best = [x for x in self.epoch_best if x.val == min_ee][0]
-        if (
-              min_ee  == pytest.approx(self.ObjFunc.globmin.val, 1e-3)
-        ):
+        if min_ee == pytest.approx(self.ObjFunc.globmin.val, 1e-3):
             self.fCalls = self.ObjFunc.calls
             self.ObjFunc.calls = 0
             return True

@@ -15,7 +15,9 @@ class Plot2dQuench(Plot2dObj):
     def __init__(self, obj: ObjectiveFunction, nelem: int):
         super().__init__(obj, nelem)
 
-    def plotQuenchContour(self, quenchy: Quencher, nsamples=500, savePath=None, ptitle=None):
+    def plotQuenchContour(
+        self, quenchy: Quencher, nsamples=500, savePath=None, ptitle=None
+    ):
         self.pdat = pd.DataFrame(quenchy.PlotData)
         accepted_pos = self.pdat[self.pdat.accept == AcceptStates.IMPROVED][
             "pos"

@@ -1,7 +1,7 @@
 from anneal.core.components import *
 
 
-class MHChain():
+class MHChain:
     def __init__(self, Target, Proposal, InitialState):
         """
         Metropolis Hastings Chain sampler
