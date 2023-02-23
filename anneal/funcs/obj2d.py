@@ -1,4 +1,4 @@
-from anneal.core.components import NumLimit, ObjectiveFunction, FPair
+from eindir.core.components import NumLimit, ObjectiveFunction, FPair
 
 import numpy as np
 
