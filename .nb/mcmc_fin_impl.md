@@ -30,14 +30,20 @@ from anneal.quenchers.boltzmann import BoltzmannCooler
 ```{code-cell} ipython3
 :tags: []
 
-ff = StybTangNd(dims = 5)
-mhcsa = MHChainSA(ff, BoltzmannCooler(50), 50)
+ff = StybTangNd(dims = 2)
+mhcsa = MHChainSA(ff, BoltzmannCooler(5), n_sim = 50000)
 ```
 
 ```{code-cell} ipython3
 :tags: []
 
-mhcsa(np.random.default_rng().lognormal)
+mhcsa(np.random.default_rng().normal)
+```
+
+```{code-cell} ipython3
+:tags: []
+
+mhcsa.best
 ```
 
 ```{code-cell} ipython3
@@ -55,7 +61,7 @@ ffb = lambda x: np.exp(-ff(x) / 5)
 ```{code-cell} ipython3
 :tags: []
 
-mha = MHChain(mhcsa.mk_target(50),
+mha = MHChain(mhcsa.mk_target(5),
               np.random.default_rng().normal,
               ff.limits.mkpoint())
 ```
@@ -69,7 +75,7 @@ mha.step()
 ```{code-cell} ipython3
 :tags: []
 
-for _ in range(20000):
+for _ in range(50000):
     mha.step()
 ```
 
