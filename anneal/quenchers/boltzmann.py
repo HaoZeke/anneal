@@ -100,8 +100,8 @@ class BoltzmannQuencher(Quencher):
     # TODO: Generalize for other kinds of convergence
     def HasConverged(self):
         if (
-            self.best.val == pytest.approx(self.ObjFunc.globmin.val, 1e-6)
-            or self.best.pos == pytest.approx(self.ObjFunc.globmin.pos, 1e-6)
+            self.best.val == pytest.approx(self.ObjFunc.globmin.val, 1e-3)
+            or self.best.pos == pytest.approx(self.ObjFunc.globmin.pos, 1e-3)
             or self.samestate_time > 1e4
         ):
             if self.samestate_time > 1e4:
