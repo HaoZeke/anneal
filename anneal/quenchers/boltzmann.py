@@ -2,17 +2,20 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
+from eindir.core.components import (
+    NumLimit,
+    FPair,
+    ObjectiveFunction,
+)
+
 from anneal.core.components import (
     Quencher,
-    ObjectiveFunction,
     CoolingSchedule,
     AcceptCriteria,
     ConstructNeighborhood,
     MoveClass,
-    NumLimit,
     MAX_LIMITS,
     EpochLine,
-    FPair,
     AcceptStates,
 )
 
