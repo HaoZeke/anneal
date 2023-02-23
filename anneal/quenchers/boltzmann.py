@@ -127,7 +127,7 @@ class BoltzmannCooler(CoolingSchedule):
 
     def __call__(self, epoch):
         """Random perturbation to ensure G&G inequality holds
-        np.random.uniform(0.01, 0.5) +
+        np.random.default_rng().uniform(0.01, 0.5) +
         """
         Temp = (self.c_param * self.Tinit) / (1 + np.log(epoch))
         return Temp
@@ -151,7 +151,7 @@ class BoltzmannMove(MoveClass):
         return "Random stepsize for the Boltzmann"
 
 
-## Consider np.random.normal(0, np.random.rand(1), ndim)
+## Consider np.random.default_rng().normal(0, np.random.rand(1), ndim)
 class BoltzmannNeighbor(ConstructNeighborhood):
     """For the Boltzmann this is a random direction, Casella and Robert (2010)
     Gall (2014) disagrees though
@@ -183,7 +183,7 @@ class BoltzmannAccept(AcceptCriteria):
 
     def __call__(self, diff, Temperature):
         metropolis = np.min([np.exp(-self.k * diff / Temperature), 1])
-        return np.random.uniform(0, 1) < metropolis
+        return np.random.default_rng().uniform(0, 1) < metropolis
 
     def __repr__(self):
         return "Basic Metropolis acceptance for Boltzmann"
