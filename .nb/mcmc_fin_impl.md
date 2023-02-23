@@ -164,7 +164,7 @@ class MetropolisHastingsSampler:
         """
         proposal = self.proposal_distribution(self.current_state)
         self.acceptance_prob = min(1, self.target_distribution(proposal) / self.target_distribution(self.current_state))
-        if np.random.uniform() < self.acceptance_prob:
+        if np.random.default_rng().uniform() < self.acceptance_prob:
             self.current_state = proposal 
             self.acceptances += 1
         return self.current_state
@@ -182,7 +182,7 @@ def target_distribution(x):
 # Define the proposal distribution (a Gaussian with mean equal to the current state and
 # standard deviation equal to 1)
 def proposal_distribution(x):
-    return x + np.random.normal()
+    return x + np.random.default_rng().normal()
 
 # Initialize the sampler with an initial state of 0
 sampler = MetropolisHastingsSampler(target_distribution, proposal_distribution, 0)
@@ -209,7 +209,7 @@ def target_distribution(x):
 # Define the proposal distribution (a Gaussian with mean equal to the current state and
 # standard deviation equal to 1)
 def proposal_distribution(x):
-    return x + np.random.normal()
+    return x + np.random.default_rng().normal()
 
 # Initialize the sampler with an initial state of 0
 sampler = MetropolisHastingsSampler(target_distribution, proposal_distribution, 0)
@@ -239,7 +239,7 @@ def target_distribution(x):
 # Define the proposal distribution (a Gaussian with mean equal to the current state and
 # standard deviation equal to 1)
 def proposal_distribution(x):
-    return x + np.random.normal()
+    return x + np.random.default_rng().normal()
 
 # Initialize the sampler with an initial state of 0
 sampler = MetropolisHastingsSampler(target_distribution, proposal_distribution, 0)
@@ -250,7 +250,7 @@ acceptances = []
 for i in range(10000):
     sample = sampler.step()
     samples.append(sample)
-    acceptances.append(np.random.uniform() < sampler.acceptance_prob)
+    acceptances.append(np.random.default_rng().uniform() < sampler.acceptance_prob)
 
 # Plot the trajectory with acceptances
 plt.scatter(range(len(samples)), samples, c=acceptances, cmap='cool', alpha=0.5)
@@ -283,7 +283,7 @@ class SimulatedAnnealing:
                                           self.target_distribution(self.state)) / current_temperature))
         
         # Accept or reject the proposal based on the acceptance probability
-        if np.random.uniform() < acceptance_prob:
+        if np.random.default_rng().uniform() < acceptance_prob:
             self.state = proposed_state
             accepted = True
         else:
@@ -323,7 +323,7 @@ def target_distribution(x):
 # Define the proposal distribution (a Gaussian with mean equal to the current state and
 # standard deviation equal to 1)
 def proposal_distribution(x):
-    return x + np.random.normal()
+    return x + np.random.default_rng().normal()
 
 # Initialize the simulated annealing algorithm with an initial state of 0 and a linear temperature schedule
 sa = SimulatedAnnealing(target_distribution, proposal_distribution, 0, LinearTemperatureSchedule(10, 0.01, 10000))
