@@ -21,7 +21,6 @@ class StybTangNd(ObjectiveFunction):
         )
 
     def singlepoint(self, pos):
-        # self.limits.check(pos)
         return np.sum((pos**4) - (16 * (pos**2)) + (5 * pos)) / 2
 
     def multipoint(self, pos):
