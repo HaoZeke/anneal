@@ -202,20 +202,59 @@ class BaseChainSA(metaclass=abc.ABCMeta):
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,
-        Temperature,
-        Nsim=5000,
+        Chain, # The type of chain used
+        Cooler: CoolingSchedule,
+        init_temp: float,
+        n_sim: int = 20000,
+        maxiter: MAX_LIMITS = MAX_LIMITS(int(1e6), int(1e3)),
     ):
-        """A key point is that the temperature is used to define the target probability distribution"""
+        """A key point is that the temperature is used to define the target
+        probability distribution"""
         self.ObjFunc = ObjFunc
-        self.Nsim = Nsim
-        self.Temperature = Temperature
+        self.n_sim = n_sim
+        self.Temperature = init_temp
         self.stepNum = 0
-        self.states = np.array(
-            [self.ObjFunc.limits.mkpoint() for x in range(self.Nsim)]
+        self.epoch_best = []
+        self.Chain = Chain
+        self.epoch = 1
+        self.maxiter = maxiter
+        self.best = None
+        self.TargetDistrib = None
+        self.Cooler = Cooler
+
+    def mk_target(self, Temperature):
+        return lambda point: np.exp(
+            -self.ObjFunc(point) / Temperature
         )
-        self.status = np.empty(self.Nsim, dtype=bool)
-        self.fvals = np.zeros(self.Nsim)
-        ## This is the probability at each temperature
-        self.TargetDistrib = lambda point: np.exp(
-            -self.ObjFunc(point) / self.Temperature
-        )
+
+    def __call__(self, Proposal, init_state = None):
+        if isinstance(init_state, type(None)):
+            init_state = self.ObjFunc.limits.mkpoint()
+        while (
+                temperature := self.Cooler(self.epoch)
+        ) > 0.01 and self.epoch < self.maxiter.EPOCHS:
+            target = self.mk_target(temperature)
+            chain = self.Chain(target, Proposal, init_state)
+            for _ in range(self.n_sim):
+                chain.step()
+            self.epoch_best.append(self.getBest(chain.states))
+            if self.epoch > 1:
+                print(f"{self.epoch} for {temperature} has {self.best}")
+            if self.HasConverged():
+                return
+            else:
+                self.epoch += 1
+
+    def getBest(self, statelist: list):
+        energies = np.array([self.ObjFunc(x) for x in statelist])
+        return FPair(pos=statelist[energies.argmin()], val=np.min(energies))
+
+    def HasConverged(self):
+        min_ee = min([x.val for x in self.epoch_best])
+        self.best = [x for x in self.epoch_best if x.val == min_ee][0]
+        if (
+              min_ee  == pytest.approx(self.ObjFunc.globmin.val, 1e-3)
+        ):
+            self.fCalls = self.ObjFunc.calls
+            self.ObjFunc.calls = 0
+            return True
