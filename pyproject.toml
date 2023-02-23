@@ -1,6 +1,6 @@
 [project]
 name = "anneal"
-version = "0.0.6"
+version = "0.0.7"
 authors = [
     { name="Rohit Goswami", email="rgoswami@ieee.org" },
     { name="Ruhila S", email="ruhila@ieee.org" },
