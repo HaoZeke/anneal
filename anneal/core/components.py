@@ -6,6 +6,7 @@ import abc
 import numpy as np
 import numpy.typing as npt
 import typing
+import pytest
 
 from eindir.core.components import FPair, NumLimit, ObjectiveFunction
 
@@ -194,6 +195,20 @@ class Quencher(metaclass=abc.ABCMeta):
                 accept=acceptState,
             )
         )
+
+# class ProbabilityDistribution:
+#     def __init__(self):
+#         pass
+
+# class BaseChain(metaclass=abc.ABCMeta):
+#     """Base class for MCMC sampler chains"""
+#     TODO: Add thinning, burn_in, gelman-rubin, make basechainsa inherit this
+#     def __init__(
+#             self,
+#             n_samples: int = 500,
+#             burn_in: int = 50,
+#             thining: int = 1,
+#     ):
 
 
 class BaseChainSA(metaclass=abc.ABCMeta):
