@@ -2,12 +2,13 @@ import pytest
 import numpy.testing as nptt
 
 from anneal.funcs.obj2d import *
-from anneal.mcsamplers.chains import MHChain
+from anneal.mcsamplers.sa_chains import MHChainSA
+from anneal.quenchers.boltzmann import BoltzmannCooler
 
 
 def test_MHChain():
     ff = StybTang2d()
-    mha = MHChain(StybTang2d(), Temperature=10, Nsim=9000)
-    bpair = mha()
-    assert bpair.val == pytest.approx(ff.globmin.val, 1e-2)
-    assert bpair.pos == pytest.approx(ff.globmin.pos, 1e1)
+    mhcsa = MHChainSA(ff, BoltzmannCooler(50), 50)
+    mhcsa(np.random.default_rng().normal)
+    assert mhcsa.best.val == pytest.approx(ff.globmin.val, 1e-2)
+    assert mhcsa.best.pos == pytest.approx(ff.globmin.pos, 1e1)
