@@ -75,8 +75,8 @@ class ConstructNeighborhood(metaclass=abc.ABCMeta):
 
 
 class CoolingSchedule(metaclass=abc.ABCMeta):
-    def __init__(self):
-        pass
+    def __init__(self, T_init : float):
+        self.Tinit = T_init
 
     @classmethod
     def __subclasshook__(cls, subclass):
@@ -220,7 +220,6 @@ class BaseChainSA(metaclass=abc.ABCMeta):
         ObjFunc: ObjectiveFunction,
         Chain,  # The type of chain used
         Cooler: CoolingSchedule,
-        init_temp: float,
         n_sim: int = 20000,
         maxiter: MAX_LIMITS = MAX_LIMITS(int(1e6), int(1e3)),
     ):
@@ -228,7 +227,6 @@ class BaseChainSA(metaclass=abc.ABCMeta):
         probability distribution"""
         self.ObjFunc = ObjFunc
         self.n_sim = n_sim
-        self.Temperature = init_temp
         self.stepNum = 0
         self.epoch_best = []
         self.Chain = Chain
