@@ -10,14 +10,41 @@ from eindir.viz.viz2d import Plot2dObj
 
 
 class Plot2dQuench(Plot2dObj):
-    """Meant to plot 2D Quench objects"""
-
+    """
+    Class for plotting 2D Quench objects.
+    """
     def __init__(self, obj: ObjectiveFunction, nelem: int):
+        """
+        Initializes the `Plot2dQuench` object.
+
+        #### Parameters
+        **obj: ObjectiveFunction**
+        : An instance of the `ObjectiveFunction` class.
+
+        **nelem: int**
+        : The number of elements.
+        """
         super().__init__(obj, nelem)
 
     def plotQuenchContour(
         self, quenchy: Quencher, nsamples=500, savePath=None, ptitle=None
     ):
+        """
+        Plots the contour of the Quencher.
+
+        #### Parameters
+        **quenchy: Quencher**
+        : An instance of the `Quencher` class.
+
+        **nsamples: int, optional (default=500)**
+        : The number of samples for the plot.
+
+        **savePath: str, optional**
+        : The path to save the plot. If `None`, the plot is not saved.
+
+        **ptitle: str, optional**
+        : The title for the plot.
+        """
         self.pdat = pd.DataFrame(quenchy.PlotData)
         accepted_pos = self.pdat[self.pdat.accept == AcceptStates.IMPROVED][
             "pos"
