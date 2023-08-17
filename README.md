@@ -1,8 +1,7 @@
 # Anneal
 
 This is a `python` package for simulated annealing (and quenching) in all its
-many guises. The design decisions are described in the corresponding InTechOpen
-article.
+many guises. The design decisions are described in the corresponding [ArXiV preprint](https://arxiv.org/abs/2302.02811v2).
 
 ## Development
 
