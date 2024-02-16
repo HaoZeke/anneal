@@ -50,9 +50,6 @@ test = [
     "pytest>=7.2.1",
     "pytest-datadir>=1.4.1",
 ]
-lint = [
-    "black>=23.1.0",
-]
 interactive = [
     "ipython>=8.9.0",
     "jupytext>=1.14.4",
@@ -64,12 +61,3 @@ plotter = [
     "pandas>=1.5.3",
     "matplotlib>=3.6.3",
 ]
-
-[tool.pdm.scripts]
-lint = "black"
-test = "pytest"
-all = {composite = ["lint tests/ anneal/", "test -v tests/"]}
-
-[tool.black]
-line-length = 80
-target-version = ['py310']
