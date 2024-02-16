@@ -15,7 +15,6 @@ from anneal.core.components import (
     ConstructNeighborhood,
     MoveClass,
     MAX_LIMITS,
-    EpochLine,
     AcceptStates,
 )
 
@@ -28,6 +27,7 @@ class BoltzmannQuencher(Quencher):
     Boltzmann Quencher is a type of Simulated Annealing algorithm that uses a
     Boltzmann distribution for the acceptance criteria of new points.
     """
+
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,
@@ -72,9 +72,7 @@ class BoltzmannQuencher(Quencher):
         )
         self.epoch = 1
         if pos_init is None:
-            self.cur = FPair(
-                pt := self.ObjFunc.limits.mkpoint(), self.ObjFunc(pt)
-            )
+            self.cur = FPair(pt := self.ObjFunc.limits.mkpoint(), self.ObjFunc(pt))
         else:
             self.cur = FPair(pt := pos_init, self.ObjFunc(pt))
         self.maxiter = maxiter
@@ -104,14 +102,10 @@ class BoltzmannQuencher(Quencher):
                 else:
                     if self.Accepter(diff, temperature):
                         self.AcceptMove()
-                        self.addPlotPoint(
-                            temperature, step, AcceptStates.MHACCEPT
-                        )
+                        self.addPlotPoint(temperature, step, AcceptStates.MHACCEPT)
                     else:
                         self.RejectMove()
-                        self.addPlotPoint(
-                            temperature, step, AcceptStates.REJECT
-                        )
+                        self.addPlotPoint(temperature, step, AcceptStates.REJECT)
             print(f"{self.epoch} for {temperature} has {self.best}")
             if self.HasConverged():
                 return
@@ -181,6 +175,7 @@ class BoltzmannCooler(CoolingSchedule):
     is reduced at each epoch according to a logarithmic function to ensure that the
     Geman & Geman inequality holds.
     """
+
     def __init__(self, T_init, c_param=1):
         """
         Initializes an instance of the `BoltzmannCooler` class.
@@ -291,9 +286,7 @@ class BoltzmannNeighbor(ConstructNeighborhood):
         """
         ## Project current onto candidate
         candidate = self.limits.mkpoint()
-        proj = (
-            candidate * np.dot(c_pos, candidate) / np.dot(candidate, candidate)
-        )
+        proj = candidate * np.dot(c_pos, candidate) / np.dot(candidate, candidate)
         dir_vec = proj / np.linalg.norm(proj)
         final_cand = candidate + dir_vec * self.stepper()
         ## Clipping is not part of the original formulation
@@ -312,6 +305,7 @@ class BoltzmannAccept(AcceptCriteria):
     The Metropolis-Hastings criterion is used for acceptance in Boltzmann
     simulated annealing.
     """
+
     def __init__(self, k=1):
         """
         Initializes an instance of the `BoltzmannAccept` class.

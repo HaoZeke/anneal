@@ -1,5 +1,6 @@
-from anneal.mcsamplers.chains import *
-from anneal.core.components import BaseChainSA
+from anneal.mcsamplers.chains import MHChain
+from anneal.core.components import BaseChainSA, MAX_LIMITS, CoolingSchedule
+from eindir.core.components import ObjectiveFunction
 
 
 class MHChainSA(BaseChainSA):
@@ -14,6 +15,7 @@ class MHChainSA(BaseChainSA):
     approximation to the global optimum of a given function. It uses a cooling
     schedule and temperature to control the search process.
     """
+
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,
