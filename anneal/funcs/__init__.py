@@ -1,1 +1,1 @@
-from anneal.core.components import ObjectiveFunction
+from eindir.core.components import ObjectiveFunction
