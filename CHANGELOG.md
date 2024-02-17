@@ -7,3 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 This project uses [*towncrier*](https://towncrier.readthedocs.io/) and the changes for the upcoming release can be [found here](https://github.com/HaoZeke/anneal/tree/main/changelog.d/).
 
 <!-- towncrier release notes start -->
+
+## [0.1.0](https://github.com/HaoZeke/anneal/tree/0.1.0) - 17-02-2024
+
+
+No significant changes.
