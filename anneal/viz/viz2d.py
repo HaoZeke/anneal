@@ -1,10 +1,10 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-
-from anneal.core.components import AcceptStates, Quencher
+import pandas as pd
 from eindir.core.components import ObjectiveFunction
 from eindir.viz.viz2d import Plot2dObj
+
+from anneal.core.components import AcceptStates, Quencher
 
 
 class Plot2dQuench(Plot2dObj):

@@ -1,22 +1,11 @@
 import numpy as np
 import numpy.typing as npt
 import pytest
+from eindir.core.components import FPair, NumLimit, ObjectiveFunction
 
-from eindir.core.components import (
-    NumLimit,
-    FPair,
-    ObjectiveFunction,
-)
-
-from anneal.core.components import (
-    Quencher,
-    CoolingSchedule,
-    AcceptCriteria,
-    ConstructNeighborhood,
-    MoveClass,
-    MAX_LIMITS,
-    AcceptStates,
-)
+from anneal.core.components import (MAX_LIMITS, AcceptCriteria, AcceptStates,
+                                    ConstructNeighborhood, CoolingSchedule,
+                                    MoveClass, Quencher)
 
 
 class BoltzmannQuencher(Quencher):
@@ -171,9 +160,9 @@ class BoltzmannCooler(CoolingSchedule):
     Implements the logarithmic cooling schedule proposed by Geman and Geman (1983).
 
     #### Notes
-    This cooling schedule is designed for use with the Boltzmann Quencher. The temperature
-    is reduced at each epoch according to a logarithmic function to ensure that the
-    Geman & Geman inequality holds.
+    This cooling schedule is designed for use with the Boltzmann Quencher. The
+    temperature is reduced at each epoch according to a logarithmic function to
+    ensure that the Geman & Geman inequality holds.
     """
 
     def __init__(self, T_init, c_param=1):
@@ -185,8 +174,8 @@ class BoltzmannCooler(CoolingSchedule):
         : The initial temperature for the cooling schedule.
 
         **c_param: float, optional (default=1)**
-        : The parameter 'c' for the cooling schedule. According to Salazar and Torale (1997),
-          this can be set to the initial temperature.
+        : The parameter 'c' for the cooling schedule. According to Salazar and
+          Torale (1997), this can be set to the initial temperature.
         """
         self.c_param = c_param
         super().__init__(T_init)
@@ -322,7 +311,8 @@ class BoltzmannAccept(AcceptCriteria):
 
         #### Parameters
         **diff: float**
-        : The difference in objective function values between the candidate and current solutions.
+        : The difference in objective function values between the
+          candidate and current solutions.
 
         **Temperature: float**
         : The current temperature.

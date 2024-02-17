@@ -1,5 +1,5 @@
-import pytest
 import numpy as np
+import pytest
 
 from anneal.funcs.obj2d import StybTang2d
 from anneal.quenchers.boltzmann import BoltzmannQuencher

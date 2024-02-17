@@ -6,10 +6,12 @@ class MHChain:
     Implements a Markov Chain using the Metropolis-Hastings algorithm.
 
     #### Notes
-    The Metropolis-Hastings algorithm is a method used to sample from a probability distribution by constructing a Markov chain.
-    It provides a procedure to move from the current state to a new state in the Markov chain.
+    The Metropolis-Hastings algorithm is a method used to sample from a
+    probability distribution by constructing a Markov chain.  It provides a
+    procedure to move from the current state to a new state in the Markov chain.
 
-    In this class, the Metropolis-Hastings algorithm is used to construct a Markov chain by sampling from a target distribution.
+    In this class, the Metropolis-Hastings algorithm is used to construct a
+    Markov chain by sampling from a target distribution.
     """
 
     def __init__(self, Target, Proposal, InitialState):
