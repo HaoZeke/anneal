@@ -1,0 +1,335 @@
+# {py:mod}`anneal.core.components`
+
+```{py:module} anneal.core.components
+```
+
+```{autodoc2-docstring} anneal.core.components
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`AcceptCriteria <anneal.core.components.AcceptCriteria>`
+  - ```{autodoc2-docstring} anneal.core.components.AcceptCriteria
+    :summary:
+    ```
+* - {py:obj}`ConstructNeighborhood <anneal.core.components.ConstructNeighborhood>`
+  - ```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood
+    :summary:
+    ```
+* - {py:obj}`CoolingSchedule <anneal.core.components.CoolingSchedule>`
+  - ```{autodoc2-docstring} anneal.core.components.CoolingSchedule
+    :summary:
+    ```
+* - {py:obj}`MoveClass <anneal.core.components.MoveClass>`
+  - ```{autodoc2-docstring} anneal.core.components.MoveClass
+    :summary:
+    ```
+* - {py:obj}`Quencher <anneal.core.components.Quencher>`
+  - ```{autodoc2-docstring} anneal.core.components.Quencher
+    :summary:
+    ```
+* - {py:obj}`BaseChainSA <anneal.core.components.BaseChainSA>`
+  - ```{autodoc2-docstring} anneal.core.components.BaseChainSA
+    :summary:
+    ```
+````
+
+### Data
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`MAX_LIMITS <anneal.core.components.MAX_LIMITS>`
+  - ```{autodoc2-docstring} anneal.core.components.MAX_LIMITS
+    :summary:
+    ```
+* - {py:obj}`EpochLine <anneal.core.components.EpochLine>`
+  - ```{autodoc2-docstring} anneal.core.components.EpochLine
+    :summary:
+    ```
+* - {py:obj}`AcceptStates <anneal.core.components.AcceptStates>`
+  - ```{autodoc2-docstring} anneal.core.components.AcceptStates
+    :summary:
+    ```
+````
+
+### API
+
+````{py:data} MAX_LIMITS
+:canonical: anneal.core.components.MAX_LIMITS
+:value: >
+   'namedtuple(...)'
+
+```{autodoc2-docstring} anneal.core.components.MAX_LIMITS
+```
+
+````
+
+````{py:data} EpochLine
+:canonical: anneal.core.components.EpochLine
+:value: >
+   'namedtuple(...)'
+
+```{autodoc2-docstring} anneal.core.components.EpochLine
+```
+
+````
+
+````{py:data} AcceptStates
+:canonical: anneal.core.components.AcceptStates
+:value: >
+   'Enum(...)'
+
+```{autodoc2-docstring} anneal.core.components.AcceptStates
+```
+
+````
+
+`````{py:class} AcceptCriteria()
+:canonical: anneal.core.components.AcceptCriteria
+
+```{autodoc2-docstring} anneal.core.components.AcceptCriteria
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.AcceptCriteria.__init__
+```
+
+````{py:method} __call__()
+:canonical: anneal.core.components.AcceptCriteria.__call__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.AcceptCriteria.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.core.components.AcceptCriteria.__repr__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.AcceptCriteria.__repr__
+```
+
+````
+
+`````
+
+`````{py:class} ConstructNeighborhood()
+:canonical: anneal.core.components.ConstructNeighborhood
+
+```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood.__init__
+```
+
+````{py:method} __subclasshook__(subclass)
+:canonical: anneal.core.components.ConstructNeighborhood.__subclasshook__
+:classmethod:
+
+```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood.__subclasshook__
+```
+
+````
+
+````{py:method} __call__()
+:canonical: anneal.core.components.ConstructNeighborhood.__call__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.core.components.ConstructNeighborhood.__repr__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.ConstructNeighborhood.__repr__
+```
+
+````
+
+`````
+
+`````{py:class} CoolingSchedule(T_init: float)
+:canonical: anneal.core.components.CoolingSchedule
+
+```{autodoc2-docstring} anneal.core.components.CoolingSchedule
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.CoolingSchedule.__init__
+```
+
+````{py:method} __call__()
+:canonical: anneal.core.components.CoolingSchedule.__call__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.CoolingSchedule.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.core.components.CoolingSchedule.__repr__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.CoolingSchedule.__repr__
+```
+
+````
+
+`````
+
+`````{py:class} MoveClass()
+:canonical: anneal.core.components.MoveClass
+
+```{autodoc2-docstring} anneal.core.components.MoveClass
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.MoveClass.__init__
+```
+
+````{py:method} __call__()
+:canonical: anneal.core.components.MoveClass.__call__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.MoveClass.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.core.components.MoveClass.__repr__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.MoveClass.__repr__
+```
+
+````
+
+`````
+
+`````{py:class} Quencher(ObjFunc: eindir.core.components.ObjectiveFunction, MkNeigh: anneal.core.components.ConstructNeighborhood, Accepter: anneal.core.components.AcceptCriteria, Mover: anneal.core.components.MoveClass, Cooler: anneal.core.components.CoolingSchedule)
+:canonical: anneal.core.components.Quencher
+
+```{autodoc2-docstring} anneal.core.components.Quencher
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.Quencher.__init__
+```
+
+````{py:method} __subclasshook__(subclass)
+:canonical: anneal.core.components.Quencher.__subclasshook__
+:classmethod:
+
+```{autodoc2-docstring} anneal.core.components.Quencher.__subclasshook__
+```
+
+````
+
+````{py:method} __call__()
+:canonical: anneal.core.components.Quencher.__call__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.Quencher.__call__
+```
+
+````
+
+````{py:method} HasConverged()
+:canonical: anneal.core.components.Quencher.HasConverged
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.Quencher.HasConverged
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.core.components.Quencher.__repr__
+:abstractmethod:
+
+```{autodoc2-docstring} anneal.core.components.Quencher.__repr__
+```
+
+````
+
+````{py:method} addPlotPoint(temperature: float, step: int, acceptState: anneal.core.components.AcceptStates)
+:canonical: anneal.core.components.Quencher.addPlotPoint
+
+```{autodoc2-docstring} anneal.core.components.Quencher.addPlotPoint
+```
+
+````
+
+`````
+
+`````{py:class} BaseChainSA(ObjFunc: eindir.core.components.ObjectiveFunction, Chain, Cooler: anneal.core.components.CoolingSchedule, n_sim: int = 20000, maxiter: anneal.core.components.MAX_LIMITS = MAX_LIMITS(int(1000000.0), int(1000.0)))
+:canonical: anneal.core.components.BaseChainSA
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA.__init__
+```
+
+````{py:method} mk_target(Temperature)
+:canonical: anneal.core.components.BaseChainSA.mk_target
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA.mk_target
+```
+
+````
+
+````{py:method} __call__(Proposal, init_state=None)
+:canonical: anneal.core.components.BaseChainSA.__call__
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA.__call__
+```
+
+````
+
+````{py:method} getBest(statelist: list)
+:canonical: anneal.core.components.BaseChainSA.getBest
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA.getBest
+```
+
+````
+
+````{py:method} HasConverged()
+:canonical: anneal.core.components.BaseChainSA.HasConverged
+
+```{autodoc2-docstring} anneal.core.components.BaseChainSA.HasConverged
+```
+
+````
+
+`````

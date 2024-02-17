@@ -1,0 +1,18 @@
+# {py:mod}`anneal.funcs`
+
+```{py:module} anneal.funcs
+```
+
+```{autodoc2-docstring} anneal.funcs
+:allowtitles:
+```
+
+## Submodules
+
+```{toctree}
+:titlesonly:
+:maxdepth: 1
+
+anneal.funcs.obj2d
+anneal.funcs.objNd
+```

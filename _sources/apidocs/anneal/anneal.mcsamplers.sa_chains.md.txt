@@ -1,0 +1,40 @@
+# {py:mod}`anneal.mcsamplers.sa_chains`
+
+```{py:module} anneal.mcsamplers.sa_chains
+```
+
+```{autodoc2-docstring} anneal.mcsamplers.sa_chains
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`MHChainSA <anneal.mcsamplers.sa_chains.MHChainSA>`
+  - ```{autodoc2-docstring} anneal.mcsamplers.sa_chains.MHChainSA
+    :summary:
+    ```
+````
+
+### API
+
+````{py:class} MHChainSA(ObjFunc: eindir.core.components.ObjectiveFunction, Cooler: anneal.core.components.CoolingSchedule, n_sim: int = 5000, maxiter: anneal.core.components.MAX_LIMITS = MAX_LIMITS(int(1000000.0), int(1000.0)))
+:canonical: anneal.mcsamplers.sa_chains.MHChainSA
+
+Bases: {py:obj}`anneal.core.components.BaseChainSA`
+
+```{autodoc2-docstring} anneal.mcsamplers.sa_chains.MHChainSA
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.mcsamplers.sa_chains.MHChainSA.__init__
+```
+
+````

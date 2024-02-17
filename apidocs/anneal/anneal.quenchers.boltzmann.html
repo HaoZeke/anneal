@@ -1,0 +1,615 @@
+<!doctype html>
+<html class="no-js" lang="en" data-content_root="../../">
+  <head><meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <meta name="color-scheme" content="light dark"><meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="Changelog" href="../../changelog.html" /><link rel="prev" title="anneal.quenchers" href="anneal.quenchers.html" />
+
+    <!-- Generated with Sphinx 7.2.6 and Furo 2024.01.29 -->
+        <title>anneal.quenchers.boltzmann - anneal documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=a746c00c" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo.css?v=135e06be" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx_contributors.css?v=f079e67e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
+    <link rel="stylesheet" type="text/css" href="../../_static/styles/furo-extensions.css?v=36a5483c" />
+    
+    
+
+
+<style>
+  body {
+    --color-code-background: #f8f8f8;
+  --color-code-foreground: black;
+  
+  }
+  @media not print {
+    body[data-theme="dark"] {
+      --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+    }
+    @media (prefers-color-scheme: dark) {
+      body:not([data-theme="light"]) {
+        --color-code-background: #202020;
+  --color-code-foreground: #d0d0d0;
+  
+      }
+    }
+  }
+</style></head>
+  <body>
+    
+    <script>
+      document.body.dataset.theme = localStorage.getItem("theme") || "auto";
+    </script>
+    
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+  <symbol id="svg-toc" viewBox="0 0 24 24">
+    <title>Contents</title>
+    <svg stroke="currentColor" fill="currentColor" stroke-width="0" viewBox="0 0 1024 1024">
+      <path d="M408 442h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8zm-8 204c0 4.4 3.6 8 8 8h480c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H408c-4.4 0-8 3.6-8 8v56zm504-486H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm0 632H120c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h784c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zM115.4 518.9L271.7 642c5.8 4.6 14.4.5 14.4-6.9V388.9c0-7.4-8.5-11.5-14.4-6.9L115.4 505.1a8.74 8.74 0 0 0 0 13.8z"/>
+    </svg>
+  </symbol>
+  <symbol id="svg-menu" viewBox="0 0 24 24">
+    <title>Menu</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-menu">
+      <line x1="3" y1="12" x2="21" y2="12"></line>
+      <line x1="3" y1="6" x2="21" y2="6"></line>
+      <line x1="3" y1="18" x2="21" y2="18"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-arrow-right" viewBox="0 0 24 24">
+    <title>Expand</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather-chevron-right">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </svg>
+  </symbol>
+  <symbol id="svg-sun" viewBox="0 0 24 24">
+    <title>Light mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="feather-sun">
+      <circle cx="12" cy="12" r="5"></circle>
+      <line x1="12" y1="1" x2="12" y2="3"></line>
+      <line x1="12" y1="21" x2="12" y2="23"></line>
+      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+      <line x1="1" y1="12" x2="3" y2="12"></line>
+      <line x1="21" y1="12" x2="23" y2="12"></line>
+      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>
+  </symbol>
+  <symbol id="svg-moon" viewBox="0 0 24 24">
+    <title>Dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-moon">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+      <path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" />
+    </svg>
+  </symbol>
+  <symbol id="svg-sun-half" viewBox="0 0 24 24">
+    <title>Auto light/dark mode</title>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon-tabler-shadow">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M13 12h5" />
+      <path d="M13 15h4" />
+      <path d="M13 18h1" />
+      <path d="M13 9h4" />
+      <path d="M13 6h1" />
+    </svg>
+  </symbol>
+</svg>
+
+<input type="checkbox" class="sidebar-toggle" name="__navigation" id="__navigation">
+<input type="checkbox" class="sidebar-toggle" name="__toc" id="__toc">
+<label class="overlay sidebar-overlay" for="__navigation">
+  <div class="visually-hidden">Hide navigation sidebar</div>
+</label>
+<label class="overlay toc-overlay" for="__toc">
+  <div class="visually-hidden">Hide table of contents sidebar</div>
+</label>
+
+
+
+<div class="page">
+  <header class="mobile-header">
+    <div class="header-left">
+      <label class="nav-overlay-icon" for="__navigation">
+        <div class="visually-hidden">Toggle site navigation sidebar</div>
+        <i class="icon"><svg><use href="#svg-menu"></use></svg></i>
+      </label>
+    </div>
+    <div class="header-center">
+      <a href="../../index.html"><div class="brand">anneal  documentation</div></a>
+    </div>
+    <div class="header-right">
+      <div class="theme-toggle-container theme-toggle-header">
+        <button class="theme-toggle">
+          <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+          <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+          <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+          <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+        </button>
+      </div>
+      <label class="toc-overlay-icon toc-header-icon" for="__toc">
+        <div class="visually-hidden">Toggle table of contents sidebar</div>
+        <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+      </label>
+    </div>
+  </header>
+  <aside class="sidebar-drawer">
+    <div class="sidebar-container">
+      
+      <div class="sidebar-sticky"><a class="sidebar-brand" href="../../index.html">
+  
+  
+  <span class="sidebar-brand-text">anneal  documentation</span>
+  
+</a><form class="sidebar-search-container" method="get" action="../../search.html" role="search">
+  <input class="sidebar-search" placeholder="Search" name="q" aria-label="Search">
+  <input type="hidden" name="check_keywords" value="yes">
+  <input type="hidden" name="area" value="default">
+</form>
+<div id="searchbox"></div><div class="sidebar-scroll"><div class="sidebar-tree">
+  <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1 current has-children"><a class="reference internal" href="../index.html">API Reference</a><input checked="" class="toctree-checkbox" id="toctree-checkbox-1" name="toctree-checkbox-1" role="switch" type="checkbox"/><label for="toctree-checkbox-1"><div class="visually-hidden">Toggle navigation of API Reference</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l2 current has-children"><a class="reference internal" href="anneal.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal</span></code></a><input checked="" class="toctree-checkbox" id="toctree-checkbox-2" name="toctree-checkbox-2" role="switch" type="checkbox"/><label for="toctree-checkbox-2"><div class="visually-hidden">Toggle navigation of anneal</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l3 has-children"><a class="reference internal" href="anneal.mcsamplers.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.mcsamplers</span></code></a><input class="toctree-checkbox" id="toctree-checkbox-3" name="toctree-checkbox-3" role="switch" type="checkbox"/><label for="toctree-checkbox-3"><div class="visually-hidden">Toggle navigation of anneal.mcsamplers</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="anneal.mcsamplers.sa_chains.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.mcsamplers.sa_chains</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="anneal.mcsamplers.chains.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.mcsamplers.chains</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="anneal.viz.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.viz</span></code></a><input class="toctree-checkbox" id="toctree-checkbox-4" name="toctree-checkbox-4" role="switch" type="checkbox"/><label for="toctree-checkbox-4"><div class="visually-hidden">Toggle navigation of anneal.viz</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="anneal.viz.viz2d.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.viz.viz2d</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="anneal.core.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.core</span></code></a><input class="toctree-checkbox" id="toctree-checkbox-5" name="toctree-checkbox-5" role="switch" type="checkbox"/><label for="toctree-checkbox-5"><div class="visually-hidden">Toggle navigation of anneal.core</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="anneal.core.components.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.core.components</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3 has-children"><a class="reference internal" href="anneal.funcs.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.funcs</span></code></a><input class="toctree-checkbox" id="toctree-checkbox-6" name="toctree-checkbox-6" role="switch" type="checkbox"/><label for="toctree-checkbox-6"><div class="visually-hidden">Toggle navigation of anneal.funcs</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul>
+<li class="toctree-l4"><a class="reference internal" href="anneal.funcs.obj2d.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.funcs.obj2d</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="anneal.funcs.objNd.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.funcs.objNd</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3 current has-children"><a class="reference internal" href="anneal.quenchers.html"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.quenchers</span></code></a><input checked="" class="toctree-checkbox" id="toctree-checkbox-7" name="toctree-checkbox-7" role="switch" type="checkbox"/><label for="toctree-checkbox-7"><div class="visually-hidden">Toggle navigation of anneal.quenchers</div><i class="icon"><svg><use href="#svg-arrow-right"></use></svg></i></label><ul class="current">
+<li class="toctree-l4 current current-page"><a class="current reference internal" href="#"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.quenchers.boltzmann</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../changelog.html">Changelog</a></li>
+</ul>
+
+</div>
+</div>
+
+      </div>
+      
+    </div>
+  </aside>
+  <div class="main">
+    <div class="content">
+      <div class="article-container">
+        <a href="#" class="back-to-top muted-link">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+            <path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12z"></path>
+          </svg>
+          <span>Back to top</span>
+        </a>
+        <div class="content-icon-container">
+          <div class="edit-this-page">
+  <a class="muted-link" href="https://github.com/HaoZeke/anneal/edit/main/docs/apidocs/anneal/anneal.quenchers.boltzmann.md" title="Edit this page">
+    <svg aria-hidden="true" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+      <path d="M4 20h4l10.5 -10.5a1.5 1.5 0 0 0 -4 -4l-10.5 10.5v4" />
+      <line x1="13.5" y1="6.5" x2="17.5" y2="10.5" />
+    </svg>
+    <span class="visually-hidden">Edit this page</span>
+  </a>
+</div><div class="theme-toggle-container theme-toggle-content">
+            <button class="theme-toggle">
+              <div class="visually-hidden">Toggle Light / Dark / Auto color theme</div>
+              <svg class="theme-icon-when-auto"><use href="#svg-sun-half"></use></svg>
+              <svg class="theme-icon-when-dark"><use href="#svg-moon"></use></svg>
+              <svg class="theme-icon-when-light"><use href="#svg-sun"></use></svg>
+            </button>
+          </div>
+          <label class="toc-overlay-icon toc-content-icon" for="__toc">
+            <div class="visually-hidden">Toggle table of contents sidebar</div>
+            <i class="icon"><svg><use href="#svg-toc"></use></svg></i>
+          </label>
+        </div>
+        <article role="main">
+          <section id="module-anneal.quenchers.boltzmann">
+<span id="anneal-quenchers-boltzmann"></span><h1><a class="reference internal" href="#module-anneal.quenchers.boltzmann" title="anneal.quenchers.boltzmann"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.quenchers.boltzmann</span></code></a><a class="headerlink" href="#module-anneal.quenchers.boltzmann" title="Link to this heading">#</a></h1>
+<section id="module-contents">
+<h2>Module Contents<a class="headerlink" href="#module-contents" title="Link to this heading">#</a></h2>
+<section id="classes">
+<h3>Classes<a class="headerlink" href="#classes" title="Link to this heading">#</a></h3>
+<div class="table-wrapper autosummary longtable docutils container">
+<table class="autosummary longtable docutils align-left">
+<tbody>
+<tr class="row-odd"><td><p><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher" title="anneal.quenchers.boltzmann.BoltzmannQuencher"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BoltzmannQuencher</span></code></a></p></td>
+<td><p>Implements the Boltzmann Quencher method for optimization.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannCooler" title="anneal.quenchers.boltzmann.BoltzmannCooler"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BoltzmannCooler</span></code></a></p></td>
+<td><p>Implements the logarithmic cooling schedule proposed by Geman and Geman (1983).</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannMove" title="anneal.quenchers.boltzmann.BoltzmannMove"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BoltzmannMove</span></code></a></p></td>
+<td><p>Implements a Boltzmann move with a random step size.</p></td>
+</tr>
+<tr class="row-even"><td><p><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor" title="anneal.quenchers.boltzmann.BoltzmannNeighbor"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BoltzmannNeighbor</span></code></a></p></td>
+<td><p>Constructs a neighborhood for Boltzmann simulated annealing.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannAccept" title="anneal.quenchers.boltzmann.BoltzmannAccept"><code class="xref py py-obj docutils literal notranslate"><span class="pre">BoltzmannAccept</span></code></a></p></td>
+<td><p>Implements the acceptance criteria for Boltzmann simulated annealing.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="api">
+<h3>API<a class="headerlink" href="#api" title="Link to this heading">#</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">anneal.quenchers.boltzmann.</span></span><span class="sig-name descname"><span class="pre">BoltzmannQuencher</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ObjFunc</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">eindir.core.components.ObjectiveFunction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">pos_init</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">numpy.typing.NDArray</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">T_init</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">float</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">maxiter</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">anneal.core.components.MAX_LIMITS</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">MAX_LIMITS(int(1000000.0),</span> <span class="pre">int(1000.0))</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.Quencher" title="anneal.core.components.Quencher"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.Quencher</span></code></a></p>
+<p>Implements the Boltzmann Quencher method for optimization.</p>
+<h4 class="rubric" id="id5">Notes</h4>
+<p>Boltzmann Quencher is a type of Simulated Annealing algorithm that uses a
+Boltzmann distribution for the acceptance criteria of new points.</p>
+<p class="rubric">Initialization</p>
+<p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher</span></code> class.</p>
+<h4 class="rubric" id="parameters">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>ObjFunc: ObjectiveFunction</strong></dt><dd><p>An instance of the <code class="docutils literal notranslate"><span class="pre">ObjectiveFunction</span></code> class representing the
+function to be optimized.</p>
+</dd>
+<dt><strong>pos_init: npt.NDArray, optional</strong></dt><dd><p>The initial position in the function’s search space.</p>
+</dd>
+<dt><strong>T_init: float, optional</strong></dt><dd><p>The initial temperature for the simulated annealing process.</p>
+</dd>
+<dt><strong>maxiter: MAX_LIMITS, optional</strong></dt><dd><p>An instance of the <code class="docutils literal notranslate"><span class="pre">MAX_LIMITS</span></code> class representing the maximum number
+of iterations for the simulated annealing process. If not provided,
+the default maximum number of steps is 1e6 and the default maximum
+number of epochs is 1e3.</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">trackPlot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.__call__" title="Link to this definition">#</a></dt>
+<dd><p>Runs the Boltzmann Quencher algorithm.</p>
+<h4 class="rubric" id="id6">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>trackPlot: bool, optional (default=False)</strong></dt><dd><p>Whether to track the performance of the algorithm for plotting.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.DeltaFunc">
+<span class="sig-name descname"><span class="pre">DeltaFunc</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.DeltaFunc" title="Link to this definition">#</a></dt>
+<dd><p>Computes the difference in objective function values between the
+current state and the proposed state.</p>
+<h4 class="rubric" id="returns">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">float</span></code></dt><dd><p>The difference in objective function values.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.AcceptMove">
+<span class="sig-name descname"><span class="pre">AcceptMove</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.AcceptMove" title="Link to this definition">#</a></dt>
+<dd><p>Accepts the move from the current state to the proposed state.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.RejectMove">
+<span class="sig-name descname"><span class="pre">RejectMove</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.RejectMove" title="Link to this definition">#</a></dt>
+<dd><p>Rejects the move from the current state to the proposed state.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.HasConverged">
+<span class="sig-name descname"><span class="pre">HasConverged</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.HasConverged" title="Link to this definition">#</a></dt>
+<dd><p>Checks if the optimization process has converged.</p>
+<h4 class="rubric" id="id7">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> if the optimization has converged, <code class="docutils literal notranslate"><span class="pre">False</span></code> otherwise.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannQuencher.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.__repr__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannCooler">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">anneal.quenchers.boltzmann.</span></span><span class="sig-name descname"><span class="pre">BoltzmannCooler</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">T_init</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">c_param</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannCooler" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.CoolingSchedule" title="anneal.core.components.CoolingSchedule"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.CoolingSchedule</span></code></a></p>
+<p>Implements the logarithmic cooling schedule proposed by Geman and Geman (1983).</p>
+<h4 class="rubric" id="id8">Notes</h4>
+<p>This cooling schedule is designed for use with the Boltzmann Quencher. The temperature
+is reduced at each epoch according to a logarithmic function to ensure that the
+Geman &amp; Geman inequality holds.</p>
+<p class="rubric">Initialization</p>
+<p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannCooler</span></code> class.</p>
+<h4 class="rubric" id="id9">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>T_init: float</strong></dt><dd><p>The initial temperature for the cooling schedule.</p>
+</dd>
+<dt><strong>c_param: float, optional (default=1)</strong></dt><dd><p>The parameter ‘c’ for the cooling schedule. According to Salazar and Torale (1997),
+this can be set to the initial temperature.</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannCooler.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">epoch</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannCooler.__call__" title="Link to this definition">#</a></dt>
+<dd><p>Calculates the temperature for a given epoch.</p>
+<h4 class="rubric" id="id10">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>epoch: int</strong></dt><dd><p>The current epoch (iteration) of the optimization process.</p>
+</dd>
+</dl>
+<h4 class="rubric" id="id11">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">float</span></code></dt><dd><p>The temperature for the given epoch.</p>
+</dd>
+</dl>
+<h4 class="rubric" id="id12">Notes</h4>
+<p>Can also consider a random perturbation to ensure G&amp;G inequality holds
+np.random.default_rng().uniform(0.01, 0.5) +</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannCooler.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannCooler.__repr__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannMove">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">anneal.quenchers.boltzmann.</span></span><span class="sig-name descname"><span class="pre">BoltzmannMove</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">limits</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">eindir.core.components.NumLimit</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannMove" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.MoveClass" title="anneal.core.components.MoveClass"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.MoveClass</span></code></a></p>
+<p>Implements a Boltzmann move with a random step size.</p>
+<h4 class="rubric" id="id13">Notes</h4>
+<p>For Boltzmann simulated annealing, the step size of a move is randomly
+chosen from a standard Gaussian distribution.</p>
+<p class="rubric">Initialization</p>
+<p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannMove</span></code> class.</p>
+<h4 class="rubric" id="id14">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>limits: NumLimit</strong></dt><dd><p>The limits for the move.</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannMove.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannMove.__call__" title="Link to this definition">#</a></dt>
+<dd><p>Generates a random step size for the move.</p>
+<h4 class="rubric" id="id15">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">float</span></code></dt><dd><p>The step size for the move.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannMove.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannMove.__repr__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannNeighbor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">anneal.quenchers.boltzmann.</span></span><span class="sig-name descname"><span class="pre">BoltzmannNeighbor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">limits</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">eindir.core.components.NumLimit</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mover</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannMove" title="anneal.quenchers.boltzmann.BoltzmannMove"><span class="pre">anneal.quenchers.boltzmann.BoltzmannMove</span></a></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.ConstructNeighborhood" title="anneal.core.components.ConstructNeighborhood"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.ConstructNeighborhood</span></code></a></p>
+<p>Constructs a neighborhood for Boltzmann simulated annealing.</p>
+<h4 class="rubric" id="id16">Notes</h4>
+<p>For Boltzmann simulated annealing, a random direction is chosen. This
+behavior is based on the recommendation of Casella and Robert (2010).
+However, Gall (2014) disagrees.</p>
+<p class="rubric">Initialization</p>
+<p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannNeighbor</span></code> class.</p>
+<h4 class="rubric" id="id17">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>limits: NumLimit</strong></dt><dd><p>The limits for the move.</p>
+</dd>
+<dt><strong>mover: BoltzmannMove</strong></dt><dd><p>An instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannMove</span></code> class to make the move.</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannNeighbor.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">c_pos</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor.__call__" title="Link to this definition">#</a></dt>
+<dd><p>Generates a new candidate position in the neighborhood of the current position.</p>
+<h4 class="rubric" id="id18">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>c_pos: numpy.ndarray</strong></dt><dd><p>The current position.</p>
+</dd>
+</dl>
+<h4 class="rubric" id="id19">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">numpy.ndarray</span></code></dt><dd><p>The candidate position.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannNeighbor.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor.__repr__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannAccept">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">anneal.quenchers.boltzmann.</span></span><span class="sig-name descname"><span class="pre">BoltzmannAccept</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">k</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannAccept" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.AcceptCriteria" title="anneal.core.components.AcceptCriteria"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.AcceptCriteria</span></code></a></p>
+<p>Implements the acceptance criteria for Boltzmann simulated annealing.</p>
+<h4 class="rubric" id="id20">Notes</h4>
+<p>The Metropolis-Hastings criterion is used for acceptance in Boltzmann
+simulated annealing.</p>
+<p class="rubric">Initialization</p>
+<p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannAccept</span></code> class.</p>
+<h4 class="rubric" id="id21">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>k: int, optional (default=1)</strong></dt><dd><p>The parameter ‘k’ for the acceptance criteria.</p>
+</dd>
+</dl>
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannAccept.__call__">
+<span class="sig-name descname"><span class="pre">__call__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">diff</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">Temperature</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannAccept.__call__" title="Link to this definition">#</a></dt>
+<dd><p>Decides whether to accept a candidate solution.</p>
+<h4 class="rubric" id="id22">Parameters</h4>
+<dl class="simple myst">
+<dt><strong>diff: float</strong></dt><dd><p>The difference in objective function values between the candidate and current solutions.</p>
+</dd>
+<dt><strong>Temperature: float</strong></dt><dd><p>The current temperature.</p>
+</dd>
+</dl>
+<h4 class="rubric" id="id23">Returns</h4>
+<dl class="simple myst">
+<dt><code class="docutils literal notranslate"><span class="pre">bool</span></code></dt><dd><p><code class="docutils literal notranslate"><span class="pre">True</span></code> if the candidate solution is accepted, <code class="docutils literal notranslate"><span class="pre">False</span></code> otherwise.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="anneal.quenchers.boltzmann.BoltzmannAccept.__repr__">
+<span class="sig-name descname"><span class="pre">__repr__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#anneal.quenchers.boltzmann.BoltzmannAccept.__repr__" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+</section>
+
+        </article>
+      </div>
+      <footer>
+        
+        <div class="related-pages">
+          <a class="next-page" href="../../changelog.html">
+              <div class="page-info">
+                <div class="context">
+                  <span>Next</span>
+                </div>
+                <div class="title">Changelog</div>
+              </div>
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+            </a>
+          <a class="prev-page" href="anneal.quenchers.html">
+              <svg class="furo-related-icon"><use href="#svg-arrow-right"></use></svg>
+              <div class="page-info">
+                <div class="context">
+                  <span>Previous</span>
+                </div>
+                
+                <div class="title"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.quenchers</span></code></div>
+                
+              </div>
+            </a>
+        </div>
+        <div class="bottom-of-page">
+          <div class="left-details">
+            <div class="copyright">
+                Copyright &#169; 2023--present, anneal Developers
+            </div>
+            Made with <a href="https://www.sphinx-doc.org/">Sphinx</a> and <a class="muted-link" href="https://pradyunsg.me">@pradyunsg</a>'s
+            
+            <a href="https://github.com/pradyunsg/furo">Furo</a>
+            
+          </div>
+          <div class="right-details">
+            
+          </div>
+        </div>
+        
+      </footer>
+    </div>
+    <aside class="toc-drawer">
+      
+      
+      <div class="toc-sticky toc-scroll">
+        <div class="toc-title-container">
+          <span class="toc-title">
+            On this page
+          </span>
+        </div>
+        <div class="toc-tree-container">
+          <div class="toc-tree">
+            <ul>
+<li><a class="reference internal" href="#"><code class="xref py py-mod docutils literal notranslate"><span class="pre">anneal.quenchers.boltzmann</span></code></a><ul>
+<li><a class="reference internal" href="#module-contents">Module Contents</a><ul>
+<li><a class="reference internal" href="#classes">Classes</a></li>
+<li><a class="reference internal" href="#api">API</a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher</span></code></a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.__call__"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.__call__()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.DeltaFunc"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.DeltaFunc()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.AcceptMove"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.AcceptMove()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.RejectMove"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.RejectMove()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.HasConverged"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.HasConverged()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannQuencher.__repr__"><code class="docutils literal notranslate"><span class="pre">BoltzmannQuencher.__repr__()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannCooler"><code class="docutils literal notranslate"><span class="pre">BoltzmannCooler</span></code></a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannCooler.__call__"><code class="docutils literal notranslate"><span class="pre">BoltzmannCooler.__call__()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannCooler.__repr__"><code class="docutils literal notranslate"><span class="pre">BoltzmannCooler.__repr__()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannMove"><code class="docutils literal notranslate"><span class="pre">BoltzmannMove</span></code></a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannMove.__call__"><code class="docutils literal notranslate"><span class="pre">BoltzmannMove.__call__()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannMove.__repr__"><code class="docutils literal notranslate"><span class="pre">BoltzmannMove.__repr__()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor"><code class="docutils literal notranslate"><span class="pre">BoltzmannNeighbor</span></code></a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor.__call__"><code class="docutils literal notranslate"><span class="pre">BoltzmannNeighbor.__call__()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannNeighbor.__repr__"><code class="docutils literal notranslate"><span class="pre">BoltzmannNeighbor.__repr__()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannAccept"><code class="docutils literal notranslate"><span class="pre">BoltzmannAccept</span></code></a><ul>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannAccept.__call__"><code class="docutils literal notranslate"><span class="pre">BoltzmannAccept.__call__()</span></code></a></li>
+<li><a class="reference internal" href="#anneal.quenchers.boltzmann.BoltzmannAccept.__repr__"><code class="docutils literal notranslate"><span class="pre">BoltzmannAccept.__repr__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+          </div>
+        </div>
+      </div>
+      
+      
+    </aside>
+  </div>
+</div><script src="../../_static/documentation_options.js?v=5929fcd5"></script>
+    <script src="../../_static/doctools.js?v=888ff710"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/scripts/furo.js?v=32e29ea5"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../_static/design-tabs.js?v=36754332"></script>
+    </body>
+</html>

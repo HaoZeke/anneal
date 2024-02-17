@@ -1,0 +1,17 @@
+# {py:mod}`anneal.core`
+
+```{py:module} anneal.core
+```
+
+```{autodoc2-docstring} anneal.core
+:allowtitles:
+```
+
+## Submodules
+
+```{toctree}
+:titlesonly:
+:maxdepth: 1
+
+anneal.core.components
+```

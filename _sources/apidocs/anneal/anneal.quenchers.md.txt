@@ -1,0 +1,17 @@
+# {py:mod}`anneal.quenchers`
+
+```{py:module} anneal.quenchers
+```
+
+```{autodoc2-docstring} anneal.quenchers
+:allowtitles:
+```
+
+## Submodules
+
+```{toctree}
+:titlesonly:
+:maxdepth: 1
+
+anneal.quenchers.boltzmann
+```

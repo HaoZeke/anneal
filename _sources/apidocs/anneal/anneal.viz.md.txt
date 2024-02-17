@@ -1,0 +1,17 @@
+# {py:mod}`anneal.viz`
+
+```{py:module} anneal.viz
+```
+
+```{autodoc2-docstring} anneal.viz
+:allowtitles:
+```
+
+## Submodules
+
+```{toctree}
+:titlesonly:
+:maxdepth: 1
+
+anneal.viz.viz2d
+```

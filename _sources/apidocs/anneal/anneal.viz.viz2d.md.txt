@@ -1,0 +1,48 @@
+# {py:mod}`anneal.viz.viz2d`
+
+```{py:module} anneal.viz.viz2d
+```
+
+```{autodoc2-docstring} anneal.viz.viz2d
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`Plot2dQuench <anneal.viz.viz2d.Plot2dQuench>`
+  - ```{autodoc2-docstring} anneal.viz.viz2d.Plot2dQuench
+    :summary:
+    ```
+````
+
+### API
+
+`````{py:class} Plot2dQuench(obj: eindir.core.components.ObjectiveFunction, nelem: int)
+:canonical: anneal.viz.viz2d.Plot2dQuench
+
+Bases: {py:obj}`eindir.viz.viz2d.Plot2dObj`
+
+```{autodoc2-docstring} anneal.viz.viz2d.Plot2dQuench
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.viz.viz2d.Plot2dQuench.__init__
+```
+
+````{py:method} plotQuenchContour(quenchy: anneal.core.components.Quencher, nsamples=500, savePath=None, ptitle=None)
+:canonical: anneal.viz.viz2d.Plot2dQuench.plotQuenchContour
+
+```{autodoc2-docstring} anneal.viz.viz2d.Plot2dQuench.plotQuenchContour
+```
+
+````
+
+`````

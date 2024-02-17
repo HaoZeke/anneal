@@ -1,0 +1,46 @@
+# {py:mod}`anneal.mcsamplers.chains`
+
+```{py:module} anneal.mcsamplers.chains
+```
+
+```{autodoc2-docstring} anneal.mcsamplers.chains
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`MHChain <anneal.mcsamplers.chains.MHChain>`
+  - ```{autodoc2-docstring} anneal.mcsamplers.chains.MHChain
+    :summary:
+    ```
+````
+
+### API
+
+`````{py:class} MHChain(Target, Proposal, InitialState)
+:canonical: anneal.mcsamplers.chains.MHChain
+
+```{autodoc2-docstring} anneal.mcsamplers.chains.MHChain
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.mcsamplers.chains.MHChain.__init__
+```
+
+````{py:method} step()
+:canonical: anneal.mcsamplers.chains.MHChain.step
+
+```{autodoc2-docstring} anneal.mcsamplers.chains.MHChain.step
+```
+
+````
+
+`````

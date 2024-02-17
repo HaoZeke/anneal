@@ -1,0 +1,217 @@
+# {py:mod}`anneal.quenchers.boltzmann`
+
+```{py:module} anneal.quenchers.boltzmann
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`BoltzmannQuencher <anneal.quenchers.boltzmann.BoltzmannQuencher>`
+  - ```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher
+    :summary:
+    ```
+* - {py:obj}`BoltzmannCooler <anneal.quenchers.boltzmann.BoltzmannCooler>`
+  - ```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannCooler
+    :summary:
+    ```
+* - {py:obj}`BoltzmannMove <anneal.quenchers.boltzmann.BoltzmannMove>`
+  - ```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannMove
+    :summary:
+    ```
+* - {py:obj}`BoltzmannNeighbor <anneal.quenchers.boltzmann.BoltzmannNeighbor>`
+  - ```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannNeighbor
+    :summary:
+    ```
+* - {py:obj}`BoltzmannAccept <anneal.quenchers.boltzmann.BoltzmannAccept>`
+  - ```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannAccept
+    :summary:
+    ```
+````
+
+### API
+
+`````{py:class} BoltzmannQuencher(ObjFunc: eindir.core.components.ObjectiveFunction, pos_init: numpy.typing.NDArray = None, *, T_init: float = None, maxiter: anneal.core.components.MAX_LIMITS = MAX_LIMITS(int(1000000.0), int(1000.0)))
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher
+
+Bases: {py:obj}`anneal.core.components.Quencher`
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.__init__
+```
+
+````{py:method} __call__(trackPlot=False)
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.__call__
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.__call__
+```
+
+````
+
+````{py:method} DeltaFunc()
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.DeltaFunc
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.DeltaFunc
+```
+
+````
+
+````{py:method} AcceptMove()
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.AcceptMove
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.AcceptMove
+```
+
+````
+
+````{py:method} RejectMove()
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.RejectMove
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.RejectMove
+```
+
+````
+
+````{py:method} HasConverged()
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.HasConverged
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannQuencher.HasConverged
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannQuencher.__repr__
+
+````
+
+`````
+
+`````{py:class} BoltzmannCooler(T_init, c_param=1)
+:canonical: anneal.quenchers.boltzmann.BoltzmannCooler
+
+Bases: {py:obj}`anneal.core.components.CoolingSchedule`
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannCooler
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannCooler.__init__
+```
+
+````{py:method} __call__(epoch)
+:canonical: anneal.quenchers.boltzmann.BoltzmannCooler.__call__
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannCooler.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannCooler.__repr__
+
+````
+
+`````
+
+`````{py:class} BoltzmannMove(limits: eindir.core.components.NumLimit)
+:canonical: anneal.quenchers.boltzmann.BoltzmannMove
+
+Bases: {py:obj}`anneal.core.components.MoveClass`
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannMove
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannMove.__init__
+```
+
+````{py:method} __call__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannMove.__call__
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannMove.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannMove.__repr__
+
+````
+
+`````
+
+`````{py:class} BoltzmannNeighbor(limits: eindir.core.components.NumLimit, mover: anneal.quenchers.boltzmann.BoltzmannMove)
+:canonical: anneal.quenchers.boltzmann.BoltzmannNeighbor
+
+Bases: {py:obj}`anneal.core.components.ConstructNeighborhood`
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannNeighbor
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannNeighbor.__init__
+```
+
+````{py:method} __call__(c_pos)
+:canonical: anneal.quenchers.boltzmann.BoltzmannNeighbor.__call__
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannNeighbor.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannNeighbor.__repr__
+
+````
+
+`````
+
+`````{py:class} BoltzmannAccept(k=1)
+:canonical: anneal.quenchers.boltzmann.BoltzmannAccept
+
+Bases: {py:obj}`anneal.core.components.AcceptCriteria`
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannAccept
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannAccept.__init__
+```
+
+````{py:method} __call__(diff, Temperature)
+:canonical: anneal.quenchers.boltzmann.BoltzmannAccept.__call__
+
+```{autodoc2-docstring} anneal.quenchers.boltzmann.BoltzmannAccept.__call__
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.quenchers.boltzmann.BoltzmannAccept.__repr__
+
+````
+
+`````

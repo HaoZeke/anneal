@@ -1,0 +1,61 @@
+# {py:mod}`anneal.funcs.obj2d`
+
+```{py:module} anneal.funcs.obj2d
+```
+
+```{autodoc2-docstring} anneal.funcs.obj2d
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`StybTang2d <anneal.funcs.obj2d.StybTang2d>`
+  - ```{autodoc2-docstring} anneal.funcs.obj2d.StybTang2d
+    :summary:
+    ```
+````
+
+### API
+
+`````{py:class} StybTang2d(limits=NumLimit(dims=2, low=np.ones(2) * -5, high=np.ones(2) * 5))
+:canonical: anneal.funcs.obj2d.StybTang2d
+
+Bases: {py:obj}`eindir.core.components.ObjectiveFunction`
+
+```{autodoc2-docstring} anneal.funcs.obj2d.StybTang2d
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.funcs.obj2d.StybTang2d.__init__
+```
+
+````{py:method} singlepoint(pos)
+:canonical: anneal.funcs.obj2d.StybTang2d.singlepoint
+
+```{autodoc2-docstring} anneal.funcs.obj2d.StybTang2d.singlepoint
+```
+
+````
+
+````{py:method} multipoint(pos)
+:canonical: anneal.funcs.obj2d.StybTang2d.multipoint
+
+```{autodoc2-docstring} anneal.funcs.obj2d.StybTang2d.multipoint
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.funcs.obj2d.StybTang2d.__repr__
+
+````
+
+`````

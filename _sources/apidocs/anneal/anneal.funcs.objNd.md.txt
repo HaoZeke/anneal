@@ -1,0 +1,61 @@
+# {py:mod}`anneal.funcs.objNd`
+
+```{py:module} anneal.funcs.objNd
+```
+
+```{autodoc2-docstring} anneal.funcs.objNd
+:allowtitles:
+```
+
+## Module Contents
+
+### Classes
+
+````{list-table}
+:class: autosummary longtable
+:align: left
+
+* - {py:obj}`StybTangNd <anneal.funcs.objNd.StybTangNd>`
+  - ```{autodoc2-docstring} anneal.funcs.objNd.StybTangNd
+    :summary:
+    ```
+````
+
+### API
+
+`````{py:class} StybTangNd(dims)
+:canonical: anneal.funcs.objNd.StybTangNd
+
+Bases: {py:obj}`eindir.core.components.ObjectiveFunction`
+
+```{autodoc2-docstring} anneal.funcs.objNd.StybTangNd
+```
+
+```{rubric} Initialization
+```
+
+```{autodoc2-docstring} anneal.funcs.objNd.StybTangNd.__init__
+```
+
+````{py:method} singlepoint(pos)
+:canonical: anneal.funcs.objNd.StybTangNd.singlepoint
+
+```{autodoc2-docstring} anneal.funcs.objNd.StybTangNd.singlepoint
+```
+
+````
+
+````{py:method} multipoint(pos)
+:canonical: anneal.funcs.objNd.StybTangNd.multipoint
+
+```{autodoc2-docstring} anneal.funcs.objNd.StybTangNd.multipoint
+```
+
+````
+
+````{py:method} __repr__()
+:canonical: anneal.funcs.objNd.StybTangNd.__repr__
+
+````
+
+`````
