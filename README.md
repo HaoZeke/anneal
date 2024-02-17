@@ -1,3 +1,5 @@
+![Logo](./branding/logo/eindir_logo.png)
+
 # Anneal
 
 This is a `python` package for simulated annealing (and quenching) in all its

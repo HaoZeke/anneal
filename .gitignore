@@ -256,3 +256,4 @@ Temporary Items
 
 /docs/source/apidocs/
 /_version.py
+/.pdm-build/
