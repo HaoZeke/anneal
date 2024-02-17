@@ -1,6 +1,7 @@
-![Logo](./branding/logo/eindir_logo.png)
+![Logo](./branding/logo/anneal_logo.png)
 
-# Anneal
+# Anneal [![DOI](https://zenodo.org/badge/597892274.svg)](https://zenodo.org/doi/10.5281/zenodo.10672746)
+
 
 This is a `python` package for simulated annealing (and quenching) in all its
 many guises. The design decisions are described in the corresponding [ArXiV preprint](https://arxiv.org/abs/2302.02811v2).
