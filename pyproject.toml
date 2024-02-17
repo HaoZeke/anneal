@@ -30,7 +30,7 @@ dependencies = [
     "matplotlib>=3.6.3",
     "tqdm>=4.64.1",
     "probsamplers>=0.1.0",
-    "eindir>=0.0.5",
+    "eindir>=0.1.0",
 ]
 
 [project.urls]
