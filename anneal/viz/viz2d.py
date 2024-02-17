@@ -1,7 +1,5 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import numpy as np
 
 from anneal.core.components import AcceptStates, Quencher
@@ -13,6 +11,7 @@ class Plot2dQuench(Plot2dObj):
     """
     Class for plotting 2D Quench objects.
     """
+
     def __init__(self, obj: ObjectiveFunction, nelem: int):
         """
         Initializes the `Plot2dQuench` object.
@@ -46,55 +45,55 @@ class Plot2dQuench(Plot2dObj):
         : The title for the plot.
         """
         self.pdat = pd.DataFrame(quenchy.PlotData)
-        accepted_pos = self.pdat[self.pdat.accept == AcceptStates.IMPROVED][
-            "pos"
-        ]
+        accepted_pos = self.pdat[self.pdat.accept == AcceptStates.IMPROVED]["pos"]
         rejected_pos = self.pdat[self.pdat.accept == AcceptStates.REJECT]["pos"]
-        mhaccept_pos = self.pdat[self.pdat.accept == AcceptStates.MHACCEPT][
-            "pos"
-        ]
-        toNPD = (
-            lambda poscol: np.concatenate(poscol.to_list(), axis=0).reshape(
-                -1, self.func.limits.dims
+        mhaccept_pos = self.pdat[self.pdat.accept == AcceptStates.MHACCEPT]["pos"]
+
+        def toNPD(poscol):
+            return (
+                np.concatenate(poscol.to_list(), axis=0).reshape(
+                    -1, self.func.limits.dims
+                )
+                if len(poscol) > 1
+                else poscol
             )
-            if len(poscol) > 1
-            else poscol
-        )
-        getDat = (
-            lambda posDat: toNPD(pd.DataFrame.sample(posDat, n=nsamples))
-            if len(posDat) > nsamples
-            else toNPD(posDat)
-        )
-        inBounds = lambda point: np.all(
-            point > self.contourExtent[::2]
-        ) and np.all(point < self.contourExtent[1::2])
-        fig = plt.figure(figsize=(12, 10))
+
+        def getDat(posDat):
+            return (
+                toNPD(pd.DataFrame.sample(posDat, n=nsamples))
+                if len(posDat) > nsamples
+                else toNPD(posDat)
+            )
+
+        def inBounds(point):
+            return np.all(point > self.contourExtent[::2]) and np.all(
+                point < self.contourExtent[1::2]
+            )
+
+        plt.figure(figsize=(12, 10))
         ax = plt.subplot()
-        plotAccept = (
-            lambda point: ax.plot(
-                point[0], point[1], marker="o", color="blue", alpha=0.5
+
+        def plotAccept(point):
+            return (
+                ax.plot(point[0], point[1], marker="o", color="blue", alpha=0.5)
+                if inBounds(point)
+                else None
             )
-            if inBounds(point)
-            else None
-        )
-        plotReject = (
-            lambda point: ax.plot(
-                point[0], point[1], marker="o", color="red", alpha=0.3
+
+        def plotReject(point):
+            return (
+                ax.plot(point[0], point[1], marker="o", color="red", alpha=0.3)
+                if inBounds(point)
+                else None
             )
-            if inBounds(point)
-            else None
-        )
-        plotMHAccept = (
-            lambda point: ax.plot(
-                point[0],
-                point[1],
-                marker="*",
-                color="yellow",
-                alpha=0.5,
+
+        def plotMHAccept(point):
+            return (
+                ax.plot(point[0], point[1], marker="*", color="yellow", alpha=0.5)
+                if inBounds(point)
+                else None
             )
-            if inBounds(point)
-            else None
-        )
+
         [t.set_va("center") for t in ax.get_yticklabels()]
         [t.set_ha("left") for t in ax.get_yticklabels()]
         [t.set_va("center") for t in ax.get_xticklabels()]
@@ -107,9 +106,7 @@ class Plot2dQuench(Plot2dObj):
             alpha=0.8,
         )
         plt.colorbar()
-        contours = ax.contour(
-            self.X, self.Y, self.Z, 10, colors="black", alpha=0.9
-        )
+        contours = ax.contour(self.X, self.Y, self.Z, 10, colors="black", alpha=0.9)
         plt.clabel(contours, inline=True, fontsize=8, fmt="%.0f")
         plt.plot(
             self.X_glob_min,

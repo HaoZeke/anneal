@@ -1,14 +1,11 @@
-from dataclasses import dataclass
 from collections import namedtuple
 from enum import Enum
 import abc
 
 import numpy as np
-import numpy.typing as npt
-import typing
 import pytest
 
-from eindir.core.components import FPair, NumLimit, ObjectiveFunction
+from eindir.core.components import FPair, ObjectiveFunction
 
 MAX_LIMITS = namedtuple("MAX_LIMITS", ["EPOCHS", "STEPS_PER_EPOCH"])
 """
@@ -106,6 +103,7 @@ class AcceptCriteria(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
 
+
 class ConstructNeighborhood(metaclass=abc.ABCMeta):
     """
     Abstract base class for constructing a neighborhood of points.
@@ -166,6 +164,7 @@ class ConstructNeighborhood(metaclass=abc.ABCMeta):
         """
         raise NotImplementedError
 
+
 class CoolingSchedule(metaclass=abc.ABCMeta):
     """
     Abstract base class for cooling schedules in simulated annealing.
@@ -214,6 +213,8 @@ class CoolingSchedule(metaclass=abc.ABCMeta):
         Subclasses must provide an implementation for this method.
         """
         raise NotImplementedError
+
+
 class MoveClass(metaclass=abc.ABCMeta):
     """
     Abstract base class for the probability distribution for the step-size in
@@ -254,6 +255,8 @@ class MoveClass(metaclass=abc.ABCMeta):
         Subclasses must provide an implementation for this method.
         """
         raise NotImplementedError
+
+
 class Quencher(metaclass=abc.ABCMeta):
     """
     Abstract base class for a quenching class in simulated annealing.
@@ -267,6 +270,7 @@ class Quencher(metaclass=abc.ABCMeta):
     This class uses the `abc.ABCMeta` metaclass and the `abc.abstractmethod`
     decorator to define an abstract base class.
     """
+
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,
@@ -375,9 +379,7 @@ class Quencher(metaclass=abc.ABCMeta):
         raise NotImplementedError
 
     # Default implementation
-    def addPlotPoint(
-        self, temperature: float, step: int, acceptState: AcceptStates
-    ):
+    def addPlotPoint(self, temperature: float, step: int, acceptState: AcceptStates):
         """
         Adds a point to the plot data.
 
@@ -440,6 +442,7 @@ class BaseChainSA(metaclass=abc.ABCMeta):
     This class uses the `abc.ABCMeta` metaclass and the `abc.abstractmethod`
     decorator to define an abstract base class.
     """
+
     def __init__(
         self,
         ObjFunc: ObjectiveFunction,

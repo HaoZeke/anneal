@@ -19,6 +19,7 @@ class StybTangNd(ObjectiveFunction):
     value of $-39.16599 \times n$. This class provides a generalized
     implementation of the function over an n-dimensional hypercube.
     """
+
     def __init__(self, dims):
         """
         Initializes an instance of the `StybTangNd` class.
@@ -35,9 +36,7 @@ class StybTangNd(ObjectiveFunction):
         )
         super().__init__(
             self.limits,
-            FPair(
-                val=-39.16599 * self.dims, pos=np.array([-2.903534] * self.dims)
-            ),
+            FPair(val=-39.16599 * self.dims, pos=np.array([-2.903534] * self.dims)),
         )
 
     def singlepoint(self, pos):

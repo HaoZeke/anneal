@@ -1,7 +1,7 @@
 import pytest
-import numpy.testing as nptt
+import numpy as np
 
-from anneal.funcs.obj2d import *
+from anneal.funcs.obj2d import StybTang2d
 from anneal.quenchers.boltzmann import BoltzmannQuencher
 
 
