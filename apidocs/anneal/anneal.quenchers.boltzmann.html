@@ -344,17 +344,17 @@ current state and the proposed state.</p>
 <dd><p>Bases: <a class="reference internal" href="anneal.core.components.html#anneal.core.components.CoolingSchedule" title="anneal.core.components.CoolingSchedule"><code class="xref py py-obj docutils literal notranslate"><span class="pre">anneal.core.components.CoolingSchedule</span></code></a></p>
 <p>Implements the logarithmic cooling schedule proposed by Geman and Geman (1983).</p>
 <h4 class="rubric" id="id8">Notes</h4>
-<p>This cooling schedule is designed for use with the Boltzmann Quencher. The temperature
-is reduced at each epoch according to a logarithmic function to ensure that the
-Geman &amp; Geman inequality holds.</p>
+<p>This cooling schedule is designed for use with the Boltzmann Quencher. The
+temperature is reduced at each epoch according to a logarithmic function to
+ensure that the Geman &amp; Geman inequality holds.</p>
 <p class="rubric">Initialization</p>
 <p>Initializes an instance of the <code class="docutils literal notranslate"><span class="pre">BoltzmannCooler</span></code> class.</p>
 <h4 class="rubric" id="id9">Parameters</h4>
 <dl class="simple myst">
 <dt><strong>T_init: float</strong></dt><dd><p>The initial temperature for the cooling schedule.</p>
 </dd>
-<dt><strong>c_param: float, optional (default=1)</strong></dt><dd><p>The parameter ‘c’ for the cooling schedule. According to Salazar and Torale (1997),
-this can be set to the initial temperature.</p>
+<dt><strong>c_param: float, optional (default=1)</strong></dt><dd><p>The parameter ‘c’ for the cooling schedule. According to Salazar and
+Torale (1997), this can be set to the initial temperature.</p>
 </dd>
 </dl>
 <dl class="py method">
@@ -478,7 +478,8 @@ simulated annealing.</p>
 <dd><p>Decides whether to accept a candidate solution.</p>
 <h4 class="rubric" id="id22">Parameters</h4>
 <dl class="simple myst">
-<dt><strong>diff: float</strong></dt><dd><p>The difference in objective function values between the candidate and current solutions.</p>
+<dt><strong>diff: float</strong></dt><dd><p>The difference in objective function values between the
+candidate and current solutions.</p>
 </dd>
 <dt><strong>Temperature: float</strong></dt><dd><p>The current temperature.</p>
 </dd>
