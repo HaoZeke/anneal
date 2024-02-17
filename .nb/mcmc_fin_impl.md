@@ -145,7 +145,7 @@ class MetropolisHastingsSampler:
     def __init__(self, target_distribution, proposal_distribution, initial_state):
         """
         Initializes the Metropolis-Hastings sampler.
-        
+
         target_distribution: A function that takes a state as input and returns the unnormalized
                              probability density of the target distribution at that state.
         proposal_distribution: A function that takes a state as input and returns a new state
@@ -165,7 +165,7 @@ class MetropolisHastingsSampler:
         proposal = self.proposal_distribution(self.current_state)
         self.acceptance_prob = min(1, self.target_distribution(proposal) / self.target_distribution(self.current_state))
         if np.random.default_rng().uniform() < self.acceptance_prob:
-            self.current_state = proposal 
+            self.current_state = proposal
             self.acceptances += 1
         return self.current_state
 ```
@@ -270,28 +270,28 @@ class SimulatedAnnealing:
         self.proposal_distribution = proposal_distribution
         self.state = initial_state
         self.temperature_schedule = temperature_schedule
-    
+
     def step(self):
         # Get the current temperature from the temperature schedule
         current_temperature = self.temperature_schedule.get_current_temperature()
-        
+
         # Generate a proposal from the proposal distribution
         proposed_state = self.proposal_distribution(self.state)
-        
+
         # Calculate the acceptance probability
-        acceptance_prob = min(1, np.exp((self.target_distribution(proposed_state) - 
+        acceptance_prob = min(1, np.exp((self.target_distribution(proposed_state) -
                                           self.target_distribution(self.state)) / current_temperature))
-        
+
         # Accept or reject the proposal based on the acceptance probability
         if np.random.default_rng().uniform() < acceptance_prob:
             self.state = proposed_state
             accepted = True
         else:
             accepted = False
-        
+
         # Update the temperature schedule
         self.temperature_schedule.update()
-        
+
         # Return the current state and whether the proposal was accepted
         return self.state, accepted
 ```
@@ -305,10 +305,10 @@ class LinearTemperatureSchedule:
         self.final_temperature = final_temperature
         self.cooling_schedule = cooling_schedule
         self.current_iteration = 0
-        
+
     def get_current_temperature(self):
         return self.initial_temperature + (self.final_temperature - self.initial_temperature) * self.current_iteration / self.cooling_schedule
-        
+
     def update(self):
         self.current_iteration += 1
 ```

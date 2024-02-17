@@ -1,6 +1,5 @@
-from eindir.core.components import NumLimit, ObjectiveFunction, FPair
-
 import numpy as np
+from eindir.core.components import FPair, NumLimit, ObjectiveFunction
 
 
 class StybTang2d(ObjectiveFunction):
@@ -28,7 +27,8 @@ class StybTang2d(ObjectiveFunction):
 
         #### Parameters
         **limits**, optional
-        : The limits for the function. If not provided, the function is defined over the domain $[-5, 5] \times [-5, 5]$.
+        : The limits for the function. If not provided, the function is defined
+           over the domain $[-5, 5] \times [-5, 5]$.
         """
         super().__init__(
             limits,

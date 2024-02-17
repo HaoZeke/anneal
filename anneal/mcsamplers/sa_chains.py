@@ -1,6 +1,7 @@
-from anneal.mcsamplers.chains import MHChain
-from anneal.core.components import BaseChainSA, MAX_LIMITS, CoolingSchedule
 from eindir.core.components import ObjectiveFunction
+
+from anneal.core.components import MAX_LIMITS, BaseChainSA, CoolingSchedule
+from anneal.mcsamplers.chains import MHChain
 
 
 class MHChainSA(BaseChainSA):

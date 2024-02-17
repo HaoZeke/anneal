@@ -1,10 +1,9 @@
+import abc
 from collections import namedtuple
 from enum import Enum
-import abc
 
 import numpy as np
 import pytest
-
 from eindir.core.components import FPair, ObjectiveFunction
 
 MAX_LIMITS = namedtuple("MAX_LIMITS", ["EPOCHS", "STEPS_PER_EPOCH"])
@@ -54,7 +53,8 @@ Enumeration of possible acceptance states.
 : The state indicating that the new position is an improvement.
 
 **MHACCEPT**
-: The state indicating that the new position is not an improvement, but is accepted according to the Metropolis-Hastings criterion.
+: The state indicating that the new position is not an improvement, but is
+ accepted according to the Metropolis-Hastings criterion.
 
 **REJECT**
 : The state indicating that the new position is rejected.

@@ -156,7 +156,7 @@ getDat(pdat[pdat.accept==AcceptStates.REJECT]['pos'])
 :tags: []
 
 plttr = Plot2dQuench(StybTangNd(2), 30)
-plttr.plotQuenchContour(bq, 
+plttr.plotQuenchContour(bq,
                         savePath="pltQuenchCont.pdf",
                        ptitle=f"Boltzmann Quencher for {str(StybTangNd(2))}, abs(E)<1e-3")
 ```

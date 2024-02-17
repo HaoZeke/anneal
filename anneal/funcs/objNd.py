@@ -1,6 +1,5 @@
-from eindir.core.components import NumLimit, ObjectiveFunction, FPair
-
 import numpy as np
+from eindir.core.components import FPair, NumLimit, ObjectiveFunction
 
 
 class StybTangNd(ObjectiveFunction):
@@ -15,9 +14,9 @@ class StybTangNd(ObjectiveFunction):
 
     $$f(\mathbf{x}) = \frac{1}{2} \sum_{i=1}^{n} \left[ x_i^4 - 16x_i^2 + 5x_i \right]$$
 
-    The function is minimized at $x = [-2.903534, -2.903534, ..., -2.903534]$ (n times) with a minimum
-    value of $-39.16599 \times n$. This class provides a generalized
-    implementation of the function over an n-dimensional hypercube.
+    The function is minimized at $x = [-2.903534, -2.903534, ..., -2.903534]$ (n
+    times) with a minimum value of $-39.16599 \times n$. This class provides a
+    generalized implementation of the function over an n-dimensional hypercube.
     """
 
     def __init__(self, dims):
@@ -26,7 +25,8 @@ class StybTangNd(ObjectiveFunction):
 
         #### Parameters
         **dims**
-        : The number of dimensions for the Styblinski-Tang function. The function is then defined over a hypercube in this number of dimensions.
+        : The number of dimensions for the Styblinski-Tang function. The
+          function is then defined over a hypercube in this number of dimensions.
         """
         self.dims = dims
         self.limits = NumLimit(
