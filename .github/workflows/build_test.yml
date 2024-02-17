@@ -1,0 +1,22 @@
+name: Build and test
+on: [push, pull_request]
+permissions:
+  contents: write
+jobs:
+  build_test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+    steps:
+      - uses: actions/checkout@v3
+      - uses: pdm-project/setup-pdm@v3
+        with:
+          python-version: 3.11
+          cache: true
+      - name: Install dependencies
+        run: pdm install
+      - name: Lint things
+        run: pdm run lint
+      - name: Build and test
+        run: pdm run test

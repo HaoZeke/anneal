@@ -1,4 +1,4 @@
-from anneal.core.components import *
+import numpy as np
 
 
 class MHChain:
