@@ -1,6 +1,5 @@
 [project]
 name = "anneal"
-version = "0.0.8"
 authors = [
     { name="Rohit Goswami", email="rgoswami@ieee.org" },
     { name="Ruhila S", email="ruhila@ieee.org" },
@@ -16,6 +15,7 @@ maintainers = [
 description = "A package for various annealing and quenching techniques"
 readme = "README.md"
 license = { file = "LICENSE.txt" }
+dynamic = [ "version" ]
 keywords = ["optimization", "algorithms"]
 requires-python = ">=3.10.1"
 classifiers = [
@@ -41,8 +41,12 @@ dependencies = [
 anneal = "anneal.cli.main:hello"
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.version]
+source = "scm"
+write_to = "_version.py"
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
@@ -77,5 +81,5 @@ check_ruff  = "ruff ."
 ruff_fix    = "ruff --fix --unsafe-fixes ."
 ruff_format = "ruff format ."
 lint        = { composite = [ "ruff_fix", "ruff_format" ] }
-test        = "pytest --cov=eindir tests"
+test        = "pytest --cov=anneal tests"
 mkdoc = {composite = ["sphinx-build -b html docs/source docs/build/html"]}
