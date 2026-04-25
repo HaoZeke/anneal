@@ -1,0 +1,57 @@
+[package]
+name = "anneal-core"
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Simulated annealing components built on the eindir typed primitives."
+repository = "https://github.com/HaoZeke/anneal"
+categories = ["science", "mathematics"]
+keywords = ["optimization", "simulated-annealing", "metaheuristic"]
+
+[lib]
+name = "anneal_core"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[features]
+default = []
+capi = []
+python = ["dep:pyo3", "dlpk/pyo3"]
+
+[dependencies]
+thiserror   = "2"
+ndarray     = "0.17"
+dlpk        = { git = "https://github.com/metatensor/dlpk.git", tag = "v0.1.5", features = ["ndarray", "half"] }
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", tag = "v0.2.0" }
+pyo3        = { version = "0.26", features = ["extension-module"], optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.6", features = ["html_reports"] }
+proptest  = "1"
+
+[build-dependencies]
+cbindgen = "0.29"
+
+[package.metadata.capi]
+min_version = "0.10.17"
+
+[package.metadata.capi.header]
+name         = "anneal-core.h"
+subdirectory = ""
+generation   = true
+enabled      = true
+
+[package.metadata.capi.pkg_config]
+name        = "anneal-core"
+filename    = "anneal-core"
+description = "Simulated annealing components on the eindir typed primitives"
+
+[package.metadata.capi.library]
+name = "anneal_core"
+
+[package.metadata.capi.install.include]
+asset = [{ from = "include/anneal-core.hpp", to = "." }]
+
+[profile.dist]
+inherits = "release"
+lto      = "thin"
