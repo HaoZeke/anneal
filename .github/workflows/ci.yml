@@ -1,0 +1,218 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
+
+      - name: Setup sccache environment
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings
+
+      - name: Conventional commits check
+        uses: cocogitto/cocogitto-action@v3
+
+      - name: Audit for large files
+        uses: HaoZeke/large-file-auditor@v0.1.0
+        with:
+          file-size-threshold: "1M"
+
+  test:
+    name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-13, macos-14]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
+
+      - name: Setup sccache environment
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Configure pyo3 + linker for macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          PYBIN="$(which python)"
+          echo "PYO3_PYTHON=$PYBIN" >> "$GITHUB_ENV"
+          # Allow pyo3 extension-module symbols to remain undefined at
+          # link time on macOS; the dynamic loader resolves them against
+          # the embedding interpreter at run time.
+          {
+            echo "RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup"
+          } >> "$GITHUB_ENV"
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo test --all-features
+        run: cargo test --all-features
+
+      - name: Create virtualenv
+        shell: bash
+        run: |
+          python -m venv .venv
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          else
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          fi
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+
+      - name: Install maturin + pytest
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "maturin>=1.5,<2" pytest numpy
+
+      - name: maturin develop
+        run: maturin develop --features python
+
+      - name: pytest
+        run: pytest pytest/
+
+  ffi-smoke:
+    name: FFI smoke (linux + cargo-c + valgrind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+        with:
+          version: "v0.10.0"
+
+      - name: Setup sccache environment
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev valgrind libc6-dbg
+
+      - name: Install cargo-c
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-c
+
+      - name: Install cbindgen
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cbindgen
+
+      - name: cargo cinstall (smoke)
+        run: |
+          mkdir -p staging
+          cargo cinstall --release --prefix=/usr --destdir="$PWD/staging"
+
+      - name: Show installed FFI artefacts
+        run: |
+          find staging -type f | sort
+
+      - name: Resolve FFI install paths via pkg-config
+        id: pcfg
+        run: |
+          set -euxo pipefail
+          PCFILE="$(find staging -name 'anneal-core.pc' -print -quit)"
+          test -n "$PCFILE"
+          PCDIR="$(dirname "$PCFILE")"
+          # cargo-c installs the .pc with the destdir-stripped prefix
+          # (/usr). Recover absolute paths by overriding `prefix` via
+          # PKG_CONFIG_SYSROOT_DIR which prepends the staging root.
+          STAGING_ROOT="$PWD/staging"
+          export PKG_CONFIG_PATH="$PCDIR"
+          export PKG_CONFIG_SYSROOT_DIR="$STAGING_ROOT"
+          CFLAGS_OUT="$(pkg-config --cflags anneal-core)"
+          LIBS_OUT="$(pkg-config --libs anneal-core)"
+          LIBDIR_OUT="$(pkg-config --variable=libdir anneal-core)"
+          # Create unversioned .so symlink so the linker can resolve
+          # `-lanneal_core` (cargo-c installs `libanneal_core.so.<ver>`
+          # only).
+          (
+            cd "$LIBDIR_OUT"
+            for f in libanneal_core.so.*; do
+              [ -e "$f" ] || continue
+              base="${f%.so.*}.so"
+              [ -e "$base" ] || ln -s "$f" "$base"
+            done
+          )
+          {
+            echo "cflags=$CFLAGS_OUT"
+            echo "libs=$LIBS_OUT"
+            echo "libdir=$LIBDIR_OUT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build ffi_smoke against installed lib
+        run: |
+          set -euxo pipefail
+          # shellcheck disable=SC2086
+          cc -std=c99 -Wall -Wextra \
+             ${{ steps.pcfg.outputs.cflags }} \
+             tests/ffi_smoke.c \
+             -Wl,-rpath,${{ steps.pcfg.outputs.libdir }} \
+             ${{ steps.pcfg.outputs.libs }} \
+             -o ffi_smoke
+          ./ffi_smoke
+
+      - name: valgrind ffi_smoke
+        run: |
+          set -euxo pipefail
+          LD_LIBRARY_PATH="${{ steps.pcfg.outputs.libdir }}" valgrind \
+            --leak-check=full \
+            --show-leak-kinds=definite,indirect \
+            --track-origins=yes \
+            --error-exitcode=1 \
+            ./ffi_smoke
