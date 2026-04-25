@@ -1,0 +1,34 @@
+#+TITLE: Contributing
+
+* Setup
+
+#+BEGIN_SRC bash
+git clone https://github.com/HaoZeke/anneal
+cd anneal
+pixi install
+pixi run -e python python-test
+#+END_SRC
+
+* Conventional Commits
+
+Commit messages follow the Conventional Commits convention. The
+=cog= tool drives the changelog from these messages; please use
+the standard prefixes:
+
+- =feat:=   new functionality
+- =fix:=    bug fix
+- =docs:=   documentation only
+- =refactor:= behaviour-preserving code change
+- =chore:=  tooling, build, dependency updates
+- =ci:=     CI configuration
+
+* Style
+
+Rust code is formatted with =cargo fmt= and linted with =cargo
+clippy --all-features -- -D warnings=. Python code follows
+=ruff=.
+
+* Tests
+
+Rust tests under =tests/= and =benches/=; Python tests under
+=pytest/=. The full pixi-driven matrix is what CI exercises.

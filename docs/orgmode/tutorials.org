@@ -1,0 +1,46 @@
+#+TITLE: Tutorials
+
+* Install
+
+** Python (pip)
+
+#+BEGIN_SRC bash
+pip install anneal
+#+END_SRC
+
+** Pixi (development)
+
+#+BEGIN_SRC bash
+pixi install
+pixi run -e python python-test
+#+END_SRC
+
+** From source (cargo)
+
+#+BEGIN_SRC bash
+cargo build --release
+cargo cinstall --release --prefix /usr/local
+#+END_SRC
+
+* Hello anneal
+
+#+BEGIN_SRC python
+import anneal
+print(anneal._core.__version__)
+#+END_SRC
+
+* Boltzmann quench, the legacy way
+
+The current API surface (BoltzmannQuencher, MHChainSA, etc.) is
+unchanged from anneal v0.1.x. The typed-component-algebra rewrite
+of the IISE manuscript lands in v0.3.0.
+
+#+BEGIN_SRC python
+import numpy as np
+from anneal.quenchers.boltzmann import BoltzmannQuencher
+from anneal.funcs.obj2d import StybTang2d
+obj = StybTang2d()
+quench = BoltzmannQuencher(obj, T_init=1.0)
+quench()
+print(quench.best.pos, quench.best.val)
+#+END_SRC

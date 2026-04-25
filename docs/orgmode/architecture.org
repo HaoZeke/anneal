@@ -1,0 +1,32 @@
+#+TITLE: Architecture
+
+* Layout
+
+#+BEGIN_EXAMPLE
+anneal/
+  Cargo.toml          Rust crate (lib + cdylib + staticlib)
+  src/                Rust source
+  include/            hand-written C++ companion header
+  python/anneal/      Python package (mixed maturin layout)
+  pytest/             pytest suite
+  docs/               this documentation
+#+END_EXAMPLE
+
+* Crate types
+
+The Rust crate produces three artefacts:
+
+- =rlib= for downstream Rust consumers
+- =cdylib= for Python (=pyo3=) and C dynamic loading
+- =staticlib= for C/C++ static linking
+
+* Bindings
+
+- *Python.* =anneal._core= is the Rust extension; the user-facing
+  package =anneal= re-exports both Rust types and pure-Python
+  helpers from a mixed-mode maturin layout.
+- *C.* =cargo-c= produces =anneal-core.h= and
+  =libanneal_core.{a,so}= with =pkg-config= integration via
+  =anneal-core.pc=.
+- *C++.* The hand-written =include/anneal-core.hpp= wraps the C ABI
+  in =namespace anneal= for ergonomic C++ use.
