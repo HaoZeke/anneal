@@ -26,8 +26,11 @@ dependencies = [
  "dlpk",
  "eindir-core",
  "ndarray",
+ "num-traits",
  "proptest",
  "pyo3",
+ "rand",
+ "rand_distr",
  "thiserror",
 ]
 
@@ -287,12 +290,15 @@ dependencies = [
 
 [[package]]
 name = "eindir-core"
-version = "0.2.0"
-source = "git+https://github.com/HaoZeke/eindir.git?tag=v0.2.0#036117d378499fe2e64f79c7aedb1a4684cd5b04"
+version = "0.3.0"
+source = "git+https://github.com/HaoZeke/eindir.git?tag=v0.3.0#e584eebd240ceed79b39c607d77cf24bad191197"
 dependencies = [
  "cbindgen",
  "dlpk",
  "ndarray",
+ "num-traits",
+ "rand",
+ "rand_distr",
  "thiserror",
 ]
 
@@ -479,6 +485,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -555,6 +567,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -780,6 +793,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom 0.3.4",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
+dependencies = [
+ "num-traits",
+ "rand",
 ]
 
 [[package]]
