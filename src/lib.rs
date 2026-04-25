@@ -3,13 +3,27 @@
 //!
 //! This crate ships the typed component algebra (Cool / Neigh / Move / Accept
 //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
-//! consumed by the Python `anneal` package via pyo3. The current revision is
-//! a structural scaffold; the typed component algebra lands in v0.3.0.
+//! consumed by the Python `anneal` package via pyo3. v0.3.0 introduces
+//! the four trait signatures and the SaVariant scaffold; concrete impls
+//! and the run loop land in subsequent commits.
 
+/// The acceptance-rule trait: `(delta_e, T) -> p`.
+pub mod accept;
+/// The cooling-schedule trait: `epoch -> temperature`.
+pub mod cool;
 /// Error variants returned by `anneal-core`.
 pub mod error;
+/// Law-witness helpers and the `LawViolation` diagnostic type.
+pub mod laws;
+/// The move-kernel trait: temperature-indexed proposal sampling.
+pub mod movekernel;
+/// The neighborhood trait: `state -> set-of-states`.
+pub mod neigh;
 /// Reserved for the typed component algebra (Spec 2, v0.3.0).
 pub mod types;
+/// The fully-typed `SaVariant` tuple satisfying L1-L4.
+pub mod variant;
+
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]
 pub mod ffi;
@@ -17,4 +31,10 @@ pub mod ffi;
 #[cfg(feature = "python")]
 pub mod python;
 
+pub use accept::AcceptRule;
+pub use cool::Cooling;
 pub use error::Error;
+pub use laws::LawViolation;
+pub use movekernel::MoveKernel;
+pub use neigh::Neighborhood;
+pub use variant::SaVariant;
