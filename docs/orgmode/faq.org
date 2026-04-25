@@ -1,0 +1,10 @@
+#+TITLE: FAQ
+
+* What license is anneal under?
+
+MIT. See =LICENSE= in the repository root.
+
+* How do I cite anneal?
+
+See =CITATION.cff= in the repository root, or use the Zenodo DOI
+badge in the README.

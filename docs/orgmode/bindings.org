@@ -1,0 +1,40 @@
+#+TITLE: Bindings
+
+* Python (maturin)
+
+The Python package =anneal= ships from PyPI as a maturin-built
+wheel. The Rust extension is exposed as the submodule
+=anneal._core=. The package source lives at =python/anneal/= in the
+repo and is installed via =maturin develop --features python=
+during development.
+
+* C and C++ (cargo-c)
+
+The Rust crate produces a =cdylib=, =staticlib=, generated header
+=anneal-core.h=, and pkg-config metadata =anneal-core.pc= via
+cargo-c.
+
+#+BEGIN_SRC bash
+cargo cinstall --release --prefix /usr/local
+pkg-config --cflags --libs anneal-core
+#+END_SRC
+
+A hand-written companion header =anneal-core.hpp= wraps the C
+declarations in =namespace anneal= for ergonomic C++ usage.
+
+* Build-system glue
+
+** Meson
+
+#+BEGIN_SRC meson
+anneal_core_dep = dependency('anneal-core')
+executable('myprog', 'main.cpp', dependencies: anneal_core_dep)
+#+END_SRC
+
+** CMake
+
+#+BEGIN_SRC cmake
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ANNEAL_CORE REQUIRED IMPORTED_TARGET anneal-core)
+target_link_libraries(myprog PRIVATE PkgConfig::ANNEAL_CORE)
+#+END_SRC

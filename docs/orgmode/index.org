@@ -1,0 +1,23 @@
+#+TITLE: anneal
+#+AUTHOR: anneal developers
+#+DATE: 2026
+
+* About
+
+=anneal= ships simulated-annealing components on the eindir typed
+primitives. The Python user-facing surface is unchanged from the
+legacy package; the Rust crate =anneal-core= now backs the
+implementations, with =pyo3= bindings exposed as =anneal._core= and
+a C/C++ ABI for downstream native consumers.
+
+* Contents
+
+#+TOC: headlines 2
+
+* Background
+
+=anneal= sits on top of =eindir=. The IISE manuscript at
+HaoZeke/anneal (paper) defines the typed component algebra
+(Obj / Cool / Neigh / Move / Accept and laws L1-L4); this crate
+hosts the four trait signatures, the BSA / FSA / GSA points, and
+the orchestrator loop.

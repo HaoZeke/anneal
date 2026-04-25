@@ -1,0 +1,3 @@
+#+TITLE: Specification
+
+Reserved for the typed component algebra (Spec 2, anneal v0.3.0).
