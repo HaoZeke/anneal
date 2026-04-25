@@ -40,15 +40,16 @@ Propose ==
         /\ history' = Append(history, c)
         /\ UNCHANGED <<temp, epoch>>
 
-\* Cool action: advance the epoch counter and update temperature.
-\* The cooling schedule is required by L4 to be non-increasing.
-Cool ==
+\* CoolStep action: advance the epoch counter and update temperature.
+\* The cooling schedule operator Cool(_) is required by L4 to be non-increasing.
+\* Action name is CoolStep to avoid colliding with the Cool constant operator.
+CoolStep ==
     /\ epoch < MaxSteps
     /\ temp' = Cool(epoch + 1)
     /\ epoch' = epoch + 1
     /\ UNCHANGED <<cur, best, history>>
 
-Step == Propose \/ Cool
+Step == Propose \/ CoolStep
 
 Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
 
@@ -81,5 +82,21 @@ MonotoneCooling ==
 EventualTermination == <>(epoch = MaxSteps)
 
 EventualCooling == \A k \in 0..MaxSteps: <>(temp <= Cool(k))
+
+----------------------------------------------------------------------------
+(*                  Concrete operator definitions                           *)
+(* Used by small.cfg / apalache.cfg as substitutions for the abstract       *)
+(* CONSTANTS Cool(_), Neigh(_), Cost(_).                                    *)
+\* StepCool: a simple non-increasing schedule. Drops by 1 each epoch,
+\* clamped at 0. Witnesses L4 (non-increasing in epoch).
+StepCool(e) == IF T_0 - e > 0 THEN T_0 - e ELSE 0
+
+\* TrivialNeigh: every state is its own neighbor plus all other states.
+\* Witnesses L1 (symmetric) trivially.
+TrivialNeigh(s) == S
+
+\* TrivialCost: zero cost everywhere. Witnesses BestMonotone trivially
+\* (every transition keeps Cost(best) = Cost(cur) = 0).
+TrivialCost(s) == 0
 
 ============================================================================
