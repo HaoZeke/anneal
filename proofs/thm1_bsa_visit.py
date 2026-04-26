@@ -52,3 +52,22 @@ def witness_for(form: str) -> bool:
 
 
 WITNESS = witness_for("denominator")
+
+
+def derive() -> None:
+    """Pretty-print both forms' q_v -> 1 limit and the witness verdict."""
+    sp.init_printing(use_unicode=False)
+    g_d = g_qv_denominator(dx, T, q_v, D)
+    g_n = g_qv_numerator(dx, T, q_v, D)
+    print("Theorem 1: BSA Gaussian limit of GSA visiting distribution")
+    print("  target           =", target)
+    print("  denominator form =", g_d)
+    print("    limit q_v->1+  =", sp.limit(g_d, q_v, 1, "+"))
+    print("    witness        =", witness_for("denominator"))
+    print("  numerator form   =", g_n)
+    print("    limit q_v->1+  =", sp.limit(g_n, q_v, 1, "+"))
+    print("    witness        =", witness_for("numerator"))
+
+
+if __name__ == "__main__":
+    derive()

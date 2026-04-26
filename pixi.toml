@@ -50,7 +50,47 @@ setup-rustdocgen = "test -x $CONDA_PREFIX/bin/sphinx-rustdocgen || cargo install
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "sphinx-build docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
 
+# verify env
+#
+# Bundles the verification toolchain that backs the IISE manuscript:
+#   - sympy proofs runner (proofs/, pytest harness)
+#   - TLA+ TLC model checker (downloaded as tla2tools.jar at first use)
+#   - Apalache symbolic model checker (downloaded as a tarball at first use)
+#
+# Network: setup-tlc and setup-apalache pull JARs from the public
+# nightly.tlapl.us / GitHub release CDNs. If the host blocks outbound
+# HTTPS, both setup tasks fail and tlc-small/apalache-check fail with
+# them. Pre-stage .verify/tla2tools.jar and .verify/apalache/ manually
+# in that case (see tla/README.org).
+#
+# Aggregator: `pixi run -e verify all` smoke-runs every artefact:
+#   proofs-test (pytest) -> proofs-derive (4 thm scripts) ->
+#   tlc-small (TLC on small.cfg) -> apalache-check (apalache.cfg).
+[feature.verify.dependencies]
+python      = ">=3.11"
+sympy       = "*"
+pytest      = "*"
+pytest-cov  = "*"
+openjdk     = ">=17"
+curl        = "*"
+
+[feature.verify.activation.env]
+# Mirror the default env's empty rustflags so that any incidental cargo
+# invocation under the verify env uses the conda-managed linker cleanly.
+CARGO_BUILD_RUSTFLAGS = ""
+RUSTFLAGS             = ""
+
+[feature.verify.tasks]
+setup-tlc       = "test -f .verify/tla2tools.jar || (mkdir -p .verify && curl -L -o .verify/tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar)"
+setup-apalache  = "test -x .verify/apalache/bin/apalache-mc || (mkdir -p .verify && curl -L https://github.com/apalache-mc/apalache/releases/download/v0.57.0/apalache.tgz | tar xz -C .verify && (test -d .verify/apalache || mv .verify/apalache-* .verify/apalache))"
+proofs-test     = "pytest proofs/tests/ -v"
+proofs-derive   = "PYTHONPATH=. python proofs/thm1_bsa_visit.py && PYTHONPATH=. python proofs/thm2_fsa_visit.py && PYTHONPATH=. python proofs/thm3_metropolis.py && PYTHONPATH=. python proofs/thm4_log_cool.py"
+tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
+apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
+all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
+
 [environments]
 default = { solve-group = "default" }
 python  = { features = ["python"], solve-group = "default" }
 docs    = { features = ["docs"],   solve-group = "default" }
+verify  = { features = ["verify"], solve-group = "default" }

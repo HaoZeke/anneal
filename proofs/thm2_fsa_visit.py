@@ -18,3 +18,16 @@ g = T ** (-D / (3 - q_v)) * (
 target = T / (T ** 2 + dx ** 2) ** ((D + 1) * sp.Rational(1, 2))
 
 WITNESS = witness(sp.simplify(g), target)
+
+
+def derive() -> None:
+    """Pretty-print the q_v = 2 substitution and the witness verdict."""
+    sp.init_printing(use_unicode=False)
+    print("Theorem 2: FSA Cauchy specialization of GSA visiting distribution")
+    print("  q_v = 2 substitution =", sp.simplify(g))
+    print("  target               =", target)
+    print("  witness              =", WITNESS)
+
+
+if __name__ == "__main__":
+    derive()

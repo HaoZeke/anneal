@@ -20,3 +20,17 @@ limit = sp.limit(inner, Q_a, 1)
 target = sp.exp(-beta * dE)
 
 WITNESS = witness(limit, target)
+
+
+def derive() -> None:
+    """Pretty-print the Q_a -> 1 limit and the witness verdict."""
+    sp.init_printing(use_unicode=False)
+    print("Theorem 3: Metropolis limit of GSA acceptance rule")
+    print("  inner P_Qa     =", inner)
+    print("  limit Q_a -> 1 =", limit)
+    print("  target         =", target)
+    print("  witness        =", WITNESS)
+
+
+if __name__ == "__main__":
+    derive()
