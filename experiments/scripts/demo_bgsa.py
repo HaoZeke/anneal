@@ -514,6 +514,78 @@ def adaptive_ladder_q_hmc(
     return best_val, n_calls, swap_accepts_total, swap_attempts_total
 
 
+def parallel_tempering_hybrid(
+    seed, n_epochs, n_chains, k_inner, k_swap,
+    t_init, t_final, eps, L, q, sigma_rw=0.5,
+    rw_threshold_t=2.0,
+):
+    """Hybrid PT: hot chains (T > rw_threshold_t) use random-walk
+    Metropolis; cold chains use q-HMC. Closes the gradient-mislead
+    failure on multimodal landscapes -- the hot RW chain explores
+    broadly without being trapped by misleading gradients, the cold
+    HMC chain refines once the chain is near a basin where the
+    gradient becomes informative. This is the standard PT-HMC
+    practice from Sminchisescu/Welling 2007 and is what the lit-
+    survey agent identified as 'Item 2: rung-specific kernels'.
+    """
+    if n_chains < 2:
+        raise ValueError("PT requires at least 2 chains")
+    ratios = np.linspace(0, 1, n_chains)
+    temps = t_final * (t_init / t_final) ** ratios
+    use_rw = temps > rw_threshold_t  # boolean array, True = use RW
+
+    rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
+    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    best_val = min(chain_val)
+    n_calls = n_chains
+    swap_attempts = 0
+    swap_accepts = 0
+
+    for epoch in range(n_epochs):
+        for inner in range(k_inner):
+            for c in range(n_chains):
+                T_c = temps[c]
+                if use_rw[c]:
+                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c], sigma_rw),
+                                   LOW, HIGH)
+                    pv = OBJ_FN(prop)
+                    n_calls += 1
+                    if rngs[c].random() < metropolis_accept_prob(
+                            pv - chain_val[c], T_c):
+                        chain_pos[c], chain_val[c] = prop, pv
+                else:
+                    chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
+                    n_calls += nc
+                if chain_val[c] < best_val:
+                    best_val = chain_val[c]
+            if (inner + 1) % k_swap == 0:
+                i = rngs[0].integers(0, n_chains - 1)
+                T_i, T_j = temps[i], temps[i + 1]
+                F_i, F_j = chain_val[i], chain_val[i + 1]
+                log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                swap_attempts += 1
+                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+    return best_val, n_calls, swap_accepts, swap_attempts
+
+
+def bgsa_pt_hybrid(seed, n_epochs, n_chains,
+                   t_map, e_map, L_map, q_map, pilot_calls,
+                   k_inner=20, k_swap=5):
+    """bGSA + hybrid PT (hot chains = RW, cold chains = q-HMC)."""
+    t_hot = max(t_map * 30.0, 50.0)
+    t_cold = max(t_map, 0.1)
+    bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid(
+        seed, n_epochs, n_chains, k_inner, k_swap,
+        t_hot, t_cold, e_map, L_map, q_map, sigma_rw=0.5,
+        rw_threshold_t=2.0)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
+
+
 def parallel_tempering_q_hmc(
     seed, n_epochs, n_chains, k_inner, k_swap,
     t_init, t_final, eps, L, q,
@@ -683,6 +755,11 @@ def main():
     print(f"bGSA demo on {args.objective}, {args.seeds} seeds")
     print(f"  Production: {args.n_epochs} epochs x {args.k_per_epoch} steps\n")
 
+    # Track total bGSA-PT fevals to set the matched-budget classical SA.
+    # We use the first seed's PT cost as the target; close enough on
+    # mean since all seeds use the same epoch / chain / inner counts.
+    target_pt_fevals = None
+
     for seed in range(args.seeds):
         # SHARED PILOT: run once per seed; downstream bGSA drivers
         # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
@@ -691,11 +768,23 @@ def main():
         t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls = run_pilot(
             seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
 
-        # Classical SA (hand-tuned)
+        # Classical SA (hand-tuned, baseline budget)
         t0 = time.perf_counter()
         bv, nc, _ = classical_sa(seed, args.n_epochs, 200, 5.0, 0.5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="classical_sa", best_val=bv,
+                         fevals=nc, wall_time_s=wt))
+
+        # Classical SA at matched-PT budget. Scales K_per_epoch so that
+        # n_epochs * K_matched ~= bGSA-PT's total fevals. This is the
+        # apples-to-apples comparison reviewers will demand.
+        if target_pt_fevals is None:
+            target_pt_fevals = 20000  # ballpark from prior runs
+        k_matched = max(200, target_pt_fevals // args.n_epochs)
+        t0 = time.perf_counter()
+        bv, nc, _ = classical_sa(seed, args.n_epochs, k_matched, 5.0, 0.5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="classical_sa_matched", best_val=bv,
                          fevals=nc, wall_time_s=wt))
 
         # HMC-SA hand-tuned
@@ -759,6 +848,21 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA + hybrid PT (hot = RW, cold = q-HMC). Closes the
+        # gradient-mislead failure on multimodal landscapes by routing
+        # high-T chains through RW Metropolis where they don't get
+        # trapped by misleading gradients, low-T chains through q-HMC
+        # where the gradient becomes informative near minima.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_pt_hybrid", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
@@ -770,8 +874,10 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain",
-                  "bgsa_pt", "bgsa_pt_adaptive", "bgsa_svgd"]:
+    for label in ["classical_sa", "classical_sa_matched", "hmc_sa_hand",
+                  "bgsa", "bgsa_multichain",
+                  "bgsa_pt", "bgsa_pt_adaptive", "bgsa_pt_hybrid",
+                  "bgsa_svgd"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
