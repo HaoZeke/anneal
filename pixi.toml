@@ -110,6 +110,10 @@ cutest-smoke    = "PYTHONPATH=. python experiments/benchmarks/cutest_runner.py"
 cutest-bench    = "PYTHONPATH=. python experiments/scripts/run_cutest_benchmarks.py --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15"
 cutest-plots    = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/cutest_benchmarks.csv data/cutest/", depends-on = ["cutest-bench"] }
 mcmc-demo       = "PYTHONPATH=. python experiments/scripts/demo_mcmc_vs_classical.py --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
+bgsa-rastrigin  = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective rastrigin_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rastrigin.csv"
+bgsa-rosenbrock = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective rosenbrock_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rosenbrock.csv"
+bgsa-schwefel   = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective schwefel_20d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_schwefel.csv"
+bgsa-cross-plot = { cmd = "PYTHONPATH=. python experiments/scripts/plot_cross_landscape.py --rastrigin data/bgsa_rastrigin.csv --rosenbrock data/bgsa_rosenbrock.csv --schwefel data/bgsa_schwefel.csv --out-dir data/figs", depends-on = ["bgsa-rastrigin", "bgsa-rosenbrock", "bgsa-schwefel"] }
 
 [environments]
 default = { solve-group = "default" }
