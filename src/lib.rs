@@ -23,8 +23,13 @@ pub mod laws;
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
+/// First-derivative interface for HMC-style samplers.
+pub mod grad;
+/// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
+pub mod hmc;
 /// Annealing-method extensions built on the typed algebra:
-/// MCMC-style multi-chain SA with Gelman-Rubin termination.
+/// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
+/// pilot adaptation, etc.
 pub mod methods;
 /// The pure-Rust SA driver loop.
 pub mod runner;
@@ -50,6 +55,8 @@ pub use history::{EpochLine, History, State};
 pub use laws::LawViolation;
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
+pub use grad::{FiniteDiffGradient, Gradient};
+pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult};
 pub use methods::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use runner::{run_rs, run_rs_variant};
 pub use sampler::Sampler;
