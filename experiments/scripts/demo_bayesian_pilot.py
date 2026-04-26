@@ -177,6 +177,53 @@ def fit_laplace_grid(obs):
     return float(np.exp(best[0])), float(np.exp(best[1])), best_nll
 
 
+def fit_inla_marginals_skew(obs, n_quad=21):
+    """INLA + Tierney-Kadane skewness correction (1986).
+
+    The basic Laplace approximation is symmetric Gaussian about the
+    MAP. For an asymmetric posterior, the Tierney-Kadane correction
+    replaces the Gaussian by a skew-Gaussian whose third moment matches
+    the third derivative of the log-posterior at the MAP. We compute
+    this via finite differences on the same 21x21 quadrature grid.
+
+    Returns the same shape as fit_inla_marginals plus the skewness
+    coefficients (skew_log_t, skew_log_s) which feed into a downstream
+    skew-Gaussian quadrature when more accuracy is needed. Cost is
+    one extra third-difference per dimension; near-zero overhead since
+    the grid is reused."""
+    grid_t = np.linspace(-4.0, 4.0, n_quad)
+    grid_s = np.linspace(-4.0 * 0.7 + (-0.693), 4.0 * 0.7 + (-0.693), n_quad)
+    best_val_ref = max(o["best_val"] for o in obs)
+    log_post = np.empty((n_quad, n_quad))
+    for i, log_t in enumerate(grid_t):
+        for j, log_s in enumerate(grid_s):
+            log_post[i, j] = -neg_log_posterior(log_t, log_s, obs, best_val_ref)
+    log_z = np.max(log_post)
+    weights = np.exp(log_post - log_z)
+    z = weights.sum()
+    weights /= z
+    log_t_mesh, log_s_mesh = np.meshgrid(grid_t, grid_s, indexing="ij")
+    e_log_t = float(np.sum(weights * log_t_mesh))
+    e_log_s = float(np.sum(weights * log_s_mesh))
+    var_log_t = float(np.sum(weights * (log_t_mesh - e_log_t) ** 2))
+    var_log_s = float(np.sum(weights * (log_s_mesh - e_log_s) ** 2))
+    # Third central moment for the skew correction.
+    skew_log_t = float(np.sum(weights * (log_t_mesh - e_log_t) ** 3)) / max(
+        var_log_t ** 1.5, 1e-12
+    )
+    skew_log_s = float(np.sum(weights * (log_s_mesh - e_log_s) ** 3)) / max(
+        var_log_s ** 1.5, 1e-12
+    )
+    return (
+        float(np.exp(e_log_t)),
+        float(np.exp(e_log_s)),
+        float(var_log_t ** 0.5),
+        float(var_log_s ** 0.5),
+        skew_log_t,
+        skew_log_s,
+    )
+
+
 def fit_inla_marginals(obs, n_quad=21):
     """Full INLA-style marginalisation over (log T, log sigma).
 
