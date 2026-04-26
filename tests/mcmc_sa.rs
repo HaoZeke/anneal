@@ -61,16 +61,16 @@ fn mcmc_sa_finds_global_minimum_with_rhat_termination() {
         .iter()
         .map(|h| h.best.val)
         .fold(f64::INFINITY, f64::min);
-    assert!(best_overall < 0.0, "no chain found negative value; got {best_overall}");
+    assert!(
+        best_overall < 0.0,
+        "no chain found negative value; got {best_overall}"
+    );
 
     // Step counts should vary across epochs (some hit k_min, others
     // need more) -- the MCMC payoff. If they're all equal to k_min the
     // diagnostic is not doing useful work.
     let unique: std::collections::BTreeSet<usize> = result.epoch_steps.iter().copied().collect();
-    assert!(
-        unique.len() >= 1,
-        "epoch_steps trace should be non-empty"
-    );
+    assert!(!unique.is_empty(), "epoch_steps trace should be non-empty");
 }
 
 #[test]
@@ -134,4 +134,3 @@ fn sparse_straggler_mode_reduces_total_steps() {
     assert_eq!(dense_result.epoch_steps.len(), 20);
     assert_eq!(sparse_result.epoch_steps.len(), 20);
 }
-

@@ -13,9 +13,10 @@
 
 pub mod bayesian_pilot;
 pub mod mcmc_sa;
+pub mod parallel_tempering;
 
 pub use bayesian_pilot::{
-    LaplacePosterior, PilotObservation, PilotPrior, TARGET_ACCEPT_RATE,
-    fit_laplace, pilot_draws,
+    LaplacePosterior, PilotObservation, PilotPrior, TARGET_ACCEPT_RATE, fit_laplace, pilot_draws,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
+pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
