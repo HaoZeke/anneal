@@ -101,19 +101,47 @@ def classical_sa(seed, n_epochs, k_fixed, t_init, sigma, x0=None):
     return best, n, cur
 
 
-def hmc_sa_step(rng, x, U, T, eps, L, dim):
-    """One HMC trajectory at temperature T. Returns (new_x, accepted, n_calls)."""
-    p = rng.normal(0.0, 1.0, size=dim)
+def sample_q_gaussian_momentum(rng, dim, q):
+    """q-Gaussian momentum draw. q=1.0 is Gaussian; 1 < q < 1+2/dim is heavy-tailed."""
+    if q <= 1.0 + 1e-9:
+        return rng.normal(0.0, 1.0, size=dim)
+    alpha = 1.0 / (q - 1.0) - 0.5 * dim
+    if alpha <= 0:
+        # Outside valid range; fall back to Gaussian.
+        return rng.normal(0.0, 1.0, size=dim)
+    g = rng.gamma(alpha, 1.0)
+    g = max(g, 1e-300)
+    scale = (1.0 / ((q - 1.0) * g)) ** 0.5
+    return scale * rng.normal(0.0, 1.0, size=dim)
+
+
+def kinetic_q_gaussian(p, q):
+    if q <= 1.0 + 1e-9:
+        return 0.5 * np.dot(p, p)
+    return (1.0 / (q - 1.0)) * np.log1p(0.5 * (q - 1.0) * np.dot(p, p))
+
+
+def dk_dp_q_gaussian(p, q):
+    if q <= 1.0 + 1e-9:
+        return p
+    denom = 1.0 + 0.5 * (q - 1.0) * np.dot(p, p)
+    return p / denom
+
+
+def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
+    """One HMC trajectory at temperature T with q-Gaussian momentum."""
+    p = sample_q_gaussian_momentum(rng, dim, q)
     x0 = x.copy()
     p0 = p.copy()
-    H0 = U / T + 0.5 * np.dot(p0, p0)
+    H0 = U / T + kinetic_q_gaussian(p0, q)
 
     grad = OBJ_GRAD(x)
     p = p - 0.5 * eps * grad / T
     n = 1  # gradient counts as ~1 feval (analytic here, FD would be 2D)
 
     for step in range(L):
-        x = x + eps * p
+        dk = dk_dp_q_gaussian(p, q)
+        x = x + eps * dk
         x = np.clip(x, LOW, HIGH)
         grad = OBJ_GRAD(x)
         n += 1
@@ -122,7 +150,7 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim):
 
     U_new = OBJ_FN(x)
     n += 1
-    H_new = U_new / T + 0.5 * np.dot(p, p)
+    H_new = U_new / T + kinetic_q_gaussian(p, q)
     delta_h = H_new - H0
 
     if abs(delta_h) > 1000 or not np.isfinite(delta_h):
@@ -133,7 +161,7 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim):
     return x0, False, n, U
 
 
-def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None):
+def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
     rng = np.random.default_rng(seed)
     cur = (rng.uniform(LOW, HIGH) if x0 is None else x0.copy()).astype(np.float64)
     cur_v = OBJ_FN(cur)
@@ -144,14 +172,14 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None):
         T = log_cool(t_init, 2.0, epoch)
         eps_eff = eps * np.sqrt(T / eps_ref)
         for _ in range(k_per_epoch):
-            cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5)
+            cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5, q)
             n_calls += nc
             if cur_v < best:
                 best = cur_v
     return best, n_calls, cur
 
 
-def hmc_pilot(seed, t_init, eps, L, n_steps):
+def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
     rng = np.random.default_rng(seed)
     cur = rng.uniform(LOW, HIGH).astype(np.float64)
     cur_v = OBJ_FN(cur)
@@ -161,7 +189,7 @@ def hmc_pilot(seed, t_init, eps, L, n_steps):
     for step in range(n_steps):
         T = log_cool(t_init, 2.0, step // 10)
         eps_eff = eps * np.sqrt(T / t_init)
-        cur, acc, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5)
+        cur, acc, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5, q)
         n += nc
         if acc:
             accepts += 1
@@ -170,15 +198,24 @@ def hmc_pilot(seed, t_init, eps, L, n_steps):
     return best, accepts / n_steps, cur, n
 
 
-def neg_log_posterior_3d(log_t, log_e, log_l, obs):
-    """3D Bayesian posterior for HMC: (log T_init, log epsilon, log L)."""
+def neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim):
+    """4D Bayesian posterior for HMC: (log T_init, log epsilon, log L, q).
+
+    q is the Tsallis momentum index. Prior: truncated normal on (1.05,
+    1 + 2/dim - 0.05) with mode at 1.15 (mildly heavy-tailed).
+    """
+    q_max = 1.0 + 2.0 / dim - 0.05
+    if q <= 1.0 + 0.04 or q >= q_max:
+        return float("inf")
     prior_t_mean, prior_t_sd = 0.0, 1.0
-    prior_e_mean, prior_e_sd = -3.0, 1.0  # epsilon ~ logN(log 0.05, 1)
-    prior_l_mean, prior_l_sd = 1.6, 0.7   # L ~ logN(log 5, 0.7)
+    prior_e_mean, prior_e_sd = -3.0, 1.0
+    prior_l_mean, prior_l_sd = 1.6, 0.7
+    prior_q_mean, prior_q_sd = 1.15, 0.1
     prior_term = 0.5 * (
         ((log_t - prior_t_mean) / prior_t_sd) ** 2
         + ((log_e - prior_e_mean) / prior_e_sd) ** 2
         + ((log_l - prior_l_mean) / prior_l_sd) ** 2
+        + ((q - prior_q_mean) / prior_q_sd) ** 2
     )
     bv_max = max(o["best_val"] for o in obs)
     bv_min = min(o["best_val"] for o in obs)
@@ -191,7 +228,8 @@ def neg_log_posterior_3d(log_t, log_e, log_l, obs):
         dx = log_t - np.log(o["t_init"])
         dy = log_e - np.log(o["epsilon"])
         dz = log_l - np.log(o["L"])
-        d2 = dx * dx + dy * dy + dz * dz
+        dq = (q - o["q"]) / 0.1  # bandwidth 0.1 in q dimension
+        d2 = dx * dx + dy * dy + dz * dz + dq * dq
         w = np.exp(-0.5 * d2 / 0.5)
         total_w += w
         a = max(min(o["accept_rate"], 1 - 1e-6), 1e-6)
@@ -200,51 +238,59 @@ def neg_log_posterior_3d(log_t, log_e, log_l, obs):
         norm_imp = (bv_max - o["best_val"]) / bv_range
         weighted_i += w * (1.0 - norm_imp) ** 2
     if total_w > 0:
-        accept_term = 0.5 * weighted_a / total_w / 0.36  # sigma_a = 0.6 (HMC target broader)
+        accept_term = 0.5 * weighted_a / total_w / 0.36
         improve_term = 0.5 * weighted_i / total_w / 0.04
     else:
         accept_term = improve_term = 0.0
     return prior_term + accept_term + improve_term
 
 
-def fit_laplace_3d(obs):
-    n = 13
-    grid_t = np.linspace(-3.0, 3.0, n)
-    grid_e = np.linspace(-6.0, 0.0, n)
-    grid_l = np.linspace(0.5, 3.0, n)
-    best_nll = neg_log_posterior_3d(0.0, -3.0, 1.6, obs)
-    best = (0.0, -3.0, 1.6)
+def fit_laplace_4d(obs, dim):
+    n_t, n_e, n_l, n_q = 9, 9, 9, 7
+    grid_t = np.linspace(-2.0, 2.0, n_t)
+    grid_e = np.linspace(-5.0, -1.0, n_e)
+    grid_l = np.linspace(1.0, 2.5, n_l)
+    q_max = 1.0 + 2.0 / dim - 0.06
+    grid_q = np.linspace(1.05, q_max, n_q)
+    best_nll = float("inf")
+    best = (0.0, -3.0, 1.6, 1.15)
     for log_t in grid_t:
         for log_e in grid_e:
             for log_l in grid_l:
-                nll = neg_log_posterior_3d(log_t, log_e, log_l, obs)
-                if nll < best_nll:
-                    best_nll = nll
-                    best = (log_t, log_e, log_l)
-    return float(np.exp(best[0])), float(np.exp(best[1])), max(1, int(np.exp(best[2])))
+                for q in grid_q:
+                    nll = neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim)
+                    if nll < best_nll:
+                        best_nll = nll
+                        best = (log_t, log_e, log_l, q)
+    return (float(np.exp(best[0])), float(np.exp(best[1])),
+            max(1, int(np.exp(best[2]))), float(best[3]))
 
 
-def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps):
-    """bGSA = Bayesian pilot on HMC-SA hyperparameters + production HMC-SA."""
+def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=5):
+    """bGSA = Bayesian pilot on (T, eps, L, q) + production q-HMC-SA."""
     rng = np.random.default_rng(seed)
+    q_max = 1.0 + 2.0 / dim - 0.06
     pilot_obs = []
     pilot_calls = 0
     best_pilot_pos = None
     best_pilot_val = float("inf")
     for k in range(n_pilot):
         t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))  # ~ logN(log 0.05, 1)
+        e = float(np.exp(rng.normal(-3.0, 1.0)))
         L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "accept_rate": ar, "best_val": bv})
+        # Sample q from truncated normal on (1.05, q_max)
+        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
         pilot_calls += nc
         if bv < best_pilot_val:
             best_pilot_val = bv
             best_pilot_pos = fpos
-    t_map, e_map, L_map = fit_laplace_3d(pilot_obs)
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
     bv, n_calls, _ = hmc_sa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map,
-                            x0=best_pilot_pos)
-    return bv, pilot_calls + n_calls, t_map, e_map, L_map
+                            x0=best_pilot_pos, q=q_map)
+    return bv, pilot_calls + n_calls, t_map, e_map, L_map, q_map
 
 
 # -------------------------------------------------------------------------
@@ -285,22 +331,22 @@ def main():
         rows.append(dict(seed=seed, driver="hmc_sa_hand", best_val=bv,
                          fevals=nc, wall_time_s=wt))
 
-        # bGSA = pilot HMC + Laplace + production HMC
+        # bGSA = pilot 4D (T, eps, L, q) + Laplace + production q-HMC
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map = bgsa(seed, args.n_epochs, args.k_per_epoch,
-                                           args.n_pilot, args.pilot_steps)
+        bv, nc, t_map, e_map, L_map, q_map = bgsa(seed, args.n_epochs, args.k_per_epoch,
+                                                   args.n_pilot, args.pilot_steps, dim=5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa", best_val=bv,
                          fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map))
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
-                                          "t_map", "e_map", "L_map"])
+                                          "t_map", "e_map", "L_map", "q_map"])
         w.writeheader()
         for r in rows:
-            for k in ["t_map", "e_map", "L_map"]:
+            for k in ["t_map", "e_map", "L_map", "q_map"]:
                 r.setdefault(k, "")
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
@@ -319,6 +365,7 @@ def main():
         print(f"  T_init: {np.mean([r['t_map'] for r in bgsa_rows]):.3f}")
         print(f"  epsilon: {np.mean([r['e_map'] for r in bgsa_rows]):.4f}")
         print(f"  L:       {np.mean([r['L_map'] for r in bgsa_rows]):.1f}")
+        print(f"  q:       {np.mean([r['q_map'] for r in bgsa_rows]):.3f}")
 
 
 if __name__ == "__main__":

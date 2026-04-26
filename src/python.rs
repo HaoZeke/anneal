@@ -251,17 +251,20 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
-///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray` -- the
-///            gradient of `obj_fn`. Pass `jax.grad(f)`, a torch
-///            `lambda x: f(torch.tensor(x, requires_grad=True)).grad`,
-///            or a hand-coded analytic gradient. Ceres-style plug-in.
+///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray`. Pass
+///            `jax.grad(f)`, a torch `.backward()`-based wrapper, or
+///            a hand-coded analytic gradient. Ceres-style plug-in.
 ///   low, high: numpy box bounds.
 ///   t_init: initial temperature for the log-cooling schedule.
 ///   epsilon: leapfrog step size.
 ///   l_steps: number of leapfrog steps per HMC trajectory.
+///   q: Tsallis momentum index. Default `1.0` (Gaussian). Values
+///      `q in (1, 1 + 2/dim)` enable q-Gaussian momentum -- heavy-tailed
+///      draws that help HMC-SA escape local cups on multimodal
+///      objectives. For `dim=5`, `q < 1.4`; for `dim=10`, `q < 1.2`.
 ///   n_epochs, steps_per_epoch, seed.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, n_epochs = 100, steps_per_epoch = 50, seed = 42))]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, q = 1.0, n_epochs = 100, steps_per_epoch = 50, seed = 42))]
 #[allow(clippy::too_many_arguments)]
 fn run_hmc(
     obj_fn: Py<PyAny>,
@@ -271,12 +274,15 @@ fn run_hmc(
     t_init: f64,
     epsilon: f64,
     l_steps: usize,
+    q: f64,
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
 ) -> PyResult<PyHistory> {
     use crate::cool::LogCool;
-    use crate::hmc::{HmcSaSampler, LeapfrogIntegrator};
+    use crate::hmc::{
+        GaussianMomentum, HmcSaSampler, LeapfrogIntegrator, QGaussianMomentum,
+    };
 
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -286,13 +292,37 @@ fn run_hmc(
         ));
     }
     let dim = low_vec.len();
+    let q_max = 1.0 + 2.0 / dim as f64;
+    if q > 1.0 && q >= q_max {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "q-Gaussian momentum requires q < 1 + 2/dim = {} for dim = {}; got q = {}",
+            q_max, dim, q
+        )));
+    }
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective { fn_: obj_fn, bounds };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let cool = LogCool::new(t_init, 2.0_f64);
     let integrator = LeapfrogIntegrator::new(epsilon, l_steps, t_init);
-    let sampler = HmcSaSampler::new(obj, grad, cool.clone(), integrator);
-    let history = crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed);
+    let history = if q <= 1.0 + 1e-9 {
+        let sampler = HmcSaSampler::with_momentum(
+            obj,
+            grad,
+            cool.clone(),
+            GaussianMomentum,
+            integrator,
+        );
+        crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
+    } else {
+        let sampler = HmcSaSampler::with_momentum(
+            obj,
+            grad,
+            cool.clone(),
+            QGaussianMomentum::new(q),
+            integrator,
+        );
+        crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
+    };
     Ok(PyHistory::from(history))
 }
 

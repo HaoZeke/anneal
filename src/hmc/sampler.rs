@@ -1,30 +1,33 @@
-//! `HmcSaSampler`: HMC inside SA. Implements `Sampler<f64>` so it
-//! drops into `run_rs` and `MultiChainSampler` without further code.
+//! `HmcSaSampler`: HMC inside SA, generic over the momentum kernel.
 //!
-//! Phase 1: Gaussian momentum, identity metric, explicit leapfrog.
-//! The cooling temperature comes from the underlying `Cool` trait
-//! object; the sampler holds a borrow of it via the `Cooling`
-//! trait at construction time.
+//! Phase 1 used hard-coded Gaussian momentum. Phase 2 (this commit)
+//! makes the sampler generic over any `Momentum` impl, so q-Gaussian
+//! momentum drives the same `Sampler<f64>` impl through the trait.
+//! Dropping into `run_rs` and `MultiChainSampler` is unchanged.
 
 use eindir_core::{FPair, Objective};
-use ndarray::{Array1, ArrayView1};
+use ndarray::ArrayView1;
 use rand::Rng;
 
 use crate::cool::Cooling;
 use crate::grad::Gradient;
 use crate::hmc::integrator::LeapfrogIntegrator;
+use crate::hmc::momentum::{GaussianMomentum, Momentum};
 use crate::history::State;
 use crate::sampler::Sampler;
 
-/// HMC-driven SA sampler. The `step` method draws a fresh momentum,
-/// integrates the Hamiltonian dynamics for `L` leapfrog steps, and
-/// accepts/rejects via the standard HMC Metropolis criterion
-/// `alpha = min(1, exp(-delta_H))`.
-pub struct HmcSaSampler<O, G, C>
+/// HMC-driven SA sampler with pluggable momentum kernel.
+///
+/// `M = GaussianMomentum` recovers Phase 1 standard HMC. `M =
+/// QGaussianMomentum` enables the q-deformed dynamics: heavy-tailed
+/// momentum draws let the chain escape local cups at the cost of
+/// less efficient exploitation in smooth regions.
+pub struct HmcSaSampler<O, G, C, M = GaussianMomentum>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
+    M: Momentum,
 {
     /// The objective.
     pub obj: O,
@@ -32,42 +35,63 @@ where
     pub gradient: G,
     /// The cooling schedule.
     pub cool: C,
-    /// The leapfrog integrator (encapsulates epsilon, L, temp_ref).
+    /// The momentum kernel (Gaussian, q-Gaussian, or custom).
+    pub momentum: M,
+    /// The leapfrog integrator (epsilon, L, temp_ref).
     pub integrator: LeapfrogIntegrator,
 }
 
-impl<O, G, C> HmcSaSampler<O, G, C>
+impl<O, G, C> HmcSaSampler<O, G, C, GaussianMomentum>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
 {
-    /// Constructs an HMC-SA sampler. `temp_ref` of the integrator
-    /// should typically equal `cool.temperature(0)` so the cooling
-    /// rescaling kicks in correctly.
+    /// Constructs an HMC-SA sampler with standard Gaussian momentum.
+    /// Phase 1 API; equivalent to `HmcSaSampler::with_momentum` with
+    /// `GaussianMomentum`.
     pub fn new(obj: O, gradient: G, cool: C, integrator: LeapfrogIntegrator) -> Self {
         Self {
             obj,
             gradient,
             cool,
+            momentum: GaussianMomentum,
             integrator,
         }
     }
 }
 
-fn sample_gaussian_momentum<R: Rng>(dim: usize, rng: &mut R) -> Array1<f64> {
-    Array1::from_iter((0..dim).map(|_| {
-        let u1: f64 = rng.random();
-        let u2: f64 = rng.random();
-        (-2.0 * u1.max(1e-300).ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
-    }))
-}
-
-impl<O, G, C> Sampler<f64> for HmcSaSampler<O, G, C>
+impl<O, G, C, M> HmcSaSampler<O, G, C, M>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
+    M: Momentum,
+{
+    /// Constructs with a user-chosen momentum kernel.
+    pub fn with_momentum(
+        obj: O,
+        gradient: G,
+        cool: C,
+        momentum: M,
+        integrator: LeapfrogIntegrator,
+    ) -> Self {
+        Self {
+            obj,
+            gradient,
+            cool,
+            momentum,
+            integrator,
+        }
+    }
+}
+
+impl<O, G, C, M> Sampler<f64> for HmcSaSampler<O, G, C, M>
+where
+    O: Objective<f64> + Send + Sync,
+    G: Gradient<f64>,
+    C: Cooling<f64>,
+    M: Momentum,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
         let pos = self.obj.bounds().mkpoint(rng);
@@ -82,7 +106,7 @@ where
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
         let temp = self.cool.temperature(epoch);
         let dim = state.cur.pos.len();
-        let p0 = sample_gaussian_momentum(dim, rng);
+        let p0 = self.momentum.sample(dim, rng);
         let x0 = state.cur.pos.clone();
         let u0 = state.cur.val;
 
@@ -93,14 +117,11 @@ where
             u0,
             temp,
             &self.gradient,
-            &|x: &Array1<f64>| obj.eval(ArrayView1::from(x.as_slice().unwrap())),
+            &self.momentum,
+            &|x: &ndarray::Array1<f64>| obj.eval(ArrayView1::from(x.as_slice().unwrap())),
         );
 
         if result.diverged {
-            // Treat divergence as rejection. The user-facing diagnostic
-            // is the `delta_h` field on `LeapfrogResult`; future epochs
-            // can fall back to MultiChainSampler<SaVariant> on repeated
-            // divergence (Phase 2 wiring).
             return false;
         }
 
