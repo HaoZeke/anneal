@@ -6,7 +6,7 @@
 //!   2. Determinism: two runs with the same seed produce bitwise-identical
 //!      `History.best.pos` and identical per-epoch counters.
 
-use anneal_core::run_rs;
+use anneal_core::run_rs_variant;
 use anneal_core::variant::boltzmann;
 
 use eindir_core::objectives::StybTang2D;
@@ -18,7 +18,7 @@ const SEED: u64 = 42;
 #[test]
 fn run_rs_styb_tang_finds_negative_minimum() {
     let v = boltzmann(StybTang2D::new(), 5.0, 0.5).expect("Boltzmann construction");
-    let h = run_rs(v, N_EPOCHS, STEPS_PER_EPOCH, SEED);
+    let h = run_rs_variant(v, N_EPOCHS, STEPS_PER_EPOCH, SEED);
     assert!(
         h.best.val < 0.0,
         "Boltzmann SA should find a negative value on StybTang2D; got {}",
@@ -28,13 +28,13 @@ fn run_rs_styb_tang_finds_negative_minimum() {
 
 #[test]
 fn run_rs_styb_tang_is_deterministic() {
-    let h1 = run_rs(
+    let h1 = run_rs_variant(
         boltzmann(StybTang2D::new(), 5.0, 0.5).expect("variant"),
         N_EPOCHS,
         STEPS_PER_EPOCH,
         SEED,
     );
-    let h2 = run_rs(
+    let h2 = run_rs_variant(
         boltzmann(StybTang2D::new(), 5.0, 0.5).expect("variant"),
         N_EPOCHS,
         STEPS_PER_EPOCH,

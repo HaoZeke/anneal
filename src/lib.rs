@@ -23,6 +23,8 @@ pub mod movekernel;
 pub mod neigh;
 /// The pure-Rust SA driver loop.
 pub mod runner;
+/// Stan-style single-step sampler trait: `trait Sampler<T>`.
+pub mod sampler;
 /// Reserved for the typed component algebra (Spec 2, v0.3.0).
 pub mod types;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
@@ -42,5 +44,6 @@ pub use history::{EpochLine, History, State};
 pub use laws::LawViolation;
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
-pub use runner::run_rs;
+pub use runner::{run_rs, run_rs_variant};
+pub use sampler::Sampler;
 pub use variant::SaVariant;
