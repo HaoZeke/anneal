@@ -17,7 +17,7 @@ maintainers = [
     { name = "Ruhila S",       email = "ruhila@ieee.org" },
     { name = "Amrita Goswami", email = "amrita@hi.is" },
 ]
-version = "0.2.0"
+version = "0.3.0"
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
