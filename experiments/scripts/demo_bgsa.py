@@ -350,6 +350,92 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
     return best_val, n_calls
 
 
+def svgd_step(particles, grad_logp_fn, eps, h=None):
+    """One step of Stein Variational Gradient Descent (Liu/Wang 2016).
+
+    M particles in shape (M, D); each evolves via the Stein-kernelized
+    gradient:
+      phi_i = (1/M) sum_j [k(x_i, x_j) * grad log p(x_j)
+                          + grad_{x_j} k(x_i, x_j)]
+    with RBF kernel k(x, y) = exp(-|x - y|^2 / h). Bandwidth h chosen
+    by the median heuristic (Liu/Wang 2016 sec 3.4). The first term
+    is the "attraction" (mode-seeking) and the second is the
+    "repulsion" (diversity-preserving), so SVGD avoids the
+    mode-collapse failure of greedy gradient descent.
+    """
+    M, D = particles.shape
+    # Pairwise squared distances.
+    diffs = particles[:, None, :] - particles[None, :, :]  # (M, M, D)
+    sq = np.sum(diffs ** 2, axis=2)  # (M, M)
+    if h is None:
+        # Median heuristic.
+        med = np.median(sq[sq > 0]) if np.any(sq > 0) else 1.0
+        h = med / max(np.log(M), 1.0)
+    K = np.exp(-sq / h)  # (M, M)
+    # grad_{x_j} k(x_i, x_j) = K_ij * 2*(x_i - x_j)/h
+    grad_K = (2.0 / h) * (K[:, :, None] * diffs)  # (M, M, D)
+    grads = np.array([grad_logp_fn(p) for p in particles])  # (M, D)
+    # phi_i = (1/M) * (sum_j K_ij * grad_j) + (1/M) * sum_j grad_K_ij
+    attraction = K @ grads / M  # (M, D)
+    repulsion = grad_K.sum(axis=1) / M  # (M, D)
+    phi = attraction + repulsion
+    return particles + eps * phi, h
+
+
+def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd):
+    """SVGD-driven SA. M particles evolve deterministically per Stein
+    flow at the cooling temperature; cooling sharpens the target
+    pi_T(x) ~ exp(-F(x)/T) so particles converge on the modes."""
+    rng = np.random.default_rng(seed)
+    particles = rng.uniform(LOW, HIGH, size=(n_particles, len(LOW))).astype(np.float64)
+    vals = np.array([OBJ_FN(p) for p in particles])
+    best_val = vals.min()
+    best_pos = particles[np.argmin(vals)].copy()
+    n_calls = n_particles
+    eps_ref = t_init
+    for epoch in range(n_epochs):
+        T = log_cool(t_init, 2.0, epoch)
+        eps_eff = eps_svgd * np.sqrt(T / eps_ref)
+
+        def grad_logp(x):
+            return -OBJ_GRAD(x) / T
+
+        for _ in range(k_inner):
+            particles, _ = svgd_step(particles, grad_logp, eps_eff)
+            particles = np.clip(particles, LOW, HIGH)
+            vals = np.array([OBJ_FN(p) for p in particles])
+            n_calls += n_particles + n_particles  # one grad + one obj per particle
+            if vals.min() < best_val:
+                best_val = vals.min()
+                best_pos = particles[np.argmin(vals)].copy()
+    return best_val, n_calls, best_pos
+
+
+def bgsa_svgd(seed, n_epochs, n_particles, n_pilot, pilot_steps, dim=5,
+              k_inner=10):
+    """bGSA with SVGD particle-flow production. Pilot still uses HMC
+    chains for the Bayesian fit; production replaces the SA/HMC kernel
+    with SVGD. The pilot's MAP T_init becomes the SVGD cooling start;
+    eps_svgd defaults to 0.05 (separate from HMC's leapfrog eps)."""
+    rng = np.random.default_rng(seed)
+    q_max = 1.0 + 2.0 / dim - 0.06
+    pilot_obs = []
+    pilot_calls = 0
+    for k in range(n_pilot):
+        t = float(np.exp(rng.normal(0.0, 1.0)))
+        e = float(np.exp(rng.normal(-3.0, 1.0)))
+        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
+        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    bv, prod_calls, _ = svgd_sa(seed, n_epochs, n_particles, k_inner,
+                                t_map, eps_svgd=0.05)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
 def adaptive_ladder_q_hmc(
     seed, n_epochs, n_chains, k_inner, k_swap,
     t_init, t_final, eps, L, q,
@@ -682,6 +768,16 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA + SVGD = pilot 4D + Stein variational particle flow
+        t0 = time.perf_counter()
+        bv, nc, t_map, e_map, L_map, q_map = bgsa_svgd(
+            seed, args.n_epochs, args.n_chains,
+            args.n_pilot, args.pilot_steps, dim=len(LOW), k_inner=10)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_svgd", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
@@ -694,7 +790,7 @@ def main():
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
     for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain",
-                  "bgsa_pt", "bgsa_pt_adaptive"]:
+                  "bgsa_pt", "bgsa_pt_adaptive", "bgsa_svgd"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
