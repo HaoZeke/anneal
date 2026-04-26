@@ -333,6 +333,108 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
     return best_val, n_calls
 
 
+def parallel_tempering_q_hmc(
+    seed, n_epochs, n_chains, k_inner, k_swap,
+    t_init, t_final, eps, L, q,
+    use_hmc=True,
+):
+    """Parallel tempering with q-HMC inner kernel (or random-walk if use_hmc=False).
+
+    M = n_chains chains at temperatures T_1 < ... < T_M on a geometric
+    ladder spanning [t_final, t_init]. Hot chain explores broadly
+    (random-walk-dominant); cold chain refines (gradient-dominant).
+    Every k_swap inner-loop steps we attempt a Metropolis swap between
+    adjacent chains:
+      alpha = min(1, exp((1/T_i - 1/T_j) * (F(x_i) - F(x_j))))
+    The Cool component becomes the temperature ladder; the Exchange
+    component (this swap rule) is the new typed primitive that the
+    IISE Section 8.3 defers to "next paper". E1 (detailed balance
+    across the swap) holds by the standard parallel-tempering argument.
+    """
+    # Geometric temperature ladder: T_i = t_final * (t_init/t_final)^(i / (M-1))
+    if n_chains < 2:
+        raise ValueError("PT requires at least 2 chains")
+    ratios = np.linspace(0, 1, n_chains)
+    temps = t_final * (t_init / t_final) ** ratios
+
+    rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
+    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    best_val = min(chain_val)
+    n_calls = n_chains
+    swap_accepts = 0
+    swap_attempts = 0
+
+    for epoch in range(n_epochs):
+        for inner in range(k_inner):
+            for c in range(n_chains):
+                T_c = temps[c]
+                if use_hmc:
+                    chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, 5, q)
+                    n_calls += nc
+                else:
+                    # Random-walk Metropolis at temperature T_c
+                    sigma = 0.5
+                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c], sigma),
+                                   LOW, HIGH)
+                    pv = OBJ_FN(prop)
+                    n_calls += 1
+                    if rngs[c].random() < metropolis_accept_prob(
+                            pv - chain_val[c], T_c):
+                        chain_pos[c], chain_val[c] = prop, pv
+                if chain_val[c] < best_val:
+                    best_val = chain_val[c]
+            # Attempt swap every k_swap inner-loop steps (between random adj pair).
+            if (inner + 1) % k_swap == 0:
+                # Pick a random adjacent pair (i, i+1).
+                i = rngs[0].integers(0, n_chains - 1)
+                T_i, T_j = temps[i], temps[i + 1]
+                F_i, F_j = chain_val[i], chain_val[i + 1]
+                # Swap accept: alpha = min(1, exp((1/T_i - 1/T_j)*(F_i - F_j)))
+                log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                swap_attempts += 1
+                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+    return best_val, n_calls, swap_accepts, swap_attempts
+
+
+def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
+            k_inner=20, k_swap=5):
+    """bGSA with parallel-tempering q-HMC production phase."""
+    rng = np.random.default_rng(seed)
+    q_max = 1.0 + 2.0 / dim - 0.06
+    pilot_obs = []
+    pilot_calls = 0
+    for k in range(n_pilot):
+        t = float(np.exp(rng.normal(0.0, 1.0)))
+        e = float(np.exp(rng.normal(-3.0, 1.0)))
+        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
+        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    # PT temperature ladder: hot end MUST allow broad random-walk-like
+    # acceptance (T_hot >= 10) regardless of what the pilot found for the
+    # cold-end production T. Cold end = t_map so HMC exploits when it's
+    # there. The Bayesian pilot informs the cold T; PT physics demands
+    # the hot chain.
+    # T_hot needs to be hot enough for random-walk-like acceptance on
+    # the worst-case Delta_E that the objective produces. For Rastrigin
+    # 5D, max |Delta_E| from a tail proposal can be ~50; T_hot = 50
+    # gives accept rate >= e^{-1} ~= 0.37 even on the worst proposals.
+    t_hot = max(t_map * 30.0, 50.0)
+    t_cold = max(t_map, 0.1)
+    bv, prod_calls, swap_a, swap_t = parallel_tempering_q_hmc(
+        seed, n_epochs, n_chains, k_inner, k_swap,
+        t_hot, t_cold, e_map, L_map, q_map)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
+
+
 def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
                     k_min=15, k_check=10, k_max=80, rhat_threshold=1.3):
     """bGSA with multi-chain q-HMC-SA production."""
@@ -446,6 +548,16 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA parallel-tempering = pilot 4D + PT q-HMC with adjacent chain swaps
+        t0 = time.perf_counter()
+        bv, nc, t_map, e_map, L_map, q_map, swap_a, swap_t = bgsa_pt(
+            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
+            dim=5, k_inner=20, k_swap=5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_pt", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
@@ -457,7 +569,7 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain"]:
+    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain", "bgsa_pt"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
