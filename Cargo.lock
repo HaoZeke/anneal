@@ -25,8 +25,9 @@ dependencies = [
  "criterion",
  "dlpk",
  "eindir-core",
- "ndarray",
+ "ndarray 0.17.2",
  "num-traits",
+ "numpy",
  "proptest",
  "pyo3",
  "rand",
@@ -284,7 +285,7 @@ version = "0.1.5"
 source = "git+https://github.com/metatensor/dlpk.git?tag=v0.1.5#cfb6baa733897cc70cef578556fe978eec77f29c"
 dependencies = [
  "half 1.8.3",
- "ndarray",
+ "ndarray 0.17.2",
  "pyo3",
 ]
 
@@ -295,7 +296,7 @@ source = "git+https://github.com/HaoZeke/eindir.git?tag=v0.3.0#e584eebd240ceed79
 dependencies = [
  "cbindgen",
  "dlpk",
- "ndarray",
+ "ndarray 0.17.2",
  "num-traits",
  "rand",
  "rand_distr",
@@ -529,6 +530,21 @@ dependencies = [
 
 [[package]]
 name = "ndarray"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "882ed72dce9365842bf196bdeedf5055305f11fc8c03dee7bb0194a6cad34841"
+dependencies = [
+ "matrixmultiply",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "portable-atomic",
+ "portable-atomic-util",
+ "rawpointer",
+]
+
+[[package]]
+name = "ndarray"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "520080814a7a6b4a6e9070823bb24b4531daac8c4627e08ba5de8c5ef2f2752d"
@@ -568,6 +584,22 @@ checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
  "libm",
+]
+
+[[package]]
+name = "numpy"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b2dba356160b54f5371b550575b78130a54718b4c6e46b3f33a6da74a27e78b"
+dependencies = [
+ "libc",
+ "ndarray 0.16.1",
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "pyo3",
+ "pyo3-build-config",
+ "rustc-hash",
 ]
 
 [[package]]
@@ -868,6 +900,12 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "rustc-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
 
 [[package]]
 name = "rustix"
