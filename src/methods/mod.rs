@@ -11,6 +11,11 @@
 //! Accept) is silent on this loop control, so both styles are
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
+pub mod bayesian_pilot;
 pub mod mcmc_sa;
 
+pub use bayesian_pilot::{
+    LaplacePosterior, PilotObservation, PilotPrior, TARGET_ACCEPT_RATE,
+    fit_laplace, pilot_draws,
+};
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
