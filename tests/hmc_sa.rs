@@ -3,9 +3,10 @@
 
 use anneal_core::accept::Metropolis;
 use anneal_core::cool::LogCool;
-use anneal_core::grad::{FiniteDiffGradient, Gradient};
+use anneal_core::grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 use anneal_core::hmc::{HmcSaSampler, LeapfrogIntegrator};
 use anneal_core::run_rs;
+use ndarray::Array1;
 
 use eindir_core::objectives::StybTang2D;
 
@@ -37,6 +38,29 @@ fn hmc_sa_finds_negative_minimum() {
         "HMC-SA should find a negative value on StybTang2D; got {}",
         history.best.val
     );
+}
+
+#[test]
+fn analytic_gradient_matches_finite_diff_on_styb_tang() {
+    // Analytic d/dx (x^4 - 16x^2 + 5x)/2 = (4x^3 - 32x + 5)/2 per coord.
+    let analytic = AnalyticGradient::new(2, |x: ndarray::ArrayView1<f64>| {
+        Array1::from_iter(x.iter().map(|&xi| (4.0 * xi.powi(3) - 32.0 * xi + 5.0) / 2.0))
+    });
+    let fd = FiniteDiffGradient::new(eindir_core::objectives::StybTang2D::new());
+    let test_pts: Vec<[f64; 2]> = vec![[0.0, 0.0], [-2.9, -2.9], [1.5, -3.0]];
+    for pt in test_pts {
+        let av = analytic.grad(ndarray::ArrayView1::from(&pt));
+        let fv = fd.grad(ndarray::ArrayView1::from(&pt));
+        for i in 0..2 {
+            assert!(
+                (av[i] - fv[i]).abs() < 1e-3,
+                "analytic {} vs FD {} at {:?}",
+                av[i],
+                fv[i],
+                pt
+            );
+        }
+    }
 }
 
 #[test]
