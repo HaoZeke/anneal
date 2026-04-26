@@ -57,7 +57,7 @@ pub use error::Error;
 pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
 pub use grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 pub use history::{EpochLine, History, State};
-pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult};
+pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition};
 pub use laws::LawViolation;
 pub use methods::{
     GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState, ParallelTemperingSampler,

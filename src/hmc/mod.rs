@@ -8,8 +8,10 @@
 
 pub mod integrator;
 pub mod momentum;
+pub mod nuts;
 pub mod sampler;
 
 pub use integrator::{LeapfrogIntegrator, LeapfrogResult};
 pub use momentum::{GaussianMomentum, Momentum, QGaussianMomentum};
+pub use nuts::{NutsSaSampler, NutsTransition, nuts_step};
 pub use sampler::HmcSaSampler;

@@ -11,9 +11,9 @@ use rand::Rng;
 
 use crate::cool::Cooling;
 use crate::grad::Gradient;
+use crate::history::State;
 use crate::hmc::integrator::LeapfrogIntegrator;
 use crate::hmc::momentum::{GaussianMomentum, Momentum};
-use crate::history::State;
 use crate::sampler::Sampler;
 
 /// HMC-driven SA sampler with pluggable momentum kernel.

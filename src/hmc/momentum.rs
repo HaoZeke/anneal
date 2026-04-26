@@ -34,6 +34,30 @@ pub trait Momentum: Send + Sync {
 
     /// Gradient of `K` w.r.t. `p`. Used in the leapfrog drift step.
     fn dk_dp(&self, p: &Array1<f64>) -> Array1<f64>;
+
+    /// NUTS U-turn termination predicate: returns true iff the trajectory
+    /// has reversed direction between the leftmost and rightmost states.
+    /// For Gaussian momentum: `<p_l, dx> < 0 || <p_r, dx> < 0` per
+    /// Hoffman/Gelman 2014 NUTS, eqn 9. The default implementation
+    /// uses this Gaussian formula (correct for both Gaussian and
+    /// q-Gaussian since `dK/dp` is just `p` rescaled, preserving sign).
+    fn uturn(
+        &self,
+        x_left: &Array1<f64>,
+        p_left: &Array1<f64>,
+        x_right: &Array1<f64>,
+        p_right: &Array1<f64>,
+    ) -> bool {
+        let dim = x_left.len();
+        let mut dot_l: f64 = 0.0;
+        let mut dot_r: f64 = 0.0;
+        for i in 0..dim {
+            let dx = x_right[i] - x_left[i];
+            dot_l += p_left[i] * dx;
+            dot_r += p_right[i] * dx;
+        }
+        dot_l < 0.0 || dot_r < 0.0
+    }
 }
 
 /// Standard Gaussian momentum: `K(p) = |p|^2 / 2`, `dK/dp = p`.
@@ -73,7 +97,10 @@ impl QGaussianMomentum {
     /// Constructs with the given `q`. Validate against `dim` separately
     /// before sampling -- the `dim` arrives at sample time.
     pub fn new(q: f64) -> Self {
-        assert!(q > 1.0, "q-Gaussian requires q > 1; for q = 1 use GaussianMomentum");
+        assert!(
+            q > 1.0,
+            "q-Gaussian requires q > 1; for q = 1 use GaussianMomentum"
+        );
         Self { q }
     }
 
