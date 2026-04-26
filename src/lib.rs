@@ -15,9 +15,13 @@ pub mod adapter;
 pub mod cool;
 /// Error variants returned by `anneal-core`.
 pub mod error;
+/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
+pub mod bias;
 /// Parallel-tempering Exchange operator: the typed primitive that
 /// closes the multimodal SA gap (IISE Section 8.3 "next paper").
 pub mod exchange;
+/// Free-energy estimators (Bennett's BAR + descendants).
+pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod grad;
 /// Per-epoch run history returned by `run_rs`.
@@ -54,7 +58,9 @@ pub use accept::AcceptRule;
 pub use adapter::{Adapter, IdentityAdapter};
 pub use cool::Cooling;
 pub use error::Error;
+pub use bias::{Bias, WellTemperedBias};
 pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
+pub use free_energy::BarEstimator;
 pub use grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 pub use history::{EpochLine, History, State};
 pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition};
