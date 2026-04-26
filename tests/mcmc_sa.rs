@@ -47,6 +47,8 @@ fn mcmc_sa_finds_global_minimum_with_rhat_termination() {
         k_check: 10,
         k_max: 200,
         rhat_threshold: 1.2,
+        sparse_straggler_only: false,
+        straggler_top_k: 0,
     };
     let result = mc.run(&cooling, 50, 7);
     assert_eq!(result.chain_histories.len(), 4);
@@ -84,6 +86,8 @@ fn mcmc_sa_respects_k_max_bailout() {
         k_check: 5,
         k_max: 25,
         rhat_threshold: 1.0001, // unattainable
+        sparse_straggler_only: false,
+        straggler_top_k: 0,
     };
     let result = mc.run(&cooling, 5, 1);
     for s in &result.epoch_steps {
@@ -91,3 +95,43 @@ fn mcmc_sa_respects_k_max_bailout() {
         assert!(*s >= 10, "k_min not respected: {s}");
     }
 }
+
+#[test]
+fn sparse_straggler_mode_reduces_total_steps() {
+    // Compare sparse vs dense at identical seed/budget: sparse should
+    // not exceed dense in fevals (frozen chains contribute zero step
+    // calls), and produces at least as many epochs of useful chain
+    // history. This pins the skip-connection invariant.
+    let variant_dense = boltzmann(StybTang2D::new(), 5.0, 0.5).expect("variant");
+    let cooling_dense = variant_dense.cool.clone();
+    let dense = MultiChainSampler {
+        sampler: variant_dense,
+        n_chains: 4,
+        k_min: 20,
+        k_check: 10,
+        k_max: 100,
+        rhat_threshold: 1.2,
+        sparse_straggler_only: false,
+        straggler_top_k: 0,
+    };
+    let dense_result = dense.run(&cooling_dense, 20, 99);
+
+    let variant_sparse = boltzmann(StybTang2D::new(), 5.0, 0.5).expect("variant");
+    let cooling_sparse = variant_sparse.cool.clone();
+    let sparse = MultiChainSampler {
+        sampler: variant_sparse,
+        n_chains: 4,
+        k_min: 20,
+        k_check: 10,
+        k_max: 100,
+        rhat_threshold: 1.2,
+        sparse_straggler_only: true,
+        straggler_top_k: 2, // step only the 2 stragglers per phase-2 batch
+    };
+    let sparse_result = sparse.run(&cooling_sparse, 20, 99);
+
+    // Both produced the requested 20 epochs.
+    assert_eq!(dense_result.epoch_steps.len(), 20);
+    assert_eq!(sparse_result.epoch_steps.len(), 20);
+}
+

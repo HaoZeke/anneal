@@ -79,6 +79,7 @@ curl        = "*"
 
 [feature.verify.pypi-dependencies]
 chemparseplot = ">=1.7.0"
+pycutest = ">=1.8.1, <2"
 
 [feature.verify.activation.env]
 # Mirror the default env's empty rustflags so that any incidental cargo
@@ -104,6 +105,9 @@ bench-plots     = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.
 all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
 all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "exp3-summary"] }
 all-bench       = { depends-on = ["bench-suite", "bench-plots"] }
+cutest-bootstrap = "bash experiments/benchmarks/bootstrap_cutest.sh"
+cutest-smoke    = "PYTHONPATH=. python experiments/benchmarks/cutest_runner.py"
+mcmc-demo       = "PYTHONPATH=. python experiments/scripts/demo_mcmc_vs_classical.py --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
 
 [environments]
 default = { solve-group = "default" }
