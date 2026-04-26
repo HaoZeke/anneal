@@ -266,8 +266,98 @@ def fit_laplace_4d(obs, dim):
             max(1, int(np.exp(best[2]))), float(best[3]))
 
 
+def gelman_rubin_max(traces):
+    """Max-per-coordinate Rhat across M chains; mirrors the Rust impl."""
+    m = len(traces)
+    if m < 2:
+        return float("inf")
+    n = len(traces[0])
+    if n < 2:
+        return float("inf")
+    dim = traces[0][0].shape[0]
+    max_rhat = 0.0
+    for d in range(dim):
+        means = np.array([np.mean([x[d] for x in chain]) for chain in traces])
+        vars_ = np.array([np.var([x[d] for x in chain], ddof=1) for chain in traces])
+        if np.any(vars_ <= 0):
+            continue
+        theta_bar = means.mean()
+        b = (n / (m - 1.0)) * np.sum((means - theta_bar) ** 2)
+        w = vars_.mean()
+        var_hat = ((n - 1.0) / n) * w + b / n
+        rhat = np.sqrt(var_hat / w)
+        if rhat > max_rhat:
+            max_rhat = rhat
+    return max_rhat
+
+
+def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
+                     rhat_threshold, t_init, eps, L, q):
+    """Multi-chain q-HMC-SA with Gelman-Rubin termination per epoch.
+
+    Each chain runs HMC trajectories independently; per epoch we run
+    k_min steps then check Rhat across chains. Each step inside a
+    chain is a full HMC trajectory of L leapfrog steps.
+    """
+    rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
+    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    best_val = min(chain_val)
+    n_calls = n_chains
+    eps_ref = t_init
+    for epoch in range(n_epochs):
+        T = log_cool(t_init, 2.0, epoch)
+        eps_eff = eps * np.sqrt(T / eps_ref)
+        traces = [[] for _ in range(n_chains)]
+        for _ in range(k_min):
+            for c in range(n_chains):
+                chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                    rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, 5, q)
+                n_calls += nc
+                if chain_val[c] < best_val:
+                    best_val = chain_val[c]
+                traces[c].append(chain_pos[c].copy())
+        total_steps = k_min
+        rhat = gelman_rubin_max(traces)
+        while rhat > rhat_threshold and total_steps < k_max:
+            for _ in range(k_check):
+                for c in range(n_chains):
+                    chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                        rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, 5, q)
+                    n_calls += nc
+                    if chain_val[c] < best_val:
+                        best_val = chain_val[c]
+                    traces[c].append(chain_pos[c].copy())
+            total_steps += k_check
+            rhat = gelman_rubin_max(traces)
+    return best_val, n_calls
+
+
+def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
+                    k_min=15, k_check=10, k_max=80, rhat_threshold=1.3):
+    """bGSA with multi-chain q-HMC-SA production."""
+    rng = np.random.default_rng(seed)
+    q_max = 1.0 + 2.0 / dim - 0.06
+    pilot_obs = []
+    pilot_calls = 0
+    for k in range(n_pilot):
+        t = float(np.exp(rng.normal(0.0, 1.0)))
+        e = float(np.exp(rng.normal(-3.0, 1.0)))
+        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
+        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    bv, prod_calls = multichain_q_hmc(
+        seed, n_epochs, n_chains, k_min, k_check, k_max, rhat_threshold,
+        t_map, e_map, L_map, q_map)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
 def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=5):
-    """bGSA = Bayesian pilot on (T, eps, L, q) + production q-HMC-SA."""
+    """bGSA = Bayesian pilot on (T, eps, L, q) + production q-HMC-SA (single chain)."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
     pilot_obs = []
@@ -306,6 +396,11 @@ def main():
     p.add_argument("--n-pilot", type=int, default=10)
     p.add_argument("--pilot-steps", type=int, default=200)
     p.add_argument("--objective", default="rosenbrock_5d", choices=list(OBJECTIVES))
+    p.add_argument("--n-chains", type=int, default=4)
+    p.add_argument("--k-min", type=int, default=15)
+    p.add_argument("--k-check", type=int, default=10)
+    p.add_argument("--k-max", type=int, default=80)
+    p.add_argument("--rhat-threshold", type=float, default=1.3)
     args = p.parse_args()
 
     global LOW, HIGH, OBJ_FN, OBJ_GRAD
@@ -340,6 +435,17 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA multi-chain = pilot 4D + multi-chain q-HMC with Rhat termination
+        t0 = time.perf_counter()
+        bv, nc, t_map, e_map, L_map, q_map = bgsa_multichain(
+            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
+            dim=5, k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
+            rhat_threshold=args.rhat_threshold)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_multichain", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
@@ -351,7 +457,7 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "hmc_sa_hand", "bgsa"]:
+    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
