@@ -23,6 +23,9 @@ pub mod laws;
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
+/// Annealing-method extensions built on the typed algebra:
+/// MCMC-style multi-chain SA with Gelman-Rubin termination.
+pub mod methods;
 /// The pure-Rust SA driver loop.
 pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
@@ -47,6 +50,7 @@ pub use history::{EpochLine, History, State};
 pub use laws::LawViolation;
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
+pub use methods::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use runner::{run_rs, run_rs_variant};
 pub use sampler::Sampler;
 pub use variant::SaVariant;
