@@ -44,7 +44,10 @@ fn hmc_sa_finds_negative_minimum() {
 fn analytic_gradient_matches_finite_diff_on_styb_tang() {
     // Analytic d/dx (x^4 - 16x^2 + 5x)/2 = (4x^3 - 32x + 5)/2 per coord.
     let analytic = AnalyticGradient::new(2, |x: ndarray::ArrayView1<f64>| {
-        Array1::from_iter(x.iter().map(|&xi| (4.0 * xi.powi(3) - 32.0 * xi + 5.0) / 2.0))
+        Array1::from_iter(
+            x.iter()
+                .map(|&xi| (4.0 * xi.powi(3) - 32.0 * xi + 5.0) / 2.0),
+        )
     });
     let fd = FiniteDiffGradient::new(eindir_core::objectives::StybTang2D::new());
     let test_pts: Vec<[f64; 2]> = vec![[0.0, 0.0], [-2.9, -2.9], [1.5, -3.0]];

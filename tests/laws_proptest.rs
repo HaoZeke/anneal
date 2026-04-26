@@ -159,6 +159,39 @@ proptest! {
         let p2 = acc.accept_prob(d, t2);
         prop_assert!(p1 <= p2 + 1e-12);
     }
+
+    #[test]
+    fn tsallis_q_gt_one_dominates_metropolis(
+        d in 1e-3_f64..1e3,
+        t in 1e-3_f64..1e2,
+        q_a in 1.05_f64..3.0,
+    ) {
+        // Tsallis with q_a > 1 must accept >= Metropolis at any
+        // (d > 0, T > 0). This is the GSA selling point; if it fails,
+        // the formula sign is wrong (the previous bug).
+        let p_tsallis = TsallisAccept::new(q_a).accept_prob(d, t);
+        let p_metro = Metropolis.accept_prob(d, t);
+        prop_assert!(
+            p_tsallis + 1e-12 >= p_metro,
+            "q_a={} d={} T={}: Tsallis={} < Metropolis={}",
+            q_a, d, t, p_tsallis, p_metro,
+        );
+    }
+
+    #[test]
+    fn tsallis_q_gt_one_increases_with_q_a(
+        d in 1e-3_f64..1e3,
+        t in 1e-3_f64..1e2,
+        q1 in 1.05_f64..2.0,
+        q2 in 1.05_f64..2.0,
+    ) {
+        // For fixed (d > 0, T), q_a -> p is non-decreasing for q_a > 1.
+        // Heavier tail = more uphill acceptance.
+        prop_assume!(q1 < q2);
+        let p1 = TsallisAccept::new(q1).accept_prob(d, t);
+        let p2 = TsallisAccept::new(q2).accept_prob(d, t);
+        prop_assert!(p1 <= p2 + 1e-12, "q1={} p1={} q2={} p2={}", q1, p1, q2, p2);
+    }
 }
 
 // ----- L4: cooling non-increasing in epoch -------------------------------
