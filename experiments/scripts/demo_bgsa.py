@@ -950,6 +950,115 @@ def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
+def trajectory_inla_diagnostic(traj_vals):
+    """Issue 007 -- Single-chain non-stationarity diagnostic via
+    trajectory-INLA. Approximates the chain trajectory as an AR(1)
+    latent field with sparse precision matrix Q (tridiagonal). Fits
+    phi (the AR(1) coefficient) and sigma_eps (innovation SD), then
+    computes the diagonal of Q^{-1} via the Cholesky-then-Takahashi
+    recursion; the diagonal entries are the per-step marginal
+    variances sigma_t^2.
+
+    Returns (phi, sigma_eps, sigma_t_array, flags) where flags[t] is
+    True for any t whose sigma_t^2 deviates from the chain-mean
+    sigma^2 by > 3 standard deviations (the within-chain stationarity
+    test). Catches non-stationarity in a single chain at no extra
+    sampling cost.
+
+    References: Rue/Martino/Chopin 2009 INLA; Roberts/Rosenthal 2007
+    adaptive MCMC ergodicity diagnostics.
+    """
+    arr = np.asarray(traj_vals, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    n = len(arr)
+    if n < 5:
+        return float("nan"), float("nan"), np.array([]), np.array([])
+
+    # AR(1) fit: x_{t+1} = phi * x_t + eps_t. OLS on lagged pairs.
+    x_t = arr[:-1] - arr[:-1].mean()
+    x_tp1 = arr[1:] - arr[1:].mean()
+    denom = float(np.sum(x_t * x_t))
+    phi = float(np.sum(x_t * x_tp1) / denom) if denom > 0 else 0.0
+    phi = max(min(phi, 0.99), -0.99)
+    eps = arr[1:] - phi * arr[:-1]
+    sigma_eps = float(np.std(eps, ddof=1)) if len(eps) > 1 else 1.0
+    if sigma_eps <= 0:
+        sigma_eps = 1.0
+
+    # Tridiagonal precision matrix for AR(1):
+    #   Q[0,0] = 1/(sigma_eps^2 (1 - phi^2)) (stationary boundary)
+    #   Q[t,t] = (1 + phi^2) / sigma_eps^2 for interior
+    #   Q[t,t+1] = Q[t+1,t] = -phi / sigma_eps^2
+    # Marginal sigma_t^2 = (Q^{-1})_{tt}, computed via Takahashi
+    # recursion in O(n).
+    var_eps = sigma_eps * sigma_eps
+    diag = np.full(n, (1.0 + phi * phi) / var_eps)
+    diag[0] = 1.0 / max(var_eps * (1.0 - phi * phi), 1e-30)
+    diag[-1] = 1.0 / var_eps
+    off = np.full(n - 1, -phi / var_eps)
+
+    # Cholesky of tridiagonal Q: lower bidiagonal L with diag d, off e.
+    d = np.empty(n)
+    e = np.empty(n - 1)
+    d[0] = np.sqrt(max(diag[0], 1e-30))
+    for t in range(1, n):
+        e[t - 1] = off[t - 1] / d[t - 1]
+        d[t] = np.sqrt(max(diag[t] - e[t - 1] ** 2, 1e-30))
+
+    # Takahashi recursion to extract diag(Q^{-1}) in O(n).
+    sigma2 = np.empty(n)
+    sigma2[-1] = 1.0 / (d[-1] ** 2)
+    for t in range(n - 2, -1, -1):
+        sigma2[t] = 1.0 / (d[t] ** 2) + (e[t] ** 2) * sigma2[t + 1]
+
+    sigma_t = np.sqrt(np.maximum(sigma2, 0.0))
+    mean_st = float(np.mean(sigma_t))
+    std_st = float(np.std(sigma_t)) if len(sigma_t) > 1 else 0.0
+    if std_st <= 0:
+        flags = np.zeros(n, dtype=bool)
+    else:
+        flags = np.abs(sigma_t - mean_st) > 3.0 * std_st
+    return phi, sigma_eps, sigma_t, flags
+
+
+def smc_pt_log_z_estimator(swap_log_alphas):
+    """Issue 005 -- SMC-on-PT free log-Z-ratio estimator.
+
+    Each PT swap step produces a log_alpha = (1/T_low - 1/T_high) *
+    (F_low - F_high). The bridge sampling identity (Del Moral, Doucet,
+    Jasra 2006 Eq.(8); Neal 2001 AIS) gives an unbiased estimator of
+    log Z(T_low) / Z(T_high) as the LOG-MEAN-EXP of the per-swap
+    log-alphas:
+
+        log Z_ratio_est = log mean exp(log_alpha_i)
+
+    Bootstrap CI from N_BOOT=200 resamples of the swap series.
+    Returns (log_z_est, log_z_se, ci_low, ci_high)."""
+    if not swap_log_alphas:
+        return float("nan"), float("nan"), float("nan"), float("nan")
+    arr = np.asarray(swap_log_alphas, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) == 0:
+        return float("nan"), float("nan"), float("nan"), float("nan")
+
+    def log_mean_exp(x):
+        m = float(np.max(x))
+        return m + float(np.log(np.mean(np.exp(x - m))))
+
+    point = log_mean_exp(arr)
+    rng = np.random.default_rng(0xBA7CE57)
+    n = len(arr)
+    n_boot = 200
+    boots = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = rng.integers(0, n, size=n)
+        boots[b] = log_mean_exp(arr[idx])
+    se = float(boots.std(ddof=1))
+    lo = float(np.quantile(boots, 0.025))
+    hi = float(np.quantile(boots, 0.975))
+    return point, se, lo, hi
+
+
 def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
                     t_init, t_final, sigma_rw=0.5,
                     deposit_period=20, metad_sigma=0.3,
@@ -1000,6 +1109,9 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
     deposit_counter = 0
     swap_attempts = 0
     swap_accepts = 0
+    # Issue 005: collect per-swap log_alphas keyed by adjacent rung
+    # pair so log Z(T_i)/Z(T_{i+1}) can be estimated post-hoc.
+    swap_log_alpha_pairs = [[] for _ in range(n_chains - 1)]
     # Andrieu/Thoms 2008 per-rung adaptive sigma. Each PT rung has its
     # own log_sigma adapted toward 0.234 RW-Metropolis acceptance.
     log_sigmas = [float(np.log(max(sigma_rw, 1e-6))) for _ in range(n_chains)]
@@ -1038,12 +1150,23 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
                 F_i = chain_val[i] + bias.potential(bias.cv(chain_pos[i]))
                 F_j = chain_val[i + 1] + bias.potential(bias.cv(chain_pos[i + 1]))
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                swap_log_alpha_pairs[i].append(log_alpha)
                 swap_attempts += 1
                 if rngs[0].random() < min(1.0, np.exp(log_alpha)):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1
-    return best_val, n_calls, swap_accepts, swap_attempts
+
+    # Issue 005: compute per-pair log Z(T_i) / Z(T_{i+1}) and
+    # accumulate into log Z(T_cold) / Z(T_hot) by chaining.
+    z_pair_estimates = []
+    for pair_idx, alphas in enumerate(swap_log_alpha_pairs):
+        log_z_est, _, _, _ = smc_pt_log_z_estimator(alphas)
+        z_pair_estimates.append(log_z_est)
+    log_z_cold_to_hot = (sum(z for z in z_pair_estimates if np.isfinite(z))
+                          if z_pair_estimates else float("nan"))
+    return (best_val, n_calls, swap_accepts, swap_attempts,
+            log_z_cold_to_hot, z_pair_estimates)
 
 
 def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
@@ -1056,7 +1179,7 @@ def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
     if t_hot is None:
         t_hot = t_map
     t_cold = max(t_map, 0.1)
-    bv, prod_calls, swap_a, swap_t = pt_metad_shared(
+    bv, prod_calls, swap_a, swap_t, log_z_ratio, _ = pt_metad_shared(
         seed, n_epochs, n_chains, k_inner, k_swap,
         t_hot, t_cold, sigma_rw=sigma_rw,
         deposit_period=20, metad_sigma=sigma_rw,
@@ -1064,7 +1187,8 @@ def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
         metad_gamma=metad_gamma_from_qv(q_map),
         q_a=q_map, q_v=q_map,
     )
-    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
+    return (bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map,
+            swap_a, swap_t, log_z_ratio)
 
 
 def parallel_tempering_hybrid(
@@ -1766,7 +1890,7 @@ def main():
         # PT-MetaD). High-T chains discover cups and deposit, low-T
         # chains refine, swaps propagate basins down the ladder.
         t0 = time.perf_counter()
-        bv, nc, _, _, _, _, _, _ = bgsa_pt_metad(
+        bv, nc, _, _, _, _, _, _, _log_z = bgsa_pt_metad(
             seed, args.n_epochs, args.n_chains,
             t_rw_map, e_map, L_map, q_map, pilot_calls,
             k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
