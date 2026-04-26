@@ -28,6 +28,10 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
+    # exp4 enables BOTH compensated_delta_e (running Kahan on cur_val)
+    # AND log_domain_accept (avoids exp() underflow at f16). The
+    # comparison vs exp3 surfaces the bias reduction from the
+    # combined precision-correctness pair, matching manuscript Sec 5.4.
     rows = []
     for seed in range(args.seeds):
         for dtype in ("float64", "float16"):
@@ -35,7 +39,8 @@ def main():
                        dtype=dtype, seed=seed,
                        n_epochs=args.n_epochs,
                        steps_per_epoch=args.steps_per_epoch,
-                       compensated_delta_e=True)
+                       compensated_delta_e=True,
+                       log_domain_accept=True)
             rows.append(dict(seed=seed, dtype=dtype,
                              mean_pos_x=float(r.best_pos[0]),
                              mean_pos_y=float(r.best_pos[1]),
