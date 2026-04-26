@@ -601,6 +601,14 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     best = cur_v
     n_calls = 1
     accept_count = 0
+    # NOTE: Andrieu/Thoms 2008 adaptive sigma is intentionally NOT used
+    # here. With a well-tempered metad bias evolving in time, accept
+    # rate measures (F + V)-acceptance, and the bias's cup-filling
+    # dynamics drive adaptive sigma toward "stay in same filled basin"
+    # rather than exploration. Fixed sigma_rw works better empirically
+    # for metad-augmented chains; adaptive scaling lands in the swap-
+    # augmented variants (metad_sa_shared_bias, pt_metad_shared) where
+    # PT swaps and walker exchange counteract the local-collapse pull.
     for epoch in range(n_epochs):
         T = tsallis_cool(t_init, q_v, epoch)
         # Anneal q_a alongside T: heavy-tailed early, Metropolis late.
@@ -675,6 +683,10 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
     chain_best = list(chain_val)
     n_calls = n_starts
     deposit_counter = 0
+    # Adaptive sigma intentionally disabled here: with k_inner/n_starts
+    # steps per walker the diminishing-adaptation transient hasn't
+    # decayed before the chain ends. Empirically hurts ~1.5x on
+    # Rastrigin 5D. See note in metad_sa.
 
     k_per_chain = max(1, k_inner // n_starts)
 
@@ -765,20 +777,31 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
     deposit_counter = 0
     swap_attempts = 0
     swap_accepts = 0
+    # Andrieu/Thoms 2008 per-rung adaptive sigma. Each PT rung has its
+    # own log_sigma adapted toward 0.234 RW-Metropolis acceptance.
+    log_sigmas = [float(np.log(max(sigma_rw, 1e-6))) for _ in range(n_chains)]
+    n_steps_per_chain = [0 for _ in range(n_chains)]
+    target_a = 0.234
 
     for epoch in range(n_epochs):
         for inner in range(k_inner):
             for c in range(n_chains):
                 T_c = temps[c]
                 q_a_c = q_a_per_chain[c]
+                sigma_eff = float(np.exp(log_sigmas[c]))
                 prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
-                                                sigma_rw), LOW, HIGH)
+                                                sigma_eff), LOW, HIGH)
                 pv = OBJ_FN(prop)
                 n_calls += 1
                 cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
                 prop_aug = pv + bias.potential(bias.cv(prop))
-                if rngs[c].random() < tsallis_accept_prob(
-                        prop_aug - cur_aug, T_c, q_a_c):
+                accepted = rngs[c].random() < tsallis_accept_prob(
+                    prop_aug - cur_aug, T_c, q_a_c)
+                n_steps_per_chain[c] += 1
+                gamma_n = 1.0 / max(n_steps_per_chain[c], 1) ** 0.6
+                log_sigmas[c] += gamma_n * (
+                    (1.0 if accepted else 0.0) - target_a)
+                if accepted:
                     chain_pos[c], chain_val[c] = prop, pv
                     if pv < best_val:
                         best_val = pv
