@@ -265,6 +265,65 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
     return best, n_calls, cur
 
 
+def fit_empirical_bayes_priors(scout_obs, dim):
+    """Empirical-Bayes prior fit for the bGSA pilot (issue 001).
+
+    Given a small set of "scout" pilot draws -- HMC chains at widely-
+    spaced (T, eps, L, q) -- compute method-of-moments estimates of
+    the prior log-normal / truncated-normal parameters by:
+
+      1. Filtering scouts to the upper quartile of accept-rate-quality
+         (proximity to the 0.65 HMC target on a logit scale, plus
+         improvement bonus).
+      2. Method-of-moments fit on (log T, log eps, log L) over that
+         quartile; truncated-normal MoM on q.
+
+    Returns a dict {"t_mean", "t_sd", "e_mean", "e_sd", "l_mean",
+    "l_sd", "q_mean", "q_sd"} that the main pilot consumes as priors
+    instead of the hardcoded values. The user gets pilot priors
+    inferred from data, not arbitrary literature folklore."""
+    if not scout_obs:
+        return {
+            "t_mean": 0.0, "t_sd": 1.0,
+            "e_mean": -3.0, "e_sd": 1.0,
+            "l_mean": 1.6, "l_sd": 0.7,
+            "q_mean": 1.15, "q_sd": 0.1,
+        }
+    target_logit = float(np.log(0.65 / 0.35))
+    bv_max = max(o["best_val"] for o in scout_obs)
+    bv_range = bv_max - min(o["best_val"] for o in scout_obs) + 1e-12
+    scored = []
+    for o in scout_obs:
+        a = max(min(o["accept_rate"], 1 - 1e-6), 1e-6)
+        logit_r = np.log(a / (1.0 - a))
+        accept_term = (logit_r - target_logit) ** 2
+        norm_imp = (bv_max - o["best_val"]) / bv_range
+        improve_term = (1.0 - norm_imp) ** 2
+        scored.append((accept_term + improve_term, o))
+    scored.sort(key=lambda x: x[0])
+    keep = scored[: max(1, len(scored) // 4)]  # upper quartile
+    log_ts = np.array([np.log(o["t_init"]) for _, o in keep])
+    log_es = np.array([np.log(o["epsilon"]) for _, o in keep])
+    log_ls = np.array([np.log(o["L"]) for _, o in keep])
+    qs = np.array([o["q"] for _, o in keep])
+
+    def _mom(arr, default_mean, default_sd):
+        if len(arr) < 2:
+            return float(default_mean), float(default_sd)
+        return float(np.mean(arr)), float(max(np.std(arr), 0.1))
+
+    t_mean, t_sd = _mom(log_ts, 0.0, 1.0)
+    e_mean, e_sd = _mom(log_es, -3.0, 1.0)
+    l_mean, l_sd = _mom(log_ls, 1.6, 0.7)
+    q_mean, q_sd = _mom(qs, 1.15, 0.1)
+    return {
+        "t_mean": t_mean, "t_sd": t_sd,
+        "e_mean": e_mean, "e_sd": e_sd,
+        "l_mean": l_mean, "l_sd": l_sd,
+        "q_mean": q_mean, "q_sd": q_sd,
+    }
+
+
 def rw_pilot(seed, T, sigma, n_steps):
     """Pilot RW-Metropolis chain at FIXED temperature T. Used to fit
     sigma_rw against the Roberts/Gelman/Gilks 1997 0.234 acceptance
@@ -356,24 +415,29 @@ def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
     return best, accepts / n_steps, cur, n
 
 
-def neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim):
+def neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim, priors=None):
     """4D Bayesian posterior for HMC: (log T_init, log epsilon, log L, q).
 
-    q is the Tsallis momentum index. Prior: truncated normal on (1.05,
-    1 + 2/dim - 0.05) with mode at 1.15 (mildly heavy-tailed).
+    q is the Tsallis momentum index. The prior parameters come from
+    `priors` (issue 001 empirical-Bayes fit) when provided; if None,
+    falls back to the legacy hardcoded values for backwards
+    compatibility.
     """
     q_max = 1.0 + 2.0 / dim - 0.05
     if q <= 1.0 + 0.04 or q >= q_max:
         return float("inf")
-    prior_t_mean, prior_t_sd = 0.0, 1.0
-    prior_e_mean, prior_e_sd = -3.0, 1.0
-    prior_l_mean, prior_l_sd = 1.6, 0.7
-    prior_q_mean, prior_q_sd = 1.15, 0.1
+    if priors is None:
+        priors = {
+            "t_mean": 0.0, "t_sd": 1.0,
+            "e_mean": -3.0, "e_sd": 1.0,
+            "l_mean": 1.6, "l_sd": 0.7,
+            "q_mean": 1.15, "q_sd": 0.1,
+        }
     prior_term = 0.5 * (
-        ((log_t - prior_t_mean) / prior_t_sd) ** 2
-        + ((log_e - prior_e_mean) / prior_e_sd) ** 2
-        + ((log_l - prior_l_mean) / prior_l_sd) ** 2
-        + ((q - prior_q_mean) / prior_q_sd) ** 2
+        ((log_t - priors["t_mean"]) / priors["t_sd"]) ** 2
+        + ((log_e - priors["e_mean"]) / priors["e_sd"]) ** 2
+        + ((log_l - priors["l_mean"]) / priors["l_sd"]) ** 2
+        + ((q - priors["q_mean"]) / priors["q_sd"]) ** 2
     )
     bv_max = max(o["best_val"] for o in obs)
     bv_min = min(o["best_val"] for o in obs)
@@ -403,25 +467,94 @@ def neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim):
     return prior_term + accept_term + improve_term
 
 
-def fit_laplace_4d(obs, dim):
+def _laplace_third_moment_correction(nll_fn, params_map, h=0.05):
+    """Tierney-Kadane 1986 skew correction for univariate marginals
+    (issue 009). For each parameter axis k we approximate the third
+    derivative of the negative log posterior at the MAP via central
+    differences, then return a skew-correction shift
+
+      delta_k = - (psi_kkk / psi_kk^2) / 6
+
+    where psi denotes derivatives of the NLL at the MAP. The shift
+    catches asymmetry that basic Laplace ignores; on symmetric
+    posteriors delta_k -> 0.
+
+    Returns shifts in the same scale as params_map."""
+    deltas = []
+    for k in range(len(params_map)):
+        params_p = list(params_map)
+        params_m = list(params_map)
+        params_2p = list(params_map)
+        params_2m = list(params_map)
+        params_p[k] = params_map[k] + h
+        params_m[k] = params_map[k] - h
+        params_2p[k] = params_map[k] + 2.0 * h
+        params_2m[k] = params_map[k] - 2.0 * h
+        f0 = nll_fn(params_map)
+        fp = nll_fn(params_p)
+        fm = nll_fn(params_m)
+        f2p = nll_fn(params_2p)
+        f2m = nll_fn(params_2m)
+        if any(not np.isfinite(x) for x in [f0, fp, fm, f2p, f2m]):
+            deltas.append(0.0)
+            continue
+        # Second derivative: (fp - 2*f0 + fm) / h^2
+        d2 = (fp - 2.0 * f0 + fm) / max(h * h, 1e-18)
+        # Third derivative: (f2p - 2*fp + 2*fm - f2m) / (2*h^3)
+        d3 = (f2p - 2.0 * fp + 2.0 * fm - f2m) / (2.0 * h * h * h)
+        if d2 <= 0:
+            deltas.append(0.0)
+            continue
+        deltas.append(-d3 / (6.0 * d2 * d2))
+    return deltas
+
+
+def fit_laplace_4d(obs, dim, priors=None):
+    """Grid-MAP Laplace fit for (T_init, epsilon, L, q_v). When
+    `priors` is provided (issue 001 empirical-Bayes), grid bounds
+    centre on the prior means +/- 2 prior SDs so the grid adapts to
+    the data-derived priors instead of using a fixed [-2, 2] x
+    [-5, -1] x [1, 2.5] x [1.05, q_max] box."""
+    if priors is None:
+        priors = {
+            "t_mean": 0.0, "t_sd": 1.0,
+            "e_mean": -3.0, "e_sd": 1.0,
+            "l_mean": 1.6, "l_sd": 0.7,
+            "q_mean": 1.15, "q_sd": 0.1,
+        }
     n_t, n_e, n_l, n_q = 9, 9, 9, 7
-    grid_t = np.linspace(-2.0, 2.0, n_t)
-    grid_e = np.linspace(-5.0, -1.0, n_e)
-    grid_l = np.linspace(1.0, 2.5, n_l)
+    grid_t = np.linspace(priors["t_mean"] - 2 * priors["t_sd"],
+                          priors["t_mean"] + 2 * priors["t_sd"], n_t)
+    grid_e = np.linspace(priors["e_mean"] - 2 * priors["e_sd"],
+                          priors["e_mean"] + 2 * priors["e_sd"], n_e)
+    grid_l = np.linspace(max(0.5, priors["l_mean"] - 2 * priors["l_sd"]),
+                          priors["l_mean"] + 2 * priors["l_sd"], n_l)
     q_max = 1.0 + 2.0 / dim - 0.06
-    grid_q = np.linspace(1.05, q_max, n_q)
+    q_lo = max(1.05, priors["q_mean"] - 2 * priors["q_sd"])
+    q_hi = min(q_max, priors["q_mean"] + 2 * priors["q_sd"])
+    grid_q = np.linspace(q_lo, q_hi, n_q)
     best_nll = float("inf")
-    best = (0.0, -3.0, 1.6, 1.15)
+    best = (priors["t_mean"], priors["e_mean"],
+            priors["l_mean"], priors["q_mean"])
     for log_t in grid_t:
         for log_e in grid_e:
             for log_l in grid_l:
                 for q in grid_q:
-                    nll = neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim)
+                    nll = neg_log_posterior_4d(
+                        log_t, log_e, log_l, q, obs, dim, priors=priors)
                     if nll < best_nll:
                         best_nll = nll
                         best = (log_t, log_e, log_l, q)
-    return (float(np.exp(best[0])), float(np.exp(best[1])),
-            max(1, int(np.exp(best[2]))), float(best[3]))
+    # Issue 009 -- Tierney-Kadane skew correction at the grid MAP.
+    # Catches third-cumulant asymmetry that the symmetric grid Laplace
+    # misses, at the cost of 4 extra NLL evaluations per parameter.
+    def _nll(p):
+        return neg_log_posterior_4d(p[0], p[1], p[2], p[3], obs, dim,
+                                     priors=priors)
+    deltas = _laplace_third_moment_correction(_nll, list(best), h=0.05)
+    corrected = tuple(b + d for b, d in zip(best, deltas))
+    return (float(np.exp(corrected[0])), float(np.exp(corrected[1])),
+            max(1, int(np.exp(corrected[2]))), float(corrected[3]))
 
 
 def gelman_rubin_max(traces):
@@ -1323,24 +1456,56 @@ def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50):
+def run_pilot(seed, n_pilot, pilot_steps, dim,
+              n_rw_pilot=10, rw_steps=50, n_scout=8):
     """Shared pilot phase for ALL bGSA drivers.
 
-    Returns (T_map, e_map, L_map, q_map, sigma_map, best_pilot_pos,
-    pilot_calls, t_hot). Sigma_map is fit via a separate RW-Metropolis
-    pilot (issue 002) so that bGSA-MetaD drivers no longer need a
-    hardcoded sigma_rw."""
+    Three-stage pilot (after issue 001 empirical-Bayes priors):
+
+      Stage 0 (~n_scout=8 fevals/coord) -- widely-spaced log-uniform
+        scout draws over (T, eps, L, q). Used to fit method-of-
+        moments empirical-Bayes priors (issue 001), eliminating the
+        hardcoded log-normal mean / SD constants.
+      Stage 1 (n_pilot HMC chains, pilot_steps each) -- main HMC
+        pilot using the data-derived priors.
+      Stage 2 (n_rw_pilot RW chains, rw_steps each) -- RW pilot for
+        joint (t_rw, sigma_rw) MAP (issue 002).
+
+    Returns (t_map, e_map, L_map, q_map, sigma_map, best_pilot_pos,
+    pilot_calls, t_hot, t_rw_map)."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
-    pilot_obs = []
     pilot_calls = 0
     best_pilot_pos = None
     best_pilot_val = float("inf")
+
+    # Stage 0 -- scout phase for empirical-Bayes priors.
+    scout_obs = []
+    for k in range(n_scout):
+        # Widely-spaced log-uniform draws spanning 4 log-decades for
+        # T and eps, 1 decade for L. q is uniform on the safe range.
+        t = float(np.exp(rng.uniform(-3.0, 3.0)))
+        e = float(np.exp(rng.uniform(-5.0, -1.0)))
+        L = max(1, int(np.exp(rng.uniform(0.5, 3.0))))
+        q = float(rng.uniform(1.05, q_max))
+        bv, ar, fpos, nc = hmc_pilot(seed * 7919 + k, t, e, L,
+                                     max(20, pilot_steps // 4), q=q)
+        scout_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+        if bv < best_pilot_val:
+            best_pilot_val = bv
+            best_pilot_pos = fpos
+    priors = fit_empirical_bayes_priors(scout_obs, dim)
+
+    # Stage 1 -- main HMC pilot using empirical-Bayes priors.
+    pilot_obs = list(scout_obs)  # fold scouts into the Laplace fit
     for k in range(n_pilot):
-        t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))
-        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        t = float(np.exp(rng.normal(priors["t_mean"], priors["t_sd"])))
+        e = float(np.exp(rng.normal(priors["e_mean"], priors["e_sd"])))
+        L = max(1, int(np.exp(rng.normal(priors["l_mean"], priors["l_sd"]))))
+        q = float(np.clip(rng.normal(priors["q_mean"], priors["q_sd"]),
+                          1.05, q_max))
         bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
         pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
                           "accept_rate": ar, "best_val": bv})
@@ -1348,7 +1513,7 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50):
         if bv < best_pilot_val:
             best_pilot_val = bv
             best_pilot_pos = fpos
-    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim, priors=priors)
 
     # Issue 002 -- joint RW pilot for (t_rw_map, sigma_rw_map).
     # bGSA-MetaD is RW-driven; its optimal T is generally HOTTER than
