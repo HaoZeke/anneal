@@ -433,29 +433,10 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
     return best_val, n_calls, best_pos, bci_lower, bci_upper
 
 
-def bgsa_svgd(seed, n_epochs, n_particles, n_pilot, pilot_steps, dim=5,
+def bgsa_svgd(seed, n_epochs, n_particles,
+              t_map, e_map, L_map, q_map, pilot_calls,
               k_inner=10):
-    """bGSA with SVGD particle-flow production. Pilot still uses HMC
-    chains for the Bayesian fit; production replaces the SA/HMC kernel
-    with SVGD. The pilot's MAP T_init becomes the SVGD cooling start;
-    eps_svgd defaults to 0.05 (separate from HMC's leapfrog eps)."""
-    rng = np.random.default_rng(seed)
-    q_max = 1.0 + 2.0 / dim - 0.06
-    pilot_obs = []
-    pilot_calls = 0
-    for k in range(n_pilot):
-        t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))
-        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
-        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
-        pilot_calls += nc
-    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
-    # Production: use Stochastic SVGD (Bayesian variant) so the
-    # particle ensemble samples from pi_T_map and best_val carries a
-    # 95% credible interval from the particle quantiles.
+    """bGSA with Bayesian Stochastic SVGD production. Pilot done upstream."""
     bv, prod_calls, _, _bci_lo, _bci_hi = svgd_sa(
         seed, n_epochs, n_particles, k_inner,
         t_map, eps_svgd=0.05, stochastic=True)
@@ -601,23 +582,10 @@ def parallel_tempering_q_hmc(
     return best_val, n_calls, swap_accepts, swap_attempts
 
 
-def bgsa_pt_adaptive(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
+def bgsa_pt_adaptive(seed, n_epochs, n_chains,
+                     t_map, e_map, L_map, q_map, pilot_calls,
                      k_inner=20, k_swap=5, target_swap_rate=0.25):
-    """bGSA with adaptive parallel-tempering production phase."""
-    rng = np.random.default_rng(seed)
-    q_max = 1.0 + 2.0 / dim - 0.06
-    pilot_obs = []
-    pilot_calls = 0
-    for k in range(n_pilot):
-        t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))
-        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
-        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
-        pilot_calls += nc
-    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    """bGSA with adaptive parallel-tempering production. Pilot done upstream."""
     t_hot_init = max(t_map * 30.0, 50.0)
     t_cold_init = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = adaptive_ladder_q_hmc(
@@ -627,32 +595,10 @@ def bgsa_pt_adaptive(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
-            k_inner=20, k_swap=5):
-    """bGSA with parallel-tempering q-HMC production phase."""
-    rng = np.random.default_rng(seed)
-    q_max = 1.0 + 2.0 / dim - 0.06
-    pilot_obs = []
-    pilot_calls = 0
-    for k in range(n_pilot):
-        t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))
-        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
-        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
-        pilot_calls += nc
-    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
-    # PT temperature ladder: hot end MUST allow broad random-walk-like
-    # acceptance (T_hot >= 10) regardless of what the pilot found for the
-    # cold-end production T. Cold end = t_map so HMC exploits when it's
-    # there. The Bayesian pilot informs the cold T; PT physics demands
-    # the hot chain.
-    # T_hot needs to be hot enough for random-walk-like acceptance on
-    # the worst-case Delta_E that the objective produces. For Rastrigin
-    # 5D, max |Delta_E| from a tail proposal can be ~50; T_hot = 50
-    # gives accept rate >= e^{-1} ~= 0.37 even on the worst proposals.
+def bgsa_pt(seed, n_epochs, n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5, _unused_dim=None):
+    """bGSA with parallel-tempering q-HMC production. Pilot done upstream."""
     t_hot = max(t_map * 30.0, 50.0)
     t_cold = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_q_hmc(
@@ -661,31 +607,24 @@ def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
+def bgsa_multichain(seed, n_epochs, n_chains,
+                    t_map, e_map, L_map, q_map, pilot_calls,
                     k_min=15, k_check=10, k_max=80, rhat_threshold=1.3):
-    """bGSA with multi-chain q-HMC-SA production."""
-    rng = np.random.default_rng(seed)
-    q_max = 1.0 + 2.0 / dim - 0.06
-    pilot_obs = []
-    pilot_calls = 0
-    for k in range(n_pilot):
-        t = float(np.exp(rng.normal(0.0, 1.0)))
-        e = float(np.exp(rng.normal(-3.0, 1.0)))
-        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
-        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
-        pilot_calls += nc
-    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    """bGSA multi-chain q-HMC + Rhat termination. Pilot done upstream."""
     bv, prod_calls = multichain_q_hmc(
         seed, n_epochs, n_chains, k_min, k_check, k_max, rhat_threshold,
         t_map, e_map, L_map, q_map)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
-def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=len(LOW)):
-    """bGSA = Bayesian pilot on (T, eps, L, q) + production q-HMC-SA (single chain)."""
+def run_pilot(seed, n_pilot, pilot_steps, dim):
+    """Shared pilot phase for ALL bGSA drivers.
+
+    Run once per seed; returns the Laplace-MAP hyperparameters + the
+    best pilot endpoint + the pilot feval count, which downstream
+    bGSA variants reuse instead of running their own pilot. This was
+    the largest source of feval overhead in the v0.4.0 demo (each
+    driver re-ran a 1500-feval pilot)."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
     pilot_obs = []
@@ -696,7 +635,6 @@ def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=len(LOW)):
         t = float(np.exp(rng.normal(0.0, 1.0)))
         e = float(np.exp(rng.normal(-3.0, 1.0)))
         L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
-        # Sample q from truncated normal on (1.05, q_max)
         q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
         bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
         pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
@@ -706,6 +644,12 @@ def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=len(LOW)):
             best_pilot_val = bv
             best_pilot_pos = fpos
     t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    return t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls
+
+
+def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
+         best_pilot_pos, pilot_calls):
+    """bGSA = production q-HMC-SA (single chain). Pilot done upstream."""
     bv, n_calls, _ = hmc_sa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map,
                             x0=best_pilot_pos, q=q_map)
     return bv, pilot_calls + n_calls, t_map, e_map, L_map, q_map
@@ -740,6 +684,13 @@ def main():
     print(f"  Production: {args.n_epochs} epochs x {args.k_per_epoch} steps\n")
 
     for seed in range(args.seeds):
+        # SHARED PILOT: run once per seed; downstream bGSA drivers
+        # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
+        # tuple. This was the largest source of feval overhead in the
+        # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
+        t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls = run_pilot(
+            seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
+
         # Classical SA (hand-tuned)
         t0 = time.perf_counter()
         bv, nc, _ = classical_sa(seed, args.n_epochs, 200, 5.0, 0.5)
@@ -754,51 +705,55 @@ def main():
         rows.append(dict(seed=seed, driver="hmc_sa_hand", best_val=bv,
                          fevals=nc, wall_time_s=wt))
 
-        # bGSA = pilot 4D (T, eps, L, q) + Laplace + production q-HMC
+        # bGSA = production q-HMC at MAP
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map, q_map = bgsa(seed, args.n_epochs, args.k_per_epoch,
-                                                   args.n_pilot, args.pilot_steps, dim=len(LOW))
+        bv, nc, _, _, _, _ = bgsa(
+            seed, args.n_epochs, args.k_per_epoch,
+            t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA multi-chain = pilot 4D + multi-chain q-HMC with Rhat termination
+        # bGSA multi-chain = multi-chain q-HMC with Rhat termination
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map, q_map = bgsa_multichain(
-            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
-            dim=len(LOW), k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
+        bv, nc, _, _, _, _ = bgsa_multichain(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
             rhat_threshold=args.rhat_threshold)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_multichain", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA parallel-tempering = pilot 4D + PT q-HMC with adjacent chain swaps
+        # bGSA PT = PT q-HMC with adjacent chain swaps
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map, q_map, swap_a, swap_t = bgsa_pt(
-            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
-            dim=len(LOW), k_inner=20, k_swap=5)
+        bv, nc, _, _, _, _, _, _ = bgsa_pt(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA adaptive PT = pilot 4D + Robbins-Monro adaptive ladder
+        # bGSA adaptive PT = Robbins-Monro adaptive ladder
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map, q_map, swap_a, swap_t = bgsa_pt_adaptive(
-            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
-            dim=len(LOW), k_inner=20, k_swap=5, target_swap_rate=0.25)
+        bv, nc, _, _, _, _, _, _ = bgsa_pt_adaptive(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5, target_swap_rate=0.25)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_adaptive", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA + SVGD = pilot 4D + Stein variational particle flow
+        # bGSA + Bayesian SVGD = Stein variational particle flow
         t0 = time.perf_counter()
-        bv, nc, t_map, e_map, L_map, q_map = bgsa_svgd(
+        bv, nc, _, _, _, _ = bgsa_svgd(
             seed, args.n_epochs, args.n_chains,
-            args.n_pilot, args.pilot_steps, dim=len(LOW), k_inner=10)
+            t_map, e_map, L_map, q_map, pilot_calls, k_inner=10)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_svgd", best_val=bv,
                          fevals=nc, wall_time_s=wt,
