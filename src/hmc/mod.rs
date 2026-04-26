@@ -7,7 +7,9 @@
 //! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_09_method_b_hmc.org`.
 
 pub mod integrator;
+pub mod momentum;
 pub mod sampler;
 
 pub use integrator::{LeapfrogIntegrator, LeapfrogResult};
+pub use momentum::{GaussianMomentum, Momentum, QGaussianMomentum};
 pub use sampler::HmcSaSampler;

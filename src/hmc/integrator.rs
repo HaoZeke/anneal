@@ -5,14 +5,15 @@
 //!   update_q        (drift:     x += epsilon * dK/dp)
 //!   end_update_p    (half-kick: p -= 0.5*epsilon * grad U / T)
 //!
-//! For Phase 1 with Gaussian momentum and identity metric, dK/dp = p
-//! so the drift simplifies to `x += epsilon * p`. Phase 2 with
-//! q-Gaussian momentum will need the implicit `update_q` of
-//! `impl_leapfrog.hpp:25-39`.
+//! Phase 1 used `dK/dp = p` (Gaussian momentum). Phase 2 (this commit)
+//! generalises to any `Momentum` kernel via a `&dyn Momentum` borrow,
+//! so q-Gaussian momentum + Gaussian momentum drive the same evolve()
+//! through the trait.
 
 use ndarray::Array1;
 
 use crate::grad::Gradient;
+use crate::hmc::momentum::Momentum;
 
 /// One leapfrog trajectory (L steps) at fixed temperature `temp`.
 /// Returns the final `(x, p)` and the integrator energy error
@@ -29,9 +30,15 @@ pub struct LeapfrogResult {
     pub diverged: bool,
 }
 
-/// Explicit-leapfrog integrator with Gaussian momentum and identity metric.
-/// Cooling-aware: `epsilon_eff = epsilon * sqrt(temp / temp_ref)` keeps
-/// the linear-stability margin epoch-invariant under SA cooling.
+/// Explicit-leapfrog integrator. Cooling-aware: `epsilon_eff =
+/// epsilon * sqrt(temp / temp_ref)` keeps the linear-stability margin
+/// epoch-invariant under SA cooling.
+///
+/// For Phase 2 q-Gaussian momentum the drift `dK/dp` is no longer
+/// `p` -- the momentum kernel computes it from the current `p`. The
+/// kinetic contribution to the Hamiltonian likewise comes from
+/// `momentum.kinetic(&p)`. The integrator stays explicit because
+/// `dK/dp` only depends on `p` (constant during the drift step).
 pub struct LeapfrogIntegrator {
     /// Base step size; rescaled by `sqrt(temp / temp_ref)` per call.
     pub epsilon: f64,
@@ -64,24 +71,26 @@ impl LeapfrogIntegrator {
     /// Evolves `(x, p)` for `l_steps` leapfrog steps at temperature
     /// `temp`. Returns the final state plus the integrator energy
     /// error.
-    pub fn evolve<G, Obj>(
+    pub fn evolve<G, M, Obj>(
         &self,
         x0: Array1<f64>,
         p0: Array1<f64>,
         u0: f64,
         temp: f64,
         gradient: &G,
+        momentum: &M,
         objective: &Obj,
     ) -> LeapfrogResult
     where
         G: Gradient<f64>,
+        M: Momentum + ?Sized,
         Obj: Fn(&Array1<f64>) -> f64,
     {
         let eps = self.epsilon * (temp / self.temp_ref).sqrt();
         let mut x = x0;
         let mut p = p0;
 
-        let h0 = u0 / temp + 0.5 * p.iter().map(|pi| pi * pi).sum::<f64>();
+        let h0 = u0 / temp + momentum.kinetic(&p);
 
         // Half-kick using the initial gradient.
         let mut grad = gradient.grad(x.view());
@@ -90,9 +99,10 @@ impl LeapfrogIntegrator {
         }
 
         for step in 0..self.l_steps {
-            // Drift.
+            // Drift using the momentum kernel's dK/dp (constant during this step).
+            let dk = momentum.dk_dp(&p);
             for i in 0..x.len() {
-                x[i] += eps * p[i];
+                x[i] += eps * dk[i];
             }
             // Re-evaluate gradient.
             grad = gradient.grad(x.view());
@@ -104,7 +114,7 @@ impl LeapfrogIntegrator {
         }
 
         let u_new = objective(&x);
-        let h_new = u_new / temp + 0.5 * p.iter().map(|pi| pi * pi).sum::<f64>();
+        let h_new = u_new / temp + momentum.kinetic(&p);
         let delta_h = h_new - h0;
         let diverged = delta_h.abs() > self.max_delta_h || !delta_h.is_finite();
         LeapfrogResult {
