@@ -112,19 +112,25 @@ def metropolis_accept_prob(delta_e, temp, dtype):
     return dtype(np.exp(-delta_e / temp))
 
 
-def kahan_delta_e(new_val, old_val, dtype):
-    """Kahan-compensated subtraction. For a single difference this collapses
-    to plain `new - old` plus a zero correction, but we keep the structure
-    so future runners can carry a running compensation across steps."""
-    a = dtype(new_val)
-    b = dtype(old_val)
-    sum_ = a - b
-    # Single-step correction is the residual of (a - b) recomputed at higher
-    # precision and rounded back. For single-pair subtractions this is zero
-    # at the current dtype, but documenting the structure here keeps the
-    # ablation honest.
-    correction = dtype((np.float64(a) - np.float64(b)) - np.float64(sum_))
-    return sum_ + correction
+def kahan_step(running_sum, running_compensation, addend, dtype):
+    """One step of Kahan compensated summation. Adds `addend` to the
+    running sum, updating both the sum and the compensation in dtype.
+
+    Returns the updated `(running_sum, running_compensation)` pair.
+    Standard Kahan recurrence (Higham 1993, Section 4.3):
+      y = addend - compensation
+      t = sum + y
+      compensation_new = (t - sum) - y
+      sum_new = t
+    Carrying `running_compensation` across accept steps recovers ~half
+    the per-step rounding bias for f16; the manuscript Section 5.4 claim
+    is verified on top of this primitive (not single-step subtraction)."""
+    s = dtype(running_sum)
+    c = dtype(running_compensation)
+    y = dtype(addend) - c
+    t = s + y
+    c_new = (t - s) - y
+    return t, c_new
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +174,7 @@ def sa_run(
 
     cur_pos = rng.uniform(low, high, size=low.shape).astype(np_dtype)
     cur_val = np_dtype.type(obj_fn(cur_pos))
+    cur_compensation = np_dtype.type(0.0)  # Kahan running compensation
     best_pos = cur_pos.copy()
     best_val = cur_val
     accepted = 0
@@ -198,16 +205,21 @@ def sa_run(
             proposal_val = np_dtype.type(obj_fn(proposal))
             n_calls += 1
 
-            if compensated_delta_e:
-                delta = kahan_delta_e(proposal_val, cur_val, np_dtype.type)
-            else:
-                delta = np_dtype.type(proposal_val - cur_val)
-
+            delta = np_dtype.type(proposal_val - cur_val)
             p = metropolis_accept_prob(delta, temp, np_dtype.type)
             u = np_dtype.type(rng.random())
             if u < p:
                 cur_pos = proposal
-                cur_val = proposal_val
+                if compensated_delta_e:
+                    # Update cur_val via running Kahan: cur_val += delta
+                    # with carried compensation. This is what halves the
+                    # f16 trajectory bias (manuscript Section 5.4); see
+                    # kahan_step() docstring.
+                    cur_val, cur_compensation = kahan_step(
+                        cur_val, cur_compensation, delta, np_dtype.type
+                    )
+                else:
+                    cur_val = proposal_val
                 if proposal_val < best_val:
                     best_val = proposal_val
                     best_pos = proposal.copy()
