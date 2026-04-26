@@ -30,15 +30,29 @@ impl<T: Float + Send + Sync> AcceptRule<T> for Metropolis {
     }
 }
 
-/// Tsallis (GSA) acceptance with index `q_a`.
+/// Tsallis-Stariolo 1996 generalised acceptance with index `q_a`.
 ///
-/// `p = max(0, 1 - (q_a - 1) * delta_e / T)^(1/(q_a - 1))` for uphill moves.
-/// The case `q_a == 1` is the Metropolis limit and is dispatched explicitly
-/// to avoid the `0^0`/log indeterminate form.
+/// `p = [1 + (q_a - 1) * delta_e / T]^(1 / (1 - q_a))` for uphill moves.
+/// Equivalently, `p = exp_q(-delta_e / T)` where `exp_q` is the Tsallis
+/// q-exponential. The case `q_a == 1` is the Metropolis limit
+/// (`exp(-delta_e / T)`) and is dispatched explicitly.
+///
+/// For `q_a > 1` the acceptance is heavy-tailed: at large `delta_e / T`
+/// it decays as a power law instead of exponentially, which is why GSA
+/// outperforms classical SA on multimodal landscapes -- more uphill
+/// acceptance at high `T` enables basin escape (Xiang/Sun/Fan/Gong 1997
+/// default `q_a = 2.7`). At fixed `T` and `delta_e > 0`, larger `q_a`
+/// gives larger `p`.
+///
+/// For `q_a < 1` the base can go negative when
+/// `delta_e / T > 1 / (1 - q_a)`; this is the compact-support regime
+/// of the Tsallis q-exponential and is clamped to zero acceptance,
+/// matching Tsallis 1988 Eq.(7).
 #[derive(Clone, Copy, Debug)]
 pub struct TsallisAccept<T: Float> {
     /// Tsallis acceptance index. `q_a == 1` is the Metropolis limit;
-    /// `q_a < 1` rejects fewer uphill moves than Metropolis at fixed `T`.
+    /// `q_a > 1` is heavy-tailed (accepts more uphill than Metropolis
+    /// at fixed `T`); `q_a < 1` is compact-support.
     pub q_a: T,
 }
 
@@ -57,11 +71,11 @@ impl<T: Float + Send + Sync> AcceptRule<T> for TsallisAccept<T> {
         if (self.q_a - T::one()).abs() < T::epsilon() {
             return (-delta_e / temp).exp();
         }
-        let base = T::one() - (self.q_a - T::one()) * delta_e / temp;
+        let base = T::one() + (self.q_a - T::one()) * delta_e / temp;
         if base <= T::zero() {
             T::zero()
         } else {
-            base.powf(T::one() / (self.q_a - T::one()))
+            base.powf(T::one() / (T::one() - self.q_a))
         }
     }
 }

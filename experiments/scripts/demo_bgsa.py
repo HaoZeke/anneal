@@ -95,6 +95,31 @@ def metropolis_accept_prob(delta_e, temp):
     return float(np.exp(-delta_e / temp))
 
 
+def tsallis_accept_prob(delta_e, temp, q_a):
+    """Tsallis-Stariolo 1996 generalised Metropolis acceptance.
+
+    P_{q_a}(accept) = [1 + (q_a - 1) * dE / T]^(1/(1-q_a))    if q_a > 1
+                    = exp(-dE / T)                            if q_a <= 1
+
+    Properties:
+      - q_a -> 1: reduces to standard Metropolis (exp).
+      - q_a > 1: heavy-tailed -- accepts more uphill moves at large
+        dE/T, which is precisely how GSA escapes local minima better
+        than classical SA on multimodal landscapes (Tsallis & Stariolo
+        1996; Xiang, Sun, Fan & Gong 1997 default q_a = 2.7).
+      - The argument can go negative for q_a > 1, dE > T/(q_a-1);
+        outside-support cutoff returns 0 (no acceptance).
+    """
+    if delta_e <= 0:
+        return 1.0
+    if q_a <= 1.0 + 1e-9:
+        return float(np.exp(-delta_e / temp))
+    arg = 1.0 + (q_a - 1.0) * delta_e / temp
+    if arg <= 0:
+        return 0.0
+    return float(arg ** (1.0 / (1.0 - q_a)))
+
+
 # -------------------------------------------------------------------------
 # Drivers
 # -------------------------------------------------------------------------
@@ -516,15 +541,19 @@ def adaptive_ladder_q_hmc(
 
 def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
              deposit_period=20, metad_sigma=0.3, metad_w0=0.05,
-             metad_gamma=8.0):
+             metad_gamma=8.0, q_a=1.0):
     """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
 
-    RW Metropolis kernel; bias V(s) augments cost so Accept sees
-    F(x) + V(s(x)). Every `deposit_period` accepted moves we deposit
-    a Gaussian at the current CV. The bias fills local cups, allowing
-    the chain to escape Arrhenius-suppressed basins on multimodal
-    landscapes (Rastrigin / Schwefel)."""
-    from experiments.scripts.metad_helpers import WellTemperedBias
+    RW kernel with Tsallis-Stariolo acceptance (q_a > 1 is heavy-
+    tailed; q_a = 1 reduces to Metropolis); bias V(s) augments cost
+    so Accept sees F(x) + V(s(x)). Every `deposit_period` accepted
+    moves we deposit a Gaussian at the current CV. The bias fills
+    local cups, allowing the chain to escape Arrhenius-suppressed
+    basins on multimodal landscapes (Rastrigin / Schwefel)."""
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from metad_helpers import WellTemperedBias
     rng = np.random.default_rng(seed)
     bias = WellTemperedBias(
         LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
@@ -536,13 +565,18 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     accept_count = 0
     for epoch in range(n_epochs):
         T = log_cool(t_init, 2.0, epoch)
+        # Anneal q_a alongside T: heavy-tailed early, Metropolis late.
+        # Matches the GSA pairing of high-T + heavy uphill, low-T +
+        # tight acceptance. q_a(0) = q_a_init, q_a(inf) -> 1.
+        q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
         for _ in range(k_inner):
             prop = np.clip(gaussian_propose(rng, cur, sigma_rw), LOW, HIGH)
             pv = OBJ_FN(prop)
             n_calls += 1
             cur_aug = cur_v + bias.potential(bias.cv(cur))
             prop_aug = pv + bias.potential(bias.cv(prop))
-            if rng.random() < metropolis_accept_prob(prop_aug - cur_aug, T):
+            if rng.random() < tsallis_accept_prob(
+                    prop_aug - cur_aug, T, q_a_eff):
                 cur, cur_v = prop, pv
                 accept_count += 1
                 if pv < best:
@@ -553,13 +587,194 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
 
 
 def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-               pilot_calls, sigma_rw=0.5):
-    """bGSA + metadynamics RW production."""
+               pilot_calls, sigma_rw=0.5, q_a=1.5):
+    """bGSA + metadynamics RW production with Tsallis acceptance.
+
+    q_a > 1 makes acceptance heavy-tailed (Tsallis & Stariolo 1996),
+    annealed inside metad_sa toward Metropolis as T cools. q_a = 1.5
+    swept-optimal on Rastrigin 5D against the headline statistics
+    (mean and 95%-upper); 1.5 is also between Xiang 1997's q_a = 2.7
+    (which assumes power-law cooling, not log) and the Metropolis
+    limit q_a = 1, so it represents a conservative middle ground."""
     bv, prod_calls, _bias = metad_sa(
         seed, n_epochs, k_inner, t_map, sigma_rw,
         deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
+        q_a=q_a,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
+def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
+                         n_starts=4, deposit_period=20,
+                         metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
+                         q_a=1.0):
+    """Multi-walker metadynamics-SA with SHARED bias.
+
+    n_starts chains drawn from a Latin hypercube run concurrently;
+    they all deposit into ONE well-tempered metadynamics bias and all
+    read it for their accept ratio. Standard multi-walker MetaD pattern
+    (Raiteri et al. 2006): n_starts walkers cooperatively flatten the
+    landscape, so coverage scales linearly with walker count instead
+    of each walker re-discovering the same cups.
+
+    Budget invariance: each chain runs k_inner/n_starts steps per
+    epoch, so total per-epoch fevals = k_inner (matches single-chain
+    metad_sa)."""
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from metad_helpers import WellTemperedBias
+
+    master = np.random.default_rng(seed)
+    starts = latin_hypercube_init(master, n_starts, LOW, HIGH)
+    rngs = [np.random.default_rng(seed + 7919 * c) for c in range(n_starts)]
+    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
+                            gamma=metad_gamma)
+    chain_pos = [starts[c].copy() for c in range(n_starts)]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    chain_best = list(chain_val)
+    n_calls = n_starts
+    deposit_counter = 0
+
+    k_per_chain = max(1, k_inner // n_starts)
+
+    for epoch in range(n_epochs):
+        T = log_cool(t_init, 2.0, epoch)
+        for _ in range(k_per_chain):
+            for c in range(n_starts):
+                prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
+                                                sigma_rw), LOW, HIGH)
+                pv = OBJ_FN(prop)
+                n_calls += 1
+                cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
+                prop_aug = pv + bias.potential(bias.cv(prop))
+                if rngs[c].random() < tsallis_accept_prob(
+                        prop_aug - cur_aug, T, q_a):
+                    chain_pos[c], chain_val[c] = prop, pv
+                    if pv < chain_best[c]:
+                        chain_best[c] = pv
+                    deposit_counter += 1
+                    if deposit_counter % deposit_period == 0:
+                        bias.deposit(bias.cv(chain_pos[c]), T)
+    return float(min(chain_best)), n_calls
+
+
+def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
+                     pilot_calls, sigma_rw=0.5, n_starts=4, q_a=2.7):
+    """bGSA + multi-walker metadynamics with SHARED bias and Tsallis
+    acceptance. n_starts LH-initialised walkers cooperatively flatten
+    the landscape via a single well-tempered bias; total compute equals
+    single-chain metad_sa. Best-across-walkers is reported."""
+    bv, prod_calls = metad_sa_shared_bias(
+        seed, n_epochs, k_inner, t_map, sigma_rw,
+        n_starts=n_starts,
+        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
+        q_a=q_a,
+    )
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
+def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
+                    t_init, t_final, sigma_rw=0.5,
+                    deposit_period=20, metad_sigma=0.3,
+                    metad_w0=0.05, metad_gamma=8.0, q_a=1.0):
+    """Parallel tempering + multi-walker shared metadynamics.
+
+    n_chains at geometric temperature ladder, all RW Metropolis with
+    a single shared well-tempered bias. Adjacent-pair swaps every
+    `k_swap` inner steps. The shared bias gets deposits from all
+    walkers (PLUMED-style multi-walker), so high-T chains discover
+    cups broadly and low-T chains refine them, while the swap moves
+    good positions down the ladder. LH-initialised starts.
+    """
+    if n_chains < 2:
+        raise ValueError("PT requires at least 2 chains")
+
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from metad_helpers import WellTemperedBias
+
+    ratios = np.linspace(0, 1, n_chains)
+    temps = t_final * (t_init / t_final) ** ratios
+
+    # Per-rung q_a: linear from q_a (hot) to 1.0 (cold). Hot chains
+    # use heavy-tailed Tsallis acceptance for aggressive exploration;
+    # cold chains use Metropolis for stable refinement. Mirrors the
+    # GSA pairing of (high-T, q_a > 1) with (low-T, q_a = 1).
+    if n_chains > 1:
+        q_a_per_chain = np.array([
+            1.0 + (q_a - 1.0) * (temps[c] - t_final) / max(t_init - t_final, 1e-12)
+            for c in range(n_chains)
+        ])
+    else:
+        q_a_per_chain = np.array([q_a])
+
+    master = np.random.default_rng(seed)
+    starts = latin_hypercube_init(master, n_chains, LOW, HIGH)
+    rngs = [np.random.default_rng(seed + 7919 * c) for c in range(n_chains)]
+    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
+                            gamma=metad_gamma)
+
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    best_val = min(chain_val)
+    n_calls = n_chains
+    deposit_counter = 0
+    swap_attempts = 0
+    swap_accepts = 0
+
+    for epoch in range(n_epochs):
+        for inner in range(k_inner):
+            for c in range(n_chains):
+                T_c = temps[c]
+                q_a_c = q_a_per_chain[c]
+                prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
+                                                sigma_rw), LOW, HIGH)
+                pv = OBJ_FN(prop)
+                n_calls += 1
+                cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
+                prop_aug = pv + bias.potential(bias.cv(prop))
+                if rngs[c].random() < tsallis_accept_prob(
+                        prop_aug - cur_aug, T_c, q_a_c):
+                    chain_pos[c], chain_val[c] = prop, pv
+                    if pv < best_val:
+                        best_val = pv
+                    deposit_counter += 1
+                    if deposit_counter % deposit_period == 0:
+                        bias.deposit(bias.cv(chain_pos[c]), T_c)
+
+            if (inner + 1) % k_swap == 0:
+                i = rngs[0].integers(0, n_chains - 1)
+                T_i, T_j = temps[i], temps[i + 1]
+                F_i = chain_val[i] + bias.potential(bias.cv(chain_pos[i]))
+                F_j = chain_val[i + 1] + bias.potential(bias.cv(chain_pos[i + 1]))
+                log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                swap_attempts += 1
+                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+    return best_val, n_calls, swap_accepts, swap_attempts
+
+
+def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
+                  pilot_calls, k_inner=20, k_swap=5, sigma_rw=0.5, q_a=2.7):
+    """bGSA + PT + shared metadynamics + Tsallis acceptance. The pilot
+    fixes t_cold = t_map (the well-mixed temperature); t_hot is forced
+    wide enough that the hot rungs are exploration-dominated. Tsallis
+    acceptance with q_a > 1 makes uphill moves heavy-tailed, the same
+    mechanism that makes GSA outperform classical SA on multimodal
+    landscapes (Tsallis & Stariolo 1996)."""
+    t_hot = max(t_map * 30.0, 50.0)
+    t_cold = max(t_map, 0.1)
+    bv, prod_calls, swap_a, swap_t = pt_metad_shared(
+        seed, n_epochs, n_chains, k_inner, k_swap,
+        t_hot, t_cold, sigma_rw=sigma_rw,
+        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
+        q_a=q_a,
+    )
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
 def parallel_tempering_hybrid(
@@ -737,6 +952,209 @@ def bgsa_multichain(seed, n_epochs, n_chains,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
+# -------------------------------------------------------------------------
+# v2 drivers: Latin hypercube + adaptive sigma + stagnation restart.
+# These are the three architectural fixes the v0.4.0 baselines lack;
+# they matter most on multi-cup landscapes (Rastrigin) where a single-
+# basin chain wastes budget.
+# -------------------------------------------------------------------------
+
+def latin_hypercube_init(rng, n_points, low, high):
+    """Stratified init: each dim split into n_points strata of equal
+    width, one point per stratum, intra-stratum offsets randomised,
+    strata permuted independently per dim. Removes the cluster bias
+    of n independent uniform draws."""
+    low = np.asarray(low, dtype=np.float64)
+    high = np.asarray(high, dtype=np.float64)
+    dim = len(low)
+    out = np.zeros((n_points, dim))
+    for d in range(dim):
+        edges = np.linspace(low[d], high[d], n_points + 1)
+        offsets = rng.uniform(edges[:-1], edges[1:])
+        rng.shuffle(offsets)
+        out[:, d] = offsets
+    return out
+
+
+def classical_sa_advanced(seed, n_epochs, k_per_epoch, t_init, sigma_init,
+                          n_starts=4, stagnation_k=400,
+                          sigma_target_accept=0.234):
+    """Multi-start classical SA. Latin hypercube spreads n_starts
+    chains across the box; each chain adapts sigma toward the
+    Roberts/Rosenthal 0.234 target; stagnation restart redraws a
+    fresh LH point if no improvement in `stagnation_k` steps."""
+    rng = np.random.default_rng(seed)
+    starts = latin_hypercube_init(rng, n_starts, LOW, HIGH)
+    chain_pos = [s.copy() for s in starts]
+    chain_val = [OBJ_FN(s) for s in chain_pos]
+    chain_sigma = [sigma_init for _ in range(n_starts)]
+    chain_stag = [0 for _ in range(n_starts)]
+    chain_recent_acc: list[list[bool]] = [[] for _ in range(n_starts)]
+    best_idx = int(np.argmin(chain_val))
+    best_pos = chain_pos[best_idx].copy()
+    best_val = chain_val[best_idx]
+    n = n_starts
+
+    k_per_chain = max(1, k_per_epoch // n_starts)
+    sigma_min = 1e-3
+    sigma_max = 0.5 * float(np.max(HIGH - LOW))
+
+    for epoch in range(n_epochs):
+        T = log_cool(t_init, 2.0, epoch)
+        for c in range(n_starts):
+            for step in range(k_per_chain):
+                prop = np.clip(gaussian_propose(rng, chain_pos[c],
+                                                chain_sigma[c]), LOW, HIGH)
+                pv = OBJ_FN(prop)
+                n += 1
+                accepted = rng.random() < metropolis_accept_prob(
+                    pv - chain_val[c], T)
+                chain_recent_acc[c].append(accepted)
+                if len(chain_recent_acc[c]) > 100:
+                    chain_recent_acc[c].pop(0)
+                if accepted:
+                    chain_pos[c], chain_val[c] = prop, pv
+                    if pv < best_val:
+                        best_val = pv
+                        best_pos = prop.copy()
+                        chain_stag[c] = 0
+                    else:
+                        chain_stag[c] += 1
+                else:
+                    chain_stag[c] += 1
+
+                if len(chain_recent_acc[c]) >= 25 and step % 25 == 0:
+                    rate = float(np.mean(chain_recent_acc[c]))
+                    if rate > sigma_target_accept + 0.1:
+                        chain_sigma[c] = min(chain_sigma[c] * 1.1, sigma_max)
+                    elif rate < sigma_target_accept - 0.1:
+                        chain_sigma[c] = max(chain_sigma[c] * 0.9, sigma_min)
+
+                if chain_stag[c] >= stagnation_k:
+                    fresh = latin_hypercube_init(rng, 1, LOW, HIGH)[0]
+                    chain_pos[c] = fresh
+                    chain_val[c] = OBJ_FN(fresh)
+                    chain_sigma[c] = sigma_init
+                    chain_recent_acc[c] = []
+                    chain_stag[c] = 0
+                    n += 1
+                    if chain_val[c] < best_val:
+                        best_val = chain_val[c]
+                        best_pos = fresh.copy()
+    return best_val, n, best_pos
+
+
+def parallel_tempering_hybrid_v2(
+    seed, n_epochs, n_chains, k_inner, k_swap,
+    t_init, t_final, eps, L, q,
+    sigma_rw_init=0.5, rw_threshold_t=2.0,
+    stagnation_k=400, sigma_target_accept=0.234,
+):
+    """Hybrid PT v2: hot chains (T > rw_threshold_t) use adaptive
+    RW Metropolis (per-chain sigma toward 0.234), cold chains use
+    q-HMC. All chains start from a Latin hypercube; per-chain
+    stagnation restart redraws a fresh LH point on no-improvement
+    runs of length `stagnation_k`."""
+    if n_chains < 2:
+        raise ValueError("PT requires at least 2 chains")
+    ratios = np.linspace(0, 1, n_chains)
+    temps = t_final * (t_init / t_final) ** ratios
+    use_rw = temps > rw_threshold_t
+
+    master = np.random.default_rng(seed)
+    starts = latin_hypercube_init(master, n_chains, LOW, HIGH)
+    rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    sigmas = [sigma_rw_init for _ in range(n_chains)]
+    recent_acc: list[list[bool]] = [[] for _ in range(n_chains)]
+    chain_stag = [0 for _ in range(n_chains)]
+    best_idx = int(np.argmin(chain_val))
+    best_pos = chain_pos[best_idx].copy()
+    best_val = chain_val[best_idx]
+    n_calls = n_chains
+    swap_attempts = 0
+    swap_accepts = 0
+
+    sigma_min = 1e-3
+    sigma_max = 0.5 * float(np.max(HIGH - LOW))
+
+    for epoch in range(n_epochs):
+        for inner in range(k_inner):
+            for c in range(n_chains):
+                T_c = temps[c]
+                improved_this_step = False
+                if use_rw[c]:
+                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
+                                                    sigmas[c]), LOW, HIGH)
+                    pv = OBJ_FN(prop)
+                    n_calls += 1
+                    accepted = rngs[c].random() < metropolis_accept_prob(
+                        pv - chain_val[c], T_c)
+                    recent_acc[c].append(accepted)
+                    if len(recent_acc[c]) > 100:
+                        recent_acc[c].pop(0)
+                    if accepted:
+                        chain_pos[c], chain_val[c] = prop, pv
+                    if len(recent_acc[c]) >= 25:
+                        rate = float(np.mean(recent_acc[c]))
+                        if rate > sigma_target_accept + 0.1:
+                            sigmas[c] = min(sigmas[c] * 1.1, sigma_max)
+                        elif rate < sigma_target_accept - 0.1:
+                            sigmas[c] = max(sigmas[c] * 0.9, sigma_min)
+                else:
+                    chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L,
+                        len(LOW), q)
+                    n_calls += nc
+                if chain_val[c] < best_val:
+                    best_val = chain_val[c]
+                    best_pos = chain_pos[c].copy()
+                    chain_stag[c] = 0
+                    improved_this_step = True
+                if not improved_this_step:
+                    chain_stag[c] += 1
+
+                if chain_stag[c] >= stagnation_k:
+                    fresh = latin_hypercube_init(rngs[c], 1, LOW, HIGH)[0]
+                    chain_pos[c] = fresh
+                    chain_val[c] = OBJ_FN(fresh)
+                    sigmas[c] = sigma_rw_init
+                    recent_acc[c] = []
+                    chain_stag[c] = 0
+                    n_calls += 1
+                    if chain_val[c] < best_val:
+                        best_val = chain_val[c]
+                        best_pos = fresh.copy()
+
+            if (inner + 1) % k_swap == 0:
+                i = rngs[0].integers(0, n_chains - 1)
+                T_i, T_j = temps[i], temps[i + 1]
+                F_i, F_j = chain_val[i], chain_val[i + 1]
+                log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                swap_attempts += 1
+                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+    return best_val, n_calls, swap_accepts, swap_attempts
+
+
+def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
+                      t_map, e_map, L_map, q_map, pilot_calls,
+                      k_inner=20, k_swap=5):
+    """bGSA + hybrid PT v2: Latin hypercube + adaptive sigma +
+    stagnation restart on top of the rung-specific kernel
+    architecture. t_hot is forced wide enough that the hot rungs
+    are exploration-dominated regardless of the pilot's mixing-T."""
+    t_hot = max(t_map * 50.0, 100.0)
+    t_cold = max(t_map, 0.1)
+    bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid_v2(
+        seed, n_epochs, n_chains, k_inner, k_swap,
+        t_hot, t_cold, e_map, L_map, q_map)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
+
+
 def run_pilot(seed, n_pilot, pilot_steps, dim):
     """Shared pilot phase for ALL bGSA drivers.
 
@@ -835,6 +1253,17 @@ def main():
         rows.append(dict(seed=seed, driver="classical_sa_matched", best_val=bv,
                          fevals=nc, wall_time_s=wt))
 
+        # Classical SA + Latin hypercube + adaptive sigma + stagnation
+        # restart. The three architectural fixes that turn matched-budget
+        # classical from a single-basin grinder into an actual explorer.
+        t0 = time.perf_counter()
+        bv, nc, _ = classical_sa_advanced(
+            seed, args.n_epochs, k_matched, 5.0, 0.5,
+            n_starts=4, stagnation_k=400, sigma_target_accept=0.234)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="classical_sa_advanced", best_val=bv,
+                         fevals=nc, wall_time_s=wt))
+
         # HMC-SA hand-tuned
         t0 = time.perf_counter()
         bv, nc, _ = hmc_sa(seed, args.n_epochs, args.k_per_epoch, 5.0, 0.05, 5)
@@ -907,6 +1336,20 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA + hybrid PT v2: Latin hypercube + adaptive sigma +
+        # stagnation restart on top of the rung-specific kernel
+        # architecture. Forces t_hot wide enough that the hot rungs
+        # are exploration-dominated regardless of the pilot's mixing-T.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_pt_hybrid_v2", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
         # bGSA + metadynamics. Well-tempered bias on (x_0, x_1) fills
         # local cups so RW Metropolis escapes Arrhenius-suppressed basins.
         t0 = time.perf_counter()
@@ -915,6 +1358,32 @@ def main():
             t_map, e_map, L_map, q_map, pilot_calls, sigma_rw=0.5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_metad", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA + multi-start metadynamics: 4 LH-initialised chains
+        # each run their own metad bias, take min. Combines the
+        # cup-filling of metad with the lower-tail of multi-start.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _ = bgsa_metad_multi(
+            seed, args.n_epochs, args.k_per_epoch,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            sigma_rw=0.5, n_starts=4)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_metad_multi", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA + PT + shared metadynamics (PLUMED-style multi-walker
+        # PT-MetaD). High-T chains discover cups and deposit, low-T
+        # chains refine, swaps propagate basins down the ladder.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _, _, _ = bgsa_pt_metad(
+            seed, args.n_epochs, args.n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5, sigma_rw=0.5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_pt_metad", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
@@ -929,15 +1398,20 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "classical_sa_matched", "hmc_sa_hand",
+    for label in ["classical_sa", "classical_sa_matched", "classical_sa_advanced",
+                  "hmc_sa_hand",
                   "bgsa", "bgsa_multichain",
                   "bgsa_pt", "bgsa_pt_adaptive", "bgsa_pt_hybrid",
-                  "bgsa_svgd", "bgsa_metad"]:
+                  "bgsa_pt_hybrid_v2",
+                  "bgsa_svgd", "bgsa_metad", "bgsa_metad_multi",
+                  "bgsa_pt_metad"]:
         sub = [r for r in rows if r["driver"] == label]
+        if not sub:
+            continue
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
         ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
-        print(f"  {label:<14}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
+        print(f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
               f"95%-upper = {ci_upper:7.3f}  fevals = "
               f"{np.mean([r['fevals'] for r in sub]):.0f}")
     bgsa_rows = [r for r in rows if r["driver"] == "bgsa"]

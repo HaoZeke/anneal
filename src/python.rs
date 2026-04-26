@@ -280,9 +280,7 @@ fn run_hmc(
     seed: u64,
 ) -> PyResult<PyHistory> {
     use crate::cool::LogCool;
-    use crate::hmc::{
-        GaussianMomentum, HmcSaSampler, LeapfrogIntegrator, QGaussianMomentum,
-    };
+    use crate::hmc::{GaussianMomentum, HmcSaSampler, LeapfrogIntegrator, QGaussianMomentum};
 
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -300,18 +298,16 @@ fn run_hmc(
         )));
     }
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
-    let obj = CallableObjective { fn_: obj_fn, bounds };
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let cool = LogCool::new(t_init, 2.0_f64);
     let integrator = LeapfrogIntegrator::new(epsilon, l_steps, t_init);
     let history = if q <= 1.0 + 1e-9 {
-        let sampler = HmcSaSampler::with_momentum(
-            obj,
-            grad,
-            cool.clone(),
-            GaussianMomentum,
-            integrator,
-        );
+        let sampler =
+            HmcSaSampler::with_momentum(obj, grad, cool.clone(), GaussianMomentum, integrator);
         crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
     } else {
         let sampler = HmcSaSampler::with_momentum(
