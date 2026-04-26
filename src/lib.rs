@@ -13,12 +13,16 @@ pub mod accept;
 pub mod cool;
 /// Error variants returned by `anneal-core`.
 pub mod error;
+/// Per-epoch run history returned by `run_rs`.
+pub mod history;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
 pub mod laws;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
+/// The pure-Rust SA driver loop.
+pub mod runner;
 /// Reserved for the typed component algebra (Spec 2, v0.3.0).
 pub mod types;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
@@ -34,7 +38,9 @@ pub mod python;
 pub use accept::AcceptRule;
 pub use cool::Cooling;
 pub use error::Error;
+pub use history::{EpochLine, History, State};
 pub use laws::LawViolation;
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
+pub use runner::run_rs;
 pub use variant::SaVariant;

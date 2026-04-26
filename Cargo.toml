@@ -58,3 +58,7 @@ asset = [{ from = "include/anneal-core.hpp", to = "." }]
 [profile.dist]
 inherits = "release"
 lto      = "thin"
+
+[[bench]]
+name    = "sa_bench"
+harness = false
