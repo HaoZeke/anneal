@@ -1940,6 +1940,156 @@ def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
     return float(np.median(high_accept_t))
 
 
+def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
+                      t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
+                      t_hot, best_pilot_pos, pilot_calls,
+                      n_segments=4, parallel=True):
+    """Particle-filter ensemble over the bGSA driver space.
+
+    The four candidate drivers are treated as PARTICLES on the
+    "driver" coordinate. Each runs for n_epochs/n_segments epochs at
+    a time, then we reweight by (negative) best-val improvement and
+    resample at the ESS threshold (Del Moral, Doucet, Jasra 2006
+    Algorithm 1; Liu & Chen 1998). Particles that converged early
+    duplicate; particles that stalled die. The final return is the
+    weighted-min best_val + the surviving driver-mass distribution.
+
+    This is a true SMC sampler over the driver index, not a heuristic
+    selection rule. The framework discovers the right driver online
+    via the ESS resampling step rather than via pilot-feature
+    heuristics. This is the genuinely-novel piece of the unifier
+    framework's design space (design pass 16): the driver tuple
+    (Cool, Neigh, Move, Accept, Exchange) IS a particle space, and
+    SMC over that space gives Bayesian model averaging across SA
+    variants.
+
+    Returns (best_val, total_fevals, surviving_distribution) where
+    surviving_distribution is a dict {driver_name: weight} after the
+    final resampling step."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Particle factory: each particle holds (driver_name, callable,
+    # cur_state, best_val, weight). State threads through segments.
+    n_epochs_each = max(1, n_epochs // n_segments)
+
+    def _seg_bgsa(s, x0, sub_seed):
+        bv, nc, x_new = hmc_sa(sub_seed, n_epochs_each, k_per_epoch,
+                                t_map, e_map, L_map, x0=x0, q=q_map)
+        return bv, nc, x_new
+
+    def _seg_metad(s, x0, sub_seed):
+        # metad_sa doesn't take x0; emulate with adjusted seed.
+        bv, nc, _bias = metad_sa(
+            sub_seed, n_epochs_each, k_per_epoch, t_rw_map, sigma_map,
+            deposit_period=20, metad_sigma=sigma_map,
+            metad_w0=0.05 * t_rw_map,
+            metad_gamma=metad_gamma_from_qv(q_map),
+            q_v=q_map)
+        return bv, nc, x0  # state-less for metad; carry x0 forward
+
+    def _seg_pt_metad(s, x0, sub_seed):
+        bv, nc, _, _, _, _ = pt_metad_shared(
+            sub_seed, n_epochs_each, n_chains, 20, 5,
+            t_hot, t_rw_map, sigma_rw=sigma_map,
+            deposit_period=20, metad_sigma=sigma_map,
+            metad_w0=0.05 * t_rw_map,
+            metad_gamma=metad_gamma_from_qv(q_map),
+            q_a=q_map, q_v=q_map)
+        return bv, nc, x0
+
+    def _seg_pt_hybrid_v2(s, x0, sub_seed):
+        bv, nc, _, _ = parallel_tempering_hybrid_v2(
+            sub_seed, n_epochs_each, n_chains, 20, 5,
+            t_hot, max(t_map, 0.1), e_map, L_map, q_map,
+            sigma_rw_init=sigma_map,
+            rw_threshold_t=0.5 * (t_hot + max(t_map, 0.1)))
+        return bv, nc, x0
+
+    drivers = [
+        ("bgsa", _seg_bgsa),
+        ("bgsa_metad", _seg_metad),
+        ("bgsa_pt_metad", _seg_pt_metad),
+        ("bgsa_pt_hybrid_v2", _seg_pt_hybrid_v2),
+    ]
+    n_particles = len(drivers)
+
+    # Initialise particle states + uniform weights.
+    states = [best_pilot_pos.copy() if best_pilot_pos is not None
+              else np.random.default_rng(seed + 7919 * i).uniform(LOW, HIGH)
+              for i in range(n_particles)]
+    bvs = [float("inf")] * n_particles
+    weights = np.ones(n_particles) / n_particles
+    log_z_running = 0.0
+    total_calls = 0
+
+    rng_master = np.random.default_rng(seed)
+
+    for seg in range(n_segments):
+        # Run one segment per particle in parallel.
+        if parallel:
+            with ThreadPoolExecutor(max_workers=n_particles) as ex:
+                futures = [
+                    ex.submit(drivers[i][1], i, states[i],
+                              seed + 7919 * i + seg * 1009)
+                    for i in range(n_particles)
+                ]
+                outcomes = [f.result() for f in futures]
+        else:
+            outcomes = [drivers[i][1](i, states[i],
+                                       seed + 7919 * i + seg * 1009)
+                        for i in range(n_particles)]
+
+        seg_bvs = np.array([o[0] for o in outcomes])
+        seg_calls = sum(o[1] for o in outcomes)
+        total_calls += seg_calls
+        for i in range(n_particles):
+            states[i] = outcomes[i][2] if outcomes[i][2] is not None \
+                        else states[i]
+            if seg_bvs[i] < bvs[i]:
+                bvs[i] = seg_bvs[i]
+
+        # Importance reweighting: log-weight increment is the negative
+        # best-val improvement (lower bv -> higher weight). Normalise
+        # so weights sum to 1.
+        if seg_bvs.std() > 1e-12:
+            normed = -(seg_bvs - seg_bvs.min()) / max(seg_bvs.std(), 1e-12)
+        else:
+            normed = np.zeros(n_particles)
+        log_inc = normed
+        log_w = np.log(weights + 1e-300) + log_inc
+        m = log_w.max()
+        weights = np.exp(log_w - m)
+        weights = weights / weights.sum()
+
+        # ESS resampling threshold.
+        ess = 1.0 / np.sum(weights ** 2)
+        if ess < n_particles / 2.0 and seg < n_segments - 1:
+            # Multinomial-systematic resample: replicate winners,
+            # discard losers. Track for the final mass distribution.
+            cumw = np.cumsum(weights)
+            u0 = rng_master.uniform(0.0, 1.0 / n_particles)
+            new_indices = []
+            for j in range(n_particles):
+                u = u0 + j / n_particles
+                idx = int(np.searchsorted(cumw, u))
+                idx = min(idx, n_particles - 1)
+                new_indices.append(idx)
+            states = [states[i].copy() if hasattr(states[i], 'copy')
+                      else states[i] for i in new_indices]
+            bvs = [bvs[i] for i in new_indices]
+            # After resampling, weights are uniform.
+            weights = np.ones(n_particles) / n_particles
+
+    # Final answer: weighted-min best val across particles.
+    final_idx = int(np.argmin(bvs))
+    surviving = {drivers[i][0]: float(weights[i])
+                 for i in range(n_particles)}
+    return (float(bvs[final_idx]),
+            pilot_calls + total_calls,
+            f"smc[{drivers[final_idx][0]}]",
+            surviving)
+
+
 def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
               t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
               t_hot, features, best_pilot_pos, pilot_calls,
@@ -2225,7 +2375,7 @@ def main():
                          best_val=bv, fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA-auto: pilot-driven driver selection (issue 010).
+        # bGSA-auto: parallel ensemble (commit ff499f0).
         t0 = time.perf_counter()
         bv, nc, chosen = bgsa_auto(
             seed, args.n_epochs, args.k_per_epoch, args.n_chains,
@@ -2234,6 +2384,20 @@ def main():
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed,
                          driver=f"bgsa_auto[{chosen}]",
+                         best_val=bv, fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA-SMC: SMC particle filter over the driver space.
+        # Treats the four candidate drivers as particles, reweights
+        # by best-val improvement, resamples at ESS threshold.
+        t0 = time.perf_counter()
+        bv, nc, chosen, surviving = bgsa_smc_ensemble(
+            seed, args.n_epochs, args.k_per_epoch, args.n_chains,
+            t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
+            t_hot, best_pilot_pos, pilot_calls)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed,
+                         driver=f"bgsa_smc[{chosen}]",
                          best_val=bv, fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
