@@ -28,19 +28,29 @@ import numpy as np
 # (ROSENBR), separable polynomials (CUBE), trigonometric multimodality
 # (BOX3, MEYER3), singular Hessians (POWELLSG, BROWNDEN), etc.
 DEFAULT_MANIFEST = [
-    "ROSENBR",   # n=2  Rosenbrock 2D ravine; classical SA hard
-    "BEALE",     # n=2  Beale: f* at (3, 0.5)
-    "BRKMCC",    # n=2  Brkmcc
-    "CUBE",      # n=2  Cubic ravine
-    "POWELLSG",  # n=4  Powell singular function
-    "BROWNDEN",  # n=4  Brown-Dennis nonlinear LSQ
-    "BOX3",      # n=3  Box 3D
-    "BIGGS6",   # n=6  Biggs EXP6
-    "WATSON",   # n=12 Watson nonlinear LSQ; harder
-    "EXTROSNB", # n=10 Extended Rosenbrock 10D
-    "GULF",     # n=3  Gulf research and development
-    "OSBORNEA", # n=5  Osborne A nonlinear LSQ
+    # (name, sif_params dict for problem-size capping)
+    ("ROSENBR",  None),                # n=2  Rosenbrock ravine
+    ("BEALE",    None),                # n=2  Beale: f* at (3, 0.5)
+    ("BRKMCC",   None),                # n=2  Brkmcc
+    ("CUBE",     None),                # n=2  Cubic ravine
+    ("POWELLSG", {"N": 4}),            # n=4  Powell singular (cap from default 5000)
+    ("BROWNDEN", None),                # n=4  Brown-Dennis nonlinear LSQ
+    ("BOX3",     None),                # n=3  Box 3D
+    ("BIGGS6",   None),                # n=6  Biggs EXP6
+    ("WATSON",   {"N": 12}),           # n=12 Watson nonlinear LSQ
+    ("EXTROSNB", {"N": 10}),           # n=10 Extended Rosenbrock (cap from default 1000)
+    ("GULF",     None),                # n=3  Gulf research and development
+    ("OSBORNEA", None),                # n=5  Osborne A nonlinear LSQ
 ]
+
+
+# IEEE-754 sentinel CUTEst uses for "no bound": 1e+20.
+_BOUND_INF = 1e19
+
+
+def _is_finite_bound(b: np.ndarray) -> np.ndarray:
+    """Return mask of bounds that are NOT the CUTEst -1e20 / +1e20 sentinel."""
+    return np.isfinite(b) & (np.abs(b) < _BOUND_INF)
 
 
 def cutest_env() -> dict:
@@ -91,17 +101,35 @@ class CutestProblem:
     f_star: float | None  # may be None for problems without a stored optimum
 
 
-def load(name: str, x_box: float = 5.0, f_star: float | None = None) -> CutestProblem:
-    """Loads a CUTEst problem and wraps it as a CutestProblem. The SA
-    runner needs box bounds; if the underlying problem is unconstrained
-    we synthesise a `[-x_box, x_box]^n` box around `x0`. The Problem's
-    own bl/bu are used when finite, falling back to the synth box."""
+def load(
+    name: str,
+    sif_params: dict | None = None,
+    x_box: float = 5.0,
+    f_star: float | None = None,
+) -> CutestProblem:
+    """Loads a CUTEst problem and wraps it as a CutestProblem.
+
+    Args:
+        name: SIF problem id.
+        sif_params: pycutest sifParams dict to fix problem size (e.g.,
+            {"N": 10} caps EXTROSNB at n=10 instead of its default 1000).
+        x_box: half-width of the synthetic box around `x0` for problems
+            whose CUTEst-side bounds are the +-1e20 "no bound" sentinel.
+        f_star: known global optimum if available (used by the bench
+            "solved" predicate). None means "use a tolerance from x0".
+    """
     setup_cutest_env()
     import pycutest
-    p = pycutest.import_problem(name)
+    p = pycutest.import_problem(name, sifParams=sif_params)
 
-    bl = np.where(np.isfinite(p.bl), p.bl, p.x0 - x_box).astype(np.float64)
-    bu = np.where(np.isfinite(p.bu), p.bu, p.x0 + x_box).astype(np.float64)
+    bl_finite = _is_finite_bound(p.bl)
+    bu_finite = _is_finite_bound(p.bu)
+    bl = np.where(bl_finite, p.bl, p.x0 - x_box).astype(np.float64)
+    bu = np.where(bu_finite, p.bu, p.x0 + x_box).astype(np.float64)
+    # Guard pathological cases where bl == bu after substitution.
+    same = bl >= bu
+    bl[same] -= x_box
+    bu[same] += x_box
 
     def fn(x: np.ndarray) -> float:
         x_arr = np.asarray(x, dtype=np.float64).reshape(-1)
@@ -110,24 +138,28 @@ def load(name: str, x_box: float = 5.0, f_star: float | None = None) -> CutestPr
     return CutestProblem(name=name, dim=p.n, fn=fn, low=bl, high=bu, f_star=f_star)
 
 
-def list_default_manifest() -> list[str]:
+def list_default_manifest() -> list[tuple[str, dict | None]]:
     return list(DEFAULT_MANIFEST)
+
+
+def load_default_manifest() -> list[CutestProblem]:
+    """Load every (name, sif_params) pair from the default manifest."""
+    return [load(name, sif_params=params) for name, params in DEFAULT_MANIFEST]
 
 
 def main():
     """Smoke test: load every problem in the default manifest, evaluate
     f(x0), and print n / f(x0). Use as `pixi run -e verify cutest-smoke`."""
     setup_cutest_env()
-    import pycutest
     print(f"Loading {len(DEFAULT_MANIFEST)} CUTEst problems...\n")
     print(f"{'name':<10} {'n':>4} {'f(x0)':>16} {'box low':>10} {'box high':>10}")
     print("-" * 56)
     bad = []
-    for name in DEFAULT_MANIFEST:
+    for name, params in DEFAULT_MANIFEST:
         try:
-            prob = load(name)
-            fval = prob.fn(np.where(np.isfinite(prob.low + prob.high) & (prob.low < prob.high),
-                                    (prob.low + prob.high) / 2, np.zeros(prob.dim)))
+            prob = load(name, sif_params=params)
+            mid = (prob.low + prob.high) / 2
+            fval = prob.fn(mid)
             print(f"{name:<10} {prob.dim:>4} {fval:>16.4g} {prob.low.min():>10.2g} {prob.high.max():>10.2g}")
         except Exception as e:
             print(f"{name:<10} FAIL: {type(e).__name__}: {e}")

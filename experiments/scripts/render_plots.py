@@ -32,7 +32,7 @@ def aggregate(rows):
     NaN otherwise (failed)."""
     best = defaultdict(lambda: {"fevals": [], "best_val": [], "dim": None, "solved": []})
     for r in rows:
-        key = (r["problem"], r["solver"])
+        key = (r["problem"], r["driver"])
         best[key]["fevals"].append(int(r["fevals"]))
         best[key]["best_val"].append(float(r["best_val"]))
         best[key]["dim"] = int(r["dim"])
@@ -51,7 +51,7 @@ def main():
     agg = aggregate(rows)
 
     problems = sorted({r["problem"] for r in rows})
-    solvers = sorted({r["solver"] for r in rows})
+    solvers = sorted({r["driver"] for r in rows})
     n_p, n_s = len(problems), len(solvers)
 
     fevals_matrix = np.full((n_p, n_s), np.nan, dtype=float)
@@ -90,7 +90,7 @@ def main():
     for j, solver in enumerate(solvers):
         pts = []
         for r in rows:
-            if r["solver"] != solver:
+            if r["driver"] != solver:
                 continue
             pts.append((float(r["fevals"]), float(r["best_val"])))
         pareto_runs.append((solver, np.asarray(pts)))
