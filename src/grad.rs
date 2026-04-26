@@ -8,6 +8,46 @@ use eindir_core::Objective;
 use ndarray::{Array1, ArrayView1};
 use num_traits::Float;
 
+/// Wraps a user-supplied analytic gradient closure into a `Gradient` impl.
+/// Use this when an analytic gradient is known. For black-box objectives
+/// fall back to `FiniteDiffGradient`. For user-defined Rust objectives
+/// where neither is available, use `AutoDiffGradient` (forward-mode dual
+/// numbers via the `dual_num` crate; planned for the v0.4 surface --
+/// requires making the `Objective` trait generic over `Float` first,
+/// since dual_num's `Dual<f64>` is not a numpy `f64` literal).
+pub struct AnalyticGradient<F>
+where
+    F: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    /// The analytic gradient closure: `x |-> grad f(x)`.
+    pub grad_fn: F,
+    /// Number of dimensions.
+    pub dim: usize,
+}
+
+impl<F> AnalyticGradient<F>
+where
+    F: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    /// Constructs from a closure plus dimension.
+    pub fn new(dim: usize, grad_fn: F) -> Self {
+        Self { grad_fn, dim }
+    }
+}
+
+impl<F> Gradient<f64> for AnalyticGradient<F>
+where
+    F: Fn(ArrayView1<f64>) -> Array1<f64> + Send + Sync,
+{
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        (self.grad_fn)(x)
+    }
+
+    fn dim(&self) -> usize {
+        self.dim
+    }
+}
+
 /// First-derivative interface. Implementors that own an analytic
 /// gradient implement this directly; black-box objectives use
 /// `FiniteDiffGradient`.

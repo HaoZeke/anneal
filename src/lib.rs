@@ -55,7 +55,7 @@ pub use history::{EpochLine, History, State};
 pub use laws::LawViolation;
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
-pub use grad::{FiniteDiffGradient, Gradient};
+pub use grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult};
 pub use methods::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use runner::{run_rs, run_rs_variant};

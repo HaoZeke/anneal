@@ -215,6 +215,87 @@ impl Objective<f64> for CallableObjective {
     }
 }
 
+/// Internal gradient adapter: a Python callable that takes a numpy
+/// array `x` and returns a numpy array `grad f(x)` of the same shape.
+/// Ceres-style plug-in: PyTorch users pass a callable that does
+/// `tensor.requires_grad_(True); f(tensor).backward(); return tensor.grad.numpy()`,
+/// JAX users pass `jax.grad(f)`, and analytic users pass a hand-coded
+/// gradient. The pyo3 surface remains agnostic.
+struct CallablePyGradient {
+    fn_: Py<PyAny>,
+    dim: usize,
+}
+
+impl crate::grad::Gradient<f64> for CallablePyGradient {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        Python::attach(|py| {
+            let owned: Vec<f64> = x.iter().copied().collect();
+            let py_arr = PyArray1::from_vec(py, owned);
+            let r = self
+                .fn_
+                .call1(py, (py_arr,))
+                .expect("anneal.run_hmc: gradient callable raised");
+            let arr = r
+                .extract::<numpy::PyReadonlyArray1<f64>>(py)
+                .expect("anneal.run_hmc: gradient callable returned non-array");
+            Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
+        })
+    }
+
+    fn dim(&self) -> usize {
+        self.dim
+    }
+}
+
+/// Runs HMC-driven SA with a user-supplied gradient and returns a `History`.
+///
+/// Args:
+///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
+///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray` -- the
+///            gradient of `obj_fn`. Pass `jax.grad(f)`, a torch
+///            `lambda x: f(torch.tensor(x, requires_grad=True)).grad`,
+///            or a hand-coded analytic gradient. Ceres-style plug-in.
+///   low, high: numpy box bounds.
+///   t_init: initial temperature for the log-cooling schedule.
+///   epsilon: leapfrog step size.
+///   l_steps: number of leapfrog steps per HMC trajectory.
+///   n_epochs, steps_per_epoch, seed.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, n_epochs = 100, steps_per_epoch = 50, seed = 42))]
+#[allow(clippy::too_many_arguments)]
+fn run_hmc(
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    t_init: f64,
+    epsilon: f64,
+    l_steps: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> PyResult<PyHistory> {
+    use crate::cool::LogCool;
+    use crate::hmc::{HmcSaSampler, LeapfrogIntegrator};
+
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective { fn_: obj_fn, bounds };
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let cool = LogCool::new(t_init, 2.0_f64);
+    let integrator = LeapfrogIntegrator::new(epsilon, l_steps, t_init);
+    let sampler = HmcSaSampler::new(obj, grad, cool.clone(), integrator);
+    let history = crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed);
+    Ok(PyHistory::from(history))
+}
+
 // ---------------------------------------------------------------------------
 // Preset enum + dispatch.
 // ---------------------------------------------------------------------------
@@ -269,17 +350,17 @@ fn run(
         Preset::Boltzmann(p) => {
             let v = boltzmann(obj, p.t_init, p.sigma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
         }
         Preset::Fast(p) => {
             let v = fast(obj, p.t_init, p.gamma)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
         }
         Preset::Gsa(p) => {
             let v = gsa(obj, p.t_init, p.q_v, p.q_a)
                 .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
-            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+            crate::runner::run_rs_variant(v, n_epochs, steps_per_epoch, seed)
         }
     };
     Ok(PyHistory::from(history))
@@ -299,5 +380,6 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEpochLine>()?;
     m.add_class::<PyHistory>()?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
+    m.add_function(wrap_pyfunction!(run_hmc, m)?)?;
     Ok(())
 }

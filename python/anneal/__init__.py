@@ -19,6 +19,7 @@ from anneal._core import (
     History,
     __version__,
     run,
+    run_hmc,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "History",
     "__version__",
     "run",
+    "run_hmc",
 ]
