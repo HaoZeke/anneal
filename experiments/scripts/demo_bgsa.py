@@ -1942,27 +1942,71 @@ def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
 
 def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
               t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-              t_hot, features, best_pilot_pos, pilot_calls):
-    """Issue 010 -- pilot-driven driver-selection layer. Picks the
-    production bGSA driver based on landscape features extracted
-    during the pilot, then runs it. Returns (best_val, fevals,
-    chosen_driver_name)."""
-    chosen = select_bgsa_driver(features, q_map)
-    if chosen == "bgsa":
-        bv, nc, _ = hmc_sa(seed, n_epochs, k_per_epoch,
-                           t_map, e_map, L_map, x0=best_pilot_pos, q=q_map)
-        return bv, pilot_calls + nc, chosen
-    if chosen == "bgsa_pt_metad":
+              t_hot, features, best_pilot_pos, pilot_calls,
+              parallel=True):
+    """bGSA-auto = parallel ensemble of candidate drivers.
+
+    Runs the four bGSA-family production drivers concurrently from
+    the same pilot, with each driver allocated 1/n_drivers of the
+    requested epoch budget so the ENSEMBLE matches the single-driver
+    feval cost. Returns (best_val_across_drivers, total_fevals,
+    "ensemble[<best>]") -- the chosen tag carries the driver that
+    achieved the minimum best_val on this seed.
+
+    No feature heuristic; the framework picks the winner by actual
+    observed outcome. Standard parallel-MCMC pattern (Geyer 1991,
+    Earl & Deem 2005). Optional `parallel=True` uses
+    concurrent.futures.ThreadPoolExecutor; numpy releases the GIL on
+    bulk ops so threads see real CPU parallelism. Set parallel=False
+    to run sequentially when reproducibility-by-thread-order is
+    required."""
+    from concurrent.futures import ThreadPoolExecutor
+    # Allocate budget per driver so the ensemble matches the single-
+    # driver wall-clock target. n_epochs / n_drivers per driver,
+    # rounded up so each driver gets >= 1 epoch.
+    n_drivers = 4
+    n_epochs_each = max(1, n_epochs // n_drivers)
+
+    def _run_bgsa():
+        bv, nc, _ = hmc_sa(seed, n_epochs_each, k_per_epoch,
+                            t_map, e_map, L_map,
+                            x0=best_pilot_pos, q=q_map)
+        return "bgsa", bv, nc
+
+    def _run_bgsa_metad():
+        bv, nc, _, _, _, _ = bgsa_metad(
+            seed + 1, n_epochs_each, k_per_epoch,
+            t_rw_map, e_map, L_map, q_map, pilot_calls=0,
+            sigma_rw=sigma_map)
+        return "bgsa_metad", bv, nc
+
+    def _run_bgsa_pt_metad():
         bv, nc, _, _, _, _, _, _, _ = bgsa_pt_metad(
-            seed, n_epochs, n_chains, t_rw_map, e_map, L_map, q_map,
-            pilot_calls, k_inner=20, k_swap=5, sigma_rw=sigma_map,
-            t_hot=t_hot)
-        return bv, nc, chosen
-    # default: bgsa_metad
-    bv, nc, _, _, _, _ = bgsa_metad(
-        seed, n_epochs, k_per_epoch,
-        t_rw_map, e_map, L_map, q_map, pilot_calls, sigma_rw=sigma_map)
-    return bv, nc, chosen
+            seed + 2, n_epochs_each, n_chains,
+            t_rw_map, e_map, L_map, q_map, pilot_calls=0,
+            k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
+        return "bgsa_pt_metad", bv, nc
+
+    def _run_bgsa_pt_hybrid_v2():
+        bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
+            seed + 3, n_epochs_each, n_chains,
+            t_map, e_map, L_map, q_map, pilot_calls=0,
+            k_inner=20, k_swap=5, t_hot=t_hot)
+        return "bgsa_pt_hybrid_v2", bv, nc
+
+    runners = [_run_bgsa, _run_bgsa_metad, _run_bgsa_pt_metad,
+               _run_bgsa_pt_hybrid_v2]
+
+    if parallel:
+        with ThreadPoolExecutor(max_workers=len(runners)) as ex:
+            outcomes = list(ex.map(lambda f: f(), runners))
+    else:
+        outcomes = [f() for f in runners]
+
+    # Pick the winner by min best_val.
+    best_name, best_bv, _ = min(outcomes, key=lambda x: x[1])
+    total_calls = pilot_calls + sum(o[2] for o in outcomes)
+    return best_bv, total_calls, f"ensemble[{best_name}]"
 
 
 def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
