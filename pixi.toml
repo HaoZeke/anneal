@@ -72,8 +72,13 @@ sympy       = "*"
 pytest      = "*"
 pytest-cov  = "*"
 numpy       = ">=1.24"
+matplotlib  = ">=3.6"
+scipy       = ">=1.11"
 openjdk     = ">=17"
 curl        = "*"
+
+[feature.verify.pypi-dependencies]
+chemparseplot = ">=1.7.0"
 
 [feature.verify.activation.env]
 # Mirror the default env's empty rustflags so that any incidental cargo
@@ -94,8 +99,11 @@ exp2            = "PYTHONPATH=. python experiments/exp2_cancellation.py --out da
 exp3            = "PYTHONPATH=. python experiments/exp3_trajectory_bias.py --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
 exp4            = "PYTHONPATH=. python experiments/exp4_compensated.py --out data/exp4_compensated.csv --seeds 32 --n-epochs 200"
 exp3-summary    = "PYTHONPATH=. python experiments/scripts/exp3_summary.py data/exp3_trajectory.csv"
+bench-suite     = "PYTHONPATH=. python experiments/scripts/run_benchmarks.py --out data/benchmarks.csv --seeds 5 --n-epochs 100"
+bench-plots     = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/benchmarks.csv data/", depends-on = ["bench-suite"] }
 all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
 all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "exp3-summary"] }
+all-bench       = { depends-on = ["bench-suite", "bench-plots"] }
 
 [environments]
 default = { solve-group = "default" }
