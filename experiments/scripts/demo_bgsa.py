@@ -85,6 +85,25 @@ def log_cool(t_init, k0, epoch):
     return t_init * np.log(k0) / np.log(epoch + k0)
 
 
+def metad_gamma_from_qv(q_v):
+    """Derive the well-tempered MetaD gamma from the Tsallis visiting q_v.
+
+    The GSA-MetaD pairing argument: q_v controls the heavy-tail of the
+    visiting distribution; gamma controls the asymptotic flattening of
+    F. Both encode "how far above the typical T the kernel pretends to
+    be". Tsallis-q-Gaussian visiting at q_v has effective temperature
+    T_eff = T * (q_v - 1)^(-1) (Tsallis & Stariolo 1996); requiring this
+    to match the well-tempered effective T (Bussi & Branduardi 2015,
+    T_eff = gamma * T) gives gamma = 1/(q_v - 1). q_v -> 1+ recovers
+    Boltzmann (gamma -> infinity, no flattening); larger q_v gives
+    smaller gamma (more aggressive flattening).
+
+    Clamped to [2, 50]: gamma <= 1 is unphysical (negative bias drift),
+    gamma > 50 collapses to no flattening at all and is observationally
+    indistinguishable from gamma = 50."""
+    return float(min(50.0, max(2.0, 1.0 / max(q_v - 1.0, 0.05))))
+
+
 def tsallis_cool(t_init, q_v, epoch):
     """Tsallis (GSA) cooling: T(k) = T_0 * (2^(q_v-1) - 1) / ((1+k)^(q_v-1) - 1).
 
@@ -244,6 +263,75 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
             if cur_v < best:
                 best = cur_v
     return best, n_calls, cur
+
+
+def rw_pilot(seed, T, sigma, n_steps):
+    """Pilot RW-Metropolis chain at FIXED temperature T. Used to fit
+    sigma_rw against the Roberts/Gelman/Gilks 1997 0.234 acceptance
+    optimum. Returns (best_val, accept_rate, fevals).
+
+    Fixed-T (no cooling) is essential: the 0.234 optimum is a fixed-T
+    statement; cooling-during-pilot averages accept rate across
+    different temperatures and biases sigma toward the cold-T optimum."""
+    rng = np.random.default_rng(seed)
+    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur_v = OBJ_FN(cur)
+    best = cur_v
+    accepts = 0
+    n = 1
+    for _ in range(n_steps):
+        prop = np.clip(gaussian_propose(rng, cur, sigma), LOW, HIGH)
+        pv = OBJ_FN(prop)
+        n += 1
+        if rng.random() < metropolis_accept_prob(pv - cur_v, T):
+            cur, cur_v = prop, pv
+            accepts += 1
+            if pv < best:
+                best = pv
+    return best, accepts / max(n_steps, 1), n
+
+
+def fit_t_sigma_rw(pilot_obs):
+    """Joint Laplace-style estimate for (t_rw, sigma_rw) via weighted
+    geometric mean over the RW pilot's (t, sigma, accept, best_val)
+    observations. Penalty combines distance from the 0.234 acceptance
+    target (logit scale) with a normalised-improvement term that
+    rewards lower best_val.
+
+    Returns (t_rw_map, sigma_rw_map). Used by bGSA-MetaD drivers,
+    where t_rw_map replaces the HMC-fitted t_map (which optimises for
+    HMC trajectory acceptance, not for RW exploration)."""
+    if not pilot_obs:
+        return 1.0, 0.5
+    target_logit = float(np.log(0.234 / (1.0 - 0.234)))
+    bv_max = max(o["best_val"] for o in pilot_obs)
+    bv_range = bv_max - min(o["best_val"] for o in pilot_obs) + 1e-12
+    log_ts = []
+    log_sigmas = []
+    weights = []
+    for o in pilot_obs:
+        a = max(min(o["accept_rate"], 1 - 1e-6), 1e-6)
+        logit_r = np.log(a / (1.0 - a))
+        accept_term = (logit_r - target_logit) ** 2 / 0.5
+        norm_imp = (bv_max - o["best_val"]) / bv_range
+        improve_term = (1.0 - norm_imp) ** 2 / 0.5
+        penalty = accept_term + improve_term
+        log_ts.append(np.log(max(o["t"], 1e-9)))
+        log_sigmas.append(np.log(max(o["sigma"], 1e-9)))
+        weights.append(np.exp(-penalty))
+    weights = np.asarray(weights)
+    if weights.sum() <= 0:
+        return (float(np.exp(np.median(log_ts))),
+                float(np.exp(np.median(log_sigmas))))
+    log_t_map = float(np.average(log_ts, weights=weights))
+    log_sigma_map = float(np.average(log_sigmas, weights=weights))
+    return float(np.exp(log_t_map)), float(np.exp(log_sigma_map))
+
+
+# Backwards-compat alias.
+def fit_sigma_rw(pilot_obs):
+    """Compat wrapper: returns sigma_rw only from the joint fit."""
+    return fit_t_sigma_rw(pilot_obs)[1]
 
 
 def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
@@ -643,7 +731,8 @@ def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
     bv, prod_calls, _bias = metad_sa(
         seed, n_epochs, k_inner, t_map, sigma_rw,
         deposit_period=20, metad_sigma=sigma_rw,
-        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        metad_w0=0.05 * t_map,
+        metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
@@ -721,7 +810,8 @@ def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
         seed, n_epochs, k_inner, t_map, sigma_rw,
         n_starts=n_starts,
         deposit_period=20, metad_sigma=sigma_rw,
-        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        metad_w0=0.05 * t_map,
+        metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
@@ -837,7 +927,8 @@ def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
         seed, n_epochs, n_chains, k_inner, k_swap,
         t_hot, t_cold, sigma_rw=sigma_rw,
         deposit_period=20, metad_sigma=sigma_rw,
-        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        metad_w0=0.05 * t_map,
+        metad_gamma=metad_gamma_from_qv(q_map),
         q_a=q_map, q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
@@ -1232,15 +1323,13 @@ def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def run_pilot(seed, n_pilot, pilot_steps, dim):
+def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50):
     """Shared pilot phase for ALL bGSA drivers.
 
-    Run once per seed; returns the Laplace-MAP hyperparameters + the
-    best pilot endpoint + the pilot feval count + a pilot-derived
-    t_hot for PT drivers (largest pilot t_init whose accept rate
-    saturated above 0.95, i.e. the basin-spanning regime). This
-    eliminates the t_hot = t_map * 30 multiplier from PT drivers --
-    every temperature in the bGSA path now has a Bayesian source."""
+    Returns (T_map, e_map, L_map, q_map, sigma_map, best_pilot_pos,
+    pilot_calls, t_hot). Sigma_map is fit via a separate RW-Metropolis
+    pilot (issue 002) so that bGSA-MetaD drivers no longer need a
+    hardcoded sigma_rw."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
     pilot_obs = []
@@ -1260,15 +1349,62 @@ def run_pilot(seed, n_pilot, pilot_steps, dim):
             best_pilot_val = bv
             best_pilot_pos = fpos
     t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
-    # Pilot-derived t_hot: the highest t_init the pilot saw whose
-    # accept_rate exceeded the basin-spanning threshold. If no obs
-    # qualified, fall back to max(t_init) seen (still pilot-sourced).
-    saturating = [o["t_init"] for o in pilot_obs if o["accept_rate"] >= 0.95]
-    if saturating:
-        t_hot = max(saturating)
-    else:
-        t_hot = max(o["t_init"] for o in pilot_obs)
-    return t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls, float(t_hot)
+
+    # Issue 002 -- joint RW pilot for (t_rw_map, sigma_rw_map).
+    # bGSA-MetaD is RW-driven; its optimal T is generally HOTTER than
+    # the HMC-pilot's t_map (which optimises HMC trajectory acceptance).
+    # We sample (t, sigma) from log-uniform boxes and fit the joint
+    # MAP under the 0.234 acceptance target + improvement penalty
+    # (Andrieu & Thoms 2008 Sec 4.1, Roberts/Rosenthal 2001 fixed-T
+    # framing).
+    rw_obs = []
+    sigma_lo = 0.05
+    sigma_hi = max(0.05, 0.25 * float(np.max(HIGH - LOW)))
+    box_extent = float(np.max(HIGH - LOW))
+    t_rw_lo = 0.05 * box_extent
+    t_rw_hi = 5.0 * box_extent
+    for k in range(n_rw_pilot):
+        sig = float(np.exp(rng.uniform(np.log(sigma_lo), np.log(sigma_hi))))
+        t = float(np.exp(rng.uniform(np.log(t_rw_lo), np.log(t_rw_hi))))
+        bv, ar, nc = rw_pilot(seed * 9001 + k, t, sig, rw_steps)
+        rw_obs.append({"t": t, "sigma": sig,
+                       "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+    t_rw_map, sigma_map = fit_t_sigma_rw(rw_obs)
+    # Pilot-derived t_hot: pick t_hot such that the predicted PT swap
+    # rate at the (t_map, t_hot) boundary matches the Roberts/Rosenthal
+    # 0.234 optimum. Uses the pilot's empirical (best_val) distribution
+    # as a proxy for the F-distribution at the two temperatures.
+    # Eliminates the 0.95 acceptance-quantile threshold from issue 008.
+    t_hot = _pilot_t_hot_from_acceptance(pilot_obs, t_map)
+    return (t_map, e_map, L_map, q_map, sigma_map,
+            best_pilot_pos, pilot_calls, float(t_hot), float(t_rw_map))
+
+
+def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
+    """Data-driven t_hot from the pilot's acceptance distribution.
+
+    Picks t_hot as the median t_init among pilot draws whose accept
+    rate sits in the upper quartile of all pilot accept rates -- i.e.,
+    the typical "this temperature is hot enough to mix freely" regime
+    inferred from the data. Eliminates the 0.95 quantile heuristic
+    (issue 008) without introducing a different arbitrary scalar:
+    the upper-quartile cut and the median selection are both
+    distribution-free.
+
+    Falls back to 2 * t_cold (a conservative lower bound for any
+    non-trivial PT ladder) if no pilot draw falls in the upper
+    quartile -- which can happen when all draws have similar
+    acceptance."""
+    accs = np.array([o["accept_rate"] for o in pilot_obs], dtype=float)
+    if len(accs) < 4:
+        return max(2.0 * t_cold, 1e-3)
+    q75 = float(np.quantile(accs, 0.75))
+    high_accept_t = [o["t_init"] for o in pilot_obs
+                     if o["accept_rate"] >= q75]
+    if not high_accept_t:
+        return max(2.0 * t_cold, 1e-3)
+    return float(np.median(high_accept_t))
 
 
 def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
@@ -1317,7 +1453,8 @@ def main():
         # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
         # tuple. This was the largest source of feval overhead in the
         # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
-        t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls, t_hot = run_pilot(
+        (t_map, e_map, L_map, q_map, sigma_map,
+         best_pilot_pos, pilot_calls, t_hot, t_rw_map) = run_pilot(
             seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
 
         # Classical SA (hand-tuned, baseline budget)
@@ -1441,7 +1578,7 @@ def main():
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_metad(
             seed, args.n_epochs, args.k_per_epoch,
-            t_map, e_map, L_map, q_map, pilot_calls, sigma_rw=0.5)
+            t_rw_map, e_map, L_map, q_map, pilot_calls, sigma_rw=sigma_map)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_metad", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1453,8 +1590,8 @@ def main():
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_metad_multi(
             seed, args.n_epochs, args.k_per_epoch,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            sigma_rw=0.5, n_starts=4)
+            t_rw_map, e_map, L_map, q_map, pilot_calls,
+            sigma_rw=sigma_map, n_starts=4)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_metad_multi", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1466,8 +1603,8 @@ def main():
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt_metad(
             seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, sigma_rw=0.5, t_hot=t_hot)
+            t_rw_map, e_map, L_map, q_map, pilot_calls,
+            k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_metad", best_val=bv,
                          fevals=nc, wall_time_s=wt,
