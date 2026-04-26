@@ -51,13 +51,7 @@ where
     /// L3 (downhill always accepts) is left to the per-impl proptest sweep
     /// since it is a property of the `AcceptRule::accept_prob` function
     /// shape and cannot be captured by a single Boolean witness.
-    pub fn checked(
-        obj: O,
-        cool: C,
-        neigh: N,
-        mover: M,
-        accept: A,
-    ) -> Result<Self, LawViolation> {
+    pub fn checked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Result<Self, LawViolation> {
         if !cool.is_monotone() {
             return Err(LawViolation::NonMonotoneCooling);
         }
