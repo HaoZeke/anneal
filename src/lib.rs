@@ -9,6 +9,8 @@
 
 /// The acceptance-rule trait: `(delta_e, T) -> p`.
 pub mod accept;
+/// Stan-style windowed adaptation: `trait Adapter<T, S>`.
+pub mod adapter;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
 /// Error variants returned by `anneal-core`.
@@ -38,6 +40,7 @@ pub mod ffi;
 pub mod python;
 
 pub use accept::AcceptRule;
+pub use adapter::{Adapter, IdentityAdapter};
 pub use cool::Cooling;
 pub use error::Error;
 pub use history::{EpochLine, History, State};

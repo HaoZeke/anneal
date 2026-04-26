@@ -72,6 +72,74 @@ where
     }
 }
 
+/// Sweep budget for `checked_with_sweep`. `Off` skips the random
+/// property sweeps; `Default` runs 256 samples per law (matches the
+/// proptest default per-test budget); `Strict` runs 4096.
+#[derive(Clone, Copy, Debug)]
+pub enum SweepBudget {
+    /// No randomised law sweep; behaves identically to `checked`.
+    Off,
+    /// 256 samples per law sweep (default proptest budget).
+    Default,
+    /// 4096 samples per law sweep, for strict correctness checks.
+    Strict,
+    /// Custom sample count.
+    Custom(usize),
+}
+
+impl SweepBudget {
+    fn n_samples(self) -> usize {
+        match self {
+            SweepBudget::Off => 0,
+            SweepBudget::Default => 256,
+            SweepBudget::Strict => 4096,
+            SweepBudget::Custom(n) => n,
+        }
+    }
+}
+
+impl<T, O, C, N, M, A> SaVariant<T, O, C, N, M, A>
+where
+    T: Float,
+    O: Objective<T>,
+    C: Cooling<T> + Cooling<f64>,
+    N: Neighborhood<T> + Neighborhood<f64>,
+    M: MoveKernel<T>,
+    A: AcceptRule<T> + AcceptRule<f64>,
+{
+    /// Like `checked`, but additionally runs randomised property sweeps
+    /// over `accept` (L3 downhill, L4 temp-monotone), `cool` (L4
+    /// epoch-monotone), and `neigh` (L1 symmetry) before returning.
+    /// `dim` and `bound` parameterise the L1 neighbourhood sweep over
+    /// `[-bound, bound]^dim`. `seed` makes the sweep reproducible.
+    ///
+    /// This is the v0.3.2 fix for the gap where a deliberately-broken
+    /// AcceptRule whose `accept_prob` violated L3 still constructed
+    /// cleanly because the trait method that returned the law witness
+    /// could lie. See design_pass_04_lit_survey.org task A6.
+    #[allow(clippy::too_many_arguments)]
+    pub fn checked_with_sweep(
+        obj: O,
+        cool: C,
+        neigh: N,
+        mover: M,
+        accept: A,
+        budget: SweepBudget,
+        dim: usize,
+        bound: f64,
+        seed: u64,
+    ) -> Result<Self, LawViolation> {
+        let n = budget.n_samples();
+        if n > 0 {
+            crate::laws::sweep_downhill_accepts(&accept, n, seed)?;
+            crate::laws::sweep_accept_monotone_in_temp(&accept, n, seed.wrapping_add(1))?;
+            crate::laws::sweep_cooling_monotone(&cool, n.min(1000))?;
+            crate::laws::sweep_neighborhood_symmetric(&neigh, dim, bound, n, seed.wrapping_add(2))?;
+        }
+        Self::checked(obj, cool, neigh, mover, accept)
+    }
+}
+
 /// Type alias for the Boltzmann (BSA) preset:
 /// `(O, LogCool, ContinuousR_n, Gaussian, Metropolis)`.
 pub type BoltzmannVariant<O> = SaVariant<f64, O, LogCool<f64>, ContinuousR_n, Gaussian, Metropolis>;
