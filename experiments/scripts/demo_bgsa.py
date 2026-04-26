@@ -355,7 +355,8 @@ def fit_t_sigma_rw(pilot_obs):
     geometric mean over the RW pilot's (t, sigma, accept, best_val)
     observations. Penalty combines distance from the 0.234 acceptance
     target (logit scale) with a normalised-improvement term that
-    rewards lower best_val.
+    rewards lower best_val. Robust to non-finite best_val (CUTEst
+    landscapes can return inf/nan at boundary samples).
 
     Returns (t_rw_map, sigma_rw_map). Used by bGSA-MetaD drivers,
     where t_rw_map replaces the HMC-fitted t_map (which optimises for
@@ -363,8 +364,14 @@ def fit_t_sigma_rw(pilot_obs):
     if not pilot_obs:
         return 1.0, 0.5
     target_logit = float(np.log(0.234 / (1.0 - 0.234)))
-    bv_max = max(o["best_val"] for o in pilot_obs)
-    bv_range = bv_max - min(o["best_val"] for o in pilot_obs) + 1e-12
+    finite_bvs = [o["best_val"] for o in pilot_obs
+                  if np.isfinite(o["best_val"])]
+    if finite_bvs:
+        bv_max = max(finite_bvs)
+        bv_range = bv_max - min(finite_bvs) + 1e-12
+    else:
+        bv_max = 0.0
+        bv_range = 1.0
     log_ts = []
     log_sigmas = []
     weights = []
@@ -372,13 +379,20 @@ def fit_t_sigma_rw(pilot_obs):
         a = max(min(o["accept_rate"], 1 - 1e-6), 1e-6)
         logit_r = np.log(a / (1.0 - a))
         accept_term = (logit_r - target_logit) ** 2 / 0.5
-        norm_imp = (bv_max - o["best_val"]) / bv_range
-        improve_term = (1.0 - norm_imp) ** 2 / 0.5
+        bv = o["best_val"]
+        if np.isfinite(bv):
+            norm_imp = (bv_max - bv) / bv_range
+            improve_term = (1.0 - norm_imp) ** 2 / 0.5
+        else:
+            # Non-finite F: treat as zero improvement (worst case),
+            # so the penalty is dominated by the accept-rate term.
+            improve_term = 1.0 / 0.5
         penalty = accept_term + improve_term
         log_ts.append(np.log(max(o["t"], 1e-9)))
         log_sigmas.append(np.log(max(o["sigma"], 1e-9)))
         weights.append(np.exp(-penalty))
     weights = np.asarray(weights)
+    weights = np.where(np.isfinite(weights), weights, 0.0)
     if weights.sum() <= 0:
         return (float(np.exp(np.median(log_ts))),
                 float(np.exp(np.median(log_sigmas))))
@@ -791,7 +805,8 @@ def adaptive_ladder_q_hmc(
 
 def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
              deposit_period=20, metad_sigma=0.3, metad_w0=0.05,
-             metad_gamma=8.0, q_v=1.0, q_a=None):
+             metad_gamma=8.0, q_v=1.0, q_a=None,
+             w0_decay_exp=0.0):
     """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
 
     Cooling uses tsallis_cool(t_init, q_v) -- the GSA schedule paired
@@ -822,6 +837,18 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     best = cur_v
     n_calls = 1
     accept_count = 0
+    deposit_count = 0
+    # Adaptive w_0(K) schedule (design pass 19 open problem 3):
+    # w_0(K) = metad_w0 * (1 + K)^(-w0_decay_exp). At w0_decay_exp = 1/3,
+    # the bias deposition height decays as K^{-1/3}, which Theorem 7'
+    # predicts pushes the equilibration window's lower edge q_v* toward
+    # 1 (expanding the window where Theorem 7's effective heating holds
+    # quantitatively). w0_decay_exp = 0 recovers the constant w_0
+    # (Barducci-Bussi-Parrinello 2008 default). Diminishing-deposition
+    # (Atchade-Roberts-Rosenthal 2011 ergodicity argument): the chain
+    # remains ergodic for the time-averaged target as long as
+    # sum w_0(K) diverges (recovers V_inf) but slowly enough that
+    # mixing keeps up.
     # NOTE: Andrieu/Thoms 2008 adaptive sigma is intentionally NOT used
     # here. With a well-tempered metad bias evolving in time, accept
     # rate measures (F + V)-acceptance, and the bias's cup-filling
@@ -847,26 +874,41 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
                 if pv < best:
                     best = pv
                 if accept_count % deposit_period == 0:
-                    bias.deposit(bias.cv(cur), T)
+                    deposit_count += 1
+                    if w0_decay_exp > 0.0:
+                        # Per-deposit w_0 scaling for the adaptive
+                        # diminishing-deposition schedule.
+                        scale = (1.0 + deposit_count) ** (-w0_decay_exp)
+                        old_w0 = bias.w0
+                        bias.w0 = metad_w0 * scale
+                        bias.deposit(bias.cv(cur), T)
+                        bias.w0 = old_w0
+                    else:
+                        bias.deposit(bias.cv(cur), T)
     return best, n_calls, bias
 
 
 def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-               pilot_calls, sigma_rw=0.5):
+               pilot_calls, sigma_rw=0.5, w0_decay_exp=0.0):
     """bGSA + metadynamics RW production. All bGSA-side hyperparameters
     come from the pilot:
       cooling shape   <- tsallis_cool(t_map, q_map)
       q_a (acceptance) <- q_map (Andricioaei & Straub 1996 GSA pairing)
       metad_sigma      <- sigma_rw (bias-bump width matches proposal)
       metad_w0         <- 0.05 * t_map (bump height scales with T)
-    metad_gamma = 8 is the only constant left, matching the well-
-    tempered MetaD literature default (Barducci et al. 2008)."""
+      metad_gamma      <- 1 / (q_map - 1) (Tsallis-coherent coupling)
+    `w0_decay_exp` enables the adaptive diminishing-deposition
+    schedule from design pass 19 (Theorem 7' open problem 3): set
+    to 1/3 for the K^{-1/3} decay that pushes the equilibration
+    window toward q_v -> 1. Default 0.0 keeps the classical fixed
+    w_0 schedule."""
     bv, prod_calls, _bias = metad_sa(
         seed, n_epochs, k_inner, t_map, sigma_rw,
         deposit_period=20, metad_sigma=sigma_rw,
         metad_w0=0.05 * t_map,
         metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
+        w0_decay_exp=w0_decay_exp,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
