@@ -9,14 +9,30 @@
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 
 CONSTANTS
+    \* @type: Set(Str);
     S,        \* Finite state space
+    \* @type: Int;
     T_0,      \* Initial temperature
+    \* @type: Int => Int;
     Cool(_),  \* Cooling schedule: epoch -> temp
+    \* @type: Str => Set(Str);
     Neigh(_), \* Neighborhood: state -> set of states
+    \* @type: Str => Int;
     Cost(_),  \* Objective: state -> integer (TLA+ has no reals)
+    \* @type: Int;
     MaxSteps  \* Liveness bound on the epoch counter
 
-VARIABLES cur, best, temp, epoch, history
+VARIABLES
+    \* @type: Str;
+    cur,
+    \* @type: Str;
+    best,
+    \* @type: Int;
+    temp,
+    \* @type: Int;
+    epoch,
+    \* @type: Seq(Str);
+    history
 
 vars == <<cur, best, temp, epoch, history>>
 
@@ -82,6 +98,16 @@ MonotoneCooling ==
 EventualTermination == <>(epoch = MaxSteps)
 
 EventualCooling == \A k \in 0..MaxSteps: <>(temp <= Cool(k))
+
+----------------------------------------------------------------------------
+(*                              State constraints                           *)
+\* BoundedHistory bounds the trajectory length so TLC's BFS terminates on
+\* the small.cfg / apalache.cfg models. Propose grows history without bound;
+\* this state constraint cuts BFS expansion at a fixed trajectory length,
+\* which keeps the smoke-run finite. The bound is wider than MaxSteps so
+\* every (cur, best, temp, epoch) reachable under the cooler is still
+\* exercised; only redundant trajectory tails are truncated.
+BoundedHistory == Len(history) <= 3
 
 ----------------------------------------------------------------------------
 (*                  Concrete operator definitions                           *)

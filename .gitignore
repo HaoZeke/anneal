@@ -263,3 +263,12 @@ Temporary Items
 docs/source/*.rst
 docs/source/crates/
 docs/build/
+
+# Verify env: tla2tools.jar + apalache tarball staged by setup tasks
+.verify/
+
+# TLC writes counterexample state graphs into states/ on failed checks
+states/
+
+# Apalache writes per-run debug logs into _apalache-out/
+_apalache-out/

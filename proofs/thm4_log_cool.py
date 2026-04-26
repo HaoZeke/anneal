@@ -15,3 +15,17 @@ limit = sp.limit(schedule, q_v, 1)
 target = T0 * sp.log(2) / sp.log(1 + t)
 
 WITNESS = witness(limit, target)
+
+
+def derive() -> None:
+    """Pretty-print the q_v -> 1 limit of the Tsallis cooling schedule."""
+    sp.init_printing(use_unicode=False)
+    print("Theorem 4: logarithmic limit of Tsallis cooling schedule")
+    print("  T_qv(t)        =", schedule)
+    print("  limit q_v -> 1 =", limit)
+    print("  target         =", target)
+    print("  witness        =", WITNESS)
+
+
+if __name__ == "__main__":
+    derive()
