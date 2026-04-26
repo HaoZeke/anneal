@@ -514,6 +514,54 @@ def adaptive_ladder_q_hmc(
     return best_val, n_calls, swap_accepts_total, swap_attempts_total
 
 
+def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
+             deposit_period=20, metad_sigma=0.3, metad_w0=0.05,
+             metad_gamma=8.0):
+    """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
+
+    RW Metropolis kernel; bias V(s) augments cost so Accept sees
+    F(x) + V(s(x)). Every `deposit_period` accepted moves we deposit
+    a Gaussian at the current CV. The bias fills local cups, allowing
+    the chain to escape Arrhenius-suppressed basins on multimodal
+    landscapes (Rastrigin / Schwefel)."""
+    from experiments.scripts.metad_helpers import WellTemperedBias
+    rng = np.random.default_rng(seed)
+    bias = WellTemperedBias(
+        LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
+    )
+    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur_v = OBJ_FN(cur)
+    best = cur_v
+    n_calls = 1
+    accept_count = 0
+    for epoch in range(n_epochs):
+        T = log_cool(t_init, 2.0, epoch)
+        for _ in range(k_inner):
+            prop = np.clip(gaussian_propose(rng, cur, sigma_rw), LOW, HIGH)
+            pv = OBJ_FN(prop)
+            n_calls += 1
+            cur_aug = cur_v + bias.potential(bias.cv(cur))
+            prop_aug = pv + bias.potential(bias.cv(prop))
+            if rng.random() < metropolis_accept_prob(prop_aug - cur_aug, T):
+                cur, cur_v = prop, pv
+                accept_count += 1
+                if pv < best:
+                    best = pv
+                if accept_count % deposit_period == 0:
+                    bias.deposit(bias.cv(cur), T)
+    return best, n_calls, bias
+
+
+def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
+               pilot_calls, sigma_rw=0.5):
+    """bGSA + metadynamics RW production."""
+    bv, prod_calls, _bias = metad_sa(
+        seed, n_epochs, k_inner, t_map, sigma_rw,
+        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
+    )
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
 def parallel_tempering_hybrid(
     seed, n_epochs, n_chains, k_inner, k_swap,
     t_init, t_final, eps, L, q, sigma_rw=0.5,
@@ -848,11 +896,7 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
-        # bGSA + hybrid PT (hot = RW, cold = q-HMC). Closes the
-        # gradient-mislead failure on multimodal landscapes by routing
-        # high-T chains through RW Metropolis where they don't get
-        # trapped by misleading gradients, low-T chains through q-HMC
-        # where the gradient becomes informative near minima.
+        # bGSA + hybrid PT (hot = RW, cold = q-HMC).
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid(
             seed, args.n_epochs, args.n_chains,
@@ -860,6 +904,17 @@ def main():
             k_inner=20, k_swap=5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_hybrid", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA + metadynamics. Well-tempered bias on (x_0, x_1) fills
+        # local cups so RW Metropolis escapes Arrhenius-suppressed basins.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _ = bgsa_metad(
+            seed, args.n_epochs, args.k_per_epoch,
+            t_map, e_map, L_map, q_map, pilot_calls, sigma_rw=0.5)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_metad", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
@@ -877,7 +932,7 @@ def main():
     for label in ["classical_sa", "classical_sa_matched", "hmc_sa_hand",
                   "bgsa", "bgsa_multichain",
                   "bgsa_pt", "bgsa_pt_adaptive", "bgsa_pt_hybrid",
-                  "bgsa_svgd"]:
+                  "bgsa_svgd", "bgsa_metad"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
