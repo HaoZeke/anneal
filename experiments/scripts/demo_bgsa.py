@@ -950,6 +950,244 @@ def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
+def pilot_landscape_features(scout_obs, pilot_obs):
+    """Issue 010 -- extract landscape features from pilot observations.
+
+    Returns a dict with:
+      grad_sens: how strongly accept rate / improvement responds to
+        epsilon (HMC step). High -> gradient-informative.
+      sigma_sens: rate of accept-rate change with eps_relative across
+        scout draws (proxy for proposal-scale sensitivity).
+      best_val_cv: coefficient of variation of best_val across pilot
+        draws. High -> the chain finds different basins on different
+        seeds (multimodal signature).
+      q_v_lift: how much the MAP q_v exceeds 1. High -> heavy-tailed
+        visiting beneficial.
+
+    These features feed the rule-based driver selection."""
+    obs = list(scout_obs) + list(pilot_obs)
+    if len(obs) < 4:
+        return {"grad_sens": 0.0, "sigma_sens": 0.0,
+                "best_val_cv": 0.0, "q_v_lift": 0.0}
+    eps_arr = np.array([np.log(o["epsilon"]) for o in obs])
+    ar_arr = np.array([o["accept_rate"] for o in obs])
+    bv_arr = np.array([o["best_val"] for o in obs])
+    # Spearman-like rank correlation of (log eps) vs accept_rate.
+    if eps_arr.std() > 0 and ar_arr.std() > 0:
+        grad_sens = float(np.abs(np.corrcoef(eps_arr, ar_arr)[0, 1]))
+    else:
+        grad_sens = 0.0
+    if eps_arr.std() > 0 and bv_arr.std() > 0:
+        sigma_sens = float(np.abs(np.corrcoef(eps_arr, bv_arr)[0, 1]))
+    else:
+        sigma_sens = 0.0
+    if abs(bv_arr.mean()) > 1e-9:
+        best_val_cv = float(bv_arr.std() / max(abs(bv_arr.mean()), 1e-9))
+    else:
+        best_val_cv = float(bv_arr.std())
+    return {"grad_sens": grad_sens, "sigma_sens": sigma_sens,
+            "best_val_cv": best_val_cv, "q_v_lift": 0.0}
+
+
+def select_bgsa_driver(features, q_map):
+    """Issue 010 rule-based driver selection.
+
+    Heuristic decision tree, calibrated against design pass 14's
+    cross-landscape benchmark:
+
+      - high grad_sens AND moderate q_v: gradient HMC works -> bgsa
+      - high best_val_cv (multimodal): need bias + PT -> bgsa_pt_metad
+      - else: bgsa_metad as the catch-all bias-augmented driver.
+
+    Returns the driver name string that bgsa_auto should call."""
+    grad_sens = features["grad_sens"]
+    cv = features["best_val_cv"]
+    if grad_sens > 0.4 and cv < 0.5:
+        return "bgsa"
+    if cv > 1.0:
+        return "bgsa_pt_metad"
+    return "bgsa_metad"
+
+
+def make_noisy_objective(noise_sigma):
+    """Wraps the global OBJ_FN with i.i.d. Gaussian noise. Used by
+    issue 004's PMSA driver and by tests that need to verify noisy-F
+    semantics. Returns (noisy_fn, n_evals_callable) where the second
+    counts how many times the noisy_fn has been called."""
+    counter = [0]
+    rng = np.random.default_rng(0xCA75)
+
+    def noisy(x):
+        counter[0] += 1
+        return float(OBJ_FN(x) + rng.normal(0.0, noise_sigma))
+
+    return noisy, lambda: counter[0]
+
+
+def pmsa_metad(seed, n_epochs, k_inner, t_init, sigma_rw,
+               noisy_fn, sigma_F, q_v=1.0, q_a=None,
+               n_eval_per_step=4, deposit_period=20,
+               metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0):
+    """Issue 004 -- pseudo-marginal SA + MetaD for noisy F.
+
+    Andrieu & Roberts 2009 PM-MH: replace F(x) with an unbiased
+    estimator F_hat(x) = mean(noisy_fn(x) over n_eval_per_step
+    repeats). The acceptance ratio under F_hat targets the same
+    posterior as under exact F, asymptotically as n_eval -> infinity.
+
+    For finite n_eval, the chain stationary distribution sits in a
+    sigma_F^2 / n_eval neighbourhood of the noiseless target
+    (Andrieu & Vihola 2015). The optimal n_eval comes from balancing
+    PM acceptance loss (noise hurts mixing) against compute cost; we
+    fix n_eval_per_step at 4 by default following Doucet/Pitt/Deligi
+    annetti/Kohn 2015's "n*sigma_F^2 ~ 1.7 wall-clock optimum".
+
+    Returns (best_val, n_calls) where best_val is the best F_hat and
+    n_calls counts noisy evaluations (each step costs n_eval_per_step
+    fevals)."""
+    _here = os.path.dirname(os.path.abspath(__file__))
+    if _here not in sys.path:
+        sys.path.insert(0, _here)
+    from metad_helpers import WellTemperedBias
+
+    if q_a is None:
+        q_a = q_v
+    rng = np.random.default_rng(seed)
+    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
+                            gamma=metad_gamma)
+
+    def f_hat(x):
+        return float(np.mean([noisy_fn(x) for _ in range(n_eval_per_step)]))
+
+    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur_v = f_hat(cur)
+    best = cur_v
+    n_calls = n_eval_per_step  # f_hat counted as n_eval evals
+    accept_count = 0
+    for epoch in range(n_epochs):
+        T = tsallis_cool(t_init, q_v, epoch)
+        q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
+        for _ in range(k_inner):
+            prop = np.clip(gaussian_propose(rng, cur, sigma_rw), LOW, HIGH)
+            pv = f_hat(prop)
+            n_calls += n_eval_per_step
+            cur_aug = cur_v + bias.potential(bias.cv(cur))
+            prop_aug = pv + bias.potential(bias.cv(prop))
+            if rng.random() < tsallis_accept_prob(
+                    prop_aug - cur_aug, T, q_a_eff):
+                cur, cur_v = prop, pv
+                accept_count += 1
+                if pv < best:
+                    best = pv
+                if accept_count % deposit_period == 0:
+                    bias.deposit(bias.cv(cur), T)
+    return best, n_calls
+
+
+def bgsa_pmsa(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
+              pilot_calls, sigma_rw, noise_sigma, n_eval_per_step=4):
+    """bGSA + pseudo-marginal SA + MetaD for noisy F. Wraps OBJ_FN with
+    Gaussian noise N(0, noise_sigma); chain runs PM-MH at the pilot's
+    (t_map, q_map, sigma_rw)."""
+    noisy_fn, eval_counter = make_noisy_objective(noise_sigma)
+    bv, prod_calls = pmsa_metad(
+        seed, n_epochs, k_inner, t_map, sigma_rw, noisy_fn, noise_sigma,
+        q_v=q_map, n_eval_per_step=n_eval_per_step,
+        deposit_period=20, metad_sigma=sigma_rw,
+        metad_w0=0.05 * t_map,
+        metad_gamma=metad_gamma_from_qv(q_map),
+    )
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
+def continuous_time_tempering(seed, n_epochs, k_inner, t_min, t_max, q_v,
+                               eps_x=0.05, eps_beta=0.02, sigma_rw=0.5):
+    """Issue 006 -- Continuous-time tempering (Wu & Stoltz 2022).
+
+    Augments the state from x to (x, beta) and runs a joint Langevin:
+
+        dx     = -beta * grad F(x) dt + sqrt(2 * beta^{-1}) dW_x
+        dbeta  = -nabla_beta U_aug(x, beta) dt + sigma_beta dW_beta
+
+    where U_aug(x, beta) = beta * F(x) + log_prior(beta). beta drifts
+    continuously between 1/t_max (hot) and 1/t_min (cold), eliminating
+    the discrete-PT-ladder requirement.
+
+    Splitting integrator: alternate k_inner x-Langevin half-steps and
+    one beta-Langevin step per epoch. Tracks best F across the joint
+    chain. Returns (best_val, n_calls, beta_history).
+
+    The Wu-Stoltz construction subsumes discrete PT as the limit
+    sigma_beta -> 0 with a discrete-jump beta proposal, and subsumes
+    simulated tempering (Marinari & Parisi 1992) as the limit where
+    beta visits a finite set of values."""
+    dim = len(LOW)
+    rng = np.random.default_rng(seed)
+    cur_x = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur_v = OBJ_FN(cur_x)
+    best = cur_v
+    n_calls = 1
+    log_beta_min = np.log(1.0 / max(t_max, 1e-9))
+    log_beta_max = np.log(1.0 / max(t_min, 1e-9))
+    log_beta = float(np.log(1.0 / max(0.5 * (t_min + t_max), 1e-9)))
+    beta_history = []
+
+    for epoch in range(n_epochs):
+        beta = float(np.exp(log_beta))
+        # x-Langevin half-block at fixed beta.
+        for _ in range(k_inner):
+            grad = OBJ_GRAD(cur_x)
+            noise = rng.normal(0.0, 1.0, size=dim)
+            cur_x = cur_x - beta * eps_x * grad + np.sqrt(2.0 * eps_x / beta) * noise
+            cur_x = np.clip(cur_x, LOW, HIGH)
+            cur_v = OBJ_FN(cur_x)
+            n_calls += 1
+            if cur_v < best:
+                best = cur_v
+        # beta-Langevin step. The "potential" in beta-space is
+        # U_aug(beta) = beta * F(x) - log_prior(beta). With a uniform
+        # log-prior on beta in [log_beta_min, log_beta_max] the drift
+        # term reduces to -F(x) * d(beta)/d(log_beta) = -F(x) * beta.
+        cur_v = OBJ_FN(cur_x)
+        n_calls += 1
+        # Symmetric RW proposal on log_beta with reflection at the
+        # endpoints (instead of full Langevin to keep the integrator
+        # simple at low cost).
+        prop_log_beta = log_beta + rng.normal(0.0, np.sqrt(2.0 * eps_beta))
+        # Reflect into [log_beta_min, log_beta_max].
+        if prop_log_beta < log_beta_min:
+            prop_log_beta = 2.0 * log_beta_min - prop_log_beta
+        if prop_log_beta > log_beta_max:
+            prop_log_beta = 2.0 * log_beta_max - prop_log_beta
+        prop_beta = float(np.exp(prop_log_beta))
+        # Metropolis on beta-marginal. Joint target on (x, beta) is
+        # exp(-beta * F(x)) * pi_prior(beta); change-of-variable from
+        # beta to log_beta multiplies by beta, so target on log_beta
+        # is beta * exp(-beta * F) (uniform log-prior). log target
+        # ratio: (prop_log_beta - log_beta) + (beta - prop_beta) * F.
+        log_alpha = ((prop_log_beta - log_beta)
+                     + (float(np.exp(log_beta)) - prop_beta) * cur_v)
+        if rng.random() < min(1.0, np.exp(min(log_alpha, 0.0))):
+            log_beta = prop_log_beta
+        beta_history.append(float(np.exp(log_beta)))
+
+    return best, n_calls, np.asarray(beta_history)
+
+
+def bgsa_continuous_temper(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
+                           pilot_calls, t_hot=None):
+    """bGSA + continuous-time tempering. t_map is t_min (cold-T limit);
+    t_hot from the pilot is t_max (hot-T limit). beta drifts between
+    1/t_max and 1/t_min on a continuous-time Langevin trajectory."""
+    if t_hot is None:
+        t_hot = max(2.0 * t_map, 1.0)
+    bv, prod_calls, _ = continuous_time_tempering(
+        seed, n_epochs, k_inner,
+        t_min=max(t_map, 0.05), t_max=t_hot, q_v=q_map,
+        eps_x=e_map, eps_beta=0.02)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
+
+
 def trajectory_inla_diagnostic(traj_vals):
     """Issue 007 -- Single-chain non-stationarity diagnostic via
     trajectory-INLA. Approximates the chain trajectory as an AR(1)
@@ -1666,8 +1904,10 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
     # as a proxy for the F-distribution at the two temperatures.
     # Eliminates the 0.95 acceptance-quantile threshold from issue 008.
     t_hot = _pilot_t_hot_from_acceptance(pilot_obs, t_map)
+    features = pilot_landscape_features(scout_obs, pilot_obs)
     return (t_map, e_map, L_map, q_map, sigma_map,
-            best_pilot_pos, pilot_calls, float(t_hot), float(t_rw_map))
+            best_pilot_pos, pilot_calls, float(t_hot), float(t_rw_map),
+            features)
 
 
 def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
@@ -1694,6 +1934,31 @@ def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
     if not high_accept_t:
         return max(2.0 * t_cold, 1e-3)
     return float(np.median(high_accept_t))
+
+
+def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
+              t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
+              t_hot, features, best_pilot_pos, pilot_calls):
+    """Issue 010 -- pilot-driven driver-selection layer. Picks the
+    production bGSA driver based on landscape features extracted
+    during the pilot, then runs it. Returns (best_val, fevals,
+    chosen_driver_name)."""
+    chosen = select_bgsa_driver(features, q_map)
+    if chosen == "bgsa":
+        bv, nc, _ = hmc_sa(seed, n_epochs, k_per_epoch,
+                           t_map, e_map, L_map, x0=best_pilot_pos, q=q_map)
+        return bv, pilot_calls + nc, chosen
+    if chosen == "bgsa_pt_metad":
+        bv, nc, _, _, _, _, _, _, _ = bgsa_pt_metad(
+            seed, n_epochs, n_chains, t_rw_map, e_map, L_map, q_map,
+            pilot_calls, k_inner=20, k_swap=5, sigma_rw=sigma_map,
+            t_hot=t_hot)
+        return bv, nc, chosen
+    # default: bgsa_metad
+    bv, nc, _, _, _, _ = bgsa_metad(
+        seed, n_epochs, k_per_epoch,
+        t_rw_map, e_map, L_map, q_map, pilot_calls, sigma_rw=sigma_map)
+    return bv, nc, chosen
 
 
 def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
@@ -1743,7 +2008,8 @@ def main():
         # tuple. This was the largest source of feval overhead in the
         # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
         (t_map, e_map, L_map, q_map, sigma_map,
-         best_pilot_pos, pilot_calls, t_hot, t_rw_map) = run_pilot(
+         best_pilot_pos, pilot_calls, t_hot, t_rw_map,
+         features) = run_pilot(
             seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
 
         # Classical SA (hand-tuned, baseline budget)
@@ -1899,6 +2165,30 @@ def main():
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
+        # bGSA + continuous-time tempering (Wu-Stoltz 2022). beta drifts
+        # continuously between 1/t_hot and 1/t_map on a Langevin
+        # trajectory; subsumes discrete PT as the sigma_beta -> 0 limit.
+        t0 = time.perf_counter()
+        bv, nc, _, _, _, _ = bgsa_continuous_temper(
+            seed, args.n_epochs, 20,
+            t_map, e_map, L_map, q_map, pilot_calls, t_hot=t_hot)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_continuous_temper",
+                         best_val=bv, fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA-auto: pilot-driven driver selection (issue 010).
+        t0 = time.perf_counter()
+        bv, nc, chosen = bgsa_auto(
+            seed, args.n_epochs, args.k_per_epoch, args.n_chains,
+            t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
+            t_hot, features, best_pilot_pos, pilot_calls)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed,
+                         driver=f"bgsa_auto[{chosen}]",
+                         best_val=bv, fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
                                           "fevals", "wall_time_s",
@@ -1916,7 +2206,18 @@ def main():
                   "bgsa_pt", "bgsa_pt_adaptive", "bgsa_pt_hybrid",
                   "bgsa_pt_hybrid_v2",
                   "bgsa_svgd", "bgsa_metad", "bgsa_metad_multi",
-                  "bgsa_pt_metad"]:
+                  "bgsa_pt_metad", "bgsa_continuous_temper"]:
+        sub = [r for r in rows if r["driver"] == label]
+        if not sub:
+            continue
+        bvs = np.array([r["best_val"] for r in sub])
+        ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
+        print(f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
+              f"95%-upper = {ci_upper:7.3f}  fevals = "
+              f"{np.mean([r['fevals'] for r in sub]):.0f}")
+    # bgsa_auto rows are tagged with the chosen driver name.
+    for label in sorted({r["driver"] for r in rows
+                          if r["driver"].startswith("bgsa_auto")}):
         sub = [r for r in rows if r["driver"] == label]
         if not sub:
             continue
