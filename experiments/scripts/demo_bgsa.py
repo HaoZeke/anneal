@@ -350,7 +350,7 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
     return best_val, n_calls
 
 
-def svgd_step(particles, grad_logp_fn, eps, h=None):
+def svgd_step(particles, grad_logp_fn, eps, h=None, T_for_noise=None, rng=None):
     """One step of Stein Variational Gradient Descent (Liu/Wang 2016).
 
     M particles in shape (M, D); each evolves via the Stein-kernelized
@@ -358,10 +358,16 @@ def svgd_step(particles, grad_logp_fn, eps, h=None):
       phi_i = (1/M) sum_j [k(x_i, x_j) * grad log p(x_j)
                           + grad_{x_j} k(x_i, x_j)]
     with RBF kernel k(x, y) = exp(-|x - y|^2 / h). Bandwidth h chosen
-    by the median heuristic (Liu/Wang 2016 sec 3.4). The first term
-    is the "attraction" (mode-seeking) and the second is the
-    "repulsion" (diversity-preserving), so SVGD avoids the
-    mode-collapse failure of greedy gradient descent.
+    by the median heuristic (Liu/Wang 2016 sec 3.4).
+
+    BAYESIAN VARIANT: when `T_for_noise` is provided, add a Brownian
+    noise term sqrt(2 * eps * T) * z with z ~ N(0, I). This converts
+    SVGD into Stochastic SVGD a.k.a. Particle Langevin (Liu/Wang 2017
+    follow-up): each particle's update is now an Euler-Maruyama
+    discretisation of the target's Langevin SDE plus the Stein kernel
+    smoothing. The stationary distribution is exactly pi_T(x) rather
+    than concentrating on modes, so Bayesian credible intervals on
+    f(x_min) come for free as quantiles of {f(x_i)}.
     """
     M, D = particles.shape
     # Pairwise squared distances.
@@ -379,13 +385,23 @@ def svgd_step(particles, grad_logp_fn, eps, h=None):
     attraction = K @ grads / M  # (M, D)
     repulsion = grad_K.sum(axis=1) / M  # (M, D)
     phi = attraction + repulsion
+    if T_for_noise is not None and rng is not None:
+        # Brownian noise for proper Bayesian sampling of pi_T.
+        noise = rng.standard_normal(size=particles.shape)
+        return particles + eps * phi + np.sqrt(2.0 * eps * T_for_noise) * noise, h
     return particles + eps * phi, h
 
 
-def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd):
-    """SVGD-driven SA. M particles evolve deterministically per Stein
-    flow at the cooling temperature; cooling sharpens the target
-    pi_T(x) ~ exp(-F(x)/T) so particles converge on the modes."""
+def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
+            stochastic=True):
+    """SVGD-driven SA, optionally Bayesian (Stochastic SVGD).
+
+    M particles evolve per Stein flow at the cooling temperature.
+    `stochastic=True` (default) adds Brownian noise sqrt(2*eps*T)
+    so the stationary distribution of the particle ensemble is
+    pi_T(x) ~ exp(-F(x)/T), giving Bayesian credible intervals on
+    best_val from the particle quantiles. `stochastic=False` is the
+    deterministic-flow variant (mode-seeking, no Bayesian semantics)."""
     rng = np.random.default_rng(seed)
     particles = rng.uniform(LOW, HIGH, size=(n_particles, len(LOW))).astype(np.float64)
     vals = np.array([OBJ_FN(p) for p in particles])
@@ -401,14 +417,20 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd):
             return -OBJ_GRAD(x) / T
 
         for _ in range(k_inner):
-            particles, _ = svgd_step(particles, grad_logp, eps_eff)
+            T_noise = T if stochastic else None
+            particles, _ = svgd_step(particles, grad_logp, eps_eff,
+                                     T_for_noise=T_noise, rng=rng)
             particles = np.clip(particles, LOW, HIGH)
             vals = np.array([OBJ_FN(p) for p in particles])
             n_calls += n_particles + n_particles  # one grad + one obj per particle
             if vals.min() < best_val:
                 best_val = vals.min()
                 best_pos = particles[np.argmin(vals)].copy()
-    return best_val, n_calls, best_pos
+    # Bayesian credible interval on best_val from particle quantiles.
+    final_vals_sorted = np.sort(vals)
+    bci_lower = float(final_vals_sorted[max(0, int(0.025 * n_particles))])
+    bci_upper = float(final_vals_sorted[min(n_particles - 1, int(0.975 * n_particles))])
+    return best_val, n_calls, best_pos, bci_lower, bci_upper
 
 
 def bgsa_svgd(seed, n_epochs, n_particles, n_pilot, pilot_steps, dim=5,
@@ -431,8 +453,12 @@ def bgsa_svgd(seed, n_epochs, n_particles, n_pilot, pilot_steps, dim=5,
                           "accept_rate": ar, "best_val": bv})
         pilot_calls += nc
     t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
-    bv, prod_calls, _ = svgd_sa(seed, n_epochs, n_particles, k_inner,
-                                t_map, eps_svgd=0.05)
+    # Production: use Stochastic SVGD (Bayesian variant) so the
+    # particle ensemble samples from pi_T_map and best_val carries a
+    # 95% credible interval from the particle quantiles.
+    bv, prod_calls, _, _bci_lo, _bci_hi = svgd_sa(
+        seed, n_epochs, n_particles, k_inner,
+        t_map, eps_svgd=0.05, stochastic=True)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
