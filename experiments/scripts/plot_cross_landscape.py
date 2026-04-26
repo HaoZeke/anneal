@@ -44,18 +44,23 @@ DRIVER_ORDER = [
     "classical_sa",
     "classical_sa_advanced",
     "bgsa",
-    "bgsa_pt_hybrid",
+    "bgsa_pt_hybrid_v2",
     "bgsa_metad",
     "bgsa_pt_metad",
+    # bgsa_continuous_temper omitted: the Wu-Stoltz integrator
+    # currently lands far from the cold-T target in the standard
+    # configuration; revisit once issue 006's tuning is finalised.
+    # bgsa_auto rows are handled separately (driver name is bgsa_auto[<chosen>]).
 ]
 
 DRIVER_LABELS = {
     "classical_sa": "classical SA",
     "classical_sa_advanced": "classical+",
     "bgsa": "bGSA",
-    "bgsa_pt_hybrid": "bGSA-PT-hybrid",
+    "bgsa_pt_hybrid_v2": "bGSA-PT-hybrid+",
     "bgsa_metad": "bGSA-MetaD",
     "bgsa_pt_metad": "bGSA-PT-MetaD",
+    "bgsa_continuous_temper": "bGSA-cont-temp",
 }
 
 

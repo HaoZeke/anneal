@@ -1837,6 +1837,10 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
     pilot_calls, t_hot, t_rw_map)."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
+    # In high-D q_max can fall below the safe lower bound 1.05.
+    # Clamp the q sampling range so high-D pilots remain Gaussian (q ~ 1).
+    q_lo = min(1.05, q_max - 1e-3)
+    q_hi = max(q_lo + 1e-3, q_max)
     pilot_calls = 0
     best_pilot_pos = None
     best_pilot_val = float("inf")
@@ -1849,7 +1853,7 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
         t = float(np.exp(rng.uniform(-3.0, 3.0)))
         e = float(np.exp(rng.uniform(-5.0, -1.0)))
         L = max(1, int(np.exp(rng.uniform(0.5, 3.0))))
-        q = float(rng.uniform(1.05, q_max))
+        q = float(rng.uniform(q_lo, q_hi))
         bv, ar, fpos, nc = hmc_pilot(seed * 7919 + k, t, e, L,
                                      max(20, pilot_steps // 4), q=q)
         scout_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
@@ -1867,7 +1871,7 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
         e = float(np.exp(rng.normal(priors["e_mean"], priors["e_sd"])))
         L = max(1, int(np.exp(rng.normal(priors["l_mean"], priors["l_sd"]))))
         q = float(np.clip(rng.normal(priors["q_mean"], priors["q_sd"]),
-                          1.05, q_max))
+                          q_lo, q_hi))
         bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
         pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
                           "accept_rate": ar, "best_val": bv})
