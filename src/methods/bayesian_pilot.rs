@@ -109,11 +109,11 @@ pub struct PilotPrior {
 impl Default for PilotPrior {
     fn default() -> Self {
         Self {
-            log_t_init_mean: 0.0,            // T_0 ~ logN(0, 1) -> median 1
+            log_t_init_mean: 0.0, // T_0 ~ logN(0, 1) -> median 1
             log_t_init_sd: 1.0,
-            log_sigma_mean: -0.693,          // sigma ~ logN(log 0.5, 0.7) -> median 0.5
+            log_sigma_mean: -0.693, // sigma ~ logN(log 0.5, 0.7) -> median 0.5
             log_sigma_sd: 0.7,
-            q_v_mean: 2.0,                   // q_v ~ truncated-N(2, 0.5) on (1.05, 2.95)
+            q_v_mean: 2.0, // q_v ~ truncated-N(2, 0.5) on (1.05, 2.95)
             q_v_sd: 0.5,
         }
     }
@@ -173,10 +173,7 @@ fn neg_log_posterior(
             + ((log_sigma - prior.log_sigma_mean) / prior.log_sigma_sd).powi(2)
             + ((q_v - prior.q_v_mean) / prior.q_v_sd).powi(2));
 
-    let bv_min = obs
-        .iter()
-        .map(|o| o.best_val)
-        .fold(f64::INFINITY, f64::min);
+    let bv_min = obs.iter().map(|o| o.best_val).fold(f64::INFINITY, f64::min);
     let bv_range = best_val_ref - bv_min + 1e-12;
 
     let mut total_weight = 0.0;
@@ -190,7 +187,7 @@ fn neg_log_posterior(
         let dist2 = dx * dx + dy * dy + dz * dz;
         let w = (-0.5 * dist2 / 0.5).exp(); // bandwidth 0.5 in (log T, log sigma, scaled q_v)
         total_weight += w;
-        let a = o.accept_rate.max(1e-6).min(1.0 - 1e-6);
+        let a = o.accept_rate.clamp(1e-6, 1.0 - 1e-6);
         let logit_r = a.ln() - (1.0 - a).ln();
         weighted_accept += w * (logit_r - logit_target).powi(2);
         let norm_improve = (best_val_ref - o.best_val) / bv_range;
@@ -213,7 +210,10 @@ fn neg_log_posterior(
 /// by a finite-difference diagonal Hessian Newton step. Returns the
 /// MAP and posterior SDs in (log T_0, log sigma, q_v) space.
 pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePosterior {
-    let best_val_ref = obs.iter().map(|o| o.best_val).fold(f64::NEG_INFINITY, f64::max);
+    let best_val_ref = obs
+        .iter()
+        .map(|o| o.best_val)
+        .fold(f64::NEG_INFINITY, f64::max);
 
     // Phase 1: 11x11x11 grid search in log space, 3 sd around the prior mean.
     let n = 11;
@@ -226,8 +226,7 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
                     + 6.0 * prior.log_t_init_sd * (i as f64) / (n as f64 - 1.0);
                 let log_s = prior.log_sigma_mean - 3.0 * prior.log_sigma_sd
                     + 6.0 * prior.log_sigma_sd * (j as f64) / (n as f64 - 1.0);
-                let q_v = (prior.q_v_mean - 3.0 * prior.q_v_sd)
-                    .max(Q_V_MIN + 0.01)
+                let q_v = (prior.q_v_mean - 3.0 * prior.q_v_sd).max(Q_V_MIN + 0.01)
                     + ((prior.q_v_mean + 3.0 * prior.q_v_sd).min(Q_V_MAX - 0.01)
                         - (prior.q_v_mean - 3.0 * prior.q_v_sd).max(Q_V_MIN + 0.01))
                         * (k as f64)
@@ -290,7 +289,9 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
 /// best vals) happens in user code so this module stays Sampler-agnostic.
 pub fn pilot_draws(prior: &PilotPrior, n_pilot: usize, seed: u64) -> Vec<(f64, f64, f64)> {
     let mut rng = StdRng::seed_from_u64(seed);
-    (0..n_pilot).map(|_| sample_prior(prior, &mut rng)).collect()
+    (0..n_pilot)
+        .map(|_| sample_prior(prior, &mut rng))
+        .collect()
 }
 
 #[cfg(test)]
@@ -319,7 +320,11 @@ mod tests {
         assert!((log_s_mean - prior.log_sigma_mean).abs() < 0.1);
         assert!((q_v_mean - prior.q_v_mean).abs() < 0.1);
         for (_, _, q) in &draws {
-            assert!(*q > Q_V_MIN && *q < Q_V_MAX, "q_v {} outside (1.05, 2.95)", q);
+            assert!(
+                *q > Q_V_MIN && *q < Q_V_MAX,
+                "q_v {} outside (1.05, 2.95)",
+                q
+            );
         }
     }
 

@@ -64,16 +64,16 @@ impl GelmanRubin {
             for chain in traces.iter().take(m) {
                 let mean: f64 = chain.iter().map(|x| x[d]).sum::<f64>() / n as f64;
                 chain_means.push(mean);
-                let var: f64 = chain
-                    .iter()
-                    .map(|x| (x[d] - mean).powi(2))
-                    .sum::<f64>()
-                    / (n as f64 - 1.0);
+                let var: f64 =
+                    chain.iter().map(|x| (x[d] - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0);
                 chain_vars.push(var);
             }
             let theta_bar: f64 = chain_means.iter().sum::<f64>() / m as f64;
             let b: f64 = (n as f64 / (m as f64 - 1.0))
-                * chain_means.iter().map(|t| (t - theta_bar).powi(2)).sum::<f64>();
+                * chain_means
+                    .iter()
+                    .map(|t| (t - theta_bar).powi(2))
+                    .sum::<f64>();
             let w: f64 = chain_vars.iter().sum::<f64>() / m as f64;
             if w <= 0.0 {
                 continue;
@@ -140,12 +140,12 @@ fn straggler_indices(states: &[State], top_k: usize) -> Vec<usize> {
     let dim = states[0].cur.pos.len();
     let mut pooled = vec![0.0_f64; dim];
     for s in states.iter() {
-        for d in 0..dim {
-            pooled[d] += s.cur.pos[d];
+        for (d, p) in pooled.iter_mut().enumerate().take(dim) {
+            *p += s.cur.pos[d];
         }
     }
-    for d in 0..dim {
-        pooled[d] /= n as f64;
+    for p in pooled.iter_mut().take(dim) {
+        *p /= n as f64;
     }
     let mut dists: Vec<(usize, f64)> = states
         .iter()
@@ -201,8 +201,9 @@ impl<S: Sampler<f64>> MultiChainSampler<S> {
             let temp = cooling.temperature(epoch);
             let mut accepted_per_chain = vec![0usize; self.n_chains];
             let mut rejected_per_chain = vec![0usize; self.n_chains];
-            let mut traces: Vec<Vec<Vec<f64>>> =
-                (0..self.n_chains).map(|_| Vec::with_capacity(self.k_min)).collect();
+            let mut traces: Vec<Vec<Vec<f64>>> = (0..self.n_chains)
+                .map(|_| Vec::with_capacity(self.k_min))
+                .collect();
 
             // Phase 1: minimum-K steps.
             for _ in 0..self.k_min {

@@ -71,6 +71,7 @@ impl LeapfrogIntegrator {
     /// Evolves `(x, p)` for `l_steps` leapfrog steps at temperature
     /// `temp`. Returns the final state plus the integrator energy
     /// error.
+    #[allow(clippy::too_many_arguments)]
     pub fn evolve<G, M, Obj>(
         &self,
         x0: Array1<f64>,
