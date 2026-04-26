@@ -85,6 +85,28 @@ def log_cool(t_init, k0, epoch):
     return t_init * np.log(k0) / np.log(epoch + k0)
 
 
+def tsallis_cool(t_init, q_v, epoch):
+    """Tsallis (GSA) cooling: T(k) = T_0 * (2^(q_v-1) - 1) / ((1+k)^(q_v-1) - 1).
+
+    The Tsallis-Stariolo 1996 GSA cooling, derived as the schedule for
+    which the q-Gaussian visiting + q-acceptance triple yields a
+    canonical equilibrium distribution. At q_v = 1 the schedule
+    reduces (L'Hopital) to T_0 * ln 2 / ln(1+k), matching Boltzmann
+    log-cooling (i.e. log_cool with k0 = 2). For q_v > 1 the schedule
+    cools FASTER than log -- the heavy-tailed visiting distribution
+    can offset more aggressive cooling. Strictly decreasing for q_v in
+    (1, 3); we clamp epoch=0 to T_0 to avoid the 0/0 indeterminate at
+    the origin."""
+    if epoch == 0:
+        return t_init
+    if abs(q_v - 1.0) < 1e-9:
+        return t_init * np.log(2.0) / np.log(1.0 + epoch)
+    exp = q_v - 1.0
+    num = (2.0 ** exp) - 1.0
+    den = ((1.0 + epoch) ** exp) - 1.0
+    return t_init * num / den
+
+
 def gaussian_propose(rng, x, sigma):
     return x + rng.normal(0.0, sigma, size=x.shape)
 
@@ -204,6 +226,9 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
 
 
 def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
+    """Production q-HMC SA. Cooling uses tsallis_cool(t_init, q) when
+    q > 1 (the Tsallis-Stariolo 1996 GSA schedule paired with q-Gaussian
+    momentum) and reduces to log cooling at q = 1 by L'Hopital."""
     rng = np.random.default_rng(seed)
     cur = (rng.uniform(LOW, HIGH) if x0 is None else x0.copy()).astype(np.float64)
     cur_v = OBJ_FN(cur)
@@ -211,7 +236,7 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
     n_calls = 1
     eps_ref = t_init
     for epoch in range(n_epochs):
-        T = log_cool(t_init, 2.0, epoch)
+        T = tsallis_cool(t_init, q, epoch)
         eps_eff = eps * np.sqrt(T / eps_ref)
         for _ in range(k_per_epoch):
             cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, len(LOW), q)
@@ -222,6 +247,9 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
 
 
 def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
+    """Pilot HMC trajectory. Cooling uses tsallis_cool(t_init, q) so the
+    pilot's accept-rate observation is at the same schedule the
+    production driver will use."""
     rng = np.random.default_rng(seed)
     cur = rng.uniform(LOW, HIGH).astype(np.float64)
     cur_v = OBJ_FN(cur)
@@ -229,7 +257,7 @@ def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
     accepts = 0
     n = 1
     for step in range(n_steps):
-        T = log_cool(t_init, 2.0, step // 10)
+        T = tsallis_cool(t_init, q, step // 10)
         eps_eff = eps * np.sqrt(T / t_init)
         cur, acc, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, len(LOW), q)
         n += nc
@@ -348,7 +376,7 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
     n_calls = n_chains
     eps_ref = t_init
     for epoch in range(n_epochs):
-        T = log_cool(t_init, 2.0, epoch)
+        T = tsallis_cool(t_init, q, epoch)
         eps_eff = eps * np.sqrt(T / eps_ref)
         traces = [[] for _ in range(n_chains)]
         for _ in range(k_min):
@@ -418,7 +446,7 @@ def svgd_step(particles, grad_logp_fn, eps, h=None, T_for_noise=None, rng=None):
 
 
 def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
-            stochastic=True):
+            stochastic=True, q_v=1.0):
     """SVGD-driven SA, optionally Bayesian (Stochastic SVGD).
 
     M particles evolve per Stein flow at the cooling temperature.
@@ -435,7 +463,7 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
     n_calls = n_particles
     eps_ref = t_init
     for epoch in range(n_epochs):
-        T = log_cool(t_init, 2.0, epoch)
+        T = tsallis_cool(t_init, q_v, epoch)
         eps_eff = eps_svgd * np.sqrt(T / eps_ref)
 
         def grad_logp(x):
@@ -461,10 +489,11 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
 def bgsa_svgd(seed, n_epochs, n_particles,
               t_map, e_map, L_map, q_map, pilot_calls,
               k_inner=10):
-    """bGSA with Bayesian Stochastic SVGD production. Pilot done upstream."""
+    """bGSA with Bayesian Stochastic SVGD production. Pilot done upstream;
+    cooling uses tsallis_cool(t_map, q_map)."""
     bv, prod_calls, _, _bci_lo, _bci_hi = svgd_sa(
         seed, n_epochs, n_particles, k_inner,
-        t_map, eps_svgd=0.05, stochastic=True)
+        t_map, eps_svgd=0.05, stochastic=True, q_v=q_map)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
@@ -541,19 +570,28 @@ def adaptive_ladder_q_hmc(
 
 def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
              deposit_period=20, metad_sigma=0.3, metad_w0=0.05,
-             metad_gamma=8.0, q_a=1.0):
+             metad_gamma=8.0, q_v=1.0, q_a=None):
     """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
 
-    RW kernel with Tsallis-Stariolo acceptance (q_a > 1 is heavy-
-    tailed; q_a = 1 reduces to Metropolis); bias V(s) augments cost
-    so Accept sees F(x) + V(s(x)). Every `deposit_period` accepted
-    moves we deposit a Gaussian at the current CV. The bias fills
-    local cups, allowing the chain to escape Arrhenius-suppressed
-    basins on multimodal landscapes (Rastrigin / Schwefel)."""
+    Cooling uses tsallis_cool(t_init, q_v) -- the GSA schedule paired
+    with q-Gaussian visiting. q_a defaults to q_v (the canonical
+    Andricioaei/Straub 1996 GSA pairing), so a single Bayesian-fit
+    parameter q_v controls the cooling schedule, the proposal heavy-
+    tail (when wired through q-Gaussian momentum), AND the acceptance
+    heavy-tail. q_a is annealed alongside T (heavy-tailed early,
+    Metropolis at low T) so the cold phase converges to the canonical
+    distribution.
+
+    Bias V(s) augments cost so Accept sees F(x) + V(s(x)); every
+    `deposit_period` accepted moves we deposit a Gaussian at the
+    current CV. The bias fills local cups so the chain can escape
+    Arrhenius-suppressed basins on multimodal landscapes."""
     _here = os.path.dirname(os.path.abspath(__file__))
     if _here not in sys.path:
         sys.path.insert(0, _here)
     from metad_helpers import WellTemperedBias
+    if q_a is None:
+        q_a = q_v
     rng = np.random.default_rng(seed)
     bias = WellTemperedBias(
         LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
@@ -564,10 +602,8 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     n_calls = 1
     accept_count = 0
     for epoch in range(n_epochs):
-        T = log_cool(t_init, 2.0, epoch)
+        T = tsallis_cool(t_init, q_v, epoch)
         # Anneal q_a alongside T: heavy-tailed early, Metropolis late.
-        # Matches the GSA pairing of high-T + heavy uphill, low-T +
-        # tight acceptance. q_a(0) = q_a_init, q_a(inf) -> 1.
         q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
         for _ in range(k_inner):
             prop = np.clip(gaussian_propose(rng, cur, sigma_rw), LOW, HIGH)
@@ -587,19 +623,20 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
 
 
 def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-               pilot_calls, sigma_rw=0.5, q_a=1.5):
-    """bGSA + metadynamics RW production with Tsallis acceptance.
-
-    q_a > 1 makes acceptance heavy-tailed (Tsallis & Stariolo 1996),
-    annealed inside metad_sa toward Metropolis as T cools. q_a = 1.5
-    swept-optimal on Rastrigin 5D against the headline statistics
-    (mean and 95%-upper); 1.5 is also between Xiang 1997's q_a = 2.7
-    (which assumes power-law cooling, not log) and the Metropolis
-    limit q_a = 1, so it represents a conservative middle ground."""
+               pilot_calls, sigma_rw=0.5):
+    """bGSA + metadynamics RW production. All bGSA-side hyperparameters
+    come from the pilot:
+      cooling shape   <- tsallis_cool(t_map, q_map)
+      q_a (acceptance) <- q_map (Andricioaei & Straub 1996 GSA pairing)
+      metad_sigma      <- sigma_rw (bias-bump width matches proposal)
+      metad_w0         <- 0.05 * t_map (bump height scales with T)
+    metad_gamma = 8 is the only constant left, matching the well-
+    tempered MetaD literature default (Barducci et al. 2008)."""
     bv, prod_calls, _bias = metad_sa(
         seed, n_epochs, k_inner, t_map, sigma_rw,
-        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
-        q_a=q_a,
+        deposit_period=20, metad_sigma=sigma_rw,
+        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
@@ -607,7 +644,7 @@ def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
 def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
                          n_starts=4, deposit_period=20,
                          metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
-                         q_a=1.0):
+                         q_v=1.0, q_a=None):
     """Multi-walker metadynamics-SA with SHARED bias.
 
     n_starts chains drawn from a Latin hypercube run concurrently;
@@ -625,6 +662,9 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
         sys.path.insert(0, _here)
     from metad_helpers import WellTemperedBias
 
+    if q_a is None:
+        q_a = q_v
+
     master = np.random.default_rng(seed)
     starts = latin_hypercube_init(master, n_starts, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 7919 * c) for c in range(n_starts)]
@@ -639,7 +679,9 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
     k_per_chain = max(1, k_inner // n_starts)
 
     for epoch in range(n_epochs):
-        T = log_cool(t_init, 2.0, epoch)
+        T = tsallis_cool(t_init, q_v, epoch)
+        # Anneal q_a alongside T (heavy-tailed early, Metropolis at low T).
+        q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
         for _ in range(k_per_chain):
             for c in range(n_starts):
                 prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
@@ -649,7 +691,7 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
                 cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
                 prop_aug = pv + bias.potential(bias.cv(prop))
                 if rngs[c].random() < tsallis_accept_prob(
-                        prop_aug - cur_aug, T, q_a):
+                        prop_aug - cur_aug, T, q_a_eff):
                     chain_pos[c], chain_val[c] = prop, pv
                     if pv < chain_best[c]:
                         chain_best[c] = pv
@@ -660,16 +702,15 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
 
 
 def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-                     pilot_calls, sigma_rw=0.5, n_starts=4, q_a=2.7):
-    """bGSA + multi-walker metadynamics with SHARED bias and Tsallis
-    acceptance. n_starts LH-initialised walkers cooperatively flatten
-    the landscape via a single well-tempered bias; total compute equals
-    single-chain metad_sa. Best-across-walkers is reported."""
+                     pilot_calls, sigma_rw=0.5, n_starts=4):
+    """bGSA + multi-walker metadynamics, SHARED bias, Tsallis acceptance.
+    Same pilot-driven hyperparameters as bgsa_metad."""
     bv, prod_calls = metad_sa_shared_bias(
         seed, n_epochs, k_inner, t_map, sigma_rw,
         n_starts=n_starts,
-        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
-        q_a=q_a,
+        deposit_period=20, metad_sigma=sigma_rw,
+        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
@@ -677,7 +718,8 @@ def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
 def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
                     t_init, t_final, sigma_rw=0.5,
                     deposit_period=20, metad_sigma=0.3,
-                    metad_w0=0.05, metad_gamma=8.0, q_a=1.0):
+                    metad_w0=0.05, metad_gamma=8.0, q_a=1.0,
+                    q_v=1.0):
     """Parallel tempering + multi-walker shared metadynamics.
 
     n_chains at geometric temperature ladder, all RW Metropolis with
@@ -759,20 +801,21 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
 
 
 def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
-                  pilot_calls, k_inner=20, k_swap=5, sigma_rw=0.5, q_a=2.7):
-    """bGSA + PT + shared metadynamics + Tsallis acceptance. The pilot
-    fixes t_cold = t_map (the well-mixed temperature); t_hot is forced
-    wide enough that the hot rungs are exploration-dominated. Tsallis
-    acceptance with q_a > 1 makes uphill moves heavy-tailed, the same
-    mechanism that makes GSA outperform classical SA on multimodal
-    landscapes (Tsallis & Stariolo 1996)."""
-    t_hot = max(t_map * 30.0, 50.0)
+                  pilot_calls, k_inner=20, k_swap=5, sigma_rw=0.5,
+                  t_hot=None):
+    """bGSA + PT + shared metadynamics + Tsallis acceptance. All
+    hyperparameters from pilot: t_cold = t_map, t_hot from basin-
+    spanning regime, q_a = q_v = q_map, metad_sigma = sigma_rw,
+    metad_w0 = 0.05 * t_map."""
+    if t_hot is None:
+        t_hot = t_map
     t_cold = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = pt_metad_shared(
         seed, n_epochs, n_chains, k_inner, k_swap,
         t_hot, t_cold, sigma_rw=sigma_rw,
-        deposit_period=20, metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
-        q_a=q_a,
+        deposit_period=20, metad_sigma=sigma_rw,
+        metad_w0=0.05 * t_map, metad_gamma=8.0,
+        q_a=q_map, q_v=q_map,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
@@ -838,14 +881,18 @@ def parallel_tempering_hybrid(
 
 def bgsa_pt_hybrid(seed, n_epochs, n_chains,
                    t_map, e_map, L_map, q_map, pilot_calls,
-                   k_inner=20, k_swap=5):
-    """bGSA + hybrid PT (hot chains = RW, cold chains = q-HMC)."""
-    t_hot = max(t_map * 30.0, 50.0)
+                   k_inner=20, k_swap=5, t_hot=None):
+    """bGSA + hybrid PT (hot chains = RW, cold chains = q-HMC).
+    t_hot comes from the pilot's basin-spanning regime; falls back
+    to t_map if no pilot draw saturated."""
+    if t_hot is None:
+        t_hot = t_map
     t_cold = max(t_map, 0.1)
+    rw_threshold_t = 0.5 * (t_hot + t_cold)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid(
         seed, n_epochs, n_chains, k_inner, k_swap,
         t_hot, t_cold, e_map, L_map, q_map, sigma_rw=0.5,
-        rw_threshold_t=2.0)
+        rw_threshold_t=rw_threshold_t)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
@@ -919,22 +966,27 @@ def parallel_tempering_q_hmc(
 
 def bgsa_pt_adaptive(seed, n_epochs, n_chains,
                      t_map, e_map, L_map, q_map, pilot_calls,
-                     k_inner=20, k_swap=5, target_swap_rate=0.25):
-    """bGSA with adaptive parallel-tempering production. Pilot done upstream."""
-    t_hot_init = max(t_map * 30.0, 50.0)
+                     k_inner=20, k_swap=5, target_swap_rate=0.25,
+                     t_hot=None):
+    """bGSA with adaptive parallel-tempering production. Pilot done upstream;
+    t_hot from pilot."""
+    if t_hot is None:
+        t_hot = t_map
     t_cold_init = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = adaptive_ladder_q_hmc(
         seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot_init, t_cold_init, e_map, L_map, q_map,
+        t_hot, t_cold_init, e_map, L_map, q_map,
         target_swap_rate=target_swap_rate)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
 def bgsa_pt(seed, n_epochs, n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, _unused_dim=None):
-    """bGSA with parallel-tempering q-HMC production. Pilot done upstream."""
-    t_hot = max(t_map * 30.0, 50.0)
+            k_inner=20, k_swap=5, _unused_dim=None, t_hot=None):
+    """bGSA with parallel-tempering q-HMC production. Pilot done upstream;
+    t_hot from pilot."""
+    if t_hot is None:
+        t_hot = t_map
     t_cold = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_q_hmc(
         seed, n_epochs, n_chains, k_inner, k_swap,
@@ -1142,16 +1194,18 @@ def parallel_tempering_hybrid_v2(
 
 def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
                       t_map, e_map, L_map, q_map, pilot_calls,
-                      k_inner=20, k_swap=5):
+                      k_inner=20, k_swap=5, t_hot=None):
     """bGSA + hybrid PT v2: Latin hypercube + adaptive sigma +
     stagnation restart on top of the rung-specific kernel
-    architecture. t_hot is forced wide enough that the hot rungs
-    are exploration-dominated regardless of the pilot's mixing-T."""
-    t_hot = max(t_map * 50.0, 100.0)
+    architecture. t_hot from pilot's basin-spanning regime."""
+    if t_hot is None:
+        t_hot = t_map
     t_cold = max(t_map, 0.1)
+    rw_threshold_t = 0.5 * (t_hot + t_cold)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid_v2(
         seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold, e_map, L_map, q_map)
+        t_hot, t_cold, e_map, L_map, q_map,
+        rw_threshold_t=rw_threshold_t)
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
@@ -1159,10 +1213,11 @@ def run_pilot(seed, n_pilot, pilot_steps, dim):
     """Shared pilot phase for ALL bGSA drivers.
 
     Run once per seed; returns the Laplace-MAP hyperparameters + the
-    best pilot endpoint + the pilot feval count, which downstream
-    bGSA variants reuse instead of running their own pilot. This was
-    the largest source of feval overhead in the v0.4.0 demo (each
-    driver re-ran a 1500-feval pilot)."""
+    best pilot endpoint + the pilot feval count + a pilot-derived
+    t_hot for PT drivers (largest pilot t_init whose accept rate
+    saturated above 0.95, i.e. the basin-spanning regime). This
+    eliminates the t_hot = t_map * 30 multiplier from PT drivers --
+    every temperature in the bGSA path now has a Bayesian source."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
     pilot_obs = []
@@ -1182,7 +1237,15 @@ def run_pilot(seed, n_pilot, pilot_steps, dim):
             best_pilot_val = bv
             best_pilot_pos = fpos
     t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
-    return t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls
+    # Pilot-derived t_hot: the highest t_init the pilot saw whose
+    # accept_rate exceeded the basin-spanning threshold. If no obs
+    # qualified, fall back to max(t_init) seen (still pilot-sourced).
+    saturating = [o["t_init"] for o in pilot_obs if o["accept_rate"] >= 0.95]
+    if saturating:
+        t_hot = max(saturating)
+    else:
+        t_hot = max(o["t_init"] for o in pilot_obs)
+    return t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls, float(t_hot)
 
 
 def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
@@ -1231,7 +1294,7 @@ def main():
         # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
         # tuple. This was the largest source of feval overhead in the
         # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
-        t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls = run_pilot(
+        t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls, t_hot = run_pilot(
             seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
 
         # Classical SA (hand-tuned, baseline budget)
@@ -1298,7 +1361,7 @@ def main():
         bv, nc, _, _, _, _, _, _ = bgsa_pt(
             seed, args.n_epochs, args.n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5)
+            k_inner=20, k_swap=5, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1309,7 +1372,7 @@ def main():
         bv, nc, _, _, _, _, _, _ = bgsa_pt_adaptive(
             seed, args.n_epochs, args.n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, target_swap_rate=0.25)
+            k_inner=20, k_swap=5, target_swap_rate=0.25, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_adaptive", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1330,7 +1393,7 @@ def main():
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid(
             seed, args.n_epochs, args.n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5)
+            k_inner=20, k_swap=5, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_hybrid", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1344,7 +1407,7 @@ def main():
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
             seed, args.n_epochs, args.n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5)
+            k_inner=20, k_swap=5, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_hybrid_v2", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -1381,7 +1444,7 @@ def main():
         bv, nc, _, _, _, _, _, _ = bgsa_pt_metad(
             seed, args.n_epochs, args.n_chains,
             t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, sigma_rw=0.5)
+            k_inner=20, k_swap=5, sigma_rw=0.5, t_hot=t_hot)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt_metad", best_val=bv,
                          fevals=nc, wall_time_s=wt,
