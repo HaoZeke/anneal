@@ -21,23 +21,18 @@ version = "0.2.0"
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
-keywords = ["optimization", "algorithms"]
+keywords = ["optimization", "algorithms", "simulated-annealing"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "click>=8.1.3",
     "numpy>=1.24.1",
-    "matplotlib>=3.6.3",
-    "tqdm>=4.64.1",
-    "probsamplers>=0.1.0",
-    "eindir>=0.2.0,<0.3",
 ]
 
 [project.optional-dependencies]
-plotter = ["pandas>=1.5.3", "matplotlib>=3.6.3"]
+plotter = ["matplotlib>=3.6.3"]
 testing = ["pytest>=8", "pytest-cov>=4.1"]
 
 [project.urls]

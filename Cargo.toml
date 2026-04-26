@@ -16,7 +16,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [features]
 default = []
 capi = []
-python = ["dep:pyo3", "dlpk/pyo3"]
+python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3"]
 
 [dependencies]
 thiserror   = "2"
@@ -27,6 +27,7 @@ num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
 pyo3        = { version = "0.26", features = ["extension-module"], optional = true }
+numpy       = { version = "0.26", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }

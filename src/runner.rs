@@ -2,8 +2,8 @@
 //! over `f64` components and returns a `History`.
 
 use eindir_core::{FPair, Objective};
-use rand::{Rng, SeedableRng};
 use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 use crate::accept::AcceptRule;
 use crate::cool::Cooling;

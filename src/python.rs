@@ -1,11 +1,303 @@
-//! pyo3 entry point for `anneal._core`. Re-exports the package version;
-//! typed bindings land with Spec 2.
+//! pyo3 entry point for `anneal._core`. Exposes the three preset variants
+//! (Boltzmann / Fast / Gsa), a `History` wrapper, and a `run` function
+//! that dispatches on the preset type. The Python objective is a callable
+//! `f: ndarray -> float` plus a `Bounds` for sampling and dimensionality.
+//!
+//! Internally, `run` wraps the Python callable in a thin `Objective<f64>`
+//! adapter that re-acquires the GIL per `eval`. This is acceptable when
+//! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
+//! which is true for any non-toy objective.
 
+use ndarray::{Array1, ArrayView1};
+use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
+
+use eindir_core::{Bounds, Objective};
+
+use crate::history::History;
+use crate::variant::{boltzmann, fast, gsa};
+
+// ---------------------------------------------------------------------------
+// Preset parameter holders.
+// ---------------------------------------------------------------------------
+
+/// Boltzmann preset parameters: initial temperature and Gaussian step size.
+#[pyclass(name = "Boltzmann")]
+#[derive(Clone, Copy, Debug)]
+pub struct PyBoltzmann {
+    /// Initial temperature `T_0`.
+    #[pyo3(get, set)]
+    pub t_init: f64,
+    /// Gaussian per-component standard deviation.
+    #[pyo3(get, set)]
+    pub sigma: f64,
+}
+
+#[pymethods]
+impl PyBoltzmann {
+    #[new]
+    #[pyo3(signature = (t_init = 1.0, sigma = 0.5))]
+    fn new(t_init: f64, sigma: f64) -> Self {
+        Self { t_init, sigma }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Boltzmann(t_init={:?}, sigma={:?})",
+            self.t_init, self.sigma
+        )
+    }
+}
+
+/// Fast SA preset parameters: initial temperature and Cauchy scale.
+#[pyclass(name = "Fast")]
+#[derive(Clone, Copy, Debug)]
+pub struct PyFast {
+    /// Initial temperature `T_0`.
+    #[pyo3(get, set)]
+    pub t_init: f64,
+    /// Cauchy per-component scale.
+    #[pyo3(get, set)]
+    pub gamma: f64,
+}
+
+#[pymethods]
+impl PyFast {
+    #[new]
+    #[pyo3(signature = (t_init = 1.0, gamma = 0.5))]
+    fn new(t_init: f64, gamma: f64) -> Self {
+        Self { t_init, gamma }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Fast(t_init={:?}, gamma={:?})", self.t_init, self.gamma)
+    }
+}
+
+/// GSA preset parameters: initial temperature and Tsallis indices.
+#[pyclass(name = "Gsa")]
+#[derive(Clone, Copy, Debug)]
+pub struct PyGsa {
+    /// Initial temperature `T_0`.
+    #[pyo3(get, set)]
+    pub t_init: f64,
+    /// Visiting index `q_v in (1, 3)`.
+    #[pyo3(get, set)]
+    pub q_v: f64,
+    /// Acceptance index `q_a` (`1.0` collapses to Metropolis).
+    #[pyo3(get, set)]
+    pub q_a: f64,
+}
+
+#[pymethods]
+impl PyGsa {
+    #[new]
+    #[pyo3(signature = (t_init = 1.0, q_v = 2.62, q_a = 1.7))]
+    fn new(t_init: f64, q_v: f64, q_a: f64) -> Self {
+        Self { t_init, q_v, q_a }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Gsa(t_init={:?}, q_v={:?}, q_a={:?})",
+            self.t_init, self.q_v, self.q_a
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// History wrapper.
+// ---------------------------------------------------------------------------
+
+/// Per-epoch summary line exposed to Python.
+#[pyclass(name = "EpochLine")]
+#[derive(Clone, Debug)]
+pub struct PyEpochLine {
+    /// Zero-based epoch index.
+    #[pyo3(get)]
+    pub epoch: usize,
+    /// Temperature at this epoch.
+    #[pyo3(get)]
+    pub temp: f64,
+    /// Proposals accepted in this epoch.
+    #[pyo3(get)]
+    pub accepted: usize,
+    /// Proposals rejected in this epoch.
+    #[pyo3(get)]
+    pub rejected: usize,
+    /// Best objective value seen up to and including this epoch.
+    #[pyo3(get)]
+    pub best_val: f64,
+}
+
+/// Run history exposed to Python.
+#[pyclass(name = "History")]
+#[derive(Clone, Debug)]
+pub struct PyHistory {
+    /// Per-epoch summary lines, in epoch order.
+    #[pyo3(get)]
+    pub epochs: Vec<PyEpochLine>,
+    /// Best position seen across the entire run.
+    #[pyo3(get)]
+    pub best_pos: Vec<f64>,
+    /// Best objective value seen across the entire run.
+    #[pyo3(get)]
+    pub best_val: f64,
+}
+
+#[pymethods]
+impl PyHistory {
+    /// Total proposals accepted across all epochs.
+    #[getter]
+    fn total_accepted(&self) -> usize {
+        self.epochs.iter().map(|e| e.accepted).sum()
+    }
+
+    /// Total proposals rejected across all epochs.
+    #[getter]
+    fn total_rejected(&self) -> usize {
+        self.epochs.iter().map(|e| e.rejected).sum()
+    }
+}
+
+impl From<History> for PyHistory {
+    fn from(h: History) -> Self {
+        Self {
+            epochs: h
+                .epochs
+                .into_iter()
+                .map(|e| PyEpochLine {
+                    epoch: e.epoch,
+                    temp: e.temp,
+                    accepted: e.accepted,
+                    rejected: e.rejected,
+                    best_val: e.best_val,
+                })
+                .collect(),
+            best_pos: h.best.pos.to_vec(),
+            best_val: h.best.val,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Objective adapter wrapping a Python callable.
+// ---------------------------------------------------------------------------
+
+/// Internal objective adapter: a Python callable plus a `Bounds`.
+/// Holds the GIL per `eval` call. `Py<PyAny>` is `Send + Sync` because
+/// pyo3 ref-counts atomically and gates dereferencing on the GIL.
+struct CallableObjective {
+    fn_: Py<PyAny>,
+    bounds: Bounds<f64>,
+}
+
+impl Objective<f64> for CallableObjective {
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        Python::attach(|py| {
+            let owned: Vec<f64> = x.iter().copied().collect();
+            let py_arr = PyArray1::from_vec(py, owned);
+            let r = self
+                .fn_
+                .call1(py, (py_arr,))
+                .expect("anneal.run: objective callable raised");
+            r.extract::<f64>(py)
+                .expect("anneal.run: objective callable returned non-float")
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Preset enum + dispatch.
+// ---------------------------------------------------------------------------
+
+/// Preset selector accepted by `run`. Matches one of the three
+/// IISE-manuscript points.
+#[derive(FromPyObject)]
+enum Preset {
+    #[pyo3(transparent)]
+    Boltzmann(PyBoltzmann),
+    #[pyo3(transparent)]
+    Fast(PyFast),
+    #[pyo3(transparent)]
+    Gsa(PyGsa),
+}
+
+/// Runs the SA driver and returns a `History`.
+///
+/// Args:
+///   obj_fn: Python callable `f(numpy.ndarray) -> float` evaluated at every
+///           proposal. Held via the GIL.
+///   low, high: numpy arrays defining the box bounds used to draw the
+///              initial position uniformly. Same length defines the
+///              objective dimensionality.
+///   preset: one of `Boltzmann()`, `Fast()`, `Gsa()` from `anneal`.
+///   n_epochs, steps_per_epoch: SA loop dimensions.
+///   seed: u64 seed for the StdRng.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, preset, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+fn run(
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    preset: Preset,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> PyResult<PyHistory> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let history = match preset {
+        Preset::Boltzmann(p) => {
+            let v = boltzmann(obj, p.t_init, p.sigma)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+        }
+        Preset::Fast(p) => {
+            let v = fast(obj, p.t_init, p.gamma)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+        }
+        Preset::Gsa(p) => {
+            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs(v, n_epochs, steps_per_epoch, seed)
+        }
+    };
+    Ok(PyHistory::from(history))
+}
+
+// ---------------------------------------------------------------------------
+// Module entry point.
+// ---------------------------------------------------------------------------
 
 /// pyo3 module initialiser. Exposed to Python as `anneal._core`.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add_class::<PyBoltzmann>()?;
+    m.add_class::<PyFast>()?;
+    m.add_class::<PyGsa>()?;
+    m.add_class::<PyEpochLine>()?;
+    m.add_class::<PyHistory>()?;
+    m.add_function(wrap_pyfunction!(run, m)?)?;
     Ok(())
 }
