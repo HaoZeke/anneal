@@ -138,7 +138,70 @@ def mcmc_sa(prob, seed, n_epochs, n_chains, k_min, k_check, k_max,
     return min(chain_best_val), n_calls
 
 
-DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse"]
+DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse",
+           "bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]
+
+
+def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
+    """Run a v0.5 bGSA driver on a CUTEst problem. Reuses demo_bgsa's
+    pilot + driver functions; we monkey-patch OBJ_FN/LOW/HIGH/OBJ_GRAD
+    to point at the CUTEst problem so the existing driver wrappers
+    work without modification."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import demo_bgsa as d
+    # Save / patch globals.
+    saved = (d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH)
+    try:
+        d.OBJ_FN = prob.fn
+        # CUTEst problems have no analytic gradient available cheaply; use
+        # finite differences.
+        eps = 1e-6
+        def _fd_grad(x):
+            x = np.asarray(x, dtype=np.float64)
+            f0 = prob.fn(x)
+            g = np.zeros_like(x)
+            for i in range(len(x)):
+                x1 = x.copy()
+                x1[i] += eps
+                g[i] = (prob.fn(x1) - f0) / eps
+            return g
+        d.OBJ_GRAD = _fd_grad
+        d.LOW = prob.low.astype(np.float64)
+        d.HIGH = prob.high.astype(np.float64)
+        # Run the pilot.
+        out = d.run_pilot(seed, max(8, min(16, n_epochs)),
+                          max(40, min(80, k_per_epoch // 2)),
+                          dim=prob.dim)
+        (t_map, e_map, L_map, q_map, sigma_map,
+         best_pilot_pos, pilot_calls, t_hot, t_rw_map, features) = out
+        if driver == "bgsa":
+            bv, nc, _ = d.hmc_sa(seed, n_epochs, k_per_epoch,
+                                  t_map, e_map, L_map,
+                                  x0=best_pilot_pos, q=q_map)
+            return bv, pilot_calls + nc
+        if driver == "bgsa_metad":
+            bv, nc, _, _, _, _ = d.bgsa_metad(
+                seed, n_epochs, k_per_epoch,
+                t_rw_map, e_map, L_map, q_map, pilot_calls,
+                sigma_rw=sigma_map)
+            return bv, nc
+        if driver == "bgsa_pt_metad":
+            bv, nc, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
+                seed, n_epochs, n_chains,
+                t_rw_map, e_map, L_map, q_map, pilot_calls,
+                k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
+            return bv, nc
+        if driver == "bgsa_auto":
+            bv, nc, _chosen = d.bgsa_auto(
+                seed, n_epochs, k_per_epoch, n_chains,
+                t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
+                t_hot, features, best_pilot_pos, pilot_calls)
+            return bv, nc
+        raise ValueError(f"Unknown bGSA driver: {driver}")
+    finally:
+        d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH = saved
 
 
 def main():
@@ -194,6 +257,30 @@ def main():
                              seed=seed, fevals=nc, best_val=bv,
                              wall_time_s=wt, f_x0=f0,
                              solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+
+            # v0.5 bGSA stack on the same CUTEst problem.
+            for bgsa_drv in ["bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]:
+                try:
+                    t0 = time.perf_counter()
+                    bv, nc = _bgsa_run(prob, seed, args.n_epochs,
+                                        args.k_fixed, args.n_chains,
+                                        bgsa_drv)
+                    wt = time.perf_counter() - t0
+                    rows.append(dict(problem=prob.name, dim=prob.dim,
+                                     driver=bgsa_drv,
+                                     seed=seed, fevals=nc, best_val=bv,
+                                     wall_time_s=wt, f_x0=f0,
+                                     solved=int(bv < 0.95 * f0 if f0 > 0
+                                                else bv < 1.05 * f0)))
+                except Exception as exc:
+                    # Don't kill the whole sweep on a single driver failure;
+                    # mark the cell as failed and move on.
+                    print(f"    {bgsa_drv} failed on {prob.name} seed {seed}: "
+                          f"{type(exc).__name__}: {exc}")
+                    rows.append(dict(problem=prob.name, dim=prob.dim,
+                                     driver=bgsa_drv,
+                                     seed=seed, fevals=0, best_val=float("nan"),
+                                     wall_time_s=0.0, f_x0=f0, solved=0))
         elapsed = time.perf_counter() - t_start
         print(f"  done {prob.name:<10} (n={prob.dim:>3}) -- elapsed {elapsed:.1f}s")
 
