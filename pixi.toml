@@ -71,6 +71,7 @@ python      = ">=3.11"
 sympy       = "*"
 pytest      = "*"
 pytest-cov  = "*"
+numpy       = ">=1.24"
 openjdk     = ">=17"
 curl        = "*"
 
@@ -87,7 +88,14 @@ proofs-test     = "pytest proofs/tests/ -v"
 proofs-derive   = "PYTHONPATH=. python proofs/thm1_bsa_visit.py && PYTHONPATH=. python proofs/thm2_fsa_visit.py && PYTHONPATH=. python proofs/thm3_metropolis.py && PYTHONPATH=. python proofs/thm4_log_cool.py"
 tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
 apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
+exp-test        = "PYTHONPATH=. pytest experiments/tests/ -v"
+exp1            = "PYTHONPATH=. python experiments/exp1_underflow.py --out data/exp1_underflow.csv --samples 200000"
+exp2            = "PYTHONPATH=. python experiments/exp2_cancellation.py --out data/exp2_cancellation.csv"
+exp3            = "PYTHONPATH=. python experiments/exp3_trajectory_bias.py --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
+exp4            = "PYTHONPATH=. python experiments/exp4_compensated.py --out data/exp4_compensated.csv --seeds 32 --n-epochs 200"
+exp3-summary    = "PYTHONPATH=. python experiments/scripts/exp3_summary.py data/exp3_trajectory.csv"
 all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
+all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "exp3-summary"] }
 
 [environments]
 default = { solve-group = "default" }
