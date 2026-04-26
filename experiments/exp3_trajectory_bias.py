@@ -31,6 +31,11 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
+    # exp3 explicitly disables log-domain acceptance so the f16 path
+    # is the naive `u < exp(-delta/T)` form that underflows for moderate
+    # delta/T ratios. exp4 (compensated) flips both compensated_delta_e
+    # and log_domain_accept on so the comparison surfaces the precision
+    # gap the manuscript Section 5.4 ablation targets.
     rows = []
     for seed in range(args.seeds):
         for dtype in ("float64", "float16"):
@@ -38,7 +43,8 @@ def main():
                        dtype=dtype, seed=seed,
                        n_epochs=args.n_epochs,
                        steps_per_epoch=args.steps_per_epoch,
-                       compensated_delta_e=False)
+                       compensated_delta_e=False,
+                       log_domain_accept=False)
             rows.append(dict(seed=seed, dtype=dtype,
                              mean_pos_x=float(r.best_pos[0]),
                              mean_pos_y=float(r.best_pos[1]),

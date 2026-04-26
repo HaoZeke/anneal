@@ -112,6 +112,24 @@ def metropolis_accept_prob(delta_e, temp, dtype):
     return dtype(np.exp(-delta_e / temp))
 
 
+def log_metropolis_accept_prob(delta_e, temp, dtype):
+    """Log-domain Metropolis acceptance: returns ln(accept_prob).
+
+    The manuscript Section 5.4 (and Higham 1993, Section 5) require
+    log-domain acceptance as the f16 default: f16's smallest positive
+    representable value is ~6e-5, so any `accept_prob = exp(-delta_e/T)`
+    with `delta_e/T > ~11` underflows to zero. In log domain we work
+    with `-delta_e/T` directly and compare to `log(u)` for the rejection
+    test, recovering the full dynamic range of the acceptance criterion.
+
+    Returns -inf for the never-accept case so that `log(u) < -inf` is
+    always false.
+    """
+    if delta_e <= dtype(0):
+        return dtype(0.0)  # log(1) = 0
+    return dtype(-delta_e / temp)
+
+
 def kahan_step(running_sum, running_compensation, addend, dtype):
     """One step of Kahan compensated summation. Adds `addend` to the
     running sum, updating both the sum and the compensation in dtype.
@@ -157,6 +175,7 @@ def sa_run(
     n_epochs: int = 100,
     steps_per_epoch: int = 200,
     compensated_delta_e: bool = False,
+    log_domain_accept: bool | None = None,
     t_init: float = 5.0,
     sigma: float = 0.5,
     gamma: float = 0.5,
@@ -167,8 +186,16 @@ def sa_run(
 
     Determinism: same `(objective, variant, dtype, seed)` produces
     bitwise-identical `best_pos` modulo dtype rounding.
+
+    Args:
+        log_domain_accept: when True, use `log_metropolis_accept_prob`
+            and compare `log(u) < log_p` instead of `u < exp(log_p)`.
+            Default: True for f16 (per manuscript Section 5.4 / Higham
+            1993 Section 5), False otherwise.
     """
     np_dtype = np.dtype(dtype)
+    if log_domain_accept is None:
+        log_domain_accept = (np_dtype == np.float16)
     obj_fn, low, high = OBJECTIVES[objective]
     rng = np.random.default_rng(seed)
 
@@ -206,9 +233,17 @@ def sa_run(
             n_calls += 1
 
             delta = np_dtype.type(proposal_val - cur_val)
-            p = metropolis_accept_prob(delta, temp, np_dtype.type)
             u = np_dtype.type(rng.random())
-            if u < p:
+            if log_domain_accept:
+                log_p = log_metropolis_accept_prob(delta, temp, np_dtype.type)
+                # log(0) underflows on small u in f16; clamp to a finite
+                # most-negative value so the comparison always terminates.
+                log_u = np.log(np.clip(u, np_dtype.type(1e-7), np_dtype.type(1.0)))
+                accept = bool(np_dtype.type(log_u) < log_p)
+            else:
+                p = metropolis_accept_prob(delta, temp, np_dtype.type)
+                accept = bool(u < p)
+            if accept:
                 cur_pos = proposal
                 if compensated_delta_e:
                     # Update cur_val via running Kahan: cur_val += delta
