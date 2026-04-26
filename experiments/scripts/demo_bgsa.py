@@ -33,6 +33,21 @@ def rastrigin_grad(x: np.ndarray) -> np.ndarray:
     return 2.0 * x + 20.0 * np.pi * np.sin(2.0 * np.pi * x)
 
 
+def schwefel_20d(x: np.ndarray) -> float:
+    """Schwefel function. Global min at x_i = 420.9687 with f(x*) = 0.
+    Multimodal, deceptive (global min near domain boundary)."""
+    x = x.astype(np.float64)
+    return float(418.9829 * len(x) - np.sum(x * np.sin(np.sqrt(np.abs(x)))))
+
+
+def schwefel_grad(x: np.ndarray) -> np.ndarray:
+    """Analytic gradient of Schwefel. d/dx_i = -sin(sqrt|x|) - x*cos(sqrt|x|)/(2*sqrt|x|)*sign(x)
+    -> simplifies to -sin(sqrt|x|) - sqrt(|x|)/2 * cos(sqrt|x|) * sign(x)."""
+    x = x.astype(np.float64)
+    sx = np.sign(x) * np.sqrt(np.abs(x) + 1e-12)
+    return -np.sin(sx) - 0.5 * sx * np.cos(sx)
+
+
 def rosenbrock_5d(x: np.ndarray) -> float:
     x = x.astype(np.float64)
     return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
@@ -54,6 +69,8 @@ OBJECTIVES = {
     "rastrigin_5d": (rastrigin_5d, rastrigin_grad, np.full(5, -5.12), np.full(5, 5.12), 0.0),
     "rosenbrock_5d": (rosenbrock_5d, rosenbrock_grad,
                       np.full(5, -2.048), np.full(5, 2.048), 0.0),
+    "schwefel_20d": (schwefel_20d, schwefel_grad,
+                     np.full(20, -500.0), np.full(20, 500.0), 0.0),
 }
 
 # Default to rosenbrock_5d for the demo; HMC is supposed to win here.
@@ -172,7 +189,7 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
         T = log_cool(t_init, 2.0, epoch)
         eps_eff = eps * np.sqrt(T / eps_ref)
         for _ in range(k_per_epoch):
-            cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5, q)
+            cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, len(LOW), q)
             n_calls += nc
             if cur_v < best:
                 best = cur_v
@@ -189,7 +206,7 @@ def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
     for step in range(n_steps):
         T = log_cool(t_init, 2.0, step // 10)
         eps_eff = eps * np.sqrt(T / t_init)
-        cur, acc, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, 5, q)
+        cur, acc, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, len(LOW), q)
         n += nc
         if acc:
             accepts += 1
@@ -312,7 +329,7 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
         for _ in range(k_min):
             for c in range(n_chains):
                 chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                    rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, 5, q)
+                    rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q)
                 n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -323,7 +340,7 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
             for _ in range(k_check):
                 for c in range(n_chains):
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, 5, q)
+                        rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q)
                     n_calls += nc
                     if chain_val[c] < best_val:
                         best_val = chain_val[c]
@@ -331,6 +348,77 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
             total_steps += k_check
             rhat = gelman_rubin_max(traces)
     return best_val, n_calls
+
+
+def adaptive_ladder_q_hmc(
+    seed, n_epochs, n_chains, k_inner, k_swap,
+    t_init, t_final, eps, L, q,
+    target_swap_rate=0.25,
+):
+    """Adaptive PT (Lacki/Miasojedow 2016): Robbins-Monro updates on
+    log(T_{k+1}/T_k) targeting `target_swap_rate` swap acceptance per
+    adjacent pair. Removes the hand-tuned T_hot bake-in.
+
+    Each adjacent pair maintains its own log-ratio. After every swap
+    attempt we update:
+       log_ratio_k += eta_k * (alpha_k - target)
+    where eta_k = c / sqrt(swap_count_k + 1) with c = 1.0. Robbins-Monro
+    convergence preserves stationarity in the limit (Atchade-Roberts-
+    Rosenthal 2011 diminishing-adaptation scaffold).
+    """
+    if n_chains < 2:
+        raise ValueError("PT requires at least 2 chains")
+    # Initialise log-ratios geometric (starting from the user-provided ladder).
+    init_ratios = np.linspace(0, 1, n_chains)
+    init_temps = t_final * (t_init / t_final) ** init_ratios
+    log_ratios = np.diff(np.log(init_temps))  # length n_chains - 1
+    swap_counts = np.zeros(n_chains - 1, dtype=np.int64)
+
+    rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
+    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_val = [OBJ_FN(p) for p in chain_pos]
+    best_val = min(chain_val)
+    n_calls = n_chains
+    swap_accepts_total = 0
+    swap_attempts_total = 0
+
+    for epoch in range(n_epochs):
+        # Rebuild current ladder from log_ratios.
+        temps = np.empty(n_chains)
+        temps[0] = t_final
+        for i in range(n_chains - 1):
+            temps[i + 1] = temps[i] * np.exp(log_ratios[i])
+        for inner in range(k_inner):
+            for c in range(n_chains):
+                T_c = temps[c]
+                chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
+                    rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
+                n_calls += nc
+                if chain_val[c] < best_val:
+                    best_val = chain_val[c]
+            if (inner + 1) % k_swap == 0:
+                i = rngs[0].integers(0, n_chains - 1)
+                T_i, T_j = temps[i], temps[i + 1]
+                F_i, F_j = chain_val[i], chain_val[i + 1]
+                log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
+                alpha = min(1.0, np.exp(log_alpha))
+                accepted = rngs[0].random() < alpha
+                swap_attempts_total += 1
+                if accepted:
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts_total += 1
+                # Robbins-Monro update on log_ratios[i]
+                swap_counts[i] += 1
+                eta = 1.0 / np.sqrt(swap_counts[i])
+                log_ratios[i] += eta * (alpha - target_swap_rate)
+                # Re-clamp to keep monotone (positive log-ratios).
+                log_ratios[i] = max(log_ratios[i], 1e-3)
+                temps[i + 1] = temps[i] * np.exp(log_ratios[i])
+                # Re-propagate downstream of i+1 too.
+                for k in range(i + 2, n_chains):
+                    temps[k] = temps[k - 1] * np.exp(log_ratios[k - 1])
+    return best_val, n_calls, swap_accepts_total, swap_attempts_total
 
 
 def parallel_tempering_q_hmc(
@@ -371,7 +459,7 @@ def parallel_tempering_q_hmc(
                 T_c = temps[c]
                 if use_hmc:
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, 5, q)
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
                     n_calls += nc
                 else:
                     # Random-walk Metropolis at temperature T_c
@@ -401,7 +489,33 @@ def parallel_tempering_q_hmc(
     return best_val, n_calls, swap_accepts, swap_attempts
 
 
-def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
+def bgsa_pt_adaptive(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
+                     k_inner=20, k_swap=5, target_swap_rate=0.25):
+    """bGSA with adaptive parallel-tempering production phase."""
+    rng = np.random.default_rng(seed)
+    q_max = 1.0 + 2.0 / dim - 0.06
+    pilot_obs = []
+    pilot_calls = 0
+    for k in range(n_pilot):
+        t = float(np.exp(rng.normal(0.0, 1.0)))
+        e = float(np.exp(rng.normal(-3.0, 1.0)))
+        L = max(1, int(np.exp(rng.normal(1.6, 0.7))))
+        q = float(np.clip(rng.normal(1.15, 0.1), 1.05, q_max))
+        bv, ar, _, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
+                          "accept_rate": ar, "best_val": bv})
+        pilot_calls += nc
+    t_map, e_map, L_map, q_map = fit_laplace_4d(pilot_obs, dim)
+    t_hot_init = max(t_map * 30.0, 50.0)
+    t_cold_init = max(t_map, 0.1)
+    bv, prod_calls, swap_a, swap_t = adaptive_ladder_q_hmc(
+        seed, n_epochs, n_chains, k_inner, k_swap,
+        t_hot_init, t_cold_init, e_map, L_map, q_map,
+        target_swap_rate=target_swap_rate)
+    return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
+
+
+def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
             k_inner=20, k_swap=5):
     """bGSA with parallel-tempering q-HMC production phase."""
     rng = np.random.default_rng(seed)
@@ -435,7 +549,7 @@ def bgsa_pt(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
+def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=len(LOW),
                     k_min=15, k_check=10, k_max=80, rhat_threshold=1.3):
     """bGSA with multi-chain q-HMC-SA production."""
     rng = np.random.default_rng(seed)
@@ -458,7 +572,7 @@ def bgsa_multichain(seed, n_epochs, n_chains, n_pilot, pilot_steps, dim=5,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
-def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=5):
+def bgsa(seed, n_epochs, k_per_epoch, n_pilot, pilot_steps, dim=len(LOW)):
     """bGSA = Bayesian pilot on (T, eps, L, q) + production q-HMC-SA (single chain)."""
     rng = np.random.default_rng(seed)
     q_max = 1.0 + 2.0 / dim - 0.06
@@ -531,7 +645,7 @@ def main():
         # bGSA = pilot 4D (T, eps, L, q) + Laplace + production q-HMC
         t0 = time.perf_counter()
         bv, nc, t_map, e_map, L_map, q_map = bgsa(seed, args.n_epochs, args.k_per_epoch,
-                                                   args.n_pilot, args.pilot_steps, dim=5)
+                                                   args.n_pilot, args.pilot_steps, dim=len(LOW))
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa", best_val=bv,
                          fevals=nc, wall_time_s=wt,
@@ -541,7 +655,7 @@ def main():
         t0 = time.perf_counter()
         bv, nc, t_map, e_map, L_map, q_map = bgsa_multichain(
             seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
-            dim=5, k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
+            dim=len(LOW), k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
             rhat_threshold=args.rhat_threshold)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_multichain", best_val=bv,
@@ -552,9 +666,19 @@ def main():
         t0 = time.perf_counter()
         bv, nc, t_map, e_map, L_map, q_map, swap_a, swap_t = bgsa_pt(
             seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
-            dim=5, k_inner=20, k_swap=5)
+            dim=len(LOW), k_inner=20, k_swap=5)
         wt = time.perf_counter() - t0
         rows.append(dict(seed=seed, driver="bgsa_pt", best_val=bv,
+                         fevals=nc, wall_time_s=wt,
+                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+
+        # bGSA adaptive PT = pilot 4D + Robbins-Monro adaptive ladder
+        t0 = time.perf_counter()
+        bv, nc, t_map, e_map, L_map, q_map, swap_a, swap_t = bgsa_pt_adaptive(
+            seed, args.n_epochs, args.n_chains, args.n_pilot, args.pilot_steps,
+            dim=len(LOW), k_inner=20, k_swap=5, target_swap_rate=0.25)
+        wt = time.perf_counter() - t0
+        rows.append(dict(seed=seed, driver="bgsa_pt_adaptive", best_val=bv,
                          fevals=nc, wall_time_s=wt,
                          t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
 
@@ -569,7 +693,8 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain", "bgsa_pt"]:
+    for label in ["classical_sa", "hmc_sa_hand", "bgsa", "bgsa_multichain",
+                  "bgsa_pt", "bgsa_pt_adaptive"]:
         sub = [r for r in rows if r["driver"] == label]
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
