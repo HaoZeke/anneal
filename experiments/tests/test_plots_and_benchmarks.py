@@ -221,3 +221,32 @@ def test_cutest_budgeted_mcmc_matches_classical_epoch_budget():
     budget = n_chains + n_epochs * k_fixed
     assert dense_fevals <= budget
     assert sparse_fevals <= budget
+
+
+def test_cutest_budgeted_pt_matches_classical_epoch_budget_and_is_deterministic():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    kwargs = dict(
+        prob=_QuadraticCutestProblem(),
+        seed=11,
+        n_epochs=12,
+        n_chains=4,
+        epoch_budget=80,
+        swap_period=3,
+        return_diagnostics=True,
+    )
+
+    first = cutest.pt_sa_budgeted(**kwargs)
+    second = cutest.pt_sa_budgeted(**kwargs)
+    budget = kwargs["n_chains"] + kwargs["n_epochs"] * kwargs["epoch_budget"]
+
+    assert first == second
+    assert first[1] <= budget
+    assert first[2]["swap_attempts"] > 0
+    assert first[2]["swap_accepts"] <= first[2]["swap_attempts"]
+
+
+def test_cutest_full_suite_accepts_budgeted_pt_driver():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)

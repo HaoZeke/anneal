@@ -208,8 +208,84 @@ def mcmc_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
     return min(chain_best_val), n_calls
 
 
+def _geometric_ladder(t_cold, t_hot, n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if n_chains == 1:
+        return np.array([t_cold], dtype=np.float64)
+    if t_cold <= 0 or t_hot <= t_cold:
+        raise ValueError("temperature ladder requires 0 < t_cold < t_hot")
+    ratios = np.linspace(0.0, 1.0, n_chains)
+    return t_cold * (t_hot / t_cold) ** ratios
+
+
+def _pt_swap_accept_prob(f_i, t_i, f_j, t_j):
+    log_alpha = (1.0 / t_i - 1.0 / t_j) * (f_i - f_j)
+    if log_alpha >= 0.0:
+        return 1.0
+    return float(np.exp(max(log_alpha, -745.0)))
+
+
+def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
+                   swap_period=5, sigma=0.5, t_init=5.0,
+                   t_hot_multiplier=4.0, return_diagnostics=False):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if swap_period < 1:
+        raise ValueError("swap_period must be positive")
+    if t_hot_multiplier <= 1.0:
+        raise ValueError("t_hot_multiplier must exceed one")
+
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    swap_rng = np.random.default_rng(seed + n_chains + 1)
+    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    best_val = min(chain_best_val)
+    n_calls = n_chains
+    swap_attempts = 0
+    swap_accepts = 0
+
+    for epoch in range(n_epochs):
+        cold_temp = log_cool(t_init, 2.0, epoch, np.float64)
+        temps = _geometric_ladder(cold_temp, cold_temp * t_hot_multiplier, n_chains)
+        epoch_calls = 0
+        rounds = 0
+        while epoch_calls < epoch_budget:
+            for c in range(n_chains):
+                if epoch_calls >= epoch_budget:
+                    break
+                chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+                    prob, rngs[c], chain_pos[c], chain_val[c],
+                    chain_best_val[c], temps[c], sigma)
+                n_calls += 1
+                epoch_calls += 1
+                if chain_best_val[c] < best_val:
+                    best_val = chain_best_val[c]
+            rounds += 1
+            if n_chains > 1 and rounds % swap_period == 0:
+                i = int(swap_rng.integers(0, n_chains - 1))
+                alpha = _pt_swap_accept_prob(
+                    chain_val[i], temps[i], chain_val[i + 1], temps[i + 1])
+                swap_attempts += 1
+                if swap_rng.random() < alpha:
+                    chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
+                    chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
+                    swap_accepts += 1
+
+    if return_diagnostics:
+        return best_val, n_calls, {
+            "swap_attempts": swap_attempts,
+            "swap_accepts": swap_accepts,
+        }
+    return best_val, n_calls
+
+
 DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse",
            "mcmc_sa_budgeted", "mcmc_sa_sparse_budgeted",
+           "pt_sa_budgeted",
            "bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]
 
 
@@ -347,6 +423,15 @@ def main():
             wt = time.perf_counter() - t0
             rows.append(dict(problem=prob.name, dim=prob.dim,
                              driver="mcmc_sa_sparse_budgeted",
+                             seed=seed, fevals=nc, best_val=bv,
+                             wall_time_s=wt, f_x0=f0,
+                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+
+            t0 = time.perf_counter()
+            bv, nc = pt_sa_budgeted(
+                prob, seed, args.n_epochs, args.n_chains, args.k_fixed)
+            wt = time.perf_counter() - t0
+            rows.append(dict(problem=prob.name, dim=prob.dim, driver="pt_sa_budgeted",
                              seed=seed, fevals=nc, best_val=bv,
                              wall_time_s=wt, f_x0=f0,
                              solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
