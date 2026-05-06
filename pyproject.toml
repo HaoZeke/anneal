@@ -45,3 +45,8 @@ testing = ["pytest>=8", "pytest-cov>=4.1"]
 features      = ["python"]
 module-name   = "anneal._core"
 python-source = "python"
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: tests requiring a CUDA array backend",
+]
