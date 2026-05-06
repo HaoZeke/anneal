@@ -556,9 +556,56 @@ DRIVERS = [
 ]
 
 
-def _rust_hmc_fd_work_units(dim, n_trajectories, l_steps):
+def _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps):
+    """Gradient calls made by Rust Omelyan HMC trajectories."""
+    return int(n_trajectories) * (1 + 2 * int(l_steps))
+
+
+def _rust_hmc_native_grad_work_units(n_trajectories, l_steps, total_accepted=0):
+    """Objective-equivalent work units for Rust Omelyan HMC with native gradients."""
+    n_trajectories = int(n_trajectories)
+    return (
+        1
+        + n_trajectories
+        + int(total_accepted)
+        + _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps)
+    )
+
+
+def _rust_hmc_fd_work_units(dim, n_trajectories, l_steps, total_accepted=0):
     """Objective-call work units for Rust Omelyan HMC with finite differences."""
-    return 1 + int(n_trajectories) * (1 + 3 * int(l_steps) * (int(dim) + 1))
+    n_trajectories = int(n_trajectories)
+    grad_cost = int(dim) + 1
+    return (
+        1
+        + n_trajectories
+        + int(total_accepted)
+        + grad_cost * _rust_hmc_omelyan_grad_calls(n_trajectories, l_steps)
+    )
+
+
+def _cutest_gradient(prob):
+    native_grad = getattr(prob, "grad", None)
+    if callable(native_grad):
+
+        def _native_grad(x):
+            return np.asarray(native_grad(x), dtype=np.float64).reshape(-1)
+
+        return _native_grad, "native"
+
+    eps = 1e-6
+
+    def _fd_grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        f0 = prob.fn(x)
+        g = np.zeros_like(x)
+        for i in range(len(x)):
+            x1 = x.copy()
+            x1[i] += eps
+            g[i] = (prob.fn(x1) - f0) / eps
+        return g
+
+    return _fd_grad, "finite-difference"
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
@@ -575,21 +622,8 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     saved = (d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH)
     try:
         d.OBJ_FN = prob.fn
-        # CUTEst problems have no analytic gradient available cheaply; use
-        # finite differences.
-        eps = 1e-6
-
-        def _fd_grad(x):
-            x = np.asarray(x, dtype=np.float64)
-            f0 = prob.fn(x)
-            g = np.zeros_like(x)
-            for i in range(len(x)):
-                x1 = x.copy()
-                x1[i] += eps
-                g[i] = (prob.fn(x1) - f0) / eps
-            return g
-
-        d.OBJ_GRAD = _fd_grad
+        grad_fn, grad_kind = _cutest_gradient(prob)
+        d.OBJ_GRAD = grad_fn
         d.LOW = prob.low.astype(np.float64)
         d.HIGH = prob.high.astype(np.float64)
         # Run the pilot.
@@ -617,7 +651,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             l_steps = max(1, int(L_map))
             history = anneal.run_hmc(
                 prob.fn,
-                _fd_grad,
+                grad_fn,
                 prob.low.astype(np.float64),
                 prob.high.astype(np.float64),
                 t_init=float(t_map),
@@ -630,7 +664,15 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 x0=np.asarray(best_pilot_pos, dtype=np.float64),
             )
             n_trajectories = int(n_epochs) * int(k_per_epoch)
-            work_units = _rust_hmc_fd_work_units(prob.dim, n_trajectories, l_steps)
+            total_accepted = int(getattr(history, "total_accepted", 0))
+            if grad_kind == "native":
+                work_units = _rust_hmc_native_grad_work_units(
+                    n_trajectories, l_steps, total_accepted=total_accepted
+                )
+            else:
+                work_units = _rust_hmc_fd_work_units(
+                    prob.dim, n_trajectories, l_steps, total_accepted=total_accepted
+                )
             return float(history.best_val), pilot_calls + work_units
         if driver == "bgsa_metad":
             bv, nc, _, _, _, _ = d.bgsa_metad(
