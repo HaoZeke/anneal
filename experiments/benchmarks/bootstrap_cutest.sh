@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bootstrap_cutest.sh: clone + build the CUTEst stack into .bench/
-# so pycutest can find it. Sets MASTSIF / SIFDECODE / CUTEST / ARCHDEFS
-# in the current shell (source this script, do not exec).
+# so pycutest can find it. Prints the MASTSIF / SIFDECODE / CUTEST /
+# ARCHDEFS values expected by pycutest.
 #
 # Run from the anneal repo root via:
 #   pixi run -e verify bash experiments/benchmarks/bootstrap_cutest.sh
@@ -37,28 +37,54 @@ clone_or_pull https://bitbucket.org/optrove/sif.git    "$MASTSIF"
 export ARCHDEFS SIFDECODE CUTEST MASTSIF
 export MYARCH="pc64.lnx.gfo"
 
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "[bootstrap] ERROR: required command not found on PATH: $1" >&2
+    exit 1
+  fi
+}
+
+has_required_paths() {
+  local path
+  for path in "$@"; do
+    if [ ! -e "$path" ]; then
+      return 1
+    fi
+  done
+}
+
+require_command meson
+require_command ninja
+
 # Build SIFDecode + CUTEst via Meson (the ARCHDefs path is the legacy
-# install shim; modern pycutest needs Meson-built libs).
+# install shim; pycutest needs the Meson-installed decoder and CUTEst libs).
 build_meson() {
   local pkg="$1"; local src="$2"
+  shift 2
   if [ -f "$src/builddir/build.ninja" ]; then
     echo "[bootstrap] $pkg already configured"
   else
     echo "[bootstrap] Configuring $pkg with Meson"
-    (cd "$src" && meson setup builddir --prefix="$src/install" >/dev/null 2>&1)
+    (cd "$src" && meson setup builddir --prefix="$src/install")
   fi
-  if [ ! -f "$src/install/lib/libsifdecode.so" ] && [ ! -f "$src/install/lib/libcutest.so" ]; then
-    echo "[bootstrap] Building $pkg"
-    (cd "$src" && meson compile -C builddir >/dev/null 2>&1 && \
-                  meson install -C builddir >/dev/null 2>&1) || \
-      echo "[bootstrap] WARNING: $pkg build had non-fatal errors; continuing"
-  else
+  if has_required_paths "$@"; then
     echo "[bootstrap] $pkg already installed"
+  else
+    echo "[bootstrap] Building $pkg"
+    (cd "$src" && meson compile -C builddir && meson install -C builddir)
+    if ! has_required_paths "$@"; then
+      echo "[bootstrap] ERROR: $pkg install did not create required files:" >&2
+      printf '  %s\n' "$@" >&2
+      exit 1
+    fi
   fi
 }
 
-build_meson SIFDecode "$SIFDECODE"
-build_meson CUTEst    "$CUTEST"
+build_meson SIFDecode "$SIFDECODE" \
+  "$SIFDECODE/install/bin/sifdecoder"
+build_meson CUTEst "$CUTEST" \
+  "$CUTEST/install/lib/libcutest_single.a" \
+  "$CUTEST/install/lib/libcutest_double.a"
 
 cat <<EOF
 

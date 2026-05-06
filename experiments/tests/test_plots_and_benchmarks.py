@@ -130,6 +130,19 @@ def test_cutest_full_suite_resume_key_normalises_seed():
     }
 
 
+def test_cutest_env_requires_cutest_install(tmp_path, monkeypatch):
+    from experiments.benchmarks.cutest_runner import cutest_env
+
+    bench = tmp_path / ".bench"
+    (bench / "SIFDecode" / "install" / "bin").mkdir(parents=True)
+    (bench / "sif").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PIXI_PROJECT_ROOT", raising=False)
+
+    with pytest.raises(RuntimeError, match="CUTEst bootstrap incomplete"):
+        cutest_env()
+
+
 def test_cutest_summary_reports_status_and_winners(tmp_path):
     from experiments.scripts.summarize_cutest_benchmarks import summarize_csv
 
