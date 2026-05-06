@@ -105,6 +105,7 @@ class CutestProblem:
     name: str
     dim: int
     fn: callable
+    grad: callable | None
     low: np.ndarray
     high: np.ndarray
     f_star: float | None  # may be None for problems without a stored optimum
@@ -144,7 +145,22 @@ def load(
         x_arr = np.asarray(x, dtype=np.float64).reshape(-1)
         return float(p.obj(x_arr))
 
-    return CutestProblem(name=name, dim=p.n, fn=fn, low=bl, high=bu, f_star=f_star)
+    grad = None
+    if hasattr(p, "grad"):
+
+        def grad(x: np.ndarray) -> np.ndarray:
+            x_arr = np.asarray(x, dtype=np.float64).reshape(-1)
+            return np.asarray(p.grad(x_arr), dtype=np.float64).reshape(-1)
+
+    return CutestProblem(
+        name=name,
+        dim=p.n,
+        fn=fn,
+        grad=grad,
+        low=bl,
+        high=bu,
+        f_star=f_star,
+    )
 
 
 def list_default_manifest() -> list[tuple[str, dict | None]]:

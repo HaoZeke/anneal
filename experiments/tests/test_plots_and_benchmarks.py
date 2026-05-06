@@ -570,7 +570,99 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     assert captured["kwargs"]["q"] == pytest.approx(1.1)
     assert captured["kwargs"]["l_steps"] == 2
     assert fevals == 11 + cutest._rust_hmc_fd_work_units(
-        dim=2, n_trajectories=15, l_steps=2
+        dim=2,
+        n_trajectories=15,
+        l_steps=2,
+        total_accepted=2,
+    )
+
+
+def test_cutest_loader_preserves_native_gradient(monkeypatch):
+    from experiments.benchmarks import cutest_runner
+
+    class NativeProblem:
+        n = 2
+        bl = np.array([-1.0, -2.0], dtype=np.float64)
+        bu = np.array([3.0, 4.0], dtype=np.float64)
+        x0 = np.zeros(2, dtype=np.float64)
+
+        def obj(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.dot(x, x))
+
+        def grad(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return np.array([10.0 + x[0], -3.0 + x[1]], dtype=np.float64)
+
+    fake_pycutest = types.SimpleNamespace(
+        import_problem=lambda *_args, **_kwargs: NativeProblem()
+    )
+    monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
+    monkeypatch.setattr(cutest_runner, "setup_cutest_env", lambda: None)
+
+    prob = cutest_runner.load("NATIVEGRAD")
+
+    assert prob.fn(np.array([2.0, 3.0])) == pytest.approx(13.0)
+    assert prob.grad(np.array([2.0, 3.0])) == pytest.approx([12.0, 0.0])
+
+
+def test_cutest_bgsa_uses_native_gradient_and_native_work_units(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return np.array([10.0 + x[0], -3.0 + x[1]], dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -2.0
+        total_accepted = 2
+        total_rejected = 1
+
+    def run_hmc(_obj_fn, grad_fn, _low, _high, **_kwargs):
+        captured["grad_at_probe"] = grad_fn(np.array([0.5, -0.25], dtype=np.float64))
+        return FakeHistory()
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        hmc_sa=lambda *_args, **_kwargs: pytest.fail("demo HMC must not run"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=5,
+        n_chains=4,
+        driver="bgsa",
+    )
+
+    assert best_val == -2.0
+    assert captured["grad_at_probe"] == pytest.approx([10.5, -3.25])
+    assert fevals == 11 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=15,
+        l_steps=2,
+        total_accepted=2,
     )
 
 
