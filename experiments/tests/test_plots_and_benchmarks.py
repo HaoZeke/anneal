@@ -2,8 +2,10 @@
 
 import os
 import inspect
+import multiprocessing as mp
 import sys
 import tempfile
+import time
 import types
 
 import numpy as np
@@ -264,6 +266,26 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
     from experiments.scripts import run_cutest_full_suite as suite
 
     assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)
+
+
+def test_cutest_full_suite_cell_timeout_terminates_hanging_driver(monkeypatch):
+    if "fork" not in mp.get_all_start_methods():
+        pytest.skip("subprocess timeout uses fork where available")
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    def hangs(_prob, _driver, _seed, _args):
+        time.sleep(5)
+        return 0.0, 1
+
+    monkeypatch.setattr(suite, "run_driver", hangs)
+    args = types.SimpleNamespace(per_problem_timeout=1)
+
+    best_val, fevals, status = suite.run_driver_cell(
+        _QuadraticCutestProblem(), "classical", 0, args)
+
+    assert np.isnan(best_val)
+    assert fevals == 0
+    assert status == "timeout"
 
 
 def test_bgsa_log_acceptance_probability_is_stable():

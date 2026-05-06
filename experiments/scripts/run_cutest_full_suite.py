@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import multiprocessing as mp
 import os
 import signal
 import sys
@@ -23,6 +24,7 @@ import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from queue import Empty
 
 import numpy as np
 
@@ -242,6 +244,56 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
 
 
+def _driver_worker(queue, prob, driver: str, seed: int, args) -> None:
+    try:
+        queue.put(("ok", run_driver(prob, driver, seed, args)))
+    except Exception as exc:
+        queue.put(("err", type(exc).__name__))
+
+
+def _fork_context():
+    try:
+        return mp.get_context("fork")
+    except ValueError:
+        return None
+
+
+def run_driver_cell(prob, driver: str, seed: int, args) -> tuple[float, int, str]:
+    """Run one driver cell with a timeout that can stop compiled code."""
+    ctx = _fork_context()
+    if ctx is None:
+        try:
+            with per_problem_timeout(args.per_problem_timeout):
+                best_val, fevals = run_driver(prob, driver, seed, args)
+            return best_val, fevals, "ok"
+        except TimeoutError:
+            return float("nan"), 0, "timeout"
+        except Exception as exc:
+            return float("nan"), 0, f"err:{type(exc).__name__}"
+
+    queue = ctx.Queue(maxsize=1)
+    proc = ctx.Process(target=_driver_worker, args=(queue, prob, driver, seed, args))
+    proc.start()
+    proc.join(args.per_problem_timeout)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join(5.0)
+        if proc.is_alive():
+            proc.kill()
+            proc.join()
+        return float("nan"), 0, "timeout"
+    if proc.exitcode != 0:
+        return float("nan"), 0, f"err:exit{proc.exitcode}"
+    try:
+        status, payload = queue.get_nowait()
+    except Empty:
+        return float("nan"), 0, "err:no-result"
+    if status == "ok":
+        best_val, fevals = payload
+        return best_val, fevals, "ok"
+    return float("nan"), 0, f"err:{payload}"
+
+
 def run_suite(args) -> list[dict]:
     drivers = parse_drivers(args.drivers)
     rows = load_existing_rows(args.out, resume=not args.no_resume)
@@ -282,16 +334,7 @@ def run_suite(args) -> list[dict]:
                     continue
 
                 start = time.perf_counter()
-                best_val = float("nan")
-                fevals = 0
-                status = "ok"
-                try:
-                    with per_problem_timeout(args.per_problem_timeout):
-                        best_val, fevals = run_driver(prob, driver, seed, args)
-                except TimeoutError:
-                    status = "timeout"
-                except Exception as exc:
-                    status = f"err:{type(exc).__name__}"
+                best_val, fevals, status = run_driver_cell(prob, driver, seed, args)
 
                 row = {
                     "problem": target.name,
