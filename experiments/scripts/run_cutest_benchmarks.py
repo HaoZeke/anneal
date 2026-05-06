@@ -596,6 +596,23 @@ def _rust_hmc_steps_per_epoch_budget(epoch_budget, dim, l_steps, grad_kind):
     return max(1, int(epoch_budget) // per_trajectory)
 
 
+def _pt_hmc_inner_steps_per_epoch_budget(epoch_budget, n_chains, dim, l_steps, grad_kind):
+    if epoch_budget <= 0:
+        raise ValueError("epoch_budget must be positive")
+    per_inner = max(1, int(n_chains)) * _rust_hmc_max_work_units_per_trajectory(
+        dim, l_steps, grad_kind
+    )
+    return max(1, int(epoch_budget) // per_inner)
+
+
+def _ensemble_candidate_epoch_budget(epoch_budget, n_candidates):
+    if epoch_budget <= 0:
+        raise ValueError("epoch_budget must be positive")
+    if n_candidates <= 0:
+        raise ValueError("n_candidates must be positive")
+    return max(1, int(epoch_budget) // int(n_candidates))
+
+
 def _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains):
     pilot_steps = max(5, min(20, int(k_per_epoch) // 10))
     return {
@@ -629,6 +646,51 @@ def _cutest_gradient(prob):
         return g
 
     return _fd_grad, "finite-difference"
+
+
+def _run_cutest_rust_hmc(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_epochs,
+    epoch_budget,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    best_pilot_pos,
+):
+    l_steps = max(1, int(L_map))
+    hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
+        epoch_budget, prob.dim, l_steps, grad_kind
+    )
+    history = anneal_module.run_hmc(
+        prob.fn,
+        grad_fn,
+        prob.low.astype(np.float64),
+        prob.high.astype(np.float64),
+        t_init=float(t_map),
+        epsilon=float(e_map),
+        l_steps=l_steps,
+        q=float(q_map),
+        n_epochs=int(n_epochs),
+        steps_per_epoch=hmc_steps_per_epoch,
+        seed=int(seed),
+        x0=np.asarray(best_pilot_pos, dtype=np.float64),
+    )
+    n_trajectories = int(n_epochs) * hmc_steps_per_epoch
+    total_accepted = int(getattr(history, "total_accepted", 0))
+    if grad_kind == "native":
+        work_units = _rust_hmc_native_grad_work_units(
+            n_trajectories, l_steps, total_accepted=total_accepted
+        )
+    else:
+        work_units = _rust_hmc_fd_work_units(
+            prob.dim, n_trajectories, l_steps, total_accepted=total_accepted
+        )
+    return float(history.best_val), work_units
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
@@ -675,35 +737,21 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         if driver == "bgsa":
             import anneal
 
-            l_steps = max(1, int(L_map))
-            hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
-                k_per_epoch, prob.dim, l_steps, grad_kind
-            )
-            history = anneal.run_hmc(
-                prob.fn,
+            best_val, work_units = _run_cutest_rust_hmc(
+                anneal,
+                prob,
                 grad_fn,
-                prob.low.astype(np.float64),
-                prob.high.astype(np.float64),
-                t_init=float(t_map),
-                epsilon=float(e_map),
-                l_steps=l_steps,
-                q=float(q_map),
-                n_epochs=int(n_epochs),
-                steps_per_epoch=hmc_steps_per_epoch,
-                seed=int(seed),
-                x0=np.asarray(best_pilot_pos, dtype=np.float64),
+                grad_kind,
+                seed,
+                n_epochs,
+                k_per_epoch,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                best_pilot_pos,
             )
-            n_trajectories = int(n_epochs) * hmc_steps_per_epoch
-            total_accepted = int(getattr(history, "total_accepted", 0))
-            if grad_kind == "native":
-                work_units = _rust_hmc_native_grad_work_units(
-                    n_trajectories, l_steps, total_accepted=total_accepted
-                )
-            else:
-                work_units = _rust_hmc_fd_work_units(
-                    prob.dim, n_trajectories, l_steps, total_accepted=total_accepted
-                )
-            return float(history.best_val), pilot_calls + work_units
+            return best_val, pilot_calls + work_units
         if driver == "bgsa_metad":
             bv, nc, _, _, _, _ = d.bgsa_metad(
                 seed,
@@ -734,23 +782,74 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             )
             return bv, nc
         if driver == "bgsa_auto":
-            bv, nc, _chosen = d.bgsa_auto(
+            import anneal
+
+            candidate_budget = _ensemble_candidate_epoch_budget(k_per_epoch, 4)
+            hmc_bv, hmc_calls = _run_cutest_rust_hmc(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
                 seed,
                 n_epochs,
-                k_per_epoch,
+                candidate_budget,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                best_pilot_pos,
+            )
+            metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
+                seed + 1,
+                n_epochs,
+                candidate_budget,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls=0,
+                sigma_rw=sigma_map,
+            )
+            pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
+            pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
+                seed + 2,
+                n_epochs,
+                n_chains,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls=0,
+                k_inner=pt_inner,
+                k_swap=max(1, min(5, pt_inner)),
+                sigma_rw=sigma_map,
+                t_hot=t_hot,
+            )
+            hybrid_inner = _pt_hmc_inner_steps_per_epoch_budget(
+                candidate_budget, n_chains, prob.dim, max(1, int(L_map)), grad_kind
+            )
+            hybrid_bv, hybrid_calls, _, _, _, _, _, _ = d.bgsa_pt_hybrid_v2(
+                seed + 3,
+                n_epochs,
                 n_chains,
                 t_map,
                 e_map,
                 L_map,
                 q_map,
-                t_rw_map,
-                sigma_map,
-                t_hot,
-                features,
-                best_pilot_pos,
-                pilot_calls,
+                pilot_calls=0,
+                k_inner=hybrid_inner,
+                k_swap=max(1, min(5, hybrid_inner)),
+                t_hot=t_hot,
             )
-            return bv, nc
+            outcomes = (
+                (hmc_bv, hmc_calls),
+                (metad_bv, metad_calls),
+                (pt_bv, pt_calls),
+                (hybrid_bv, hybrid_calls),
+            )
+            return min(value for value, _calls in outcomes), pilot_calls + sum(
+                calls for _value, calls in outcomes
+            )
         raise ValueError(f"Unknown bGSA driver: {driver}")
     finally:
         d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH = saved
