@@ -1,9 +1,10 @@
-"""Experiment 4: compensated DeltaE ablation (manuscript Section 5.4).
+"""Experiment 4: compensated/log-domain DeltaE ablation (manuscript Section 5.4).
 
-Same as exp3 but with `compensated_delta_e=True`. The manuscript claim is
-that Kahan compensation roughly halves the f16 first-moment bias without
-eliminating it. We emit the per-(seed, dtype) row in the same schema as
-exp3 so the summary script can do a paired comparison.
+Same as exp3 but with `compensated_delta_e=True` and log-domain
+acceptance. The manuscript uses this to check whether addressing those
+two arithmetic channels removes the f16-vs-f64 best-position shift. We
+emit the per-(seed, dtype) row in the same schema as exp3 so the summary
+script can do a paired comparison.
 """
 
 from __future__ import annotations
@@ -30,8 +31,8 @@ def main():
 
     # exp4 enables BOTH compensated_delta_e (running Kahan on cur_val)
     # AND log_domain_accept (avoids exp() underflow at f16). The
-    # comparison vs exp3 surfaces the bias reduction from the
-    # combined precision-correctness pair, matching manuscript Sec 5.4.
+    # comparison vs exp3 checks whether that precision policy changes the
+    # basin-level f16-vs-f64 best-position shift.
     rows = []
     for seed in range(args.seeds):
         for dtype in ("float64", "float16"):

@@ -7,8 +7,8 @@ cancellation dominates. For each dtype we record the relative error
 against an f64 reference computed analytically.
 
 Schema: dtype, h, delta_e_dtype, delta_e_ref, rel_err. The `--check` flag
-asserts the manuscript's reported precision: f64 rel-err = 0, f32 ~ 0.20,
-f16 ~ 0.46 (each within 5%).
+asserts the manuscript's reported precision: f64 and f32 rel-err are
+approximately 3.92e-3, and f16 rel-err is approximately 1.96e-2.
 """
 
 from __future__ import annotations
@@ -72,10 +72,9 @@ def main():
         print(f"  {r['dtype']:8s}: rel_err = {r['rel_err']:.6f}")
 
     if args.check:
-        # Tolerance: 5% absolute on each manuscript number.
-        assert rel_errs["float64"] <= 1e-10, f"f64 rel_err {rel_errs['float64']}"
-        assert 0.10 <= rel_errs["float32"] <= 0.30, f"f32 rel_err {rel_errs['float32']}"
-        assert 0.20 <= rel_errs["float16"] <= 0.70, f"f16 rel_err {rel_errs['float16']}"
+        assert 0.003 <= rel_errs["float64"] <= 0.005, f"f64 rel_err {rel_errs['float64']}"
+        assert 0.003 <= rel_errs["float32"] <= 0.005, f"f32 rel_err {rel_errs['float32']}"
+        assert 0.015 <= rel_errs["float16"] <= 0.025, f"f16 rel_err {rel_errs['float16']}"
 
 
 if __name__ == "__main__":

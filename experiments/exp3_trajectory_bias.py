@@ -1,10 +1,9 @@
-"""Experiment 3: paired trajectory bias (manuscript Section 5.3).
+"""Experiment 3: paired finite-run best-position shift (manuscript Section 5.3).
 
 Runs 32-seed paired f16 vs f64 SA on Styblinski-Tang 2D. Reports the
-per-seed first-moment of the trajectory's accepted positions for both
-dtypes. The summary script (`scripts/exp3_summary.py`) computes the
-paired bias and a bootstrap CI; this script just emits the per-(seed,
-dtype) row.
+per-seed best position and best value for both dtypes. The summary script
+(`scripts/exp3_summary.py`) computes the paired best-position shift and a
+bootstrap CI; this script just emits the per-(seed, dtype) row.
 """
 
 from __future__ import annotations
