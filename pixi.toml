@@ -117,9 +117,9 @@ all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "e
 all-bench       = { depends-on = ["bench-suite", "bench-plots"] }
 cutest-bootstrap = "bash experiments/benchmarks/bootstrap_cutest.sh"
 cutest-smoke    = "PYTHONPATH=. python experiments/benchmarks/cutest_runner.py"
-cutest-bench    = "PYTHONPATH=. python experiments/scripts/run_cutest_benchmarks.py --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15"
+cutest-bench    = { cmd = "PYTHONPATH=. python experiments/scripts/run_cutest_benchmarks.py --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15", depends-on = ["python-build"] }
 cutest-plots    = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/cutest_benchmarks.csv data/cutest/", depends-on = ["cutest-bench"] }
-cutest-full     = "PYTHONPATH=. python experiments/scripts/run_cutest_full_suite.py --out data/cutest_full.csv --seeds 3 --dim-cap 50 --n-epochs 30"
+cutest-full     = { cmd = "PYTHONPATH=. python experiments/scripts/run_cutest_full_suite.py --out data/cutest_full.csv --seeds 3 --dim-cap 50 --n-epochs 30", depends-on = ["python-build"] }
 cutest-full-summary = { cmd = "PYTHONPATH=. python experiments/scripts/summarize_cutest_benchmarks.py data/cutest_full.csv --out data/cutest_full_summary.csv --min-problems 1", depends-on = ["cutest-full"] }
 cutest-full-plots = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/cutest_full.csv data/cutest-full/", depends-on = ["cutest-full"] }
 mcmc-demo       = "PYTHONPATH=. python experiments/scripts/demo_mcmc_vs_classical.py --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
@@ -133,4 +133,4 @@ default = { solve-group = "default" }
 python  = { features = ["python"], solve-group = "default" }
 gpu     = { features = ["python", "gpu"], solve-group = "default" }
 docs    = { features = ["docs"],   solve-group = "default" }
-verify  = { features = ["verify"], solve-group = "default" }
+verify  = { features = ["python", "verify"], solve-group = "default" }
