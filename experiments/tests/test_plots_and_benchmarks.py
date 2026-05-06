@@ -62,6 +62,7 @@ def test_performance_profile_renders():
     pytest.importorskip("matplotlib")
     pytest.importorskip("chemparseplot")
     from experiments.plots.performance_profile import plot_performance_profile
+
     rng = np.random.default_rng(0)
     costs = rng.uniform(100, 10_000, size=(8, 3))
     costs[0, 1] = np.nan  # one failed cell
@@ -74,6 +75,7 @@ def test_data_profile_renders():
     pytest.importorskip("matplotlib")
     pytest.importorskip("chemparseplot")
     from experiments.plots.data_profile import plot_data_profile
+
     rng = np.random.default_rng(1)
     fevals = rng.uniform(100, 10_000, size=(6, 2))
     dims = np.array([2, 5, 5, 10, 10, 2])
@@ -85,6 +87,7 @@ def test_pareto_renders_and_finds_front():
     pytest.importorskip("matplotlib")
     pytest.importorskip("chemparseplot")
     from experiments.plots.pareto import plot_pareto, pareto_front
+
     pts = np.array([[100.0, 5.0], [200.0, 3.0], [400.0, 1.0], [800.0, 1.5]])
     front = pareto_front(pts)
     assert set(front.tolist()) == {0, 1, 2}  # (800, 1.5) is dominated by (400, 1.0)
@@ -386,7 +389,8 @@ def test_cutest_full_suite_cell_timeout_terminates_hanging_driver(monkeypatch):
     args = types.SimpleNamespace(per_problem_timeout=1)
 
     best_val, fevals, f0, status = suite.run_driver_cell(
-        _QuadraticCutestProblem(), "classical", 0, args)
+        _QuadraticCutestProblem(), "classical", 0, args
+    )
 
     assert np.isnan(best_val)
     assert fevals == 0
@@ -429,7 +433,8 @@ def test_bgsa_hmc_rejects_nonfinite_hamiltonians_without_warning(monkeypatch):
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         x, accepted, _n_calls, value = bgsa.hmc_sa_step(
-            np.random.default_rng(0), x0, float("inf"), 1.0, 0.0, 1, 2, q=1.5)
+            np.random.default_rng(0), x0, float("inf"), 1.0, 0.0, 1, 2, q=1.5
+        )
 
     assert not accepted
     assert np.all(x == x0)
@@ -448,7 +453,8 @@ def test_bgsa_hmc_rejects_overflowing_momentum_updates_without_warning(monkeypat
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         x, accepted, _n_calls, value = bgsa.hmc_sa_step(
-            np.random.default_rng(0), x0, 0.0, 1.0, 1e308, 1, 2, q=1.5)
+            np.random.default_rng(0), x0, 0.0, 1.0, 1e308, 1, 2, q=1.5
+        )
 
     assert not accepted
     assert np.all(x == x0)
@@ -472,7 +478,8 @@ def test_bgsa_hmc_default_uses_omelyan_force_stages(monkeypatch):
     monkeypatch.setattr(bgsa, "OBJ_GRAD", grad)
 
     _x, accepted, n_calls, value = bgsa.hmc_sa_step(
-        np.random.default_rng(0), x0, 0.0, 1.0, 0.01, 1, 2, q=1.0)
+        np.random.default_rng(0), x0, 0.0, 1.0, 0.01, 1, 2, q=1.0
+    )
 
     assert accepted
     assert value == 0.0
@@ -480,11 +487,14 @@ def test_bgsa_hmc_default_uses_omelyan_force_stages(monkeypatch):
     assert n_calls == 4
 
 
-@pytest.mark.parametrize("module_name", [
-    "experiments.scripts.demo_bgsa",
-    "experiments.scripts.demo_mcmc_vs_classical",
-    "experiments.scripts.run_cutest_benchmarks",
-])
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "experiments.scripts.demo_bgsa",
+        "experiments.scripts.demo_mcmc_vs_classical",
+        "experiments.scripts.run_cutest_benchmarks",
+    ],
+)
 def test_gelman_rubin_returns_inf_for_nonfinite_traces_without_warning(module_name):
     module = __import__(module_name, fromlist=["gelman_rubin_max"])
     traces = [
@@ -507,14 +517,38 @@ def test_bgsa_pilot_statistics_ignore_nonfinite_values_without_warning():
     )
 
     obs = [
-        {"t_init": 1.0, "epsilon": 0.10, "L": 2, "q": 1.1,
-         "accept_rate": 0.2, "best_val": float("inf")},
-        {"t_init": 2.0, "epsilon": 0.20, "L": 3, "q": 1.2,
-         "accept_rate": 0.5, "best_val": 1e308},
-        {"t_init": 3.0, "epsilon": 0.30, "L": 4, "q": 1.3,
-         "accept_rate": 0.7, "best_val": 8.0},
-        {"t_init": 4.0, "epsilon": 0.40, "L": 5, "q": 1.4,
-         "accept_rate": 0.8, "best_val": float("nan")},
+        {
+            "t_init": 1.0,
+            "epsilon": 0.10,
+            "L": 2,
+            "q": 1.1,
+            "accept_rate": 0.2,
+            "best_val": float("inf"),
+        },
+        {
+            "t_init": 2.0,
+            "epsilon": 0.20,
+            "L": 3,
+            "q": 1.2,
+            "accept_rate": 0.5,
+            "best_val": 1e308,
+        },
+        {
+            "t_init": 3.0,
+            "epsilon": 0.30,
+            "L": 4,
+            "q": 1.3,
+            "accept_rate": 0.7,
+            "best_val": 8.0,
+        },
+        {
+            "t_init": 4.0,
+            "epsilon": 0.40,
+            "L": 5,
+            "q": 1.4,
+            "accept_rate": 0.8,
+            "best_val": float("nan"),
+        },
     ]
 
     with warnings.catch_warnings():
@@ -522,7 +556,8 @@ def test_bgsa_pilot_statistics_ignore_nonfinite_values_without_warning():
         priors = fit_empirical_bayes_priors(obs, dim=5)
         features = pilot_landscape_features(obs[:2], obs[2:])
         log_inc = _segment_log_weight_increment(
-            np.array([1.0, 1e308, float("inf"), float("nan")]))
+            np.array([1.0, 1e308, float("inf"), float("nan")])
+        )
 
     assert all(np.isfinite(value) for value in priors.values())
     assert all(np.isfinite(value) for value in features.values())
@@ -564,9 +599,11 @@ def test_cutest_bayesian_mixing_keeps_easy_problem_competitive():
 
     prob = _QuadraticCutestProblem()
     classical_val, classical_fevals = cutest.classical_sa(
-        prob, seed=0, n_epochs=12, k_fixed=40)
+        prob, seed=0, n_epochs=12, k_fixed=40
+    )
     bayes_val, bayes_fevals = cutest.bayesian_mixing_sa(
-        prob, seed=0, max_fevals=classical_fevals)
+        prob, seed=0, max_fevals=classical_fevals
+    )
 
     assert bayes_fevals == classical_fevals
     assert bayes_val <= 5.0 * classical_val

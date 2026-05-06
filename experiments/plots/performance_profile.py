@@ -35,14 +35,25 @@ from chemparseplot.plot.theme import (
 
 
 def _solver_color(idx: int) -> str:
-    palette = [
-        RUHI_COLORS["teal"],
-        RUHI_COLORS["coral"],
-        RUHI_COLORS["sky"],
-        RUHI_COLORS["magenta"],
-        RUHI_COLORS["sunshine"],
-    ]
+    palette = list(plt.get_cmap("tab20").colors)
     return palette[idx % len(palette)]
+
+
+def _solver_linestyle(idx: int) -> str:
+    styles = ["-", "--", "-.", ":"]
+    return styles[(idx // 20) % len(styles)]
+
+
+def _place_legend(ax, n_items: int):
+    ncol = 2 if n_items <= 6 else 3
+    return ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.24),
+        ncol=ncol,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=2.4,
+    )
 
 
 def plot_performance_profile(
@@ -96,27 +107,38 @@ def plot_performance_profile(
     else:
         taus = np.linspace(1.0, tau_max, n_tau)
 
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
     apply_axis_theme(ax, get_theme("ruhi"))
 
     for s_idx, name in enumerate(solver_names):
-        rho = np.array([
-            float(np.sum(ratios[valid_problems, s_idx] <= tau)) / valid_problems.sum()
-            for tau in taus
-        ])
-        ax.plot(taus, rho, label=name, color=_solver_color(s_idx), linewidth=2.0)
+        rho = np.array(
+            [
+                float(np.sum(ratios[valid_problems, s_idx] <= tau))
+                / valid_problems.sum()
+                for tau in taus
+            ]
+        )
+        ax.plot(
+            taus,
+            rho,
+            label=name,
+            color=_solver_color(s_idx),
+            linestyle=_solver_linestyle(s_idx),
+            linewidth=2.0,
+        )
 
     if log_x:
         ax.set_xscale("log", base=2)
     ax.set_xlim(1.0, tau_max)
     ax.set_ylim(0.0, 1.05)
     ax.set_xlabel(r"Performance ratio $\tau$")
-    ax.set_ylabel(r"$\rho_s(\tau)$ -- fraction of problems within $\tau$ of best")
+    ax.set_ylabel(r"Fraction within $\tau$ of best")
     if title:
         ax.set_title(title)
-    ax.legend(loc="lower right", frameon=False)
+    _place_legend(ax, n_solvers)
+    fig.subplots_adjust(bottom=0.34)
 
     if out_path:
-        fig.savefig(out_path)
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
 
     return fig, ax
