@@ -67,7 +67,7 @@ def pareto_front(points: np.ndarray) -> np.ndarray:
 def plot_pareto(
     runs: Sequence[tuple[str, np.ndarray]],
     *,
-    cost_label: str = "Cost (function evaluations)",
+    cost_label: str = "Cost (objective-equivalent evaluations)",
     value_label: str = "Best objective value",
     title: str | None = None,
     out_path: str | None = None,

@@ -1,7 +1,8 @@
 """Dolan-Moré performance profile (doi:10.1007/s101070100263).
 
-For solver `s` and problem `p`, define `t_{p,s}` as the cost (function
-evals or wall time) needed to solve `p` to within a tolerance.
+For solver `s` and problem `p`, define `t_{p,s}` as the cost
+(objective-equivalent evaluations or wall time) needed to solve `p` to
+within a tolerance.
 The performance ratio is
   r_{p,s} = t_{p,s} / min_{s'} t_{p,s'}
 and the performance profile is

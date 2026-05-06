@@ -2,8 +2,8 @@
 
 For solver `s` and problem `p`, define a "solved at budget kappa" predicate
   H_{p,s}(kappa) = 1 iff t_{p,s} <= kappa * (n_p + 1)
-where `n_p` is the problem's dimension and `t_{p,s}` is function evals to
-reach a tolerance. The data profile is
+where `n_p` is the problem's dimension and `t_{p,s}` is
+objective-equivalent evaluations to reach a tolerance. The data profile is
   d_s(kappa) = (1/|P|) * sum_p H_{p,s}(kappa).
 
 Reading: d_s(kappa) is the fraction of problems solved by solver s within
@@ -62,8 +62,8 @@ def plot_data_profile(
     """Render a Moré-Wild data profile.
 
     Args:
-        fevals: shape `(n_problems, n_solvers)` of function evaluations to
-                reach the tolerance. NaN encodes a failed run.
+        fevals: shape `(n_problems, n_solvers)` of objective-equivalent
+                evaluations to reach the tolerance. NaN encodes a failed run.
         dims: shape `(n_problems,)` -- problem dimensions `n_p`.
         solver_names: one label per column.
         kappa_max: upper bound on the budget ratio.
@@ -107,7 +107,7 @@ def plot_data_profile(
 
     ax.set_xlim(0.0, kappa_max)
     ax.set_ylim(0.0, 1.05)
-    ax.set_xlabel(r"Budget $\kappa$ (simplex gradients)")
+    ax.set_xlabel(r"Budget $\kappa$ (simplex-gradient-equivalent)")
     ax.set_ylabel(r"Fraction solved")
     if title:
         ax.set_title(title)

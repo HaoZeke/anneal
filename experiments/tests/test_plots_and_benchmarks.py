@@ -95,6 +95,7 @@ def test_data_profile_renders():
     dims = np.array([2, 5, 5, 10, 10, 2])
     fig, ax = plot_data_profile(fevals, dims, ["boltzmann", "fast"])
     assert ax.get_xlabel().startswith("Budget")
+    assert "simplex-gradient-equivalent" in ax.get_xlabel()
 
 
 def test_pareto_renders_and_finds_front():
@@ -106,6 +107,7 @@ def test_pareto_renders_and_finds_front():
     front = pareto_front(pts)
     assert set(front.tolist()) == {0, 1, 2}  # (800, 1.5) is dominated by (400, 1.0)
     fig, ax = plot_pareto([("solver_a", pts)])
+    assert ax.get_xlabel() == "Cost (objective-equivalent evaluations)"
     assert ax.get_legend() is not None
 
 

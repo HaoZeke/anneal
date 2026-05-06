@@ -197,7 +197,7 @@ def main():
     ]
     plot_pareto(
         pareto_runs,
-        cost_label="Function evaluations",
+        cost_label="Objective-equivalent evaluations",
         value_label="Relative gap to cell best",
         title="CUTEst accuracy-cost Pareto",
         log_x=True,
