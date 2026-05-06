@@ -244,9 +244,18 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
 
 
-def _driver_worker(queue, prob, driver: str, seed: int, args) -> None:
+def _load_cell_problem(problem_ref):
+    if isinstance(problem_ref, str):
+        return load_problem(problem_ref)
+    return problem_ref
+
+
+def _driver_worker(queue, problem_ref, driver: str, seed: int, args) -> None:
     try:
-        queue.put(("ok", run_driver(prob, driver, seed, args)))
+        prob = _load_cell_problem(problem_ref)
+        f0 = centre_value(prob)
+        best_val, fevals = run_driver(prob, driver, seed, args)
+        queue.put(("ok", (best_val, fevals, f0)))
     except Exception as exc:
         queue.put(("err", type(exc).__name__))
 
@@ -258,21 +267,23 @@ def _fork_context():
         return None
 
 
-def run_driver_cell(prob, driver: str, seed: int, args) -> tuple[float, int, str]:
-    """Run one driver cell with a timeout that can stop compiled code."""
+def run_driver_cell(problem_ref, driver: str, seed: int, args) -> tuple[float, int, float, str]:
+    """Load and run one driver cell with a timeout that can stop compiled code."""
     ctx = _fork_context()
     if ctx is None:
         try:
             with per_problem_timeout(args.per_problem_timeout):
+                prob = _load_cell_problem(problem_ref)
+                f0 = centre_value(prob)
                 best_val, fevals = run_driver(prob, driver, seed, args)
-            return best_val, fevals, "ok"
+            return best_val, fevals, f0, "ok"
         except TimeoutError:
-            return float("nan"), 0, "timeout"
+            return float("nan"), 0, float("nan"), "timeout"
         except Exception as exc:
-            return float("nan"), 0, f"err:{type(exc).__name__}"
+            return float("nan"), 0, float("nan"), f"err:{type(exc).__name__}"
 
     queue = ctx.Queue(maxsize=1)
-    proc = ctx.Process(target=_driver_worker, args=(queue, prob, driver, seed, args))
+    proc = ctx.Process(target=_driver_worker, args=(queue, problem_ref, driver, seed, args))
     proc.start()
     proc.join(args.per_problem_timeout)
     if proc.is_alive():
@@ -281,17 +292,17 @@ def run_driver_cell(prob, driver: str, seed: int, args) -> tuple[float, int, str
         if proc.is_alive():
             proc.kill()
             proc.join()
-        return float("nan"), 0, "timeout"
+        return float("nan"), 0, float("nan"), "timeout"
     if proc.exitcode != 0:
-        return float("nan"), 0, f"err:exit{proc.exitcode}"
+        return float("nan"), 0, float("nan"), f"err:exit{proc.exitcode}"
     try:
         status, payload = queue.get_nowait()
     except Empty:
-        return float("nan"), 0, "err:no-result"
+        return float("nan"), 0, float("nan"), "err:no-result"
     if status == "ok":
-        best_val, fevals = payload
-        return best_val, fevals, "ok"
-    return float("nan"), 0, f"err:{payload}"
+        best_val, fevals, f0 = payload
+        return best_val, fevals, f0, "ok"
+    return float("nan"), 0, float("nan"), f"err:{payload}"
 
 
 def run_suite(args) -> list[dict]:
@@ -319,14 +330,6 @@ def run_suite(args) -> list[dict]:
         if all_done:
             continue
 
-        try:
-            with per_problem_timeout(args.load_timeout):
-                prob = load_problem(target.name)
-                f0 = centre_value(prob)
-        except Exception as exc:
-            print(f"  SKIP {target.name}: load failed: {type(exc).__name__}: {exc}")
-            continue
-
         for seed in range(args.seeds):
             for driver in drivers:
                 key = (target.name, driver, str(seed))
@@ -334,7 +337,7 @@ def run_suite(args) -> list[dict]:
                     continue
 
                 start = time.perf_counter()
-                best_val, fevals, status = run_driver_cell(prob, driver, seed, args)
+                best_val, fevals, f0, status = run_driver_cell(target.name, driver, seed, args)
 
                 row = {
                     "problem": target.name,

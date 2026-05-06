@@ -280,11 +280,12 @@ def test_cutest_full_suite_cell_timeout_terminates_hanging_driver(monkeypatch):
     monkeypatch.setattr(suite, "run_driver", hangs)
     args = types.SimpleNamespace(per_problem_timeout=1)
 
-    best_val, fevals, status = suite.run_driver_cell(
+    best_val, fevals, f0, status = suite.run_driver_cell(
         _QuadraticCutestProblem(), "classical", 0, args)
 
     assert np.isnan(best_val)
     assert fevals == 0
+    assert np.isnan(f0)
     assert status == "timeout"
 
 
