@@ -27,7 +27,7 @@ from experiments.shared.runner import gelman_rubin_max
 
 def rastrigin_5d(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    return float(10.0 * len(x) + np.sum(x ** 2 - 10.0 * np.cos(2.0 * np.pi * x)))
+    return float(10.0 * len(x) + np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x)))
 
 
 def rastrigin_grad(x: np.ndarray) -> np.ndarray:
@@ -68,11 +68,27 @@ def rosenbrock_grad(x: np.ndarray) -> np.ndarray:
 
 
 OBJECTIVES = {
-    "rastrigin_5d": (rastrigin_5d, rastrigin_grad, np.full(5, -5.12), np.full(5, 5.12), 0.0),
-    "rosenbrock_5d": (rosenbrock_5d, rosenbrock_grad,
-                      np.full(5, -2.048), np.full(5, 2.048), 0.0),
-    "schwefel_20d": (schwefel_20d, schwefel_grad,
-                     np.full(20, -500.0), np.full(20, 500.0), 0.0),
+    "rastrigin_5d": (
+        rastrigin_5d,
+        rastrigin_grad,
+        np.full(5, -5.12),
+        np.full(5, 5.12),
+        0.0,
+    ),
+    "rosenbrock_5d": (
+        rosenbrock_5d,
+        rosenbrock_grad,
+        np.full(5, -2.048),
+        np.full(5, 2.048),
+        0.0,
+    ),
+    "schwefel_20d": (
+        schwefel_20d,
+        schwefel_grad,
+        np.full(20, -500.0),
+        np.full(20, 500.0),
+        0.0,
+    ),
 }
 
 # Default to rosenbrock_5d for the demo; HMC is supposed to win here.
@@ -80,7 +96,7 @@ LOW = OBJECTIVES["rosenbrock_5d"][2]
 HIGH = OBJECTIVES["rosenbrock_5d"][3]
 OBJ_FN = OBJECTIVES["rosenbrock_5d"][0]
 OBJ_GRAD = OBJECTIVES["rosenbrock_5d"][1]
-TARGET_ACCEPT = 0.65  # HMC target accept rate (Beskos/Pillai/Roberts 2013)
+TARGET_ACCEPT = 0.65  # Beskos/Pillai/Roberts 2013, doi:10.3150/12-BEJ414.
 OMELYAN_LAMBDA = 0.1931833275037836
 
 
@@ -102,9 +118,11 @@ def metad_gamma_from_qv(q_v):
     visiting distribution; gamma controls the asymptotic flattening of
     F. Both encode "how far above the typical T the kernel pretends to
     be". Tsallis-q-Gaussian visiting at q_v has effective temperature
-    T_eff = T * (q_v - 1)^(-1) (Tsallis & Stariolo 1996); requiring this
-    to match the well-tempered effective T (Bussi & Branduardi 2015,
-    T_eff = gamma * T) gives gamma = 1/(q_v - 1). q_v -> 1+ recovers
+    T_eff = T * (q_v - 1)^(-1) (Tsallis & Stariolo 1996,
+    doi:10.1016/S0378-4371(96)00271-3); requiring this to match the
+    well-tempered effective T (Barducci/Bussi/Parrinello 2008,
+    doi:10.1103/PhysRevLett.100.020603, T_eff = gamma * T) gives
+    gamma = 1/(q_v - 1). q_v -> 1+ recovers
     Boltzmann (gamma -> infinity, no flattening); larger q_v gives
     smaller gamma (more aggressive flattening).
 
@@ -117,7 +135,8 @@ def metad_gamma_from_qv(q_v):
 def tsallis_cool(t_init, q_v, epoch):
     """Tsallis (GSA) cooling: T(k) = T_0 * (2^(q_v-1) - 1) / ((1+k)^(q_v-1) - 1).
 
-    The Tsallis-Stariolo 1996 GSA cooling, derived as the schedule for
+    The Tsallis-Stariolo 1996 GSA cooling
+    (doi:10.1016/S0378-4371(96)00271-3), derived as the schedule for
     which the q-Gaussian visiting + q-acceptance triple yields a
     canonical equilibrium distribution. At q_v = 1 the schedule
     reduces (L'Hopital) to T_0 * ln 2 / ln(1+k), matching Boltzmann
@@ -131,7 +150,7 @@ def tsallis_cool(t_init, q_v, epoch):
     if abs(q_v - 1.0) < 1e-9:
         return t_init * np.log(2.0) / np.log(1.0 + epoch)
     exp = q_v - 1.0
-    num = (2.0 ** exp) - 1.0
+    num = (2.0**exp) - 1.0
     den = ((1.0 + epoch) ** exp) - 1.0
     return t_init * num / den
 
@@ -149,6 +168,8 @@ def metropolis_accept_prob(delta_e, temp):
 def tsallis_accept_prob(delta_e, temp, q_a):
     """Tsallis-Stariolo 1996 generalised Metropolis acceptance.
 
+    DOI: 10.1016/S0378-4371(96)00271-3.
+
     P_{q_a}(accept) = [1 + (q_a - 1) * dE / T]^(1/(1-q_a))    if q_a > 1
                     = exp(-dE / T)                            if q_a <= 1
 
@@ -157,7 +178,8 @@ def tsallis_accept_prob(delta_e, temp, q_a):
       - q_a > 1: heavy-tailed -- accepts more uphill moves at large
         dE/T, which is precisely how GSA escapes local minima better
         than classical SA on multimodal landscapes (Tsallis & Stariolo
-        1996; Xiang, Sun, Fan & Gong 1997 default q_a = 2.7).
+        1996, doi:10.1016/S0378-4371(96)00271-3; Xiang/Sun/Fan/Gong
+        1997 default q_a = 2.7, doi:10.1016/S0375-9601(97)00474-X).
       - The argument can go negative for q_a > 1, dE > T/(q_a-1);
         outside-support cutoff returns 0 (no acceptance).
     """
@@ -174,6 +196,7 @@ def tsallis_accept_prob(delta_e, temp, q_a):
 # -------------------------------------------------------------------------
 # Drivers
 # -------------------------------------------------------------------------
+
 
 def classical_sa(seed, n_epochs, k_fixed, t_init, sigma, x0=None):
     rng = np.random.default_rng(seed)
@@ -195,7 +218,10 @@ def classical_sa(seed, n_epochs, k_fixed, t_init, sigma, x0=None):
 
 
 def sample_q_gaussian_momentum(rng, dim, q):
-    """q-Gaussian momentum draw. q=1.0 is Gaussian; 1 < q < 1+2/dim is heavy-tailed."""
+    """q-Gaussian momentum draw (doi:10.1007/BF01016429).
+
+    q=1.0 is Gaussian; 1 < q < 1+2/dim is heavy-tailed.
+    """
     if q <= 1.0 + 1e-9:
         return rng.normal(0.0, 1.0, size=dim)
     alpha = 1.0 / (q - 1.0) - 0.5 * dim
@@ -281,8 +307,9 @@ def _finite_abs_corr(x, y):
     y_scaled = y_fin / y_scale
     x_centered = x_scaled - np.mean(x_scaled)
     y_centered = y_scaled - np.mean(y_scaled)
-    denom = float(np.sqrt(np.dot(x_centered, x_centered)
-                          * np.dot(y_centered, y_centered)))
+    denom = float(
+        np.sqrt(np.dot(x_centered, x_centered) * np.dot(y_centered, y_centered))
+    )
     if not np.isfinite(denom) or denom <= 0.0:
         return 0.0
     value = float(np.dot(x_centered, y_centered) / denom)
@@ -490,7 +517,9 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
         T = tsallis_cool(t_init, q, epoch)
         eps_eff = eps * np.sqrt(T / eps_ref)
         for _ in range(k_per_epoch):
-            cur, accepted, nc, cur_v = hmc_sa_step(rng, cur, cur_v, T, eps_eff, L, len(LOW), q)
+            cur, accepted, nc, cur_v = hmc_sa_step(
+                rng, cur, cur_v, T, eps_eff, L, len(LOW), q
+            )
             n_calls += nc
             if cur_v < best:
                 best = cur_v
@@ -516,10 +545,14 @@ def fit_empirical_bayes_priors(scout_obs, dim):
     inferred from data, not arbitrary literature folklore."""
     if not scout_obs:
         return {
-            "t_mean": 0.0, "t_sd": 1.0,
-            "e_mean": -3.0, "e_sd": 1.0,
-            "l_mean": 1.6, "l_sd": 0.7,
-            "q_mean": 1.15, "q_sd": 0.1,
+            "t_mean": 0.0,
+            "t_sd": 1.0,
+            "e_mean": -3.0,
+            "e_sd": 1.0,
+            "l_mean": 1.6,
+            "l_sd": 0.7,
+            "q_mean": 1.15,
+            "q_sd": 0.1,
         }
     target_logit = float(np.log(0.65 / 0.35))
     finite_bvs = _finite_array([o["best_val"] for o in scout_obs])
@@ -558,17 +591,22 @@ def fit_empirical_bayes_priors(scout_obs, dim):
     l_mean, l_sd = _mom(log_ls, 1.6, 0.7)
     q_mean, q_sd = _mom(qs, 1.15, 0.1)
     return {
-        "t_mean": t_mean, "t_sd": t_sd,
-        "e_mean": e_mean, "e_sd": e_sd,
-        "l_mean": l_mean, "l_sd": l_sd,
-        "q_mean": q_mean, "q_sd": q_sd,
+        "t_mean": t_mean,
+        "t_sd": t_sd,
+        "e_mean": e_mean,
+        "e_sd": e_sd,
+        "l_mean": l_mean,
+        "l_sd": l_sd,
+        "q_mean": q_mean,
+        "q_sd": q_sd,
     }
 
 
 def rw_pilot(seed, T, sigma, n_steps):
     """Pilot RW-Metropolis chain at FIXED temperature T. Used to fit
     sigma_rw against the Roberts/Gelman/Gilks 1997 0.234 acceptance
-    optimum. Returns (best_val, accept_rate, fevals).
+    optimum (doi:10.1214/aoap/1034625254). Returns
+    (best_val, accept_rate, fevals).
 
     Fixed-T (no cooling) is essential: the 0.234 optimum is a fixed-T
     statement; cooling-during-pilot averages accept rate across
@@ -605,8 +643,7 @@ def fit_t_sigma_rw(pilot_obs):
     if not pilot_obs:
         return 1.0, 0.5
     target_logit = float(np.log(0.234 / (1.0 - 0.234)))
-    finite_bvs = [o["best_val"] for o in pilot_obs
-                  if np.isfinite(o["best_val"])]
+    finite_bvs = [o["best_val"] for o in pilot_obs if np.isfinite(o["best_val"])]
     if finite_bvs:
         bv_max = max(finite_bvs)
         bv_range = bv_max - min(finite_bvs) + 1e-12
@@ -635,8 +672,7 @@ def fit_t_sigma_rw(pilot_obs):
     weights = np.asarray(weights)
     weights = np.where(np.isfinite(weights), weights, 0.0)
     if weights.sum() <= 0:
-        return (float(np.exp(np.median(log_ts))),
-                float(np.exp(np.median(log_sigmas))))
+        return (float(np.exp(np.median(log_ts))), float(np.exp(np.median(log_sigmas))))
     log_t_map = float(np.average(log_ts, weights=weights))
     log_sigma_map = float(np.average(log_sigmas, weights=weights))
     return float(np.exp(log_t_map)), float(np.exp(log_sigma_map))
@@ -683,10 +719,14 @@ def neg_log_posterior_4d(log_t, log_e, log_l, q, obs, dim, priors=None):
         return float("inf")
     if priors is None:
         priors = {
-            "t_mean": 0.0, "t_sd": 1.0,
-            "e_mean": -3.0, "e_sd": 1.0,
-            "l_mean": 1.6, "l_sd": 0.7,
-            "q_mean": 1.15, "q_sd": 0.1,
+            "t_mean": 0.0,
+            "t_sd": 1.0,
+            "e_mean": -3.0,
+            "e_sd": 1.0,
+            "l_mean": 1.6,
+            "l_sd": 0.7,
+            "q_mean": 1.15,
+            "q_sd": 0.1,
         }
     prior_term = 0.5 * (
         ((log_t - priors["t_mean"]) / priors["t_sd"]) ** 2
@@ -772,48 +812,67 @@ def fit_laplace_4d(obs, dim, priors=None):
     [-5, -1] x [1, 2.5] x [1.05, q_max] box."""
     if priors is None:
         priors = {
-            "t_mean": 0.0, "t_sd": 1.0,
-            "e_mean": -3.0, "e_sd": 1.0,
-            "l_mean": 1.6, "l_sd": 0.7,
-            "q_mean": 1.15, "q_sd": 0.1,
+            "t_mean": 0.0,
+            "t_sd": 1.0,
+            "e_mean": -3.0,
+            "e_sd": 1.0,
+            "l_mean": 1.6,
+            "l_sd": 0.7,
+            "q_mean": 1.15,
+            "q_sd": 0.1,
         }
     n_t, n_e, n_l, n_q = 9, 9, 9, 7
-    grid_t = np.linspace(priors["t_mean"] - 2 * priors["t_sd"],
-                          priors["t_mean"] + 2 * priors["t_sd"], n_t)
-    grid_e = np.linspace(priors["e_mean"] - 2 * priors["e_sd"],
-                          priors["e_mean"] + 2 * priors["e_sd"], n_e)
-    grid_l = np.linspace(max(0.5, priors["l_mean"] - 2 * priors["l_sd"]),
-                          priors["l_mean"] + 2 * priors["l_sd"], n_l)
+    grid_t = np.linspace(
+        priors["t_mean"] - 2 * priors["t_sd"],
+        priors["t_mean"] + 2 * priors["t_sd"],
+        n_t,
+    )
+    grid_e = np.linspace(
+        priors["e_mean"] - 2 * priors["e_sd"],
+        priors["e_mean"] + 2 * priors["e_sd"],
+        n_e,
+    )
+    grid_l = np.linspace(
+        max(0.5, priors["l_mean"] - 2 * priors["l_sd"]),
+        priors["l_mean"] + 2 * priors["l_sd"],
+        n_l,
+    )
     q_max = 1.0 + 2.0 / dim - 0.06
     q_lo = max(1.05, priors["q_mean"] - 2 * priors["q_sd"])
     q_hi = min(q_max, priors["q_mean"] + 2 * priors["q_sd"])
     grid_q = np.linspace(q_lo, q_hi, n_q)
     best_nll = float("inf")
-    best = (priors["t_mean"], priors["e_mean"],
-            priors["l_mean"], priors["q_mean"])
+    best = (priors["t_mean"], priors["e_mean"], priors["l_mean"], priors["q_mean"])
     for log_t in grid_t:
         for log_e in grid_e:
             for log_l in grid_l:
                 for q in grid_q:
                     nll = neg_log_posterior_4d(
-                        log_t, log_e, log_l, q, obs, dim, priors=priors)
+                        log_t, log_e, log_l, q, obs, dim, priors=priors
+                    )
                     if nll < best_nll:
                         best_nll = nll
                         best = (log_t, log_e, log_l, q)
+
     # Issue 009 -- Tierney-Kadane skew correction at the grid MAP.
     # Catches third-cumulant asymmetry that the symmetric grid Laplace
     # misses, at the cost of 4 extra NLL evaluations per parameter.
     def _nll(p):
-        return neg_log_posterior_4d(p[0], p[1], p[2], p[3], obs, dim,
-                                     priors=priors)
+        return neg_log_posterior_4d(p[0], p[1], p[2], p[3], obs, dim, priors=priors)
+
     deltas = _laplace_third_moment_correction(_nll, list(best), h=0.05)
     corrected = tuple(b + d for b, d in zip(best, deltas))
-    return (float(np.exp(corrected[0])), float(np.exp(corrected[1])),
-            max(1, int(np.exp(corrected[2]))), float(corrected[3]))
+    return (
+        float(np.exp(corrected[0])),
+        float(np.exp(corrected[1])),
+        max(1, int(np.exp(corrected[2]))),
+        float(corrected[3]),
+    )
 
 
-def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
-                     rhat_threshold, t_init, eps, L, q):
+def multichain_q_hmc(
+    seed, n_epochs, n_chains, k_min, k_check, k_max, rhat_threshold, t_init, eps, L, q
+):
     """Multi-chain q-HMC-SA with Gelman-Rubin termination per epoch.
 
     Each chain runs HMC trajectories independently; per epoch we run
@@ -833,7 +892,8 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
         for _ in range(k_min):
             for c in range(n_chains):
                 chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                    rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q)
+                    rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q
+                )
                 n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -844,7 +904,8 @@ def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
             for _ in range(k_check):
                 for c in range(n_chains):
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q)
+                        rngs[c], chain_pos[c], chain_val[c], T, eps_eff, L, len(LOW), q
+                    )
                     n_calls += nc
                     if chain_val[c] < best_val:
                         best_val = chain_val[c]
@@ -876,7 +937,7 @@ def svgd_step(particles, grad_logp_fn, eps, h=None, T_for_noise=None, rng=None):
     M, D = particles.shape
     # Pairwise squared distances.
     diffs = particles[:, None, :] - particles[None, :, :]  # (M, M, D)
-    sq = np.sum(diffs ** 2, axis=2)  # (M, M)
+    sq = np.sum(diffs**2, axis=2)  # (M, M)
     if h is None:
         # Median heuristic.
         med = np.median(sq[sq > 0]) if np.any(sq > 0) else 1.0
@@ -896,8 +957,9 @@ def svgd_step(particles, grad_logp_fn, eps, h=None, T_for_noise=None, rng=None):
     return particles + eps * phi, h
 
 
-def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
-            stochastic=True, q_v=1.0):
+def svgd_sa(
+    seed, n_epochs, n_particles, k_inner, t_init, eps_svgd, stochastic=True, q_v=1.0
+):
     """SVGD-driven SA, optionally Bayesian (Stochastic SVGD).
 
     M particles evolve per Stein flow at the cooling temperature.
@@ -922,8 +984,9 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
 
         for _ in range(k_inner):
             T_noise = T if stochastic else None
-            particles, _ = svgd_step(particles, grad_logp, eps_eff,
-                                     T_for_noise=T_noise, rng=rng)
+            particles, _ = svgd_step(
+                particles, grad_logp, eps_eff, T_for_noise=T_noise, rng=rng
+            )
             particles = np.clip(particles, LOW, HIGH)
             vals = np.array([OBJ_FN(p) for p in particles])
             n_calls += n_particles + n_particles  # one grad + one obj per particle
@@ -937,20 +1000,35 @@ def svgd_sa(seed, n_epochs, n_particles, k_inner, t_init, eps_svgd,
     return best_val, n_calls, best_pos, bci_lower, bci_upper
 
 
-def bgsa_svgd(seed, n_epochs, n_particles,
-              t_map, e_map, L_map, q_map, pilot_calls,
-              k_inner=10):
+def bgsa_svgd(
+    seed, n_epochs, n_particles, t_map, e_map, L_map, q_map, pilot_calls, k_inner=10
+):
     """bGSA with Bayesian Stochastic SVGD production. Pilot done upstream;
     cooling uses tsallis_cool(t_map, q_map)."""
     bv, prod_calls, _, _bci_lo, _bci_hi = svgd_sa(
-        seed, n_epochs, n_particles, k_inner,
-        t_map, eps_svgd=0.05, stochastic=True, q_v=q_map)
+        seed,
+        n_epochs,
+        n_particles,
+        k_inner,
+        t_map,
+        eps_svgd=0.05,
+        stochastic=True,
+        q_v=q_map,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
 def adaptive_ladder_q_hmc(
-    seed, n_epochs, n_chains, k_inner, k_swap,
-    t_init, t_final, eps, L, q,
+    seed,
+    n_epochs,
+    n_chains,
+    k_inner,
+    k_swap,
+    t_init,
+    t_final,
+    eps,
+    L,
+    q,
     target_swap_rate=0.25,
 ):
     """Adaptive PT (Lacki/Miasojedow 2016): Robbins-Monro updates on
@@ -990,7 +1068,8 @@ def adaptive_ladder_q_hmc(
             for c in range(n_chains):
                 T_c = temps[c]
                 chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                    rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
+                    rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q
+                )
                 n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -1019,10 +1098,20 @@ def adaptive_ladder_q_hmc(
     return best_val, n_calls, swap_accepts_total, swap_attempts_total
 
 
-def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
-             deposit_period=20, metad_sigma=0.3, metad_w0=0.05,
-             metad_gamma=8.0, q_v=1.0, q_a=None,
-             w0_decay_exp=0.0):
+def metad_sa(
+    seed,
+    n_epochs,
+    k_inner,
+    t_init,
+    sigma_rw,
+    deposit_period=20,
+    metad_sigma=0.3,
+    metad_w0=0.05,
+    metad_gamma=8.0,
+    q_v=1.0,
+    q_a=None,
+    w0_decay_exp=0.0,
+):
     """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
 
     Cooling uses tsallis_cool(t_init, q_v) -- the GSA schedule paired
@@ -1042,6 +1131,7 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     if _here not in sys.path:
         sys.path.insert(0, _here)
     from metad_helpers import WellTemperedBias
+
     if q_a is None:
         q_a = q_v
     rng = np.random.default_rng(seed)
@@ -1083,8 +1173,7 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
             n_calls += 1
             cur_aug = cur_v + bias.potential(bias.cv(cur))
             prop_aug = pv + bias.potential(bias.cv(prop))
-            if rng.random() < tsallis_accept_prob(
-                    prop_aug - cur_aug, T, q_a_eff):
+            if rng.random() < tsallis_accept_prob(prop_aug - cur_aug, T, q_a_eff):
                 cur, cur_v = prop, pv
                 accept_count += 1
                 if pv < best:
@@ -1104,8 +1193,18 @@ def metad_sa(seed, n_epochs, k_inner, t_init, sigma_rw,
     return best, n_calls, bias
 
 
-def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-               pilot_calls, sigma_rw=0.5, w0_decay_exp=0.0):
+def bgsa_metad(
+    seed,
+    n_epochs,
+    k_inner,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    sigma_rw=0.5,
+    w0_decay_exp=0.0,
+):
     """bGSA + metadynamics RW production. All bGSA-side hyperparameters
     come from the pilot:
       cooling shape   <- tsallis_cool(t_map, q_map)
@@ -1119,8 +1218,13 @@ def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
     window toward q_v -> 1. Default 0.0 keeps the classical fixed
     w_0 schedule."""
     bv, prod_calls, _bias = metad_sa(
-        seed, n_epochs, k_inner, t_map, sigma_rw,
-        deposit_period=20, metad_sigma=sigma_rw,
+        seed,
+        n_epochs,
+        k_inner,
+        t_map,
+        sigma_rw,
+        deposit_period=20,
+        metad_sigma=sigma_rw,
         metad_w0=0.05 * t_map,
         metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
@@ -1129,10 +1233,20 @@ def bgsa_metad(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
-def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
-                         n_starts=4, deposit_period=20,
-                         metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0,
-                         q_v=1.0, q_a=None):
+def metad_sa_shared_bias(
+    seed,
+    n_epochs,
+    k_inner,
+    t_init,
+    sigma_rw,
+    n_starts=4,
+    deposit_period=20,
+    metad_sigma=0.3,
+    metad_w0=0.05,
+    metad_gamma=8.0,
+    q_v=1.0,
+    q_a=None,
+):
     """Multi-walker metadynamics-SA with SHARED bias.
 
     n_starts chains drawn from a Latin hypercube run concurrently;
@@ -1156,8 +1270,9 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
     master = np.random.default_rng(seed)
     starts = latin_hypercube_init(master, n_starts, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 7919 * c) for c in range(n_starts)]
-    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
-                            gamma=metad_gamma)
+    bias = WellTemperedBias(
+        LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
+    )
     chain_pos = [starts[c].copy() for c in range(n_starts)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
     chain_best = list(chain_val)
@@ -1176,14 +1291,16 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
         q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
         for _ in range(k_per_chain):
             for c in range(n_starts):
-                prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
-                                                sigma_rw), LOW, HIGH)
+                prop = np.clip(
+                    gaussian_propose(rngs[c], chain_pos[c], sigma_rw), LOW, HIGH
+                )
                 pv = OBJ_FN(prop)
                 n_calls += 1
                 cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
                 prop_aug = pv + bias.potential(bias.cv(prop))
                 if rngs[c].random() < tsallis_accept_prob(
-                        prop_aug - cur_aug, T, q_a_eff):
+                    prop_aug - cur_aug, T, q_a_eff
+                ):
                     chain_pos[c], chain_val[c] = prop, pv
                     if pv < chain_best[c]:
                         chain_best[c] = pv
@@ -1193,14 +1310,29 @@ def metad_sa_shared_bias(seed, n_epochs, k_inner, t_init, sigma_rw,
     return float(min(chain_best)), n_calls
 
 
-def bgsa_metad_multi(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-                     pilot_calls, sigma_rw=0.5, n_starts=4):
+def bgsa_metad_multi(
+    seed,
+    n_epochs,
+    k_inner,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    sigma_rw=0.5,
+    n_starts=4,
+):
     """bGSA + multi-walker metadynamics, SHARED bias, Tsallis acceptance.
     Same pilot-driven hyperparameters as bgsa_metad."""
     bv, prod_calls = metad_sa_shared_bias(
-        seed, n_epochs, k_inner, t_map, sigma_rw,
+        seed,
+        n_epochs,
+        k_inner,
+        t_map,
+        sigma_rw,
         n_starts=n_starts,
-        deposit_period=20, metad_sigma=sigma_rw,
+        deposit_period=20,
+        metad_sigma=sigma_rw,
         metad_w0=0.05 * t_map,
         metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
@@ -1225,8 +1357,12 @@ def pilot_landscape_features(scout_obs, pilot_obs):
     These features feed the rule-based driver selection."""
     obs = list(scout_obs) + list(pilot_obs)
     if len(obs) < 4:
-        return {"grad_sens": 0.0, "sigma_sens": 0.0,
-                "best_val_cv": 0.0, "q_v_lift": 0.0}
+        return {
+            "grad_sens": 0.0,
+            "sigma_sens": 0.0,
+            "best_val_cv": 0.0,
+            "q_v_lift": 0.0,
+        }
     eps_arr = np.array([np.log(o["epsilon"]) for o in obs])
     ar_arr = np.array([o["accept_rate"] for o in obs])
     bv_arr = np.array([o["best_val"] for o in obs])
@@ -1239,8 +1375,12 @@ def pilot_landscape_features(scout_obs, pilot_obs):
         best_val_cv = float(bv_std / max(abs(bv_mean), 1e-9))
     else:
         best_val_cv = float(bv_std)
-    return {"grad_sens": grad_sens, "sigma_sens": sigma_sens,
-            "best_val_cv": best_val_cv, "q_v_lift": 0.0}
+    return {
+        "grad_sens": grad_sens,
+        "sigma_sens": sigma_sens,
+        "best_val_cv": best_val_cv,
+        "q_v_lift": 0.0,
+    }
 
 
 def select_bgsa_driver(features, q_map):
@@ -1278,23 +1418,38 @@ def make_noisy_objective(noise_sigma):
     return noisy, lambda: counter[0]
 
 
-def pmsa_metad(seed, n_epochs, k_inner, t_init, sigma_rw,
-               noisy_fn, sigma_F, q_v=1.0, q_a=None,
-               n_eval_per_step=4, deposit_period=20,
-               metad_sigma=0.3, metad_w0=0.05, metad_gamma=8.0):
+def pmsa_metad(
+    seed,
+    n_epochs,
+    k_inner,
+    t_init,
+    sigma_rw,
+    noisy_fn,
+    sigma_F,
+    q_v=1.0,
+    q_a=None,
+    n_eval_per_step=4,
+    deposit_period=20,
+    metad_sigma=0.3,
+    metad_w0=0.05,
+    metad_gamma=8.0,
+):
     """Issue 004 -- pseudo-marginal SA + MetaD for noisy F.
 
-    Andrieu & Roberts 2009 PM-MH: replace F(x) with an unbiased
-    estimator F_hat(x) = mean(noisy_fn(x) over n_eval_per_step
-    repeats). The acceptance ratio under F_hat targets the same
-    posterior as under exact F, asymptotically as n_eval -> infinity.
+    Andrieu & Roberts 2009 PM-MH (doi:10.1214/07-AOS574): replace
+    F(x) with an unbiased estimator F_hat(x) = mean(noisy_fn(x) over
+    n_eval_per_step repeats). The acceptance ratio under F_hat targets
+    the same posterior as under exact F, asymptotically as
+    n_eval -> infinity.
 
     For finite n_eval, the chain stationary distribution sits in a
     sigma_F^2 / n_eval neighbourhood of the noiseless target
-    (Andrieu & Vihola 2015). The optimal n_eval comes from balancing
-    PM acceptance loss (noise hurts mixing) against compute cost; we
-    fix n_eval_per_step at 4 by default following Doucet/Pitt/Deligi
-    annetti/Kohn 2015's "n*sigma_F^2 ~ 1.7 wall-clock optimum".
+    (Andrieu & Vihola 2015, doi:10.1214/14-AAP1022). The optimal
+    n_eval comes from balancing PM acceptance loss (noise hurts mixing)
+    against compute cost; we fix n_eval_per_step at 4 by default
+    following Doucet/Pitt/Deligiannidis/Kohn 2015's
+    "n*sigma_F^2 ~ 1.7 wall-clock optimum"
+    (doi:10.1093/biomet/asu075).
 
     Returns (best_val, n_calls) where best_val is the best F_hat and
     n_calls counts noisy evaluations (each step costs n_eval_per_step
@@ -1307,8 +1462,9 @@ def pmsa_metad(seed, n_epochs, k_inner, t_init, sigma_rw,
     if q_a is None:
         q_a = q_v
     rng = np.random.default_rng(seed)
-    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
-                            gamma=metad_gamma)
+    bias = WellTemperedBias(
+        LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
+    )
 
     def f_hat(x):
         return float(np.mean([noisy_fn(x) for _ in range(n_eval_per_step)]))
@@ -1327,8 +1483,7 @@ def pmsa_metad(seed, n_epochs, k_inner, t_init, sigma_rw,
             n_calls += n_eval_per_step
             cur_aug = cur_v + bias.potential(bias.cv(cur))
             prop_aug = pv + bias.potential(bias.cv(prop))
-            if rng.random() < tsallis_accept_prob(
-                    prop_aug - cur_aug, T, q_a_eff):
+            if rng.random() < tsallis_accept_prob(prop_aug - cur_aug, T, q_a_eff):
                 cur, cur_v = prop, pv
                 accept_count += 1
                 if pv < best:
@@ -1338,24 +1493,44 @@ def pmsa_metad(seed, n_epochs, k_inner, t_init, sigma_rw,
     return best, n_calls
 
 
-def bgsa_pmsa(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-              pilot_calls, sigma_rw, noise_sigma, n_eval_per_step=4):
+def bgsa_pmsa(
+    seed,
+    n_epochs,
+    k_inner,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    sigma_rw,
+    noise_sigma,
+    n_eval_per_step=4,
+):
     """bGSA + pseudo-marginal SA + MetaD for noisy F. Wraps OBJ_FN with
     Gaussian noise N(0, noise_sigma); chain runs PM-MH at the pilot's
     (t_map, q_map, sigma_rw)."""
     noisy_fn, eval_counter = make_noisy_objective(noise_sigma)
     bv, prod_calls = pmsa_metad(
-        seed, n_epochs, k_inner, t_map, sigma_rw, noisy_fn, noise_sigma,
-        q_v=q_map, n_eval_per_step=n_eval_per_step,
-        deposit_period=20, metad_sigma=sigma_rw,
+        seed,
+        n_epochs,
+        k_inner,
+        t_map,
+        sigma_rw,
+        noisy_fn,
+        noise_sigma,
+        q_v=q_map,
+        n_eval_per_step=n_eval_per_step,
+        deposit_period=20,
+        metad_sigma=sigma_rw,
         metad_w0=0.05 * t_map,
         metad_gamma=metad_gamma_from_qv(q_map),
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
-def continuous_time_tempering(seed, n_epochs, k_inner, t_min, t_max, q_v,
-                               eps_x=0.05, eps_beta=0.02, sigma_rw=0.5):
+def continuous_time_tempering(
+    seed, n_epochs, k_inner, t_min, t_max, q_v, eps_x=0.05, eps_beta=0.02, sigma_rw=0.5
+):
     """Issue 006 -- Continuous-time tempering (Wu & Stoltz 2022).
 
     Augments the state from x to (x, beta) and runs a joint Langevin:
@@ -1419,8 +1594,9 @@ def continuous_time_tempering(seed, n_epochs, k_inner, t_min, t_max, q_v,
         # beta to log_beta multiplies by beta, so target on log_beta
         # is beta * exp(-beta * F) (uniform log-prior). log target
         # ratio: (prop_log_beta - log_beta) + (beta - prop_beta) * F.
-        log_alpha = ((prop_log_beta - log_beta)
-                     + (float(np.exp(log_beta)) - prop_beta) * cur_v)
+        log_alpha = (prop_log_beta - log_beta) + (
+            float(np.exp(log_beta)) - prop_beta
+        ) * cur_v
         if rng.random() < min(1.0, np.exp(min(log_alpha, 0.0))):
             log_beta = prop_log_beta
         beta_history.append(float(np.exp(log_beta)))
@@ -1428,17 +1604,24 @@ def continuous_time_tempering(seed, n_epochs, k_inner, t_min, t_max, q_v,
     return best, n_calls, np.asarray(beta_history)
 
 
-def bgsa_continuous_temper(seed, n_epochs, k_inner, t_map, e_map, L_map, q_map,
-                           pilot_calls, t_hot=None):
+def bgsa_continuous_temper(
+    seed, n_epochs, k_inner, t_map, e_map, L_map, q_map, pilot_calls, t_hot=None
+):
     """bGSA + continuous-time tempering. t_map is t_min (cold-T limit);
     t_hot from the pilot is t_max (hot-T limit). beta drifts between
     1/t_max and 1/t_min on a continuous-time Langevin trajectory."""
     if t_hot is None:
         t_hot = max(2.0 * t_map, 1.0)
     bv, prod_calls, _ = continuous_time_tempering(
-        seed, n_epochs, k_inner,
-        t_min=max(t_map, 0.05), t_max=t_hot, q_v=q_map,
-        eps_x=e_map, eps_beta=0.02)
+        seed,
+        n_epochs,
+        k_inner,
+        t_min=max(t_map, 0.05),
+        t_max=t_hot,
+        q_v=q_map,
+        eps_x=e_map,
+        eps_beta=0.02,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
@@ -1457,8 +1640,9 @@ def trajectory_inla_diagnostic(traj_vals):
     test). Catches non-stationarity in a single chain at no extra
     sampling cost.
 
-    References: Rue/Martino/Chopin 2009 INLA; Roberts/Rosenthal 2007
-    adaptive MCMC ergodicity diagnostics.
+    References: Rue/Martino/Chopin 2009 INLA
+    (doi:10.1111/j.1467-9868.2008.00700.x); Roberts/Rosenthal 2007
+    adaptive MCMC ergodicity diagnostics (doi:10.1239/jap/1183667414).
     """
     arr = np.asarray(traj_vals, dtype=float)
     arr = arr[np.isfinite(arr)]
@@ -1517,9 +1701,10 @@ def smc_pt_log_z_estimator(swap_log_alphas):
     """Issue 005 -- SMC-on-PT free log-Z-ratio estimator.
 
     Each PT swap step produces a log_alpha = (1/T_low - 1/T_high) *
-    (F_low - F_high). The bridge sampling identity (Del Moral, Doucet,
-    Jasra 2006 Eq.(8); Neal 2001 AIS) gives an unbiased estimator of
-    log Z(T_low) / Z(T_high) as the LOG-MEAN-EXP of the per-swap
+    (F_low - F_high). The bridge sampling identity (Del Moral/Doucet/
+    Jasra 2006 Eq.(8), doi:10.1111/j.1467-9868.2006.00553.x; Neal
+    2001 AIS, doi:10.1023/A:1008923215028) gives an unbiased estimator
+    of log Z(T_low) / Z(T_high) as the LOG-MEAN-EXP of the per-swap
     log-alphas:
 
         log Z_ratio_est = log mean exp(log_alpha_i)
@@ -1551,11 +1736,22 @@ def smc_pt_log_z_estimator(swap_log_alphas):
     return point, se, lo, hi
 
 
-def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
-                    t_init, t_final, sigma_rw=0.5,
-                    deposit_period=20, metad_sigma=0.3,
-                    metad_w0=0.05, metad_gamma=8.0, q_a=1.0,
-                    q_v=1.0):
+def pt_metad_shared(
+    seed,
+    n_epochs,
+    n_chains,
+    k_inner,
+    k_swap,
+    t_init,
+    t_final,
+    sigma_rw=0.5,
+    deposit_period=20,
+    metad_sigma=0.3,
+    metad_w0=0.05,
+    metad_gamma=8.0,
+    q_a=1.0,
+    q_v=1.0,
+):
     """Parallel tempering + multi-walker shared metadynamics.
 
     n_chains at geometric temperature ladder, all RW Metropolis with
@@ -1581,18 +1777,21 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
     # cold chains use Metropolis for stable refinement. Mirrors the
     # GSA pairing of (high-T, q_a > 1) with (low-T, q_a = 1).
     if n_chains > 1:
-        q_a_per_chain = np.array([
-            1.0 + (q_a - 1.0) * (temps[c] - t_final) / max(t_init - t_final, 1e-12)
-            for c in range(n_chains)
-        ])
+        q_a_per_chain = np.array(
+            [
+                1.0 + (q_a - 1.0) * (temps[c] - t_final) / max(t_init - t_final, 1e-12)
+                for c in range(n_chains)
+            ]
+        )
     else:
         q_a_per_chain = np.array([q_a])
 
     master = np.random.default_rng(seed)
     starts = latin_hypercube_init(master, n_chains, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 7919 * c) for c in range(n_chains)]
-    bias = WellTemperedBias(LOW, HIGH, sigma=metad_sigma, w0=metad_w0,
-                            gamma=metad_gamma)
+    bias = WellTemperedBias(
+        LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
+    )
 
     chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
@@ -1616,18 +1815,19 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
                 T_c = temps[c]
                 q_a_c = q_a_per_chain[c]
                 sigma_eff = float(np.exp(log_sigmas[c]))
-                prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
-                                                sigma_eff), LOW, HIGH)
+                prop = np.clip(
+                    gaussian_propose(rngs[c], chain_pos[c], sigma_eff), LOW, HIGH
+                )
                 pv = OBJ_FN(prop)
                 n_calls += 1
                 cur_aug = chain_val[c] + bias.potential(bias.cv(chain_pos[c]))
                 prop_aug = pv + bias.potential(bias.cv(prop))
                 accepted = rngs[c].random() < tsallis_accept_prob(
-                    prop_aug - cur_aug, T_c, q_a_c)
+                    prop_aug - cur_aug, T_c, q_a_c
+                )
                 n_steps_per_chain[c] += 1
                 gamma_n = 1.0 / max(n_steps_per_chain[c], 1) ** 0.6
-                log_sigmas[c] += gamma_n * (
-                    (1.0 if accepted else 0.0) - target_a)
+                log_sigmas[c] += gamma_n * ((1.0 if accepted else 0.0) - target_a)
                 if accepted:
                     chain_pos[c], chain_val[c] = prop, pv
                     if pv < best_val:
@@ -1655,15 +1855,35 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
     for pair_idx, alphas in enumerate(swap_log_alpha_pairs):
         log_z_est, _, _, _ = smc_pt_log_z_estimator(alphas)
         z_pair_estimates.append(log_z_est)
-    log_z_cold_to_hot = (sum(z for z in z_pair_estimates if np.isfinite(z))
-                          if z_pair_estimates else float("nan"))
-    return (best_val, n_calls, swap_accepts, swap_attempts,
-            log_z_cold_to_hot, z_pair_estimates)
+    log_z_cold_to_hot = (
+        sum(z for z in z_pair_estimates if np.isfinite(z))
+        if z_pair_estimates
+        else float("nan")
+    )
+    return (
+        best_val,
+        n_calls,
+        swap_accepts,
+        swap_attempts,
+        log_z_cold_to_hot,
+        z_pair_estimates,
+    )
 
 
-def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
-                  pilot_calls, k_inner=20, k_swap=5, sigma_rw=0.5,
-                  t_hot=None):
+def bgsa_pt_metad(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_inner=20,
+    k_swap=5,
+    sigma_rw=0.5,
+    t_hot=None,
+):
     """bGSA + PT + shared metadynamics + Tsallis acceptance. All
     hyperparameters from pilot: t_cold = t_map, t_hot from basin-
     spanning regime, q_a = q_v = q_map, metad_sigma = sigma_rw,
@@ -1672,20 +1892,46 @@ def bgsa_pt_metad(seed, n_epochs, n_chains, t_map, e_map, L_map, q_map,
         t_hot = t_map
     t_cold = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t, log_z_ratio, _ = pt_metad_shared(
-        seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold, sigma_rw=sigma_rw,
-        deposit_period=20, metad_sigma=sigma_rw,
+        seed,
+        n_epochs,
+        n_chains,
+        k_inner,
+        k_swap,
+        t_hot,
+        t_cold,
+        sigma_rw=sigma_rw,
+        deposit_period=20,
+        metad_sigma=sigma_rw,
         metad_w0=0.05 * t_map,
         metad_gamma=metad_gamma_from_qv(q_map),
-        q_a=q_map, q_v=q_map,
+        q_a=q_map,
+        q_v=q_map,
     )
-    return (bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map,
-            swap_a, swap_t, log_z_ratio)
+    return (
+        bv,
+        pilot_calls + prod_calls,
+        t_map,
+        e_map,
+        L_map,
+        q_map,
+        swap_a,
+        swap_t,
+        log_z_ratio,
+    )
 
 
 def parallel_tempering_hybrid(
-    seed, n_epochs, n_chains, k_inner, k_swap,
-    t_init, t_final, eps, L, q, sigma_rw=0.5,
+    seed,
+    n_epochs,
+    n_chains,
+    k_inner,
+    k_swap,
+    t_init,
+    t_final,
+    eps,
+    L,
+    q,
+    sigma_rw=0.5,
     rw_threshold_t=2.0,
 ):
     """Hybrid PT: hot chains (T > rw_threshold_t) use random-walk
@@ -1716,16 +1962,19 @@ def parallel_tempering_hybrid(
             for c in range(n_chains):
                 T_c = temps[c]
                 if use_rw[c]:
-                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c], sigma_rw),
-                                   LOW, HIGH)
+                    prop = np.clip(
+                        gaussian_propose(rngs[c], chain_pos[c], sigma_rw), LOW, HIGH
+                    )
                     pv = OBJ_FN(prop)
                     n_calls += 1
                     if rngs[c].random() < metropolis_accept_prob(
-                            pv - chain_val[c], T_c):
+                        pv - chain_val[c], T_c
+                    ):
                         chain_pos[c], chain_val[c] = prop, pv
                 else:
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q
+                    )
                     n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -1742,9 +1991,19 @@ def parallel_tempering_hybrid(
     return best_val, n_calls, swap_accepts, swap_attempts
 
 
-def bgsa_pt_hybrid(seed, n_epochs, n_chains,
-                   t_map, e_map, L_map, q_map, pilot_calls,
-                   k_inner=20, k_swap=5, t_hot=None):
+def bgsa_pt_hybrid(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_inner=20,
+    k_swap=5,
+    t_hot=None,
+):
     """bGSA + hybrid PT (hot chains = RW, cold chains = q-HMC).
     t_hot comes from the pilot's basin-spanning regime; falls back
     to t_map if no pilot draw saturated."""
@@ -1753,15 +2012,33 @@ def bgsa_pt_hybrid(seed, n_epochs, n_chains,
     t_cold = max(t_map, 0.1)
     rw_threshold_t = 0.5 * (t_hot + t_cold)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid(
-        seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold, e_map, L_map, q_map, sigma_rw=0.5,
-        rw_threshold_t=rw_threshold_t)
+        seed,
+        n_epochs,
+        n_chains,
+        k_inner,
+        k_swap,
+        t_hot,
+        t_cold,
+        e_map,
+        L_map,
+        q_map,
+        sigma_rw=0.5,
+        rw_threshold_t=rw_threshold_t,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
 def parallel_tempering_q_hmc(
-    seed, n_epochs, n_chains, k_inner, k_swap,
-    t_init, t_final, eps, L, q,
+    seed,
+    n_epochs,
+    n_chains,
+    k_inner,
+    k_swap,
+    t_init,
+    t_final,
+    eps,
+    L,
+    q,
     use_hmc=True,
 ):
     """Parallel tempering with q-HMC inner kernel (or random-walk if use_hmc=False).
@@ -1797,17 +2074,20 @@ def parallel_tempering_q_hmc(
                 T_c = temps[c]
                 if use_hmc:
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q)
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q
+                    )
                     n_calls += nc
                 else:
                     # Random-walk Metropolis at temperature T_c
                     sigma = 0.5
-                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c], sigma),
-                                   LOW, HIGH)
+                    prop = np.clip(
+                        gaussian_propose(rngs[c], chain_pos[c], sigma), LOW, HIGH
+                    )
                     pv = OBJ_FN(prop)
                     n_calls += 1
                     if rngs[c].random() < metropolis_accept_prob(
-                            pv - chain_val[c], T_c):
+                        pv - chain_val[c], T_c
+                    ):
                         chain_pos[c], chain_val[c] = prop, pv
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -1826,43 +2106,94 @@ def parallel_tempering_q_hmc(
     return best_val, n_calls, swap_accepts, swap_attempts
 
 
-def bgsa_pt_adaptive(seed, n_epochs, n_chains,
-                     t_map, e_map, L_map, q_map, pilot_calls,
-                     k_inner=20, k_swap=5, target_swap_rate=0.25,
-                     t_hot=None):
+def bgsa_pt_adaptive(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_inner=20,
+    k_swap=5,
+    target_swap_rate=0.25,
+    t_hot=None,
+):
     """bGSA with adaptive parallel-tempering production. Pilot done upstream;
     t_hot from pilot."""
     if t_hot is None:
         t_hot = t_map
     t_cold_init = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = adaptive_ladder_q_hmc(
-        seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold_init, e_map, L_map, q_map,
-        target_swap_rate=target_swap_rate)
+        seed,
+        n_epochs,
+        n_chains,
+        k_inner,
+        k_swap,
+        t_hot,
+        t_cold_init,
+        e_map,
+        L_map,
+        q_map,
+        target_swap_rate=target_swap_rate,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def bgsa_pt(seed, n_epochs, n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, _unused_dim=None, t_hot=None):
+def bgsa_pt(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_inner=20,
+    k_swap=5,
+    _unused_dim=None,
+    t_hot=None,
+):
     """bGSA with parallel-tempering q-HMC production. Pilot done upstream;
     t_hot from pilot."""
     if t_hot is None:
         t_hot = t_map
     t_cold = max(t_map, 0.1)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_q_hmc(
-        seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold, e_map, L_map, q_map)
+        seed, n_epochs, n_chains, k_inner, k_swap, t_hot, t_cold, e_map, L_map, q_map
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def bgsa_multichain(seed, n_epochs, n_chains,
-                    t_map, e_map, L_map, q_map, pilot_calls,
-                    k_min=15, k_check=10, k_max=80, rhat_threshold=1.3):
+def bgsa_multichain(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_min=15,
+    k_check=10,
+    k_max=80,
+    rhat_threshold=1.3,
+):
     """bGSA multi-chain q-HMC + Rhat termination. Pilot done upstream."""
     bv, prod_calls = multichain_q_hmc(
-        seed, n_epochs, n_chains, k_min, k_check, k_max, rhat_threshold,
-        t_map, e_map, L_map, q_map)
+        seed,
+        n_epochs,
+        n_chains,
+        k_min,
+        k_check,
+        k_max,
+        rhat_threshold,
+        t_map,
+        e_map,
+        L_map,
+        q_map,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
 
@@ -1872,6 +2203,7 @@ def bgsa_multichain(seed, n_epochs, n_chains,
 # they matter most on multi-cup landscapes (Rastrigin) where a single-
 # basin chain wastes budget.
 # -------------------------------------------------------------------------
+
 
 def latin_hypercube_init(rng, n_points, low, high):
     """Stratified init: each dim split into n_points strata of equal
@@ -1890,9 +2222,16 @@ def latin_hypercube_init(rng, n_points, low, high):
     return out
 
 
-def classical_sa_advanced(seed, n_epochs, k_per_epoch, t_init, sigma_init,
-                          n_starts=4, stagnation_k=400,
-                          sigma_target_accept=0.234):
+def classical_sa_advanced(
+    seed,
+    n_epochs,
+    k_per_epoch,
+    t_init,
+    sigma_init,
+    n_starts=4,
+    stagnation_k=400,
+    sigma_target_accept=0.234,
+):
     """Multi-start classical SA. Latin hypercube spreads n_starts
     chains across the box; each chain adapts sigma toward the
     Roberts/Rosenthal 0.234 target; stagnation restart redraws a
@@ -1917,12 +2256,12 @@ def classical_sa_advanced(seed, n_epochs, k_per_epoch, t_init, sigma_init,
         T = log_cool(t_init, 2.0, epoch)
         for c in range(n_starts):
             for step in range(k_per_chain):
-                prop = np.clip(gaussian_propose(rng, chain_pos[c],
-                                                chain_sigma[c]), LOW, HIGH)
+                prop = np.clip(
+                    gaussian_propose(rng, chain_pos[c], chain_sigma[c]), LOW, HIGH
+                )
                 pv = OBJ_FN(prop)
                 n += 1
-                accepted = rng.random() < metropolis_accept_prob(
-                    pv - chain_val[c], T)
+                accepted = rng.random() < metropolis_accept_prob(pv - chain_val[c], T)
                 chain_recent_acc[c].append(accepted)
                 if len(chain_recent_acc[c]) > 100:
                     chain_recent_acc[c].pop(0)
@@ -1959,10 +2298,20 @@ def classical_sa_advanced(seed, n_epochs, k_per_epoch, t_init, sigma_init,
 
 
 def parallel_tempering_hybrid_v2(
-    seed, n_epochs, n_chains, k_inner, k_swap,
-    t_init, t_final, eps, L, q,
-    sigma_rw_init=0.5, rw_threshold_t=2.0,
-    stagnation_k=400, sigma_target_accept=0.234,
+    seed,
+    n_epochs,
+    n_chains,
+    k_inner,
+    k_swap,
+    t_init,
+    t_final,
+    eps,
+    L,
+    q,
+    sigma_rw_init=0.5,
+    rw_threshold_t=2.0,
+    stagnation_k=400,
+    sigma_target_accept=0.234,
 ):
     """Hybrid PT v2: hot chains (T > rw_threshold_t) use adaptive
     RW Metropolis (per-chain sigma toward 0.234), cold chains use
@@ -1999,12 +2348,14 @@ def parallel_tempering_hybrid_v2(
                 T_c = temps[c]
                 improved_this_step = False
                 if use_rw[c]:
-                    prop = np.clip(gaussian_propose(rngs[c], chain_pos[c],
-                                                    sigmas[c]), LOW, HIGH)
+                    prop = np.clip(
+                        gaussian_propose(rngs[c], chain_pos[c], sigmas[c]), LOW, HIGH
+                    )
                     pv = OBJ_FN(prop)
                     n_calls += 1
                     accepted = rngs[c].random() < metropolis_accept_prob(
-                        pv - chain_val[c], T_c)
+                        pv - chain_val[c], T_c
+                    )
                     recent_acc[c].append(accepted)
                     if len(recent_acc[c]) > 100:
                         recent_acc[c].pop(0)
@@ -2018,8 +2369,8 @@ def parallel_tempering_hybrid_v2(
                             sigmas[c] = max(sigmas[c] * 0.9, sigma_min)
                 else:
                     chain_pos[c], _, nc, chain_val[c] = hmc_sa_step(
-                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L,
-                        len(LOW), q)
+                        rngs[c], chain_pos[c], chain_val[c], T_c, eps, L, len(LOW), q
+                    )
                     n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
@@ -2054,9 +2405,19 @@ def parallel_tempering_hybrid_v2(
     return best_val, n_calls, swap_accepts, swap_attempts
 
 
-def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
-                      t_map, e_map, L_map, q_map, pilot_calls,
-                      k_inner=20, k_swap=5, t_hot=None):
+def bgsa_pt_hybrid_v2(
+    seed,
+    n_epochs,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    pilot_calls,
+    k_inner=20,
+    k_swap=5,
+    t_hot=None,
+):
     """bGSA + hybrid PT v2: Latin hypercube + adaptive sigma +
     stagnation restart on top of the rung-specific kernel
     architecture. t_hot from pilot's basin-spanning regime."""
@@ -2065,14 +2426,22 @@ def bgsa_pt_hybrid_v2(seed, n_epochs, n_chains,
     t_cold = max(t_map, 0.1)
     rw_threshold_t = 0.5 * (t_hot + t_cold)
     bv, prod_calls, swap_a, swap_t = parallel_tempering_hybrid_v2(
-        seed, n_epochs, n_chains, k_inner, k_swap,
-        t_hot, t_cold, e_map, L_map, q_map,
-        rw_threshold_t=rw_threshold_t)
+        seed,
+        n_epochs,
+        n_chains,
+        k_inner,
+        k_swap,
+        t_hot,
+        t_cold,
+        e_map,
+        L_map,
+        q_map,
+        rw_threshold_t=rw_threshold_t,
+    )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map, swap_a, swap_t
 
 
-def run_pilot(seed, n_pilot, pilot_steps, dim,
-              n_rw_pilot=10, rw_steps=50, n_scout=8):
+def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_scout=8):
     """Shared pilot phase for ALL bGSA drivers.
 
     Three-stage pilot (after issue 001 empirical-Bayes priors):
@@ -2107,10 +2476,19 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
         e = float(np.exp(rng.uniform(-5.0, -1.0)))
         L = max(1, int(np.exp(rng.uniform(0.5, 3.0))))
         q = float(rng.uniform(q_lo, q_hi))
-        bv, ar, fpos, nc = hmc_pilot(seed * 7919 + k, t, e, L,
-                                     max(20, pilot_steps // 4), q=q)
-        scout_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
+        bv, ar, fpos, nc = hmc_pilot(
+            seed * 7919 + k, t, e, L, max(20, pilot_steps // 4), q=q
+        )
+        scout_obs.append(
+            {
+                "t_init": t,
+                "epsilon": e,
+                "L": L,
+                "q": q,
+                "accept_rate": ar,
+                "best_val": bv,
+            }
+        )
         pilot_calls += nc
         if bv < best_pilot_val:
             best_pilot_val = bv
@@ -2123,11 +2501,18 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
         t = float(np.exp(rng.normal(priors["t_mean"], priors["t_sd"])))
         e = float(np.exp(rng.normal(priors["e_mean"], priors["e_sd"])))
         L = max(1, int(np.exp(rng.normal(priors["l_mean"], priors["l_sd"]))))
-        q = float(np.clip(rng.normal(priors["q_mean"], priors["q_sd"]),
-                          q_lo, q_hi))
+        q = float(np.clip(rng.normal(priors["q_mean"], priors["q_sd"]), q_lo, q_hi))
         bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
-        pilot_obs.append({"t_init": t, "epsilon": e, "L": L, "q": q,
-                          "accept_rate": ar, "best_val": bv})
+        pilot_obs.append(
+            {
+                "t_init": t,
+                "epsilon": e,
+                "L": L,
+                "q": q,
+                "accept_rate": ar,
+                "best_val": bv,
+            }
+        )
         pilot_calls += nc
         if bv < best_pilot_val:
             best_pilot_val = bv
@@ -2151,8 +2536,7 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
         sig = float(np.exp(rng.uniform(np.log(sigma_lo), np.log(sigma_hi))))
         t = float(np.exp(rng.uniform(np.log(t_rw_lo), np.log(t_rw_hi))))
         bv, ar, nc = rw_pilot(seed * 9001 + k, t, sig, rw_steps)
-        rw_obs.append({"t": t, "sigma": sig,
-                       "accept_rate": ar, "best_val": bv})
+        rw_obs.append({"t": t, "sigma": sig, "accept_rate": ar, "best_val": bv})
         pilot_calls += nc
     t_rw_map, sigma_map = fit_t_sigma_rw(rw_obs)
     # Pilot-derived t_hot: pick t_hot such that the predicted PT swap
@@ -2162,9 +2546,18 @@ def run_pilot(seed, n_pilot, pilot_steps, dim,
     # Eliminates the 0.95 acceptance-quantile threshold from issue 008.
     t_hot = _pilot_t_hot_from_acceptance(pilot_obs, t_map)
     features = pilot_landscape_features(scout_obs, pilot_obs)
-    return (t_map, e_map, L_map, q_map, sigma_map,
-            best_pilot_pos, pilot_calls, float(t_hot), float(t_rw_map),
-            features)
+    return (
+        t_map,
+        e_map,
+        L_map,
+        q_map,
+        sigma_map,
+        best_pilot_pos,
+        pilot_calls,
+        float(t_hot),
+        float(t_rw_map),
+        features,
+    )
 
 
 def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
@@ -2186,24 +2579,37 @@ def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
     if len(accs) < 4:
         return max(2.0 * t_cold, 1e-3)
     q75 = float(np.quantile(accs, 0.75))
-    high_accept_t = [o["t_init"] for o in pilot_obs
-                     if o["accept_rate"] >= q75]
+    high_accept_t = [o["t_init"] for o in pilot_obs if o["accept_rate"] >= q75]
     if not high_accept_t:
         return max(2.0 * t_cold, 1e-3)
     return float(np.median(high_accept_t))
 
 
-def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
-                      t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-                      t_hot, best_pilot_pos, pilot_calls,
-                      n_segments=4, parallel=True):
+def bgsa_smc_ensemble(
+    seed,
+    n_epochs,
+    k_per_epoch,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    t_rw_map,
+    sigma_map,
+    t_hot,
+    best_pilot_pos,
+    pilot_calls,
+    n_segments=4,
+    parallel=True,
+):
     """Particle-filter ensemble over the bGSA driver space.
 
     The four candidate drivers are treated as PARTICLES on the
     "driver" coordinate. Each runs for n_epochs/n_segments epochs at
     a time, then we reweight by (negative) best-val improvement and
-    resample at the ESS threshold (Del Moral, Doucet, Jasra 2006
-    Algorithm 1; Liu & Chen 1998). Particles that converged early
+    resample at the ESS threshold (Del Moral/Doucet/Jasra 2006
+    Algorithm 1, doi:10.1111/j.1467-9868.2006.00553.x; Liu/Chen 1998,
+    doi:10.1080/01621459.1998.10473765). Particles that converged early
     duplicate; particles that stalled die. The final return is the
     weighted-min best_val + the surviving driver-mass distribution.
 
@@ -2226,36 +2632,61 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
     n_epochs_each = max(1, n_epochs // n_segments)
 
     def _seg_bgsa(s, x0, sub_seed):
-        bv, nc, x_new = hmc_sa(sub_seed, n_epochs_each, k_per_epoch,
-                                t_map, e_map, L_map, x0=x0, q=q_map)
+        bv, nc, x_new = hmc_sa(
+            sub_seed, n_epochs_each, k_per_epoch, t_map, e_map, L_map, x0=x0, q=q_map
+        )
         return bv, nc, x_new
 
     def _seg_metad(s, x0, sub_seed):
         # metad_sa doesn't take x0; emulate with adjusted seed.
         bv, nc, _bias = metad_sa(
-            sub_seed, n_epochs_each, k_per_epoch, t_rw_map, sigma_map,
-            deposit_period=20, metad_sigma=sigma_map,
+            sub_seed,
+            n_epochs_each,
+            k_per_epoch,
+            t_rw_map,
+            sigma_map,
+            deposit_period=20,
+            metad_sigma=sigma_map,
             metad_w0=0.05 * t_rw_map,
             metad_gamma=metad_gamma_from_qv(q_map),
-            q_v=q_map)
+            q_v=q_map,
+        )
         return bv, nc, x0  # state-less for metad; carry x0 forward
 
     def _seg_pt_metad(s, x0, sub_seed):
         bv, nc, _, _, _, _ = pt_metad_shared(
-            sub_seed, n_epochs_each, n_chains, 20, 5,
-            t_hot, t_rw_map, sigma_rw=sigma_map,
-            deposit_period=20, metad_sigma=sigma_map,
+            sub_seed,
+            n_epochs_each,
+            n_chains,
+            20,
+            5,
+            t_hot,
+            t_rw_map,
+            sigma_rw=sigma_map,
+            deposit_period=20,
+            metad_sigma=sigma_map,
             metad_w0=0.05 * t_rw_map,
             metad_gamma=metad_gamma_from_qv(q_map),
-            q_a=q_map, q_v=q_map)
+            q_a=q_map,
+            q_v=q_map,
+        )
         return bv, nc, x0
 
     def _seg_pt_hybrid_v2(s, x0, sub_seed):
         bv, nc, _, _ = parallel_tempering_hybrid_v2(
-            sub_seed, n_epochs_each, n_chains, 20, 5,
-            t_hot, max(t_map, 0.1), e_map, L_map, q_map,
+            sub_seed,
+            n_epochs_each,
+            n_chains,
+            20,
+            5,
+            t_hot,
+            max(t_map, 0.1),
+            e_map,
+            L_map,
+            q_map,
             sigma_rw_init=sigma_map,
-            rw_threshold_t=0.5 * (t_hot + max(t_map, 0.1)))
+            rw_threshold_t=0.5 * (t_hot + max(t_map, 0.1)),
+        )
         return bv, nc, x0
 
     drivers = [
@@ -2267,9 +2698,12 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
     n_particles = len(drivers)
 
     # Initialise particle states + uniform weights.
-    states = [best_pilot_pos.copy() if best_pilot_pos is not None
-              else np.random.default_rng(seed + 7919 * i).uniform(LOW, HIGH)
-              for i in range(n_particles)]
+    states = [
+        best_pilot_pos.copy()
+        if best_pilot_pos is not None
+        else np.random.default_rng(seed + 7919 * i).uniform(LOW, HIGH)
+        for i in range(n_particles)
+    ]
     bvs = [float("inf")] * n_particles
     weights = np.ones(n_particles) / n_particles
     log_z_running = 0.0
@@ -2282,22 +2716,21 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
         if parallel:
             with ThreadPoolExecutor(max_workers=n_particles) as ex:
                 futures = [
-                    ex.submit(drivers[i][1], i, states[i],
-                              seed + 7919 * i + seg * 1009)
+                    ex.submit(drivers[i][1], i, states[i], seed + 7919 * i + seg * 1009)
                     for i in range(n_particles)
                 ]
                 outcomes = [f.result() for f in futures]
         else:
-            outcomes = [drivers[i][1](i, states[i],
-                                       seed + 7919 * i + seg * 1009)
-                        for i in range(n_particles)]
+            outcomes = [
+                drivers[i][1](i, states[i], seed + 7919 * i + seg * 1009)
+                for i in range(n_particles)
+            ]
 
         seg_bvs = np.array([o[0] for o in outcomes])
         seg_calls = sum(o[1] for o in outcomes)
         total_calls += seg_calls
         for i in range(n_particles):
-            states[i] = outcomes[i][2] if outcomes[i][2] is not None \
-                        else states[i]
+            states[i] = outcomes[i][2] if outcomes[i][2] is not None else states[i]
             if seg_bvs[i] < bvs[i]:
                 bvs[i] = seg_bvs[i]
 
@@ -2311,7 +2744,7 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
         weights = weights / weights.sum()
 
         # ESS resampling threshold.
-        ess = 1.0 / np.sum(weights ** 2)
+        ess = 1.0 / np.sum(weights**2)
         if ess < n_particles / 2.0 and seg < n_segments - 1:
             # Multinomial-systematic resample: replicate winners,
             # discard losers. Track for the final mass distribution.
@@ -2323,26 +2756,42 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
                 idx = int(np.searchsorted(cumw, u))
                 idx = min(idx, n_particles - 1)
                 new_indices.append(idx)
-            states = [states[i].copy() if hasattr(states[i], 'copy')
-                      else states[i] for i in new_indices]
+            states = [
+                states[i].copy() if hasattr(states[i], "copy") else states[i]
+                for i in new_indices
+            ]
             bvs = [bvs[i] for i in new_indices]
             # After resampling, weights are uniform.
             weights = np.ones(n_particles) / n_particles
 
     # Final answer: weighted-min best val across particles.
     final_idx = int(np.argmin(bvs))
-    surviving = {drivers[i][0]: float(weights[i])
-                 for i in range(n_particles)}
-    return (float(bvs[final_idx]),
-            pilot_calls + total_calls,
-            f"smc[{drivers[final_idx][0]}]",
-            surviving)
+    surviving = {drivers[i][0]: float(weights[i]) for i in range(n_particles)}
+    return (
+        float(bvs[final_idx]),
+        pilot_calls + total_calls,
+        f"smc[{drivers[final_idx][0]}]",
+        surviving,
+    )
 
 
-def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
-              t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-              t_hot, features, best_pilot_pos, pilot_calls,
-              parallel=True):
+def bgsa_auto(
+    seed,
+    n_epochs,
+    k_per_epoch,
+    n_chains,
+    t_map,
+    e_map,
+    L_map,
+    q_map,
+    t_rw_map,
+    sigma_map,
+    t_hot,
+    features,
+    best_pilot_pos,
+    pilot_calls,
+    parallel=True,
+):
     """bGSA-auto = parallel ensemble of candidate drivers.
 
     Runs the four bGSA-family production drivers concurrently from
@@ -2353,13 +2802,14 @@ def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
     achieved the minimum best_val on this seed.
 
     No feature heuristic; the framework picks the winner by actual
-    observed outcome. Standard parallel-MCMC pattern (Geyer 1991,
-    Earl & Deem 2005). Optional `parallel=True` uses
+    observed outcome. Parallel-tempering motivation follows Earl/Deem
+    2005 (doi:10.1039/B509983H). Optional `parallel=True` uses
     concurrent.futures.ThreadPoolExecutor; numpy releases the GIL on
     bulk ops so threads see real CPU parallelism. Set parallel=False
     to run sequentially when reproducibility-by-thread-order is
     required."""
     from concurrent.futures import ThreadPoolExecutor
+
     # Allocate budget per driver so the ensemble matches the single-
     # driver wall-clock target. n_epochs / n_drivers per driver,
     # rounded up so each driver gets >= 1 epoch.
@@ -2367,34 +2817,66 @@ def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
     n_epochs_each = max(1, n_epochs // n_drivers)
 
     def _run_bgsa():
-        bv, nc, _ = hmc_sa(seed, n_epochs_each, k_per_epoch,
-                            t_map, e_map, L_map,
-                            x0=best_pilot_pos, q=q_map)
+        bv, nc, _ = hmc_sa(
+            seed,
+            n_epochs_each,
+            k_per_epoch,
+            t_map,
+            e_map,
+            L_map,
+            x0=best_pilot_pos,
+            q=q_map,
+        )
         return "bgsa", bv, nc
 
     def _run_bgsa_metad():
         bv, nc, _, _, _, _ = bgsa_metad(
-            seed + 1, n_epochs_each, k_per_epoch,
-            t_rw_map, e_map, L_map, q_map, pilot_calls=0,
-            sigma_rw=sigma_map)
+            seed + 1,
+            n_epochs_each,
+            k_per_epoch,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls=0,
+            sigma_rw=sigma_map,
+        )
         return "bgsa_metad", bv, nc
 
     def _run_bgsa_pt_metad():
         bv, nc, _, _, _, _, _, _, _ = bgsa_pt_metad(
-            seed + 2, n_epochs_each, n_chains,
-            t_rw_map, e_map, L_map, q_map, pilot_calls=0,
-            k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
+            seed + 2,
+            n_epochs_each,
+            n_chains,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls=0,
+            k_inner=20,
+            k_swap=5,
+            sigma_rw=sigma_map,
+            t_hot=t_hot,
+        )
         return "bgsa_pt_metad", bv, nc
 
     def _run_bgsa_pt_hybrid_v2():
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
-            seed + 3, n_epochs_each, n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls=0,
-            k_inner=20, k_swap=5, t_hot=t_hot)
+            seed + 3,
+            n_epochs_each,
+            n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls=0,
+            k_inner=20,
+            k_swap=5,
+            t_hot=t_hot,
+        )
         return "bgsa_pt_hybrid_v2", bv, nc
 
-    runners = [_run_bgsa, _run_bgsa_metad, _run_bgsa_pt_metad,
-               _run_bgsa_pt_hybrid_v2]
+    runners = [_run_bgsa, _run_bgsa_metad, _run_bgsa_pt_metad, _run_bgsa_pt_hybrid_v2]
 
     if parallel:
         with ThreadPoolExecutor(max_workers=len(runners)) as ex:
@@ -2408,17 +2890,20 @@ def bgsa_auto(seed, n_epochs, k_per_epoch, n_chains,
     return best_bv, total_calls, f"ensemble[{best_name}]"
 
 
-def bgsa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map,
-         best_pilot_pos, pilot_calls):
+def bgsa(
+    seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls
+):
     """bGSA = production q-HMC-SA (single chain). Pilot done upstream."""
-    bv, n_calls, _ = hmc_sa(seed, n_epochs, k_per_epoch, t_map, e_map, L_map,
-                            x0=best_pilot_pos, q=q_map)
+    bv, n_calls, _ = hmc_sa(
+        seed, n_epochs, k_per_epoch, t_map, e_map, L_map, x0=best_pilot_pos, q=q_map
+    )
     return bv, pilot_calls + n_calls, t_map, e_map, L_map, q_map
 
 
 # -------------------------------------------------------------------------
 # Driver
 # -------------------------------------------------------------------------
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -2454,17 +2939,28 @@ def main():
         # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
         # tuple. This was the largest source of feval overhead in the
         # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
-        (t_map, e_map, L_map, q_map, sigma_map,
-         best_pilot_pos, pilot_calls, t_hot, t_rw_map,
-         features) = run_pilot(
-            seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
+        (
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            sigma_map,
+            best_pilot_pos,
+            pilot_calls,
+            t_hot,
+            t_rw_map,
+            features,
+        ) = run_pilot(seed, args.n_pilot, args.pilot_steps, dim=len(LOW))
 
         # Classical SA (hand-tuned, baseline budget)
         t0 = time.perf_counter()
         bv, nc, _ = classical_sa(seed, args.n_epochs, 200, 5.0, 0.5)
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="classical_sa", best_val=bv,
-                         fevals=nc, wall_time_s=wt))
+        rows.append(
+            dict(
+                seed=seed, driver="classical_sa", best_val=bv, fevals=nc, wall_time_s=wt
+            )
+        )
 
         # Classical SA at matched-PT budget. Scales K_per_epoch so that
         # n_epochs * K_matched ~= bGSA-PT's total fevals. This is the
@@ -2475,91 +2971,228 @@ def main():
         t0 = time.perf_counter()
         bv, nc, _ = classical_sa(seed, args.n_epochs, k_matched, 5.0, 0.5)
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="classical_sa_matched", best_val=bv,
-                         fevals=nc, wall_time_s=wt))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="classical_sa_matched",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+            )
+        )
 
         # Classical SA + Latin hypercube + adaptive sigma + stagnation
         # restart. The three architectural fixes that turn matched-budget
         # classical from a single-basin grinder into an actual explorer.
         t0 = time.perf_counter()
         bv, nc, _ = classical_sa_advanced(
-            seed, args.n_epochs, k_matched, 5.0, 0.5,
-            n_starts=4, stagnation_k=400, sigma_target_accept=0.234)
+            seed,
+            args.n_epochs,
+            k_matched,
+            5.0,
+            0.5,
+            n_starts=4,
+            stagnation_k=400,
+            sigma_target_accept=0.234,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="classical_sa_advanced", best_val=bv,
-                         fevals=nc, wall_time_s=wt))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="classical_sa_advanced",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+            )
+        )
 
         # HMC-SA hand-tuned
         t0 = time.perf_counter()
         bv, nc, _ = hmc_sa(seed, args.n_epochs, args.k_per_epoch, 5.0, 0.05, 5)
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="hmc_sa_hand", best_val=bv,
-                         fevals=nc, wall_time_s=wt))
+        rows.append(
+            dict(
+                seed=seed, driver="hmc_sa_hand", best_val=bv, fevals=nc, wall_time_s=wt
+            )
+        )
 
         # bGSA = production q-HMC at MAP
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa(
-            seed, args.n_epochs, args.k_per_epoch,
-            t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls)
+            seed,
+            args.n_epochs,
+            args.k_per_epoch,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            best_pilot_pos,
+            pilot_calls,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA multi-chain = multi-chain q-HMC with Rhat termination
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_multichain(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_min=args.k_min, k_check=args.k_check, k_max=args.k_max,
-            rhat_threshold=args.rhat_threshold)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_min=args.k_min,
+            k_check=args.k_check,
+            k_max=args.k_max,
+            rhat_threshold=args.rhat_threshold,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_multichain", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_multichain",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA PT = PT q-HMC with adjacent chain swaps
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=20,
+            k_swap=5,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_pt", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_pt",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA adaptive PT = Robbins-Monro adaptive ladder
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt_adaptive(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, target_swap_rate=0.25, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=20,
+            k_swap=5,
+            target_swap_rate=0.25,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_pt_adaptive", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_pt_adaptive",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + Bayesian SVGD = Stein variational particle flow
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_svgd(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls, k_inner=10)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=10,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_svgd", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_svgd",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + hybrid PT (hot = RW, cold = q-HMC).
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=20,
+            k_swap=5,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_pt_hybrid", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_pt_hybrid",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + hybrid PT v2: Latin hypercube + adaptive sigma +
         # stagnation restart on top of the rung-specific kernel
@@ -2567,93 +3200,238 @@ def main():
         # are exploration-dominated regardless of the pilot's mixing-T.
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
-            seed, args.n_epochs, args.n_chains,
-            t_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=20,
+            k_swap=5,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_pt_hybrid_v2", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_pt_hybrid_v2",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + metadynamics. Well-tempered bias on (x_0, x_1) fills
         # local cups so RW Metropolis escapes Arrhenius-suppressed basins.
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_metad(
-            seed, args.n_epochs, args.k_per_epoch,
-            t_rw_map, e_map, L_map, q_map, pilot_calls, sigma_rw=sigma_map)
+            seed,
+            args.n_epochs,
+            args.k_per_epoch,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            sigma_rw=sigma_map,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_metad", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_metad",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + multi-start metadynamics: 4 LH-initialised chains
         # each run their own metad bias, take min. Combines the
         # cup-filling of metad with the lower-tail of multi-start.
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_metad_multi(
-            seed, args.n_epochs, args.k_per_epoch,
-            t_rw_map, e_map, L_map, q_map, pilot_calls,
-            sigma_rw=sigma_map, n_starts=4)
+            seed,
+            args.n_epochs,
+            args.k_per_epoch,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            sigma_rw=sigma_map,
+            n_starts=4,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_metad_multi", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_metad_multi",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + PT + shared metadynamics (PLUMED-style multi-walker
         # PT-MetaD). High-T chains discover cups and deposit, low-T
         # chains refine, swaps propagate basins down the ladder.
         t0 = time.perf_counter()
         bv, nc, _, _, _, _, _, _, _log_z = bgsa_pt_metad(
-            seed, args.n_epochs, args.n_chains,
-            t_rw_map, e_map, L_map, q_map, pilot_calls,
-            k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            k_inner=20,
+            k_swap=5,
+            sigma_rw=sigma_map,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_pt_metad", best_val=bv,
-                         fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_pt_metad",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA + continuous-time tempering (Wu-Stoltz 2022). beta drifts
         # continuously between 1/t_hot and 1/t_map on a Langevin
         # trajectory; subsumes discrete PT as the sigma_beta -> 0 limit.
         t0 = time.perf_counter()
         bv, nc, _, _, _, _ = bgsa_continuous_temper(
-            seed, args.n_epochs, 20,
-            t_map, e_map, L_map, q_map, pilot_calls, t_hot=t_hot)
+            seed,
+            args.n_epochs,
+            20,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls,
+            t_hot=t_hot,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed, driver="bgsa_continuous_temper",
-                         best_val=bv, fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver="bgsa_continuous_temper",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA-auto: parallel ensemble (commit ff499f0).
         t0 = time.perf_counter()
         bv, nc, chosen = bgsa_auto(
-            seed, args.n_epochs, args.k_per_epoch, args.n_chains,
-            t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-            t_hot, features, best_pilot_pos, pilot_calls)
+            seed,
+            args.n_epochs,
+            args.k_per_epoch,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            t_rw_map,
+            sigma_map,
+            t_hot,
+            features,
+            best_pilot_pos,
+            pilot_calls,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed,
-                         driver=f"bgsa_auto[{chosen}]",
-                         best_val=bv, fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver=f"bgsa_auto[{chosen}]",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
         # bGSA-SMC: SMC particle filter over the driver space.
         # Treats the four candidate drivers as particles, reweights
         # by best-val improvement, resamples at ESS threshold.
         t0 = time.perf_counter()
         bv, nc, chosen, surviving = bgsa_smc_ensemble(
-            seed, args.n_epochs, args.k_per_epoch, args.n_chains,
-            t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-            t_hot, best_pilot_pos, pilot_calls)
+            seed,
+            args.n_epochs,
+            args.k_per_epoch,
+            args.n_chains,
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            t_rw_map,
+            sigma_map,
+            t_hot,
+            best_pilot_pos,
+            pilot_calls,
+        )
         wt = time.perf_counter() - t0
-        rows.append(dict(seed=seed,
-                         driver=f"bgsa_smc[{chosen}]",
-                         best_val=bv, fevals=nc, wall_time_s=wt,
-                         t_map=t_map, e_map=e_map, L_map=L_map, q_map=q_map))
+        rows.append(
+            dict(
+                seed=seed,
+                driver=f"bgsa_smc[{chosen}]",
+                best_val=bv,
+                fevals=nc,
+                wall_time_s=wt,
+                t_map=t_map,
+                e_map=e_map,
+                L_map=L_map,
+                q_map=q_map,
+            )
+        )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["seed", "driver", "best_val",
-                                          "fevals", "wall_time_s",
-                                          "t_map", "e_map", "L_map", "q_map"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "seed",
+                "driver",
+                "best_val",
+                "fevals",
+                "wall_time_s",
+                "t_map",
+                "e_map",
+                "L_map",
+                "q_map",
+            ],
+        )
         w.writeheader()
         for r in rows:
             for k in ["t_map", "e_map", "L_map", "q_map"]:
@@ -2661,33 +3439,48 @@ def main():
             w.writerow(r)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
 
-    for label in ["classical_sa", "classical_sa_matched", "classical_sa_advanced",
-                  "hmc_sa_hand",
-                  "bgsa", "bgsa_multichain",
-                  "bgsa_pt", "bgsa_pt_adaptive", "bgsa_pt_hybrid",
-                  "bgsa_pt_hybrid_v2",
-                  "bgsa_svgd", "bgsa_metad", "bgsa_metad_multi",
-                  "bgsa_pt_metad", "bgsa_continuous_temper"]:
+    for label in [
+        "classical_sa",
+        "classical_sa_matched",
+        "classical_sa_advanced",
+        "hmc_sa_hand",
+        "bgsa",
+        "bgsa_multichain",
+        "bgsa_pt",
+        "bgsa_pt_adaptive",
+        "bgsa_pt_hybrid",
+        "bgsa_pt_hybrid_v2",
+        "bgsa_svgd",
+        "bgsa_metad",
+        "bgsa_metad_multi",
+        "bgsa_pt_metad",
+        "bgsa_continuous_temper",
+    ]:
         sub = [r for r in rows if r["driver"] == label]
         if not sub:
             continue
         bvs = np.array([r["best_val"] for r in sub])
         ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
-        print(f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
-              f"95%-upper = {ci_upper:7.3f}  fevals = "
-              f"{np.mean([r['fevals'] for r in sub]):.0f}")
+        print(
+            f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
+            f"95%-upper = {ci_upper:7.3f}  fevals = "
+            f"{np.mean([r['fevals'] for r in sub]):.0f}"
+        )
     # bgsa_auto rows are tagged with the chosen driver name.
-    for label in sorted({r["driver"] for r in rows
-                          if r["driver"].startswith("bgsa_auto")}):
+    for label in sorted(
+        {r["driver"] for r in rows if r["driver"].startswith("bgsa_auto")}
+    ):
         sub = [r for r in rows if r["driver"] == label]
         if not sub:
             continue
         bvs = np.array([r["best_val"] for r in sub])
         # 95% upper bound (bGSA's headline statistic per design_pass_10)
         ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
-        print(f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
-              f"95%-upper = {ci_upper:7.3f}  fevals = "
-              f"{np.mean([r['fevals'] for r in sub]):.0f}")
+        print(
+            f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "
+            f"95%-upper = {ci_upper:7.3f}  fevals = "
+            f"{np.mean([r['fevals'] for r in sub]):.0f}"
+        )
     bgsa_rows = [r for r in rows if r["driver"] == "bgsa"]
     if bgsa_rows:
         print(f"\nbGSA hyperparameter MAP (mean across seeds):")

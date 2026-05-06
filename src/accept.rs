@@ -30,7 +30,8 @@ impl<T: Float + Send + Sync> AcceptRule<T> for Metropolis {
     }
 }
 
-/// Tsallis-Stariolo 1996 generalised acceptance with index `q_a`.
+/// Tsallis-Stariolo 1996 generalised acceptance with index `q_a`
+/// (doi:10.1016/S0378-4371(96)00271-3).
 ///
 /// `p = [1 + (q_a - 1) * delta_e / T]^(1 / (1 - q_a))` for uphill moves.
 /// Equivalently, `p = exp_q(-delta_e / T)` where `exp_q` is the Tsallis
@@ -40,14 +41,14 @@ impl<T: Float + Send + Sync> AcceptRule<T> for Metropolis {
 /// For `q_a > 1` the acceptance is heavy-tailed: at large `delta_e / T`
 /// it decays as a power law instead of exponentially, which is why GSA
 /// outperforms classical SA on multimodal landscapes -- more uphill
-/// acceptance at high `T` enables basin escape (Xiang/Sun/Fan/Gong 1997
-/// default `q_a = 2.7`). At fixed `T` and `delta_e > 0`, larger `q_a`
-/// gives larger `p`.
+/// acceptance at high `T` enables basin escape. Xiang/Sun/Fan/Gong 1997
+/// use the default `q_a = 2.7` (doi:10.1016/S0375-9601(97)00474-X).
+/// At fixed `T` and `delta_e > 0`, larger `q_a` gives larger `p`.
 ///
 /// For `q_a < 1` the base can go negative when
 /// `delta_e / T > 1 / (1 - q_a)`; this is the compact-support regime
 /// of the Tsallis q-exponential and is clamped to zero acceptance,
-/// matching Tsallis 1988 Eq.(7).
+/// matching Tsallis 1988 Eq.(7) (doi:10.1007/BF01016429).
 #[derive(Clone, Copy, Debug)]
 pub struct TsallisAccept<T: Float> {
     /// Tsallis acceptance index. `q_a == 1` is the Metropolis limit;

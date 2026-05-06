@@ -249,6 +249,10 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 
 /// Runs HMC-driven SA with a user-supplied gradient and returns a `History`.
 ///
+/// The trajectory kernel uses the Omelyan minimum-norm integrator
+/// (doi:10.1016/S0010-4655(02)00754-3). q-Gaussian momentum follows
+/// the Tsallis/GSA construction (doi:10.1016/S0378-4371(96)00271-3).
+///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
 ///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray`. Pass
@@ -263,6 +267,7 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 ///      draws that help HMC-SA escape local cups on multimodal
 ///      objectives. For `dim=5`, `q < 1.4`; for `dim=10`, `q < 1.2`.
 ///   n_epochs, steps_per_epoch, seed.
+///   x0: optional deterministic starting position.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, q = 1.0, n_epochs = 100, steps_per_epoch = 50, seed = 42, x0 = None))]
 #[allow(clippy::too_many_arguments)]

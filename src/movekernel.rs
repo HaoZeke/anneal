@@ -84,8 +84,9 @@ impl MoveKernel<f64> for Cauchy {
     }
 }
 
-/// Tsallis visiting distribution (GSA): a heavy-tailed proposal whose
-/// tail index is controlled by `q_v in (1, 3)`. Implemented as a
+/// Tsallis visiting distribution (GSA; doi:10.1016/S0378-4371(96)00271-3):
+/// a heavy-tailed proposal whose tail index is controlled by `q_v in (1, 3)`.
+/// Implemented as a
 /// Student-t style sample with `dof = (3 - q_v) / (q_v - 1)`, scaled by
 /// `T^(1/(3-q_v))` per the IISE manuscript Eq. (3).
 ///
