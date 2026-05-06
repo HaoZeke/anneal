@@ -60,11 +60,6 @@ def cutest_env() -> dict:
     RuntimeError with a clear message if the bootstrap hasn't run."""
     root = os.environ.get("PIXI_PROJECT_ROOT", os.getcwd())
     bench = os.path.join(root, ".bench")
-    if not os.path.isdir(os.path.join(bench, "SIFDecode", "install", "bin")):
-        raise RuntimeError(
-            f"CUTEst not bootstrapped. Run 'bash experiments/benchmarks/bootstrap_cutest.sh' "
-            f"first (looked in {bench})"
-        )
     env = {
         "ARCHDEFS": os.path.join(bench, "ARCHDefs"),
         "SIFDECODE": os.path.join(bench, "SIFDecode", "install"),
@@ -73,6 +68,20 @@ def cutest_env() -> dict:
         "MYARCH": "pc64.lnx.gfo",
         "PYCUTEST_CACHE": os.path.join(bench, "cache"),
     }
+    required_paths = {
+        "SIFDecode decoder": os.path.join(env["SIFDECODE"], "bin", "sifdecoder"),
+        "CUTEst single library": os.path.join(env["CUTEST"], "lib", "libcutest_single.a"),
+        "CUTEst double library": os.path.join(env["CUTEST"], "lib", "libcutest_double.a"),
+        "MASTSIF catalogue": env["MASTSIF"],
+    }
+    missing = [f"{label} ({path})" for label, path in required_paths.items() if not os.path.exists(path)]
+    if missing:
+        joined = "; ".join(missing)
+        raise RuntimeError(
+            "CUTEst bootstrap incomplete. Run "
+            "'bash experiments/benchmarks/bootstrap_cutest.sh' first "
+            f"(looked in {bench}; missing {joined})"
+        )
     os.makedirs(os.path.join(env["PYCUTEST_CACHE"], "pycutest_cache_holder"), exist_ok=True)
     return env
 
