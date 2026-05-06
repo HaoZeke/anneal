@@ -12,6 +12,17 @@ from experiments.benchmarks.catalog import CATALOG, list_problems, get_problem
 from experiments.benchmarks.runner import run_benchmarks
 
 
+class _QuadraticCutestProblem:
+    name = "QUAD2"
+    dim = 2
+    low = np.array([-1.0, -1.0])
+    high = np.array([1.0, 1.0])
+
+    def fn(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+
 def test_catalog_has_expected_problems():
     names = list_problems()
     assert "styb_tang_2d" in names
@@ -142,3 +153,71 @@ def test_cutest_summary_reports_status_and_winners(tmp_path):
     assert bgsa.timeout == 1
     assert bgsa.best_cells == 1
     assert out.read_text(encoding="utf-8").splitlines()[0].startswith("driver,cells,ok")
+
+
+def test_cutest_classical_budget_matches_fixed_epoch_steps():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    _, fevals = cutest.classical_sa(
+        _QuadraticCutestProblem(),
+        seed=0,
+        n_epochs=20,
+        k_fixed=80,
+    )
+
+    assert fevals == 1601
+
+
+def test_cutest_legacy_mcmc_never_overshoots_k_max():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    n_chains = 4
+    k_max = 35
+    _, fevals = cutest.mcmc_sa(
+        _QuadraticCutestProblem(),
+        seed=0,
+        n_epochs=1,
+        n_chains=n_chains,
+        k_min=30,
+        k_check=20,
+        k_max=k_max,
+        rhat_threshold=-1.0,
+    )
+
+    assert fevals <= n_chains + n_chains * k_max
+
+
+def test_cutest_budgeted_mcmc_matches_classical_epoch_budget():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    prob = _QuadraticCutestProblem()
+    n_epochs = 20
+    k_fixed = 80
+    n_chains = 4
+
+    _, dense_fevals = cutest.mcmc_sa_budgeted(
+        prob,
+        seed=0,
+        n_epochs=n_epochs,
+        n_chains=n_chains,
+        epoch_budget=k_fixed,
+        k_min=8,
+        k_check=8,
+        rhat_threshold=-1.0,
+    )
+    _, sparse_fevals = cutest.mcmc_sa_budgeted(
+        prob,
+        seed=0,
+        n_epochs=n_epochs,
+        n_chains=n_chains,
+        epoch_budget=k_fixed,
+        k_min=8,
+        k_check=8,
+        rhat_threshold=-1.0,
+        sparse=True,
+        straggler_top_k=2,
+    )
+
+    budget = n_chains + n_epochs * k_fixed
+    assert dense_fevals <= budget
+    assert sparse_fevals <= budget

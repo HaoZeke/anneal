@@ -32,6 +32,7 @@ from experiments.scripts.run_cutest_benchmarks import (
     _bgsa_run,
     classical_sa,
     mcmc_sa,
+    mcmc_sa_budgeted,
 )
 
 
@@ -194,6 +195,30 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
             args.k_min,
             args.k_check,
             args.k_max,
+            args.rhat_threshold,
+            sparse=True,
+            straggler_top_k=args.straggler_top_k,
+        )
+    if driver == "mcmc_sa_budgeted":
+        return mcmc_sa_budgeted(
+            prob,
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            args.k_fixed,
+            args.k_min,
+            args.k_check,
+            args.rhat_threshold,
+        )
+    if driver == "mcmc_sa_sparse_budgeted":
+        return mcmc_sa_budgeted(
+            prob,
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            args.k_fixed,
+            args.k_min,
+            args.k_check,
             args.rhat_threshold,
             sparse=True,
             straggler_top_k=args.straggler_top_k,

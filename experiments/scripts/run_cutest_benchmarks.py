@@ -61,6 +61,20 @@ def _straggler_indices(chain_pos, top_k):
     return [i for i, _ in dists[:top_k]]
 
 
+def _step_chain(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
+    proposal = gaussian_propose(rng, cur_pos, sigma, np.float64)
+    proposal = np.clip(proposal, prob.low, prob.high)
+    proposal_val = prob.fn(proposal)
+    delta = proposal_val - cur_val
+    p = metropolis_accept_prob(delta, temp, np.float64)
+    if rng.random() < p:
+        cur_pos = proposal
+        cur_val = proposal_val
+        if proposal_val < best_val:
+            best_val = proposal_val
+    return cur_pos, cur_val, best_val
+
+
 def classical_sa(prob, seed, n_epochs, k_fixed, sigma=0.5, t_init=5.0):
     rng = np.random.default_rng(seed)
     cur_pos = rng.uniform(prob.low, prob.high).astype(np.float64)
@@ -116,29 +130,86 @@ def mcmc_sa(prob, seed, n_epochs, n_chains, k_min, k_check, k_max,
                 active = _straggler_indices(chain_pos, straggler_top_k)
             else:
                 active = list(range(n_chains))
-            for _ in range(k_check):
+            batch = min(k_check, k_max - total_steps)
+            for _ in range(batch):
                 for c in active:
-                    proposal = gaussian_propose(rngs[c], chain_pos[c], sigma, np.float64)
-                    proposal = np.clip(proposal, prob.low, prob.high)
-                    proposal_val = prob.fn(proposal)
+                    chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+                        prob, rngs[c], chain_pos[c], chain_val[c],
+                        chain_best_val[c], temp, sigma)
                     n_calls += 1
-                    delta = proposal_val - chain_val[c]
-                    p = metropolis_accept_prob(delta, temp, np.float64)
-                    if rngs[c].random() < p:
-                        chain_pos[c] = proposal
-                        chain_val[c] = proposal_val
-                        if proposal_val < chain_best_val[c]:
-                            chain_best_val[c] = proposal_val
                     traces[c].append(chain_pos[c].copy())
                 for c in range(n_chains):
                     if c not in active:
                         traces[c].append(chain_pos[c].copy())
-            total_steps += k_check
+            total_steps += batch
             rhat = gelman_rubin_max(traces)
     return min(chain_best_val), n_calls
 
 
+def _append_budgeted_round(traces, chain_pos, step_active):
+    step_active = set(step_active)
+    for c in range(len(chain_pos)):
+        if c not in step_active:
+            traces[c].append(chain_pos[c].copy())
+
+
+def _budgeted_step_round(prob, rngs, chain_pos, chain_val, chain_best_val,
+                         traces, active, remaining, temp, sigma):
+    stepped = []
+    for c in active[:remaining]:
+        chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
+            prob, rngs[c], chain_pos[c], chain_val[c],
+            chain_best_val[c], temp, sigma)
+        traces[c].append(chain_pos[c].copy())
+        stepped.append(c)
+    _append_budgeted_round(traces, chain_pos, stepped)
+    return len(stepped)
+
+
+def mcmc_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
+                     k_min=30, k_check=20, rhat_threshold=1.2,
+                     sigma=0.5, t_init=5.0, sparse=False,
+                     straggler_top_k=0):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    n_calls = n_chains
+    for epoch in range(n_epochs):
+        temp = log_cool(t_init, 2.0, epoch, np.float64)
+        traces = [[] for _ in range(n_chains)]
+        epoch_calls = 0
+
+        min_rounds = min(k_min, epoch_budget // n_chains)
+        for _ in range(min_rounds):
+            epoch_calls += _budgeted_step_round(
+                prob, rngs, chain_pos, chain_val, chain_best_val, traces,
+                list(range(n_chains)), epoch_budget - epoch_calls, temp, sigma)
+        while epoch_calls < epoch_budget:
+            rhat = gelman_rubin_max(traces)
+            if rhat <= rhat_threshold:
+                break
+            if sparse and 0 < straggler_top_k < n_chains:
+                active = _straggler_indices(chain_pos, straggler_top_k)
+            else:
+                active = list(range(n_chains))
+            for _ in range(k_check):
+                if epoch_calls >= epoch_budget:
+                    break
+                epoch_calls += _budgeted_step_round(
+                    prob, rngs, chain_pos, chain_val, chain_best_val, traces,
+                    active, epoch_budget - epoch_calls, temp, sigma)
+        n_calls += epoch_calls
+    return min(chain_best_val), n_calls
+
+
 DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse",
+           "mcmc_sa_budgeted", "mcmc_sa_sparse_budgeted",
            "bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]
 
 
@@ -221,8 +292,8 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     print(f"Loading CUTEst manifest...")
     problems = load_default_manifest()
-    print(f"Loaded {len(problems)} problems. Running {args.seeds} seeds x 3 drivers = "
-          f"{args.seeds * 3 * len(problems)} cells.")
+    print(f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
+          f"{len(DRIVERS)} drivers = {args.seeds * len(DRIVERS) * len(problems)} cells.")
 
     rows = []
     t_start = time.perf_counter()
@@ -254,6 +325,28 @@ def main():
                              straggler_top_k=args.straggler_top_k)
             wt = time.perf_counter() - t0
             rows.append(dict(problem=prob.name, dim=prob.dim, driver="mcmc_sa_sparse",
+                             seed=seed, fevals=nc, best_val=bv,
+                             wall_time_s=wt, f_x0=f0,
+                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa_budgeted(
+                prob, seed, args.n_epochs, args.n_chains, args.k_fixed,
+                args.k_min, args.k_check, args.rhat_threshold)
+            wt = time.perf_counter() - t0
+            rows.append(dict(problem=prob.name, dim=prob.dim, driver="mcmc_sa_budgeted",
+                             seed=seed, fevals=nc, best_val=bv,
+                             wall_time_s=wt, f_x0=f0,
+                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+
+            t0 = time.perf_counter()
+            bv, nc = mcmc_sa_budgeted(
+                prob, seed, args.n_epochs, args.n_chains, args.k_fixed,
+                args.k_min, args.k_check, args.rhat_threshold,
+                sparse=True, straggler_top_k=args.straggler_top_k)
+            wt = time.perf_counter() - t0
+            rows.append(dict(problem=prob.name, dim=prob.dim,
+                             driver="mcmc_sa_sparse_budgeted",
                              seed=seed, fevals=nc, best_val=bv,
                              wall_time_s=wt, f_x0=f0,
                              solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
