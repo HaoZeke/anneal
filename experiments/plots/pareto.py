@@ -133,7 +133,9 @@ def plot_pareto(
     if symlog_y:
         ax.set_yscale("symlog", linthresh=y_linthresh)
         if np.nanmin(combined[:, 1]) >= 0.0:
-            ax.set_ylim(bottom=0.0)
+            y_max = float(np.nanmax(combined[:, 1]))
+            y_top = y_max * 1.5 if y_max > y_linthresh else y_max + y_linthresh
+            ax.set_ylim(bottom=0.0, top=y_top)
     elif log_y:
         ax.set_yscale("log")
     ax.set_xlabel(cost_label)
