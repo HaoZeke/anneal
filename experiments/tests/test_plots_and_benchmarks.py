@@ -106,6 +106,7 @@ def test_pareto_symlog_y_handles_zero_gaps_and_outliers():
 
     assert ax.get_yscale() == "symlog"
     assert ax.get_ylim()[0] == 0.0
+    assert ax.get_ylim()[1] > pts[:, 1].max()
 
 
 def test_cutest_render_uses_stable_driver_order_and_labels():
