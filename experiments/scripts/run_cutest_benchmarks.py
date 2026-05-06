@@ -596,6 +596,17 @@ def _rust_hmc_steps_per_epoch_budget(epoch_budget, dim, l_steps, grad_kind):
     return max(1, int(epoch_budget) // per_trajectory)
 
 
+def _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains):
+    pilot_steps = max(5, min(20, int(k_per_epoch) // 10))
+    return {
+        "n_pilot": max(4, min(8, int(n_epochs) // 2)),
+        "pilot_steps": pilot_steps,
+        "n_rw_pilot": max(4, min(6, int(n_chains))),
+        "rw_steps": pilot_steps,
+        "n_scout": 4,
+    }
+
+
 def _cutest_gradient(prob):
     native_grad = getattr(prob, "grad", None)
     if callable(native_grad):
@@ -639,11 +650,15 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         d.LOW = prob.low.astype(np.float64)
         d.HIGH = prob.high.astype(np.float64)
         # Run the pilot.
+        pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
         out = d.run_pilot(
             seed,
-            max(8, min(16, n_epochs)),
-            max(40, min(80, k_per_epoch // 2)),
+            pilot_budget["n_pilot"],
+            pilot_budget["pilot_steps"],
             dim=prob.dim,
+            n_rw_pilot=pilot_budget["n_rw_pilot"],
+            rw_steps=pilot_budget["rw_steps"],
+            n_scout=pilot_budget["n_scout"],
         )
         (
             t_map,

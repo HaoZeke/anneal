@@ -536,12 +536,10 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
         return FakeHistory()
 
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: (
+    def run_pilot(*args, **kwargs):
+        captured["pilot_args"] = args
+        captured["pilot_kwargs"] = kwargs
+        return (
             3.0,
             0.25,
             2,
@@ -552,7 +550,14 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
             8.0,
             2.0,
             {"grad_sens": 0.0},
-        ),
+        )
+
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=run_pilot,
         hmc_sa=lambda *_args, **_kwargs: pytest.fail("demo HMC must not run"),
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
@@ -572,6 +577,13 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     assert captured["kwargs"]["q"] == pytest.approx(1.1)
     assert captured["kwargs"]["l_steps"] == 2
     assert captured["kwargs"]["steps_per_epoch"] == 1
+    assert captured["pilot_args"] == (7, 4, 5)
+    assert captured["pilot_kwargs"] == {
+        "dim": 2,
+        "n_rw_pilot": 4,
+        "rw_steps": 5,
+        "n_scout": 4,
+    }
     assert fevals == 11 + cutest._rust_hmc_fd_work_units(
         dim=2,
         n_trajectories=3,
@@ -684,6 +696,22 @@ def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
         l_steps=32,
         grad_kind="native",
     ) == 2
+
+
+def test_cutest_bgsa_pilot_budget_is_derived_from_epoch_budget():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    assert cutest._bgsa_pilot_budget(
+        n_epochs=30,
+        k_per_epoch=200,
+        n_chains=4,
+    ) == {
+        "n_pilot": 8,
+        "pilot_steps": 20,
+        "n_rw_pilot": 4,
+        "rw_steps": 20,
+        "n_scout": 4,
+    }
 
 
 @pytest.mark.parametrize(
