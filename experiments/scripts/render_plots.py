@@ -201,6 +201,8 @@ def main():
         value_label="Relative gap to cell best",
         title="CUTEst accuracy-cost Pareto",
         log_x=True,
+        symlog_y=True,
+        y_linthresh=1e-3,
         out_path=os.path.join(args.out_dir, "pareto.png"),
     )
     print(f"Wrote {os.path.join(args.out_dir, 'pareto.png')}")
