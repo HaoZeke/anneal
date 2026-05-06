@@ -304,6 +304,7 @@ def test_cutest_summary_reports_status_and_winners(tmp_path):
     assert bgsa.ok == 1
     assert bgsa.timeout == 2
     assert bgsa.best_cells == 1
+    assert bgsa.best_share == pytest.approx(0.5)
     assert out.read_text(encoding="utf-8").splitlines()[0].startswith("driver,cells,ok")
 
 
