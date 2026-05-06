@@ -167,6 +167,15 @@ def test_cutest_pareto_points_use_problem_seed_relative_gaps():
     assert points[1][1][:, 1].tolist() == pytest.approx([0.0, 0.0])
 
 
+def test_cutest_data_profile_budget_limit_tracks_solved_budget_range():
+    from experiments.scripts.render_plots import data_profile_kappa_max
+
+    fevals = np.array([[1600.0, 1604.0], [30000.0, np.nan]])
+    dims = np.array([2, 12])
+
+    assert data_profile_kappa_max(fevals, dims) > 200.0
+
+
 def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
     from experiments.scripts import run_cutest_full_suite as suite
 
