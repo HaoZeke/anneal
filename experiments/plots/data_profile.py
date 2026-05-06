@@ -28,14 +28,25 @@ from chemparseplot.plot.theme import (
 
 
 def _solver_color(idx: int) -> str:
-    palette = [
-        RUHI_COLORS["teal"],
-        RUHI_COLORS["coral"],
-        RUHI_COLORS["sky"],
-        RUHI_COLORS["magenta"],
-        RUHI_COLORS["sunshine"],
-    ]
+    palette = list(plt.get_cmap("tab20").colors)
     return palette[idx % len(palette)]
+
+
+def _solver_linestyle(idx: int) -> str:
+    styles = ["-", "--", "-.", ":"]
+    return styles[(idx // 20) % len(styles)]
+
+
+def _place_legend(ax, n_items: int):
+    ncol = 2 if n_items <= 6 else 3
+    return ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.24),
+        ncol=ncol,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=2.4,
+    )
 
 
 def plot_data_profile(
@@ -78,22 +89,32 @@ def plot_data_profile(
     budget = work / (dims[:, None] + 1.0)
     kappas = np.linspace(0.0, kappa_max, n_kappa)
 
-    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
     apply_axis_theme(ax, get_theme("ruhi"))
 
     for s_idx, name in enumerate(solver_names):
-        d = np.array([float(np.sum(budget[:, s_idx] <= k)) / n_problems for k in kappas])
-        ax.plot(kappas, d, label=name, color=_solver_color(s_idx), linewidth=2.0)
+        d = np.array(
+            [float(np.sum(budget[:, s_idx] <= k)) / n_problems for k in kappas]
+        )
+        ax.plot(
+            kappas,
+            d,
+            label=name,
+            color=_solver_color(s_idx),
+            linestyle=_solver_linestyle(s_idx),
+            linewidth=2.0,
+        )
 
     ax.set_xlim(0.0, kappa_max)
     ax.set_ylim(0.0, 1.05)
     ax.set_xlabel(r"Budget $\kappa$ (simplex gradients)")
-    ax.set_ylabel(r"$d_s(\kappa)$ -- fraction of problems solved")
+    ax.set_ylabel(r"Fraction solved")
     if title:
         ax.set_title(title)
-    ax.legend(loc="lower right", frameon=False)
+    _place_legend(ax, n_solvers)
+    fig.subplots_adjust(bottom=0.34)
 
     if out_path:
-        fig.savefig(out_path)
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
 
     return fig, ax

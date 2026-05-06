@@ -33,13 +33,7 @@ _MARKERS = ["o", "s", "D", "^", "v", "P", "X"]
 
 
 def _solver_color(idx: int) -> str:
-    palette = [
-        RUHI_COLORS["teal"],
-        RUHI_COLORS["coral"],
-        RUHI_COLORS["sky"],
-        RUHI_COLORS["magenta"],
-        RUHI_COLORS["sunshine"],
-    ]
+    palette = list(plt.get_cmap("tab20").colors)
     return palette[idx % len(palette)]
 
 
@@ -94,7 +88,7 @@ def plot_pareto(
     Returns: (fig, ax).
     """
     setup_publication_theme(get_theme("ruhi"))
-    fig, ax = plt.subplots(figsize=(5.5, 4.2))
+    fig, ax = plt.subplots(figsize=(6.4, 4.2))
     apply_axis_theme(ax, get_theme("ruhi"))
 
     all_points = []
@@ -134,9 +128,19 @@ def plot_pareto(
     ax.set_ylabel(value_label)
     if title:
         ax.set_title(title)
-    ax.legend(loc="best", frameon=False)
+    n_items = len(runs) + 1
+    ncol = 2 if n_items <= 6 else 3
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.24),
+        ncol=ncol,
+        frameon=False,
+        columnspacing=1.1,
+        handlelength=2.2,
+    )
+    fig.subplots_adjust(bottom=0.34)
 
     if out_path:
-        fig.savefig(out_path)
+        fig.savefig(out_path, dpi=300, bbox_inches="tight")
 
     return fig, ax
