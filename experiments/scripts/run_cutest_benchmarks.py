@@ -662,11 +662,13 @@ def _run_cutest_rust_hmc(
     q_map,
     best_pilot_pos,
 ):
+    bounds_dim = int(np.asarray(prob.low).size)
     l_steps = max(1, int(L_map))
-    q_hmc = min(float(q_map), float(np.nextafter(1.0 + 2.0 / prob.dim, 1.0)))
+    q_hmc = min(float(q_map), float(np.nextafter(1.0 + 2.0 / bounds_dim, 1.0)))
     hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
-        epoch_budget, prob.dim, l_steps, grad_kind
+        epoch_budget, bounds_dim, l_steps, grad_kind
     )
+    x0 = _hmc_initial_position(best_pilot_pos, bounds_dim)
     history = anneal_module.run_hmc(
         prob.fn,
         grad_fn,
@@ -679,7 +681,7 @@ def _run_cutest_rust_hmc(
         n_epochs=int(n_epochs),
         steps_per_epoch=hmc_steps_per_epoch,
         seed=int(seed),
-        x0=np.asarray(best_pilot_pos, dtype=np.float64),
+        x0=x0,
     )
     n_trajectories = int(n_epochs) * hmc_steps_per_epoch
     total_accepted = int(getattr(history, "total_accepted", 0))
@@ -689,9 +691,22 @@ def _run_cutest_rust_hmc(
         )
     else:
         work_units = _rust_hmc_fd_work_units(
-            prob.dim, n_trajectories, l_steps, total_accepted=total_accepted
+            bounds_dim, n_trajectories, l_steps, total_accepted=total_accepted
         )
     return float(history.best_val), work_units
+
+
+def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
+    if best_pilot_pos is None:
+        return None
+    x0 = np.asarray(best_pilot_pos, dtype=np.float64)
+    if x0.shape != (int(dim),) or not np.all(np.isfinite(x0)):
+        return None
+    return np.ascontiguousarray(x0)
+
+
+def _metad_cv_supported(prob) -> bool:
+    return int(np.asarray(prob.low).size) >= 2 and int(np.asarray(prob.high).size) >= 2
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
@@ -754,6 +769,24 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             )
             return best_val, pilot_calls + work_units
         if driver == "bgsa_metad":
+            if not _metad_cv_supported(prob):
+                import anneal
+
+                best_val, work_units = _run_cutest_rust_hmc(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    n_epochs,
+                    k_per_epoch,
+                    t_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    best_pilot_pos,
+                )
+                return best_val, pilot_calls + work_units
             bv, nc, _, _, _, _ = d.bgsa_metad(
                 seed,
                 n_epochs,
@@ -767,6 +800,24 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             )
             return bv, nc
         if driver == "bgsa_pt_metad":
+            if not _metad_cv_supported(prob):
+                import anneal
+
+                best_val, work_units = _run_cutest_rust_hmc(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    n_epochs,
+                    k_per_epoch,
+                    t_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    best_pilot_pos,
+                )
+                return best_val, pilot_calls + work_units
             bv, nc, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
                 seed,
                 n_epochs,
@@ -800,32 +851,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 q_map,
                 best_pilot_pos,
             )
-            metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
-                seed + 1,
-                n_epochs,
-                candidate_budget,
-                t_rw_map,
-                e_map,
-                L_map,
-                q_map,
-                pilot_calls=0,
-                sigma_rw=sigma_map,
-            )
-            pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
-            pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
-                seed + 2,
-                n_epochs,
-                n_chains,
-                t_rw_map,
-                e_map,
-                L_map,
-                q_map,
-                pilot_calls=0,
-                k_inner=pt_inner,
-                k_swap=max(1, min(5, pt_inner)),
-                sigma_rw=sigma_map,
-                t_hot=t_hot,
-            )
             hybrid_inner = _pt_hmc_inner_steps_per_epoch_budget(
                 candidate_budget, n_chains, prob.dim, max(1, int(L_map)), grad_kind
             )
@@ -842,12 +867,38 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 k_swap=max(1, min(5, hybrid_inner)),
                 t_hot=t_hot,
             )
-            outcomes = (
+            outcomes = [
                 (hmc_bv, hmc_calls),
-                (metad_bv, metad_calls),
-                (pt_bv, pt_calls),
                 (hybrid_bv, hybrid_calls),
-            )
+            ]
+            if _metad_cv_supported(prob):
+                metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
+                    seed + 1,
+                    n_epochs,
+                    candidate_budget,
+                    t_rw_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    pilot_calls=0,
+                    sigma_rw=sigma_map,
+                )
+                pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
+                pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
+                    seed + 2,
+                    n_epochs,
+                    n_chains,
+                    t_rw_map,
+                    e_map,
+                    L_map,
+                    q_map,
+                    pilot_calls=0,
+                    k_inner=pt_inner,
+                    k_swap=max(1, min(5, pt_inner)),
+                    sigma_rw=sigma_map,
+                    t_hot=t_hot,
+                )
+                outcomes.extend([(metad_bv, metad_calls), (pt_bv, pt_calls)])
             return min(value for value, _calls in outcomes), pilot_calls + sum(
                 calls for _value, calls in outcomes
             )

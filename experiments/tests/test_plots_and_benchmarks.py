@@ -808,6 +808,47 @@ def test_cutest_bgsa_uses_native_gradient_and_native_work_units(monkeypatch):
     )
 
 
+def test_cutest_bgsa_hmc_uses_none_for_missing_pilot_position():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class FiveDimProblem(_QuadraticCutestProblem):
+        dim = 5
+        low = np.full(5, -1.0)
+        high = np.full(5, 1.0)
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -2.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **kwargs):
+        captured["x0"] = kwargs["x0"]
+        return FakeHistory()
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+
+    cutest._run_cutest_rust_hmc(
+        fake_anneal,
+        FiveDimProblem(),
+        lambda x: np.asarray(x, dtype=np.float64),
+        "native",
+        seed=7,
+        n_epochs=3,
+        epoch_budget=200,
+        t_map=3.0,
+        e_map=0.25,
+        L_map=2,
+        q_map=1.1,
+        best_pilot_pos=None,
+    )
+
+    assert captured["x0"] is None
+
+
 def test_cutest_bgsa_clamps_q_for_high_dimensional_rust_hmc(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
@@ -862,6 +903,69 @@ def test_cutest_bgsa_clamps_q_for_high_dimensional_rust_hmc(monkeypatch):
     )
 
     assert captured["q"] < 1.0 + 2.0 / 30.0
+
+
+def test_cutest_bgsa_metad_falls_back_when_cv_is_undefined(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    class ReducedCoordinateProblem(_QuadraticCutestProblem):
+        dim = 2
+        low = np.array([-1.0])
+        high = np.array([1.0])
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -3.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: pytest.fail("metad CV is undefined"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        ReducedCoordinateProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_metad",
+    )
+
+    assert best_val == -3.0
+    hmc_steps = cutest._rust_hmc_steps_per_epoch_budget(
+        epoch_budget=200,
+        dim=1,
+        l_steps=2,
+        grad_kind="native",
+    )
+    assert fevals == 11 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=3 * hmc_steps,
+        l_steps=2,
+    )
 
 
 def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
@@ -942,6 +1046,74 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
     assert captured["pt_inner"] == 2
     assert captured["hybrid_inner"] == 1
     assert fevals == 11 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=2,
+        l_steps=2,
+    )
+
+
+def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class ReducedCoordinateProblem(_QuadraticCutestProblem):
+        dim = 2
+        low = np.array([-1.0])
+        high = np.array([1.0])
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -5.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **kwargs):
+        captured["hmc_kwargs"] = kwargs
+        return FakeHistory()
+
+    def bgsa_pt_hybrid_v2(*_args, **kwargs):
+        captured["hybrid_inner"] = kwargs["k_inner"]
+        return 2.0, 70, None, None, None, None, None, None
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: pytest.fail("metad CV is undefined"),
+        bgsa_pt_metad=lambda *_args, **_kwargs: pytest.fail("metad CV is undefined"),
+        bgsa_pt_hybrid_v2=bgsa_pt_hybrid_v2,
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        ReducedCoordinateProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -5.0
+    assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
+    assert captured["hybrid_inner"] == 1
+    assert fevals == 11 + 70 + cutest._rust_hmc_native_grad_work_units(
         n_trajectories=2,
         l_steps=2,
     )
