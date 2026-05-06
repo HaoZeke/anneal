@@ -92,6 +92,81 @@ def test_pareto_renders_and_finds_front():
     assert ax.get_legend() is not None
 
 
+def test_cutest_render_uses_stable_driver_order_and_labels():
+    from experiments.scripts.render_plots import display_solver_names, ordered_solvers
+
+    rows = [
+        {"driver": "bgsa_auto"},
+        {"driver": "classical"},
+        {"driver": "bayesian_mixing_sa"},
+        {"driver": "mcmc_sa_sparse_budgeted"},
+    ]
+
+    solvers = ordered_solvers(rows)
+
+    assert solvers == [
+        "classical",
+        "bayesian_mixing_sa",
+        "mcmc_sa_sparse_budgeted",
+        "bgsa_auto",
+    ]
+    assert display_solver_names(solvers) == [
+        "Classical SA",
+        "Bayesian mixing",
+        "Sparse MCMC-SA (budgeted)",
+        "Automatic BGSA",
+    ]
+
+
+def test_cutest_pareto_points_use_problem_seed_relative_gaps():
+    from experiments.scripts.render_plots import pareto_points_by_solver
+
+    rows = [
+        {
+            "problem": "BIGSCALE",
+            "driver": "classical",
+            "seed": "0",
+            "fevals": "100",
+            "best_val": "1000000",
+            "f_x0": "2000000",
+            "status": "ok",
+        },
+        {
+            "problem": "BIGSCALE",
+            "driver": "bayesian_mixing_sa",
+            "seed": "0",
+            "fevals": "120",
+            "best_val": "999000",
+            "f_x0": "2000000",
+            "status": "ok",
+        },
+        {
+            "problem": "SMALLSCALE",
+            "driver": "classical",
+            "seed": "0",
+            "fevals": "100",
+            "best_val": "1",
+            "f_x0": "10",
+            "status": "ok",
+        },
+        {
+            "problem": "SMALLSCALE",
+            "driver": "bayesian_mixing_sa",
+            "seed": "0",
+            "fevals": "120",
+            "best_val": "0",
+            "f_x0": "10",
+            "status": "ok",
+        },
+    ]
+
+    points = pareto_points_by_solver(rows, ["classical", "bayesian_mixing_sa"])
+
+    assert points[0][0] == "classical"
+    assert points[0][1][:, 1].tolist() == pytest.approx([0.0005, 0.1])
+    assert points[1][1][:, 1].tolist() == pytest.approx([0.0, 0.0])
+
+
 def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
     from experiments.scripts import run_cutest_full_suite as suite
 
