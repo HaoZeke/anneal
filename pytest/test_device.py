@@ -91,3 +91,21 @@ def test_run_device_keeps_cupy_arrays_on_cuda():
         assert history.rejected.device.id == 0
         assert hasattr(history.best_pos, "__dlpack__")
         assert hasattr(history.best_val, "__dlpack__")
+
+
+@pytest.mark.gpu
+def test_candle_cuda_styblinski_tang_smoke():
+    from anneal import run_candle_styblinski_tang_cuda
+
+    result = run_candle_styblinski_tang_cuda(
+        dim=2,
+        n_epochs=8,
+        steps_per_epoch=16,
+        seed=42,
+        t_init=5.0,
+        sigma=0.5,
+    )
+
+    assert result.device == "cuda:0"
+    assert len(result.best_pos) == 2
+    assert result.best_val < 0.0
