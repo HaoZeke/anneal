@@ -125,6 +125,22 @@ def list_target_problems(dim_cap: int, exclude_names: Iterable[str] | None = Non
     return sorted(by_name.values(), key=lambda target: (target.name, target.kind))
 
 
+def shard_targets(
+    targets: Iterable[TargetProblem],
+    shard_index: int,
+    shard_count: int,
+) -> list[TargetProblem]:
+    if shard_count < 1:
+        raise ValueError("shard_count must be positive")
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < shard_count")
+    return [
+        target
+        for idx, target in enumerate(targets)
+        if idx % shard_count == shard_index
+    ]
+
+
 def parse_drivers(raw: str | None) -> tuple[str, ...]:
     if raw is None or raw.strip() == "":
         return FULL_SUITE_DRIVERS
@@ -347,8 +363,11 @@ def run_suite(args) -> list[dict]:
     targets = list_target_problems(args.dim_cap, exclude_names=args.exclude_problem)
     if args.max_problems is not None:
         targets = targets[: args.max_problems]
+    targets = shard_targets(targets, args.shard_index, args.shard_count)
 
     print(f"Found {len(targets)} CUTEst targets with dim <= {args.dim_cap}", flush=True)
+    if args.shard_count > 1:
+        print(f"Shard {args.shard_index + 1}/{args.shard_count}", flush=True)
     print(f"Drivers: {', '.join(drivers)}", flush=True)
     if rows:
         print(f"Resuming from {len(rows)} existing row(s)", flush=True)
@@ -449,6 +468,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--max-problems", type=int, default=None)
     parser.add_argument("--max-timeouts-per-target", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     return parser
 
 
