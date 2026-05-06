@@ -21,14 +21,17 @@ from anneal._core import (
     run,
     run_hmc,
 )
+from anneal.device import DeviceHistory, run_device
 
 __all__ = [
     "Boltzmann",
+    "DeviceHistory",
     "EpochLine",
     "Fast",
     "Gsa",
     "History",
     "__version__",
     "run",
+    "run_device",
     "run_hmc",
 ]

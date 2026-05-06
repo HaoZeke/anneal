@@ -26,10 +26,20 @@ python  = ">=3.10"
 maturin = ">=1.5"
 pytest  = "*"
 pip     = "*"
+array-api-compat = ">=1.12"
 
 [feature.python.tasks]
 python-build = "maturin develop --features python"
 python-test  = { cmd = "pytest pytest/", depends-on = ["python-build"] }
+
+[feature.gpu]
+platforms = ["linux-64"]
+
+[feature.gpu.pypi-dependencies]
+cupy-cuda12x = ">=13,<15"
+
+[feature.gpu.tasks]
+gpu-test = { cmd = "pytest pytest/test_device.py -q -m gpu", depends-on = ["python-build"] }
 
 [feature.docs.dependencies]
 python = ">=3.10"
@@ -118,5 +128,6 @@ bgsa-cross-plot = { cmd = "PYTHONPATH=. python experiments/scripts/plot_cross_la
 [environments]
 default = { solve-group = "default" }
 python  = { features = ["python"], solve-group = "default" }
+gpu     = { features = ["python", "gpu"], solve-group = "default" }
 docs    = { features = ["docs"],   solve-group = "default" }
 verify  = { features = ["verify"], solve-group = "default" }
