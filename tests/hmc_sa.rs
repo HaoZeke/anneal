@@ -8,6 +8,7 @@ use anneal_core::hmc::{HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, OmelyanI
 use anneal_core::run_rs;
 use anneal_core::sampler::Sampler;
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use eindir_core::objectives::StybTang2D;
@@ -96,7 +97,6 @@ fn analytic_gradient_matches_finite_diff_on_styb_tang() {
 #[test]
 fn hmc_sa_acceptance_in_unit_interval() {
     use anneal_core::history::State;
-    use rand::SeedableRng;
 
     let obj = StybTang2D::new();
     let grad = FiniteDiffGradient::new(StybTang2D::new());
