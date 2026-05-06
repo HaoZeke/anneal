@@ -159,6 +159,36 @@ def write_rows(path: str, rows: Iterable[dict]) -> None:
             writer.writerow(normalised)
 
 
+def append_target_timeout_rows(
+    rows: list[dict],
+    seen: set[tuple[str, str, str]],
+    target: TargetProblem,
+    cells: Iterable[tuple[int, str]],
+    f0: float,
+) -> int:
+    appended = 0
+    for seed, driver in cells:
+        key = (target.name, driver, str(seed))
+        if key in seen:
+            continue
+        rows.append({
+            "problem": target.name,
+            "kind": target.kind,
+            "dim": target.dim,
+            "driver": driver,
+            "seed": seed,
+            "fevals": 0,
+            "best_val": float("nan"),
+            "wall_time_s": "0.000",
+            "f_x0": f0,
+            "solved": 0,
+            "status": "target-timeout",
+        })
+        seen.add(key)
+        appended += 1
+    return appended
+
+
 def load_problem(name: str):
     return load(name, sif_params=None)
 
@@ -322,39 +352,61 @@ def run_suite(args) -> list[dict]:
     t0_global = time.perf_counter()
     completed_targets = 0
     for target in targets:
+        cells = tuple((seed, driver) for seed in range(args.seeds) for driver in drivers)
         all_done = all(
-            (target.name, driver, str(seed)) in seen
-            for driver in drivers
-            for seed in range(args.seeds)
+            (target.name, driver, str(seed)) in seen for seed, driver in cells
         )
         if all_done:
             continue
-
-        for seed in range(args.seeds):
-            for driver in drivers:
-                key = (target.name, driver, str(seed))
-                if key in seen:
-                    continue
-
-                start = time.perf_counter()
-                best_val, fevals, f0, status = run_driver_cell(target.name, driver, seed, args)
-
-                row = {
-                    "problem": target.name,
-                    "kind": target.kind,
-                    "dim": target.dim,
-                    "driver": driver,
-                    "seed": seed,
-                    "fevals": fevals,
-                    "best_val": best_val,
-                    "wall_time_s": f"{time.perf_counter() - start:.3f}",
-                    "f_x0": f0,
-                    "solved": solved_flag(float(best_val), f0),
-                    "status": status,
-                }
-                rows.append(row)
-                seen.add(key)
+        existing_target_rows = [row for row in rows if row.get("problem") == target.name]
+        target_timeouts = sum(1 for row in existing_target_rows if row.get("status") == "timeout")
+        target_f0 = float("nan")
+        for row in existing_target_rows:
+            try:
+                candidate_f0 = float(row.get("f_x0", "nan"))
+            except (TypeError, ValueError):
+                continue
+            if np.isfinite(candidate_f0):
+                target_f0 = candidate_f0
+                break
+        if args.max_timeouts_per_target > 0 and target_timeouts >= args.max_timeouts_per_target:
+            appended = append_target_timeout_rows(rows, seen, target, cells, target_f0)
+            if appended:
                 write_rows(args.out, rows)
+            continue
+
+        for idx, (seed, driver) in enumerate(cells):
+            key = (target.name, driver, str(seed))
+            if key in seen:
+                continue
+
+            start = time.perf_counter()
+            best_val, fevals, f0, status = run_driver_cell(target.name, driver, seed, args)
+            if np.isfinite(float(f0)):
+                target_f0 = float(f0)
+
+            row = {
+                "problem": target.name,
+                "kind": target.kind,
+                "dim": target.dim,
+                "driver": driver,
+                "seed": seed,
+                "fevals": fevals,
+                "best_val": best_val,
+                "wall_time_s": f"{time.perf_counter() - start:.3f}",
+                "f_x0": f0,
+                "solved": solved_flag(float(best_val), f0),
+                "status": status,
+            }
+            rows.append(row)
+            seen.add(key)
+            if status == "timeout":
+                target_timeouts += 1
+            if args.max_timeouts_per_target > 0 and target_timeouts >= args.max_timeouts_per_target:
+                append_target_timeout_rows(rows, seen, target, cells[idx + 1:], target_f0)
+                write_rows(args.out, rows)
+                break
+            write_rows(args.out, rows)
 
         completed_targets += 1
         if completed_targets % args.checkpoint_every == 0:
@@ -390,6 +442,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-every", type=int, default=10)
     parser.add_argument("--no-resume", action="store_true")
     parser.add_argument("--max-problems", type=int, default=None)
+    parser.add_argument("--max-timeouts-per-target", type=int, default=0)
     return parser
 
 
