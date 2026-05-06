@@ -11,12 +11,14 @@
 //! Accept) is silent on this loop control, so both styles are
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
+pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 
+pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
-    LaplacePosterior, PilotObservation, PilotPrior, TARGET_ACCEPT_RATE, fit_laplace, pilot_draws,
+    fit_laplace, pilot_draws, LaplacePosterior, PilotObservation, PilotPrior, TARGET_ACCEPT_RATE,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
-pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
+pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};

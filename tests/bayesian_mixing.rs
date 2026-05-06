@@ -2,8 +2,8 @@
 //! inner sampler and a proposal budget; chain count and allocation are
 //! inferred online from posterior improvement evidence.
 
-use anneal_core::BayesianMixingSampler;
 use anneal_core::variant::boltzmann;
+use anneal_core::BayesianMixingSampler;
 
 use eindir_core::objectives::StybTang2D;
 
