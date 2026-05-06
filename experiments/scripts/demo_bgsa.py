@@ -235,15 +235,32 @@ def _finite_std(values, ddof=0, default=0.0):
     arr = _finite_array(values)
     if arr.size <= ddof:
         return float(default)
-    value = float(np.std(arr, ddof=ddof))
-    return value if np.isfinite(value) else float(default)
+    scale = float(np.max(np.abs(arr)))
+    if scale == 0.0:
+        return 0.0
+    scaled = arr / scale
+    mean_scaled = float(np.mean(scaled))
+    diff = scaled - mean_scaled
+    denom = arr.size - ddof
+    scaled_var = float(np.dot(diff, diff) / denom)
+    if not np.isfinite(scaled_var) or scaled_var <= 0.0:
+        return float(default)
+    scaled_std = float(np.sqrt(scaled_var))
+    if scaled_std == 0.0:
+        return 0.0
+    if scaled_std > 1.0 and scale >= float(np.finfo(np.float64).max / scaled_std):
+        return float("inf")
+    return float(scale * scaled_std)
 
 
 def _finite_mean(values, default=0.0):
     arr = _finite_array(values)
     if arr.size == 0:
         return float(default)
-    value = float(np.mean(arr))
+    scale = float(np.max(np.abs(arr)))
+    if scale == 0.0:
+        return 0.0
+    value = float(scale * np.mean(arr / scale))
     return value if np.isfinite(value) else float(default)
 
 
@@ -255,9 +272,19 @@ def _finite_abs_corr(x, y):
         return 0.0
     x_fin = x_arr[mask]
     y_fin = y_arr[mask]
-    if _finite_std(x_fin) <= 0.0 or _finite_std(y_fin) <= 0.0:
+    x_scale = float(np.max(np.abs(x_fin)))
+    y_scale = float(np.max(np.abs(y_fin)))
+    if x_scale == 0.0 or y_scale == 0.0:
         return 0.0
-    value = float(np.corrcoef(x_fin, y_fin)[0, 1])
+    x_scaled = x_fin / x_scale
+    y_scaled = y_fin / y_scale
+    x_centered = x_scaled - np.mean(x_scaled)
+    y_centered = y_scaled - np.mean(y_scaled)
+    denom = float(np.sqrt(np.dot(x_centered, x_centered)
+                          * np.dot(y_centered, y_centered)))
+    if not np.isfinite(denom) or denom <= 0.0:
+        return 0.0
+    value = float(np.dot(x_centered, y_centered) / denom)
     return abs(value) if np.isfinite(value) else 0.0
 
 
@@ -267,10 +294,13 @@ def _segment_log_weight_increment(seg_bvs):
     if finite.size < 2:
         return np.zeros_like(values, dtype=np.float64)
     spread = _finite_std(finite)
-    if spread <= 1e-12:
+    if not np.isfinite(spread) or spread <= 1e-12:
         return np.zeros_like(values, dtype=np.float64)
     floor = float(np.min(finite))
-    penalty = float(np.max(finite) + spread)
+    finite_max = float(np.max(finite))
+    penalty = finite_max + spread
+    if not np.isfinite(penalty):
+        penalty = finite_max
     scored = np.where(np.isfinite(values), values, penalty)
     return -(scored - floor) / spread
 
