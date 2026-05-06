@@ -699,6 +699,78 @@ def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
     ) == 2
 
 
+def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -5.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **kwargs):
+        captured["hmc_kwargs"] = kwargs
+        return FakeHistory()
+
+    def bgsa_metad(*_args, **_kwargs):
+        return 1.0, 40, None, None, None, None
+
+    def bgsa_pt_metad(*_args, **kwargs):
+        captured["pt_inner"] = kwargs["k_inner"]
+        return 0.5, 30, None, None, None, None, None, None, None
+
+    def bgsa_pt_hybrid_v2(*_args, **kwargs):
+        captured["hybrid_inner"] = kwargs["k_inner"]
+        return 2.0, 70, None, None, None, None, None, None
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=bgsa_metad,
+        bgsa_pt_metad=bgsa_pt_metad,
+        bgsa_pt_hybrid_v2=bgsa_pt_hybrid_v2,
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -5.0
+    assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
+    assert captured["pt_inner"] == 2
+    assert captured["hybrid_inner"] == 1
+    assert fevals == 11 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=2,
+        l_steps=2,
+    )
+
+
 def test_cutest_bgsa_pilot_budget_is_derived_from_epoch_budget():
     from experiments.scripts import run_cutest_benchmarks as cutest
 
