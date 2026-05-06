@@ -371,6 +371,37 @@ def test_gelman_rubin_returns_inf_for_nonfinite_traces_without_warning(module_na
     assert rhat == float("inf")
 
 
+def test_bgsa_pilot_statistics_ignore_nonfinite_values_without_warning():
+    from experiments.scripts.demo_bgsa import (
+        _segment_log_weight_increment,
+        fit_empirical_bayes_priors,
+        pilot_landscape_features,
+    )
+
+    obs = [
+        {"t_init": 1.0, "epsilon": 0.10, "L": 2, "q": 1.1,
+         "accept_rate": 0.2, "best_val": float("inf")},
+        {"t_init": 2.0, "epsilon": 0.20, "L": 3, "q": 1.2,
+         "accept_rate": 0.5, "best_val": 10.0},
+        {"t_init": 3.0, "epsilon": 0.30, "L": 4, "q": 1.3,
+         "accept_rate": 0.7, "best_val": 8.0},
+        {"t_init": 4.0, "epsilon": 0.40, "L": 5, "q": 1.4,
+         "accept_rate": 0.8, "best_val": float("nan")},
+    ]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        priors = fit_empirical_bayes_priors(obs, dim=5)
+        features = pilot_landscape_features(obs[:2], obs[2:])
+        log_inc = _segment_log_weight_increment(
+            np.array([1.0, float("inf"), 3.0, float("nan")]))
+
+    assert all(np.isfinite(value) for value in priors.values())
+    assert all(np.isfinite(value) for value in features.values())
+    assert np.all(np.isfinite(log_inc))
+    assert log_inc[0] > log_inc[1]
+
+
 def test_cutest_bayesian_mixing_has_small_user_api():
     from experiments.scripts import run_cutest_benchmarks as cutest
 
