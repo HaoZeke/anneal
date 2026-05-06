@@ -245,7 +245,7 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
 
     if abs(delta_h) > 1000 or not np.isfinite(delta_h):
         return x0, False, n, U
-    alpha = min(1.0, np.exp(-delta_h))
+    alpha = _log_accept_probability(-delta_h)
     if rng.random() < alpha:
         return x, True, n, U_new
     return x0, False, n, U
