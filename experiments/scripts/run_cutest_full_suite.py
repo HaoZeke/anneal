@@ -303,10 +303,10 @@ def run_suite(args) -> list[dict]:
     if args.max_problems is not None:
         targets = targets[: args.max_problems]
 
-    print(f"Found {len(targets)} CUTEst targets with dim <= {args.dim_cap}")
-    print(f"Drivers: {', '.join(drivers)}")
+    print(f"Found {len(targets)} CUTEst targets with dim <= {args.dim_cap}", flush=True)
+    print(f"Drivers: {', '.join(drivers)}", flush=True)
     if rows:
-        print(f"Resuming from {len(rows)} existing row(s)")
+        print(f"Resuming from {len(rows)} existing row(s)", flush=True)
 
     t0_global = time.perf_counter()
     completed_targets = 0
@@ -351,6 +351,7 @@ def run_suite(args) -> list[dict]:
                 }
                 rows.append(row)
                 seen.add(key)
+                write_rows(args.out, rows)
 
         completed_targets += 1
         if completed_targets % args.checkpoint_every == 0:
@@ -358,7 +359,8 @@ def run_suite(args) -> list[dict]:
             elapsed = time.perf_counter() - t0_global
             print(
                 f"  checkpoint {completed_targets}/{len(targets)} target(s), "
-                f"{len(rows)} row(s), {elapsed:.0f}s"
+                f"{len(rows)} row(s), {elapsed:.0f}s",
+                flush=True,
             )
 
     write_rows(args.out, rows)
