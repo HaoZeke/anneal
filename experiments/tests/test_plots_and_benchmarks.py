@@ -279,6 +279,20 @@ def test_cutest_bayesian_mixing_is_online_deterministic_and_budgeted():
     assert first[2]["n_chains"] >= 2
     assert first[2]["swap_attempts"] > 0
     assert first[2]["posterior_accept_mean"] > 0.0
+    assert max(first[2]["proposal_counts"]) > kwargs["max_fevals"] // 2
+
+
+def test_cutest_bayesian_mixing_keeps_easy_problem_competitive():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    prob = _QuadraticCutestProblem()
+    classical_val, classical_fevals = cutest.classical_sa(
+        prob, seed=0, n_epochs=12, k_fixed=40)
+    bayes_val, bayes_fevals = cutest.bayesian_mixing_sa(
+        prob, seed=0, max_fevals=classical_fevals)
+
+    assert bayes_fevals == classical_fevals
+    assert bayes_val <= 5.0 * classical_val
 
 
 def test_cutest_full_suite_accepts_bayesian_mixing_driver():
