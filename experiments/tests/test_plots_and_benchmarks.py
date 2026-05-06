@@ -541,7 +541,9 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     assert captured["kwargs"]["x0"] == pytest.approx([0.2, -0.2])
     assert captured["kwargs"]["q"] == pytest.approx(1.1)
     assert captured["kwargs"]["l_steps"] == 2
-    assert fevals == 11 + cutest._rust_hmc_fd_work_units(dim=2, n_trajectories=15, l_steps=2)
+    assert fevals == 11 + cutest._rust_hmc_fd_work_units(
+        dim=2, n_trajectories=15, l_steps=2
+    )
 
 
 @pytest.mark.parametrize(

@@ -95,9 +95,20 @@ def classical_sa(prob, seed, n_epochs, k_fixed, sigma=0.5, t_init=5.0):
     return best_val, n_calls
 
 
-def mcmc_sa(prob, seed, n_epochs, n_chains, k_min, k_check, k_max,
-            rhat_threshold, sigma=0.5, t_init=5.0,
-            sparse=False, straggler_top_k=0):
+def mcmc_sa(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    k_min,
+    k_check,
+    k_max,
+    rhat_threshold,
+    sigma=0.5,
+    t_init=5.0,
+    sparse=False,
+    straggler_top_k=0,
+):
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
     chain_val = [prob.fn(p) for p in chain_pos]
@@ -131,8 +142,14 @@ def mcmc_sa(prob, seed, n_epochs, n_chains, k_min, k_check, k_max,
             for _ in range(batch):
                 for c in active:
                     chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
-                        prob, rngs[c], chain_pos[c], chain_val[c],
-                        chain_best_val[c], temp, sigma)
+                        prob,
+                        rngs[c],
+                        chain_pos[c],
+                        chain_val[c],
+                        chain_best_val[c],
+                        temp,
+                        sigma,
+                    )
                     n_calls += 1
                     traces[c].append(chain_pos[c].copy())
                 for c in range(n_chains):
@@ -150,23 +167,43 @@ def _append_budgeted_round(traces, chain_pos, step_active):
             traces[c].append(chain_pos[c].copy())
 
 
-def _budgeted_step_round(prob, rngs, chain_pos, chain_val, chain_best_val,
-                         traces, active, remaining, temp, sigma):
+def _budgeted_step_round(
+    prob,
+    rngs,
+    chain_pos,
+    chain_val,
+    chain_best_val,
+    traces,
+    active,
+    remaining,
+    temp,
+    sigma,
+):
     stepped = []
     for c in active[:remaining]:
         chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
-            prob, rngs[c], chain_pos[c], chain_val[c],
-            chain_best_val[c], temp, sigma)
+            prob, rngs[c], chain_pos[c], chain_val[c], chain_best_val[c], temp, sigma
+        )
         traces[c].append(chain_pos[c].copy())
         stepped.append(c)
     _append_budgeted_round(traces, chain_pos, stepped)
     return len(stepped)
 
 
-def mcmc_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
-                     k_min=30, k_check=20, rhat_threshold=1.2,
-                     sigma=0.5, t_init=5.0, sparse=False,
-                     straggler_top_k=0):
+def mcmc_sa_budgeted(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    epoch_budget,
+    k_min=30,
+    k_check=20,
+    rhat_threshold=1.2,
+    sigma=0.5,
+    t_init=5.0,
+    sparse=False,
+    straggler_top_k=0,
+):
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
     if epoch_budget < 1:
@@ -185,8 +222,17 @@ def mcmc_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
         min_rounds = min(k_min, epoch_budget // n_chains)
         for _ in range(min_rounds):
             epoch_calls += _budgeted_step_round(
-                prob, rngs, chain_pos, chain_val, chain_best_val, traces,
-                list(range(n_chains)), epoch_budget - epoch_calls, temp, sigma)
+                prob,
+                rngs,
+                chain_pos,
+                chain_val,
+                chain_best_val,
+                traces,
+                list(range(n_chains)),
+                epoch_budget - epoch_calls,
+                temp,
+                sigma,
+            )
         while epoch_calls < epoch_budget:
             rhat = gelman_rubin_max(traces)
             if rhat <= rhat_threshold:
@@ -199,8 +245,17 @@ def mcmc_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
                 if epoch_calls >= epoch_budget:
                     break
                 epoch_calls += _budgeted_step_round(
-                    prob, rngs, chain_pos, chain_val, chain_best_val, traces,
-                    active, epoch_budget - epoch_calls, temp, sigma)
+                    prob,
+                    rngs,
+                    chain_pos,
+                    chain_val,
+                    chain_best_val,
+                    traces,
+                    active,
+                    epoch_budget - epoch_calls,
+                    temp,
+                    sigma,
+                )
         n_calls += epoch_calls
     return min(chain_best_val), n_calls
 
@@ -223,9 +278,18 @@ def _pt_swap_accept_prob(f_i, t_i, f_j, t_j):
     return float(np.exp(max(log_alpha, -745.0)))
 
 
-def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
-                   swap_period=5, sigma=0.5, t_init=5.0,
-                   t_hot_multiplier=4.0, return_diagnostics=False):
+def pt_sa_budgeted(
+    prob,
+    seed,
+    n_epochs,
+    n_chains,
+    epoch_budget,
+    swap_period=5,
+    sigma=0.5,
+    t_init=5.0,
+    t_hot_multiplier=4.0,
+    return_diagnostics=False,
+):
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
     if epoch_budget < 1:
@@ -255,8 +319,14 @@ def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
                 if epoch_calls >= epoch_budget:
                     break
                 chain_pos[c], chain_val[c], chain_best_val[c] = _step_chain(
-                    prob, rngs[c], chain_pos[c], chain_val[c],
-                    chain_best_val[c], temps[c], sigma)
+                    prob,
+                    rngs[c],
+                    chain_pos[c],
+                    chain_val[c],
+                    chain_best_val[c],
+                    temps[c],
+                    sigma,
+                )
                 n_calls += 1
                 epoch_calls += 1
                 if chain_best_val[c] < best_val:
@@ -265,7 +335,8 @@ def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
             if n_chains > 1 and rounds % swap_period == 0:
                 i = int(swap_rng.integers(0, n_chains - 1))
                 alpha = _pt_swap_accept_prob(
-                    chain_val[i], temps[i], chain_val[i + 1], temps[i + 1])
+                    chain_val[i], temps[i], chain_val[i + 1], temps[i + 1]
+                )
                 swap_attempts += 1
                 if swap_rng.random() < alpha:
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
@@ -273,10 +344,14 @@ def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
                     swap_accepts += 1
 
     if return_diagnostics:
-        return best_val, n_calls, {
-            "swap_attempts": swap_attempts,
-            "swap_accepts": swap_accepts,
-        }
+        return (
+            best_val,
+            n_calls,
+            {
+                "swap_attempts": swap_attempts,
+                "swap_accepts": swap_accepts,
+            },
+        )
     return best_val, n_calls
 
 
@@ -322,14 +397,18 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
     best_val = min(chain_best_val)
     if n_calls >= max_fevals:
         if return_diagnostics:
-            return best_val, n_calls, {
-                "n_chains": n_chains,
-                "swap_attempts": 0,
-                "swap_accepts": 0,
-                "posterior_accept_mean": 0.5,
-                "posterior_improve_mean": 0.5,
-                "proposal_counts": [0] * n_chains,
-            }
+            return (
+                best_val,
+                n_calls,
+                {
+                    "n_chains": n_chains,
+                    "swap_attempts": 0,
+                    "swap_accepts": 0,
+                    "posterior_accept_mean": 0.5,
+                    "posterior_improve_mean": 0.5,
+                    "proposal_counts": [0] * n_chains,
+                },
+            )
         return best_val, n_calls
 
     base_sigma = _auto_sigma(prob)
@@ -363,7 +442,10 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
         best_chain = incumbent_chain
         utility = controller_rng.beta(improve_alpha, improve_beta)
         challenger_idx = int(np.argmax(utility))
-        if challenger_idx != best_chain and utility[challenger_idx] > utility[best_chain] + 0.05:
+        if (
+            challenger_idx != best_chain
+            and utility[challenger_idx] > utility[best_chain] + 0.05
+        ):
             chain_idx = challenger_idx
         else:
             chain_idx = best_chain
@@ -376,9 +458,14 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
             accepted,
             _improved,
         ) = _step_chain_observed(
-            prob, rngs[chain_idx], chain_pos[chain_idx],
-            chain_val[chain_idx], chain_best_val[chain_idx],
-            temp, sigma)
+            prob,
+            rngs[chain_idx],
+            chain_pos[chain_idx],
+            chain_val[chain_idx],
+            chain_best_val[chain_idx],
+            temp,
+            sigma,
+        )
         n_calls += 1
         proposals_since_swap += 1
         proposal_counts[chain_idx] += 1
@@ -391,7 +478,8 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
         else:
             improve_beta[chain_idx] += 1.0
         accept_mean = accept_alpha[chain_idx] / (
-            accept_alpha[chain_idx] + accept_beta[chain_idx])
+            accept_alpha[chain_idx] + accept_beta[chain_idx]
+        )
         log_sigma[chain_idx] += 0.05 * (accept_mean - TARGET_ACCEPT_RATE)
         log_sigma[chain_idx] = np.clip(
             log_sigma[chain_idx],
@@ -406,44 +494,71 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
             pair_scores = controller_rng.beta(swap_alpha, swap_beta)
             pair_idx = int(np.argmin(pair_scores))
             alpha = _pt_swap_accept_prob(
-                chain_val[pair_idx], temps[pair_idx],
-                chain_val[pair_idx + 1], temps[pair_idx + 1])
+                chain_val[pair_idx],
+                temps[pair_idx],
+                chain_val[pair_idx + 1],
+                temps[pair_idx + 1],
+            )
             swap_attempts += 1
             accepted_swap = bool(controller_rng.random() < alpha)
             if accepted_swap:
                 chain_pos[pair_idx], chain_pos[pair_idx + 1] = (
-                    chain_pos[pair_idx + 1], chain_pos[pair_idx])
+                    chain_pos[pair_idx + 1],
+                    chain_pos[pair_idx],
+                )
                 chain_val[pair_idx], chain_val[pair_idx + 1] = (
-                    chain_val[pair_idx + 1], chain_val[pair_idx])
+                    chain_val[pair_idx + 1],
+                    chain_val[pair_idx],
+                )
                 swap_accepts += 1
                 swap_alpha[pair_idx] += 1.0
             else:
                 swap_beta[pair_idx] += 1.0
             swap_mean = swap_alpha[pair_idx] / (
-                swap_alpha[pair_idx] + swap_beta[pair_idx])
+                swap_alpha[pair_idx] + swap_beta[pair_idx]
+            )
             ladder_log_span += 0.05 * (swap_mean - TARGET_SWAP_RATE)
-            ladder_log_span = float(np.clip(
-                ladder_log_span, np.log(1.5), np.log(16.0)))
+            ladder_log_span = float(np.clip(ladder_log_span, np.log(1.5), np.log(16.0)))
             proposals_since_swap = 0
 
     if return_diagnostics:
-        return best_val, n_calls, {
-            "n_chains": n_chains,
-            "swap_attempts": swap_attempts,
-            "swap_accepts": swap_accepts,
-            "posterior_accept_mean": float(np.mean(
-                accept_alpha / (accept_alpha + accept_beta))),
-            "posterior_improve_mean": float(np.mean(
-                improve_alpha / (improve_alpha + improve_beta))),
-            "proposal_counts": proposal_counts.tolist(),
-        }
+        return (
+            best_val,
+            n_calls,
+            {
+                "n_chains": n_chains,
+                "swap_attempts": swap_attempts,
+                "swap_accepts": swap_accepts,
+                "posterior_accept_mean": float(
+                    np.mean(accept_alpha / (accept_alpha + accept_beta))
+                ),
+                "posterior_improve_mean": float(
+                    np.mean(improve_alpha / (improve_alpha + improve_beta))
+                ),
+                "proposal_counts": proposal_counts.tolist(),
+            },
+        )
     return best_val, n_calls
 
 
-DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse",
-           "mcmc_sa_budgeted", "mcmc_sa_sparse_budgeted",
-           "pt_sa_budgeted", "bayesian_mixing_sa",
-           "bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]
+DRIVERS = [
+    "classical",
+    "mcmc_sa",
+    "mcmc_sa_sparse",
+    "mcmc_sa_budgeted",
+    "mcmc_sa_sparse_budgeted",
+    "pt_sa_budgeted",
+    "bayesian_mixing_sa",
+    "bgsa",
+    "bgsa_metad",
+    "bgsa_pt_metad",
+    "bgsa_auto",
+]
+
+
+def _rust_hmc_fd_work_units(dim, n_trajectories, l_steps):
+    """Objective-call work units for Rust Omelyan HMC with finite differences."""
+    return 1 + int(n_trajectories) * (1 + 3 * int(l_steps) * (int(dim) + 1))
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
@@ -455,6 +570,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     if here not in sys.path:
         sys.path.insert(0, here)
     import demo_bgsa as d
+
     # Save / patch globals.
     saved = (d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH)
     try:
@@ -462,6 +578,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         # CUTEst problems have no analytic gradient available cheaply; use
         # finite differences.
         eps = 1e-6
+
         def _fd_grad(x):
             x = np.asarray(x, dtype=np.float64)
             f0 = prob.fn(x)
@@ -471,37 +588,96 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 x1[i] += eps
                 g[i] = (prob.fn(x1) - f0) / eps
             return g
+
         d.OBJ_GRAD = _fd_grad
         d.LOW = prob.low.astype(np.float64)
         d.HIGH = prob.high.astype(np.float64)
         # Run the pilot.
-        out = d.run_pilot(seed, max(8, min(16, n_epochs)),
-                          max(40, min(80, k_per_epoch // 2)),
-                          dim=prob.dim)
-        (t_map, e_map, L_map, q_map, sigma_map,
-         best_pilot_pos, pilot_calls, t_hot, t_rw_map, features) = out
+        out = d.run_pilot(
+            seed,
+            max(8, min(16, n_epochs)),
+            max(40, min(80, k_per_epoch // 2)),
+            dim=prob.dim,
+        )
+        (
+            t_map,
+            e_map,
+            L_map,
+            q_map,
+            sigma_map,
+            best_pilot_pos,
+            pilot_calls,
+            t_hot,
+            t_rw_map,
+            features,
+        ) = out
         if driver == "bgsa":
-            bv, nc, _ = d.hmc_sa(seed, n_epochs, k_per_epoch,
-                                  t_map, e_map, L_map,
-                                  x0=best_pilot_pos, q=q_map)
-            return bv, pilot_calls + nc
+            import anneal
+
+            l_steps = max(1, int(L_map))
+            history = anneal.run_hmc(
+                prob.fn,
+                _fd_grad,
+                prob.low.astype(np.float64),
+                prob.high.astype(np.float64),
+                t_init=float(t_map),
+                epsilon=float(e_map),
+                l_steps=l_steps,
+                q=float(q_map),
+                n_epochs=int(n_epochs),
+                steps_per_epoch=int(k_per_epoch),
+                seed=int(seed),
+                x0=np.asarray(best_pilot_pos, dtype=np.float64),
+            )
+            n_trajectories = int(n_epochs) * int(k_per_epoch)
+            work_units = _rust_hmc_fd_work_units(prob.dim, n_trajectories, l_steps)
+            return float(history.best_val), pilot_calls + work_units
         if driver == "bgsa_metad":
             bv, nc, _, _, _, _ = d.bgsa_metad(
-                seed, n_epochs, k_per_epoch,
-                t_rw_map, e_map, L_map, q_map, pilot_calls,
-                sigma_rw=sigma_map)
+                seed,
+                n_epochs,
+                k_per_epoch,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls,
+                sigma_rw=sigma_map,
+            )
             return bv, nc
         if driver == "bgsa_pt_metad":
             bv, nc, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
-                seed, n_epochs, n_chains,
-                t_rw_map, e_map, L_map, q_map, pilot_calls,
-                k_inner=20, k_swap=5, sigma_rw=sigma_map, t_hot=t_hot)
+                seed,
+                n_epochs,
+                n_chains,
+                t_rw_map,
+                e_map,
+                L_map,
+                q_map,
+                pilot_calls,
+                k_inner=20,
+                k_swap=5,
+                sigma_rw=sigma_map,
+                t_hot=t_hot,
+            )
             return bv, nc
         if driver == "bgsa_auto":
             bv, nc, _chosen = d.bgsa_auto(
-                seed, n_epochs, k_per_epoch, n_chains,
-                t_map, e_map, L_map, q_map, t_rw_map, sigma_map,
-                t_hot, features, best_pilot_pos, pilot_calls)
+                seed,
+                n_epochs,
+                k_per_epoch,
+                n_chains,
+                t_map,
+                e_map,
+                L_map,
+                q_map,
+                t_rw_map,
+                sigma_map,
+                t_hot,
+                features,
+                best_pilot_pos,
+                pilot_calls,
+            )
             return bv, nc
         raise ValueError(f"Unknown bGSA driver: {driver}")
     finally:
@@ -525,8 +701,10 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     print(f"Loading CUTEst manifest...")
     problems = load_default_manifest()
-    print(f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
-          f"{len(DRIVERS)} drivers = {args.seeds * len(DRIVERS) * len(problems)} cells.")
+    print(
+        f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
+        f"{len(DRIVERS)} drivers = {args.seeds * len(DRIVERS) * len(problems)} cells."
+    )
 
     rows = []
     t_start = time.perf_counter()
@@ -536,103 +714,224 @@ def main():
             t0 = time.perf_counter()
             bv, nc = classical_sa(prob, seed, args.n_epochs, args.k_fixed)
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim, driver="classical",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="classical",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
-            bv, nc = mcmc_sa(prob, seed, args.n_epochs, args.n_chains,
-                             args.k_min, args.k_check, args.k_max,
-                             args.rhat_threshold)
+            bv, nc = mcmc_sa(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_min,
+                args.k_check,
+                args.k_max,
+                args.rhat_threshold,
+            )
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim, driver="mcmc_sa",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
-            bv, nc = mcmc_sa(prob, seed, args.n_epochs, args.n_chains,
-                             args.k_min, args.k_check, args.k_max,
-                             args.rhat_threshold, sparse=True,
-                             straggler_top_k=args.straggler_top_k)
+            bv, nc = mcmc_sa(
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_min,
+                args.k_check,
+                args.k_max,
+                args.rhat_threshold,
+                sparse=True,
+                straggler_top_k=args.straggler_top_k,
+            )
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim, driver="mcmc_sa_sparse",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_sparse",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
             bv, nc = mcmc_sa_budgeted(
-                prob, seed, args.n_epochs, args.n_chains, args.k_fixed,
-                args.k_min, args.k_check, args.rhat_threshold)
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_fixed,
+                args.k_min,
+                args.k_check,
+                args.rhat_threshold,
+            )
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim, driver="mcmc_sa_budgeted",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
             bv, nc = mcmc_sa_budgeted(
-                prob, seed, args.n_epochs, args.n_chains, args.k_fixed,
-                args.k_min, args.k_check, args.rhat_threshold,
-                sparse=True, straggler_top_k=args.straggler_top_k)
+                prob,
+                seed,
+                args.n_epochs,
+                args.n_chains,
+                args.k_fixed,
+                args.k_min,
+                args.k_check,
+                args.rhat_threshold,
+                sparse=True,
+                straggler_top_k=args.straggler_top_k,
+            )
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim,
-                             driver="mcmc_sa_sparse_budgeted",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="mcmc_sa_sparse_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
             bv, nc = pt_sa_budgeted(
-                prob, seed, args.n_epochs, args.n_chains, args.k_fixed)
+                prob, seed, args.n_epochs, args.n_chains, args.k_fixed
+            )
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim, driver="pt_sa_budgeted",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="pt_sa_budgeted",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             t0 = time.perf_counter()
             max_fevals = 1 + args.n_epochs * args.k_fixed
             bv, nc = bayesian_mixing_sa(prob, seed, max_fevals)
             wt = time.perf_counter() - t0
-            rows.append(dict(problem=prob.name, dim=prob.dim,
-                             driver="bayesian_mixing_sa",
-                             seed=seed, fevals=nc, best_val=bv,
-                             wall_time_s=wt, f_x0=f0,
-                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="bayesian_mixing_sa",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
 
             # v0.5 bGSA stack on the same CUTEst problem.
             for bgsa_drv in ["bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]:
                 try:
                     t0 = time.perf_counter()
-                    bv, nc = _bgsa_run(prob, seed, args.n_epochs,
-                                        args.k_fixed, args.n_chains,
-                                        bgsa_drv)
+                    bv, nc = _bgsa_run(
+                        prob, seed, args.n_epochs, args.k_fixed, args.n_chains, bgsa_drv
+                    )
                     wt = time.perf_counter() - t0
-                    rows.append(dict(problem=prob.name, dim=prob.dim,
-                                     driver=bgsa_drv,
-                                     seed=seed, fevals=nc, best_val=bv,
-                                     wall_time_s=wt, f_x0=f0,
-                                     solved=int(bv < 0.95 * f0 if f0 > 0
-                                                else bv < 1.05 * f0)))
+                    rows.append(
+                        dict(
+                            problem=prob.name,
+                            dim=prob.dim,
+                            driver=bgsa_drv,
+                            seed=seed,
+                            fevals=nc,
+                            best_val=bv,
+                            wall_time_s=wt,
+                            f_x0=f0,
+                            solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                        )
+                    )
                 except Exception as exc:
                     # Don't kill the whole sweep on a single driver failure;
                     # mark the cell as failed and move on.
-                    print(f"    {bgsa_drv} failed on {prob.name} seed {seed}: "
-                          f"{type(exc).__name__}: {exc}")
-                    rows.append(dict(problem=prob.name, dim=prob.dim,
-                                     driver=bgsa_drv,
-                                     seed=seed, fevals=0, best_val=float("nan"),
-                                     wall_time_s=0.0, f_x0=f0, solved=0))
+                    print(
+                        f"    {bgsa_drv} failed on {prob.name} seed {seed}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    rows.append(
+                        dict(
+                            problem=prob.name,
+                            dim=prob.dim,
+                            driver=bgsa_drv,
+                            seed=seed,
+                            fevals=0,
+                            best_val=float("nan"),
+                            wall_time_s=0.0,
+                            f_x0=f0,
+                            solved=0,
+                        )
+                    )
         elapsed = time.perf_counter() - t_start
         print(f"  done {prob.name:<10} (n={prob.dim:>3}) -- elapsed {elapsed:.1f}s")
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["problem", "dim", "driver", "seed",
-                                          "fevals", "best_val", "wall_time_s",
-                                          "f_x0", "solved"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "problem",
+                "dim",
+                "driver",
+                "seed",
+                "fevals",
+                "best_val",
+                "wall_time_s",
+                "f_x0",
+                "solved",
+            ],
+        )
         w.writeheader()
         w.writerows(rows)
     print(f"\nWrote {len(rows)} rows to {args.out}")
@@ -640,7 +939,9 @@ def main():
         sub = [r for r in rows if r["driver"] == driver]
         solved = sum(r["solved"] for r in sub)
         mean_fevals = np.mean([r["fevals"] for r in sub])
-        print(f"  {driver:<16}: solved {solved}/{len(sub)} cells, mean fevals = {mean_fevals:.0f}")
+        print(
+            f"  {driver:<16}: solved {solved}/{len(sub)} cells, mean fevals = {mean_fevals:.0f}"
+        )
 
 
 if __name__ == "__main__":
