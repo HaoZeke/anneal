@@ -63,7 +63,10 @@ pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
 pub use free_energy::BarEstimator;
 pub use grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 pub use history::{EpochLine, History, State};
-pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition};
+pub use hmc::{
+    HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
+    OmelyanIntegrator, OMELYAN_LAMBDA,
+};
 pub use laws::LawViolation;
 pub use methods::{
     geometric_ladder, BayesianMixingResult, BayesianMixingSampler, GelmanRubin, MultiChainResult,

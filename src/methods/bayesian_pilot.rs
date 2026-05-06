@@ -10,37 +10,32 @@
 //!      Roberts/Rosenthal 2001 target acceptance rate `r* = 0.234`.
 //!   4. Use the MAP estimate for the production SA run.
 //!
-//! q_v IS THE NOVELTY: to the limits of the lit-survey agent's reading,
-//! no SA paper has done Bayesian model selection over the GSA q_v
-//! continuum. q_v=1 is BSA (Boltzmann/Gaussian), q_v=2 is FSA
-//! (Cauchy), and the heavy-tailed regime q_v in (1, 3) interpolates
-//! continuously. The pilot finds the q_v that best matches the
-//! objective's geometry rather than committing to one of the three
-//! literature points by hand.
+//! The q_v coordinate is the relevant model-selection axis: q_v=1 is
+//! BSA (Boltzmann/Gaussian), q_v=2 is FSA (Cauchy), and the
+//! heavy-tailed regime q_v in (1, 3) interpolates continuously. The
+//! pilot finds the q_v that best matches the objective's geometry
+//! rather than committing to one of the fixed literature points by hand.
 //!
 //! Why Laplace and not full INLA: the latent field here is three
 //! scalars `(log T_0, log sigma, q_v)`, so the Laplace approximation
 //! is a 3x3 Hessian invert -- analytic, deterministic, O(1). INLA's
-//! sparse-precision-matrix machinery is overkill at this scale; the
-//! full INLA path is reserved for cooling schedules with one parameter
-//! per epoch (a v0.4 extension).
+//! sparse-precision-matrix machinery is overkill at this scale; sparse
+//! latent-field methods become the right scale when the cooling schedule
+//! has one parameter per epoch.
 //!
 //! Convergence: when the pilot ends at epoch `n_pilot` and the
 //! production phase uses the fixed MAP hyperparameters thereafter,
 //! Hajek 1988 doi:10.1287/moor.13.2.311 applies to the production
 //! phase unchanged -- the Bayesian-frozen SA inherits a.s. convergence
-//! to the global optimum. Online (unfrozen) adaptation requires the
-//! diminishing-adaptation condition of Roberts/Rosenthal 2007
-//! doi:10.1239/jap/1183667414; not implemented in v0.3.x.
+//! to the global optimum. Online (unfrozen) adaptation is governed by
+//! the diminishing-adaptation condition of Roberts/Rosenthal 2007
+//! doi:10.1239/jap/1183667414.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_08_bayesian_sa.org`
-//! for the full design rationale.
-
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
-/// Roberts/Rosenthal 2001 doi:10.1214/ss/998929475: the asymptotically
+/// Roberts/Rosenthal 2001 doi:10.1214/ss/1015346320: the asymptotically
 /// optimal acceptance rate for random-walk Metropolis on a generic
 /// product target. SA at high T behaves random-walk-like, so this is
 /// the target the pilot tries to match.
@@ -215,7 +210,7 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
         .map(|o| o.best_val)
         .fold(f64::NEG_INFINITY, f64::max);
 
-    // Phase 1: 11x11x11 grid search in log space, 3 sd around the prior mean.
+    // Grid search in log space, 3 sd around the prior mean.
     let n = 11;
     let mut best = (prior.log_t_init_mean, prior.log_sigma_mean, prior.q_v_mean);
     let mut best_nll = neg_log_posterior(best.0, best.1, best.2, obs, prior, best_val_ref);
@@ -240,9 +235,7 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
         }
     }
 
-    // Phase 2: finite-difference diagonal Hessian at the MAP. Diagonal
-    // approximation good enough for the v0.3.x demo; full 3x3 Hessian
-    // can be added in v0.4.
+    // Finite-difference diagonal Hessian at the MAP.
     let h = 1e-3;
     let f000 = best_nll;
     let h_tt = (neg_log_posterior(best.0 + h, best.1, best.2, obs, prior, best_val_ref)
