@@ -206,6 +206,10 @@ def solved_flag(best_val: float, f0: float) -> int:
     return int(best_val < 1.05 * f0)
 
 
+def is_timeout_status(status: str | None) -> bool:
+    return status in {"timeout", "target-timeout"}
+
+
 def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
     if driver == "classical":
         return classical_sa(prob, seed, args.n_epochs, args.k_fixed)
@@ -359,7 +363,9 @@ def run_suite(args) -> list[dict]:
         if all_done:
             continue
         existing_target_rows = [row for row in rows if row.get("problem") == target.name]
-        target_timeouts = sum(1 for row in existing_target_rows if row.get("status") == "timeout")
+        target_timeouts = sum(
+            1 for row in existing_target_rows if is_timeout_status(row.get("status"))
+        )
         target_f0 = float("nan")
         for row in existing_target_rows:
             try:
@@ -400,7 +406,7 @@ def run_suite(args) -> list[dict]:
             }
             rows.append(row)
             seen.add(key)
-            if status == "timeout":
+            if is_timeout_status(status):
                 target_timeouts += 1
             if args.max_timeouts_per_target > 0 and target_timeouts >= args.max_timeouts_per_target:
                 append_target_timeout_rows(rows, seen, target, cells[idx + 1:], target_f0)
@@ -455,7 +461,7 @@ def print_tally(rows: list[dict]) -> None:
             if row.get("status", "ok") == "ok" and np.isfinite(float(row["best_val"]))
         ]
         solved = sum(int(row["solved"]) for row in sub)
-        timeouts = sum(1 for row in sub if row.get("status") == "timeout")
+        timeouts = sum(1 for row in sub if is_timeout_status(row.get("status")))
         errors = sum(1 for row in sub if str(row.get("status", "")).startswith("err:"))
         mean_fevals = np.mean([float(row["fevals"]) for row in ok]) if ok else 0.0
         print(

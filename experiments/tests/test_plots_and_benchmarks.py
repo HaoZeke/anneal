@@ -272,19 +272,20 @@ def test_cutest_summary_reports_status_and_winners(tmp_path):
         "P1,unconstrained,2,classical,0,10,1.0,0.1,2.0,1,ok\n"
         "P1,unconstrained,2,bgsa,0,12,0.5,0.2,2.0,1,ok\n"
         "P2,bound,3,classical,0,20,4.0,0.1,5.0,0,ok\n"
-        "P2,bound,3,bgsa,0,0,nan,0.0,5.0,0,timeout\n",
+        "P2,bound,3,bgsa,0,0,nan,0.0,5.0,0,timeout\n"
+        "P3,bound,4,bgsa,0,0,nan,0.0,7.0,0,target-timeout\n",
         encoding="utf-8",
     )
     out = tmp_path / "summary.csv"
 
     summary = summarize_csv(inp, out)
 
-    assert summary.coverage.problem_count == 2
-    assert summary.coverage.cell_count == 4
+    assert summary.coverage.problem_count == 3
+    assert summary.coverage.cell_count == 5
     bgsa = summary.by_driver["bgsa"]
-    assert bgsa.cells == 2
+    assert bgsa.cells == 3
     assert bgsa.ok == 1
-    assert bgsa.timeout == 1
+    assert bgsa.timeout == 2
     assert bgsa.best_cells == 1
     assert out.read_text(encoding="utf-8").splitlines()[0].startswith("driver,cells,ok")
 
