@@ -84,10 +84,21 @@ def _best_cells(rows: list[dict]) -> dict[str, int]:
     return dict(wins)
 
 
+def _finite_problem_seed_cells(rows: list[dict]) -> set[tuple[str, str]]:
+    cells = set()
+    for row in rows:
+        status = row.get("status", "ok")
+        best_val = _float_or_nan(row.get("best_val"))
+        if status == "ok" and math.isfinite(best_val):
+            cells.add((str(row["problem"]), str(row["seed"])))
+    return cells
+
+
 def summarize_rows(rows: list[dict]) -> Summary:
     problems = {str(row["problem"]) for row in rows}
     kinds = {str(row.get("kind", "")) for row in rows if row.get("kind")}
     wins = _best_cells(rows)
+    best_cell_total = len(_finite_problem_seed_cells(rows))
 
     by_driver_rows: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -116,7 +127,7 @@ def summarize_rows(rows: list[dict]) -> Summary:
             median_fevals=float(np.median(fevals)) if fevals else float("nan"),
             median_best=float(np.median(best_vals)) if best_vals else float("nan"),
             best_cells=best_cells,
-            best_share=best_cells / len(problems) if problems else 0.0,
+            best_share=best_cells / best_cell_total if best_cell_total else 0.0,
         )
 
     return Summary(
