@@ -217,6 +217,63 @@ def test_cutest_pareto_points_use_problem_seed_relative_gaps():
     assert points[1][1][:, 1].tolist() == pytest.approx([0.0, 0.0])
 
 
+def test_cutest_profile_matrix_keeps_problem_seed_failures():
+    from experiments.scripts.render_plots import profile_matrix_by_cell
+
+    rows = [
+        {
+            "problem": "P",
+            "driver": "classical",
+            "seed": "0",
+            "dim": "2",
+            "fevals": "10",
+            "best_val": "1.0",
+            "solved": "1",
+            "status": "ok",
+        },
+        {
+            "problem": "P",
+            "driver": "bgsa_auto",
+            "seed": "0",
+            "dim": "2",
+            "fevals": "20",
+            "best_val": "0.5",
+            "solved": "1",
+            "status": "ok",
+        },
+        {
+            "problem": "P",
+            "driver": "classical",
+            "seed": "1",
+            "dim": "2",
+            "fevals": "99",
+            "best_val": "nan",
+            "solved": "0",
+            "status": "target-timeout",
+        },
+        {
+            "problem": "P",
+            "driver": "bgsa_auto",
+            "seed": "1",
+            "dim": "2",
+            "fevals": "30",
+            "best_val": "0.25",
+            "solved": "1",
+            "status": "ok",
+        },
+    ]
+
+    cell_keys, fevals, dims = profile_matrix_by_cell(
+        rows, ["classical", "bgsa_auto"]
+    )
+
+    assert cell_keys == [("P", "0"), ("P", "1")]
+    assert dims.tolist() == [2, 2]
+    assert fevals[0].tolist() == [10.0, 20.0]
+    assert np.isnan(fevals[1, 0])
+    assert fevals[1, 1] == 30.0
+
+
 def test_cutest_data_profile_budget_limit_tracks_solved_budget_range():
     from experiments.scripts.render_plots import data_profile_kappa_max
 
