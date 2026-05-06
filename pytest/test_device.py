@@ -1,11 +1,15 @@
 import numpy as np
 import pytest
+import array_api_compat
 
 from anneal import Boltzmann, DeviceHistory, run_device
 
 
 def styblinski_tang_array(array):
-    xp = array.__array_namespace__()
+    try:
+        xp = array_api_compat.array_namespace(array, use_compat=True)
+    except ValueError:
+        xp = array_api_compat.array_namespace(array)
     x2 = array * array
     x4 = x2 * x2
     return xp.sum(0.5 * (x4 - 16.0 * x2 + 5.0 * array), axis=-1)
