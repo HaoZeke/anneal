@@ -333,6 +333,44 @@ def test_bgsa_q_gaussian_kinetics_are_overflow_stable():
     assert np.all(drift == 0.0)
 
 
+def test_bgsa_hmc_rejects_nonfinite_hamiltonians_without_warning(monkeypatch):
+    from experiments.scripts import demo_bgsa as bgsa
+
+    x0 = np.zeros(2, dtype=np.float64)
+    monkeypatch.setattr(bgsa, "LOW", np.full(2, -1.0))
+    monkeypatch.setattr(bgsa, "HIGH", np.full(2, 1.0))
+    monkeypatch.setattr(bgsa, "OBJ_FN", lambda _x: float("inf"))
+    monkeypatch.setattr(bgsa, "OBJ_GRAD", lambda x: np.zeros_like(x))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        x, accepted, _n_calls, value = bgsa.hmc_sa_step(
+            np.random.default_rng(0), x0, float("inf"), 1.0, 0.0, 1, 2, q=1.5)
+
+    assert not accepted
+    assert np.all(x == x0)
+    assert value == float("inf")
+
+
+@pytest.mark.parametrize("module_name", [
+    "experiments.scripts.demo_bgsa",
+    "experiments.scripts.demo_mcmc_vs_classical",
+    "experiments.scripts.run_cutest_benchmarks",
+])
+def test_gelman_rubin_returns_inf_for_nonfinite_traces_without_warning(module_name):
+    module = __import__(module_name, fromlist=["gelman_rubin_max"])
+    traces = [
+        [np.array([0.0]), np.array([float("inf")])],
+        [np.array([1.0]), np.array([2.0])],
+    ]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        rhat = module.gelman_rubin_max(traces)
+
+    assert rhat == float("inf")
+
+
 def test_cutest_bayesian_mixing_has_small_user_api():
     from experiments.scripts import run_cutest_benchmarks as cutest
 

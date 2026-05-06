@@ -112,6 +112,39 @@ def metropolis_accept_prob(delta_e, temp, dtype):
     return dtype(np.exp(-delta_e / temp))
 
 
+def gelman_rubin_max(traces):
+    """Return max coordinate R-hat, or inf for incomplete/non-finite traces."""
+    m = len(traces)
+    if m < 2:
+        return float("inf")
+    n = len(traces[0])
+    if n < 2 or any(len(chain) != n for chain in traces):
+        return float("inf")
+    dim = traces[0][0].shape[0]
+    max_rhat = 0.0
+    for d in range(dim):
+        values = [np.asarray([x[d] for x in chain], dtype=np.float64)
+                  for chain in traces]
+        if any(vals.shape != (n,) or not np.all(np.isfinite(vals))
+               for vals in values):
+            return float("inf")
+        means = np.array([np.mean(vals) for vals in values], dtype=np.float64)
+        vars_ = np.array([np.var(vals, ddof=1) for vals in values],
+                         dtype=np.float64)
+        if not np.all(np.isfinite(vars_)) or np.any(vars_ <= 0):
+            continue
+        theta_bar = means.mean()
+        b = (n / (m - 1.0)) * np.sum((means - theta_bar) ** 2)
+        w = vars_.mean()
+        var_hat = ((n - 1.0) / n) * w + b / n
+        rhat = np.sqrt(var_hat / w)
+        if not np.isfinite(rhat):
+            return float("inf")
+        if rhat > max_rhat:
+            max_rhat = rhat
+    return max_rhat
+
+
 def log_metropolis_accept_prob(delta_e, temp, dtype):
     """Log-domain Metropolis acceptance: returns ln(accept_prob).
 

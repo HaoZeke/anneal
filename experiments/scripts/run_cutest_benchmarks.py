@@ -22,6 +22,7 @@ import numpy as np
 
 from experiments.benchmarks.cutest_runner import load_default_manifest
 from experiments.shared.runner import (
+    gelman_rubin_max,
     gaussian_propose,
     log_cool,
     metropolis_accept_prob,
@@ -29,30 +30,6 @@ from experiments.shared.runner import (
 
 TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
-
-
-def gelman_rubin_max(traces):
-    m = len(traces)
-    if m < 2:
-        return float("inf")
-    n = len(traces[0])
-    if n < 2:
-        return float("inf")
-    dim = traces[0][0].shape[0]
-    max_rhat = 0.0
-    for d in range(dim):
-        means = np.array([np.mean([x[d] for x in chain]) for chain in traces])
-        vars_ = np.array([np.var([x[d] for x in chain], ddof=1) for chain in traces])
-        if np.any(vars_ <= 0):
-            continue
-        theta_bar = means.mean()
-        b = (n / (m - 1.0)) * np.sum((means - theta_bar) ** 2)
-        w = vars_.mean()
-        var_hat = ((n - 1.0) / n) * w + b / n
-        rhat = np.sqrt(var_hat / w)
-        if rhat > max_rhat:
-            max_rhat = rhat
-    return max_rhat
 
 
 def _straggler_indices(chain_pos, top_k):
