@@ -54,16 +54,8 @@ impl BarEstimator {
     /// Returns `g(C) = sum_A f(beta_a * du_a - C) - sum_B f(beta_b * du_b + C)`.
     /// The BAR root is at `g(C) = 0`.
     fn root_residual(&self, c: f64) -> f64 {
-        let lhs: f64 = self
-            .du_a
-            .iter()
-            .map(|du| fermi(self.beta_a * du - c))
-            .sum();
-        let rhs: f64 = self
-            .du_b
-            .iter()
-            .map(|du| fermi(self.beta_b * du + c))
-            .sum();
+        let lhs: f64 = self.du_a.iter().map(|du| fermi(self.beta_a * du - c)).sum();
+        let rhs: f64 = self.du_b.iter().map(|du| fermi(self.beta_b * du + c)).sum();
         lhs - rhs
     }
 
@@ -110,16 +102,15 @@ impl BarEstimator {
         let mean_b: f64 = f_b.iter().sum::<f64>() / n_b;
         let var_a: f64 = f_a.iter().map(|fi| (fi - mean_a).powi(2)).sum::<f64>() / n_a;
         let var_b: f64 = f_b.iter().map(|fi| (fi - mean_b).powi(2)).sum::<f64>() / n_b;
-        var_a / (n_a * mean_a.powi(2).max(1e-18))
-            + var_b / (n_b * mean_b.powi(2).max(1e-18))
+        var_a / (n_a * mean_a.powi(2).max(1e-18)) + var_b / (n_b * mean_b.powi(2).max(1e-18))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
     use rand_distr::{Distribution, Normal};
 
     /// Toy: two zero-mean Gaussians with different variances.
