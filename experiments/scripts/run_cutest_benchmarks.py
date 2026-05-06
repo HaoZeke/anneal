@@ -317,7 +317,7 @@ def _auto_sigma(prob):
     span = np.linalg.norm(high - low) / np.sqrt(dim)
     if not np.isfinite(span) or span <= 0.0:
         span = 1.0
-    return max(1e-6, 0.15 * span)
+    return float(np.clip(0.25 * span, 0.05, 0.5))
 
 
 def _auto_initial_temperature(chain_val):
@@ -328,7 +328,7 @@ def _auto_initial_temperature(chain_val):
     scale = float(np.std(finite))
     if not np.isfinite(scale) or scale <= 1e-12:
         scale = float(np.median(np.abs(finite)))
-    return max(scale, 1e-6)
+    return float(np.clip(scale, 1e-6, 5.0))
 
 
 def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
@@ -351,6 +351,7 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
                 "swap_accepts": 0,
                 "posterior_accept_mean": 0.5,
                 "posterior_improve_mean": 0.5,
+                "proposal_counts": [0] * n_chains,
             }
         return best_val, n_calls
 
@@ -359,6 +360,9 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
     t_init = _auto_initial_temperature(chain_val)
     improve_alpha = np.ones(n_chains, dtype=np.float64)
     improve_beta = np.ones(n_chains, dtype=np.float64)
+    improve_alpha[0] = 4.0
+    if n_chains > 1:
+        improve_beta[1:] = 4.0
     accept_alpha = np.ones(n_chains, dtype=np.float64)
     accept_beta = np.ones(n_chains, dtype=np.float64)
     swap_alpha = np.ones(max(n_chains - 1, 1), dtype=np.float64)
@@ -367,7 +371,9 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
     swap_attempts = 0
     swap_accepts = 0
     proposals_since_swap = 0
+    proposal_counts = np.zeros(n_chains, dtype=np.int64)
     proposal_budget = max_fevals - n_calls
+    incumbent_chain = 0
 
     while n_calls < max_fevals:
         progress = (n_calls - n_chains) / max(proposal_budget, 1)
@@ -377,27 +383,33 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
             cold_temp * float(np.exp(ladder_log_span)),
             n_chains,
         )
+        best_chain = incumbent_chain
         utility = controller_rng.beta(improve_alpha, improve_beta)
-        utility += 0.1 * controller_rng.beta(accept_alpha, accept_beta)
-        chain_idx = int(np.argmax(utility))
+        challenger_idx = int(np.argmax(utility))
+        if challenger_idx != best_chain and utility[challenger_idx] > utility[best_chain] + 0.05:
+            chain_idx = challenger_idx
+        else:
+            chain_idx = best_chain
         sigma = float(np.exp(log_sigma[chain_idx]))
-        before_best = chain_best_val[chain_idx]
+        temp = cold_temp if chain_idx == best_chain else temps[chain_idx]
         (
             chain_pos[chain_idx],
             chain_val[chain_idx],
             chain_best_val[chain_idx],
             accepted,
-            improved,
+            _improved,
         ) = _step_chain_observed(
             prob, rngs[chain_idx], chain_pos[chain_idx],
             chain_val[chain_idx], chain_best_val[chain_idx],
-            temps[chain_idx], sigma)
+            temp, sigma)
         n_calls += 1
         proposals_since_swap += 1
+        proposal_counts[chain_idx] += 1
 
         accept_alpha[chain_idx] += 1.0 if accepted else 0.0
         accept_beta[chain_idx] += 0.0 if accepted else 1.0
-        if improved or chain_best_val[chain_idx] < before_best:
+        global_improved = chain_best_val[chain_idx] < best_val
+        if global_improved:
             improve_alpha[chain_idx] += 1.0
         else:
             improve_beta[chain_idx] += 1.0
@@ -409,8 +421,9 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
             np.log(base_sigma / 32.0),
             np.log(base_sigma * 32.0),
         )
-        if chain_best_val[chain_idx] < best_val:
+        if global_improved:
             best_val = chain_best_val[chain_idx]
+            incumbent_chain = chain_idx
 
         if n_chains > 1 and proposals_since_swap >= n_chains:
             pair_scores = controller_rng.beta(swap_alpha, swap_beta)
@@ -425,8 +438,6 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
                     chain_pos[pair_idx + 1], chain_pos[pair_idx])
                 chain_val[pair_idx], chain_val[pair_idx + 1] = (
                     chain_val[pair_idx + 1], chain_val[pair_idx])
-                chain_best_val[pair_idx], chain_best_val[pair_idx + 1] = (
-                    chain_best_val[pair_idx + 1], chain_best_val[pair_idx])
                 swap_accepts += 1
                 swap_alpha[pair_idx] += 1.0
             else:
@@ -447,6 +458,7 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
                 accept_alpha / (accept_alpha + accept_beta))),
             "posterior_improve_mean": float(np.mean(
                 improve_alpha / (improve_alpha + improve_beta))),
+            "proposal_counts": proposal_counts.tolist(),
         }
     return best_val, n_calls
 
