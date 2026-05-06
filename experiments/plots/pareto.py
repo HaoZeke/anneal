@@ -73,6 +73,8 @@ def plot_pareto(
     out_path: str | None = None,
     log_x: bool = False,
     log_y: bool = False,
+    symlog_y: bool = False,
+    y_linthresh: float = 1e-3,
 ):
     """Render an accuracy-vs-cost Pareto plot.
 
@@ -84,6 +86,10 @@ def plot_pareto(
         title: optional title.
         out_path: if set, savefig.
         log_x, log_y: log-scale toggles per axis.
+        symlog_y: use a symmetric-log y-axis, useful for relative-gap
+            plots that include exact zeros and large outliers.
+        y_linthresh: linear threshold passed to matplotlib for
+            symmetric-log scaling.
 
     Returns: (fig, ax).
     """
@@ -122,7 +128,13 @@ def plot_pareto(
 
     if log_x:
         ax.set_xscale("log")
-    if log_y:
+    if symlog_y and log_y:
+        raise ValueError("log_y and symlog_y are mutually exclusive")
+    if symlog_y:
+        ax.set_yscale("symlog", linthresh=y_linthresh)
+        if np.nanmin(combined[:, 1]) >= 0.0:
+            ax.set_ylim(bottom=0.0)
+    elif log_y:
         ax.set_yscale("log")
     ax.set_xlabel(cost_label)
     ax.set_ylabel(value_label)

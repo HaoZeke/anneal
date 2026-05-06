@@ -95,6 +95,19 @@ def test_pareto_renders_and_finds_front():
     assert ax.get_legend() is not None
 
 
+def test_pareto_symlog_y_handles_zero_gaps_and_outliers():
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("chemparseplot")
+    from experiments.plots.pareto import plot_pareto
+
+    pts = np.array([[100.0, 0.0], [200.0, 1e-5], [400.0, 4.0], [800.0, 5e4]])
+
+    fig, ax = plot_pareto([("solver_a", pts)], symlog_y=True, y_linthresh=1e-3)
+
+    assert ax.get_yscale() == "symlog"
+    assert ax.get_ylim()[0] == 0.0
+
+
 def test_cutest_render_uses_stable_driver_order_and_labels():
     from experiments.scripts.render_plots import display_solver_names, ordered_solvers
 
