@@ -30,6 +30,7 @@ from experiments.benchmarks.cutest_runner import load, setup_cutest_env
 from experiments.scripts.run_cutest_benchmarks import (
     DRIVERS as MANIFEST_DRIVERS,
     _bgsa_run,
+    bayesian_mixing_sa,
     classical_sa,
     mcmc_sa,
     mcmc_sa_budgeted,
@@ -231,6 +232,12 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
             args.n_epochs,
             args.n_chains,
             args.k_fixed,
+        )
+    if driver == "bayesian_mixing_sa":
+        return bayesian_mixing_sa(
+            prob,
+            seed,
+            1 + args.n_epochs * args.k_fixed,
         )
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
 

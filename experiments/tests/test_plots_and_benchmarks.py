@@ -1,6 +1,7 @@
 """Smoke tests for benchmark catalog + plot helpers (Dolan-More, More-Wild, Pareto)."""
 
 import os
+import inspect
 import sys
 import tempfile
 import types
@@ -250,3 +251,37 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
     from experiments.scripts import run_cutest_full_suite as suite
 
     assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)
+
+
+def test_cutest_bayesian_mixing_has_small_user_api():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    params = inspect.signature(cutest.bayesian_mixing_sa).parameters
+
+    assert list(params) == ["prob", "seed", "max_fevals", "return_diagnostics"]
+
+
+def test_cutest_bayesian_mixing_is_online_deterministic_and_budgeted():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    kwargs = dict(
+        prob=_QuadraticCutestProblem(),
+        seed=19,
+        max_fevals=321,
+        return_diagnostics=True,
+    )
+
+    first = cutest.bayesian_mixing_sa(**kwargs)
+    second = cutest.bayesian_mixing_sa(**kwargs)
+
+    assert first == second
+    assert first[1] <= kwargs["max_fevals"]
+    assert first[2]["n_chains"] >= 2
+    assert first[2]["swap_attempts"] > 0
+    assert first[2]["posterior_accept_mean"] > 0.0
+
+
+def test_cutest_full_suite_accepts_bayesian_mixing_driver():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    assert suite.parse_drivers("bayesian_mixing_sa") == ("bayesian_mixing_sa",)

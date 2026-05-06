@@ -27,6 +27,9 @@ from experiments.shared.runner import (
     metropolis_accept_prob,
 )
 
+TARGET_ACCEPT_RATE = 0.234
+TARGET_SWAP_RATE = 0.234
+
 
 def gelman_rubin_max(traces):
     m = len(traces)
@@ -73,6 +76,23 @@ def _step_chain(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
         if proposal_val < best_val:
             best_val = proposal_val
     return cur_pos, cur_val, best_val
+
+
+def _step_chain_observed(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
+    proposal = gaussian_propose(rng, cur_pos, sigma, np.float64)
+    proposal = np.clip(proposal, prob.low, prob.high)
+    proposal_val = prob.fn(proposal)
+    delta = proposal_val - cur_val
+    p = metropolis_accept_prob(delta, temp, np.float64)
+    accepted = bool(rng.random() < p)
+    improved = False
+    if accepted:
+        cur_pos = proposal
+        cur_val = proposal_val
+        if proposal_val < best_val:
+            best_val = proposal_val
+            improved = True
+    return cur_pos, cur_val, best_val, accepted, improved
 
 
 def classical_sa(prob, seed, n_epochs, k_fixed, sigma=0.5, t_init=5.0):
@@ -283,9 +303,157 @@ def pt_sa_budgeted(prob, seed, n_epochs, n_chains, epoch_budget,
     return best_val, n_calls
 
 
+def _auto_chain_count(prob, max_fevals):
+    dim = int(getattr(prob, "dim", len(prob.low)))
+    budget_limited = max(2, min(4, max_fevals // 64))
+    dim_limited = max(2, min(4, int(np.ceil(np.sqrt(max(dim, 1))))))
+    return max(1, min(budget_limited, dim_limited, max_fevals))
+
+
+def _auto_sigma(prob):
+    low = np.asarray(prob.low, dtype=np.float64)
+    high = np.asarray(prob.high, dtype=np.float64)
+    dim = max(len(low), 1)
+    span = np.linalg.norm(high - low) / np.sqrt(dim)
+    if not np.isfinite(span) or span <= 0.0:
+        span = 1.0
+    return max(1e-6, 0.15 * span)
+
+
+def _auto_initial_temperature(chain_val):
+    vals = np.asarray(chain_val, dtype=np.float64)
+    finite = vals[np.isfinite(vals)]
+    if finite.size < 2:
+        return 1.0
+    scale = float(np.std(finite))
+    if not np.isfinite(scale) or scale <= 1e-12:
+        scale = float(np.median(np.abs(finite)))
+    return max(scale, 1e-6)
+
+
+def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
+    if max_fevals < 1:
+        raise ValueError("max_fevals must be positive")
+
+    n_chains = _auto_chain_count(prob, max_fevals)
+    rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
+    controller_rng = np.random.default_rng(seed + 10_007)
+    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_val = [prob.fn(p) for p in chain_pos]
+    chain_best_val = list(chain_val)
+    n_calls = n_chains
+    best_val = min(chain_best_val)
+    if n_calls >= max_fevals:
+        if return_diagnostics:
+            return best_val, n_calls, {
+                "n_chains": n_chains,
+                "swap_attempts": 0,
+                "swap_accepts": 0,
+                "posterior_accept_mean": 0.5,
+                "posterior_improve_mean": 0.5,
+            }
+        return best_val, n_calls
+
+    base_sigma = _auto_sigma(prob)
+    log_sigma = np.full(n_chains, np.log(base_sigma), dtype=np.float64)
+    t_init = _auto_initial_temperature(chain_val)
+    improve_alpha = np.ones(n_chains, dtype=np.float64)
+    improve_beta = np.ones(n_chains, dtype=np.float64)
+    accept_alpha = np.ones(n_chains, dtype=np.float64)
+    accept_beta = np.ones(n_chains, dtype=np.float64)
+    swap_alpha = np.ones(max(n_chains - 1, 1), dtype=np.float64)
+    swap_beta = np.ones(max(n_chains - 1, 1), dtype=np.float64)
+    ladder_log_span = np.log(4.0)
+    swap_attempts = 0
+    swap_accepts = 0
+    proposals_since_swap = 0
+    proposal_budget = max_fevals - n_calls
+
+    while n_calls < max_fevals:
+        progress = (n_calls - n_chains) / max(proposal_budget, 1)
+        cold_temp = max(t_init / np.log(2.0 + 20.0 * progress), 1e-12)
+        temps = _geometric_ladder(
+            cold_temp,
+            cold_temp * float(np.exp(ladder_log_span)),
+            n_chains,
+        )
+        utility = controller_rng.beta(improve_alpha, improve_beta)
+        utility += 0.1 * controller_rng.beta(accept_alpha, accept_beta)
+        chain_idx = int(np.argmax(utility))
+        sigma = float(np.exp(log_sigma[chain_idx]))
+        before_best = chain_best_val[chain_idx]
+        (
+            chain_pos[chain_idx],
+            chain_val[chain_idx],
+            chain_best_val[chain_idx],
+            accepted,
+            improved,
+        ) = _step_chain_observed(
+            prob, rngs[chain_idx], chain_pos[chain_idx],
+            chain_val[chain_idx], chain_best_val[chain_idx],
+            temps[chain_idx], sigma)
+        n_calls += 1
+        proposals_since_swap += 1
+
+        accept_alpha[chain_idx] += 1.0 if accepted else 0.0
+        accept_beta[chain_idx] += 0.0 if accepted else 1.0
+        if improved or chain_best_val[chain_idx] < before_best:
+            improve_alpha[chain_idx] += 1.0
+        else:
+            improve_beta[chain_idx] += 1.0
+        accept_mean = accept_alpha[chain_idx] / (
+            accept_alpha[chain_idx] + accept_beta[chain_idx])
+        log_sigma[chain_idx] += 0.05 * (accept_mean - TARGET_ACCEPT_RATE)
+        log_sigma[chain_idx] = np.clip(
+            log_sigma[chain_idx],
+            np.log(base_sigma / 32.0),
+            np.log(base_sigma * 32.0),
+        )
+        if chain_best_val[chain_idx] < best_val:
+            best_val = chain_best_val[chain_idx]
+
+        if n_chains > 1 and proposals_since_swap >= n_chains:
+            pair_scores = controller_rng.beta(swap_alpha, swap_beta)
+            pair_idx = int(np.argmin(pair_scores))
+            alpha = _pt_swap_accept_prob(
+                chain_val[pair_idx], temps[pair_idx],
+                chain_val[pair_idx + 1], temps[pair_idx + 1])
+            swap_attempts += 1
+            accepted_swap = bool(controller_rng.random() < alpha)
+            if accepted_swap:
+                chain_pos[pair_idx], chain_pos[pair_idx + 1] = (
+                    chain_pos[pair_idx + 1], chain_pos[pair_idx])
+                chain_val[pair_idx], chain_val[pair_idx + 1] = (
+                    chain_val[pair_idx + 1], chain_val[pair_idx])
+                chain_best_val[pair_idx], chain_best_val[pair_idx + 1] = (
+                    chain_best_val[pair_idx + 1], chain_best_val[pair_idx])
+                swap_accepts += 1
+                swap_alpha[pair_idx] += 1.0
+            else:
+                swap_beta[pair_idx] += 1.0
+            swap_mean = swap_alpha[pair_idx] / (
+                swap_alpha[pair_idx] + swap_beta[pair_idx])
+            ladder_log_span += 0.05 * (swap_mean - TARGET_SWAP_RATE)
+            ladder_log_span = float(np.clip(
+                ladder_log_span, np.log(1.5), np.log(16.0)))
+            proposals_since_swap = 0
+
+    if return_diagnostics:
+        return best_val, n_calls, {
+            "n_chains": n_chains,
+            "swap_attempts": swap_attempts,
+            "swap_accepts": swap_accepts,
+            "posterior_accept_mean": float(np.mean(
+                accept_alpha / (accept_alpha + accept_beta))),
+            "posterior_improve_mean": float(np.mean(
+                improve_alpha / (improve_alpha + improve_beta))),
+        }
+    return best_val, n_calls
+
+
 DRIVERS = ["classical", "mcmc_sa", "mcmc_sa_sparse",
            "mcmc_sa_budgeted", "mcmc_sa_sparse_budgeted",
-           "pt_sa_budgeted",
+           "pt_sa_budgeted", "bayesian_mixing_sa",
            "bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]
 
 
@@ -432,6 +600,16 @@ def main():
                 prob, seed, args.n_epochs, args.n_chains, args.k_fixed)
             wt = time.perf_counter() - t0
             rows.append(dict(problem=prob.name, dim=prob.dim, driver="pt_sa_budgeted",
+                             seed=seed, fevals=nc, best_val=bv,
+                             wall_time_s=wt, f_x0=f0,
+                             solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
+
+            t0 = time.perf_counter()
+            max_fevals = 1 + args.n_epochs * args.k_fixed
+            bv, nc = bayesian_mixing_sa(prob, seed, max_fevals)
+            wt = time.perf_counter() - t0
+            rows.append(dict(problem=prob.name, dim=prob.dim,
+                             driver="bayesian_mixing_sa",
                              seed=seed, fevals=nc, best_val=bv,
                              wall_time_s=wt, f_x0=f0,
                              solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)))
