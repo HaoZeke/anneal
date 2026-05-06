@@ -33,6 +33,7 @@ from experiments.scripts.run_cutest_benchmarks import (
     classical_sa,
     mcmc_sa,
     mcmc_sa_budgeted,
+    pt_sa_budgeted,
 )
 
 
@@ -222,6 +223,14 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
             args.rhat_threshold,
             sparse=True,
             straggler_top_k=args.straggler_top_k,
+        )
+    if driver == "pt_sa_budgeted":
+        return pt_sa_budgeted(
+            prob,
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            args.k_fixed,
         )
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
 
