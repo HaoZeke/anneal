@@ -11,12 +11,12 @@
 pub mod accept;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.
 pub mod adapter;
+/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
+pub mod bias;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
 /// Error variants returned by `anneal-core`.
 pub mod error;
-/// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
-pub mod bias;
 /// Parallel-tempering Exchange operator: the typed primitive that
 /// closes the multimodal SA gap (IISE Section 8.3 "next paper").
 pub mod exchange;
@@ -56,9 +56,9 @@ pub mod python;
 
 pub use accept::AcceptRule;
 pub use adapter::{Adapter, IdentityAdapter};
+pub use bias::{Bias, WellTemperedBias};
 pub use cool::Cooling;
 pub use error::Error;
-pub use bias::{Bias, WellTemperedBias};
 pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
 pub use free_energy::BarEstimator;
 pub use grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
@@ -66,8 +66,8 @@ pub use history::{EpochLine, History, State};
 pub use hmc::{HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition};
 pub use laws::LawViolation;
 pub use methods::{
-    GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState, ParallelTemperingSampler,
-    PtChainState, PtResult, geometric_ladder,
+    geometric_ladder, BayesianMixingResult, BayesianMixingSampler, GelmanRubin, MultiChainResult,
+    MultiChainSampler, MultiChainState, ParallelTemperingSampler, PtChainState, PtResult,
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
