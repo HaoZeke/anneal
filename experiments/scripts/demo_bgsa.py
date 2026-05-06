@@ -837,9 +837,7 @@ def fit_laplace_4d(obs, dim, priors=None):
         priors["l_mean"] + 2 * priors["l_sd"],
         n_l,
     )
-    q_max = 1.0 + 2.0 / dim - 0.06
-    q_lo = max(1.05, priors["q_mean"] - 2 * priors["q_sd"])
-    q_hi = min(q_max, priors["q_mean"] + 2 * priors["q_sd"])
+    q_lo, q_hi = q_grid_bounds(dim, priors)
     grid_q = np.linspace(q_lo, q_hi, n_q)
     best_nll = float("inf")
     best = (priors["t_mean"], priors["e_mean"], priors["l_mean"], priors["q_mean"])
@@ -2332,9 +2330,7 @@ def parallel_tempering_hybrid_v2(
     sigmas = [sigma_rw_init for _ in range(n_chains)]
     recent_acc: list[list[bool]] = [[] for _ in range(n_chains)]
     chain_stag = [0 for _ in range(n_chains)]
-    best_idx = int(np.argmin(chain_val))
-    best_pos = chain_pos[best_idx].copy()
-    best_val = chain_val[best_idx]
+    best_val = min(chain_val)
     n_calls = n_chains
     swap_attempts = 0
     swap_accepts = 0
@@ -2374,7 +2370,6 @@ def parallel_tempering_hybrid_v2(
                     n_calls += nc
                 if chain_val[c] < best_val:
                     best_val = chain_val[c]
-                    best_pos = chain_pos[c].copy()
                     chain_stag[c] = 0
                     improved_this_step = True
                 if not improved_this_step:
@@ -2390,7 +2385,6 @@ def parallel_tempering_hybrid_v2(
                     n_calls += 1
                     if chain_val[c] < best_val:
                         best_val = chain_val[c]
-                        best_pos = fresh.copy()
 
             if (inner + 1) % k_swap == 0:
                 i = rngs[0].integers(0, n_chains - 1)
@@ -2458,11 +2452,7 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_sco
     Returns (t_map, e_map, L_map, q_map, sigma_map, best_pilot_pos,
     pilot_calls, t_hot, t_rw_map)."""
     rng = np.random.default_rng(seed)
-    q_max = 1.0 + 2.0 / dim - 0.06
-    # In high-D q_max can fall below the safe lower bound 1.05.
-    # Clamp the q sampling range so high-D pilots remain Gaussian (q ~ 1).
-    q_lo = min(1.05, q_max - 1e-3)
-    q_hi = max(q_lo + 1e-3, q_max)
+    q_lo, q_hi = q_grid_bounds(dim)
     pilot_calls = 0
     best_pilot_pos = None
     best_pilot_val = float("inf")
@@ -2558,6 +2548,20 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_sco
         float(t_rw_map),
         features,
     )
+
+
+def q_grid_bounds(dim, priors=None):
+    """Safe q-grid bounds for q-Gaussian momentum in dimension ``dim``."""
+    if dim <= 0:
+        raise ValueError("dim must be positive")
+    if priors is None:
+        priors = {"q_mean": 1.15, "q_sd": 0.1}
+    upper = np.nextafter(1.0 + 2.0 / dim, 1.0)
+    prior_lo = max(1.0, priors["q_mean"] - 2.0 * priors["q_sd"])
+    prior_hi = max(prior_lo, priors["q_mean"] + 2.0 * priors["q_sd"])
+    if prior_lo >= upper:
+        return 1.0, upper
+    return prior_lo, min(upper, max(prior_lo + 1e-3, prior_hi))
 
 
 def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
@@ -2706,7 +2710,6 @@ def bgsa_smc_ensemble(
     ]
     bvs = [float("inf")] * n_particles
     weights = np.ones(n_particles) / n_particles
-    log_z_running = 0.0
     total_calls = 0
 
     rng_master = np.random.default_rng(seed)
@@ -3483,7 +3486,7 @@ def main():
         )
     bgsa_rows = [r for r in rows if r["driver"] == "bgsa"]
     if bgsa_rows:
-        print(f"\nbGSA hyperparameter MAP (mean across seeds):")
+        print("\nbGSA hyperparameter MAP (mean across seeds):")
         print(f"  T_init: {np.mean([r['t_map'] for r in bgsa_rows]):.3f}")
         print(f"  epsilon: {np.mean([r['e_map'] for r in bgsa_rows]):.4f}")
         print(f"  L:       {np.mean([r['L_map'] for r in bgsa_rows]):.1f}")

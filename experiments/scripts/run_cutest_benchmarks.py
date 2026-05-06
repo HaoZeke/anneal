@@ -663,6 +663,7 @@ def _run_cutest_rust_hmc(
     best_pilot_pos,
 ):
     l_steps = max(1, int(L_map))
+    q_hmc = min(float(q_map), float(np.nextafter(1.0 + 2.0 / prob.dim, 1.0)))
     hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
         epoch_budget, prob.dim, l_steps, grad_kind
     )
@@ -674,7 +675,7 @@ def _run_cutest_rust_hmc(
         t_init=float(t_map),
         epsilon=float(e_map),
         l_steps=l_steps,
-        q=float(q_map),
+        q=q_hmc,
         n_epochs=int(n_epochs),
         steps_per_epoch=hmc_steps_per_epoch,
         seed=int(seed),
@@ -870,7 +871,7 @@ def main():
     args = p.parse_args()
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    print(f"Loading CUTEst manifest...")
+    print("Loading CUTEst manifest...")
     problems = load_default_manifest()
     print(
         f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
