@@ -12,7 +12,7 @@ import warnings
 import numpy as np
 import pytest
 
-from experiments.benchmarks.catalog import CATALOG, list_problems, get_problem
+from experiments.benchmarks.catalog import list_problems, get_problem
 from experiments.benchmarks.runner import run_benchmarks
 
 
@@ -250,6 +250,42 @@ def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
         suite.TargetProblem("BOX3", "bound", 3),
         suite.TargetProblem("DUP", "unconstrained", 4),
         suite.TargetProblem("ROSENBR", "unconstrained", 2),
+    ]
+
+
+def test_cutest_full_suite_shards_targets_by_stable_index():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    targets = [
+        suite.TargetProblem("A", "unconstrained", 1),
+        suite.TargetProblem("B", "unconstrained", 1),
+        suite.TargetProblem("C", "bound", 1),
+        suite.TargetProblem("D", "bound", 1),
+        suite.TargetProblem("E", "bound", 1),
+    ]
+
+    assert [target.name for target in suite.shard_targets(targets, 0, 2)] == ["A", "C", "E"]
+    assert [target.name for target in suite.shard_targets(targets, 1, 2)] == ["B", "D"]
+    with pytest.raises(ValueError, match="shard_index"):
+        suite.shard_targets(targets, 2, 2)
+
+
+def test_cutest_shard_combiner_deduplicates_identical_cells(tmp_path):
+    from experiments.scripts import combine_cutest_shards as combine
+
+    header = "problem,kind,dim,driver,seed,fevals,best_val,wall_time_s,f_x0,solved,status\n"
+    row_a = "P1,bound,2,classical,0,10,1.0,0.1,2.0,1,ok\n"
+    row_b = "P2,bound,3,bgsa,0,20,0.5,0.2,2.0,1,ok\n"
+    shard_a = tmp_path / "a.csv"
+    shard_b = tmp_path / "b.csv"
+    shard_a.write_text(header + row_a + row_b, encoding="utf-8")
+    shard_b.write_text(header + row_a, encoding="utf-8")
+
+    rows = combine.combine_rows([shard_b, shard_a])
+
+    assert [(row["problem"], row["driver"]) for row in rows] == [
+        ("P1", "classical"),
+        ("P2", "bgsa"),
     ]
 
 
