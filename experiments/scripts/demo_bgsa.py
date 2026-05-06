@@ -226,6 +226,55 @@ def _safe_norm2(x):
     return float((scale * scale) * scaled_norm2)
 
 
+def _finite_array(values):
+    arr = np.asarray(values, dtype=np.float64)
+    return arr[np.isfinite(arr)]
+
+
+def _finite_std(values, ddof=0, default=0.0):
+    arr = _finite_array(values)
+    if arr.size <= ddof:
+        return float(default)
+    value = float(np.std(arr, ddof=ddof))
+    return value if np.isfinite(value) else float(default)
+
+
+def _finite_mean(values, default=0.0):
+    arr = _finite_array(values)
+    if arr.size == 0:
+        return float(default)
+    value = float(np.mean(arr))
+    return value if np.isfinite(value) else float(default)
+
+
+def _finite_abs_corr(x, y):
+    x_arr = np.asarray(x, dtype=np.float64)
+    y_arr = np.asarray(y, dtype=np.float64)
+    mask = np.isfinite(x_arr) & np.isfinite(y_arr)
+    if np.count_nonzero(mask) < 2:
+        return 0.0
+    x_fin = x_arr[mask]
+    y_fin = y_arr[mask]
+    if _finite_std(x_fin) <= 0.0 or _finite_std(y_fin) <= 0.0:
+        return 0.0
+    value = float(np.corrcoef(x_fin, y_fin)[0, 1])
+    return abs(value) if np.isfinite(value) else 0.0
+
+
+def _segment_log_weight_increment(seg_bvs):
+    values = np.asarray(seg_bvs, dtype=np.float64)
+    finite = values[np.isfinite(values)]
+    if finite.size < 2:
+        return np.zeros_like(values, dtype=np.float64)
+    spread = _finite_std(finite)
+    if spread <= 1e-12:
+        return np.zeros_like(values, dtype=np.float64)
+    floor = float(np.min(finite))
+    penalty = float(np.max(finite) + spread)
+    scored = np.where(np.isfinite(values), values, penalty)
+    return -(scored - floor) / spread
+
+
 def kinetic_q_gaussian(p, q):
     norm2 = _safe_norm2(p)
     if q <= 1.0 + 1e-9:
@@ -327,15 +376,23 @@ def fit_empirical_bayes_priors(scout_obs, dim):
             "q_mean": 1.15, "q_sd": 0.1,
         }
     target_logit = float(np.log(0.65 / 0.35))
-    bv_max = max(o["best_val"] for o in scout_obs)
-    bv_range = bv_max - min(o["best_val"] for o in scout_obs) + 1e-12
+    finite_bvs = _finite_array([o["best_val"] for o in scout_obs])
+    if finite_bvs.size:
+        bv_max = float(np.max(finite_bvs))
+        bv_range = bv_max - float(np.min(finite_bvs)) + 1e-12
+    else:
+        bv_max = 0.0
+        bv_range = 1.0
     scored = []
     for o in scout_obs:
         a = max(min(o["accept_rate"], 1 - 1e-6), 1e-6)
         logit_r = np.log(a / (1.0 - a))
         accept_term = (logit_r - target_logit) ** 2
-        norm_imp = (bv_max - o["best_val"]) / bv_range
-        improve_term = (1.0 - norm_imp) ** 2
+        if np.isfinite(o["best_val"]):
+            norm_imp = (bv_max - o["best_val"]) / bv_range
+            improve_term = (1.0 - norm_imp) ** 2
+        else:
+            improve_term = 1.0
         scored.append((accept_term + improve_term, o))
     scored.sort(key=lambda x: x[0])
     keep = scored[: max(1, len(scored) // 4)]  # upper quartile
@@ -345,9 +402,10 @@ def fit_empirical_bayes_priors(scout_obs, dim):
     qs = np.array([o["q"] for _, o in keep])
 
     def _mom(arr, default_mean, default_sd):
-        if len(arr) < 2:
+        finite = _finite_array(arr)
+        if len(finite) < 2:
             return float(default_mean), float(default_sd)
-        return float(np.mean(arr)), float(max(np.std(arr), 0.1))
+        return float(np.mean(finite)), float(max(_finite_std(finite), 0.1))
 
     t_mean, t_sd = _mom(log_ts, 0.0, 1.0)
     e_mean, e_sd = _mom(log_es, -3.0, 1.0)
@@ -1027,18 +1085,14 @@ def pilot_landscape_features(scout_obs, pilot_obs):
     ar_arr = np.array([o["accept_rate"] for o in obs])
     bv_arr = np.array([o["best_val"] for o in obs])
     # Spearman-like rank correlation of (log eps) vs accept_rate.
-    if eps_arr.std() > 0 and ar_arr.std() > 0:
-        grad_sens = float(np.abs(np.corrcoef(eps_arr, ar_arr)[0, 1]))
+    grad_sens = _finite_abs_corr(eps_arr, ar_arr)
+    sigma_sens = _finite_abs_corr(eps_arr, bv_arr)
+    bv_mean = _finite_mean(bv_arr)
+    bv_std = _finite_std(bv_arr)
+    if abs(bv_mean) > 1e-9:
+        best_val_cv = float(bv_std / max(abs(bv_mean), 1e-9))
     else:
-        grad_sens = 0.0
-    if eps_arr.std() > 0 and bv_arr.std() > 0:
-        sigma_sens = float(np.abs(np.corrcoef(eps_arr, bv_arr)[0, 1]))
-    else:
-        sigma_sens = 0.0
-    if abs(bv_arr.mean()) > 1e-9:
-        best_val_cv = float(bv_arr.std() / max(abs(bv_arr.mean()), 1e-9))
-    else:
-        best_val_cv = float(bv_arr.std())
+        best_val_cv = float(bv_std)
     return {"grad_sens": grad_sens, "sigma_sens": sigma_sens,
             "best_val_cv": best_val_cv, "q_v_lift": 0.0}
 
@@ -2104,11 +2158,7 @@ def bgsa_smc_ensemble(seed, n_epochs, k_per_epoch, n_chains,
         # Importance reweighting: log-weight increment is the negative
         # best-val improvement (lower bv -> higher weight). Normalise
         # so weights sum to 1.
-        if seg_bvs.std() > 1e-12:
-            normed = -(seg_bvs - seg_bvs.min()) / max(seg_bvs.std(), 1e-12)
-        else:
-            normed = np.zeros(n_particles)
-        log_inc = normed
+        log_inc = _segment_log_weight_increment(seg_bvs)
         log_w = np.log(weights + 1e-300) + log_inc
         m = log_w.max()
         weights = np.exp(log_w - m)
