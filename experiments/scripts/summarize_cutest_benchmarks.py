@@ -55,6 +55,10 @@ def _int_or_zero(value) -> int:
         return 0
 
 
+def _is_timeout_status(status: str | None) -> bool:
+    return status in {"timeout", "target-timeout"}
+
+
 def load_rows(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
@@ -95,7 +99,7 @@ def summarize_rows(rows: list[dict]) -> Summary:
             row for row in sub
             if row.get("status", "ok") == "ok" and math.isfinite(_float_or_nan(row.get("best_val")))
         ]
-        timeout = sum(1 for row in sub if row.get("status") == "timeout")
+        timeout = sum(1 for row in sub if _is_timeout_status(row.get("status")))
         error = sum(1 for row in sub if str(row.get("status", "")).startswith("err:"))
         solved = sum(_int_or_zero(row.get("solved")) for row in sub)
         fevals = [_float_or_nan(row.get("fevals")) for row in ok_rows]
