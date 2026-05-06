@@ -584,6 +584,18 @@ def _rust_hmc_fd_work_units(dim, n_trajectories, l_steps, total_accepted=0):
     )
 
 
+def _rust_hmc_max_work_units_per_trajectory(dim, l_steps, grad_kind):
+    grad_cost = 1 if grad_kind == "native" else int(dim) + 1
+    return 2 + grad_cost * (1 + 2 * int(l_steps))
+
+
+def _rust_hmc_steps_per_epoch_budget(epoch_budget, dim, l_steps, grad_kind):
+    if epoch_budget <= 0:
+        raise ValueError("epoch_budget must be positive")
+    per_trajectory = _rust_hmc_max_work_units_per_trajectory(dim, l_steps, grad_kind)
+    return max(1, int(epoch_budget) // per_trajectory)
+
+
 def _cutest_gradient(prob):
     native_grad = getattr(prob, "grad", None)
     if callable(native_grad):
@@ -649,6 +661,9 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             import anneal
 
             l_steps = max(1, int(L_map))
+            hmc_steps_per_epoch = _rust_hmc_steps_per_epoch_budget(
+                k_per_epoch, prob.dim, l_steps, grad_kind
+            )
             history = anneal.run_hmc(
                 prob.fn,
                 grad_fn,
@@ -659,11 +674,11 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 l_steps=l_steps,
                 q=float(q_map),
                 n_epochs=int(n_epochs),
-                steps_per_epoch=int(k_per_epoch),
+                steps_per_epoch=hmc_steps_per_epoch,
                 seed=int(seed),
                 x0=np.asarray(best_pilot_pos, dtype=np.float64),
             )
-            n_trajectories = int(n_epochs) * int(k_per_epoch)
+            n_trajectories = int(n_epochs) * hmc_steps_per_epoch
             total_accepted = int(getattr(history, "total_accepted", 0))
             if grad_kind == "native":
                 work_units = _rust_hmc_native_grad_work_units(
