@@ -5,7 +5,7 @@
 //! pluggable, so leapfrog and Omelyan maps share the sampler surface.
 
 use eindir_core::{FPair, Objective};
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
 use crate::cool::Cooling;
@@ -39,6 +39,8 @@ where
     pub momentum: M,
     /// The fixed-step HMC integrator (epsilon, L, temp_ref).
     pub integrator: I,
+    /// Optional deterministic starting position.
+    pub initial_pos: Option<Array1<f64>>,
 }
 
 impl<O, G, C, I> HmcSaSampler<O, G, C, GaussianMomentum, I>
@@ -57,6 +59,7 @@ where
             cool,
             momentum: GaussianMomentum,
             integrator,
+            initial_pos: None,
         }
     }
 }
@@ -77,7 +80,19 @@ where
             cool,
             momentum,
             integrator,
+            initial_pos: None,
         }
+    }
+
+    /// Returns a sampler that starts from the supplied position.
+    pub fn with_initial_pos(mut self, pos: Array1<f64>) -> Self {
+        assert_eq!(
+            pos.len(),
+            self.obj.dim(),
+            "initial position dimension must match objective dimension"
+        );
+        self.initial_pos = Some(pos);
+        self
     }
 }
 
@@ -90,7 +105,10 @@ where
     I: HmcIntegrator,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
-        let pos = self.obj.bounds().mkpoint(rng);
+        let pos = self
+            .initial_pos
+            .clone()
+            .unwrap_or_else(|| self.obj.bounds().mkpoint(rng));
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
         State {
