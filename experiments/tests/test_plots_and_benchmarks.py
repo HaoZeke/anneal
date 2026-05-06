@@ -268,6 +268,26 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
     assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)
 
 
+def test_cutest_full_suite_appends_target_timeout_rows():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    rows = []
+    seen = set()
+    target = suite.TargetProblem("SLOW", "bound", 17)
+    appended = suite.append_target_timeout_rows(
+        rows,
+        seen,
+        target,
+        [(0, "classical"), (0, "bayesian_mixing_sa")],
+        f0=12.5,
+    )
+
+    assert appended == 2
+    assert {row["status"] for row in rows} == {"target-timeout"}
+    assert {row["f_x0"] for row in rows} == {12.5}
+    assert ("SLOW", "classical", "0") in seen
+
+
 def test_cutest_full_suite_cell_timeout_terminates_hanging_driver(monkeypatch):
     if "fork" not in mp.get_all_start_methods():
         pytest.skip("subprocess timeout uses fork where available")
