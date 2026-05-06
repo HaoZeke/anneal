@@ -11,9 +11,15 @@ import csv
 import math
 import os
 import sys
+import tempfile
 from collections import defaultdict
 
 import numpy as np
+
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(tempfile.gettempdir(), "anneal-matplotlib"),
+)
 
 from experiments.plots.data_profile import plot_data_profile
 from experiments.plots.pareto import plot_pareto
