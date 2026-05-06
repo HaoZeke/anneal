@@ -96,10 +96,13 @@ def plot_performance_profile(
     valid_problems = np.isfinite(best_per_problem.ravel())
     if not valid_problems.any():
         raise ValueError("no problem was solved by any solver; profile is empty")
-    ratios = np.where(
-        np.isfinite(work) & (best_per_problem > 0),
-        work / best_per_problem,
-        np.inf,
+    positive_best = valid_problems & (best_per_problem.ravel() > 0.0)
+    ratios = np.full_like(work, np.inf, dtype=float)
+    np.divide(
+        work,
+        best_per_problem,
+        out=ratios,
+        where=np.isfinite(work) & positive_best[:, None],
     )
 
     if log_x:

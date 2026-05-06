@@ -71,6 +71,20 @@ def test_performance_profile_renders():
     assert 0 < ax.get_ylim()[1] <= 1.05
 
 
+def test_performance_profile_masks_all_failed_rows_without_warning():
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("chemparseplot")
+    from experiments.plots.performance_profile import plot_performance_profile
+
+    costs = np.array([[np.nan, np.nan], [100.0, 200.0]])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        fig, ax = plot_performance_profile(costs, ["solver_a", "solver_b"])
+
+    assert ax.get_legend() is not None
+
+
 def test_data_profile_renders():
     pytest.importorskip("matplotlib")
     pytest.importorskip("chemparseplot")
