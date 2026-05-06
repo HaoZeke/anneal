@@ -151,6 +151,23 @@ def test_cutest_render_uses_stable_driver_order_and_labels():
     ]
 
 
+def test_cutest_render_accepts_requested_driver_subset():
+    from experiments.scripts.render_plots import ordered_solvers
+
+    rows = [
+        {"driver": "classical"},
+        {"driver": "mcmc_sa"},
+        {"driver": "bgsa_auto"},
+    ]
+
+    assert ordered_solvers(rows, requested=["bgsa_auto", "classical"]) == [
+        "bgsa_auto",
+        "classical",
+    ]
+    with pytest.raises(ValueError, match="absent"):
+        ordered_solvers(rows, requested=["missing_driver"])
+
+
 def test_cutest_pareto_points_use_problem_seed_relative_gaps():
     from experiments.scripts.render_plots import pareto_points_by_solver
 
