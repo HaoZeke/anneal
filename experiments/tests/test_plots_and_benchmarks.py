@@ -352,6 +352,25 @@ def test_bgsa_hmc_rejects_nonfinite_hamiltonians_without_warning(monkeypatch):
     assert value == float("inf")
 
 
+def test_bgsa_hmc_rejects_overflowing_momentum_updates_without_warning(monkeypatch):
+    from experiments.scripts import demo_bgsa as bgsa
+
+    x0 = np.zeros(2, dtype=np.float64)
+    monkeypatch.setattr(bgsa, "LOW", np.full(2, -1.0))
+    monkeypatch.setattr(bgsa, "HIGH", np.full(2, 1.0))
+    monkeypatch.setattr(bgsa, "OBJ_FN", lambda _x: 0.0)
+    monkeypatch.setattr(bgsa, "OBJ_GRAD", lambda x: np.full_like(x, 1e308))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        x, accepted, _n_calls, value = bgsa.hmc_sa_step(
+            np.random.default_rng(0), x0, 0.0, 1.0, 1e308, 1, 2, q=1.5)
+
+    assert not accepted
+    assert np.all(x == x0)
+    assert value == 0.0
+
+
 @pytest.mark.parametrize("module_name", [
     "experiments.scripts.demo_bgsa",
     "experiments.scripts.demo_mcmc_vs_classical",
