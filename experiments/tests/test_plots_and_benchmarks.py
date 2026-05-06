@@ -571,9 +571,10 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     assert captured["kwargs"]["x0"] == pytest.approx([0.2, -0.2])
     assert captured["kwargs"]["q"] == pytest.approx(1.1)
     assert captured["kwargs"]["l_steps"] == 2
+    assert captured["kwargs"]["steps_per_epoch"] == 1
     assert fevals == 11 + cutest._rust_hmc_fd_work_units(
         dim=2,
-        n_trajectories=15,
+        n_trajectories=3,
         l_steps=2,
         total_accepted=2,
     )
@@ -661,11 +662,28 @@ def test_cutest_bgsa_uses_native_gradient_and_native_work_units(monkeypatch):
 
     assert best_val == -2.0
     assert captured["grad_at_probe"] == pytest.approx([10.5, -3.25])
+    assert cutest._rust_hmc_steps_per_epoch_budget(
+        epoch_budget=14,
+        dim=2,
+        l_steps=2,
+        grad_kind="native",
+    ) == 2
     assert fevals == 11 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=15,
+        n_trajectories=3,
         l_steps=2,
         total_accepted=2,
     )
+
+
+def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    assert cutest._rust_hmc_steps_per_epoch_budget(
+        epoch_budget=200,
+        dim=6,
+        l_steps=32,
+        grad_kind="native",
+    ) == 2
 
 
 @pytest.mark.parametrize(
