@@ -264,7 +264,7 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 ///      objectives. For `dim=5`, `q < 1.4`; for `dim=10`, `q < 1.2`.
 ///   n_epochs, steps_per_epoch, seed.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, q = 1.0, n_epochs = 100, steps_per_epoch = 50, seed = 42))]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, t_init = 5.0, epsilon = 0.05, l_steps = 5, q = 1.0, n_epochs = 100, steps_per_epoch = 50, seed = 42, x0 = None))]
 #[allow(clippy::too_many_arguments)]
 fn run_hmc(
     obj_fn: Py<PyAny>,
@@ -278,6 +278,7 @@ fn run_hmc(
     n_epochs: usize,
     steps_per_epoch: usize,
     seed: u64,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<PyHistory> {
     use crate::cool::LogCool;
     use crate::hmc::{GaussianMomentum, HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
@@ -297,6 +298,17 @@ fn run_hmc(
             q_max, dim, q
         )));
     }
+    let x0_arr = if let Some(arr) = x0 {
+        let values = arr.as_slice()?.to_vec();
+        if values.len() != dim {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "x0 must have the same length as low and high",
+            ));
+        }
+        Some(Array1::from_vec(values))
+    } else {
+        None
+    };
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -308,6 +320,11 @@ fn run_hmc(
     let history = if q <= 1.0 + 1e-9 {
         let sampler =
             HmcSaSampler::with_momentum(obj, grad, cool.clone(), GaussianMomentum, integrator);
+        let sampler = if let Some(pos) = x0_arr {
+            sampler.with_initial_pos(pos)
+        } else {
+            sampler
+        };
         crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
     } else {
         let sampler = HmcSaSampler::with_momentum(
@@ -317,6 +334,11 @@ fn run_hmc(
             QGaussianMomentum::new(q),
             integrator,
         );
+        let sampler = if let Some(pos) = x0_arr {
+            sampler.with_initial_pos(pos)
+        } else {
+            sampler
+        };
         crate::runner::run_rs(sampler, &cool, n_epochs, steps_per_epoch, seed)
     };
     Ok(PyHistory::from(history))

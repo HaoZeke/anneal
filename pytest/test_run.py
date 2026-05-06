@@ -5,12 +5,16 @@ test_funcs / test_mcsamplers / test_quench suites."""
 import numpy as np
 import pytest
 
-from anneal import Boltzmann, Fast, Gsa, History, run
+from anneal import Boltzmann, Fast, Gsa, History, run, run_hmc
 
 
 def styb_tang_2d(x: np.ndarray) -> float:
     """Styblinski-Tang 2D objective. Global min ~ -78.332 at (-2.9035, -2.9035)."""
     return float(0.5 * np.sum(x**4 - 16 * x**2 + 5 * x))
+
+
+def styb_tang_grad_2d(x: np.ndarray) -> np.ndarray:
+    return 0.5 * (4 * x**3 - 32 * x + 5)
 
 
 LOW = np.array([-5.0, -5.0])
@@ -76,6 +80,25 @@ def test_run_returns_history_object():
     assert h.epochs[0].epoch == 0
     assert h.epochs[-1].epoch == N_EPOCHS - 1
     assert h.epochs[-1].best_val == h.best_val
+
+
+def test_run_hmc_accepts_initial_position():
+    x0 = np.array([-2.903534, -2.903534])
+    h = run_hmc(
+        styb_tang_2d,
+        styb_tang_grad_2d,
+        LOW,
+        HIGH,
+        t_init=5.0,
+        epsilon=0.01,
+        l_steps=1,
+        n_epochs=1,
+        steps_per_epoch=1,
+        seed=SEED,
+        x0=x0,
+    )
+    assert h.best_pos == pytest.approx(x0)
+    assert h.best_val == pytest.approx(GLOBAL_MIN, abs=1e-2)
 
 
 def test_run_is_deterministic():

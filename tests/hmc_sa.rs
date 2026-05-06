@@ -6,6 +6,7 @@ use anneal_core::cool::LogCool;
 use anneal_core::grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 use anneal_core::hmc::{HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, OmelyanIntegrator};
 use anneal_core::run_rs;
+use anneal_core::sampler::Sampler;
 use ndarray::{Array1, ArrayView1};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -95,7 +96,6 @@ fn analytic_gradient_matches_finite_diff_on_styb_tang() {
 #[test]
 fn hmc_sa_acceptance_in_unit_interval() {
     use anneal_core::history::State;
-    use anneal_core::sampler::Sampler;
     use rand::SeedableRng;
 
     let obj = StybTang2D::new();
@@ -124,6 +124,22 @@ fn hmc_sa_acceptance_in_unit_interval() {
     );
     // Suppress unused-import warning when Metropolis is not directly named.
     let _ = std::any::type_name::<Metropolis>();
+}
+
+#[test]
+fn hmc_sampler_can_start_from_supplied_position() {
+    let obj = StybTang2D::new();
+    let grad = FiniteDiffGradient::new(StybTang2D::new());
+    let cool = LogCool::new(5.0_f64, 2.0);
+    let integrator = OmelyanIntegrator::new(0.05, 5, 5.0);
+    let x0 = Array1::from_vec(vec![-2.903534, -2.903534]);
+    let sampler = HmcSaSampler::new(obj, grad, cool, integrator).with_initial_pos(x0.clone());
+    let mut rng = rand::rngs::StdRng::seed_from_u64(3);
+
+    let state = sampler.initial_state(&mut rng);
+
+    assert_eq!(state.cur.pos, x0);
+    assert!(state.cur.val < -78.0);
 }
 
 #[test]
