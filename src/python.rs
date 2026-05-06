@@ -256,8 +256,8 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 ///            a hand-coded analytic gradient. Ceres-style plug-in.
 ///   low, high: numpy box bounds.
 ///   t_init: initial temperature for the log-cooling schedule.
-///   epsilon: leapfrog step size.
-///   l_steps: number of leapfrog steps per HMC trajectory.
+///   epsilon: Omelyan integrator step size.
+///   l_steps: number of Omelyan steps per HMC trajectory.
 ///   q: Tsallis momentum index. Default `1.0` (Gaussian). Values
 ///      `q in (1, 1 + 2/dim)` enable q-Gaussian momentum -- heavy-tailed
 ///      draws that help HMC-SA escape local cups on multimodal
@@ -280,7 +280,7 @@ fn run_hmc(
     seed: u64,
 ) -> PyResult<PyHistory> {
     use crate::cool::LogCool;
-    use crate::hmc::{GaussianMomentum, HmcSaSampler, LeapfrogIntegrator, QGaussianMomentum};
+    use crate::hmc::{GaussianMomentum, HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
 
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -304,7 +304,7 @@ fn run_hmc(
     };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let cool = LogCool::new(t_init, 2.0_f64);
-    let integrator = LeapfrogIntegrator::new(epsilon, l_steps, t_init);
+    let integrator = OmelyanIntegrator::new(epsilon, l_steps, t_init);
     let history = if q <= 1.0 + 1e-9 {
         let sampler =
             HmcSaSampler::with_momentum(obj, grad, cool.clone(), GaussianMomentum, integrator);

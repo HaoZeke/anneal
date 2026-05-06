@@ -1,9 +1,8 @@
 //! `HmcSaSampler`: HMC inside SA, generic over the momentum kernel.
 //!
-//! Phase 1 used hard-coded Gaussian momentum. Phase 2 (this commit)
-//! makes the sampler generic over any `Momentum` impl, so q-Gaussian
-//! momentum drives the same `Sampler<f64>` impl through the trait.
-//! Dropping into `run_rs` and `MultiChainSampler` is unchanged.
+//! Gaussian and q-Gaussian momentum drive the same `Sampler<f64>` impl
+//! through the `Momentum` trait. Fixed-step integrators are likewise
+//! pluggable, so leapfrog and Omelyan maps share the sampler surface.
 
 use eindir_core::{FPair, Objective};
 use ndarray::ArrayView1;
@@ -12,7 +11,7 @@ use rand::Rng;
 use crate::cool::Cooling;
 use crate::grad::Gradient;
 use crate::history::State;
-use crate::hmc::integrator::LeapfrogIntegrator;
+use crate::hmc::integrator::{HmcIntegrator, LeapfrogIntegrator};
 use crate::hmc::momentum::{GaussianMomentum, Momentum};
 use crate::sampler::Sampler;
 
@@ -22,12 +21,13 @@ use crate::sampler::Sampler;
 /// QGaussianMomentum` enables the q-deformed dynamics: heavy-tailed
 /// momentum draws let the chain escape local cups at the cost of
 /// less efficient exploitation in smooth regions.
-pub struct HmcSaSampler<O, G, C, M = GaussianMomentum>
+pub struct HmcSaSampler<O, G, C, M = GaussianMomentum, I = LeapfrogIntegrator>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
     M: Momentum,
+    I: HmcIntegrator,
 {
     /// The objective.
     pub obj: O,
@@ -37,20 +37,20 @@ where
     pub cool: C,
     /// The momentum kernel (Gaussian, q-Gaussian, or custom).
     pub momentum: M,
-    /// The leapfrog integrator (epsilon, L, temp_ref).
-    pub integrator: LeapfrogIntegrator,
+    /// The fixed-step HMC integrator (epsilon, L, temp_ref).
+    pub integrator: I,
 }
 
-impl<O, G, C> HmcSaSampler<O, G, C, GaussianMomentum>
+impl<O, G, C, I> HmcSaSampler<O, G, C, GaussianMomentum, I>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
+    I: HmcIntegrator,
 {
     /// Constructs an HMC-SA sampler with standard Gaussian momentum.
-    /// Phase 1 API; equivalent to `HmcSaSampler::with_momentum` with
-    /// `GaussianMomentum`.
-    pub fn new(obj: O, gradient: G, cool: C, integrator: LeapfrogIntegrator) -> Self {
+    /// Equivalent to `HmcSaSampler::with_momentum` with `GaussianMomentum`.
+    pub fn new(obj: O, gradient: G, cool: C, integrator: I) -> Self {
         Self {
             obj,
             gradient,
@@ -61,21 +61,16 @@ where
     }
 }
 
-impl<O, G, C, M> HmcSaSampler<O, G, C, M>
+impl<O, G, C, M, I> HmcSaSampler<O, G, C, M, I>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
     M: Momentum,
+    I: HmcIntegrator,
 {
     /// Constructs with a user-chosen momentum kernel.
-    pub fn with_momentum(
-        obj: O,
-        gradient: G,
-        cool: C,
-        momentum: M,
-        integrator: LeapfrogIntegrator,
-    ) -> Self {
+    pub fn with_momentum(obj: O, gradient: G, cool: C, momentum: M, integrator: I) -> Self {
         Self {
             obj,
             gradient,
@@ -86,12 +81,13 @@ where
     }
 }
 
-impl<O, G, C, M> Sampler<f64> for HmcSaSampler<O, G, C, M>
+impl<O, G, C, M, I> Sampler<f64> for HmcSaSampler<O, G, C, M, I>
 where
     O: Objective<f64> + Send + Sync,
     G: Gradient<f64>,
     C: Cooling<f64>,
     M: Momentum,
+    I: HmcIntegrator,
 {
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State {
         let pos = self.obj.bounds().mkpoint(rng);
