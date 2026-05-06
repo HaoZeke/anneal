@@ -205,16 +205,42 @@ def sample_q_gaussian_momentum(rng, dim, q):
     return scale * rng.normal(0.0, 1.0, size=dim)
 
 
+def _safe_norm2(x):
+    arr = np.asarray(x, dtype=np.float64)
+    if not np.all(np.isfinite(arr)):
+        return float("inf")
+    if arr.size == 0:
+        return 0.0
+    scale = float(np.max(np.abs(arr)))
+    if scale == 0.0:
+        return 0.0
+    scaled = arr / scale
+    scaled_norm2 = float(np.dot(scaled, scaled))
+    if not np.isfinite(scaled_norm2):
+        return float("inf")
+    max_scale = float(np.sqrt(np.finfo(np.float64).max / max(scaled_norm2, 1.0)))
+    if scale >= max_scale:
+        return float("inf")
+    return float((scale * scale) * scaled_norm2)
+
+
 def kinetic_q_gaussian(p, q):
+    norm2 = _safe_norm2(p)
     if q <= 1.0 + 1e-9:
-        return 0.5 * np.dot(p, p)
-    return (1.0 / (q - 1.0)) * np.log1p(0.5 * (q - 1.0) * np.dot(p, p))
+        return 0.5 * norm2
+    arg = 0.5 * (q - 1.0) * norm2
+    if not np.isfinite(arg):
+        return float("inf")
+    return (1.0 / (q - 1.0)) * np.log1p(arg)
 
 
 def dk_dp_q_gaussian(p, q):
+    p = np.asarray(p, dtype=np.float64)
     if q <= 1.0 + 1e-9:
         return p
-    denom = 1.0 + 0.5 * (q - 1.0) * np.dot(p, p)
+    denom = 1.0 + 0.5 * (q - 1.0) * _safe_norm2(p)
+    if not np.isfinite(denom):
+        return np.zeros_like(p)
     return p / denom
 
 

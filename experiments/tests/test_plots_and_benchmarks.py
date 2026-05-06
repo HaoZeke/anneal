@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import types
+import warnings
 
 import numpy as np
 import pytest
@@ -317,6 +318,19 @@ def test_bgsa_log_acceptance_probability_is_stable():
     small = _log_accept_probability(-1_000.0)
     assert 0.0 <= small <= 1.0
     assert np.isfinite(_log_accept_probability(0.0))
+
+
+def test_bgsa_q_gaussian_kinetics_are_overflow_stable():
+    from experiments.scripts.demo_bgsa import dk_dp_q_gaussian, kinetic_q_gaussian
+
+    p = np.array([1e308, -1e308], dtype=np.float64)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        assert np.isinf(kinetic_q_gaussian(p, 1.5))
+        drift = dk_dp_q_gaussian(p, 1.5)
+    assert np.all(np.isfinite(drift))
+    assert np.all(drift == 0.0)
 
 
 def test_cutest_bayesian_mixing_has_small_user_api():
