@@ -49,6 +49,17 @@ DRIVER_LABELS = {
 }
 
 
+DEFAULT_FIGURE_DRIVERS = [
+    "classical",
+    "bayesian_mixing_sa",
+    "mcmc_sa_budgeted",
+    "mcmc_sa_sparse_budgeted",
+    "pt_sa_budgeted",
+    "bgsa",
+    "bgsa_auto",
+]
+
+
 def _float_or_nan(value) -> float:
     try:
         return float(value)
@@ -60,8 +71,20 @@ def _status_ok(row: dict) -> bool:
     return row.get("status", "ok") == "ok"
 
 
-def ordered_solvers(rows: list[dict]) -> list[str]:
+def _split_driver_list(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    drivers = [part.strip() for part in raw.split(",") if part.strip()]
+    return drivers or None
+
+
+def ordered_solvers(rows: list[dict], requested: list[str] | None = None) -> list[str]:
     present = {str(row["driver"]) for row in rows}
+    if requested is not None:
+        missing = [driver for driver in requested if driver not in present]
+        if missing:
+            raise ValueError(f"requested driver(s) absent from CSV: {', '.join(missing)}")
+        return list(dict.fromkeys(requested))
     known = [driver for driver in DRIVER_ORDER if driver in present]
     unknown = sorted(present.difference(DRIVER_ORDER))
     return known + unknown
@@ -142,6 +165,11 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("csv_path")
     p.add_argument("out_dir")
+    p.add_argument(
+        "--drivers",
+        default=",".join(DEFAULT_FIGURE_DRIVERS),
+        help="Comma-separated driver subset for manuscript figures; use all for every CSV driver.",
+    )
     args = p.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -149,7 +177,8 @@ def main():
     agg = aggregate(rows)
 
     problems = sorted({r["problem"] for r in rows})
-    solvers = ordered_solvers(rows)
+    requested = None if args.drivers == "all" else _split_driver_list(args.drivers)
+    solvers = ordered_solvers(rows, requested=requested)
     solver_labels = display_solver_names(solvers)
     n_p, n_s = len(problems), len(solvers)
 
