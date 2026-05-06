@@ -81,6 +81,13 @@ OBJ_GRAD = OBJECTIVES["rosenbrock_5d"][1]
 TARGET_ACCEPT = 0.65  # HMC target accept rate (Beskos/Pillai/Roberts 2013)
 
 
+def _log_accept_probability(log_alpha: float) -> float:
+    """Return min(1, exp(log_alpha)) without overflow."""
+    if log_alpha >= 0.0:
+        return 1.0
+    return float(np.exp(max(log_alpha, -745.0)))
+
+
 def log_cool(t_init, k0, epoch):
     return t_init * np.log(k0) / np.log(epoch + k0)
 
@@ -783,7 +790,7 @@ def adaptive_ladder_q_hmc(
                 T_i, T_j = temps[i], temps[i + 1]
                 F_i, F_j = chain_val[i], chain_val[i + 1]
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
-                alpha = min(1.0, np.exp(log_alpha))
+                alpha = _log_accept_probability(log_alpha)
                 accepted = rngs[0].random() < alpha
                 swap_attempts_total += 1
                 if accepted:
@@ -1432,7 +1439,7 @@ def pt_metad_shared(seed, n_epochs, n_chains, k_inner, k_swap,
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
                 swap_log_alpha_pairs[i].append(log_alpha)
                 swap_attempts += 1
-                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                if rngs[0].random() < _log_accept_probability(log_alpha):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1
@@ -1523,7 +1530,7 @@ def parallel_tempering_hybrid(
                 F_i, F_j = chain_val[i], chain_val[i + 1]
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
                 swap_attempts += 1
-                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                if rngs[0].random() < _log_accept_probability(log_alpha):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1
@@ -1605,10 +1612,9 @@ def parallel_tempering_q_hmc(
                 i = rngs[0].integers(0, n_chains - 1)
                 T_i, T_j = temps[i], temps[i + 1]
                 F_i, F_j = chain_val[i], chain_val[i + 1]
-                # Swap accept: alpha = min(1, exp((1/T_i - 1/T_j)*(F_i - F_j)))
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
                 swap_attempts += 1
-                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                if rngs[0].random() < _log_accept_probability(log_alpha):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1
@@ -1836,7 +1842,7 @@ def parallel_tempering_hybrid_v2(
                 F_i, F_j = chain_val[i], chain_val[i + 1]
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
                 swap_attempts += 1
-                if rngs[0].random() < min(1.0, np.exp(log_alpha)):
+                if rngs[0].random() < _log_accept_probability(log_alpha):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1

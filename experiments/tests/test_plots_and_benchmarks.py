@@ -266,6 +266,15 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
     assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)
 
 
+def test_bgsa_log_acceptance_probability_is_stable():
+    from experiments.scripts.demo_bgsa import _log_accept_probability
+
+    assert _log_accept_probability(1_000.0) == 1.0
+    small = _log_accept_probability(-1_000.0)
+    assert 0.0 <= small <= 1.0
+    assert np.isfinite(_log_accept_probability(0.0))
+
+
 def test_cutest_bayesian_mixing_has_small_user_api():
     from experiments.scripts import run_cutest_benchmarks as cutest
 
