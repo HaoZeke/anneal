@@ -25,6 +25,7 @@ import numpy as np
 
 from experiments.shared.runner import (
     cauchy_propose,
+    gelman_rubin_max,
     gaussian_propose,
     log_cool,
     metropolis_accept_prob,
@@ -42,31 +43,6 @@ def rastrigin_5d(x: np.ndarray) -> float:
 LOW = np.full(5, -5.12)
 HIGH = np.full(5, 5.12)
 F_STAR = 0.0  # Rastrigin global minimum at the origin
-
-
-def gelman_rubin_max(traces):
-    """Max-per-coordinate Rhat across M chains; mirrors the Rust impl."""
-    m = len(traces)
-    if m < 2:
-        return float("inf")
-    n = len(traces[0])
-    if n < 2:
-        return float("inf")
-    dim = traces[0][0].shape[0]
-    max_rhat = 0.0
-    for d in range(dim):
-        means = np.array([np.mean([x[d] for x in chain]) for chain in traces])
-        vars_ = np.array([np.var([x[d] for x in chain], ddof=1) for chain in traces])
-        if np.any(vars_ <= 0):
-            continue
-        theta_bar = means.mean()
-        b = (n / (m - 1.0)) * np.sum((means - theta_bar) ** 2)
-        w = vars_.mean()
-        var_hat = ((n - 1.0) / n) * w + b / n
-        rhat = np.sqrt(var_hat / w)
-        if rhat > max_rhat:
-            max_rhat = rhat
-    return max_rhat
 
 
 def classical_sa(seed, n_epochs, k_fixed, t_init=5.0, sigma=0.5):

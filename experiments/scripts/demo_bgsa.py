@@ -22,6 +22,8 @@ import time
 
 import numpy as np
 
+from experiments.shared.runner import gelman_rubin_max
+
 
 def rastrigin_5d(x: np.ndarray) -> float:
     x = x.astype(np.float64)
@@ -267,6 +269,8 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
     U_new = OBJ_FN(x)
     n += 1
     H_new = U_new / T + kinetic_q_gaussian(p, q)
+    if not np.isfinite(H0) or not np.isfinite(H_new):
+        return x0, False, n, U
     delta_h = H_new - H0
 
     if abs(delta_h) > 1000 or not np.isfinite(delta_h):
@@ -602,31 +606,6 @@ def fit_laplace_4d(obs, dim, priors=None):
     corrected = tuple(b + d for b, d in zip(best, deltas))
     return (float(np.exp(corrected[0])), float(np.exp(corrected[1])),
             max(1, int(np.exp(corrected[2]))), float(corrected[3]))
-
-
-def gelman_rubin_max(traces):
-    """Max-per-coordinate Rhat across M chains; mirrors the Rust impl."""
-    m = len(traces)
-    if m < 2:
-        return float("inf")
-    n = len(traces[0])
-    if n < 2:
-        return float("inf")
-    dim = traces[0][0].shape[0]
-    max_rhat = 0.0
-    for d in range(dim):
-        means = np.array([np.mean([x[d] for x in chain]) for chain in traces])
-        vars_ = np.array([np.var([x[d] for x in chain], ddof=1) for chain in traces])
-        if np.any(vars_ <= 0):
-            continue
-        theta_bar = means.mean()
-        b = (n / (m - 1.0)) * np.sum((means - theta_bar) ** 2)
-        w = vars_.mean()
-        var_hat = ((n - 1.0) / n) * w + b / n
-        rhat = np.sqrt(var_hat / w)
-        if rhat > max_rhat:
-            max_rhat = rhat
-    return max_rhat
 
 
 def multichain_q_hmc(seed, n_epochs, n_chains, k_min, k_check, k_max,
