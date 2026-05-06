@@ -81,6 +81,7 @@ HIGH = OBJECTIVES["rosenbrock_5d"][3]
 OBJ_FN = OBJECTIVES["rosenbrock_5d"][0]
 OBJ_GRAD = OBJECTIVES["rosenbrock_5d"][1]
 TARGET_ACCEPT = 0.65  # HMC target accept rate (Beskos/Pillai/Roberts 2013)
+OMELYAN_LAMBDA = 0.1931833275037836
 
 
 def _log_accept_probability(log_alpha: float) -> float:
@@ -383,38 +384,82 @@ def dk_dp_q_gaussian(p, q):
     return p / denom
 
 
-def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
+def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0, integrator="omelyan"):
     """One HMC trajectory at temperature T with q-Gaussian momentum."""
     p = sample_q_gaussian_momentum(rng, dim, q)
     x0 = x.copy()
     p0 = p.copy()
     H0 = U / T + kinetic_q_gaussian(p0, q)
+    n = 0
 
-    grad = OBJ_GRAD(x)
-    n = 1  # gradient counts as ~1 feval (analytic here, FD would be 2D)
-    factor = _safe_leapfrog_factor(0.5, eps, T)
-    if factor is None:
-        return x0, False, n, U
-    p = _safe_momentum_update(p, grad, factor)
-    if p is None:
-        return x0, False, n, U
-
-    for step in range(L):
-        dk = dk_dp_q_gaussian(p, q)
-        x_next = _safe_position_update(x, dk, eps)
-        if x_next is None:
-            return x0, False, n, U
-        x = x_next
-        x = np.clip(x, LOW, HIGH)
+    if integrator == "leapfrog":
         grad = OBJ_GRAD(x)
-        n += 1
-        half = 0.5 if step + 1 == L else 1.0
-        factor = _safe_leapfrog_factor(half, eps, T)
+        n += 1  # gradient counts as ~1 feval (analytic here, FD would be 2D)
+        factor = _safe_leapfrog_factor(0.5, eps, T)
         if factor is None:
             return x0, False, n, U
         p = _safe_momentum_update(p, grad, factor)
         if p is None:
             return x0, False, n, U
+
+        for step in range(L):
+            dk = dk_dp_q_gaussian(p, q)
+            x_next = _safe_position_update(x, dk, eps)
+            if x_next is None:
+                return x0, False, n, U
+            x = x_next
+            x = np.clip(x, LOW, HIGH)
+            grad = OBJ_GRAD(x)
+            n += 1
+            half = 0.5 if step + 1 == L else 1.0
+            factor = _safe_leapfrog_factor(half, eps, T)
+            if factor is None:
+                return x0, False, n, U
+            p = _safe_momentum_update(p, grad, factor)
+            if p is None:
+                return x0, False, n, U
+    elif integrator == "omelyan":
+        grad = OBJ_GRAD(x)
+        n += 1
+        for _ in range(L):
+            factor = _safe_leapfrog_factor(OMELYAN_LAMBDA, eps, T)
+            if factor is None:
+                return x0, False, n, U
+            p = _safe_momentum_update(p, grad, factor)
+            if p is None:
+                return x0, False, n, U
+
+            dk = dk_dp_q_gaussian(p, q)
+            x_next = _safe_position_update(x, dk, 0.5 * eps)
+            if x_next is None:
+                return x0, False, n, U
+            x = np.clip(x_next, LOW, HIGH)
+            grad = OBJ_GRAD(x)
+            n += 1
+
+            factor = _safe_leapfrog_factor(1.0 - 2.0 * OMELYAN_LAMBDA, eps, T)
+            if factor is None:
+                return x0, False, n, U
+            p = _safe_momentum_update(p, grad, factor)
+            if p is None:
+                return x0, False, n, U
+
+            dk = dk_dp_q_gaussian(p, q)
+            x_next = _safe_position_update(x, dk, 0.5 * eps)
+            if x_next is None:
+                return x0, False, n, U
+            x = np.clip(x_next, LOW, HIGH)
+            grad = OBJ_GRAD(x)
+            n += 1
+
+            factor = _safe_leapfrog_factor(OMELYAN_LAMBDA, eps, T)
+            if factor is None:
+                return x0, False, n, U
+            p = _safe_momentum_update(p, grad, factor)
+            if p is None:
+                return x0, False, n, U
+    else:
+        raise ValueError(f"unknown HMC integrator: {integrator}")
 
     U_new = OBJ_FN(x)
     n += 1

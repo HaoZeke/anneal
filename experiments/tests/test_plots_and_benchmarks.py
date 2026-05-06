@@ -371,6 +371,31 @@ def test_bgsa_hmc_rejects_overflowing_momentum_updates_without_warning(monkeypat
     assert value == 0.0
 
 
+def test_bgsa_hmc_default_uses_omelyan_force_stages(monkeypatch):
+    from experiments.scripts import demo_bgsa as bgsa
+
+    grad_calls = 0
+
+    def grad(x):
+        nonlocal grad_calls
+        grad_calls += 1
+        return np.zeros_like(x)
+
+    x0 = np.zeros(2, dtype=np.float64)
+    monkeypatch.setattr(bgsa, "LOW", np.full(2, -1.0))
+    monkeypatch.setattr(bgsa, "HIGH", np.full(2, 1.0))
+    monkeypatch.setattr(bgsa, "OBJ_FN", lambda _x: 0.0)
+    monkeypatch.setattr(bgsa, "OBJ_GRAD", grad)
+
+    _x, accepted, n_calls, value = bgsa.hmc_sa_step(
+        np.random.default_rng(0), x0, 0.0, 1.0, 0.01, 1, 2, q=1.0)
+
+    assert accepted
+    assert value == 0.0
+    assert grad_calls == 3
+    assert n_calls == 4
+
+
 @pytest.mark.parametrize("module_name", [
     "experiments.scripts.demo_bgsa",
     "experiments.scripts.demo_mcmc_vs_classical",
