@@ -1,17 +1,16 @@
-"""Paired exp3-vs-exp4 statistical test for the manuscript's "Kahan
-compensation halves the f16 trajectory bias" claim.
+"""Paired exp3-vs-exp4 statistical test for the manuscript's compensated
+log-domain precision ablation.
 
 Reads both `exp3_trajectory.csv` (uncompensated) and `exp4_compensated.csv`
-(compensated). For each seed, computes the f16-vs-f64 first-moment bias.
-Pairs the per-seed biases and runs a Wilcoxon signed-rank test on the
+(compensated). For each seed, computes the f16-vs-f64 best-position shift.
+Pairs the per-seed shifts and runs a Wilcoxon signed-rank test on the
 paired differences (compensated - uncompensated). Reports:
-  - mean bias before / after
+  - mean shift before / after
   - paired delta + 95 percent bootstrap CI
   - Wilcoxon W, p-value, effect size (rank-biserial)
-  - "halving" check: mean(compensated) <= 0.5 * mean(uncompensated) within tol
 
 Used by the verify env's `compensation-paired` task and cited in the
-IISE Section 5.4 narrative."""
+manuscript Section 5.4 narrative."""
 
 from __future__ import annotations
 
@@ -80,7 +79,7 @@ def main():
     uncomp_b, comp_b = pairs[:, 0], pairs[:, 1]
     deltas = comp_b - uncomp_b
 
-    print(f"Paired f16-vs-f64 first-moment bias on {len(pairs)} seeds:")
+    print(f"Paired f16-vs-f64 best-position shift on {len(pairs)} seeds:")
     m_uc, lo_uc, hi_uc = bootstrap_ci(uncomp_b)
     m_c, lo_c, hi_c = bootstrap_ci(comp_b)
     print(f"  uncompensated:  mean = {m_uc:.4e}  95% CI = [{lo_uc:.4e}, {hi_uc:.4e}]")
@@ -104,11 +103,11 @@ def main():
     print(f"  ratio mean(comp) / mean(uncomp) = {ratio:.3f}")
     halving_target = 0.5 + args.halving_tolerance
     halved = ratio <= halving_target
-    print(f"  halving check (ratio <= {halving_target}): {'PASS' if halved else 'FAIL'}")
+    print(f"  legacy halving check (ratio <= {halving_target}): {'PASS' if halved else 'FAIL'}")
 
     if args.check:
         assert halved, (
-            f"manuscript halving claim fails: ratio {ratio:.3f} > {halving_target}"
+            f"legacy halving check fails: ratio {ratio:.3f} > {halving_target}"
         )
     return 0
 

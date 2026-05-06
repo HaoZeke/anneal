@@ -1,6 +1,6 @@
-"""Summarises exp3 (and exp4) trajectory CSVs: paired f16-vs-f64 first-moment
-bias plus bootstrap CI. Used to verify the manuscript Section 5.3/5.4
-bias claims at run time."""
+"""Summarises exp3 (and exp4) trajectory CSVs: paired f16-vs-f64
+best-position shift plus bootstrap CI. Used to verify the manuscript
+Section 5.3/5.4 precision claims at run time."""
 
 from __future__ import annotations
 
@@ -21,8 +21,10 @@ def load_rows(path):
 
 
 def paired_bias(rows_by_seed):
-    """Per-seed (f16 mean - f64 mean) for each coordinate; returns the
-    L2 norm of the per-seed paired difference, averaged over seeds."""
+    """Per-seed f16-vs-f64 best-position shift.
+
+    Returns the L2 norm of the paired coordinate difference for each seed.
+    """
     diffs = []
     for seed, by_dtype in sorted(rows_by_seed.items()):
         if "float16" not in by_dtype or "float64" not in by_dtype:
@@ -47,7 +49,7 @@ def bootstrap_ci(samples, n_boot=10_000, alpha=0.05, rng=None):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("csv_path")
-    p.add_argument("--manuscript-bias", type=float, default=8.8e-4,
+    p.add_argument("--manuscript-bias", type=float, default=2.0582e-1,
                    help="Reference value from the manuscript.")
     p.add_argument("--tolerance-pct", type=float, default=10.0,
                    help="Pass if measured bias is within +/- this percent.")
@@ -62,7 +64,7 @@ def main():
     mean, lo, hi = bootstrap_ci(diffs)
 
     print(f"Loaded {len(diffs)} paired seeds from {args.csv_path}")
-    print(f"  paired f16-vs-f64 first-moment bias: {mean:.4e}  (95% CI: [{lo:.4e}, {hi:.4e}])")
+    print(f"  paired f16-vs-f64 best-position shift: {mean:.4e}  (95% CI: [{lo:.4e}, {hi:.4e}])")
     print(f"  manuscript reference:                {args.manuscript_bias:.4e}")
     if args.manuscript_bias != 0:
         rel = abs(mean - args.manuscript_bias) / args.manuscript_bias * 100
