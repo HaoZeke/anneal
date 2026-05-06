@@ -305,6 +305,64 @@ def _segment_log_weight_increment(seg_bvs):
     return -(scored - floor) / spread
 
 
+def _safe_leapfrog_factor(scale, eps, temp):
+    if not np.isfinite(scale) or not np.isfinite(eps) or not np.isfinite(temp):
+        return None
+    if temp == 0.0:
+        return None
+    numerator = float(scale * eps)
+    if not np.isfinite(numerator):
+        return None
+    if abs(temp) < 1.0 and abs(numerator) > np.finfo(np.float64).max * abs(temp):
+        return None
+    factor = numerator / temp
+    return float(factor) if np.isfinite(factor) else None
+
+
+def _safe_scaled_vector(vec, factor):
+    values = np.asarray(vec, dtype=np.float64)
+    if not np.isfinite(factor) or not np.all(np.isfinite(values)):
+        return None
+    max_abs = float(np.max(np.abs(values))) if values.size else 0.0
+    if max_abs == 0.0 or factor == 0.0:
+        return np.zeros_like(values, dtype=np.float64)
+    if max_abs > 1.0 and abs(factor) > np.finfo(np.float64).max / max_abs:
+        return None
+    scaled = factor * values
+    return scaled if np.all(np.isfinite(scaled)) else None
+
+
+def _safe_add_vectors(left, right):
+    lhs = np.asarray(left, dtype=np.float64)
+    rhs = np.asarray(right, dtype=np.float64)
+    if not np.all(np.isfinite(lhs)) or not np.all(np.isfinite(rhs)):
+        return None
+    same_sign = np.signbit(lhs) == np.signbit(rhs)
+    would_overflow = same_sign & (np.abs(lhs) > np.finfo(np.float64).max - np.abs(rhs))
+    if np.any(would_overflow):
+        return None
+    out = lhs + rhs
+    return out if np.all(np.isfinite(out)) else None
+
+
+def _safe_subtract_vectors(left, right):
+    return _safe_add_vectors(left, -np.asarray(right, dtype=np.float64))
+
+
+def _safe_momentum_update(p, grad, factor):
+    delta = _safe_scaled_vector(grad, factor)
+    if delta is None:
+        return None
+    return _safe_subtract_vectors(p, delta)
+
+
+def _safe_position_update(x, drift, eps):
+    delta = _safe_scaled_vector(drift, eps)
+    if delta is None:
+        return None
+    return _safe_add_vectors(x, delta)
+
+
 def kinetic_q_gaussian(p, q):
     norm2 = _safe_norm2(p)
     if q <= 1.0 + 1e-9:
@@ -333,17 +391,30 @@ def hmc_sa_step(rng, x, U, T, eps, L, dim, q=1.0):
     H0 = U / T + kinetic_q_gaussian(p0, q)
 
     grad = OBJ_GRAD(x)
-    p = p - 0.5 * eps * grad / T
     n = 1  # gradient counts as ~1 feval (analytic here, FD would be 2D)
+    factor = _safe_leapfrog_factor(0.5, eps, T)
+    if factor is None:
+        return x0, False, n, U
+    p = _safe_momentum_update(p, grad, factor)
+    if p is None:
+        return x0, False, n, U
 
     for step in range(L):
         dk = dk_dp_q_gaussian(p, q)
-        x = x + eps * dk
+        x_next = _safe_position_update(x, dk, eps)
+        if x_next is None:
+            return x0, False, n, U
+        x = x_next
         x = np.clip(x, LOW, HIGH)
         grad = OBJ_GRAD(x)
         n += 1
         half = 0.5 if step + 1 == L else 1.0
-        p = p - half * eps * grad / T
+        factor = _safe_leapfrog_factor(half, eps, T)
+        if factor is None:
+            return x0, False, n, U
+        p = _safe_momentum_update(p, grad, factor)
+        if p is None:
+            return x0, False, n, U
 
     U_new = OBJ_FN(x)
     n += 1
