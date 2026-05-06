@@ -4,8 +4,8 @@
 //! lets the loop treat preset variants and future adaptive samplers
 //! through a single dispatch point. See `src/sampler.rs` for rationale.
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History};

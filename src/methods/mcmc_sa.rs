@@ -14,8 +14,8 @@
 //! parallel-tempering settings" and design_pass_07 in obsidian-notes
 //! for the full unification story.
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;

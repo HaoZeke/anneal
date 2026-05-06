@@ -84,7 +84,11 @@ impl WellTemperedBias {
         assert!(grid_n >= 2, "grid_n must be >= 2");
         assert!(low[0] < high[0] && low[1] < high[1], "low < high required");
         assert_eq!(projector.shape()[1], 2, "projector must be (dim, 2)");
-        assert_eq!(projector.shape()[0], mu.len(), "mu / projector dim mismatch");
+        assert_eq!(
+            projector.shape()[0],
+            mu.len(),
+            "mu / projector dim mismatch"
+        );
         Self {
             projector,
             mu,
@@ -169,9 +173,7 @@ mod tests {
         // 2D identity projector: CV is x itself.
         let projector = array![[1.0, 0.0], [0.0, 1.0]];
         let mu = array![0.0, 0.0];
-        WellTemperedBias::new(
-            projector, mu, [-5.0, -5.0], [5.0, 5.0], 0.5, 1.0, 5.0, 32,
-        )
+        WellTemperedBias::new(projector, mu, [-5.0, -5.0], [5.0, 5.0], 0.5, 1.0, 5.0, 32)
     }
 
     #[test]
@@ -208,7 +210,10 @@ mod tests {
             let v_after = b.potential(s.view());
             let delta = v_after - v_before;
             assert!(delta > 0.0);
-            assert!(delta <= last_increment + 1e-12, "well-tempered height failed to decay");
+            assert!(
+                delta <= last_increment + 1e-12,
+                "well-tempered height failed to decay"
+            );
             last_increment = delta;
         }
     }

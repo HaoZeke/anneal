@@ -26,8 +26,8 @@ use rand::Rng;
 
 use crate::cool::Cooling;
 use crate::grad::Gradient;
-use crate::hmc::momentum::Momentum;
 use crate::history::State;
+use crate::hmc::momentum::Momentum;
 use crate::sampler::Sampler;
 
 /// Diagnostic for a single NUTS step.
@@ -161,7 +161,16 @@ where
         };
     }
     let sub1 = build_tree(
-        leaf, h0, direction, depth - 1, eps, temp, grad_fn, momentum, obj_fn, rng,
+        leaf,
+        h0,
+        direction,
+        depth - 1,
+        eps,
+        temp,
+        grad_fn,
+        momentum,
+        obj_fn,
+        rng,
     );
     if sub1.terminated {
         return sub1;
@@ -197,9 +206,8 @@ where
     } else {
         sub1.candidate
     };
-    let terminated = sub1.terminated
-        || sub2.terminated
-        || momentum.uturn(&left.x, &left.p, &right.x, &right.p);
+    let terminated =
+        sub1.terminated || sub2.terminated || momentum.uturn(&left.x, &left.p, &right.x, &right.p);
     let divergent = sub1.divergent || sub2.divergent;
     SubTree {
         left,

@@ -94,7 +94,11 @@ impl<T: Float + Send + Sync> Exchange<T> for TsallisExchange<T> {
             return T::zero();
         }
         let p = bracket.powf(T::one() / (self.q - T::one()));
-        if p > T::one() { T::one() } else { p }
+        if p > T::one() {
+            T::one()
+        } else {
+            p
+        }
     }
 }
 
@@ -152,7 +156,7 @@ mod tests {
         let a_t = t.swap_accept_prob(2.0_f64, 0.5, 1.0, 2.0);
         let a_m = m.swap_accept_prob(2.0_f64, 0.5, 1.0, 2.0);
         assert_eq!(a_m, 1.0); // log_alpha = 1.5 > 0
-        // Tsallis: bracket = 1 - 0.5*1*1.5 = 0.25; p = 0.25^{1/0.5} = 0.0625
+                              // Tsallis: bracket = 1 - 0.5*1*1.5 = 0.25; p = 0.25^{1/0.5} = 0.0625
         assert!(a_t > 0.0 && a_t < 1.0);
         assert!((a_t - 0.0625).abs() < 1e-9);
     }
