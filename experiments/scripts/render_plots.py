@@ -108,19 +108,44 @@ def load_long_csv(path: str):
     return rows
 
 
-def aggregate(rows):
-    """Best-of-seeds per (problem, solver). Cost = fevals on solved runs;
-    NaN otherwise (failed)."""
-    best = defaultdict(
-        lambda: {"fevals": [], "best_val": [], "dim": None, "solved": []}
+def _int_or_zero(value) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _seed_sort_key(seed: str) -> tuple[int, int | str]:
+    try:
+        return (0, int(seed))
+    except ValueError:
+        return (1, seed)
+
+
+def profile_matrix_by_cell(
+    rows: list[dict], solvers: list[str]
+) -> tuple[list[tuple[str, str]], np.ndarray, np.ndarray]:
+    """Return objective-equivalent costs by problem-seed cell and solver."""
+    cells = sorted(
+        {(str(row["problem"]), str(row["seed"])) for row in rows},
+        key=lambda key: (key[0], _seed_sort_key(key[1])),
     )
-    for r in rows:
-        key = (r["problem"], r["driver"])
-        best[key]["fevals"].append(int(r["fevals"]))
-        best[key]["best_val"].append(float(r["best_val"]))
-        best[key]["dim"] = int(r["dim"])
-        best[key]["solved"].append(int(r["solved"]))
-    return best
+    solver_index = {solver: idx for idx, solver in enumerate(solvers)}
+    cell_index = {cell: idx for idx, cell in enumerate(cells)}
+
+    fevals = np.full((len(cells), len(solvers)), np.nan, dtype=float)
+    dims = np.zeros(len(cells), dtype=int)
+    for row in rows:
+        cell = (str(row["problem"]), str(row["seed"]))
+        i = cell_index[cell]
+        dims[i] = _int_or_zero(row.get("dim"))
+        solver = str(row["driver"])
+        if solver not in solver_index:
+            continue
+        cost = _float_or_nan(row.get("fevals"))
+        if _status_ok(row) and _int_or_zero(row.get("solved")) and math.isfinite(cost):
+            fevals[i, solver_index[solver]] = cost
+    return cells, fevals, dims
 
 
 def data_profile_kappa_max(fevals: np.ndarray, dims: np.ndarray) -> float:
@@ -180,32 +205,11 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
 
     rows = load_long_csv(args.csv_path)
-    agg = aggregate(rows)
 
-    problems = sorted({r["problem"] for r in rows})
     requested = None if args.drivers == "all" else _split_driver_list(args.drivers)
     solvers = ordered_solvers(rows, requested=requested)
     solver_labels = display_solver_names(solvers)
-    n_p, n_s = len(problems), len(solvers)
-
-    fevals_matrix = np.full((n_p, n_s), np.nan, dtype=float)
-    val_matrix = np.full((n_p, n_s), np.nan, dtype=float)
-    dims = np.zeros(n_p, dtype=int)
-    for i, prob in enumerate(problems):
-        for j, solver in enumerate(solvers):
-            entry = agg.get((prob, solver))
-            if entry is None or not entry["solved"]:
-                continue
-            solved_idx = [k for k, s in enumerate(entry["solved"]) if s]
-            if not solved_idx:
-                continue
-            fevals_matrix[i, j] = float(
-                np.median([entry["fevals"][k] for k in solved_idx])
-            )
-            val_matrix[i, j] = float(
-                np.median([entry["best_val"][k] for k in solved_idx])
-            )
-            dims[i] = entry["dim"]
+    _, fevals_matrix, dims = profile_matrix_by_cell(rows, solvers)
 
     plot_performance_profile(
         fevals_matrix,
