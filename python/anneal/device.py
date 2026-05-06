@@ -217,10 +217,10 @@ def _count_from_bool(value: Any, *, xp: Any, device: Any) -> Any:
 
 
 def _objective_value(value: Any, *, xp: Any, device: Any, dtype: Any) -> Any:
-    if isinstance(value, bool | int | float | complex):
-        raise ValueError("device objectives must return an Array API array")
     if isinstance(value, np.generic):
         array = _asarray(value, xp=xp, device=device, dtype=dtype)
+    elif isinstance(value, bool | int | float | complex):
+        raise ValueError("device objectives must return an Array API array")
     elif _array_api_compat.is_array_api_obj(value) or hasattr(value, "__dlpack__"):
         array = _asarray(value, xp=xp, device=device, dtype=dtype)
     else:
