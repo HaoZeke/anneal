@@ -1,7 +1,9 @@
 """Smoke tests for benchmark catalog + plot helpers (Dolan-More, More-Wild, Pareto)."""
 
 import os
+import sys
 import tempfile
+import types
 
 import numpy as np
 import pytest
@@ -73,3 +75,70 @@ def test_pareto_renders_and_finds_front():
     assert set(front.tolist()) == {0, 1, 2}  # (800, 1.5) is dominated by (400, 1.0)
     fig, ax = plot_pareto([("solver_a", pts)])
     assert ax.get_legend() is not None
+
+
+def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    fake_pycutest = types.SimpleNamespace(
+        find_problems=lambda constraints: {
+            "unconstrained": ["ROSENBR", "BIG", "VARIABLE", "DUP"],
+            "bound": ["BOX3", "DUP"],
+        }[constraints],
+        problem_properties=lambda name: {
+            "ROSENBR": {"n": 2},
+            "BIG": {"n": 200},
+            "VARIABLE": {"n": "variable"},
+            "BOX3": {"n": 3},
+            "DUP": {"n": 4},
+        }[name],
+    )
+
+    monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
+    monkeypatch.setattr(suite, "setup_cutest_env", lambda: None)
+
+    assert suite.list_target_problems(dim_cap=10) == [
+        suite.TargetProblem("BOX3", "bound", 3),
+        suite.TargetProblem("DUP", "unconstrained", 4),
+        suite.TargetProblem("ROSENBR", "unconstrained", 2),
+    ]
+
+
+def test_cutest_full_suite_resume_key_normalises_seed():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    rows = [
+        {"problem": "ROSENBR", "driver": "classical", "seed": "0"},
+        {"problem": "ROSENBR", "driver": "bgsa", "seed": 1},
+    ]
+
+    assert suite.resume_keys(rows) == {
+        ("ROSENBR", "classical", "0"),
+        ("ROSENBR", "bgsa", "1"),
+    }
+
+
+def test_cutest_summary_reports_status_and_winners(tmp_path):
+    from experiments.scripts.summarize_cutest_benchmarks import summarize_csv
+
+    inp = tmp_path / "cutest.csv"
+    inp.write_text(
+        "problem,kind,dim,driver,seed,fevals,best_val,wall_time_s,f_x0,solved,status\n"
+        "P1,unconstrained,2,classical,0,10,1.0,0.1,2.0,1,ok\n"
+        "P1,unconstrained,2,bgsa,0,12,0.5,0.2,2.0,1,ok\n"
+        "P2,bound,3,classical,0,20,4.0,0.1,5.0,0,ok\n"
+        "P2,bound,3,bgsa,0,0,nan,0.0,5.0,0,timeout\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "summary.csv"
+
+    summary = summarize_csv(inp, out)
+
+    assert summary.coverage.problem_count == 2
+    assert summary.coverage.cell_count == 4
+    bgsa = summary.by_driver["bgsa"]
+    assert bgsa.cells == 2
+    assert bgsa.ok == 1
+    assert bgsa.timeout == 1
+    assert bgsa.best_cells == 1
+    assert out.read_text(encoding="utf-8").splitlines()[0].startswith("driver,cells,ok")
