@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 
 from anneal import Boltzmann, run_device
-from anneal.tvm_ffi import tvm_ffi_tensor, tvm_ffi_tensors_from_history
+from anneal.tvm_ffi import (
+    tvm_ffi_tensor,
+    tvm_ffi_tensor_metadata,
+    tvm_ffi_tensors_from_history,
+)
 
 
 class _FakeTvmFfi:
@@ -53,6 +57,26 @@ def test_tvm_ffi_tensors_from_history_exports_device_history_fields():
     ]
     assert tensors["best_pos"] == {"shape": (2,), "dtype": "float32"}
     assert len(fake.arrays) == len(tensors)
+
+
+@pytest.mark.gpu
+def test_tvm_ffi_metadata_preserves_cupy_dlpack_device():
+    cupy = pytest.importorskip("cupy")
+    if cupy.cuda.runtime.getDeviceCount() == 0:
+        pytest.skip("CUDA device required")
+
+    with cupy.cuda.Device(0):
+        array = cupy.asarray([1.0, 2.0], dtype=cupy.float32)
+        fake = _FakeTvmFfi()
+
+        metadata = tvm_ffi_tensor_metadata(array)
+        converted = tvm_ffi_tensor(array, tvm_ffi=fake)
+
+        assert metadata.shape == (2,)
+        assert metadata.dtype == "float32"
+        assert metadata.dlpack_device == (2, 0)
+        assert converted == {"shape": (2,), "dtype": "float32"}
+        assert fake.arrays == [array]
 
 
 def test_tvm_ffi_tensor_rejects_non_dlpack_objects():
