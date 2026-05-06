@@ -487,6 +487,63 @@ def test_bgsa_hmc_default_uses_omelyan_force_stages(monkeypatch):
     assert n_calls == 4
 
 
+def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class FakeHistory:
+        best_val = -1.25
+        total_accepted = 2
+        total_rejected = 4
+
+    def run_hmc(obj_fn, grad_fn, low, high, **kwargs):
+        captured["low"] = np.asarray(low)
+        captured["high"] = np.asarray(high)
+        captured["kwargs"] = kwargs
+        assert obj_fn(np.zeros(2)) == 0.0
+        assert grad_fn(np.zeros(2)).shape == (2,)
+        return FakeHistory()
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        hmc_sa=lambda *_args, **_kwargs: pytest.fail("demo HMC must not run"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        _QuadraticCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=5,
+        n_chains=4,
+        driver="bgsa",
+    )
+
+    assert best_val == -1.25
+    assert captured["kwargs"]["x0"] == pytest.approx([0.2, -0.2])
+    assert captured["kwargs"]["q"] == pytest.approx(1.1)
+    assert captured["kwargs"]["l_steps"] == 2
+    assert fevals == 11 + cutest._rust_hmc_fd_work_units(dim=2, n_trajectories=15, l_steps=2)
+
+
 @pytest.mark.parametrize(
     "module_name",
     [
