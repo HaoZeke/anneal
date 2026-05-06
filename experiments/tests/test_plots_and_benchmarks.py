@@ -506,6 +506,15 @@ def test_bgsa_q_gaussian_kinetics_are_overflow_stable():
     assert np.all(drift == 0.0)
 
 
+def test_bgsa_q_grid_bounds_respect_high_dimensional_momentum_limit():
+    from experiments.scripts.demo_bgsa import q_grid_bounds
+
+    q_lo, q_hi = q_grid_bounds(30, {"q_mean": 1.15, "q_sd": 0.1})
+
+    assert 1.0 <= q_lo < q_hi
+    assert q_hi < 1.0 + 2.0 / 30.0
+
+
 def test_bgsa_hmc_rejects_nonfinite_hamiltonians_without_warning(monkeypatch):
     from experiments.scripts import demo_bgsa as bgsa
 
@@ -740,6 +749,62 @@ def test_cutest_bgsa_uses_native_gradient_and_native_work_units(monkeypatch):
         l_steps=2,
         total_accepted=2,
     )
+
+
+def test_cutest_bgsa_clamps_q_for_high_dimensional_rust_hmc(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class HighDimProblem(_QuadraticCutestProblem):
+        dim = 30
+        low = np.full(30, -1.0)
+        high = np.full(30, 1.0)
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -2.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **kwargs):
+        captured["q"] = kwargs["q"]
+        return FakeHistory()
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.15,
+            0.4,
+            np.zeros(30, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        hmc_sa=lambda *_args, **_kwargs: pytest.fail("demo HMC must not run"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    cutest._bgsa_run(
+        HighDimProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa",
+    )
+
+    assert captured["q"] < 1.0 + 2.0 / 30.0
 
 
 def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
