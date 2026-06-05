@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+title: "anneal: typed simulated-annealing components"
+message: "If you use anneal, please cite the paper and the software."
+type: software
+authors:
+  - family-names: "Goswami"
+    given-names: "Rohit"
+    orcid: "https://orcid.org/0000-0002-2393-8056"
+  - family-names: "Goswami"
+    given-names: "Ruhila"
+  - family-names: "Goswami"
+    given-names: "Amrita"
+  - family-names: "Sallermann"
+    given-names: "Moritz"
+    orcid: "https://orcid.org/0000-0002-2355-9355"
+  - family-names: "Goswami"
+    given-names: "Sonaly"
+  - family-names: "Goswami"
+    given-names: "Debabrata"
+repository-code: "https://github.com/HaoZeke/anneal"
+url: "https://anneal.rgoswami.me"
+license: MIT
+references:
+  - type: article
+    title: "Typed Component Algebras for Simulated Annealing: Mechanized Equivalences, a Safety-Liveness Specification, and Finite-Precision Effects"
+    authors:
+      - family-names: "Goswami"
+        given-names: "Rohit"
+      - family-names: "Goswami"
+        given-names: "Ruhila"
+      - family-names: "Goswami"
+        given-names: "Amrita"
+      - family-names: "Sallermann"
+        given-names: "Moritz"
+      - family-names: "Goswami"
+        given-names: "Sonaly"
+      - family-names: "Goswami"
+        given-names: "Debabrata"
+    year: 2026
+    journal: "INFORMS Journal on Computing (under review)"
+  - type: article
+    title: "Unified Software Design Patterns for Simulated Annealing"
+    authors:
+      - family-names: "Goswami"
+        given-names: "Rohit"
+    year: 2023
+    notes: "arXiv:2302.02811"
