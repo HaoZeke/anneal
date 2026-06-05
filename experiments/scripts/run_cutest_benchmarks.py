@@ -72,8 +72,10 @@ def _step_chain_observed(prob, rng, cur_pos, cur_val, best_val, temp, sigma):
     return cur_pos, cur_val, best_val, accepted, improved
 
 
-def classical_sa(prob, seed, n_epochs, k_fixed, sigma=0.5, t_init=5.0):
+def classical_sa(prob, seed, n_epochs, k_fixed, sigma=None, t_init=5.0):
     rng = np.random.default_rng(seed)
+    if sigma is None:
+        sigma = _auto_sigma(prob)
     cur_pos = rng.uniform(prob.low, prob.high).astype(np.float64)
     cur_val = prob.fn(cur_pos)
     best_val = cur_val
@@ -104,11 +106,13 @@ def mcmc_sa(
     k_check,
     k_max,
     rhat_threshold,
-    sigma=0.5,
+    sigma=None,
     t_init=5.0,
     sparse=False,
     straggler_top_k=0,
 ):
+    if sigma is None:
+        sigma = _auto_sigma(prob)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
     chain_val = [prob.fn(p) for p in chain_pos]
@@ -199,7 +203,7 @@ def mcmc_sa_budgeted(
     k_min=30,
     k_check=20,
     rhat_threshold=1.2,
-    sigma=0.5,
+    sigma=None,
     t_init=5.0,
     sparse=False,
     straggler_top_k=0,
@@ -209,6 +213,8 @@ def mcmc_sa_budgeted(
     if epoch_budget < 1:
         raise ValueError("epoch_budget must be positive")
 
+    if sigma is None:
+        sigma = _auto_sigma(prob)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
     chain_val = [prob.fn(p) for p in chain_pos]
@@ -285,7 +291,7 @@ def pt_sa_budgeted(
     n_chains,
     epoch_budget,
     swap_period=5,
-    sigma=0.5,
+    sigma=None,
     t_init=5.0,
     t_hot_multiplier=4.0,
     return_diagnostics=False,
@@ -299,6 +305,8 @@ def pt_sa_budgeted(
     if t_hot_multiplier <= 1.0:
         raise ValueError("t_hot_multiplier must exceed one")
 
+    if sigma is None:
+        sigma = _auto_sigma(prob)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     swap_rng = np.random.default_rng(seed + n_chains + 1)
     chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
@@ -363,13 +371,23 @@ def _auto_chain_count(prob, max_fevals):
 
 
 def _auto_sigma(prob):
+    """Per-coordinate Gaussian proposal scale for random-walk Metropolis.
+
+    The optimal RWM scale falls as 1/sqrt(dim): with a fixed per-coordinate
+    sigma the total step magnitude grows as sigma*sqrt(dim), so acceptance
+    collapses to zero in high dimension and the chain freezes. Scaling the
+    per-coordinate sigma by the box diagonal divided by dim keeps the total
+    step magnitude at O(box) across dimensions.
+    """
     low = np.asarray(prob.low, dtype=np.float64)
     high = np.asarray(prob.high, dtype=np.float64)
     dim = max(len(low), 1)
-    span = np.linalg.norm(high - low) / np.sqrt(dim)
-    if not np.isfinite(span) or span <= 0.0:
-        span = 1.0
-    return float(np.clip(0.25 * span, 0.05, 0.5))
+    diag = float(np.linalg.norm(high - low))
+    if not np.isfinite(diag) or diag <= 0.0:
+        diag = float(np.sqrt(dim))
+    per_coord_width = diag / np.sqrt(dim)
+    sigma = 0.25 * diag / dim  # = 0.25 * per_coord_width / sqrt(dim)
+    return float(np.clip(sigma, 1e-6, per_coord_width))
 
 
 def _auto_initial_temperature(chain_val):
