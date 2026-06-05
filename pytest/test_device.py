@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import array_api_compat
 
-from anneal import Boltzmann, DeviceHistory, run_device
+from anneal import Boltzmann, DeviceHistory, EnsembleHistory, run_device, run_ensemble
 
 
 def styblinski_tang_array(array):
@@ -93,3 +93,72 @@ def test_run_device_keeps_cupy_arrays_on_cuda():
         assert hasattr(history.best_val, "__dlpack__")
         assert history.best_pos.__dlpack_device__() == (2, 0)
         assert history.best_val.__dlpack_device__() == (2, 0)
+
+
+def test_run_ensemble_numpy_shapes_and_global_min():
+    dim, n_chains = 2, 256
+    low = np.full(dim, -5.0)
+    high = np.full(dim, 5.0)
+
+    history = run_ensemble(
+        styblinski_tang_array,
+        low,
+        high,
+        Boltzmann(t_init=5.0, sigma=0.5),
+        n_chains=n_chains,
+        n_epochs=30,
+        steps_per_epoch=120,
+        seed=0,
+    )
+
+    assert isinstance(history, EnsembleHistory)
+    assert history.best_pos.shape == (n_chains, dim)
+    assert history.best_val.shape == (n_chains,)
+    assert history.global_best_pos.shape == (dim,)
+    # Known 2D Styblinski-Tang minimum is -39.16599 * 2 = -78.33198; the
+    # ensemble best should be at that basin.
+    assert float(history.global_best_val) < -78.0
+    # The reported global best is the minimum over the per-chain bests.
+    assert float(history.global_best_val) == pytest.approx(float(history.best_val.min()))
+    total = float(history.accepted) + float(history.rejected)
+    assert total == n_chains * 30 * 120
+
+
+def test_run_ensemble_rejects_unbatched_objective():
+    with pytest.raises(ValueError):
+        run_ensemble(
+            scalar_styblinski_tang,  # returns a Python float, not a batched array
+            np.full(2, -5.0),
+            np.full(2, 5.0),
+            Boltzmann(t_init=5.0, sigma=0.5),
+            n_chains=8,
+            n_epochs=2,
+            steps_per_epoch=2,
+            seed=0,
+        )
+
+
+def test_run_ensemble_cuda_resident_when_available():
+    cupy = pytest.importorskip("cupy")
+    if cupy.cuda.runtime.getDeviceCount() == 0:
+        pytest.skip("no CUDA device")
+    dim, n_chains = 5, 1024
+    low = cupy.full(dim, -5.0)
+    high = cupy.full(dim, 5.0)
+
+    history = run_ensemble(
+        styblinski_tang_array,
+        low,
+        high,
+        Boltzmann(t_init=5.0, sigma=0.5),
+        n_chains=n_chains,
+        n_epochs=20,
+        steps_per_epoch=80,
+        seed=0,
+    )
+
+    assert isinstance(history.best_pos, cupy.ndarray)
+    assert isinstance(history.best_val, cupy.ndarray)
+    assert history.best_pos.shape == (n_chains, dim)
+    assert history.best_pos.device.id == 0
+    assert hasattr(history.best_pos, "__dlpack__")
