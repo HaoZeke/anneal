@@ -23,15 +23,16 @@ import time
 import array_api_compat
 import numpy as np
 
+from anneal import Boltzmann, Fast, Gsa
 from anneal.device import run_ensemble
 
-
-class Boltzmann:
-    """Minimal Boltzmann preset (log cooling, Gaussian proposal)."""
-
-    def __init__(self, t_init: float = 5.0, sigma: float = 0.5):
-        self.t_init = t_init
-        self.sigma = sigma
+# The three algebra presets, all driven GPU-resident through the one device
+# backend: BSA (Gaussian/log), FSA (Cauchy/reciprocal), GSA (Tsallis).
+PRESETS = {
+    "bsa": Boltzmann(t_init=5.0, sigma=0.5),
+    "fsa": Fast(t_init=5.0, gamma=0.5),
+    "gsa": Gsa(t_init=5.0, q_v=2.62, q_a=1.7),
+}
 
 
 def styb_tang(x):
@@ -89,42 +90,49 @@ def main():
     p.add_argument("--steps-per-epoch", type=int, default=150)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--backend", default="all", choices=["all", "numpy", "cupy"])
+    p.add_argument("--presets", default="bsa,fsa,gsa")
     args = p.parse_args()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
 
     obj_fn, lo, hi, known = OBJECTIVES[args.objective]
     dims = [int(d) for d in args.dims.split(",")]
     chains = [int(c) for c in args.chains.split(",")]
+    presets = [p.strip() for p in args.presets.split(",")]
     backends = _backends(args.backend)
     if not backends:
         raise SystemExit("no usable backend")
 
     rows = []
     timing = {}
-    for dim in dims:
-        for n_chains in chains:
-            for name, xp in backends.items():
-                low = xp.asarray(np.full(dim, lo), dtype=xp.float64)
-                high = xp.asarray(np.full(dim, hi), dtype=xp.float64)
-                _sync(xp)
-                t0 = time.perf_counter()
-                h = run_ensemble(obj_fn, low, high, Boltzmann(),
-                                 n_chains=n_chains, n_epochs=args.n_epochs,
-                                 steps_per_epoch=args.steps_per_epoch, seed=args.seed)
-                best = float(h.global_best_val)
-                _sync(xp)
-                wall = time.perf_counter() - t0
-                timing[(dim, n_chains, name)] = wall
-                rows.append(dict(backend=name, objective=args.objective, dim=dim,
-                                 n_chains=n_chains, n_epochs=args.n_epochs,
-                                 steps_per_epoch=args.steps_per_epoch,
-                                 wall_time_s=f"{wall:.4f}", global_best=f"{best:.6f}",
-                                 known_min=f"{known(dim):.6f}"))
-                print(f"  {name:6s} obj={args.objective} dim={dim:3d} chains={n_chains:6d} "
-                      f"wall={wall:8.3f}s best={best:.4f}")
-            if "numpy" in backends and "cupy" in backends:
-                sp = timing[(dim, n_chains, "numpy")] / timing[(dim, n_chains, "cupy")]
-                print(f"    -> GPU speedup x{sp:.1f} at dim={dim} chains={n_chains}")
+    for preset_name in presets:
+        preset = PRESETS[preset_name]
+        for dim in dims:
+            for n_chains in chains:
+                for name, xp in backends.items():
+                    low = xp.asarray(np.full(dim, lo), dtype=xp.float64)
+                    high = xp.asarray(np.full(dim, hi), dtype=xp.float64)
+                    _sync(xp)
+                    t0 = time.perf_counter()
+                    h = run_ensemble(obj_fn, low, high, preset,
+                                     n_chains=n_chains, n_epochs=args.n_epochs,
+                                     steps_per_epoch=args.steps_per_epoch, seed=args.seed)
+                    best = float(h.global_best_val)
+                    _sync(xp)
+                    wall = time.perf_counter() - t0
+                    timing[(preset_name, dim, n_chains, name)] = wall
+                    rows.append(dict(preset=preset_name, backend=name,
+                                     objective=args.objective, dim=dim,
+                                     n_chains=n_chains, n_epochs=args.n_epochs,
+                                     steps_per_epoch=args.steps_per_epoch,
+                                     wall_time_s=f"{wall:.4f}", global_best=f"{best:.6f}",
+                                     known_min=f"{known(dim):.6f}"))
+                    print(f"  {preset_name} {name:6s} obj={args.objective} dim={dim:3d} "
+                          f"chains={n_chains:6d} wall={wall:8.3f}s best={best:.4f}")
+                if "numpy" in backends and "cupy" in backends:
+                    sp = (timing[(preset_name, dim, n_chains, "numpy")]
+                          / timing[(preset_name, dim, n_chains, "cupy")])
+                    print(f"    -> {preset_name} GPU speedup x{sp:.1f} "
+                          f"at dim={dim} chains={n_chains}")
 
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
