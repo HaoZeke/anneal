@@ -1,0 +1,85 @@
+#+TITLE: Device backend, ensembles, and noise-aware acceptance
+#+AUTHOR: anneal developers
+
+This page covers the parts of =anneal= that exploit the typed component
+algebra to share one implementation across every variant: the GPU-resident
+device path, the batched ensemble runner, the dimension-collapse surrogate,
+and the noise-aware acceptance rule. Each is a single change at one of the
+five component slots (=Obj=, =Cool=, =Neigh=, =Move=, =Accept=) that serves
+Boltzmann, Fast, and Generalized SA alike.
+
+* Array API device path
+
+=anneal.run_device= runs the single-chain transition kernel through the
+namespace inferred from its bounds array. Pass NumPy bounds and it runs on the
+CPU; pass CuPy bounds and the whole loop stays resident on the GPU. The
+returned =DeviceHistory= keeps every field in the same namespace and on the
+same device, and exposes a DLPack boundary for zero-copy handoff to other
+runtimes.
+
+#+begin_src python
+import cupy as cp
+from anneal import Boltzmann, run_device
+
+low = cp.full(2, -5.0)
+high = cp.full(2, 5.0)
+history = run_device(objective, low, high, Boltzmann(t_init=5.0, sigma=0.5),
+                     n_epochs=100, steps_per_epoch=200, seed=0)
+# history.best_pos is a CuPy array on device 0
+#+end_src
+
+* Batched ensemble runner
+
+A single chain underuses a GPU: one vector per step is kernel-launch bound.
+=anneal.run_ensemble= runs ``n_chains`` independent chains as one batched
+kernel, with state shape ``(n_chains, dim)`` and the objective evaluated over
+the whole batch, so the ensemble width saturates the device. The transition
+kernel is the same as =run_device=; only a leading batch axis is added, and
+the same call drives every preset.
+
+#+begin_src python
+from anneal import Fast, run_ensemble
+
+history = run_ensemble(batched_objective, low, high, Fast(t_init=5.0, gamma=0.5),
+                       n_chains=16384, n_epochs=40, steps_per_epoch=150, seed=0)
+best = history.global_best_val   # min over the per-chain bests
+#+end_src
+
+On a consumer GPU the batched ensemble reaches the same global minimum as the
+NumPy backend; the GPU carries a fixed per-run kernel cost of a few seconds, so
+the CPU is faster for narrow ensembles, but the GPU overtakes it once the
+ensemble is wide enough. The speedup is an ensemble-width effect and is the
+same for the Boltzmann, Fast, and Generalized presets because they share the
+one backend. The =experiments/scripts/gpu_ensemble_benchmark.py= script
+reproduces the CPU-versus-GPU comparison across the three presets.
+
+* Dimension-collapse surrogate (optional)
+
+For high-dimensional objectives with low-dimensional active structure, the
+=Obj= slot accepts an optional acceleration: an active subspace estimated from
+a pilot gradient covariance collapses the search to a few coordinates, and a
+total-degree Chebyshev model on that box supplies a cheap value and an analytic
+gradient. The transforms ship as =ReducedObjective= and =ChebyshevSurrogate=
+in the =eindir= core, and a single fitted reduction serves every driver. It is
+an accelerator for near-low-rank problems, not a requirement: full-rank
+problems run through the native, dimension-scaled drivers directly.
+
+* Noise-aware acceptance
+
+When the cost difference is known only through noisy samples, the =Accept=
+slot accepts a sequential rule rather than a fixed probability. The
+=experiments/osa.py= module implements the Optimized Stochastic Annealing rule
+of Ball, Branke, and Meisel: it draws cost-difference samples until it can
+decide, accepting by a per-step rule that preserves detailed balance while
+maximizing acceptance per sample. Finite-precision rounding on the cost
+difference is a bounded instance of exactly this noise, so the same rule serves
+as a precision policy.
+
+* High dimension is native
+
+The random-walk drivers explore high-dimensional problems without any
+reduction once the proposal scale follows the standard ``1/sqrt(D)`` law; a
+fixed per-coordinate step makes the total move grow as ``sqrt(D)`` and
+acceptance collapse. The drivers scale the proposal by the box diagonal over
+the dimension, keeping the move size and the acceptance rate stable as the
+dimension grows.

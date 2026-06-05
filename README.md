@@ -1,4 +1,6 @@
-![Logo](./branding/logo/anneal_logo.png)
+<p align="center">
+  <img src="./branding/logo/anneal_logo.png" alt="Anneal" width="280">
+</p>
 
 # Anneal [![DOI](https://zenodo.org/badge/597892274.svg)](https://zenodo.org/doi/10.5281/zenodo.10672746)
 
