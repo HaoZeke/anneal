@@ -65,7 +65,12 @@ build_meson() {
     echo "[bootstrap] $pkg already configured"
   else
     echo "[bootstrap] Configuring $pkg with Meson"
-    (cd "$src" && meson setup builddir --prefix="$src/install")
+    # CUTEst's threaded test targets carry a Fortran module-ordering bug
+    # (cutest_kinds_*.mod built after the threaded tests that use it) and are
+    # not needed by pycutest, which links only the libcutest_* archives.
+    extra=""
+    if [ "$pkg" = "CUTEst" ]; then extra="-Dtests=false"; fi
+    (cd "$src" && meson setup builddir --prefix="$src/install" $extra)
   fi
   if has_required_paths "$@"; then
     echo "[bootstrap] $pkg already installed"
