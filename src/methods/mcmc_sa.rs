@@ -11,7 +11,7 @@
 //! typed algebra.
 //!
 //! See the IISE manuscript Section 8.3 "Extension to distributed and
-//! parallel-tempering settings" and design_pass_07 in obsidian-notes
+//! parallel-tempering settings" and the design notes
 //! for the full unification story.
 
 use rand::rngs::StdRng;

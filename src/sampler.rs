@@ -7,7 +7,7 @@
 //! parameters `<O, C, N, M, A>`; this trait gives the driver a single
 //! type bound and a single dispatch point.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_04_lit_survey.org`
+//! See `the design notes`
 //! task A1 for the design rationale.
 
 use eindir_core::FPair;

@@ -7,7 +7,7 @@
 //! Pure observable: takes the two energy series and returns
 //! `(Delta F, sigma^2)`. No kernel perturbation.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_13_metad_bar.org`.
+//! See `the design notes`.
 
 /// Fermi function `f(x) = 1 / (1 + exp(x))`, numerically stable.
 fn fermi(x: f64) -> f64 {

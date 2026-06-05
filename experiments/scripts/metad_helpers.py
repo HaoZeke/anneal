@@ -9,7 +9,7 @@ not grow without bound.
 
 Used by demo_bgsa.py's bgsa_metad driver to flatten the cost
 landscape on multimodal benchmarks. Closes the SA-enhanced-sampling
-gap from design_pass_12_unifier_lit_gaps.org Item 2.
+gap from the design notes Item 2.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class WellTemperedBiasOnFeaturizer:
     The black-box sampler does not need user-supplied CVs: it runs a
     short pilot trajectory, fits a Featurizer to discover the slow
     modes, then biases those modes via metadynamics. This is the
-    closure of design_pass_13 metadynamics + the user's "no
+    closure of the design notes metadynamics + the user's "no
     user-facing CV shit" constraint.
     """
 

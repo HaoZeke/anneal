@@ -10,7 +10,7 @@ hyperparameters. Compares against:
 
 Reports per-driver: best_val mean, std, fevals, wall_time, posterior 95%
 upper bound on best_val (the bGSA-specific statistic from
-design_pass_10_bgsa_formalism.org Section 5)."""
+the design notes Section 5)."""
 
 from __future__ import annotations
 
@@ -3477,7 +3477,7 @@ def main():
         if not sub:
             continue
         bvs = np.array([r["best_val"] for r in sub])
-        # 95% upper bound (bGSA's headline statistic per design_pass_10)
+        # 95% upper bound (bGSA's headline statistic per the design notes)
         ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
         print(
             f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "

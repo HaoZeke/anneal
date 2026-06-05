@@ -9,7 +9,7 @@
 //!   - The bias is a stateful component: `deposit` mutates internal
 //!     state, `potential` reads it.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_13_metad_bar.org`.
+//! See `the design notes`.
 
 use ndarray::{Array1, Array2, ArrayView1};
 

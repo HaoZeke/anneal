@@ -116,7 +116,7 @@ where
     /// This is the v0.3.2 fix for the gap where a deliberately-broken
     /// AcceptRule whose `accept_prob` violated L3 still constructed
     /// cleanly because the trait method that returned the law witness
-    /// could lie. See design_pass_04_lit_survey.org task A6.
+    /// could lie. See the design notes task A6.
     #[allow(clippy::too_many_arguments)]
     pub fn checked_with_sweep(
         obj: O,

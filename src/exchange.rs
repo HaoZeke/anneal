@@ -17,7 +17,7 @@
 //!     the Exchange every `swap_period` steps to attempt adjacent-pair
 //!     swaps.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_07_parallelism_scoping.org`
+//! See `the design notes`
 //! Section P3 for the full design.
 
 use num_traits::Float;
