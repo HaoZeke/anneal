@@ -22,7 +22,13 @@ rust_generate_mode = "always"
 
 html_theme        = "shibuya"
 html_static_path  = ["_static"]
-html_theme_options = {"github_url": "https://github.com/HaoZeke/anneal"}
+html_favicon      = "_static/favicon.png"
+html_theme_options = {
+    "github_url": "https://github.com/HaoZeke/anneal",
+    "light_logo": "_static/anneal_icon.png",
+    "dark_logo": "_static/anneal_icon.png",
+    "og_image_url": "https://anneal.rgoswami.me/_static/og-image.png",
+}
 
 intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),

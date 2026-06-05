@@ -2,9 +2,16 @@
 #+AUTHOR: anneal developers
 #+DATE: 2026
 
+#+begin_export rst
+.. image:: /_static/anneal_logo.png
+   :width: 420
+   :align: center
+   :alt: anneal
+#+end_export
+
 * About
 
-=anneal= ships simulated-annealing components on the eindir typed
+=anneal= provides simulated-annealing components on the eindir typed
 primitives. The Python user-facing surface is unchanged from the
 legacy package; the Rust crate =anneal-core= now backs the
 implementations, with =pyo3= bindings exposed as =anneal._core= and
@@ -12,7 +19,21 @@ a C/C++ ABI for downstream native consumers.
 
 * Contents
 
-#+TOC: headlines 2
+#+begin_export rst
+.. toctree::
+   :maxdepth: 2
+
+   tutorials
+   architecture
+   spec
+   bindings
+   device
+   faq
+   contributing
+   changelog
+   code_of_conduct
+   used_by
+#+end_export
 
 * Background
 
