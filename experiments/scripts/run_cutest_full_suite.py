@@ -205,8 +205,65 @@ def append_target_timeout_rows(
     return appended
 
 
-def load_problem(name: str):
-    return load(name, sif_params=None)
+# Pilot work units spent fitting each problem's reduction, charged into the
+# reported fevals of every cell that runs in the reduced space. Keyed by name;
+# read back in the same process that fit it (the forked cell worker).
+_REDUCTION_PILOT_WORK: dict[str, float] = {}
+
+
+def maybe_reduce(prob, args):
+    """Collapse a high-dimensional problem onto an active subspace.
+
+    When ``--reduce`` is set and ``prob.dim`` exceeds the threshold, fit the
+    dimension-collapse + Chebyshev surrogate (deterministically, with a fixed
+    pilot seed so the reduced coordinate system is identical across seeds and
+    drivers) and return a reduced ``CutestProblem``. The reduced ``fn``
+    evaluates the true objective at the decoded point, so ``best_val`` stays
+    honest; the reduced ``grad`` is the surrogate's cheap analytic gradient,
+    which the HMC driver consumes in place of an ``n+1`` finite difference.
+    """
+    import dataclasses
+
+    if not getattr(args, "reduce", False):
+        return prob
+    threshold = int(getattr(args, "surrogate_dim_threshold", 0) or 0)
+    if threshold <= 0 or prob.dim <= threshold:
+        return prob
+
+    from surrogate import fit_reduced_surrogate
+
+    fit = fit_reduced_surrogate(
+        prob.fn, prob.grad, prob.low, prob.high, prob.dim,
+        k=int(args.surrogate_k), degree=int(args.surrogate_degree),
+        n_pilot=getattr(args, "surrogate_pilot", None), rng=12345,
+    )
+    decode = fit.encoder.decode
+    true_fn = prob.fn
+    surrogate_grad = fit.surrogate.grad
+
+    def reduced_fn(r, _fn=true_fn, _dec=decode):
+        return float(_fn(_dec(r)))
+
+    def reduced_grad(r, _g=surrogate_grad):
+        return _g(r)
+
+    reduced = dataclasses.replace(
+        prob,
+        dim=fit.surrogate.k,
+        fn=reduced_fn,
+        grad=reduced_grad,
+        low=np.asarray(fit.reduced_low, dtype=float),
+        high=np.asarray(fit.reduced_high, dtype=float),
+    )
+    _REDUCTION_PILOT_WORK[prob.name] = float(fit.pilot_work_units)
+    return reduced
+
+
+def load_problem(name: str, args=None):
+    prob = load(name, sif_params=None)
+    if args is not None:
+        prob = maybe_reduce(prob, args)
+    return prob
 
 
 def centre_value(prob) -> float:
@@ -294,18 +351,22 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
 
 
-def _load_cell_problem(problem_ref):
+def _load_cell_problem(problem_ref, args=None):
     if isinstance(problem_ref, str):
-        return load_problem(problem_ref)
+        return load_problem(problem_ref, args)
     return problem_ref
+
+
+def _pilot_work(prob) -> int:
+    return int(_REDUCTION_PILOT_WORK.get(getattr(prob, "name", ""), 0))
 
 
 def _driver_worker(queue, problem_ref, driver: str, seed: int, args) -> None:
     try:
-        prob = _load_cell_problem(problem_ref)
+        prob = _load_cell_problem(problem_ref, args)
         f0 = centre_value(prob)
         best_val, fevals = run_driver(prob, driver, seed, args)
-        queue.put(("ok", (best_val, fevals, f0)))
+        queue.put(("ok", (best_val, fevals + _pilot_work(prob), f0)))
     except Exception as exc:
         queue.put(("err", type(exc).__name__))
 
@@ -323,10 +384,10 @@ def run_driver_cell(problem_ref, driver: str, seed: int, args) -> tuple[float, i
     if ctx is None:
         try:
             with per_problem_timeout(args.per_problem_timeout):
-                prob = _load_cell_problem(problem_ref)
+                prob = _load_cell_problem(problem_ref, args)
                 f0 = centre_value(prob)
                 best_val, fevals = run_driver(prob, driver, seed, args)
-            return best_val, fevals, f0, "ok"
+            return best_val, fevals + _pilot_work(prob), f0, "ok"
         except TimeoutError:
             return float("nan"), 0, float("nan"), "timeout"
         except Exception as exc:
@@ -452,6 +513,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default="data/cutest_full.csv")
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--dim-cap", type=int, default=50)
+    parser.add_argument("--reduce", action="store_true",
+                        help="Collapse problems above the dimension threshold onto an "
+                             "active subspace with a Chebyshev surrogate gradient.")
+    parser.add_argument("--surrogate-dim-threshold", type=int, default=0,
+                        help="Wrap problems with dim above this (0 disables).")
+    parser.add_argument("--surrogate-k", type=int, default=4,
+                        help="Reduced (active-subspace) dimension.")
+    parser.add_argument("--surrogate-degree", type=int, default=6,
+                        help="Total-degree of the Chebyshev surrogate.")
+    parser.add_argument("--surrogate-pilot", type=int, default=None,
+                        help="Pilot sample size (default scales with the basis size).")
     parser.add_argument("--load-timeout", type=int, default=30)
     parser.add_argument("--per-problem-timeout", type=int, default=180)
     parser.add_argument("--n-epochs", type=int, default=30)
