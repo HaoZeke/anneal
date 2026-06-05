@@ -139,7 +139,7 @@ def _plain(counter, low, high, dim, rng):
     return min(best, counter.best)
 
 
-def hybrid_de(counter, low, high, dim, rng, n_polish=6):
+def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1):
     """Self-adaptive (jDE) differential mutation in the Move slot, with SA
     Metropolis acceptance, a cooled temperature, and periodic L-BFGS-B polish.
 
@@ -180,10 +180,14 @@ def hybrid_de(counter, low, high, dim, rng, n_polish=6):
                         best_v, best_x = float(ft), trial.copy()
             gen += 1
             if counter.n - last >= polish_every:
-                res = minimize(counter, best_x, method="L-BFGS-B", bounds=bounds,
-                               options={"maxfun": max(20, counter.budget // (2 * n_polish))})
-                if res.fun < best_v:
-                    best_v, best_x = float(res.fun), np.asarray(res.x, float)
+                maxfun = max(20, counter.budget // (2 * n_polish * k_polish))
+                for j in np.argsort(vals)[:k_polish]:
+                    res = minimize(counter, pop[int(j)], method="L-BFGS-B", bounds=bounds,
+                                   options={"maxfun": maxfun})
+                    if res.fun < vals[int(j)]:
+                        pop[int(j)] = np.asarray(res.x, float); vals[int(j)] = float(res.fun)
+                    if res.fun < best_v:
+                        best_v, best_x = float(res.fun), np.asarray(res.x, float)
                 last = counter.n
     except _Budget:
         pass
