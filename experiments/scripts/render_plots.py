@@ -21,6 +21,7 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "anneal-matplotlib"),
 )
 
+from experiments.cutest_convergence import DEFAULT_TAU, converged_mask
 from experiments.plots.data_profile import plot_data_profile
 from experiments.plots.pareto import plot_pareto
 from experiments.plots.performance_profile import plot_performance_profile
@@ -123,15 +124,21 @@ def _seed_sort_key(seed: str) -> tuple[int, int | str]:
 
 
 def profile_matrix_by_cell(
-    rows: list[dict], solvers: list[str]
+    rows: list[dict], solvers: list[str], tau: float = DEFAULT_TAU
 ) -> tuple[list[tuple[str, str]], np.ndarray, np.ndarray]:
-    """Return objective-equivalent costs by problem-seed cell and solver."""
+    """Return objective-equivalent costs by problem-seed cell and solver.
+
+    A cell contributes its cost only when the solver converged under the
+    Moré-Wild test at tolerance ``tau`` (best across the compared solvers as
+    the reference), not under the earlier box-centre flag.
+    """
     cells = sorted(
         {(str(row["problem"]), str(row["seed"])) for row in rows},
         key=lambda key: (key[0], _seed_sort_key(key[1])),
     )
     solver_index = {solver: idx for idx, solver in enumerate(solvers)}
     cell_index = {cell: idx for idx, cell in enumerate(cells)}
+    converged = converged_mask(rows, solvers, tau)
 
     fevals = np.full((len(cells), len(solvers)), np.nan, dtype=float)
     dims = np.zeros(len(cells), dtype=int)
@@ -143,7 +150,7 @@ def profile_matrix_by_cell(
         if solver not in solver_index:
             continue
         cost = _float_or_nan(row.get("fevals"))
-        if _status_ok(row) and _int_or_zero(row.get("solved")) and math.isfinite(cost):
+        if converged.get((cell[0], cell[1], solver), False) and math.isfinite(cost):
             fevals[i, solver_index[solver]] = cost
     return cells, fevals, dims
 
@@ -201,6 +208,8 @@ def main():
         default=",".join(DEFAULT_FIGURE_DRIVERS),
         help="Comma-separated driver subset for manuscript figures; use all for every CSV driver.",
     )
+    p.add_argument("--tau", type=float, default=DEFAULT_TAU,
+                   help="Moré-Wild convergence tolerance for the profiles.")
     args = p.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
@@ -209,7 +218,7 @@ def main():
     requested = None if args.drivers == "all" else _split_driver_list(args.drivers)
     solvers = ordered_solvers(rows, requested=requested)
     solver_labels = display_solver_names(solvers)
-    _, fevals_matrix, dims = profile_matrix_by_cell(rows, solvers)
+    _, fevals_matrix, dims = profile_matrix_by_cell(rows, solvers, args.tau)
 
     plot_performance_profile(
         fevals_matrix,
