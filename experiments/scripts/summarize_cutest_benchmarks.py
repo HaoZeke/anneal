@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from experiments.cutest_convergence import DEFAULT_TAU, converged_mask
+
 
 @dataclass(frozen=True)
 class Coverage:
@@ -94,11 +96,15 @@ def _finite_problem_seed_cells(rows: list[dict]) -> set[tuple[str, str]]:
     return cells
 
 
-def summarize_rows(rows: list[dict]) -> Summary:
+def summarize_rows(rows: list[dict], tau: float = DEFAULT_TAU) -> Summary:
     problems = {str(row["problem"]) for row in rows}
     kinds = {str(row.get("kind", "")) for row in rows if row.get("kind")}
     wins = _best_cells(rows)
     best_cell_total = len(_finite_problem_seed_cells(rows))
+    # Moré-Wild convergence against the best objective reached by any driver on
+    # each problem-seed cell, replacing the box-centre solved flag.
+    all_drivers = {str(row["driver"]) for row in rows}
+    converged = converged_mask(rows, all_drivers, tau)
 
     by_driver_rows: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -112,7 +118,10 @@ def summarize_rows(rows: list[dict]) -> Summary:
         ]
         timeout = sum(1 for row in sub if _is_timeout_status(row.get("status")))
         error = sum(1 for row in sub if str(row.get("status", "")).startswith("err:"))
-        solved = sum(_int_or_zero(row.get("solved")) for row in sub)
+        solved = sum(
+            1 for row in sub
+            if converged.get((str(row["problem"]), str(row["seed"]), driver), False)
+        )
         fevals = [_float_or_nan(row.get("fevals")) for row in ok_rows]
         best_vals = [_float_or_nan(row.get("best_val")) for row in ok_rows]
         best_cells = wins.get(driver, 0)
