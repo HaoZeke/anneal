@@ -4,7 +4,7 @@
 //! identity metric. Phase 2 (q-Gaussian momentum) and Phase 3
 //! (NUTS-style trajectory adaptation) build on top.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_09_method_b_hmc.org`.
+//! See `the design notes`.
 
 pub mod integrator;
 pub mod momentum;

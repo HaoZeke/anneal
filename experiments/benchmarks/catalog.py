@@ -9,7 +9,7 @@ in plots/, (b) the IISE Section 6 benchmarking table.
 The deeper CUTEst / GALAHAD integration via pycutest lives in
 `cutest_runner.py` once `pycutest` lands in the verify env (system
 deps: gfortran + sifdecode); see the design pass at
-`~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_05_benchmark_integration.org`
+`the design notes`
 when it lands.
 """
 

@@ -17,7 +17,7 @@
 //! Phase 3b will refine the U-turn for q-Gaussian when the
 //! `Z_q(p) > 0` guard becomes meaningful at higher q.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_11_pt_nuts_lit.org`
+//! See `the design notes`
 //! Section "NUTS Phase 3 design" for the full pseudocode.
 
 use eindir_core::{FPair, Objective};

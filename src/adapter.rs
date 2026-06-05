@@ -13,7 +13,7 @@
 //! land in subsequent commits; this commit ships the surface plus a
 //! no-op `IdentityAdapter` proving the trait composes with `run_rs`.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_04_lit_survey.org`
+//! See `the design notes`
 //! task A2 for the design rationale.
 
 use num_traits::Float;

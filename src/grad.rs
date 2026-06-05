@@ -2,7 +2,7 @@
 //! sampler family (Method B). Mirrors Stan's separation of the
 //! log-density and its gradient into separate compute paths.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_09_method_b_hmc.org`.
+//! See `the design notes`.
 
 use eindir_core::Objective;
 use ndarray::{Array1, ArrayView1};

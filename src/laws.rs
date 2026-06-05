@@ -10,7 +10,7 @@
 //! `SaVariant::checked_with_sweep` calls before returning, exercising
 //! each law on `n_samples` random inputs.
 //!
-//! See `~/Git/Gitlab/obsidian-notes/Software/anneal/design_pass_04_lit_survey.org`
+//! See `the design notes`
 //! task A6 for the design rationale.
 
 use ndarray::Array1;
