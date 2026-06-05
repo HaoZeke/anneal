@@ -21,7 +21,7 @@ from anneal._core import (
     run,
     run_hmc,
 )
-from anneal.device import DeviceHistory, run_device
+from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
 from anneal.tvm_ffi import (
     TvmFfiTensorMetadata,
     tvm_ffi_tensor,
@@ -32,6 +32,7 @@ from anneal.tvm_ffi import (
 __all__ = [
     "Boltzmann",
     "DeviceHistory",
+    "EnsembleHistory",
     "EpochLine",
     "Fast",
     "Gsa",
@@ -40,6 +41,7 @@ __all__ = [
     "__version__",
     "run",
     "run_device",
+    "run_ensemble",
     "run_hmc",
     "tvm_ffi_tensor",
     "tvm_ffi_tensor_metadata",

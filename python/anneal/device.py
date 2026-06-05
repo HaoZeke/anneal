@@ -325,4 +325,120 @@ def run_device(
     )
 
 
-__all__ = ["DeviceHistory", "run_device"]
+@dataclass(frozen=True)
+class EnsembleHistory:
+    """Result of a batched ensemble SA run over ``n_chains`` parallel chains.
+
+    ``best_pos``/``best_val`` are per-chain (shape ``(n_chains, dim)`` and
+    ``(n_chains,)``); ``global_best_pos``/``global_best_val`` reduce over the
+    ensemble. All fields stay on the device and in the namespace inferred from
+    the bounds.
+    """
+
+    best_pos: Any
+    best_val: Any
+    global_best_pos: Any
+    global_best_val: Any
+    accepted: Any
+    rejected: Any
+    namespace: Any
+    device: Any
+
+
+def _ensemble_objective_value(value: Any, n_chains: int, *, xp: Any, device: Any, dtype: Any) -> Any:
+    if isinstance(value, bool | int | float | complex):
+        raise ValueError("device objectives must return an Array API array")
+    if not (_array_api_compat.is_array_api_obj(value) or hasattr(value, "__dlpack__")
+            or isinstance(value, np.ndarray)):
+        raise ValueError("device objectives must return an Array API array")
+    array = _asarray(value, xp=xp, device=device, dtype=dtype)
+    if array.shape != (n_chains,):
+        raise ValueError(
+            f"batched device objectives must return shape ({n_chains},), got {array.shape}"
+        )
+    return array
+
+
+def run_ensemble(
+    obj_fn: Callable[[Any], Any],
+    low: Any,
+    high: Any,
+    preset: Any,
+    *,
+    n_chains: int,
+    n_epochs: int = 100,
+    steps_per_epoch: int = 200,
+    seed: int = 42,
+) -> EnsembleHistory:
+    """Run ``n_chains`` independent SA chains as one batched device kernel.
+
+    The state is ``(n_chains, dim)`` and ``obj_fn`` is called on the whole
+    batch, returning ``(n_chains,)``; every proposal, acceptance, and update is
+    vectorized over the ensemble. With a CuPy-backed ``low`` the ensemble runs
+    resident on the GPU, which is where batching over chains pays off. The
+    transition-kernel decomposition is the same as the single-chain
+    :func:`run_device`; only the leading batch axis is added.
+    """
+    if n_chains <= 0:
+        raise ValueError("n_chains must be positive")
+    if n_epochs <= 0 or steps_per_epoch <= 0:
+        raise ValueError("n_epochs and steps_per_epoch must be positive")
+
+    xp = _array_namespace(low)
+    device = _device(low)
+    dtype = getattr(low, "dtype", None)
+    low_array = _asarray(low, xp=xp, device=device, dtype=dtype)
+    high_array = _asarray(high, xp=xp, device=device, dtype=dtype)
+    if low_array.shape != high_array.shape or len(low_array.shape) != 1:
+        raise ValueError("low and high must be one-dimensional arrays of equal shape")
+    dim = low_array.shape[0]
+    shape = (n_chains, dim)
+
+    random = _Random(low_array, xp=xp, device=device, dtype=dtype, seed=seed)
+    span = high_array - low_array
+    current = low_array + random.uniform(shape) * span
+    current = xp.minimum(xp.maximum(current, low_array), high_array)
+    current_val = _ensemble_objective_value(obj_fn(current), n_chains, xp=xp, device=device, dtype=dtype)
+    best_pos = current + _asarray(0.0, xp=xp, device=device, dtype=dtype)
+    best_val = current_val + _asarray(0.0, xp=xp, device=device, dtype=dtype)
+
+    int_dtype = getattr(xp, "int64", None)
+    accepted_total = _asarray(0, xp=xp, device=device, dtype=int_dtype)
+    rejected_total = _asarray(0, xp=xp, device=device, dtype=int_dtype)
+
+    for epoch in range(n_epochs):
+        temp = _temperature(preset, epoch)
+        for _ in range(steps_per_epoch):
+            candidate = _proposal(current, temp, preset, random, xp)
+            candidate = xp.minimum(xp.maximum(candidate, low_array), high_array)
+            candidate_val = _ensemble_objective_value(
+                obj_fn(candidate), n_chains, xp=xp, device=device, dtype=dtype
+            )
+            delta = candidate_val - current_val
+            probability = _acceptance_probability(
+                delta, temp=temp, preset=preset, xp=xp, device=device, dtype=dtype
+            )
+            accepted = _asarray(random.uniform((n_chains,)) < probability, xp=xp, device=device)
+            accepted_col = accepted[:, None]
+            accepted_total = accepted_total + xp.sum(_to_dtype(accepted, int_dtype))
+            rejected_total = rejected_total + xp.sum(_to_dtype(xp.logical_not(accepted), int_dtype))
+            current = xp.where(accepted_col, candidate, current)
+            current_val = xp.where(accepted, candidate_val, current_val)
+            improved = current_val < best_val
+            best_pos = xp.where(improved[:, None], current, best_pos)
+            best_val = xp.where(improved, current_val, best_val)
+
+    g = int(xp.argmin(best_val))
+    return EnsembleHistory(
+        best_pos=best_pos,
+        best_val=best_val,
+        global_best_pos=best_pos[g],
+        global_best_val=best_val[g],
+        accepted=accepted_total,
+        rejected=rejected_total,
+        namespace=xp,
+        device=device,
+    )
+
+
+__all__ = ["DeviceHistory", "EnsembleHistory", "run_device", "run_ensemble"]
