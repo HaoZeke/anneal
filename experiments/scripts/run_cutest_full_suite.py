@@ -230,7 +230,7 @@ def maybe_reduce(prob, args):
     if threshold <= 0 or prob.dim <= threshold:
         return prob
 
-    from surrogate import fit_reduced_surrogate
+    from experiments.surrogate import fit_reduced_surrogate
 
     fit = fit_reduced_surrogate(
         prob.fn, prob.grad, prob.low, prob.high, prob.dim,
