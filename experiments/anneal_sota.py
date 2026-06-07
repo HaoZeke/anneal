@@ -108,12 +108,8 @@ def qmc_annealed_hybrid(
     high = np.asarray(high, dtype=np.float64)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
-    base_pop_size = int(min(50, max(12, 5 * dim)))
-    n_qmc = max(2, base_pop_size // 3)
-    qmc_pop = low_discrepancy_population(low, high, n_qmc, skip=1)
-    random_pop = rng.uniform(low, high, size=(base_pop_size, dim))
-    pop = [p.copy() for p in np.vstack([qmc_pop, random_pop])]
-    pop_size = len(pop)
+    pop_size = int(min(50, max(12, 5 * dim)))
+    pop = [rng.uniform(low, high) for _ in range(pop_size)]
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, 0.5)
     cr = np.full(pop_size, 0.9)
@@ -123,7 +119,10 @@ def qmc_annealed_hybrid(
     finite = vals[np.isfinite(vals)]
     temp0 = max(float(np.std(finite)) if finite.size > 1 else 1.0, 1e-6)
     polish_every = max(1, counter.budget // max(n_polish, 1))
+    scout_every = max(pop_size, counter.budget // 3)
     last_polish = 0
+    last_scout = 0
+    scout_skip = 1
     gen = 0
     try:
         while True:
@@ -147,6 +146,19 @@ def qmc_annealed_hybrid(
                         best_v = float(ft)
                         best_x = trial.copy()
             gen += 1
+
+            if counter.n - last_scout >= scout_every:
+                scout = low_discrepancy_population(low, high, 1, skip=scout_skip)[0]
+                scout_skip += 1
+                fs = counter(scout)
+                worst = int(np.argmax(vals))
+                if fs < vals[worst]:
+                    pop[worst] = scout
+                    vals[worst] = fs
+                if fs < best_v:
+                    best_v = float(fs)
+                    best_x = scout.copy()
+                last_scout = counter.n
 
             if counter.n - last_polish >= polish_every:
                 maxfun = max(20, counter.budget // (2 * max(n_polish, 1) * max(k_polish, 1)))
