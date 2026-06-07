@@ -30,6 +30,7 @@ from experiments.shared.runner import (
 
 TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
+FINITE_DIFFERENCE_GRAD_STEP = 1e-6
 
 
 def _low_discrepancy_starts(
@@ -895,19 +896,21 @@ def _cutest_gradient(prob):
 
         return _native_grad, "native"
 
-    eps = 1e-6
+    return _finite_difference_gradient(prob), "finite-difference"
 
+
+def _finite_difference_gradient(prob):
     def _fd_grad(x):
         x = np.asarray(x, dtype=np.float64)
         f0 = prob.fn(x)
         g = np.zeros_like(x)
         for i in range(len(x)):
             x1 = x.copy()
-            x1[i] += eps
-            g[i] = (prob.fn(x1) - f0) / eps
+            x1[i] += FINITE_DIFFERENCE_GRAD_STEP
+            g[i] = (prob.fn(x1) - f0) / FINITE_DIFFERENCE_GRAD_STEP
         return g
 
-    return _fd_grad, "finite-difference"
+    return _fd_grad
 
 
 def _run_cutest_rust_hmc(
@@ -1232,8 +1235,8 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 auto_best_start_polish = _run_cutest_raw_best_polish(
                     anneal,
                     prob,
-                    grad_fn,
-                    grad_kind,
+                    _finite_difference_gradient(prob),
+                    "finite-difference",
                     seed,
                     int(n_chains),
                     int(k_per_epoch),
