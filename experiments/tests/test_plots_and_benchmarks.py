@@ -1493,6 +1493,73 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[[1]])
 
 
+def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"polish_x0": []}
+
+    class HighDimProblem:
+        name = "HIGHLOCAL"
+        dim = 6
+        low = np.full(6, -1.0)
+        high = np.full(6, 1.0)
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    starts = np.vstack(
+        [
+            np.full(6, 0.5),
+            np.full(6, 0.25),
+            np.zeros(6),
+            np.full(6, -0.5),
+        ]
+    )
+    polished = iter([10.0, 9.0, 1.0, 8.0])
+
+    def polish(_obj_fn, _grad_fn, _low, _high, x0, **_kwargs):
+        captured["polish_x0"].append(np.asarray(x0, dtype=np.float64))
+        return {
+            "best_val": next(polished),
+            "best_pos": np.asarray(x0, dtype=np.float64),
+            "n_evals": 2,
+            "n_grads": 1,
+        }
+
+    fake_anneal = types.SimpleNamespace(polish=polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_low_discrepancy_starts",
+        lambda *_args, **_kwargs: starts.copy(),
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        HighDimProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == 1.0
+    assert fevals == 4 * (2 + 1)
+    np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
+
+
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
