@@ -1495,6 +1495,59 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[[1]])
 
 
+def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"] = {
+            "low": np.asarray(low, dtype=np.float64),
+            "high": np.asarray(high, dtype=np.float64),
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "seed": kwargs["seed"],
+            "top_k": kwargs["top_k"],
+        }
+        return {
+            "best_val": -11.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 8,
+            "n_grads": 3,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -11.0
+    assert fevals == 8 + 3
+    assert captured["qmc"]["n_starts"] == 6
+    assert captured["qmc"]["max_fevals_per_start"] == 160
+    assert captured["qmc"]["seed"] == 7
+    assert captured["qmc"]["top_k"] == 0
+
+
 def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
@@ -1699,6 +1752,74 @@ def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
     assert fevals == 41
     assert captured["best_args"][3] == "finite-difference"
     assert captured["best_args"][4:] == (7, 4, 90)
+
+
+def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class ActiveBoundProblem:
+        name = "ACTIVEBOUND"
+        dim = 9
+        low = np.full(9, -1.0)
+        high = np.full(9, 1.0)
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"] = {
+            "low": np.asarray(low, dtype=np.float64),
+            "high": np.asarray(high, dtype=np.float64),
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "seed": kwargs["seed"],
+            "top_k": kwargs["top_k"],
+        }
+        return {
+            "best_val": -5.0,
+            "best_pos": np.zeros(9),
+            "n_evals": 13,
+            "n_grads": 4,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_raw_best_polish",
+        lambda *_args, **_kwargs: pytest.fail("raw polish should be skipped"),
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        ActiveBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -5.0
+    assert fevals == 13 + (9 + 1) * 4
+    assert captured["qmc"]["n_starts"] == 4
+    assert captured["qmc"]["max_fevals_per_start"] == 90
+    assert captured["qmc"]["seed"] == 7
+    assert captured["qmc"]["top_k"] == 2
 
 
 def test_cutest_bgsa_auto_keeps_portfolio_for_uncovered_bounds(monkeypatch):
