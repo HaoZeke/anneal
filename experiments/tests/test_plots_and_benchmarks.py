@@ -1430,7 +1430,7 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
     )
 
 
-def test_cutest_bgsa_auto_skips_portfolio_when_multistart_polish_agrees(monkeypatch):
+def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
     captured = {"polish_x0": []}
@@ -1484,8 +1484,8 @@ def test_cutest_bgsa_auto_skips_portfolio_when_multistart_polish_agrees(monkeypa
     )
 
     assert best_val == -1.0
-    assert fevals == 4 * (2 + 1)
-    np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
+    assert fevals == 4 + 2 + 1
+    np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[[1]])
 
 
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
