@@ -117,7 +117,7 @@ where
                 .zip(x.iter())
                 .all(|(a, b)| (*a - *b).abs() <= f64::EPSILON)
             {
-                alpha *= 0.5;
+                alpha *= BACKTRACK_SHRINK;
                 continue;
             }
             let trial_value = obj.eval(trial.view());
