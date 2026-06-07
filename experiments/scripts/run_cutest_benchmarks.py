@@ -1017,6 +1017,18 @@ def _polish_best_dominates_sample(values):
     return best * np.sqrt(float(arr.size)) <= median
 
 
+def _polish_bulk_dominates_worst_tail(values):
+    arr = np.sort(np.asarray(values, dtype=np.float64))
+    if arr.size < 3 or not np.all(np.isfinite(arr)):
+        return False
+    bulk_worst = float(arr[-2])
+    tail = float(arr[-1])
+    if bulk_worst <= 0.0:
+        scale = max(1.0, abs(bulk_worst), abs(tail))
+        return tail - bulk_worst >= np.sqrt(np.finfo(np.float64).eps) * scale
+    return bulk_worst * np.sqrt(float(arr.size)) <= tail
+
+
 def _run_cutest_multistart_polish(
     anneal_module,
     prob,
@@ -1257,7 +1269,9 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     polish_bv, polish_calls, polish_values = auto_multistart_polish
                     if _polish_values_agree_to_roundoff(
                         polish_values
-                    ) or _polish_best_dominates_sample(polish_values):
+                    ) or _polish_best_dominates_sample(
+                        polish_values
+                    ) or _polish_bulk_dominates_worst_tail(polish_values):
                         return polish_bv, polish_calls
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
