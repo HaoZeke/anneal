@@ -32,7 +32,9 @@ TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
 
 
-def _low_discrepancy_starts(low, high, n_points, seed):
+def _low_discrepancy_starts(
+    low, high, n_points, seed, design_low=None, design_high=None
+):
     try:
         from experiments.scripts.demo_bgsa import low_discrepancy_init
     except Exception:
@@ -43,7 +45,15 @@ def _low_discrepancy_starts(low, high, n_points, seed):
         int(n_points),
         np.asarray(low, dtype=np.float64),
         np.asarray(high, dtype=np.float64),
+        design_low=design_low,
+        design_high=design_high,
     )
+
+
+def _design_bounds(prob):
+    low = np.asarray(getattr(prob, "design_low", prob.low), dtype=np.float64)
+    high = np.asarray(getattr(prob, "design_high", prob.high), dtype=np.float64)
+    return low, high
 
 
 def _straggler_indices(chain_pos, top_k):
@@ -90,7 +100,10 @@ def classical_sa(prob, seed, n_epochs, k_fixed, sigma=None, t_init=5.0):
     rng = np.random.default_rng(seed)
     if sigma is None:
         sigma = _auto_sigma(prob)
-    cur_pos = _low_discrepancy_starts(prob.low, prob.high, 1, seed)[0]
+    design_low, design_high = _design_bounds(prob)
+    cur_pos = _low_discrepancy_starts(
+        prob.low, prob.high, 1, seed, design_low, design_high
+    )[0]
     cur_val = prob.fn(cur_pos)
     best_val = cur_val
     n_calls = 1
@@ -127,7 +140,10 @@ def mcmc_sa(
 ):
     if sigma is None:
         sigma = _auto_sigma(prob)
-    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
@@ -230,7 +246,10 @@ def mcmc_sa_budgeted(
 
     if sigma is None:
         sigma = _auto_sigma(prob)
-    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
@@ -323,7 +342,10 @@ def pt_sa_budgeted(
 
     if sigma is None:
         sigma = _auto_sigma(prob)
-    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     swap_rng = np.random.default_rng(seed + n_chains + 1)
     chain_pos = [starts[c].copy() for c in range(n_chains)]
@@ -423,7 +445,10 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
         raise ValueError("max_fevals must be positive")
 
     n_chains = _auto_chain_count(prob, max_fevals)
-    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
+    design_low, design_high = _design_bounds(prob)
+    starts = _low_discrepancy_starts(
+        prob.low, prob.high, n_chains, seed, design_low, design_high
+    )
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     controller_rng = np.random.default_rng(seed + 10_007)
     chain_pos = [starts[c].copy() for c in range(n_chains)]
@@ -756,13 +781,22 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     import demo_bgsa as d
 
     # Save / patch globals.
-    saved = (d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH)
+    saved = (
+        d.OBJ_FN,
+        d.OBJ_GRAD,
+        d.LOW,
+        d.HIGH,
+        getattr(d, "DESIGN_LOW", None),
+        getattr(d, "DESIGN_HIGH", None),
+    )
     try:
         d.OBJ_FN = prob.fn
         grad_fn, grad_kind = _cutest_gradient(prob)
         d.OBJ_GRAD = grad_fn
         d.LOW = prob.low.astype(np.float64)
         d.HIGH = prob.high.astype(np.float64)
+        d.DESIGN_LOW = getattr(prob, "design_low", prob.low).astype(np.float64)
+        d.DESIGN_HIGH = getattr(prob, "design_high", prob.high).astype(np.float64)
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
         out = d.run_pilot(
@@ -942,7 +976,14 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             )
         raise ValueError(f"Unknown bGSA driver: {driver}")
     finally:
-        d.OBJ_FN, d.OBJ_GRAD, d.LOW, d.HIGH = saved
+        (
+            d.OBJ_FN,
+            d.OBJ_GRAD,
+            d.LOW,
+            d.HIGH,
+            d.DESIGN_LOW,
+            d.DESIGN_HIGH,
+        ) = saved
 
 
 def main():

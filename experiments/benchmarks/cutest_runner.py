@@ -108,7 +108,40 @@ class CutestProblem:
     grad: callable | None
     low: np.ndarray
     high: np.ndarray
+    x0: np.ndarray
+    design_low: np.ndarray
+    design_high: np.ndarray
     f_star: float | None  # may be None for problems without a stored optimum
+
+
+def effective_design_bounds(
+    low: np.ndarray,
+    high: np.ndarray,
+    anchor: np.ndarray,
+    x_box: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return a compact QMC design box inside the true feasibility box."""
+
+    low = np.asarray(low, dtype=np.float64).reshape(-1)
+    high = np.asarray(high, dtype=np.float64).reshape(-1)
+    anchor = np.asarray(anchor, dtype=np.float64).reshape(-1)
+    if low.shape != high.shape or low.shape != anchor.shape:
+        raise ValueError("low, high, and anchor must have the same shape")
+    x_box = float(x_box)
+    if not np.isfinite(x_box) or x_box <= 0.0:
+        raise ValueError("x_box must be positive and finite")
+
+    x0 = np.clip(anchor, low, high)
+    design_low = low.copy()
+    design_high = high.copy()
+    span = high - low
+    shrink = np.isfinite(span) & (span > 2.0 * x_box)
+    design_low[shrink] = np.maximum(low[shrink], x0[shrink] - x_box)
+    design_high[shrink] = np.minimum(high[shrink], x0[shrink] + x_box)
+    same = design_low >= design_high
+    design_low[same] = low[same]
+    design_high[same] = high[same]
+    return design_low, design_high, x0
 
 
 def load(
@@ -140,6 +173,9 @@ def load(
     same = bl >= bu
     bl[same] -= x_box
     bu[same] += x_box
+    design_low, design_high, x0 = effective_design_bounds(
+        bl, bu, np.asarray(p.x0, dtype=np.float64).reshape(-1), x_box=x_box
+    )
 
     def fn(x: np.ndarray) -> float:
         x_arr = np.asarray(x, dtype=np.float64).reshape(-1)
@@ -159,6 +195,9 @@ def load(
         grad=grad,
         low=bl,
         high=bu,
+        x0=x0,
+        design_low=design_low,
+        design_high=design_high,
         f_star=f_star,
     )
 
