@@ -13,6 +13,7 @@ from anneal import (
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
+    qmc_polish,
     run,
     run_hmc,
     run_qmc,
@@ -133,6 +134,36 @@ def test_polish_refines_shifted_quadratic():
     assert result["best_val"] < 1e-10
     assert result["n_evals"] <= 64
     assert result["best_pos"] == pytest.approx([0.25, -0.4], abs=1e-5)
+
+
+def test_qmc_polish_refines_best_low_discrepancy_basin():
+    def deceptive_basin(x: np.ndarray) -> float:
+        shallow = np.sum((x - 0.35) ** 2)
+        deep = 0.03 * np.sum((x - np.array([-0.5, 1.0 / 3.0])) ** 2) - 0.75
+        return float(min(shallow, deep))
+
+    def deceptive_basin_grad(x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+        shallow = np.sum((x - 0.35) ** 2)
+        deep = 0.03 * np.sum((x - np.array([-0.5, 1.0 / 3.0])) ** 2) - 0.75
+        if deep < shallow:
+            return 0.06 * (x - np.array([-0.5, 1.0 / 3.0]))
+        return 2.0 * (x - 0.35)
+
+    result = qmc_polish(
+        deceptive_basin,
+        deceptive_basin_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        n_starts=8,
+        max_fevals_per_start=32,
+        seed=7,
+    )
+
+    assert result["best_val"] < -0.74
+    assert result["n_polished"] == 8
+    assert result["n_evals"] <= 8 * (32 + 1)
+    assert result["best_pos"] == pytest.approx([-0.5, 1.0 / 3.0], abs=1e-4)
 
 
 def test_low_discrepancy_points_are_bounded_and_deterministic():
