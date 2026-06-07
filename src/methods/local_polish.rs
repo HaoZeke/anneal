@@ -3,7 +3,7 @@
 
 use crate::grad::Gradient;
 use eindir_core::Objective;
-use ndarray::Array1;
+use ndarray::{Array1, Array2};
 
 const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
@@ -38,27 +38,81 @@ fn projected_gradient(
     out
 }
 
-fn update_diagonal_spectral_scale(
-    scale: &mut Array1<f64>,
+fn scaled_identity(dim: usize, scale: f64) -> Array2<f64> {
+    let mut matrix = Array2::zeros((dim, dim));
+    for i in 0..dim {
+        matrix[[i, i]] = scale;
+    }
+    matrix
+}
+
+fn active_descent_direction(
+    inverse_hessian: &Array2<f64>,
     x: &Array1<f64>,
     pgrad: &Array1<f64>,
-    prev_x: &Array1<f64>,
-    prev_pgrad: &Array1<f64>,
+    low: &Array1<f64>,
+    high: &Array1<f64>,
+) -> Array1<f64> {
+    let mut direction = -inverse_hessian.dot(pgrad);
+    apply_active_bounds(&mut direction, x, low, high);
+    if pgrad.dot(&direction) < 0.0 {
+        return direction;
+    }
+
+    let mut fallback = -pgrad;
+    apply_active_bounds(&mut fallback, x, low, high);
+    fallback
+}
+
+fn apply_active_bounds(
+    direction: &mut Array1<f64>,
+    x: &Array1<f64>,
+    low: &Array1<f64>,
+    high: &Array1<f64>,
 ) {
-    for i in 0..scale.len() {
-        let step_delta = x[i] - prev_x[i];
-        let grad_delta = pgrad[i] - prev_pgrad[i];
-        let curvature = step_delta * grad_delta;
-        if curvature > 0.0 {
-            let candidate = (step_delta / grad_delta).abs();
-            if candidate.is_finite() && candidate > 0.0 {
-                scale[i] = candidate;
-            }
+    for i in 0..direction.len() {
+        if (x[i] <= low[i] && direction[i] < 0.0) || (x[i] >= high[i] && direction[i] > 0.0) {
+            direction[i] = 0.0;
         }
     }
 }
 
-/// Refine a point with projected-gradient backtracking inside objective bounds.
+fn update_inverse_hessian(
+    inverse_hessian: &mut Array2<f64>,
+    s: &Array1<f64>,
+    y: &Array1<f64>,
+) -> bool {
+    let ys = y.dot(s);
+    let s_norm = s.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let y_norm = y.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let curvature_floor = f64::EPSILON.sqrt() * s_norm * y_norm;
+    if !ys.is_finite() || ys <= curvature_floor {
+        return false;
+    }
+
+    let hy = inverse_hessian.dot(y);
+    let yhy = y.dot(&hy);
+    if !yhy.is_finite() {
+        return false;
+    }
+
+    let dim = s.len();
+    let mut next = inverse_hessian.clone();
+    let ss_coeff = (ys + yhy) / (ys * ys);
+    for i in 0..dim {
+        for j in 0..dim {
+            next[[i, j]] += ss_coeff * s[i] * s[j] - (s[i] * hy[j] + hy[i] * s[j]) / ys;
+        }
+    }
+    if next.iter().all(|v| v.is_finite()) {
+        *inverse_hessian = next;
+        true
+    } else {
+        false
+    }
+}
+
+/// Refine a point with bounded quasi-Newton backtracking inside objective bounds.
 pub fn projected_gradient_polish<O, G>(
     obj: &O,
     gradient: &G,
@@ -84,7 +138,7 @@ where
     let mut n_grads = 0usize;
     let mut best_pos = x.clone();
     let mut best_val = value;
-    let mut scale = Array1::from_elem(x.len(), step0);
+    let mut inverse_hessian = scaled_identity(x.len(), step0);
     let mut prev_x = None;
     let mut prev_pgrad = None;
 
@@ -99,11 +153,15 @@ where
         if norm2.sqrt() <= grad_tol {
             break;
         }
-        if let (Some(px), Some(pg)) = (&prev_x, &prev_pgrad) {
-            update_diagonal_spectral_scale(&mut scale, &x, &pgrad, px, pg);
+        if let (Some(px), Some(pg)) = (prev_x.take(), prev_pgrad.take()) {
+            let s = &x - &px;
+            let y = &pgrad - &pg;
+            if !update_inverse_hessian(&mut inverse_hessian, &s, &y) {
+                inverse_hessian = scaled_identity(x.len(), step0);
+            }
         }
-        let direction = &pgrad * &scale;
-        let directional_decrease = pgrad.dot(&direction);
+        let direction = active_descent_direction(&inverse_hessian, &x, &pgrad, low, high);
+        let directional_decrease = -pgrad.dot(&direction);
         if !directional_decrease.is_finite() || directional_decrease <= 0.0 {
             break;
         }
@@ -111,7 +169,7 @@ where
         let mut accepted = false;
         let mut alpha = FULL_LINE_SEARCH_STEP;
         while n_evals < max_fevals && alpha > MIN_BACKTRACK_STEP {
-            let trial = bounds.clip((&x - &(direction.mapv(|v| alpha * v))).view());
+            let trial = bounds.clip((&x + &(direction.mapv(|v| alpha * v))).view());
             if trial
                 .iter()
                 .zip(x.iter())
