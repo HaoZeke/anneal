@@ -440,6 +440,201 @@ def _auto_initial_temperature(chain_val):
     return float(np.clip(scale, 1e-6, 5.0))
 
 
+class _BudgetExhausted(RuntimeError):
+    pass
+
+
+class _BudgetedObjective:
+    def __init__(self, prob, max_fevals):
+        if max_fevals < 1:
+            raise ValueError("max_fevals must be positive")
+        self.prob = prob
+        self.max_fevals = int(max_fevals)
+        self.n_calls = 0
+        self.best_val = float("inf")
+        self.best_pos = None
+
+    def __call__(self, x):
+        if self.n_calls >= self.max_fevals:
+            raise _BudgetExhausted
+        x = np.clip(
+            np.asarray(x, dtype=np.float64).reshape(-1),
+            self.prob.low,
+            self.prob.high,
+        )
+        value = float(self.prob.fn(x))
+        self.n_calls += 1
+        if np.isfinite(value) and value < self.best_val:
+            self.best_val = value
+            self.best_pos = x.copy()
+        return value
+
+    def result(self, fallback=float("inf")):
+        if np.isfinite(self.best_val):
+            return self.best_val, self.n_calls
+        return float(fallback), self.n_calls
+
+
+def _scipy_bounds(prob):
+    design_low, design_high = _design_bounds(prob)
+    return list(zip(design_low.tolist(), design_high.tolist()))
+
+
+def _scipy_start(prob, seed):
+    design_low, design_high = _design_bounds(prob)
+    return _low_discrepancy_starts(
+        prob.low, prob.high, 1, seed, design_low, design_high
+    )[0]
+
+
+def scipy_lbfgsb(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    bounds = _scipy_bounds(prob)
+    x0 = _scipy_start(prob, seed)
+    fallback = float("inf")
+    try:
+        res = optimize.minimize(
+            obj,
+            x0,
+            method="L-BFGS-B",
+            bounds=bounds,
+            options={"maxfun": int(max_fevals), "maxiter": int(max_fevals)},
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_de(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    popsize = max(3, min(15, int(max_fevals) // max(2 * dim, 1)))
+    generation = max(popsize * dim, 1)
+    maxiter = max(1, int(max_fevals) // generation)
+    fallback = float("inf")
+    try:
+        res = optimize.differential_evolution(
+            obj,
+            _scipy_bounds(prob),
+            maxiter=maxiter,
+            popsize=popsize,
+            polish=False,
+            init="sobol",
+            tol=0.0,
+            atol=0.0,
+            rng=seed,
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_dual_annealing(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.dual_annealing(
+            obj,
+            _scipy_bounds(prob),
+            maxfun=int(max_fevals),
+            rng=seed,
+            x0=_scipy_start(prob, seed),
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_basinhopping(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    local_budget = max(1, int(max_fevals) // max(4, dim))
+    niter = max(1, int(max_fevals) // max(local_budget, 1) - 1)
+    fallback = float("inf")
+    try:
+        res = optimize.basinhopping(
+            obj,
+            _scipy_start(prob, seed),
+            niter=niter,
+            stepsize=_auto_sigma(prob),
+            minimizer_kwargs={
+                "method": "L-BFGS-B",
+                "bounds": _scipy_bounds(prob),
+                "options": {"maxfun": local_budget, "maxiter": local_budget},
+            },
+            rng=seed,
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_direct(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.direct(
+            obj,
+            _scipy_bounds(prob),
+            maxfun=int(max_fevals),
+            maxiter=int(max_fevals),
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def scipy_shgo(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    dim = max(int(getattr(prob, "dim", len(prob.low))), 1)
+    n = max(dim + 1, min(int(max_fevals), 2 * dim + 1))
+    fallback = float("inf")
+    try:
+        res = optimize.shgo(
+            obj,
+            _scipy_bounds(prob),
+            n=n,
+            iters=max(1, int(max_fevals) // max(n, 1)),
+            minimizer_kwargs={
+                "method": "L-BFGS-B",
+                "bounds": _scipy_bounds(prob),
+                "options": {"maxfun": int(max_fevals), "maxiter": int(max_fevals)},
+            },
+            sampling_method="sobol",
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+SCIPY_DRIVERS = {
+    "scipy_lbfgsb": scipy_lbfgsb,
+    "scipy_de": scipy_de,
+    "scipy_dual_annealing": scipy_dual_annealing,
+    "scipy_basinhopping": scipy_basinhopping,
+    "scipy_direct": scipy_direct,
+    "scipy_shgo": scipy_shgo,
+}
+
+
 def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
     if max_fevals < 1:
         raise ValueError("max_fevals must be positive")
@@ -610,6 +805,12 @@ DRIVERS = [
     "mcmc_sa_sparse_budgeted",
     "pt_sa_budgeted",
     "bayesian_mixing_sa",
+    "scipy_lbfgsb",
+    "scipy_de",
+    "scipy_dual_annealing",
+    "scipy_basinhopping",
+    "scipy_direct",
+    "scipy_shgo",
     "bgsa",
     "bgsa_metad",
     "bgsa_pt_metad",

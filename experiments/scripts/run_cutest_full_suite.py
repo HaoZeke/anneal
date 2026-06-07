@@ -33,6 +33,7 @@ import numpy as np
 from experiments.benchmarks.cutest_runner import cutest_env, load, setup_cutest_env
 from experiments.scripts.run_cutest_benchmarks import (
     DRIVERS as MANIFEST_DRIVERS,
+    SCIPY_DRIVERS,
     _bgsa_run,
     bayesian_mixing_sa,
     classical_sa,
@@ -357,6 +358,12 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
         )
     if driver == "bayesian_mixing_sa":
         return bayesian_mixing_sa(
+            prob,
+            seed,
+            1 + args.n_epochs * args.k_fixed,
+        )
+    if driver in SCIPY_DRIVERS:
+        return SCIPY_DRIVERS[driver](
             prob,
             seed,
             1 + args.n_epochs * args.k_fixed,
