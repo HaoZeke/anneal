@@ -1530,6 +1530,35 @@ def test_cutest_full_suite_accepts_bayesian_mixing_driver():
     assert suite.parse_drivers("bayesian_mixing_sa") == ("bayesian_mixing_sa",)
 
 
+def test_cutest_full_suite_accepts_scipy_baseline_drivers():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    assert suite.parse_drivers(
+        "scipy_lbfgsb,scipy_de,scipy_dual_annealing,scipy_basinhopping,"
+        "scipy_direct,scipy_shgo"
+    ) == (
+        "scipy_lbfgsb",
+        "scipy_de",
+        "scipy_dual_annealing",
+        "scipy_basinhopping",
+        "scipy_direct",
+        "scipy_shgo",
+    )
+
+
+def test_cutest_scipy_lbfgsb_is_budgeted_and_finite():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    best_val, fevals = cutest.scipy_lbfgsb(
+        _QuadraticCutestProblem(),
+        seed=3,
+        max_fevals=25,
+    )
+
+    assert fevals <= 25
+    assert np.isfinite(best_val)
+
+
 def test_sota_compare_methods_respect_common_budget():
     from experiments import sota_compare
 
