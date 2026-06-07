@@ -31,7 +31,7 @@ from experiments.shared.runner import (
 TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
 FINITE_DIFFERENCE_GRAD_STEP = 1e-6
-FINITE_DIFFERENCE_HEADROOM_SWEEPS = 2
+COVERED_BOUND_POLISH_BUDGET_DIVISOR = 2
 
 
 def _low_discrepancy_starts(
@@ -1283,9 +1283,9 @@ def _covered_bound_polish_budget(epoch_budget, dim, n_chains):
         raise ValueError("dim must be positive")
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
-    finite_difference_sweep = (int(dim) + 1) * int(n_chains)
-    headroom = FINITE_DIFFERENCE_HEADROOM_SWEEPS * finite_difference_sweep
-    return max(1, int(epoch_budget) - headroom)
+    finite_difference_sweep = int(dim) + 1
+    local_budget = int(epoch_budget) // COVERED_BOUND_POLISH_BUDGET_DIVISOR
+    return max(1, local_budget - finite_difference_sweep)
 
 
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
