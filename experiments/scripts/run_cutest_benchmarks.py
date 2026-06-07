@@ -1184,6 +1184,14 @@ def _bounded_polish_dimension_is_covered(dim, n_chains):
     return int(dim) <= int(n_chains) * int(n_chains)
 
 
+def _covered_local_polish_budget(epoch_budget, n_chains):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(epoch_budget) * int(n_chains)
+
+
 def _covered_bound_polish_budget(epoch_budget, dim, n_chains):
     if epoch_budget < 1:
         raise ValueError("epoch_budget must be positive")
@@ -1250,7 +1258,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     grad_kind,
                     seed,
                     local_screen_starts,
-                    int(k_per_epoch),
+                    _covered_local_polish_budget(k_per_epoch, n_chains),
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
