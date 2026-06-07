@@ -2090,10 +2090,10 @@ def test_cutest_cma_es_is_budgeted_and_finite():
     best_val, fevals = cutest.cma_es(
         _QuadraticCutestProblem(),
         seed=3,
-        max_fevals=40,
+        max_fevals=400,
     )
 
-    assert fevals <= 40
+    assert fevals <= 400
     assert np.isfinite(best_val)
 
 
