@@ -1399,6 +1399,11 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
         "_run_cutest_multistart_polish",
         lambda *_args, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_best_start_polish",
+        lambda *_args, **_kwargs: None,
+    )
 
     best_val, fevals = cutest._bgsa_run(
         DesignBoundProblem(),
