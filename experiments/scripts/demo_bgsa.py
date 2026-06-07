@@ -95,6 +95,8 @@ OBJECTIVES = {
 # Default to rosenbrock_5d for the demo; HMC is supposed to win here.
 LOW = OBJECTIVES["rosenbrock_5d"][2]
 HIGH = OBJECTIVES["rosenbrock_5d"][3]
+DESIGN_LOW = LOW.copy()
+DESIGN_HIGH = HIGH.copy()
 OBJ_FN = OBJECTIVES["rosenbrock_5d"][0]
 OBJ_GRAD = OBJECTIVES["rosenbrock_5d"][1]
 TARGET_ACCEPT = 0.65  # Beskos/Pillai/Roberts 2013, doi:10.3150/12-BEJ414.
@@ -202,14 +204,46 @@ def _normal_quantiles(unit):
     return np.array([_NORMAL.inv_cdf(float(u)) for u in clipped], dtype=np.float64)
 
 
-def low_discrepancy_init(rng, n_points, low, high, skip=1):
+def low_discrepancy_init(
+    rng,
+    n_points,
+    low,
+    high,
+    skip=1,
+    design_low=None,
+    design_high=None,
+):
     """Seeded bounded design for pilot states, chain starts, and restarts."""
     low = np.asarray(low, dtype=np.float64)
     high = np.asarray(high, dtype=np.float64)
     if low.shape != high.shape:
         raise ValueError("low and high must have the same shape")
+    if design_low is None or design_high is None:
+        cand_low = np.asarray(globals().get("DESIGN_LOW", low), dtype=np.float64)
+        cand_high = np.asarray(globals().get("DESIGN_HIGH", high), dtype=np.float64)
+        if (
+            cand_low.shape == low.shape
+            and cand_high.shape == high.shape
+            and np.all(cand_low >= low)
+            and np.all(cand_high <= high)
+        ):
+            design_low = cand_low
+            design_high = cand_high
+        else:
+            design_low = low
+            design_high = high
+    else:
+        design_low = np.asarray(design_low, dtype=np.float64)
+        design_high = np.asarray(design_high, dtype=np.float64)
+    if design_low.shape != low.shape or design_high.shape != high.shape:
+        raise ValueError("design bounds must have the same shape as low and high")
+    design_low = np.maximum(design_low, low)
+    design_high = np.minimum(design_high, high)
+    if np.any(design_low > design_high):
+        raise ValueError("design bounds must lie inside low and high")
     unit = _shifted_unit_design(rng, int(n_points), len(low), skip=skip)
-    return low + (high - low) * unit
+    points = design_low + (design_high - design_low) * unit
+    return np.clip(points, low, high)
 
 
 def _log_accept_probability(log_alpha: float) -> float:
