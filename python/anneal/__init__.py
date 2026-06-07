@@ -22,6 +22,7 @@ from anneal._core import (
     __version__,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
+    polish as _core_polish,
     run,
     run_hmc,
     run_qmc,
@@ -50,6 +51,31 @@ def pilot_draws_qmc(n: int, seed: int = 42):
     return np.asarray(_core_pilot_draws_qmc(int(n), int(seed)), dtype=np.float64)
 
 
+def polish(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    x0,
+    max_fevals: int = 200,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+):
+    """Refine ``x0`` with bounded projected-gradient polish."""
+    out = _core_polish(
+        obj_fn,
+        grad_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        np.asarray(x0, dtype=np.float64),
+        int(max_fevals),
+        float(step0),
+        float(grad_tol),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 __all__ = [
     "Boltzmann",
     "DeviceHistory",
@@ -62,6 +88,7 @@ __all__ = [
     "__version__",
     "low_discrepancy_points",
     "pilot_draws_qmc",
+    "polish",
     "run",
     "run_device",
     "run_ensemble",
