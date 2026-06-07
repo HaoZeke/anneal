@@ -993,6 +993,58 @@ def _run_cutest_rust_polish(
     return float(result["best_val"]), work_units
 
 
+def _polish_values_agree_to_roundoff(values):
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.size == 0 or not np.all(np.isfinite(arr)):
+        return False
+    scale = max(1.0, float(np.max(np.abs(arr))))
+    tolerance = np.sqrt(np.finfo(np.float64).eps) * scale
+    return float(np.max(arr) - np.min(arr)) <= tolerance
+
+
+def _run_cutest_multistart_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals_per_start,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    if n_starts < 1 or max_fevals_per_start < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    try:
+        starts = _low_discrepancy_starts(
+            prob.low,
+            prob.high,
+            n_starts,
+            seed,
+            design_low,
+            design_high,
+        )
+    except Exception:
+        return None
+    outcomes = []
+    total_work = 0
+    for start in starts:
+        best_val, work_units = _run_cutest_rust_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            start,
+            max_fevals_per_start,
+        )
+        outcomes.append(float(best_val))
+        total_work += int(work_units)
+    if not outcomes:
+        return None
+    return min(outcomes), total_work, outcomes
+
+
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
     if best_pilot_pos is None:
         return None
@@ -1033,6 +1085,23 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         d.HIGH = prob.high.astype(np.float64)
         d.DESIGN_LOW = getattr(prob, "design_low", prob.low).astype(np.float64)
         d.DESIGN_HIGH = getattr(prob, "design_high", prob.high).astype(np.float64)
+        auto_multistart_polish = None
+        if driver == "bgsa_auto":
+            import anneal
+
+            auto_multistart_polish = _run_cutest_multistart_polish(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
+                seed,
+                int(n_chains),
+                int(k_per_epoch),
+            )
+            if auto_multistart_polish is not None:
+                polish_bv, polish_calls, polish_values = auto_multistart_polish
+                if _polish_values_agree_to_roundoff(polish_values):
+                    return polish_bv, polish_calls
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
         out = d.run_pilot(
@@ -1178,6 +1247,9 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 (hmc_bv, hmc_calls),
                 (hybrid_bv, hybrid_calls),
             ]
+            if auto_multistart_polish is not None:
+                polish_bv, polish_calls, _polish_values = auto_multistart_polish
+                outcomes.append((polish_bv, polish_calls))
             if hasattr(anneal, "polish"):
                 polish_bv, polish_calls = _run_cutest_rust_polish(
                     anneal,
