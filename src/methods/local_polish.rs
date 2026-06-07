@@ -90,7 +90,8 @@ fn initial_line_search_step(direction: &Array1<f64>, low: &Array1<f64>, high: &A
 }
 
 fn line_search_trial_limit(dim: usize) -> usize {
-    dim.saturating_add(1).max(1)
+    dim.saturating_add((f64::MANTISSA_DIGITS as usize).div_ceil(2))
+        .max(1)
 }
 
 fn apply_active_bounds(

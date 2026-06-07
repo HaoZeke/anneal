@@ -30,7 +30,6 @@ from experiments.shared.runner import (
 
 TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
-QMC_SCREEN_BUDGET_SLOTS = 1
 
 
 def _low_discrepancy_starts(
@@ -1113,17 +1112,60 @@ def _run_cutest_best_start_polish(
     return best_val, total_work
 
 
+def _run_cutest_raw_best_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    if n_starts < 1 or max_fevals < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    try:
+        starts = _low_discrepancy_starts(
+            prob.low,
+            prob.high,
+            n_starts,
+            seed,
+            design_low,
+            design_high,
+        )
+    except Exception:
+        return None
+    screened = []
+    for start in starts:
+        value = float(prob.fn(start))
+        if np.isfinite(value):
+            screened.append((value, start))
+    if not screened:
+        return None
+    screened.sort(key=lambda item: item[0])
+    best_val, work_units = _run_cutest_rust_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        screened[0][1],
+        max_fevals,
+    )
+    return best_val, len(starts) + int(work_units)
+
+
 def _has_declared_cutest_bounds(prob):
     return bool(getattr(prob, "has_cutest_bounds", False))
 
 
-def _bounded_screened_polish_budget(epoch_budget, n_chains):
-    if epoch_budget < 1:
-        raise ValueError("epoch_budget must be positive")
+def _bounded_polish_dimension_is_covered(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
-    screen_slots = int(n_chains) + QMC_SCREEN_BUDGET_SLOTS
-    return max(1, int(epoch_budget) // screen_slots)
+    return int(dim) <= int(n_chains) * int(n_chains)
 
 
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
@@ -1184,15 +1226,17 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
-            elif _has_declared_cutest_bounds(prob):
-                auto_best_start_polish = _run_cutest_best_start_polish(
+            elif _has_declared_cutest_bounds(
+                prob
+            ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
+                auto_best_start_polish = _run_cutest_raw_best_polish(
                     anneal,
                     prob,
                     grad_fn,
                     grad_kind,
                     seed,
                     int(n_chains),
-                    _bounded_screened_polish_budget(k_per_epoch, n_chains),
+                    int(k_per_epoch),
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
