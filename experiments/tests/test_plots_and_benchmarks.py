@@ -1312,6 +1312,104 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
     )
 
 
+def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class DesignBoundProblem(_QuadraticCutestProblem):
+        design_low = np.array([-0.5, -0.25])
+        design_high = np.array([0.75, 0.5])
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = 4.0
+        best_pos = [0.2, -0.2]
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def polish(_obj_fn, _grad_fn, low, high, x0, **kwargs):
+        captured["polish"] = {
+            "low": np.asarray(low, dtype=np.float64),
+            "high": np.asarray(high, dtype=np.float64),
+            "x0": np.asarray(x0, dtype=np.float64),
+            "max_fevals": kwargs["max_fevals"],
+        }
+        return {"best_val": -9.0, "best_pos": np.array([0.0, 0.0]), "n_evals": 6, "n_grads": 3}
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc, polish=polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (3.0, 40, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            2.0,
+            30,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            1.0,
+            70,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "bayesian_mixing_sa",
+        lambda *_args, **_kwargs: (5.0, 17),
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        DesignBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -9.0
+    assert captured["polish"]["x0"].tolist() == pytest.approx([0.2, -0.2])
+    assert captured["polish"]["low"].tolist() == pytest.approx([-0.5, -0.25])
+    assert captured["polish"]["high"].tolist() == pytest.approx([0.75, 0.5])
+    assert captured["polish"]["max_fevals"] == 40
+    assert fevals == 11 + 30 + 40 + 30 + 70 + 6 + 3 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=2,
+        l_steps=2,
+    )
+
+
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
