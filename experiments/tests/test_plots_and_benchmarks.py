@@ -498,6 +498,35 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
     assert suite.parse_drivers("pt_sa_budgeted") == ("pt_sa_budgeted",)
 
 
+def test_cutest_full_suite_accepts_evict_cache_option():
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    args = suite.build_parser().parse_args(["--evict-cache"])
+
+    assert args.evict_cache is True
+
+
+def test_cutest_full_suite_evicts_pycutest_cache(tmp_path, monkeypatch):
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    cache = tmp_path / "cache"
+    stale = cache / "stale-problem"
+    stale.mkdir(parents=True)
+    (stale / "compiled.so").write_text("stale", encoding="utf-8")
+    (cache / "stale.txt").write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(
+        suite,
+        "cutest_env",
+        lambda: {"PYCUTEST_CACHE": str(cache)},
+    )
+
+    suite.evict_pycutest_cache()
+
+    assert not stale.exists()
+    assert not (cache / "stale.txt").exists()
+    assert (cache / "pycutest_cache_holder").is_dir()
+
+
 def test_cutest_full_suite_appends_target_timeout_rows():
     from experiments.scripts import run_cutest_full_suite as suite
 
