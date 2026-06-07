@@ -11,6 +11,8 @@ The IISE-manuscript composition laws L1-L4 are enforced inside the Rust
 SaVariant::checked constructor; preset constructors call it under the hood.
 """
 
+import numpy as np
+
 from anneal._core import (
     Boltzmann,
     EpochLine,
@@ -18,8 +20,10 @@ from anneal._core import (
     Gsa,
     History,
     __version__,
+    low_discrepancy_points as _core_low_discrepancy_points,
     run,
     run_hmc,
+    run_qmc,
 )
 from anneal.device import DeviceHistory, EnsembleHistory, run_device, run_ensemble
 from anneal.tvm_ffi import (
@@ -28,6 +32,17 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+
+
+def low_discrepancy_points(low, high, n: int, skip: int = 1):
+    """Return bounded low-discrepancy points as a NumPy array."""
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    return np.asarray(
+        _core_low_discrepancy_points(low_arr, high_arr, int(n), int(skip)),
+        dtype=np.float64,
+    )
+
 
 __all__ = [
     "Boltzmann",
@@ -39,10 +54,12 @@ __all__ = [
     "History",
     "TvmFfiTensorMetadata",
     "__version__",
+    "low_discrepancy_points",
     "run",
     "run_device",
     "run_ensemble",
     "run_hmc",
+    "run_qmc",
     "tvm_ffi_tensor",
     "tvm_ffi_tensor_metadata",
     "tvm_ffi_tensors_from_history",
