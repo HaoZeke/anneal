@@ -1374,6 +1374,22 @@ def test_anneal_sota_low_discrepancy_population_is_deterministic():
     assert np.allclose(first, second)
 
 
+def test_anneal_sota_shifted_low_discrepancy_population_is_seeded():
+    from experiments.anneal_sota import low_discrepancy_population
+
+    low = np.array([-1.0, -1.0])
+    high = np.array([1.0, 1.0])
+
+    first = low_discrepancy_population(low, high, 8, rng=np.random.default_rng(3))
+    second = low_discrepancy_population(low, high, 8, rng=np.random.default_rng(3))
+    third = low_discrepancy_population(low, high, 8, rng=np.random.default_rng(4))
+
+    assert np.all(first >= low)
+    assert np.all(first <= high)
+    assert np.allclose(first, second)
+    assert not np.allclose(first, third)
+
+
 def test_anneal_sota_qmc_hybrid_sees_deceptive_basin():
     from experiments import sota_compare
     from experiments.anneal_sota import qmc_annealed_hybrid

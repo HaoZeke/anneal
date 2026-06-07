@@ -40,7 +40,13 @@ def _halton_population(low: np.ndarray, high: np.ndarray, n: int, skip: int) -> 
     return low + (high - low) * points
 
 
-def low_discrepancy_population(low, high, n: int, skip: int = 1) -> np.ndarray:
+def low_discrepancy_population(
+    low,
+    high,
+    n: int,
+    skip: int = 1,
+    rng: np.random.Generator | None = None,
+) -> np.ndarray:
     """Bounded low-discrepancy population used by anneal SOTA drivers."""
     low = np.asarray(low, dtype=np.float64)
     high = np.asarray(high, dtype=np.float64)
@@ -55,12 +61,20 @@ def low_discrepancy_population(low, high, n: int, skip: int = 1) -> np.ndarray:
     try:
         from anneal import low_discrepancy_points as core_low_discrepancy_points
 
-        return np.asarray(
+        points = np.asarray(
             core_low_discrepancy_points(low, high, int(n), int(skip)),
             dtype=np.float64,
         )
     except Exception:  # noqa: BLE001
-        return _halton_population(low, high, int(n), int(skip))
+        points = _halton_population(low, high, int(n), int(skip))
+    if rng is None:
+        return points
+    width = high - low
+    unit = np.zeros_like(points)
+    active = width > 0.0
+    unit[:, active] = (points[:, active] - low[active]) / width[active]
+    unit[:, active] = (unit[:, active] + rng.random(np.count_nonzero(active))) % 1.0
+    return low + width * unit
 
 
 def _counted_jac(counter, grad):
@@ -95,7 +109,10 @@ def qmc_annealed_hybrid(
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
     pop_size = int(min(50, max(12, 5 * dim)))
-    pop = [p.copy() for p in low_discrepancy_population(low, high, pop_size, skip=1)]
+    pop = [
+        p.copy()
+        for p in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
+    ]
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, 0.5)
     cr = np.full(pop_size, 0.9)
