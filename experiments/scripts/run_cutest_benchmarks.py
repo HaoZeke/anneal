@@ -650,6 +650,53 @@ def scipy_cobyqa(prob, seed, max_fevals):
     return obj.result(fallback)
 
 
+def pdfo_bobyqa(prob, seed, max_fevals):
+    import pdfo
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = pdfo.pdfo(
+            obj,
+            _scipy_start(prob, seed),
+            method="bobyqa",
+            bounds=np.asarray(_scipy_bounds(prob), dtype=np.float64),
+            options={
+                "maxfev": int(max_fevals),
+                "quiet": True,
+                "scale": True,
+            },
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
+def cma_es(prob, seed, max_fevals):
+    import cma
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    low, high = _design_bounds(prob)
+    fallback = float("inf")
+    try:
+        _xbest, _es = cma.fmin2(
+            obj,
+            _scipy_start(prob, seed),
+            _auto_sigma(prob),
+            options={
+                "bounds": [low.tolist(), high.tolist()],
+                "maxfevals": int(max_fevals),
+                "seed": int(seed),
+                "verbose": -9,
+            },
+        )
+        fallback = obj.best
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
 SCIPY_DRIVERS = {
     "scipy_lbfgsb": scipy_lbfgsb,
     "scipy_de": scipy_de,
@@ -658,6 +705,8 @@ SCIPY_DRIVERS = {
     "scipy_direct": scipy_direct,
     "scipy_shgo": scipy_shgo,
     "scipy_cobyqa": scipy_cobyqa,
+    "pdfo_bobyqa": pdfo_bobyqa,
+    "cma_es": cma_es,
 }
 
 
@@ -838,6 +887,8 @@ DRIVERS = [
     "scipy_direct",
     "scipy_shgo",
     "scipy_cobyqa",
+    "pdfo_bobyqa",
+    "cma_es",
     "bgsa",
     "bgsa_metad",
     "bgsa_pt_metad",
