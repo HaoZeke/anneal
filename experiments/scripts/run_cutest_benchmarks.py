@@ -958,6 +958,41 @@ def _run_cutest_rust_hmc(
     return float(history.best_val), work_units
 
 
+def _polish_work_units(dim, grad_kind, n_evals, n_grads):
+    grad_cost = 1 if grad_kind == "native" else int(dim) + 1
+    return int(n_evals) + grad_cost * int(n_grads)
+
+
+def _run_cutest_rust_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    best_pilot_pos,
+    max_fevals,
+):
+    bounds_dim = int(np.asarray(prob.low).size)
+    x0 = _hmc_initial_position(best_pilot_pos, bounds_dim)
+    if x0 is None or max_fevals < 1:
+        return float("inf"), 0
+    design_low, design_high = _design_bounds(prob)
+    result = anneal_module.polish(
+        prob.fn,
+        grad_fn,
+        design_low,
+        design_high,
+        x0,
+        max_fevals=int(max_fevals),
+    )
+    work_units = _polish_work_units(
+        bounds_dim,
+        grad_kind,
+        result.get("n_evals", 0),
+        result.get("n_grads", 0),
+    )
+    return float(result["best_val"]), work_units
+
+
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
     if best_pilot_pos is None:
         return None
@@ -1143,6 +1178,16 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 (hmc_bv, hmc_calls),
                 (hybrid_bv, hybrid_calls),
             ]
+            if hasattr(anneal, "polish"):
+                polish_bv, polish_calls = _run_cutest_rust_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    best_pilot_pos,
+                    k_per_epoch,
+                )
+                outcomes.append((polish_bv, polish_calls))
             for mix_seed in (seed, seed + 4):
                 mix_bv, mix_calls = bayesian_mixing_sa(
                     prob,
