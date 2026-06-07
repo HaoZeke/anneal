@@ -1133,13 +1133,16 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         if driver == "bgsa_auto":
             import anneal
 
+            local_screen_starts = int(n_chains)
+            if int(prob.dim) <= int(n_chains):
+                local_screen_starts += int(prob.dim)
             auto_best_start_polish = _run_cutest_best_start_polish(
                 anneal,
                 prob,
                 grad_fn,
                 grad_kind,
                 seed,
-                int(n_chains),
+                local_screen_starts,
                 int(k_per_epoch),
             )
             if (
