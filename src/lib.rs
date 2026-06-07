@@ -74,6 +74,6 @@ pub use methods::{
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
-pub use runner::{run_rs, run_rs_variant};
+pub use runner::{run_rs, run_rs_qmc_variant, run_rs_variant};
 pub use sampler::Sampler;
 pub use variant::SaVariant;

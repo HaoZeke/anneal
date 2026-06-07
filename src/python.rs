@@ -10,6 +10,7 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use eindir_core::{Bounds, Objective};
@@ -249,9 +250,8 @@ impl crate::grad::Gradient<f64> for CallablePyGradient {
 
 /// Runs HMC-driven SA with a user-supplied gradient and returns a `History`.
 ///
-/// The trajectory kernel uses the Omelyan minimum-norm integrator
-/// (doi:10.1016/S0010-4655(02)00754-3). q-Gaussian momentum follows
-/// the Tsallis/GSA construction (doi:10.1016/S0378-4371(96)00271-3).
+/// The trajectory kernel uses the Omelyan minimum-norm integrator.
+/// q-Gaussian momentum follows the Tsallis/GSA construction.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
@@ -419,6 +419,100 @@ fn run(
     Ok(PyHistory::from(history))
 }
 
+/// Low-discrepancy points scaled to the supplied box bounds.
+#[pyfunction]
+#[pyo3(signature = (low, high, n, skip = 1))]
+fn low_discrepancy_points(
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    n: usize,
+    skip: u64,
+) -> PyResult<Vec<Vec<f64>>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if low_vec
+        .iter()
+        .zip(high_vec.iter())
+        .any(|(&lo, &hi)| hi < lo)
+    {
+        return Err(PyValueError::new_err(
+            "each upper bound must be greater than or equal to the lower bound",
+        ));
+    }
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 0.0);
+    let points = eindir_core::low_discrepancy_points(&bounds, n, skip);
+    Ok(points.outer_iter().map(|row| row.to_vec()).collect())
+}
+
+/// Runs the SA driver from a low-discrepancy multistart design.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
+fn run_qmc(
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    preset: Preset,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> PyResult<PyHistory> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if low_vec
+        .iter()
+        .zip(high_vec.iter())
+        .any(|(&lo, &hi)| hi < lo)
+    {
+        return Err(PyValueError::new_err(
+            "each upper bound must be greater than or equal to the lower bound",
+        ));
+    }
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let history = match preset {
+        Preset::Boltzmann(p) => {
+            let v = boltzmann(obj, p.t_init, p.sigma)
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+        }
+        Preset::Fast(p) => {
+            let v =
+                fast(obj, p.t_init, p.gamma).map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+        }
+        Preset::Gsa(p) => {
+            let v = gsa(obj, p.t_init, p.q_v, p.q_a)
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?;
+            crate::runner::run_rs_qmc_variant(v, n_starts, n_epochs, steps_per_epoch, seed)
+        }
+    };
+    Ok(PyHistory::from(history))
+}
+
 // ---------------------------------------------------------------------------
 // Module entry point.
 // ---------------------------------------------------------------------------
@@ -432,7 +526,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGsa>()?;
     m.add_class::<PyEpochLine>()?;
     m.add_class::<PyHistory>()?;
+    m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(run_hmc, m)?)?;
+    m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     Ok(())
 }

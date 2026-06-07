@@ -8,9 +8,46 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 
 use crate::cool::Cooling;
-use crate::history::{EpochLine, History};
+use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;
 use crate::variant::SaVariant;
+
+fn drive_rs<S: Sampler<f64>>(
+    sampler: &S,
+    cooling: &dyn Cooling<f64>,
+    mut state: State,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    rng: &mut StdRng,
+) -> History {
+    let init_pair = state.best.clone();
+    let mut history = History::with_capacity(n_epochs, init_pair);
+
+    for epoch in 0..n_epochs {
+        let temp = cooling.temperature(epoch);
+        let mut accepted: usize = 0;
+        let mut rejected: usize = 0;
+
+        for _ in 0..steps_per_epoch {
+            if sampler.step(&mut state, epoch, rng) {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+
+        history.epochs.push(EpochLine {
+            epoch,
+            temp,
+            accepted,
+            rejected,
+            best_val: state.best.val,
+        });
+    }
+
+    history.best = state.best;
+    history
+}
 
 /// Runs the Metropolis-Hastings SA driver for `n_epochs` epochs of
 /// `steps_per_epoch` proposals each, seeded from `seed`.
@@ -31,34 +68,15 @@ pub fn run_rs<S: Sampler<f64>>(
     seed: u64,
 ) -> History {
     let mut rng = StdRng::seed_from_u64(seed);
-    let mut state = sampler.initial_state(&mut rng);
-    let init_pair = state.best.clone();
-    let mut history = History::with_capacity(n_epochs, init_pair);
-
-    for epoch in 0..n_epochs {
-        let temp = cooling.temperature(epoch);
-        let mut accepted: usize = 0;
-        let mut rejected: usize = 0;
-
-        for _ in 0..steps_per_epoch {
-            if sampler.step(&mut state, epoch, &mut rng) {
-                accepted += 1;
-            } else {
-                rejected += 1;
-            }
-        }
-
-        history.epochs.push(EpochLine {
-            epoch,
-            temp,
-            accepted,
-            rejected,
-            best_val: state.best.val,
-        });
-    }
-
-    history.best = state.best;
-    history
+    let state = sampler.initial_state(&mut rng);
+    drive_rs(
+        &sampler,
+        cooling,
+        state,
+        n_epochs,
+        steps_per_epoch,
+        &mut rng,
+    )
 }
 
 /// Convenience wrapper: drives a `SaVariant` through `run_rs`, supplying
@@ -78,4 +96,53 @@ where
 {
     let cooling = variant.cool.clone();
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
+}
+
+/// Runs the same `SaVariant` from a bounded low-discrepancy start set and
+/// returns the best history across starts.
+pub fn run_rs_qmc_variant<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    n_starts: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+) -> History
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let cooling = variant.cool.clone();
+    let starts = eindir_core::low_discrepancy_points(variant.obj.bounds(), n_starts.max(1), 1);
+    let mut best_history = None;
+
+    for (idx, start) in starts.outer_iter().enumerate() {
+        let pos = variant.obj.bounds().clip(start);
+        let val = variant.obj.eval(pos.view());
+        let pair = eindir_core::FPair { pos, val };
+        let state = State {
+            cur: pair.clone(),
+            best: pair,
+        };
+        let chain_seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
+        let mut rng = StdRng::seed_from_u64(chain_seed);
+        let history = drive_rs(
+            &variant,
+            &cooling,
+            state,
+            n_epochs,
+            steps_per_epoch,
+            &mut rng,
+        );
+        if best_history
+            .as_ref()
+            .map_or(true, |best: &History| history.best.val < best.best.val)
+        {
+            best_history = Some(history);
+        }
+    }
+
+    best_history.expect("n_starts.max(1) guarantees at least one chain")
 }

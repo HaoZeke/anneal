@@ -5,7 +5,16 @@ test_funcs / test_mcsamplers / test_quench suites."""
 import numpy as np
 import pytest
 
-from anneal import Boltzmann, Fast, Gsa, History, run, run_hmc
+from anneal import (
+    Boltzmann,
+    Fast,
+    Gsa,
+    History,
+    low_discrepancy_points,
+    run,
+    run_hmc,
+    run_qmc,
+)
 
 
 def styb_tang_2d(x: np.ndarray) -> float:
@@ -99,6 +108,36 @@ def test_run_hmc_accepts_initial_position():
     )
     assert h.best_pos == pytest.approx(x0)
     assert h.best_val == pytest.approx(GLOBAL_MIN, abs=1e-2)
+
+
+def test_low_discrepancy_points_are_bounded_and_deterministic():
+    first = low_discrepancy_points(LOW, HIGH, 8)
+    second = low_discrepancy_points(LOW, HIGH, 8)
+
+    assert first.shape == (8, 2)
+    assert np.all(first >= LOW)
+    assert np.all(first <= HIGH)
+    assert np.allclose(first, second)
+
+
+def test_run_qmc_sees_deceptive_basin():
+    def deceptive_basin(x: np.ndarray) -> float:
+        shallow = np.sum((x - 0.35) ** 2)
+        deep = 0.03 * np.sum((x - np.array([-0.5, 1.0 / 3.0])) ** 2) - 0.75
+        return float(min(shallow, deep))
+
+    h = run_qmc(
+        deceptive_basin,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        Gsa(t_init=1.0, q_v=2.2, q_a=1.5),
+        n_starts=8,
+        n_epochs=2,
+        steps_per_epoch=2,
+        seed=7,
+    )
+
+    assert h.best_val < -0.7
 
 
 def test_run_is_deterministic():
