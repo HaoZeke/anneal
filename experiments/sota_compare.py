@@ -147,7 +147,7 @@ def _plain(counter, low, high, dim, rng):
     return min(best, counter.best)
 
 
-def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=3):
+def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1):
     return qmc_annealed_hybrid(
         counter,
         low,
