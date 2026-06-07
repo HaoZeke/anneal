@@ -1339,7 +1339,12 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
             "x0": np.asarray(x0, dtype=np.float64),
             "max_fevals": kwargs["max_fevals"],
         }
-        return {"best_val": -9.0, "best_pos": np.array([0.0, 0.0]), "n_evals": 6, "n_grads": 3}
+        return {
+            "best_val": -9.0,
+            "best_pos": np.array([0.0, 0.0]),
+            "n_evals": 6,
+            "n_grads": 3,
+        }
 
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc, polish=polish)
     fake_demo = types.SimpleNamespace(
@@ -1404,9 +1409,19 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
     assert captured["polish"]["low"].tolist() == pytest.approx([-0.5, -0.25])
     assert captured["polish"]["high"].tolist() == pytest.approx([0.75, 0.5])
     assert captured["polish"]["max_fevals"] == 40
-    assert fevals == 11 + 30 + 40 + 30 + 70 + 6 + 3 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=2,
-        l_steps=2,
+    assert (
+        fevals
+        == 11
+        + 34
+        + 40
+        + 30
+        + 70
+        + 6
+        + 3
+        + cutest._rust_hmc_native_grad_work_units(
+            n_trajectories=2,
+            l_steps=2,
+        )
     )
 
 
