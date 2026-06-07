@@ -11,6 +11,7 @@ from anneal import (
     Gsa,
     History,
     low_discrepancy_points,
+    pilot_draws_qmc,
     run,
     run_hmc,
     run_qmc,
@@ -118,6 +119,20 @@ def test_low_discrepancy_points_are_bounded_and_deterministic():
     assert np.all(first >= LOW)
     assert np.all(first <= HIGH)
     assert np.allclose(first, second)
+
+
+def test_pilot_draws_qmc_are_seeded_and_bounded():
+    first = pilot_draws_qmc(8, seed=3)
+    second = pilot_draws_qmc(8, seed=3)
+    third = pilot_draws_qmc(8, seed=4)
+
+    assert first.shape == (8, 3)
+    assert np.all(first[:, 0] > 0.0)
+    assert np.all(first[:, 1] > 0.0)
+    assert np.all(first[:, 2] > 1.05)
+    assert np.all(first[:, 2] < 2.95)
+    assert np.allclose(first, second)
+    assert not np.allclose(first, third)
 
 
 def test_run_qmc_sees_deceptive_basin():

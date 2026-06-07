@@ -9,6 +9,7 @@ use rand::SeedableRng;
 use rand_distr::{Beta, Distribution};
 
 use crate::history::{EpochLine, History, State};
+use crate::runner::qmc_skip_from_seed;
 use crate::sampler::Sampler;
 
 /// Result of an automatic Bayesian chain-mixing run.
@@ -53,19 +54,33 @@ impl<S: Sampler<f64>> BayesianMixingSampler<S> {
 
     /// Runs the online allocation loop.
     pub fn run(&self, seed: u64) -> BayesianMixingResult {
-        let mut first_rng = StdRng::seed_from_u64(seed);
-        let first_state = self.sampler.initial_state(&mut first_rng);
-        let dim = first_state.cur.pos.len();
+        let qmc_bounds = self.sampler.qmc_bounds();
+        let dim = qmc_bounds.map(|bounds| bounds.dims).unwrap_or_else(|| {
+            let mut first_rng = StdRng::seed_from_u64(seed);
+            self.sampler.initial_state(&mut first_rng).cur.pos.len()
+        });
         let n_chains = auto_chain_count(dim, self.max_proposals);
 
         let mut rngs: Vec<StdRng> = Vec::with_capacity(n_chains);
         let mut states: Vec<State> = Vec::with_capacity(n_chains);
-        rngs.push(first_rng);
-        states.push(first_state);
-        for c in 1..n_chains {
-            let mut rng = StdRng::seed_from_u64(seed.wrapping_add(c as u64));
-            states.push(self.sampler.initial_state(&mut rng));
-            rngs.push(rng);
+        if let Some(bounds) = qmc_bounds {
+            let starts =
+                eindir_core::low_discrepancy_points(bounds, n_chains, qmc_skip_from_seed(seed));
+            for c in 0..n_chains {
+                let mut rng = StdRng::seed_from_u64(seed.wrapping_add(c as u64));
+                let state = self
+                    .sampler
+                    .initial_state_from_position(starts.row(c).to_owned())
+                    .unwrap_or_else(|| self.sampler.initial_state(&mut rng));
+                states.push(state);
+                rngs.push(rng);
+            }
+        } else {
+            for c in 0..n_chains {
+                let mut rng = StdRng::seed_from_u64(seed.wrapping_add(c as u64));
+                states.push(self.sampler.initial_state(&mut rng));
+                rngs.push(rng);
+            }
         }
 
         let mut best_idx = 0usize;

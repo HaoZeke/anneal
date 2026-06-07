@@ -21,6 +21,7 @@ from anneal._core import (
     History,
     __version__,
     low_discrepancy_points as _core_low_discrepancy_points,
+    pilot_draws_qmc as _core_pilot_draws_qmc,
     run,
     run_hmc,
     run_qmc,
@@ -44,6 +45,11 @@ def low_discrepancy_points(low, high, n: int, skip: int = 1):
     )
 
 
+def pilot_draws_qmc(n: int, seed: int = 42):
+    """Return BGSA pilot draws ``(T_0, sigma, q_v)`` as a NumPy array."""
+    return np.asarray(_core_pilot_draws_qmc(int(n), int(seed)), dtype=np.float64)
+
+
 __all__ = [
     "Boltzmann",
     "DeviceHistory",
@@ -55,6 +61,7 @@ __all__ = [
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
+    "pilot_draws_qmc",
     "run",
     "run_device",
     "run_ensemble",

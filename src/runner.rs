@@ -12,6 +12,11 @@ use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;
 use crate::variant::SaVariant;
 
+/// Deterministic positive Halton skip derived from a run seed.
+pub fn qmc_skip_from_seed(seed: u64) -> u64 {
+    seed.wrapping_add(1).max(1)
+}
+
 fn drive_rs<S: Sampler<f64>>(
     sampler: &S,
     cooling: &dyn Cooling<f64>,
@@ -115,7 +120,11 @@ where
     A: crate::accept::AcceptRule<f64>,
 {
     let cooling = variant.cool.clone();
-    let starts = eindir_core::low_discrepancy_points(variant.obj.bounds(), n_starts.max(1), 1);
+    let starts = eindir_core::low_discrepancy_points(
+        variant.obj.bounds(),
+        n_starts.max(1),
+        qmc_skip_from_seed(seed),
+    );
     let mut best_history = None;
 
     for (idx, start) in starts.outer_iter().enumerate() {

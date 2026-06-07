@@ -4,7 +4,7 @@
 //! through the `Momentum` trait. Fixed-step integrators are likewise
 //! pluggable, so leapfrog and Omelyan maps share the sampler surface.
 
-use eindir_core::{FPair, Objective};
+use eindir_core::{Bounds, FPair, Objective};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
@@ -115,6 +115,20 @@ where
             cur: pair.clone(),
             best: pair,
         }
+    }
+
+    fn qmc_bounds(&self) -> Option<&Bounds<f64>> {
+        Some(self.obj.bounds())
+    }
+
+    fn initial_state_from_position(&self, pos: Array1<f64>) -> Option<State> {
+        let pos = self.obj.bounds().clip(pos.view());
+        let val = self.obj.eval(pos.view());
+        let pair = FPair { pos, val };
+        Some(State {
+            cur: pair.clone(),
+            best: pair,
+        })
     }
 
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {

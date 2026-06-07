@@ -454,6 +454,18 @@ fn low_discrepancy_points(
     Ok(points.outer_iter().map(|row| row.to_vec()).collect())
 }
 
+/// Low-discrepancy BGSA pilot draws `(T_0, sigma, q_v)`.
+#[pyfunction]
+#[pyo3(signature = (n, seed = 42))]
+fn pilot_draws_qmc(n: usize, seed: u64) -> PyResult<Vec<Vec<f64>>> {
+    let prior = crate::methods::PilotPrior::default();
+    let draws = crate::methods::pilot_draws_qmc(&prior, n, seed);
+    Ok(draws
+        .into_iter()
+        .map(|(t_init, sigma, q_v)| vec![t_init, sigma, q_v])
+        .collect())
+}
+
 /// Runs the SA driver from a low-discrepancy multistart design.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, preset, n_starts = 8, n_epochs = 100, steps_per_epoch = 200, seed = 42))]
@@ -527,6 +539,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEpochLine>()?;
     m.add_class::<PyHistory>()?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
+    m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(run_hmc, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
