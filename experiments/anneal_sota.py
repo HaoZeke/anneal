@@ -109,10 +109,10 @@ def qmc_annealed_hybrid(
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
     pop_size = int(min(50, max(12, 5 * dim)))
-    pop = [
-        p.copy()
-        for p in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
-    ]
+    n_qmc = max(1, pop_size // 3)
+    qmc_pop = low_discrepancy_population(low, high, n_qmc, skip=1)
+    random_pop = rng.uniform(low, high, size=(pop_size - n_qmc, dim))
+    pop = [p.copy() for p in np.vstack([qmc_pop, random_pop])]
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, 0.5)
     cr = np.full(pop_size, 0.9)
