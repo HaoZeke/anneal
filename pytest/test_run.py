@@ -12,6 +12,7 @@ from anneal import (
     History,
     low_discrepancy_points,
     pilot_draws_qmc,
+    polish,
     run,
     run_hmc,
     run_qmc,
@@ -25,6 +26,14 @@ def styb_tang_2d(x: np.ndarray) -> float:
 
 def styb_tang_grad_2d(x: np.ndarray) -> np.ndarray:
     return 0.5 * (4 * x**3 - 32 * x + 5)
+
+
+def shifted_quadratic(x: np.ndarray) -> float:
+    return float((x[0] - 0.25) ** 2 + (x[1] + 0.4) ** 2)
+
+
+def shifted_quadratic_grad(x: np.ndarray) -> np.ndarray:
+    return np.array([2.0 * (x[0] - 0.25), 2.0 * (x[1] + 0.4)])
 
 
 LOW = np.array([-5.0, -5.0])
@@ -109,6 +118,21 @@ def test_run_hmc_accepts_initial_position():
     )
     assert h.best_pos == pytest.approx(x0)
     assert h.best_val == pytest.approx(GLOBAL_MIN, abs=1e-2)
+
+
+def test_polish_refines_shifted_quadratic():
+    result = polish(
+        shifted_quadratic,
+        shifted_quadratic_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        np.array([0.9, 0.9]),
+        max_fevals=64,
+    )
+
+    assert result["best_val"] < 1e-10
+    assert result["n_evals"] <= 64
+    assert result["best_pos"] == pytest.approx([0.25, -0.4], abs=1e-5)
 
 
 def test_low_discrepancy_points_are_bounded_and_deterministic():
