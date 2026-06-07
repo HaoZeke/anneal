@@ -1684,6 +1684,7 @@ def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
 
     assert best_val == -3.0
     assert fevals == 41
+    assert captured["best_args"][3] == "finite-difference"
     assert captured["best_args"][4:] == (7, 4, 200)
 
 
