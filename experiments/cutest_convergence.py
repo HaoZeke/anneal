@@ -32,6 +32,13 @@ def _status_ok(row: dict) -> bool:
     return str(row.get("status", "")).strip() == "ok"
 
 
+def _solved_flag(row: dict) -> bool:
+    try:
+        return int(float(row.get("solved", 0))) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def converged_mask(rows, solvers, tau: float = DEFAULT_TAU) -> dict:
     """Map ``(problem, seed, solver) -> bool`` under the Moré-Wild test.
 
@@ -61,13 +68,15 @@ def converged_mask(rows, solvers, tau: float = DEFAULT_TAU) -> dict:
         best = _f(row.get("best_val"))
         ref = f_ref.get(cell)
         low = f_low.get(cell)
-        ok = (
-            _status_ok(row)
-            and math.isfinite(best)
-            and ref is not None
-            and low is not None
-            and (ref - low) > 0.0
-            and (ref - best) >= (1.0 - tau) * (ref - low)
-        )
+        if ref is None:
+            ok = _status_ok(row) and _solved_flag(row)
+        else:
+            ok = (
+                _status_ok(row)
+                and math.isfinite(best)
+                and low is not None
+                and (ref - low) > 0.0
+                and (ref - best) >= (1.0 - tau) * (ref - low)
+            )
         mask[(cell[0], cell[1], solver)] = ok
     return mask
