@@ -1261,3 +1261,70 @@ def test_cutest_full_suite_accepts_bayesian_mixing_driver():
     from experiments.scripts import run_cutest_full_suite as suite
 
     assert suite.parse_drivers("bayesian_mixing_sa") == ("bayesian_mixing_sa",)
+
+
+def test_sota_compare_methods_respect_common_budget():
+    from experiments import sota_compare
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    low = np.array([-1.0, -1.0])
+    high = np.array([1.0, 1.0])
+
+    assert {
+        "hybrid_de",
+        "hybrid_bmsa",
+        "basinhopping",
+        "diff_evol",
+        "lbfgs_multistart",
+        "plain_sa",
+    } <= set(sota_compare.METHODS)
+
+    for name in ("hybrid_de", "hybrid_bmsa", "plain_sa"):
+        counter = sota_compare.Counter(sphere, budget=80)
+        best = sota_compare.METHODS[name](
+            counter,
+            low,
+            high,
+            2,
+            np.random.default_rng(7),
+        )
+        assert counter.n <= counter.budget
+        assert np.isfinite(best)
+
+
+def test_sota_cutest_native_gradient_polish_consumes_budget():
+    from experiments.scripts import sota_cutest
+
+    grad_calls = 0
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    def grad(x):
+        nonlocal grad_calls
+        grad_calls += 1
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    low = np.array([-1.0, -1.0])
+    high = np.array([1.0, 1.0])
+    counter = sota_cutest.Counter(sphere, budget=80)
+
+    best = sota_cutest.hybrid_de(
+        counter,
+        low,
+        high,
+        2,
+        grad,
+        np.random.default_rng(11),
+        n_polish=2,
+    )
+
+    assert counter.n <= counter.budget
+    assert counter.grad_evals == grad_calls
+    assert grad_calls > 0
+    assert np.isfinite(best)
