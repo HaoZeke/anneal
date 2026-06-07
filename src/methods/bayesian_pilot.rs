@@ -287,6 +287,33 @@ pub fn pilot_draws(prior: &PilotPrior, n_pilot: usize, seed: u64) -> Vec<(f64, f
         .collect()
 }
 
+/// Low-discrepancy design over the bounded high-mass prior region.
+pub fn pilot_draws_qmc(prior: &PilotPrior, n_pilot: usize, seed: u64) -> Vec<(f64, f64, f64)> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let shift = [
+        rng.random::<f64>(),
+        rng.random::<f64>(),
+        rng.random::<f64>(),
+    ];
+    let q_lo = (prior.q_v_mean - 3.0 * prior.q_v_sd).max(Q_V_MIN + 1e-12);
+    let q_hi = (prior.q_v_mean + 3.0 * prior.q_v_sd).min(Q_V_MAX - 1e-12);
+    (0..n_pilot)
+        .map(|idx| {
+            let unit = eindir_core::halton_unit(
+                crate::qmc_skip_from_seed(seed).wrapping_add(idx as u64),
+                3,
+            );
+            let u0 = (unit[0] + shift[0]).fract();
+            let u1 = (unit[1] + shift[1]).fract();
+            let u2 = (unit[2] + shift[2]).fract();
+            let log_t = prior.log_t_init_mean + prior.log_t_init_sd * (-3.0 + 6.0 * u0);
+            let log_sigma = prior.log_sigma_mean + prior.log_sigma_sd * (-3.0 + 6.0 * u1);
+            let q_v = q_lo + (q_hi - q_lo) * u2;
+            (log_t.exp(), log_sigma.exp(), q_v)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

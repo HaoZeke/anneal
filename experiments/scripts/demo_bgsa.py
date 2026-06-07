@@ -19,6 +19,7 @@ import csv
 import os
 import sys
 import time
+from statistics import NormalDist
 
 import numpy as np
 
@@ -98,6 +99,117 @@ OBJ_FN = OBJECTIVES["rosenbrock_5d"][0]
 OBJ_GRAD = OBJECTIVES["rosenbrock_5d"][1]
 TARGET_ACCEPT = 0.65  # Beskos/Pillai/Roberts 2013, doi:10.3150/12-BEJ414.
 OMELYAN_LAMBDA = 0.1931833275037836
+_NORMAL = NormalDist()
+_SMALL_PRIMES = (
+    2,
+    3,
+    5,
+    7,
+    11,
+    13,
+    17,
+    19,
+    23,
+    29,
+    31,
+    37,
+    41,
+    43,
+    47,
+    53,
+    59,
+    61,
+    67,
+    71,
+    73,
+    79,
+    83,
+    89,
+    97,
+    101,
+    103,
+    107,
+    109,
+    113,
+    127,
+    131,
+)
+
+
+def _radical_inverse(index, base):
+    inv_base = 1.0 / float(base)
+    fraction = inv_base
+    value = 0.0
+    while index > 0:
+        value += float(index % base) * fraction
+        index //= base
+        fraction *= inv_base
+    return value
+
+
+def _nth_prime(index):
+    if index < len(_SMALL_PRIMES):
+        return _SMALL_PRIMES[index]
+    candidate = _SMALL_PRIMES[-1] + 2
+    primes = len(_SMALL_PRIMES)
+    while True:
+        root = int(np.sqrt(candidate))
+        if all(candidate % div for div in range(3, root + 1, 2)):
+            if primes == index:
+                return candidate
+            primes += 1
+        candidate += 2
+
+
+def _fallback_halton_unit(n_points, dim, skip=1):
+    out = np.zeros((int(n_points), int(dim)), dtype=np.float64)
+    for row in range(int(n_points)):
+        index = int(skip) + row
+        for axis in range(int(dim)):
+            out[row, axis] = _radical_inverse(index, _nth_prime(axis))
+    return out
+
+
+def _unit_low_discrepancy(n_points, dim, skip=1):
+    if n_points <= 0:
+        return np.zeros((0, int(dim)), dtype=np.float64)
+    try:
+        from anneal import low_discrepancy_points as core_low_discrepancy_points
+
+        return np.asarray(
+            core_low_discrepancy_points(
+                np.zeros(int(dim), dtype=np.float64),
+                np.ones(int(dim), dtype=np.float64),
+                int(n_points),
+                int(skip),
+            ),
+            dtype=np.float64,
+        )
+    except Exception:
+        return _fallback_halton_unit(n_points, dim, skip=skip)
+
+
+def _shifted_unit_design(rng, n_points, dim, skip=1):
+    unit = _unit_low_discrepancy(n_points, dim, skip=skip)
+    if n_points <= 0:
+        return unit
+    shift = rng.random(int(dim)) if rng is not None else np.zeros(int(dim))
+    return np.mod(unit + shift, 1.0)
+
+
+def _normal_quantiles(unit):
+    clipped = np.clip(np.asarray(unit, dtype=np.float64), 1e-12, 1.0 - 1e-12)
+    return np.array([_NORMAL.inv_cdf(float(u)) for u in clipped], dtype=np.float64)
+
+
+def low_discrepancy_init(rng, n_points, low, high, skip=1):
+    """Seeded bounded design for pilot states, chain starts, and restarts."""
+    low = np.asarray(low, dtype=np.float64)
+    high = np.asarray(high, dtype=np.float64)
+    if low.shape != high.shape:
+        raise ValueError("low and high must have the same shape")
+    unit = _shifted_unit_design(rng, int(n_points), len(low), skip=skip)
+    return low + (high - low) * unit
 
 
 def _log_accept_probability(log_alpha: float) -> float:
@@ -200,7 +312,9 @@ def tsallis_accept_prob(delta_e, temp, q_a):
 
 def classical_sa(seed, n_epochs, k_fixed, t_init, sigma, x0=None):
     rng = np.random.default_rng(seed)
-    cur = (rng.uniform(LOW, HIGH) if x0 is None else x0.copy()).astype(np.float64)
+    cur = (
+        low_discrepancy_init(rng, 1, LOW, HIGH)[0] if x0 is None else x0.copy()
+    ).astype(np.float64)
     cur_v = OBJ_FN(cur)
     best = cur_v
     n = 1
@@ -508,7 +622,9 @@ def hmc_sa(seed, n_epochs, k_per_epoch, t_init, eps, L, x0=None, q=1.0):
     q > 1 (the Tsallis-Stariolo 1996 GSA schedule paired with q-Gaussian
     momentum) and reduces to log cooling at q = 1 by L'Hopital."""
     rng = np.random.default_rng(seed)
-    cur = (rng.uniform(LOW, HIGH) if x0 is None else x0.copy()).astype(np.float64)
+    cur = (
+        low_discrepancy_init(rng, 1, LOW, HIGH)[0] if x0 is None else x0.copy()
+    ).astype(np.float64)
     cur_v = OBJ_FN(cur)
     best = cur_v
     n_calls = 1
@@ -602,7 +718,7 @@ def fit_empirical_bayes_priors(scout_obs, dim):
     }
 
 
-def rw_pilot(seed, T, sigma, n_steps):
+def rw_pilot(seed, T, sigma, n_steps, x0=None):
     """Pilot RW-Metropolis chain at FIXED temperature T. Used to fit
     sigma_rw against the Roberts/Gelman/Gilks 1997 0.234 acceptance
     optimum (doi:10.1214/aoap/1034625254). Returns
@@ -612,7 +728,9 @@ def rw_pilot(seed, T, sigma, n_steps):
     statement; cooling-during-pilot averages accept rate across
     different temperatures and biases sigma toward the cold-T optimum."""
     rng = np.random.default_rng(seed)
-    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur = (
+        low_discrepancy_init(rng, 1, LOW, HIGH)[0] if x0 is None else x0.copy()
+    ).astype(np.float64)
     cur_v = OBJ_FN(cur)
     best = cur_v
     accepts = 0
@@ -684,12 +802,14 @@ def fit_sigma_rw(pilot_obs):
     return fit_t_sigma_rw(pilot_obs)[1]
 
 
-def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0):
+def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0, x0=None):
     """Pilot HMC trajectory. Cooling uses tsallis_cool(t_init, q) so the
     pilot's accept-rate observation is at the same schedule the
     production driver will use."""
     rng = np.random.default_rng(seed)
-    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur = (
+        low_discrepancy_init(rng, 1, LOW, HIGH)[0] if x0 is None else x0.copy()
+    ).astype(np.float64)
     cur_v = OBJ_FN(cur)
     best = cur_v
     accepts = 0
@@ -877,8 +997,10 @@ def multichain_q_hmc(
     k_min steps then check Rhat across chains. Each step inside a
     chain is a full HMC trajectory of L leapfrog steps.
     """
+    master = np.random.default_rng(seed)
+    starts = low_discrepancy_init(master, n_chains, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
-    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
     best_val = min(chain_val)
     n_calls = n_chains
@@ -967,7 +1089,7 @@ def svgd_sa(
     best_val from the particle quantiles. `stochastic=False` is the
     deterministic-flow variant (mode-seeking, no Bayesian semantics)."""
     rng = np.random.default_rng(seed)
-    particles = rng.uniform(LOW, HIGH, size=(n_particles, len(LOW))).astype(np.float64)
+    particles = low_discrepancy_init(rng, n_particles, LOW, HIGH)
     vals = np.array([OBJ_FN(p) for p in particles])
     best_val = vals.min()
     best_pos = particles[np.argmin(vals)].copy()
@@ -1048,8 +1170,10 @@ def adaptive_ladder_q_hmc(
     log_ratios = np.diff(np.log(init_temps))  # length n_chains - 1
     swap_counts = np.zeros(n_chains - 1, dtype=np.int64)
 
+    master = np.random.default_rng(seed)
+    starts = low_discrepancy_init(master, n_chains, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
-    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
     best_val = min(chain_val)
     n_calls = n_chains
@@ -1109,6 +1233,7 @@ def metad_sa(
     q_v=1.0,
     q_a=None,
     w0_decay_exp=0.0,
+    x0=None,
 ):
     """SA + Well-tempered metadynamics on the (x_0, x_1) CV.
 
@@ -1136,7 +1261,9 @@ def metad_sa(
     bias = WellTemperedBias(
         LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
     )
-    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur = (
+        low_discrepancy_init(rng, 1, LOW, HIGH)[0] if x0 is None else x0.copy()
+    ).astype(np.float64)
     cur_v = OBJ_FN(cur)
     best = cur_v
     n_calls = 1
@@ -1202,6 +1329,7 @@ def bgsa_metad(
     pilot_calls,
     sigma_rw=0.5,
     w0_decay_exp=0.0,
+    best_pilot_pos=None,
 ):
     """bGSA + metadynamics RW production. All bGSA-side hyperparameters
     come from the pilot:
@@ -1227,6 +1355,7 @@ def bgsa_metad(
         metad_gamma=metad_gamma_from_qv(q_map),
         q_v=q_map,
         w0_decay_exp=w0_decay_exp,
+        x0=best_pilot_pos,
     )
     return bv, pilot_calls + prod_calls, t_map, e_map, L_map, q_map
 
@@ -1467,7 +1596,7 @@ def pmsa_metad(
     def f_hat(x):
         return float(np.mean([noisy_fn(x) for _ in range(n_eval_per_step)]))
 
-    cur = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur = low_discrepancy_init(rng, 1, LOW, HIGH)[0]
     cur_v = f_hat(cur)
     best = cur_v
     n_calls = n_eval_per_step  # f_hat counted as n_eval evals
@@ -1550,7 +1679,7 @@ def continuous_time_tempering(
     beta visits a finite set of values."""
     dim = len(LOW)
     rng = np.random.default_rng(seed)
-    cur_x = rng.uniform(LOW, HIGH).astype(np.float64)
+    cur_x = low_discrepancy_init(rng, 1, LOW, HIGH)[0]
     cur_v = OBJ_FN(cur_x)
     best = cur_v
     n_calls = 1
@@ -1947,8 +2076,10 @@ def parallel_tempering_hybrid(
     temps = t_final * (t_init / t_final) ** ratios
     use_rw = temps > rw_threshold_t  # boolean array, True = use RW
 
+    master = np.random.default_rng(seed)
+    starts = low_discrepancy_init(master, n_chains, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
-    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
     best_val = min(chain_val)
     n_calls = n_chains
@@ -2058,8 +2189,10 @@ def parallel_tempering_q_hmc(
     ratios = np.linspace(0, 1, n_chains)
     temps = t_final * (t_init / t_final) ** ratios
 
+    master = np.random.default_rng(seed)
+    starts = low_discrepancy_init(master, n_chains, LOW, HIGH)
     rngs = [np.random.default_rng(seed + 100 * c) for c in range(n_chains)]
-    chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [OBJ_FN(p) for p in chain_pos]
     best_val = min(chain_val)
     n_calls = n_chains
@@ -2204,20 +2337,8 @@ def bgsa_multichain(
 
 
 def latin_hypercube_init(rng, n_points, low, high):
-    """Stratified init: each dim split into n_points strata of equal
-    width, one point per stratum, intra-stratum offsets randomised,
-    strata permuted independently per dim. Removes the cluster bias
-    of n independent uniform draws."""
-    low = np.asarray(low, dtype=np.float64)
-    high = np.asarray(high, dtype=np.float64)
-    dim = len(low)
-    out = np.zeros((n_points, dim))
-    for d in range(dim):
-        edges = np.linspace(low[d], high[d], n_points + 1)
-        offsets = rng.uniform(edges[:-1], edges[1:])
-        rng.shuffle(offsets)
-        out[:, d] = offsets
-    return out
+    """Compatibility name for the shared bounded low-discrepancy design."""
+    return low_discrepancy_init(rng, n_points, low, high)
 
 
 def classical_sa_advanced(
@@ -2456,18 +2577,27 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_sco
     pilot_calls = 0
     best_pilot_pos = None
     best_pilot_val = float("inf")
+    hmc_starts = low_discrepancy_init(
+        rng, max(0, int(n_scout) + int(n_pilot)), LOW, HIGH
+    )
+    scout_unit = _shifted_unit_design(rng, n_scout, 4, skip=1)
 
     # Stage 0 -- scout phase for empirical-Bayes priors.
     scout_obs = []
     for k in range(n_scout):
-        # Widely-spaced log-uniform draws spanning 4 log-decades for
-        # T and eps, 1 decade for L. q is uniform on the safe range.
-        t = float(np.exp(rng.uniform(-3.0, 3.0)))
-        e = float(np.exp(rng.uniform(-5.0, -1.0)))
-        L = max(1, int(np.exp(rng.uniform(0.5, 3.0))))
-        q = float(rng.uniform(q_lo, q_hi))
+        u = scout_unit[k]
+        t = float(np.exp(-3.0 + 6.0 * u[0]))
+        e = float(np.exp(-5.0 + 4.0 * u[1]))
+        L = max(1, int(np.exp(0.5 + 2.5 * u[2])))
+        q = float(q_lo + (q_hi - q_lo) * u[3])
         bv, ar, fpos, nc = hmc_pilot(
-            seed * 7919 + k, t, e, L, max(20, pilot_steps // 4), q=q
+            seed * 7919 + k,
+            t,
+            e,
+            L,
+            max(20, pilot_steps // 4),
+            q=q,
+            x0=hmc_starts[k],
         )
         scout_obs.append(
             {
@@ -2487,12 +2617,22 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_sco
 
     # Stage 1 -- main HMC pilot using empirical-Bayes priors.
     pilot_obs = list(scout_obs)  # fold scouts into the Laplace fit
+    pilot_unit = _shifted_unit_design(rng, n_pilot, 4, skip=1 + n_scout)
     for k in range(n_pilot):
-        t = float(np.exp(rng.normal(priors["t_mean"], priors["t_sd"])))
-        e = float(np.exp(rng.normal(priors["e_mean"], priors["e_sd"])))
-        L = max(1, int(np.exp(rng.normal(priors["l_mean"], priors["l_sd"]))))
-        q = float(np.clip(rng.normal(priors["q_mean"], priors["q_sd"]), q_lo, q_hi))
-        bv, ar, fpos, nc = hmc_pilot(seed * 1000 + k, t, e, L, pilot_steps, q=q)
+        z = _normal_quantiles(pilot_unit[k])
+        t = float(np.exp(priors["t_mean"] + priors["t_sd"] * z[0]))
+        e = float(np.exp(priors["e_mean"] + priors["e_sd"] * z[1]))
+        L = max(1, int(np.exp(priors["l_mean"] + priors["l_sd"] * z[2])))
+        q = float(np.clip(priors["q_mean"] + priors["q_sd"] * z[3], q_lo, q_hi))
+        bv, ar, fpos, nc = hmc_pilot(
+            seed * 1000 + k,
+            t,
+            e,
+            L,
+            pilot_steps,
+            q=q,
+            x0=hmc_starts[n_scout + k],
+        )
         pilot_obs.append(
             {
                 "t_init": t,
@@ -2522,10 +2662,13 @@ def run_pilot(seed, n_pilot, pilot_steps, dim, n_rw_pilot=10, rw_steps=50, n_sco
     box_extent = float(np.max(HIGH - LOW))
     t_rw_lo = 0.05 * box_extent
     t_rw_hi = 5.0 * box_extent
+    rw_unit = _shifted_unit_design(rng, n_rw_pilot, 2, skip=1 + n_scout + n_pilot)
+    rw_starts = low_discrepancy_init(rng, n_rw_pilot, LOW, HIGH)
     for k in range(n_rw_pilot):
-        sig = float(np.exp(rng.uniform(np.log(sigma_lo), np.log(sigma_hi))))
-        t = float(np.exp(rng.uniform(np.log(t_rw_lo), np.log(t_rw_hi))))
-        bv, ar, nc = rw_pilot(seed * 9001 + k, t, sig, rw_steps)
+        u = rw_unit[k]
+        sig = float(np.exp(np.log(sigma_lo) + np.log(sigma_hi / sigma_lo) * u[0]))
+        t = float(np.exp(np.log(t_rw_lo) + np.log(t_rw_hi / t_rw_lo) * u[1]))
+        bv, ar, nc = rw_pilot(seed * 9001 + k, t, sig, rw_steps, x0=rw_starts[k])
         rw_obs.append({"t": t, "sigma": sig, "accept_rate": ar, "best_val": bv})
         pilot_calls += nc
     t_rw_map, sigma_map = fit_t_sigma_rw(rw_obs)
@@ -2701,11 +2844,9 @@ def bgsa_smc_ensemble(
     ]
     n_particles = len(drivers)
 
-    # Initialise particle states + uniform weights.
+    state_design = low_discrepancy_init(np.random.default_rng(seed), n_particles, LOW, HIGH)
     states = [
-        best_pilot_pos.copy()
-        if best_pilot_pos is not None
-        else np.random.default_rng(seed + 7919 * i).uniform(LOW, HIGH)
+        best_pilot_pos.copy() if best_pilot_pos is not None else state_design[i].copy()
         for i in range(n_particles)
     ]
     bvs = [float("inf")] * n_particles
@@ -2843,6 +2984,7 @@ def bgsa_auto(
             q_map,
             pilot_calls=0,
             sigma_rw=sigma_map,
+            best_pilot_pos=best_pilot_pos,
         )
         return "bgsa_metad", bv, nc
 
@@ -3243,6 +3385,7 @@ def main():
             q_map,
             pilot_calls,
             sigma_rw=sigma_map,
+            best_pilot_pos=best_pilot_pos,
         )
         wt = time.perf_counter() - t0
         rows.append(

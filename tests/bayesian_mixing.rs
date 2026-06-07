@@ -5,8 +5,8 @@
 use anneal_core::variant::boltzmann;
 use anneal_core::{BayesianMixingSampler, Sampler, State};
 
-use eindir_core::{Bounds, FPair};
 use eindir_core::objectives::StybTang2D;
+use eindir_core::{Bounds, FPair};
 use ndarray::{array, Array1};
 use rand::Rng;
 
@@ -62,7 +62,11 @@ impl Sampler<f64> for FixedQmcSampler {
 
 #[test]
 fn bayesian_mixing_uses_low_discrepancy_initial_states_when_available() {
-    let bounds = Bounds::new(array![-1.0, -1.0, -1.0, -1.0], array![1.0, 1.0, 1.0, 1.0]);
+    let bounds = Bounds::new(
+        array![-1.0, -1.0, -1.0, -1.0],
+        array![1.0, 1.0, 1.0, 1.0],
+        0.0,
+    );
     let sampler = FixedQmcSampler {
         bounds: bounds.clone(),
     };

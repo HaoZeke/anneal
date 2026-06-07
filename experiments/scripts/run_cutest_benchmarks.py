@@ -32,6 +32,20 @@ TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
 
 
+def _low_discrepancy_starts(low, high, n_points, seed):
+    try:
+        from experiments.scripts.demo_bgsa import low_discrepancy_init
+    except Exception:
+        from demo_bgsa import low_discrepancy_init
+
+    return low_discrepancy_init(
+        np.random.default_rng(seed),
+        int(n_points),
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+    )
+
+
 def _straggler_indices(chain_pos, top_k):
     if top_k <= 0 or top_k >= len(chain_pos):
         return list(range(len(chain_pos)))
@@ -76,7 +90,7 @@ def classical_sa(prob, seed, n_epochs, k_fixed, sigma=None, t_init=5.0):
     rng = np.random.default_rng(seed)
     if sigma is None:
         sigma = _auto_sigma(prob)
-    cur_pos = rng.uniform(prob.low, prob.high).astype(np.float64)
+    cur_pos = _low_discrepancy_starts(prob.low, prob.high, 1, seed)[0]
     cur_val = prob.fn(cur_pos)
     best_val = cur_val
     n_calls = 1
@@ -113,8 +127,9 @@ def mcmc_sa(
 ):
     if sigma is None:
         sigma = _auto_sigma(prob)
+    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
-    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
     chain_best_val = list(chain_val)
     n_calls = n_chains
@@ -215,8 +230,9 @@ def mcmc_sa_budgeted(
 
     if sigma is None:
         sigma = _auto_sigma(prob)
+    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
-    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
     chain_best_val = list(chain_val)
     n_calls = n_chains
@@ -307,9 +323,10 @@ def pt_sa_budgeted(
 
     if sigma is None:
         sigma = _auto_sigma(prob)
+    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     swap_rng = np.random.default_rng(seed + n_chains + 1)
-    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
     chain_best_val = list(chain_val)
     best_val = min(chain_best_val)
@@ -406,9 +423,10 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
         raise ValueError("max_fevals must be positive")
 
     n_chains = _auto_chain_count(prob, max_fevals)
+    starts = _low_discrepancy_starts(prob.low, prob.high, n_chains, seed)
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     controller_rng = np.random.default_rng(seed + 10_007)
-    chain_pos = [r.uniform(prob.low, prob.high).astype(np.float64) for r in rngs]
+    chain_pos = [starts[c].copy() for c in range(n_chains)]
     chain_val = [prob.fn(p) for p in chain_pos]
     chain_best_val = list(chain_val)
     n_calls = n_chains
@@ -815,6 +833,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 q_map,
                 pilot_calls,
                 sigma_rw=sigma_map,
+                best_pilot_pos=best_pilot_pos,
             )
             return bv, nc
         if driver == "bgsa_pt_metad":
@@ -900,6 +919,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     q_map,
                     pilot_calls=0,
                     sigma_rw=sigma_map,
+                    best_pilot_pos=best_pilot_pos,
                 )
                 pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
                 pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(

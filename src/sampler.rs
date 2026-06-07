@@ -10,7 +10,8 @@
 //! See `the design notes`
 //! task A1 for the design rationale.
 
-use eindir_core::FPair;
+use eindir_core::{Bounds, FPair};
+use ndarray::Array1;
 use num_traits::Float;
 use rand::Rng;
 
@@ -32,6 +33,17 @@ pub trait Sampler<T: Float>: Send + Sync {
     /// Draws an initial state from the sampler's prior (uniform on the
     /// objective's bounds for the shipped impl).
     fn initial_state<R: Rng>(&self, rng: &mut R) -> State;
+
+    /// Bounds for low-discrepancy starts when the sampler can construct
+    /// a state from an externally supplied position.
+    fn qmc_bounds(&self) -> Option<&Bounds<f64>> {
+        None
+    }
+
+    /// Constructs an initial state from a bounded design point.
+    fn initial_state_from_position(&self, _pos: Array1<f64>) -> Option<State> {
+        None
+    }
 
     /// One proposal + accept cycle at the given epoch. Mutates `state`
     /// in place and returns `true` iff the proposal was accepted.
@@ -63,6 +75,20 @@ where
             cur: pair.clone(),
             best: pair,
         }
+    }
+
+    fn qmc_bounds(&self) -> Option<&Bounds<f64>> {
+        Some(self.obj.bounds())
+    }
+
+    fn initial_state_from_position(&self, pos: Array1<f64>) -> Option<State> {
+        let pos = self.obj.bounds().clip(pos.view());
+        let val = self.obj.eval(pos.view());
+        let pair = FPair { pos, val };
+        Some(State {
+            cur: pair.clone(),
+            best: pair,
+        })
     }
 
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
