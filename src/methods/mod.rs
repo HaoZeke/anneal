@@ -13,6 +13,7 @@
 
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
+pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 
@@ -21,5 +22,6 @@ pub use bayesian_pilot::{
     fit_laplace, pilot_draws, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,
     Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
+pub use local_polish::{projected_gradient_polish, LocalPolishResult};
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
