@@ -33,16 +33,37 @@ class _Budget(Exception):
 
 class Counter:
     def __init__(self, fn, budget):
-        self.fn = fn; self.budget = budget; self.n = 0; self.best = float("inf")
+        self.fn = fn
+        self.budget = budget
+        self.n = 0
+        self.objective_evals = 0
+        self.grad_evals = 0
+        self.best = float("inf")
 
-    def __call__(self, x):
+    def _consume(self):
         if self.n >= self.budget:
             raise _Budget()
         self.n += 1
+
+    def __call__(self, x):
+        self._consume()
+        self.objective_evals += 1
         v = float(self.fn(np.asarray(x, float).reshape(-1)))
         if math.isfinite(v) and v < self.best:
             self.best = v
         return v
+
+    def counted_grad(self, grad):
+        def jac(x):
+            self._consume()
+            self.grad_evals += 1
+            return np.asarray(grad(np.asarray(x, float).reshape(-1)), float)
+
+        return jac
+
+
+def _counted_jac(counter, grad):
+    return counter.counted_grad(grad) if grad else None
 
 
 def _auto_sigma(low, high, dim):
@@ -69,16 +90,16 @@ def classical(counter, low, high, dim, grad, rng):
 
 def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
     bounds = list(zip(low, high))
-    jac = (lambda x: np.asarray(grad(np.asarray(x, float)), float)) if grad else None
-    pop_size = int(min(50, max(12, 5 * dim)))
-    pop = [rng.uniform(low, high) for _ in range(pop_size)]
-    vals = np.array([counter(p) for p in pop])
-    F = np.full(pop_size, 0.5); CR = np.full(pop_size, 0.9)
-    bi = int(np.argmin(vals)); best_x = pop[bi].copy(); best_v = float(vals[bi])
-    finite = vals[np.isfinite(vals)]
-    temp0 = max(float(np.std(finite)) if finite.size > 1 else 1.0, 1e-6)
-    polish_every = max(1, counter.budget // n_polish); last = 0; gen = 0
+    jac = _counted_jac(counter, grad)
     try:
+        pop_size = int(min(50, max(12, 5 * dim)))
+        pop = [rng.uniform(low, high) for _ in range(pop_size)]
+        vals = np.array([counter(p) for p in pop])
+        F = np.full(pop_size, 0.5); CR = np.full(pop_size, 0.9)
+        bi = int(np.argmin(vals)); best_x = pop[bi].copy(); best_v = float(vals[bi])
+        finite = vals[np.isfinite(vals)]
+        temp0 = max(float(np.std(finite)) if finite.size > 1 else 1.0, 1e-6)
+        polish_every = max(1, counter.budget // n_polish); last = 0; gen = 0
         while True:
             temp = temp0 * np.log(2.0) / np.log(gen + 2.0)
             for i in range(pop_size):
@@ -108,7 +129,7 @@ def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
 
 def sci_basinhopping(counter, low, high, dim, grad, rng):
     bounds = list(zip(low, high)); x0 = rng.uniform(low, high)
-    jac = (lambda x: np.asarray(grad(np.asarray(x, float)), float)) if grad else None
+    jac = _counted_jac(counter, grad)
     mk = {"method": "L-BFGS-B", "bounds": bounds}
     if jac is not None:
         mk["jac"] = jac
