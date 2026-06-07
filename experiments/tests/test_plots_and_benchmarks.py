@@ -1218,6 +1218,89 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
     )
 
 
+def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = 4.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
+        captured["mix"] = (prob, seed, max_fevals, return_diagnostics)
+        return -7.0, 13
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (3.0, 40, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            2.0,
+            30,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            1.0,
+            70,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", bayesian_mixing_sa)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -7.0
+    assert isinstance(captured["mix"][0], GradientCutestProblem)
+    assert captured["mix"][1:] == (11, 81, False)
+    assert fevals == 11 + 13 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
+        n_trajectories=2,
+        l_steps=2,
+    )
+
+
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
