@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import basinhopping, differential_evolution, minimize
 
-from experiments.surrogate_guided import CATALOG
+from experiments.benchmarks.catalog import CATALOG
 
 
 class _Budget(Exception):
@@ -39,6 +39,13 @@ class Counter:
         if v < self.best:
             self.best = v
         return v
+
+
+def _catalog_cases(dims):
+    wanted = {int(d) for d in dims}
+    for problem in sorted(CATALOG.values(), key=lambda p: p.name):
+        if problem.dim in wanted:
+            yield problem
 
 
 def _auto_sigma(low, high, dim):
@@ -208,26 +215,25 @@ def compare(dims=(10,), seeds=6, budget=6000):
     names = list(METHODS)
     print(f"best-at-budget ({budget} evals), median over {seeds} seeds; lower is better")
     print("objective    D  f*        " + "  ".join(f"{n:>16}" for n in names))
-    for oname, (fn, (lo, hi), fstar) in CATALOG.items():
-        for d in dims:
-            low = np.full(d, lo); high = np.full(d, hi); fs = fstar(d)
-            meds = {}
-            for n, fnc in METHODS.items():
-                vals = []
-                for s in range(seeds):
-                    rng = np.random.default_rng(s)
-                    c = Counter(fn, budget)
-                    try:
-                        vals.append(fnc(c, low, high, d, rng))
-                    except _Budget:
-                        vals.append(c.best)
-                meds[n] = float(np.median(vals))
-            best_method = min(meds, key=meds.get)
-            cells = "  ".join(
-                (f"*{meds[n]:>15.3f}" if n == best_method else f"{meds[n]:>16.3f}")
-                for n in names
-            )
-            print(f"{oname:<11} {d:>2} {fs:>8.2f}  {cells}", flush=True)
+    for problem in _catalog_cases(dims):
+        d = problem.dim
+        meds = {}
+        for n, fnc in METHODS.items():
+            vals = []
+            for s in range(seeds):
+                rng = np.random.default_rng(s)
+                c = Counter(problem.fn, budget)
+                try:
+                    vals.append(fnc(c, problem.low, problem.high, d, rng))
+                except _Budget:
+                    vals.append(c.best)
+            meds[n] = float(np.median(vals))
+        best_method = min(meds, key=meds.get)
+        cells = "  ".join(
+            (f"*{meds[n]:>15.3f}" if n == best_method else f"{meds[n]:>16.3f}")
+            for n in names
+        )
+        print(f"{problem.name:<11} {d:>2} {problem.f_star:>8.2f}  {cells}", flush=True)
 
 
 if __name__ == "__main__":
