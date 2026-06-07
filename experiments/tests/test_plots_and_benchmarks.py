@@ -1438,7 +1438,7 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
 def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {"polish_x0": []}
+    captured = {"polish_x0": [], "max_fevals": []}
 
     class GradientCutestProblem(_QuadraticCutestProblem):
         def grad(self, x):
@@ -1454,8 +1454,9 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
         dtype=np.float64,
     )
 
-    def polish(_obj_fn, _grad_fn, _low, _high, x0, **_kwargs):
+    def polish(_obj_fn, _grad_fn, _low, _high, x0, **kwargs):
         captured["polish_x0"].append(np.asarray(x0, dtype=np.float64))
+        captured["max_fevals"].append(kwargs["max_fevals"])
         return {
             "best_val": -1.0,
             "best_pos": np.array([0.0, 0.0]),
@@ -1490,6 +1491,7 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
 
     assert best_val == -1.0
     assert fevals == 4 + 2 + 1
+    assert captured["max_fevals"] == [160]
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[[1]])
 
 
