@@ -1300,7 +1300,7 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
 
     assert best_val == -7.0
     assert isinstance(captured["mix"][0], GradientCutestProblem)
-    assert captured["mix"][1:] == (11, 81, False)
+    assert captured["mix"][1:] == (7, 81, False)
     assert fevals == 11 + 13 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
         n_trajectories=2,
         l_steps=2,
