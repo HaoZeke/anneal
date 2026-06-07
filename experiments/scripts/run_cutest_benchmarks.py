@@ -673,6 +673,14 @@ def pdfo_bobyqa(prob, seed, max_fevals):
     return obj.result(fallback)
 
 
+def pdfo_bobyqa_available():
+    try:
+        import pdfo.gethuge  # noqa: F401
+    except Exception:
+        return False
+    return True
+
+
 def cma_es(prob, seed, max_fevals):
     import cma
 

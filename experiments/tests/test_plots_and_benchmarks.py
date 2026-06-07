@@ -2070,6 +2070,9 @@ def test_cutest_pdfo_bobyqa_is_budgeted_and_finite():
     pytest.importorskip("pdfo")
     from experiments.scripts import run_cutest_benchmarks as cutest
 
+    if not cutest.pdfo_bobyqa_available():
+        pytest.skip("PDFO extension is not callable in this Python environment")
+
     best_val, fevals = cutest.pdfo_bobyqa(
         _QuadraticCutestProblem(),
         seed=3,
