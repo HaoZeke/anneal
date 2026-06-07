@@ -125,3 +125,17 @@ fn projected_gradient_polish_uses_rotated_curvature() {
     assert!((result.best_pos[0] - 0.25).abs() < 1e-3);
     assert!((result.best_pos[1] + 0.4).abs() < 1e-3);
 }
+
+#[test]
+fn projected_gradient_polish_recovers_from_oversized_initial_scaling() {
+    let obj = ShiftedQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * (x[0] - 0.25), 2.0 * (x[1] + 0.4)])
+    });
+
+    let result = projected_gradient_polish(&obj, &grad, array![0.9, 0.9], 16, 1e9, 1e-10);
+
+    assert!(result.best_val < 1e-3);
+    assert!(result.n_evals <= 16);
+    assert!(result.n_grads <= 16);
+}

@@ -64,6 +64,35 @@ fn active_descent_direction(
     fallback
 }
 
+fn vector_norm(x: &Array1<f64>) -> f64 {
+    x.iter().map(|v| v * v).sum::<f64>().sqrt()
+}
+
+fn box_diagonal(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
+    low.iter()
+        .zip(high.iter())
+        .map(|(lo, hi)| {
+            let width = hi - lo;
+            width * width
+        })
+        .sum::<f64>()
+        .sqrt()
+}
+
+fn initial_line_search_step(direction: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> f64 {
+    let direction_norm = vector_norm(direction);
+    let diagonal = box_diagonal(low, high);
+    if direction_norm.is_finite() && diagonal.is_finite() && direction_norm > diagonal {
+        (diagonal / direction_norm).max(MIN_BACKTRACK_STEP)
+    } else {
+        FULL_LINE_SEARCH_STEP
+    }
+}
+
+fn line_search_trial_limit(dim: usize) -> usize {
+    dim.saturating_add(1).max(1)
+}
+
 fn apply_active_bounds(
     direction: &mut Array1<f64>,
     x: &Array1<f64>,
@@ -160,41 +189,63 @@ where
                 inverse_hessian = scaled_identity(x.len(), step0);
             }
         }
-        let direction = active_descent_direction(&inverse_hessian, &x, &pgrad, low, high);
-        let directional_decrease = -pgrad.dot(&direction);
-        if !directional_decrease.is_finite() || directional_decrease <= 0.0 {
-            break;
-        }
-
         let mut accepted = false;
-        let mut alpha = FULL_LINE_SEARCH_STEP;
-        while n_evals < max_fevals && alpha > MIN_BACKTRACK_STEP {
-            let trial = bounds.clip((&x + &(direction.mapv(|v| alpha * v))).view());
-            if trial
-                .iter()
-                .zip(x.iter())
-                .all(|(a, b)| (*a - *b).abs() <= f64::EPSILON)
-            {
-                alpha *= BACKTRACK_SHRINK;
-                continue;
-            }
-            let trial_value = obj.eval(trial.view());
-            n_evals += 1;
-            if trial_value.is_finite()
-                && trial_value <= value - ARMIJO_SUFFICIENT_DECREASE * alpha * directional_decrease
-            {
-                prev_x = Some(x.clone());
-                prev_pgrad = Some(pgrad.clone());
-                x = trial;
-                value = trial_value;
-                if trial_value < best_val {
-                    best_val = trial_value;
-                    best_pos = x.clone();
-                }
-                accepted = true;
+        let mut direction = active_descent_direction(&inverse_hessian, &x, &pgrad, low, high);
+        let mut fallback_attempted = false;
+        loop {
+            let directional_decrease = -pgrad.dot(&direction);
+            if !directional_decrease.is_finite() || directional_decrease <= 0.0 {
                 break;
             }
-            alpha *= BACKTRACK_SHRINK;
+
+            let mut alpha = initial_line_search_step(&direction, low, high);
+            let mut trials = 0usize;
+            let max_trials = line_search_trial_limit(x.len());
+            while n_evals < max_fevals && alpha > MIN_BACKTRACK_STEP && trials < max_trials {
+                trials += 1;
+                let trial = bounds.clip((&x + &(direction.mapv(|v| alpha * v))).view());
+                if trial
+                    .iter()
+                    .zip(x.iter())
+                    .all(|(a, b)| (*a - *b).abs() <= f64::EPSILON)
+                {
+                    alpha *= BACKTRACK_SHRINK;
+                    continue;
+                }
+                let trial_value = obj.eval(trial.view());
+                n_evals += 1;
+                if trial_value.is_finite()
+                    && trial_value
+                        <= value - ARMIJO_SUFFICIENT_DECREASE * alpha * directional_decrease
+                {
+                    prev_x = Some(x.clone());
+                    prev_pgrad = Some(pgrad.clone());
+                    x = trial;
+                    value = trial_value;
+                    if trial_value < best_val {
+                        best_val = trial_value;
+                        best_pos = x.clone();
+                    }
+                    accepted = true;
+                    break;
+                }
+                alpha *= BACKTRACK_SHRINK;
+            }
+            if accepted || fallback_attempted {
+                break;
+            }
+            let mut fallback = -&pgrad;
+            apply_active_bounds(&mut fallback, &x, low, high);
+            if fallback
+                .iter()
+                .zip(direction.iter())
+                .all(|(a, b)| (*a - *b).abs() <= f64::EPSILON)
+            {
+                break;
+            }
+            inverse_hessian = scaled_identity(x.len(), step0);
+            direction = fallback;
+            fallback_attempted = true;
         }
         if !accepted {
             break;
