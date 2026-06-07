@@ -30,6 +30,7 @@ from experiments.shared.runner import (
 
 TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
+QMC_SCREEN_BUDGET_SLOTS = 1
 
 
 def _low_discrepancy_starts(
@@ -1112,6 +1113,19 @@ def _run_cutest_best_start_polish(
     return best_val, total_work
 
 
+def _has_declared_cutest_bounds(prob):
+    return bool(getattr(prob, "has_cutest_bounds", False))
+
+
+def _bounded_screened_polish_budget(epoch_budget, n_chains):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    screen_slots = int(n_chains) + QMC_SCREEN_BUDGET_SLOTS
+    return max(1, int(epoch_budget) // screen_slots)
+
+
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
     if best_pilot_pos is None:
         return None
@@ -1167,6 +1181,18 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     local_screen_starts,
                     int(k_per_epoch),
+                )
+                if auto_best_start_polish is not None:
+                    return auto_best_start_polish
+            elif _has_declared_cutest_bounds(prob):
+                auto_best_start_polish = _run_cutest_best_start_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    _bounded_screened_polish_budget(k_per_epoch, n_chains),
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
