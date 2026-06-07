@@ -360,6 +360,24 @@ def test_cutest_full_suite_resume_key_normalises_seed():
     }
 
 
+def test_cutest_effective_design_bounds_shrink_extreme_finite_bounds():
+    from experiments.benchmarks.cutest_runner import effective_design_bounds
+
+    low = np.array([-5.0, 1.0, -1.0e10])
+    high = np.array([5.0, 5.0, 1.0])
+    anchor = np.array([0.0, 0.0, 0.0])
+
+    design_low, design_high, design_x0 = effective_design_bounds(
+        low, high, anchor, x_box=5.0
+    )
+
+    assert design_x0.tolist() == pytest.approx([0.0, 1.0, 0.0])
+    assert design_low.tolist() == pytest.approx([-5.0, 1.0, -5.0])
+    assert design_high.tolist() == pytest.approx([5.0, 5.0, 1.0])
+    assert np.all(design_low >= low)
+    assert np.all(design_high <= high)
+
+
 def test_cutest_env_requires_cutest_install(tmp_path, monkeypatch):
     from experiments.benchmarks.cutest_runner import cutest_env
 
