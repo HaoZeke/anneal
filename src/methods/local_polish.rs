@@ -23,6 +23,23 @@ pub struct LocalPolishResult {
     pub n_grads: usize,
 }
 
+/// Result of QMC-seeded bounded local refinement.
+#[derive(Clone, Debug)]
+pub struct QmcPolishResult {
+    /// Best point found across the screened low-discrepancy starts.
+    pub best_pos: Array1<f64>,
+    /// Objective value at `best_pos`.
+    pub best_val: f64,
+    /// Objective evaluations consumed by screening and refinement.
+    pub n_evals: usize,
+    /// Gradient evaluations consumed by refinement.
+    pub n_grads: usize,
+    /// Number of low-discrepancy starts screened.
+    pub n_starts: usize,
+    /// Number of screened starts sent to local refinement.
+    pub n_polished: usize,
+}
+
 fn projected_gradient(
     x: &Array1<f64>,
     grad: &Array1<f64>,
@@ -258,5 +275,80 @@ where
         best_val,
         n_evals,
         n_grads,
+    }
+}
+
+/// Refine low-discrepancy starts with bounded quasi-Newton polish.
+pub fn qmc_projected_gradient_polish<O, G>(
+    obj: &O,
+    gradient: &G,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    assert!(n_starts > 0, "n_starts must be positive");
+    assert!(
+        max_fevals_per_start > 0,
+        "max_fevals_per_start must be positive"
+    );
+
+    let bounds = obj.bounds();
+    let starts = eindir_core::low_discrepancy_points(
+        bounds,
+        n_starts,
+        crate::runner::qmc_skip_from_seed(seed),
+    );
+    let mut screened = Vec::with_capacity(n_starts);
+    let mut n_evals = 0usize;
+    let mut best_pos = bounds.clip(starts.row(0));
+    let mut best_val = f64::INFINITY;
+
+    for start in starts.outer_iter() {
+        let pos = bounds.clip(start);
+        let value = obj.eval(pos.view());
+        n_evals += 1;
+        if value.is_finite() {
+            if value < best_val {
+                best_val = value;
+                best_pos = pos.clone();
+            }
+            screened.push((value, pos));
+        }
+    }
+    screened.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+    let polish_limit = if top_k == 0 {
+        screened.len()
+    } else {
+        top_k.min(screened.len())
+    };
+    let mut n_grads = 0usize;
+    let mut n_polished = 0usize;
+    for (_value, start) in screened.into_iter().take(polish_limit) {
+        let result =
+            projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol);
+        n_evals += result.n_evals;
+        n_grads += result.n_grads;
+        n_polished += 1;
+        if result.best_val.is_finite() && result.best_val < best_val {
+            best_val = result.best_val;
+            best_pos = result.best_pos;
+        }
+    }
+
+    QmcPolishResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads,
+        n_starts,
+        n_polished,
     }
 }

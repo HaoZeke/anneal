@@ -409,6 +409,75 @@ fn polish(
     Ok(out.into())
 }
 
+/// Refines QMC starts with bounded projected-gradient polish.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
+fn qmc_polish(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if n_starts < 1 {
+        return Err(PyValueError::new_err("n_starts must be positive"));
+    }
+    if max_fevals_per_start < 1 {
+        return Err(PyValueError::new_err(
+            "max_fevals_per_start must be positive",
+        ));
+    }
+    if step0 <= 0.0 {
+        return Err(PyValueError::new_err("step0 must be positive"));
+    }
+    if grad_tol < 0.0 {
+        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+    }
+
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let result = crate::qmc_projected_gradient_polish(
+        &obj,
+        &grad,
+        n_starts,
+        max_fevals_per_start,
+        seed,
+        step0,
+        grad_tol,
+        top_k,
+    );
+
+    let out = PyDict::new(py);
+    out.set_item(
+        "best_pos",
+        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
+    )?;
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("n_starts", result.n_starts)?;
+    out.set_item("n_polished", result.n_polished)?;
+    Ok(out.into())
+}
+
 // ---------------------------------------------------------------------------
 // Preset enum + dispatch.
 // ---------------------------------------------------------------------------
@@ -603,6 +672,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(run_hmc, m)?)?;
     m.add_function(wrap_pyfunction!(polish, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     Ok(())
 }
