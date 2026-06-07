@@ -1090,15 +1090,26 @@ def _run_cutest_best_start_polish(
     if not screened:
         return None
     screened.sort(key=lambda item: item[0])
-    best_val, work_units = _run_cutest_rust_polish(
-        anneal_module,
-        prob,
-        grad_fn,
-        grad_kind,
-        screened[0][1],
-        max_fevals,
-    )
-    return best_val, len(starts) + work_units
+    if screened[0][0] > 0.0:
+        cutoff = screened[0][0] * np.sqrt(float(len(starts)))
+        candidates = [item for item in screened if item[0] <= cutoff]
+    else:
+        candidates = [screened[0]]
+    best_val = float("inf")
+    total_work = len(starts)
+    for _value, start in candidates:
+        candidate_val, work_units = _run_cutest_rust_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            start,
+            max_fevals,
+        )
+        total_work += int(work_units)
+        if candidate_val < best_val:
+            best_val = candidate_val
+    return best_val, total_work
 
 
 def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
