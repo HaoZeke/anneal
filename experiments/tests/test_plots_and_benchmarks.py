@@ -1628,6 +1628,65 @@ def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypat
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
 
 
+def test_cutest_bgsa_auto_uses_screened_polish_for_high_dimensional_bounds(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class ActiveBoundProblem:
+        name = "ACTIVEBOUND"
+        dim = 9
+        low = np.full(9, -1.0)
+        high = np.full(9, 1.0)
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    fake_anneal = types.SimpleNamespace(polish=lambda *_args, **_kwargs: {})
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+
+    def best_start_polish(*args, **_kwargs):
+        captured["best_args"] = args
+        return -3.0, 41
+
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_best_start_polish",
+        best_start_polish,
+    )
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_multistart_polish",
+        lambda *_args, **_kwargs: pytest.fail("multistart polish should be skipped"),
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        ActiveBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -3.0
+    assert fevals == 41
+    assert captured["best_args"][4:] == (7, 4, 40)
+
+
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 

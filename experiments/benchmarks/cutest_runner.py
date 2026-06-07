@@ -111,6 +111,7 @@ class CutestProblem:
     x0: np.ndarray
     design_low: np.ndarray
     design_high: np.ndarray
+    has_cutest_bounds: bool
     f_star: float | None  # may be None for problems without a stored optimum
 
 
@@ -198,6 +199,7 @@ def load(
         x0=x0,
         design_low=design_low,
         design_high=design_high,
+        has_cutest_bounds=bool(np.any(bl_finite | bu_finite)),
         f_star=f_star,
     )
 
