@@ -1628,6 +1628,17 @@ def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypat
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
 
 
+def test_cutest_polish_bulk_dominates_worst_tail_only_for_separated_tail():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    assert cutest._polish_bulk_dominates_worst_tail(
+        [0.0037893821, 0.0037893822, 0.0037977661, 0.0319444328]
+    )
+    assert not cutest._polish_bulk_dominates_worst_tail(
+        [10683.5909, 11049.8258, 11358.6698, 12198.3876]
+    )
+
+
 def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
