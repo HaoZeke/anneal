@@ -1394,6 +1394,11 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
         "bayesian_mixing_sa",
         lambda *_args, **_kwargs: (5.0, 17),
     )
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_multistart_polish",
+        lambda *_args, **_kwargs: None,
+    )
 
     best_val, fevals = cutest._bgsa_run(
         DesignBoundProblem(),
@@ -1480,9 +1485,7 @@ def test_cutest_bgsa_auto_skips_portfolio_when_multistart_polish_agrees(monkeypa
 
     assert best_val == -1.0
     assert fevals == 4 * (2 + 1)
-    assert [x.tolist() for x in captured["polish_x0"]] == pytest.approx(
-        starts.tolist()
-    )
+    np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
 
 
 def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
