@@ -1256,6 +1256,40 @@ def _run_cutest_raw_best_polish(
     return best_val, len(starts) + int(work_units)
 
 
+def _run_cutest_qmc_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_starts,
+    max_fevals_per_start,
+    top_k=0,
+):
+    if not hasattr(anneal_module, "qmc_polish"):
+        return None
+    if n_starts < 1 or max_fevals_per_start < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    result = anneal_module.qmc_polish(
+        prob.fn,
+        grad_fn,
+        design_low,
+        design_high,
+        int(n_starts),
+        int(max_fevals_per_start),
+        seed=int(seed),
+        top_k=int(top_k),
+    )
+    work_units = _polish_work_units(
+        int(np.asarray(prob.low).size),
+        grad_kind,
+        result.get("n_evals", 0),
+        result.get("n_grads", 0),
+    )
+    return float(result["best_val"]), work_units
+
+
 def _has_declared_cutest_bounds(prob):
     return bool(getattr(prob, "has_cutest_bounds", False))
 
@@ -1266,6 +1300,12 @@ def _bounded_polish_dimension_is_covered(dim, n_chains):
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
     return int(dim) <= int(n_chains) * int(n_chains)
+
+
+def _bounded_polish_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return max(1, int(np.ceil(np.sqrt(float(n_chains)))))
 
 
 def _covered_local_polish_budget(epoch_budget, n_chains):
@@ -1335,7 +1375,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
 
             if int(prob.dim) <= int(n_chains):
                 local_screen_starts = int(n_chains) + int(prob.dim)
-                auto_best_start_polish = _run_cutest_best_start_polish(
+                auto_best_start_polish = _run_cutest_qmc_polish(
                     anneal,
                     prob,
                     grad_fn,
@@ -1343,12 +1383,35 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     local_screen_starts,
                     _covered_local_polish_budget(k_per_epoch, n_chains),
+                    top_k=0,
                 )
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_best_start_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        local_screen_starts,
+                        _covered_local_polish_budget(k_per_epoch, n_chains),
+                    )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
             elif _has_declared_cutest_bounds(
                 prob
             ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
+                auto_best_start_polish = _run_cutest_qmc_polish(
+                    anneal,
+                    prob,
+                    _finite_difference_gradient(prob),
+                    "finite-difference",
+                    seed,
+                    int(n_chains),
+                    _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                    top_k=_bounded_polish_top_k(n_chains),
+                )
+                if auto_best_start_polish is not None:
+                    return auto_best_start_polish
                 auto_best_start_polish = _run_cutest_raw_best_polish(
                     anneal,
                     prob,
