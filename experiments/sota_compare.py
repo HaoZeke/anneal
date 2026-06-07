@@ -15,6 +15,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import basinhopping, differential_evolution, minimize
 
+from experiments.anneal_sota import qmc_annealed_hybrid
 from experiments.benchmarks.catalog import CATALOG
 
 
@@ -146,59 +147,17 @@ def _plain(counter, low, high, dim, rng):
     return min(best, counter.best)
 
 
-def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1):
-    """Self-adaptive (jDE) differential mutation in the Move slot, with SA
-    Metropolis acceptance, a cooled temperature, and periodic L-BFGS-B polish.
-
-    Each individual carries its own (F, CR), reset stochastically (the jDE
-    self-adaptation that makes DE strong on multimodal landscapes). The
-    acceptance is the SA Metropolis rule on a cooled temperature scaled to the
-    population's value spread, so uphill trials are occasionally taken to escape
-    stagnation, and the global incumbent is dropped into L-BFGS-B periodically.
-    """
-    bounds = list(zip(low, high))
-    pop_size = int(min(50, max(12, 5 * dim)))
-    pop = [rng.uniform(low, high) for _ in range(pop_size)]
-    vals = np.array([counter(p) for p in pop])
-    F = np.full(pop_size, 0.5)
-    CR = np.full(pop_size, 0.9)
-    bi = int(np.argmin(vals)); best_x = pop[bi].copy(); best_v = float(vals[bi])
-    finite = vals[np.isfinite(vals)]
-    temp0 = float(np.std(finite)) if finite.size > 1 else 1.0
-    temp0 = max(temp0, 1e-6)
-    polish_every = max(1, counter.budget // n_polish)
-    last = 0; gen = 0
-    try:
-        while True:
-            temp = temp0 * np.log(2.0) / np.log(gen + 2.0)
-            for i in range(pop_size):
-                fi = (0.1 + 0.9 * rng.random()) if rng.random() < 0.1 else F[i]
-                cri = rng.random() if rng.random() < 0.1 else CR[i]
-                idx = [j for j in range(pop_size) if j != i]
-                r1, r2, r3 = rng.choice(idx, 3, replace=False)
-                mutant = pop[r1] + fi * (pop[r2] - pop[r3])
-                mask = rng.random(dim) < cri
-                mask[rng.integers(dim)] = True
-                trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
-                ft = counter(trial)
-                if ft <= vals[i] or rng.random() < np.exp(-(ft - vals[i]) / max(temp, 1e-12)):
-                    pop[i] = trial; vals[i] = ft; F[i] = fi; CR[i] = cri
-                    if ft < best_v:
-                        best_v, best_x = float(ft), trial.copy()
-            gen += 1
-            if counter.n - last >= polish_every:
-                maxfun = max(20, counter.budget // (2 * n_polish * k_polish))
-                for j in np.argsort(vals)[:k_polish]:
-                    res = minimize(counter, pop[int(j)], method="L-BFGS-B", bounds=bounds,
-                                   options={"maxfun": maxfun})
-                    if res.fun < vals[int(j)]:
-                        pop[int(j)] = np.asarray(res.x, float); vals[int(j)] = float(res.fun)
-                    if res.fun < best_v:
-                        best_v, best_x = float(res.fun), np.asarray(res.x, float)
-                last = counter.n
-    except _Budget:
-        pass
-    return min(best_v, counter.best)
+def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=3):
+    return qmc_annealed_hybrid(
+        counter,
+        low,
+        high,
+        dim,
+        grad=None,
+        rng=rng,
+        n_polish=n_polish,
+        k_polish=k_polish,
+    )
 
 
 METHODS = {

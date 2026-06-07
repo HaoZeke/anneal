@@ -23,6 +23,7 @@ import sys
 import numpy as np
 from scipy.optimize import basinhopping, differential_evolution, minimize
 
+from experiments.anneal_sota import qmc_annealed_hybrid
 from experiments.benchmarks.cutest_runner import load, setup_cutest_env
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
@@ -89,42 +90,16 @@ def classical(counter, low, high, dim, grad, rng):
 
 
 def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
-    bounds = list(zip(low, high))
-    jac = _counted_jac(counter, grad)
-    try:
-        pop_size = int(min(50, max(12, 5 * dim)))
-        pop = [rng.uniform(low, high) for _ in range(pop_size)]
-        vals = np.array([counter(p) for p in pop])
-        F = np.full(pop_size, 0.5); CR = np.full(pop_size, 0.9)
-        bi = int(np.argmin(vals)); best_x = pop[bi].copy(); best_v = float(vals[bi])
-        finite = vals[np.isfinite(vals)]
-        temp0 = max(float(np.std(finite)) if finite.size > 1 else 1.0, 1e-6)
-        polish_every = max(1, counter.budget // n_polish); last = 0; gen = 0
-        while True:
-            temp = temp0 * np.log(2.0) / np.log(gen + 2.0)
-            for i in range(pop_size):
-                fi = (0.1 + 0.9 * rng.random()) if rng.random() < 0.1 else F[i]
-                cri = rng.random() if rng.random() < 0.1 else CR[i]
-                idx = [j for j in range(pop_size) if j != i]
-                r1, r2, r3 = rng.choice(idx, 3, replace=False)
-                mutant = pop[r1] + fi * (pop[r2] - pop[r3])
-                mask = rng.random(dim) < cri; mask[rng.integers(dim)] = True
-                trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
-                ft = counter(trial)
-                if ft <= vals[i] or rng.random() < np.exp(-(ft - vals[i]) / max(temp, 1e-12)):
-                    pop[i] = trial; vals[i] = ft; F[i] = fi; CR[i] = cri
-                    if ft < best_v:
-                        best_v, best_x = float(ft), trial.copy()
-            gen += 1
-            if counter.n - last >= polish_every:
-                res = minimize(counter, best_x, method="L-BFGS-B", jac=jac, bounds=bounds,
-                               options={"maxfun": max(20, counter.budget // (2 * n_polish))})
-                if res.fun < best_v:
-                    best_v, best_x = float(res.fun), np.asarray(res.x, float)
-                last = counter.n
-    except _Budget:
-        pass
-    return counter.best
+    return qmc_annealed_hybrid(
+        counter,
+        low,
+        high,
+        dim,
+        grad,
+        rng,
+        n_polish=n_polish,
+        k_polish=3,
+    )
 
 
 def sci_basinhopping(counter, low, high, dim, grad, rng):
