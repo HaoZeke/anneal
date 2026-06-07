@@ -1174,6 +1174,10 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
         captured["hybrid_inner"] = kwargs["k_inner"]
         return 2.0, 70, None, None, None, None, None, None
 
+    def bayesian_mixing_sa(_prob, _seed, max_fevals, _return_diagnostics=False):
+        captured["mix_max_fevals"] = max_fevals
+        return 3.0, 17
+
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
     fake_demo = types.SimpleNamespace(
         OBJ_FN=None,
@@ -1198,6 +1202,7 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", bayesian_mixing_sa)
 
     best_val, fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -1212,7 +1217,8 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
     assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
     assert captured["pt_inner"] == 2
     assert captured["hybrid_inner"] == 1
-    assert fevals == 11 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
+    assert captured["mix_max_fevals"] == 81
+    assert fevals == 11 + 17 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
         n_trajectories=2,
         l_steps=2,
     )
@@ -1326,6 +1332,10 @@ def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
         captured["hybrid_inner"] = kwargs["k_inner"]
         return 2.0, 70, None, None, None, None, None, None
 
+    def bayesian_mixing_sa(_prob, _seed, max_fevals, _return_diagnostics=False):
+        captured["mix_max_fevals"] = max_fevals
+        return 3.0, 17
+
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
     fake_demo = types.SimpleNamespace(
         OBJ_FN=None,
@@ -1350,6 +1360,7 @@ def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", bayesian_mixing_sa)
 
     best_val, fevals = cutest._bgsa_run(
         ReducedCoordinateProblem(),
@@ -1363,7 +1374,8 @@ def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     assert best_val == -5.0
     assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
     assert captured["hybrid_inner"] == 1
-    assert fevals == 11 + 70 + cutest._rust_hmc_native_grad_work_units(
+    assert captured["mix_max_fevals"] == 81
+    assert fevals == 11 + 17 + 70 + cutest._rust_hmc_native_grad_work_units(
         n_trajectories=2,
         l_steps=2,
     )
