@@ -2026,7 +2026,7 @@ def test_cutest_full_suite_accepts_scipy_baseline_drivers():
 
     assert suite.parse_drivers(
         "scipy_lbfgsb,scipy_de,scipy_dual_annealing,scipy_basinhopping,"
-        "scipy_direct,scipy_shgo,scipy_cobyqa"
+        "scipy_direct,scipy_shgo,scipy_cobyqa,pdfo_bobyqa,cma_es"
     ) == (
         "scipy_lbfgsb",
         "scipy_de",
@@ -2035,6 +2035,8 @@ def test_cutest_full_suite_accepts_scipy_baseline_drivers():
         "scipy_direct",
         "scipy_shgo",
         "scipy_cobyqa",
+        "pdfo_bobyqa",
+        "cma_es",
     )
 
 
@@ -2061,6 +2063,34 @@ def test_cutest_scipy_cobyqa_is_budgeted_and_finite():
     )
 
     assert fevals <= 25
+    assert np.isfinite(best_val)
+
+
+def test_cutest_pdfo_bobyqa_is_budgeted_and_finite():
+    pytest.importorskip("pdfo")
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    best_val, fevals = cutest.pdfo_bobyqa(
+        _QuadraticCutestProblem(),
+        seed=3,
+        max_fevals=25,
+    )
+
+    assert fevals <= 25
+    assert np.isfinite(best_val)
+
+
+def test_cutest_cma_es_is_budgeted_and_finite():
+    pytest.importorskip("cma")
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    best_val, fevals = cutest.cma_es(
+        _QuadraticCutestProblem(),
+        seed=3,
+        max_fevals=40,
+    )
+
+    assert fevals <= 40
     assert np.isfinite(best_val)
 
 
