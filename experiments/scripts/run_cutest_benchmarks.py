@@ -699,7 +699,7 @@ def cma_es(prob, seed, max_fevals):
                 "verbose": -9,
             },
         )
-        fallback = obj.best
+        fallback = obj.best_val
     except _BudgetExhausted:
         pass
     return obj.result(fallback)
