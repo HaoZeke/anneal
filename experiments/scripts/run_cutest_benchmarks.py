@@ -940,7 +940,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             )
             mix_bv, mix_calls = bayesian_mixing_sa(
                 prob,
-                seed + 4,
+                seed,
                 1 + int(n_epochs) * int(k_per_epoch),
             )
             outcomes = [
