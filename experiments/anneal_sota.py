@@ -89,46 +89,33 @@ def qmc_annealed_hybrid(
     n_polish: int = 6,
     k_polish: int = 3,
 ):
-    """QMC-seeded jDE/GSA hybrid with rethermalising scouts and local polish."""
+    """QMC-seeded jDE/SA hybrid with budgeted local polish."""
     low = np.asarray(low, dtype=np.float64)
     high = np.asarray(high, dtype=np.float64)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
-    pop_size = int(min(60, max(16, 6 * dim)))
+    pop_size = int(min(50, max(12, 5 * dim)))
     pop = [p.copy() for p in low_discrepancy_population(low, high, pop_size, skip=1)]
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
-    f = np.full(pop_size, 0.5, dtype=np.float64)
-    cr = np.full(pop_size, 0.9, dtype=np.float64)
-    best_idx = int(np.nanargmin(vals))
+    f = np.full(pop_size, 0.5)
+    cr = np.full(pop_size, 0.9)
+    best_idx = int(np.argmin(vals))
     best_x = pop[best_idx].copy()
     best_v = float(vals[best_idx])
     finite = vals[np.isfinite(vals)]
     temp0 = max(float(np.std(finite)) if finite.size > 1 else 1.0, 1e-6)
-    sigma = float(np.clip(0.20 * np.linalg.norm(high - low) / max(dim, 1), 1e-9, np.inf))
     polish_every = max(1, counter.budget // max(n_polish, 1))
-    scout_every = max(pop_size, counter.budget // max(2 * max(n_polish, 1), 1))
     last_polish = 0
-    last_scout = 0
-    scout_skip = 1 + pop_size
-    stagnant = 0
     gen = 0
     try:
         while True:
             temp = temp0 * math.log(2.0) / math.log(gen + 2.0)
-            order = np.argsort(vals)
-            pbest_count = max(2, int(math.ceil(0.25 * pop_size)))
-            pbest_pool = order[:pbest_count]
-            gen_improved = False
             for i in range(pop_size):
                 fi = (0.1 + 0.9 * rng.random()) if rng.random() < 0.1 else f[i]
                 cri = rng.random() if rng.random() < 0.1 else cr[i]
-                pbest = pop[int(rng.choice(pbest_pool))]
                 idx = [j for j in range(pop_size) if j != i]
-                r1, r2 = rng.choice(idx, 2, replace=False)
-                mutant = pop[i] + fi * (pbest - pop[i]) + fi * (pop[r1] - pop[r2])
-                if rng.random() < 0.25:
-                    tail = np.clip(rng.standard_cauchy(dim), -25.0, 25.0)
-                    mutant = mutant + sigma * max(temp / temp0, 0.05) * tail
+                r1, r2, r3 = rng.choice(idx, 3, replace=False)
+                mutant = pop[r1] + fi * (pop[r2] - pop[r3])
                 mask = rng.random(dim) < cri
                 mask[rng.integers(dim)] = True
                 trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
@@ -141,32 +128,10 @@ def qmc_annealed_hybrid(
                     if ft < best_v:
                         best_v = float(ft)
                         best_x = trial.copy()
-                        gen_improved = True
             gen += 1
-            stagnant = 0 if gen_improved else stagnant + 1
-
-            if stagnant >= 2 or counter.n - last_scout >= scout_every:
-                n_scout = max(1, pop_size // 8)
-                for _ in range(n_scout):
-                    if rng.random() < 0.5:
-                        scout = low_discrepancy_population(low, high, 1, skip=scout_skip)[0]
-                        scout_skip += 1
-                    else:
-                        tail = np.clip(rng.standard_cauchy(dim), -25.0, 25.0)
-                        scout = np.clip(best_x + sigma * tail, low, high)
-                    fs = counter(scout)
-                    worst = int(np.nanargmax(vals))
-                    if _metropolis_accept(float(fs - vals[worst]), max(temp, temp0), rng):
-                        pop[worst] = scout
-                        vals[worst] = fs
-                        if fs < best_v:
-                            best_v = float(fs)
-                            best_x = scout.copy()
-                last_scout = counter.n
-                stagnant = 0
 
             if counter.n - last_polish >= polish_every:
-                maxfun = max(12, counter.budget // (2 * max(n_polish, 1) * max(k_polish, 1)))
+                maxfun = max(20, counter.budget // (2 * max(n_polish, 1) * max(k_polish, 1)))
                 for idx in np.argsort(vals)[: max(1, k_polish)]:
                     res = minimize(
                         counter,

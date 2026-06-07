@@ -98,7 +98,7 @@ def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
         grad,
         rng,
         n_polish=n_polish,
-        k_polish=3,
+        k_polish=1,
     )
 
 
