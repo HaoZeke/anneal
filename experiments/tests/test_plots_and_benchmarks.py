@@ -667,6 +667,126 @@ def test_bgsa_hmc_default_uses_omelyan_force_stages(monkeypatch):
     assert n_calls == 4
 
 
+def test_bgsa_low_discrepancy_init_is_seeded_and_bounded():
+    from experiments.scripts import demo_bgsa as bgsa
+
+    low = np.array([-1.0, -2.0, -3.0])
+    high = np.array([1.0, 2.0, 3.0])
+
+    first = bgsa.low_discrepancy_init(np.random.default_rng(7), 8, low, high)
+    second = bgsa.low_discrepancy_init(np.random.default_rng(7), 8, low, high)
+    third = bgsa.low_discrepancy_init(np.random.default_rng(8), 8, low, high)
+
+    assert first.shape == (8, 3)
+    assert np.all(first >= low)
+    assert np.all(first <= high)
+    assert np.allclose(first, second)
+    assert not np.allclose(first, third)
+
+
+def test_bgsa_run_pilot_wires_low_discrepancy_starts(monkeypatch):
+    from experiments.scripts import demo_bgsa as bgsa
+
+    monkeypatch.setattr(bgsa, "LOW", np.array([-1.0, -1.0], dtype=np.float64))
+    monkeypatch.setattr(bgsa, "HIGH", np.array([1.0, 1.0], dtype=np.float64))
+    monkeypatch.setattr(bgsa, "OBJ_FN", lambda x: float(np.sum(np.asarray(x) ** 2)))
+    monkeypatch.setattr(bgsa, "OBJ_GRAD", lambda x: 2.0 * np.asarray(x))
+
+    hmc_starts = []
+    rw_starts = []
+    hmc_params = []
+    rw_params = []
+
+    def hmc_pilot(seed, t_init, eps, L, n_steps, q=1.0, x0=None):
+        assert x0 is not None
+        x0 = np.asarray(x0, dtype=np.float64)
+        hmc_starts.append(x0.copy())
+        hmc_params.append((t_init, eps, L, q))
+        return float(np.sum(x0 * x0)), 0.65, x0, 1
+
+    def rw_pilot(seed, T, sigma, n_steps, x0=None):
+        assert x0 is not None
+        x0 = np.asarray(x0, dtype=np.float64)
+        rw_starts.append(x0.copy())
+        rw_params.append((T, sigma))
+        return float(np.sum(x0 * x0)), 0.234, 1
+
+    monkeypatch.setattr(bgsa, "hmc_pilot", hmc_pilot)
+    monkeypatch.setattr(bgsa, "rw_pilot", rw_pilot)
+    monkeypatch.setattr(
+        bgsa,
+        "fit_empirical_bayes_priors",
+        lambda _obs, _dim: {
+            "t_mean": 0.0,
+            "t_sd": 1.0,
+            "e_mean": -3.0,
+            "e_sd": 1.0,
+            "l_mean": 1.6,
+            "l_sd": 0.7,
+            "q_mean": 1.05,
+            "q_sd": 0.02,
+        },
+    )
+    monkeypatch.setattr(
+        bgsa, "fit_laplace_4d", lambda _obs, _dim, priors=None: (1.0, 0.05, 2, 1.05)
+    )
+    monkeypatch.setattr(bgsa, "fit_t_sigma_rw", lambda _obs: (1.0, 0.2))
+    monkeypatch.setattr(bgsa, "_pilot_t_hot_from_acceptance", lambda _obs, _t: 2.0)
+    monkeypatch.setattr(
+        bgsa,
+        "pilot_landscape_features",
+        lambda _scout, _pilot: {
+            "grad_sens": 0.0,
+            "sigma_sens": 0.0,
+            "best_val_cv": 0.0,
+            "q_v_lift": 0.0,
+        },
+    )
+
+    bgsa.run_pilot(
+        seed=5,
+        n_pilot=3,
+        pilot_steps=4,
+        dim=2,
+        n_rw_pilot=2,
+        rw_steps=3,
+        n_scout=2,
+    )
+
+    assert len(hmc_starts) == 5
+    assert len(rw_starts) == 2
+    assert np.all(np.asarray(hmc_starts) >= bgsa.LOW)
+    assert np.all(np.asarray(hmc_starts) <= bgsa.HIGH)
+    assert np.all(np.asarray(rw_starts) >= bgsa.LOW)
+    assert np.all(np.asarray(rw_starts) <= bgsa.HIGH)
+    assert len(set(hmc_params)) > 1
+    assert len(set(rw_params)) > 1
+
+
+def test_bayesian_mixing_sa_initializes_from_low_discrepancy_design():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    class RecordingProblem(_QuadraticCutestProblem):
+        def __init__(self):
+            self.seen = []
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            self.seen.append(x.copy())
+            return float(np.sum(x * x))
+
+    prob = RecordingProblem()
+    best, fevals, diagnostics = cutest.bayesian_mixing_sa(
+        prob, seed=11, max_fevals=2, return_diagnostics=True
+    )
+
+    expected = cutest._low_discrepancy_starts(prob.low, prob.high, 2, seed=11)
+    assert fevals == 2
+    assert diagnostics["proposal_counts"] == [0, 0]
+    assert np.isfinite(best)
+    assert np.allclose(np.asarray(prob.seen[:2]), expected)
+
+
 def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
