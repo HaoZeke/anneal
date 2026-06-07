@@ -627,6 +627,29 @@ def scipy_shgo(prob, seed, max_fevals):
     return obj.result(fallback)
 
 
+def scipy_cobyqa(prob, seed, max_fevals):
+    from scipy import optimize
+
+    obj = _BudgetedObjective(prob, max_fevals)
+    fallback = float("inf")
+    try:
+        res = optimize.minimize(
+            obj,
+            _scipy_start(prob, seed),
+            method="COBYQA",
+            bounds=_scipy_bounds(prob),
+            options={
+                "maxfev": int(max_fevals),
+                "maxiter": int(max_fevals),
+                "scale": True,
+            },
+        )
+        fallback = float(getattr(res, "fun", fallback))
+    except _BudgetExhausted:
+        pass
+    return obj.result(fallback)
+
+
 SCIPY_DRIVERS = {
     "scipy_lbfgsb": scipy_lbfgsb,
     "scipy_de": scipy_de,
@@ -634,6 +657,7 @@ SCIPY_DRIVERS = {
     "scipy_basinhopping": scipy_basinhopping,
     "scipy_direct": scipy_direct,
     "scipy_shgo": scipy_shgo,
+    "scipy_cobyqa": scipy_cobyqa,
 }
 
 
@@ -813,6 +837,7 @@ DRIVERS = [
     "scipy_basinhopping",
     "scipy_direct",
     "scipy_shgo",
+    "scipy_cobyqa",
     "bgsa",
     "bgsa_metad",
     "bgsa_pt_metad",
