@@ -938,16 +938,17 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 k_swap=max(1, min(5, hybrid_inner)),
                 t_hot=t_hot,
             )
-            mix_bv, mix_calls = bayesian_mixing_sa(
-                prob,
-                seed,
-                1 + int(n_epochs) * int(k_per_epoch),
-            )
             outcomes = [
                 (hmc_bv, hmc_calls),
                 (hybrid_bv, hybrid_calls),
-                (mix_bv, mix_calls),
             ]
+            for mix_seed in (seed, seed + 4):
+                mix_bv, mix_calls = bayesian_mixing_sa(
+                    prob,
+                    mix_seed,
+                    1 + int(n_epochs) * int(k_per_epoch),
+                )
+                outcomes.append((mix_bv, mix_calls))
             if _metad_cv_supported(prob):
                 metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
                     seed + 1,
