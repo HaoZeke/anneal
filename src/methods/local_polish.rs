@@ -60,6 +60,7 @@ where
     let mut best_pos = x.clone();
     let mut best_val = value;
     let mut step = step0;
+    let max_step = (step0 * 1e6).max(step0);
 
     while n_evals < max_fevals {
         let grad = gradient.grad(x.view());
@@ -94,7 +95,7 @@ where
                     best_val = trial_value;
                     best_pos = x.clone();
                 }
-                step = (alpha * 1.5).min(step0);
+                step = (alpha * 1.8).min(max_step);
                 accepted = true;
                 break;
             }
