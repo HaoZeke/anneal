@@ -18,17 +18,19 @@ import argparse
 import csv
 import multiprocessing as mp
 import os
+import shutil
 import signal
 import sys
 import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty
 
 import numpy as np
 
-from experiments.benchmarks.cutest_runner import load, setup_cutest_env
+from experiments.benchmarks.cutest_runner import cutest_env, load, setup_cutest_env
 from experiments.scripts.run_cutest_benchmarks import (
     DRIVERS as MANIFEST_DRIVERS,
     _bgsa_run,
@@ -149,6 +151,17 @@ def parse_drivers(raw: str | None) -> tuple[str, ...]:
     if unknown:
         raise ValueError(f"unknown CUTEst driver(s): {', '.join(unknown)}")
     return drivers
+
+
+def evict_pycutest_cache() -> None:
+    cache_root = Path(cutest_env()["PYCUTEST_CACHE"])
+    cache_root.mkdir(parents=True, exist_ok=True)
+    for child in cache_root.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    (cache_root / "pycutest_cache_holder").mkdir(parents=True, exist_ok=True)
 
 
 def resume_keys(rows: Iterable[dict]) -> set[tuple[str, str, str]]:
@@ -421,6 +434,9 @@ def run_suite(args) -> list[dict]:
     rows = load_existing_rows(args.out, resume=not args.no_resume)
     seen = resume_keys(rows)
 
+    if args.evict_cache:
+        evict_pycutest_cache()
+
     targets = list_target_problems(args.dim_cap, exclude_names=args.exclude_problem)
     if args.max_problems is not None:
         targets = targets[: args.max_problems]
@@ -542,6 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-timeouts-per-target", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--evict-cache", action="store_true",
+                        help="Clear the PyCUTEst cache before enumerating and loading targets.")
     return parser
 
 
