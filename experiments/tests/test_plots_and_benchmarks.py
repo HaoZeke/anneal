@@ -1357,3 +1357,46 @@ def test_sota_cutest_native_gradient_polish_consumes_budget():
     assert counter.grad_evals == grad_calls
     assert grad_calls > 0
     assert np.isfinite(best)
+
+
+def test_anneal_sota_low_discrepancy_population_is_deterministic():
+    from experiments.anneal_sota import low_discrepancy_population
+
+    low = np.array([-1.0, -2.0, -3.0])
+    high = np.array([1.0, 2.0, 3.0])
+
+    first = low_discrepancy_population(low, high, n=8, skip=1)
+    second = low_discrepancy_population(low, high, n=8, skip=1)
+
+    assert first.shape == (8, 3)
+    assert np.all(first >= low)
+    assert np.all(first <= high)
+    assert np.allclose(first, second)
+
+
+def test_anneal_sota_qmc_hybrid_sees_deceptive_basin():
+    from experiments import sota_compare
+    from experiments.anneal_sota import qmc_annealed_hybrid
+
+    def deceptive_basin(x):
+        x = np.asarray(x, dtype=np.float64)
+        shallow = np.sum((x - 0.35) ** 2)
+        deep = 0.03 * np.sum((x - np.array([-0.5, 1.0 / 3.0])) ** 2) - 0.75
+        return float(min(shallow, deep))
+
+    low = np.array([-1.0, -1.0])
+    high = np.array([1.0, 1.0])
+    counter = sota_compare.Counter(deceptive_basin, budget=120)
+
+    best = qmc_annealed_hybrid(
+        counter,
+        low,
+        high,
+        dim=2,
+        grad=None,
+        rng=np.random.default_rng(7),
+        n_polish=2,
+    )
+
+    assert counter.n <= counter.budget
+    assert best < -0.7
