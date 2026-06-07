@@ -5,6 +5,11 @@ use crate::grad::Gradient;
 use eindir_core::Objective;
 use ndarray::Array1;
 
+const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
+const BACKTRACK_SHRINK: f64 = 0.5;
+const MIN_BACKTRACK_STEP: f64 = f64::EPSILON;
+const FULL_LINE_SEARCH_STEP: f64 = 1.0;
+
 /// Result of bounded local refinement.
 #[derive(Clone, Debug)]
 pub struct LocalPolishResult {
@@ -33,6 +38,26 @@ fn projected_gradient(
     out
 }
 
+fn update_diagonal_spectral_scale(
+    scale: &mut Array1<f64>,
+    x: &Array1<f64>,
+    pgrad: &Array1<f64>,
+    prev_x: &Array1<f64>,
+    prev_pgrad: &Array1<f64>,
+) {
+    for i in 0..scale.len() {
+        let step_delta = x[i] - prev_x[i];
+        let grad_delta = pgrad[i] - prev_pgrad[i];
+        let curvature = step_delta * grad_delta;
+        if curvature > 0.0 {
+            let candidate = (step_delta / grad_delta).abs();
+            if candidate.is_finite() && candidate > 0.0 {
+                scale[i] = candidate;
+            }
+        }
+    }
+}
+
 /// Refine a point with projected-gradient backtracking inside objective bounds.
 pub fn projected_gradient_polish<O, G>(
     obj: &O,
@@ -59,8 +84,9 @@ where
     let mut n_grads = 0usize;
     let mut best_pos = x.clone();
     let mut best_val = value;
-    let mut step = step0;
-    let max_step = (step0 * 1e6).max(step0);
+    let mut scale = Array1::from_elem(x.len(), step0);
+    let mut prev_x = None;
+    let mut prev_pgrad = None;
 
     while n_evals < max_fevals {
         let grad = gradient.grad(x.view());
@@ -73,11 +99,19 @@ where
         if norm2.sqrt() <= grad_tol {
             break;
         }
+        if let (Some(px), Some(pg)) = (&prev_x, &prev_pgrad) {
+            update_diagonal_spectral_scale(&mut scale, &x, &pgrad, px, pg);
+        }
+        let direction = &pgrad * &scale;
+        let directional_decrease = pgrad.dot(&direction);
+        if !directional_decrease.is_finite() || directional_decrease <= 0.0 {
+            break;
+        }
 
         let mut accepted = false;
-        let mut alpha = step;
-        while n_evals < max_fevals && alpha > 1e-14 {
-            let trial = bounds.clip((&x - &(pgrad.mapv(|v| alpha * v))).view());
+        let mut alpha = FULL_LINE_SEARCH_STEP;
+        while n_evals < max_fevals && alpha > MIN_BACKTRACK_STEP {
+            let trial = bounds.clip((&x - &(direction.mapv(|v| alpha * v))).view());
             if trial
                 .iter()
                 .zip(x.iter())
@@ -88,18 +122,21 @@ where
             }
             let trial_value = obj.eval(trial.view());
             n_evals += 1;
-            if trial_value.is_finite() && trial_value <= value - 1e-4 * alpha * norm2 {
+            if trial_value.is_finite()
+                && trial_value <= value - ARMIJO_SUFFICIENT_DECREASE * alpha * directional_decrease
+            {
+                prev_x = Some(x.clone());
+                prev_pgrad = Some(pgrad.clone());
                 x = trial;
                 value = trial_value;
                 if trial_value < best_val {
                     best_val = trial_value;
                     best_pos = x.clone();
                 }
-                step = (alpha * 1.8).min(max_step);
                 accepted = true;
                 break;
             }
-            alpha *= 0.5;
+            alpha *= BACKTRACK_SHRINK;
         }
         if !accepted {
             break;
