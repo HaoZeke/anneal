@@ -219,6 +219,37 @@ def append_target_timeout_rows(
     return appended
 
 
+def append_target_error_rows(
+    rows: list[dict],
+    seen: set[tuple[str, str, str]],
+    target: TargetProblem,
+    cells: Iterable[tuple[int, str]],
+    status: str,
+    f0: float,
+) -> int:
+    appended = 0
+    for seed, driver in cells:
+        key = (target.name, driver, str(seed))
+        if key in seen:
+            continue
+        rows.append({
+            "problem": target.name,
+            "kind": target.kind,
+            "dim": target.dim,
+            "driver": driver,
+            "seed": seed,
+            "fevals": 0,
+            "best_val": float("nan"),
+            "wall_time_s": "0.000",
+            "f_x0": f0,
+            "solved": 0,
+            "status": status,
+        })
+        seen.add(key)
+        appended += 1
+    return appended
+
+
 # Pilot work units spent fitting each problem's reduction, charged into the
 # reported fevals of every cell that runs in the reduced space. Keyed by name;
 # read back in the same process that fit it (the forked cell worker).
@@ -278,6 +309,15 @@ def load_problem(name: str, args=None):
     if args is not None:
         prob = maybe_reduce(prob, args)
     return prob
+
+
+def load_target_problem(target: TargetProblem, args):
+    """Load a CUTEst target outside the per-driver timer."""
+    seconds = int(getattr(args, "load_timeout", 0) or 0)
+    if seconds > 0:
+        with per_problem_timeout(seconds):
+            return load_problem(target.name, args)
+    return load_problem(target.name, args)
 
 
 def _evict_problem_cache(name: str, args) -> None:
@@ -505,6 +545,27 @@ def run_suite(args) -> list[dict]:
             if appended:
                 write_rows(args.out, rows)
             continue
+        try:
+            target_problem = load_target_problem(target, args)
+        except TimeoutError:
+            appended = append_target_timeout_rows(rows, seen, target, cells, target_f0)
+            if appended:
+                write_rows(args.out, rows)
+            _evict_problem_cache(target.name, args)
+            continue
+        except Exception as exc:
+            appended = append_target_error_rows(
+                rows,
+                seen,
+                target,
+                cells,
+                f"err:{type(exc).__name__}",
+                target_f0,
+            )
+            if appended:
+                write_rows(args.out, rows)
+            _evict_problem_cache(target.name, args)
+            continue
 
         for idx, (seed, driver) in enumerate(cells):
             key = (target.name, driver, str(seed))
@@ -512,7 +573,7 @@ def run_suite(args) -> list[dict]:
                 continue
 
             start = time.perf_counter()
-            best_val, fevals, f0, status = run_driver_cell(target.name, driver, seed, args)
+            best_val, fevals, f0, status = run_driver_cell(target_problem, driver, seed, args)
             if np.isfinite(float(f0)):
                 target_f0 = float(f0)
 
@@ -574,7 +635,12 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Stream the suite: drop each problem's compiled pycutest "
                              "cache once its cells finish, bounding peak disk to one "
                              "problem (one per shard) instead of the whole catalogue.")
-    parser.add_argument("--load-timeout", type=int, default=30)
+    parser.add_argument(
+        "--load-timeout",
+        type=int,
+        default=0,
+        help="Maximum seconds for CUTEst load/setup; 0 disables this setup bound.",
+    )
     parser.add_argument("--per-problem-timeout", type=int, default=180)
     parser.add_argument("--n-epochs", type=int, default=30)
     parser.add_argument("--k-fixed", type=int, default=200)
