@@ -30,3 +30,20 @@ The Rust crate produces three artefacts:
   =anneal-core.pc=.
 - *C++.* The hand-written =include/anneal-core.hpp= wraps the C ABI
   in =namespace anneal= for ergonomic C++ use.
+
+* Method Families
+
+- *Component presets.* =Boltzmann=, =Fast=, and =Gsa= instantiate the
+  five typed SA signatures directly.
+- *Bayesian BGSA.* The CUTEst auto portfolio screens HMC, PT-hybrid,
+  Bayesian-mixing, metadynamics, and local-polish candidates under one
+  objective interface.
+- *QMC polish.* =qmc_polish= and =shifted_qmc_polish= use bounded
+  low-discrepancy designs from =eindir= and expose replicated shifts
+  through the Python API.
+- *Tensor independence.* =additive_independence= fits a rank-1
+  additive/tensor surrogate and samples tempered independence
+  proposals corrected against the true objective.
+- *Colored-noise dynamics.* =gle_langevin= uses a generalized
+  Langevin thermostat with an optimal-sampling drift matrix from
+  =eindir=.
