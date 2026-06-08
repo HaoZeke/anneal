@@ -2895,12 +2895,10 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (36, 4, 524),
-        (72, 4, 848),
-        (72, 0, 848),
-        (144, 4, 1496),
-        (144, 0, 1496),
-        (144, 9, 1496),
+        (36, 4, 20),
+        (72, 4, 16),
+        (144, 4, 7),
+        (144, 9, 3),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
 
@@ -3036,15 +3034,22 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (32, 4, 456),
-        (64, 4, 712),
-        (64, 0, 712),
-        (128, 4, 1224),
-        (128, 0, 1224),
-        (128, 8, 1224),
+        (32, 4, 21),
+        (64, 4, 17),
+        (128, 4, 9),
+        (128, 8, 4),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
+
+
+def test_cutest_native_qmc_polish_budget_tracks_polished_work():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    assert cutest._native_qmc_polish_budget(200, 8, 32, top_k=4) == 21
+    assert cutest._native_qmc_polish_budget(200, 8, 64, top_k=4) == 17
+    assert cutest._native_qmc_polish_budget(200, 8, 128, top_k=8) == 4
+    assert cutest._native_qmc_polish_budget(200, 8, 64, top_k=0) == 1
 
 
 def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
@@ -3101,7 +3106,7 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (32, 4, 456),
+        (32, 4, 21),
     ]
 
 
@@ -3161,8 +3166,8 @@ def test_cutest_native_qmc_schedule_uses_replicated_best_certificate():
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (32, 4, 456),
-        (64, 4, 712),
+        (32, 4, 21),
+        (64, 4, 17),
     ]
 
 
@@ -3218,11 +3223,10 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (16, 4, 264),
-        (32, 4, 328),
-        (32, 0, 328),
-        (64, 4, 456),
-        (64, 0, 456),
+        (16, 4, 23),
+        (32, 4, 21),
+        (32, 0, 2),
+        (64, 4, 17),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(4))
@@ -3280,12 +3284,10 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_middle_bounds_without_degree_hint(
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (36, 4, 524),
-        (72, 4, 848),
-        (72, 0, 848),
-        (144, 4, 1496),
-        (144, 0, 1496),
-        (144, 9, 1496),
+        (36, 4, 20),
+        (72, 4, 16),
+        (144, 4, 7),
+        (144, 9, 3),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
@@ -3405,12 +3407,10 @@ def test_cutest_bgsa_auto_ignores_degree_metadata_without_stationarity(monkeypat
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (36, 4, 524),
-        (72, 4, 848),
-        (72, 0, 848),
-        (144, 4, 1496),
-        (144, 0, 1496),
-        (144, 9, 1496),
+        (36, 4, 20),
+        (72, 4, 16),
+        (144, 4, 7),
+        (144, 9, 3),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
@@ -3470,9 +3470,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (100, 4, 2700),
-        (200, 4, 5200),
-        (200, 0, 5200),
+        (100, 4, 12),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(25))
@@ -3531,10 +3529,10 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (32, 4, 456),
-        (64, 4, 712),
-        (128, 4, 1224),
-        (128, 8, 1224),
+        (32, 4, 21),
+        (64, 4, 17),
+        (128, 4, 9),
+        (128, 8, 4),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
