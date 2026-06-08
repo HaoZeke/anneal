@@ -1,0 +1,8 @@
+#+TITLE: Installation
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Installation
+
+See the [[file:../quickstart.org][quickstart]] for the three modes (pip core, pixi full stack, source). The docs environment itself is =pixi run -e docs docs-export && pixi run -e docs docs-build= (see =pixi.toml= =[feature.docs]= and =docs/export.el=).
+
+The Python package after =pip install anneal= or =maturin develop --features python= inside the workspace gives the full surface.

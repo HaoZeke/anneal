@@ -1,0 +1,41 @@
+#+TITLE: Best Practices
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Best Practices for anneal
+
+** Use the exposed stable surface only
+
+All examples and user code should import from =anneal= (or =anneal._core= for the Rust types when necessary). The symbols listed in =python/anneal/__init__.py= are the contract: =Boltzmann=, =Fast=, =Gsa=, =run=, =run_device=, =run_ensemble=, =pilot_draws_qmc=, the polish family, =additive_independence=, =gle_langevin=, =low_discrepancy_points=, and the history containers.
+
+** Prefer the high-level drivers for "no knobs"
+
+=additive_independence= and =gle_langevin= already embed pilot logic when you pass =n_pilot > 0=. For fully automatic allocation across classical or GLE families on a fixed budget, use the orchestration scripts in =experiments/scripts/demo_bgsa.py= (they are the reference implementation of the Bayesian mixer).
+
+** Composition rules for the five slots
+
+- Only =Obj= may evaluate the true objective (or its gradient).
+- Only =Move= may know the shape of the proposal at temperature T (Gaussian scale, Cauchy, Tsallis visit, GLE drift matrix, rank-1 product of marginals...).
+- =Accept= must implement the finite-precision contract when it claims exactness (see precision how-to).
+- A change to any one slot is automatically visible to every driver that uses that slot.
+
+** When to supply a gradient
+
+- Values only: classical presets via =run=, =additive_independence=.
+- Gradient available and ill-conditioned spectrum: =gle_langevin= (the drift matrix pays for itself).
+- Last-mile accuracy: any of the polish variants.
+- No gradient but separable: additive independence gives the dimension-free floor.
+
+** Reproducibility
+
+Always pass an explicit =seed= to the top-level call. The Rust side uses =StdRng= seeded from that value; the QMC helpers use a derived skip. For cross-language bit-identical runs, the C API and the Python wrappers use the same underlying streams.
+
+** Test against the laws
+
+The =tests/laws_proptest.rs= (and the SymPy witnesses in =proofs/=) encode L1-L4. When you add a new =Cool=, =Neigh=, =Move= or =Accept= implementation, run the proptest and the theorem scripts before claiming it composes.
+
+** See also
+
+- [[file:../howto/choose-driver.org][How to choose a driver]]
+- [[file:../explanation/algebra.org][The typed algebra and the four laws]]
+- [[file:../spec.org][Specification (TLA+ invariants)]]
+- [[file:../contributing.org][Contributing]]

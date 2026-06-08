@@ -1,0 +1,24 @@
+#+TITLE: Choose a Driver
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Decision Tree
+
+Ask in order:
+
+1. Do you have a gradient?
+   - No -> classical via =run= (Boltzmann/Fast/Gsa) or =additive_independence= (if you suspect separability).
+   - Yes -> consider =gle_langevin= when the spectrum is ill-conditioned (one fitted drift matrix from =eindir= flattens efficiency from omega0 to 100*omega0).
+
+2. Is the objective separable (or well approximated by a rank-1 surrogate)?
+   - Yes -> =additive_independence= (O(d) per proposal, dimension-free acceptance floor on truly separable problems).
+
+3. Do you want a single budget knob and automatic allocation across chains?
+   - Yes -> pilot + Bayesian mixer (the =experiments/scripts/demo_bgsa.py= pattern or the internal =BayesianMixingSampler=). One =max_proposals=, auto n_chains, per-chain Beta on "produced new global best", Thompson with 0.05 guard.
+
+4. Do you need only a deterministic last mile?
+   - Run any stochastic driver to a modest budget, then =qmc_polish= or =shifted_qmc_polish= (or plain =polish=) on the best point found.
+
+5. Do you need GPU scale or large ensembles?
+   - Pass CuPy arrays to =run_device= / =run_ensemble=, or use the host versions for narrow problems (the kernel is identical).
+
+The exposed high-level functions already encode the common good choices. The full portfolio auto-orchestrator (pilot several families, allocate remaining budget to the current winner, final polish) lives in the experiments tree and is described conceptually in the Bayesian tutorial.

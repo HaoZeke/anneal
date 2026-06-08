@@ -38,3 +38,47 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(ANNEAL_CORE REQUIRED IMPORTED_TARGET anneal-core)
 target_link_libraries(myprog PRIVATE PkgConfig::ANNEAL_CORE)
 #+END_SRC
+
+** Tiny C example (preset + run)
+
+#+BEGIN_SRC c
+#include <anneal-core.h>
+#include <stdio.h>
+
+static double rosen(const double *x, void *user) {
+    (void)user;
+    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1] - x[0]*x[0])*(x[1] - x[0]*x[0]);
+}
+
+int main(void) {
+    double low[2] = {-5.0, -5.0};
+    double high[2] = {5.0, 5.0};
+    AnnealHandle *h = anneal_boltzmann(rosen, NULL, low, high, 2, 5.0, 0.5);
+    anneal_run(h, 20, 80, 42);
+    double best[2];
+    double val = anneal_best(h, best, 2);
+    printf("best val %.6f at (%.4f, %.4f)\n", val, best[0], best[1]);
+    anneal_free(h);
+    return 0;
+}
+#+END_SRC
+
+** Tiny C++ example (using the hand-written header)
+
+#+BEGIN_SRC cpp
+#include <anneal-core.hpp>
+#include <iostream>
+
+double rosen(const double* x, void*) {
+    return (1.0 - x[0])*(1.0 - x[0]) + 100.0*(x[1]-x[0]*x[0])*(x[1]-x[0]*x[0]);
+}
+
+int main() {
+    std::array<double,2> lo{-5, -5}, hi{5, 5};
+    auto h = anneal::make_boltzmann(rosen, nullptr, lo.data(), hi.data(), 2, 5.0, 0.5);
+    h.run(20, 80, 42);
+    auto [pos, val] = h.best();
+    std::cout << "best " << val << " at " << pos[0] << "," << pos[1] << "\n";
+}
+#+END_SRC
+

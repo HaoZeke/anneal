@@ -2564,6 +2564,61 @@ def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[:2])
 
 
+def test_cutest_bgsa_auto_returns_dominant_native_qmc_screen(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": 0}
+
+    class DominantNativeProblem:
+        name = "DOMINANTQMC"
+        dim = 15
+        low = np.full(15, -1.0)
+        high = np.full(15, 1.0)
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(*_args, **_kwargs):
+        captured["qmc"] += 1
+        return {
+            "best_val": -100.0,
+            "best_pos": np.zeros(15),
+            "n_evals": 10,
+            "n_grads": 3,
+            "polished_values": [-100.0, -20.0, -10.0, -1.0],
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail(
+            "dominant native qmc screen should be terminal"
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        DominantNativeProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -100.0
+    assert fevals > 0
+    assert captured["qmc"] >= 1
+
+
 def test_cutest_bgsa_auto_keeps_portfolio_for_dominant_high_dim_polish(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
