@@ -4516,6 +4516,12 @@ def test_anneal_sota_qmc_hybrid_ignores_nonfinite_surrogate_values(monkeypatch):
         NanSurrogate,
         raising=False,
     )
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
 
     def objective(x):
         x = np.asarray(x, dtype=np.float64)
