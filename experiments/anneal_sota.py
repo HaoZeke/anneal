@@ -72,6 +72,7 @@ class AnnealHybridConfig:
     best1bin_weight_span: float = 0.5
     best1bin_crossover_rate: float = 0.7
     best1bin_decision_budget_divisor: int = 4
+    best1bin_decision_min_evals: int = 1000
     best1bin_continue_value_floor: float = 0.0
     best1bin_continue_relative_above_floor: bool = False
     best1bin_continue_min_relative_improvement: float = 0.25
@@ -350,6 +351,7 @@ def _qmc_best1bin_scout(
         max(
             pop_size,
             max_evals // config.best1bin_decision_budget_divisor,
+            min(max_evals, max(config.best1bin_decision_min_evals, 0)),
         )
         if config.best1bin_decision_budget_divisor > 0
         else max_evals

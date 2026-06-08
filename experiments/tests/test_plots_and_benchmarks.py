@@ -4864,6 +4864,7 @@ def test_anneal_sota_qmc_best1bin_scout_stops_without_early_progress(monkeypatch
             best1bin_weight_span=0.0,
             best1bin_crossover_rate=1.0,
             best1bin_decision_budget_divisor=4,
+            best1bin_decision_min_evals=0,
             best1bin_continue_value_floor=0.0,
             best1bin_continue_min_relative_improvement=0.5,
             best1bin_relative_improvement_scale_floor=1.0,
