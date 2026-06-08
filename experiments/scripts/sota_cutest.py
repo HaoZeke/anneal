@@ -151,6 +151,18 @@ def _write_sota_row(writer, stream, row):
     stream.flush()
 
 
+def _shard_targets(targets, shard_index: int, shard_count: int):
+    if shard_count <= 0:
+        raise ValueError("shard_count must be positive")
+    if shard_index < 0 or shard_index >= shard_count:
+        raise ValueError("shard_index must be in [0, shard_count)")
+    return [
+        target
+        for index, target in enumerate(targets)
+        if index % shard_count == shard_index
+    ]
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="results/sota_cutest.csv")
@@ -162,12 +174,21 @@ def main():
                    help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.")
     p.add_argument("--pycutest-cache", default=None,
                    help="Explicit PyCUTEst cache directory; defaults to .bench/cache.")
+    p.add_argument("--shard-index", type=int, default=0,
+                   help="Stable shard index for distributed CUTEst sweeps.")
+    p.add_argument("--shard-count", type=int, default=1,
+                   help="Number of stable shards in the distributed CUTEst sweep.")
     args = p.parse_args()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     config = default_cutest_config(args.bench_root, cache_dir=args.pycutest_cache)
 
-    targets = list_target_problems(args.dim_cap, config=config)[: args.max_problems]
-    print(f"{len(targets)} CUTEst problems, dim <= {args.dim_cap}, budget {args.budget}", flush=True)
+    all_targets = list_target_problems(args.dim_cap, config=config)[: args.max_problems]
+    targets = _shard_targets(all_targets, args.shard_index, args.shard_count)
+    print(
+        f"{len(targets)} CUTEst problems, dim <= {args.dim_cap}, "
+        f"budget {args.budget}, shard {args.shard_index}/{args.shard_count}",
+        flush=True,
+    )
     rows = []
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDNAMES)
