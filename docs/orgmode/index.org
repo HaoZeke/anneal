@@ -60,7 +60,10 @@ TLA+ invariants they enable.
    :caption: Getting started
 
    quickstart
-   tutorials
+   tutorials/classical-and-presets
+   tutorials/bayesian-pilot-mixer
+   tutorials/gle-colored-noise
+   tutorials/polish-device-scale
 #+end_export
 
 #+begin_export rst
@@ -99,11 +102,6 @@ TLA+ invariants they enable.
    contributing
    code_of_conduct
 #+end_export
-
-(The full Diataxis toctrees with tutorials/classical-and-presets,
-tutorials/bayesian-pilot-mixer, howto/..., explanation/algebra,
-reference/glossary, dev/best_practices etc. are installed in Tasks 3
-and 4 together with the content files.)
 
 * Background
 

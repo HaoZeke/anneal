@@ -1,0 +1,86 @@
+#+TITLE: Classical Presets
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+========================
+Classical Presets
+========================
+#+end_export
+
+This tutorial shows the three classical presets (=Boltzmann=, =Fast=, ==Gsa==) and the single =run= surface. All three occupy the same five component slots; only the concrete =Cool=, =Neigh=, and =Move= objects differ.
+
+#+begin_export rst
+.. admonition:: Reference
+
+   The typed component algebra and the reduction of the three
+   Generalized-SA families to the five slots are the core of the IISE
+   manuscript (INFORMS Journal on Computing, under review). See
+   [[file:../used_by.org][used_by]] and the reproducibility package for the
+   mechanized SymPy witnesses of the four limit cases.
+#+end_export
+
+* Prerequisites
+
+- =pip install anneal= (or =pixi -e python= inside the workspace).
+- An objective callable =f(x: ndarray) -> float= (values only for these presets).
+- Box bounds (NumPy arrays, any dimension).
+
+#+begin_src bash
+pip install anneal
+#+end_src
+
+* Step 1: One surface, three presets
+
+The call is identical. Only the preset object changes.
+
+#+begin_src python
+import numpy as np
+from anneal import Boltzmann, Fast, =Gsa=, run
+
+def rosenbrock(x):
+    """Classic 2-D Rosenbrock (separable in a transformed coordinate)."""
+    return (1.0 - x[0])**2 + 100.0 * (x[1] - x[0]**2)**2
+
+low = np.array([-5.0, -5.0])
+high = np.array([5.0, 5.0])
+
+h_b = run(rosenbrock, low, high,
+          Boltzmann(t_init=5.0, sigma=0.5),
+          n_epochs=20, steps_per_epoch=100, seed=42)
+print("Boltzmann:", h_b.best_pos, h_b.best_val)
+
+h_f = run(rosenbrock, low, high,
+          Fast(t_init=5.0, gamma=0.5),
+          n_epochs=20, steps_per_epoch=100, seed=42)
+print("Fast:", h_f.best_pos, h_f.best_val)
+
+h_g = run(rosenbrock, low, high,
+          =Gsa=(t_init=5.0, =q_v==2.5, q_a=1.5),
+          n_epochs=20, steps_per_epoch=100, seed=42)
+print("=Gsa=:", h_g.best_pos, h_g.best_val)
+#+end_src
+
+Expected: three different trajectories, all reaching a point near (1,1) with value near 0 (global min is 0 at (1,1)). The histories contain =epochs= (list of =EpochLine= with =best_val=, =accept_rate=, =T= etc.).
+
+* Step 2: What the call actually does (slot view)
+
+- =Obj= is the user =rosenbrock= (only thing that knows F).
+- =Cool= is supplied by the preset (logarithmic for Boltzmann, reciprocal for Fast, =Tsallis= power for =Gsa=).
+- =Neigh= and =Move= together realize the proposal shape at the current T (Gaussian scale for Boltzmann, Cauchy for Fast, =Tsallis= visit for =Gsa=).
+- =Accept= is always Metropolis (or =Tsallis= accept for =Gsa=) with the noise-aware compensated path when the crate was built with the finite-precision feature.
+
+Because all three presets implement the same =Sampler= trait, =run= (the orchestrator) is oblivious to which family is inside.
+
+* Step 3: Inspect the returned history
+
+#+begin_src python
+print("Epochs recorded:", len(h_b.epochs))
+print("Last epoch best:", h_b.epochs[-1].best_val)
+print("Global best val:", h_b.best_val)
+#+end_src
+
+The =History= also carries the final state and per-epoch diagnostics that the Bayesian mixer later consumes.
+
+* Why this works
+
+The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2). The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the quasi-Monte Carlo (QMC) polish are shared verbatim.
