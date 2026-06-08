@@ -391,6 +391,27 @@ def test_cutest_env_requires_cutest_install(tmp_path, monkeypatch):
         cutest_env()
 
 
+def test_cutest_env_honors_existing_pycutest_cache(tmp_path, monkeypatch):
+    from experiments.benchmarks.cutest_runner import cutest_env
+
+    bench = tmp_path / ".bench"
+    (bench / "SIFDecode" / "install" / "bin").mkdir(parents=True)
+    (bench / "SIFDecode" / "install" / "bin" / "sifdecoder").touch()
+    (bench / "CUTEst" / "install" / "lib").mkdir(parents=True)
+    (bench / "CUTEst" / "install" / "lib" / "libcutest_single.a").touch()
+    (bench / "CUTEst" / "install" / "lib" / "libcutest_double.a").touch()
+    (bench / "sif").mkdir(parents=True)
+    cache = tmp_path / "cache-shard"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PIXI_PROJECT_ROOT", raising=False)
+    monkeypatch.setenv("PYCUTEST_CACHE", str(cache))
+
+    env = cutest_env()
+
+    assert env["PYCUTEST_CACHE"] == str(cache)
+    assert (cache / "pycutest_cache_holder").is_dir()
+
+
 def test_cutest_summary_reports_status_and_winners(tmp_path):
     from experiments.scripts.summarize_cutest_benchmarks import summarize_csv
 
