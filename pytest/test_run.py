@@ -15,6 +15,8 @@ from anneal import (
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
+    qmc_best1bin_scout,
+    qmc_best1bin_scout_objective,
     qmc_polish,
     qmc_polish_objective,
     run,
@@ -39,6 +41,11 @@ def shifted_quadratic(x: np.ndarray) -> float:
 
 def shifted_quadratic_grad(x: np.ndarray) -> np.ndarray:
     return np.array([2.0 * (x[0] - 0.25), 2.0 * (x[1] + 0.4)])
+
+
+def smooth_needle(x: np.ndarray) -> float:
+    dx = np.asarray(x, dtype=np.float64) - np.array([0.5, -0.5])
+    return float(-np.exp(-40.0 * np.dot(dx, dx)))
 
 
 LOW = np.array([-5.0, -5.0])
@@ -194,6 +201,41 @@ def test_qmc_polish_accepts_native_gradient_handle():
     assert result["best_val"] < 1e-10
     assert result["n_polished"] == 2
     assert result["best_pos"] == pytest.approx([0.25, -0.4], abs=1e-5)
+
+
+def test_qmc_best1bin_scout_refines_smooth_basin():
+    result = qmc_best1bin_scout(
+        smooth_needle,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        max_evals=240,
+        seed=0,
+        population_size=30,
+    )
+
+    assert result["best_val"] < -0.85
+    assert result["n_evals"] <= 240
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
+    assert isinstance(result["best_pos"], np.ndarray)
+
+
+def test_qmc_best1bin_scout_accepts_native_objective_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(smooth_needle, bounds)
+
+    result = qmc_best1bin_scout_objective(
+        obj,
+        max_evals=240,
+        seed=0,
+        population_size=30,
+    )
+
+    assert result["best_val"] < -0.85
+    assert result["n_evals"] <= 240
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
+    assert isinstance(result["best_pos"], np.ndarray)
 
 
 def test_shifted_qmc_polish_exposes_replicated_designs():
