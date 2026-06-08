@@ -8,13 +8,8 @@
 //!
 //! We model the same separation: a `Sampler<T>` runs unmodified; an
 //! `Adapter<S>` observes its (state, accepted) pairs each step and
-//! mutates *itself* (not the sampler) accordingly. Concrete impls
-//! (e.g. dual-averaging step-size adaptation, Tsallis q_v adaptation)
-//! land in subsequent commits; this commit ships the surface plus a
-//! no-op `IdentityAdapter` proving the trait composes with `run_rs`.
-//!
-//! See `the design notes`
-//! task A2 for the design rationale.
+//! mutates *itself* (not the sampler) accordingly. `IdentityAdapter`
+//! provides the no-op implementation for drivers that do not adapt.
 
 use num_traits::Float;
 

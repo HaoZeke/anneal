@@ -14,8 +14,7 @@ Usage:
         --out-dir data/figs
 
 The driver list / order is fixed so the figure compares apples-to-
-apples across landscapes; new drivers won't silently appear without
-an explicit code change.
+apples across landscapes; new drivers require an explicit code change.
 """
 
 from __future__ import annotations
@@ -37,8 +36,7 @@ from chemparseplot.plot.theme import (
 )
 
 
-# Driver display order matches the cross-landscape design pass 14
-# table grouping: classical baselines first, gradient-driven bGSA
+# Driver display order keeps classical baselines first, gradient-driven bGSA
 # variants next, then bias-augmented bGSA variants.
 DRIVER_ORDER = [
     "classical_sa",
@@ -47,9 +45,8 @@ DRIVER_ORDER = [
     "bgsa_pt_hybrid_v2",
     "bgsa_metad",
     "bgsa_pt_metad",
-    # bgsa_continuous_temper omitted: the Wu-Stoltz integrator
-    # currently lands far from the cold-T target in the standard
-    # configuration; revisit once issue 006's tuning is finalised.
+    # bgsa_continuous_temper is omitted from this fixed comparison because
+    # its standard configuration does not match the cold-temperature target.
     # bgsa_auto rows are handled separately (driver name is bgsa_auto[<chosen>]).
 ]
 

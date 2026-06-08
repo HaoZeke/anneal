@@ -2,21 +2,14 @@
 //! `SaVariant::checked` when a tuple of components fails one of the four
 //! IISE-manuscript composition laws.
 //!
-//! Pre-A6 the witnesses were just Boolean trait methods (`is_symmetric`,
-//! `is_monotone`, `supports_in`) that the impl could lie about: a
-//! deliberately-broken `AcceptRule` whose `accept_prob` violated L3 still
-//! constructed cleanly because no method asserted L3 at runtime. A6
-//! adds randomised property sweeps -- one per law -- that
-//! `SaVariant::checked_with_sweep` calls before returning, exercising
-//! each law on `n_samples` random inputs.
-//!
-//! See `the design notes`
-//! task A6 for the design rationale.
+//! `SaVariant::checked_with_sweep` exercises the executable behavior of
+//! each law on `n_samples` random inputs rather than trusting Boolean
+//! witness methods alone.
 
 use ndarray::Array1;
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 use thiserror::Error;
 
 use crate::accept::AcceptRule;

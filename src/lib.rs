@@ -3,9 +3,7 @@
 //!
 //! This crate ships the typed component algebra (Cool / Neigh / Move / Accept
 //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
-//! consumed by the Python `anneal` package via pyo3. v0.3.0 introduces
-//! the four trait signatures and the SaVariant scaffold; concrete impls
-//! and the run loop land in subsequent commits.
+//! consumed by the Python `anneal` package via pyo3.
 
 /// The acceptance-rule trait: `(delta_e, T) -> p`.
 pub mod accept;
@@ -17,8 +15,7 @@ pub mod bias;
 pub mod cool;
 /// Error variants returned by `anneal-core`.
 pub mod error;
-/// Parallel-tempering Exchange operator: the typed primitive that
-/// closes the multimodal SA gap (IISE Section 8.3 "next paper").
+/// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;
 /// Free-energy estimators (Bennett's BAR + descendants).
 pub mod free_energy;
@@ -42,11 +39,11 @@ pub mod neigh;
 pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
-/// Reserved for the typed component algebra (Spec 2, v0.3.0).
+/// Shared algebra-facing type definitions.
 pub mod types;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
 pub mod variant;
-/// Checked-in package version metadata.
+/// Package version metadata.
 pub mod version;
 
 /// C ABI surface (cargo-c builds).
@@ -67,17 +64,16 @@ pub use grad::{AnalyticGradient, DifferentiableObjective, FiniteDiffGradient, Gr
 pub use history::{EpochLine, History, State};
 pub use hmc::{
     HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
-    OMELYAN_LAMBDA, OmelyanIntegrator,
+    OmelyanIntegrator, OMELYAN_LAMBDA,
 };
 pub use laws::LawViolation;
 pub use methods::{
-    BayesianMixingResult, BayesianMixingSampler, GelmanRubin, GleLangevinResult, LaplacePosterior,
-    LocalPolishResult, MultiChainResult, MultiChainSampler, MultiChainState,
-    ParallelTemperingSampler, PilotObservation, PilotPrior, PtChainState, PtResult, Q_V_MAX,
-    Q_V_MIN, QmcPolishResult, TARGET_ACCEPT_RATE, estimate_gle_omega0, fit_laplace,
-    geometric_ladder, gle_langevin_adaptive_sa, gle_langevin_sa, pilot_draws, pilot_draws_qmc,
-    projected_gradient_polish, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish,
+    estimate_gle_omega0, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa, gle_langevin_sa,
+    pilot_draws, pilot_draws_qmc, projected_gradient_polish, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish, BayesianMixingResult, BayesianMixingSampler,
+    GelmanRubin, GleLangevinResult, LaplacePosterior, LocalPolishResult, MultiChainResult,
+    MultiChainSampler, MultiChainState, ParallelTemperingSampler, PilotObservation, PilotPrior,
+    PtChainState, PtResult, QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;

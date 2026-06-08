@@ -6,8 +6,8 @@
 //!
 //! Pure observable: takes the two energy series and returns
 //! `(Delta F, sigma^2)`. No kernel perturbation.
-//!
-//! See `the design notes`.
+//! The estimator is exposed as an observable so kernels can compare
+//! ensembles without changing the proposal or acceptance machinery.
 
 /// Fermi function `f(x) = 1 / (1 + exp(x))`, numerically stable.
 fn fermi(x: f64) -> f64 {
@@ -109,8 +109,8 @@ impl BarEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
     use rand_distr::{Distribution, Normal};
 
     /// Toy: two zero-mean Gaussians with different variances.

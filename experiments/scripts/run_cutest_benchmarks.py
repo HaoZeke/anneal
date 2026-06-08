@@ -1979,10 +1979,11 @@ def _auto_portfolio_seed_offsets(seed, n_chains):
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
-    """Run a v0.5 bGSA driver on a CUTEst problem. Reuses demo_bgsa's
-    pilot + driver functions; we monkey-patch OBJ_FN/LOW/HIGH/OBJ_GRAD
-    to point at the CUTEst problem so the existing driver wrappers
-    work without modification."""
+    """Run a bGSA driver on a CUTEst problem.
+
+    The wrapper reuses demo_bgsa's pilot and driver functions by binding
+    OBJ_FN/LOW/HIGH/OBJ_GRAD to the CUTEst problem.
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     if here not in sys.path:
         sys.path.insert(0, here)
@@ -2829,7 +2830,7 @@ def main():
                     )
                 )
 
-            # v0.5 bGSA stack on the same CUTEst problem.
+            # bGSA stack on the same CUTEst problem.
             for bgsa_drv in ["bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]:
                 try:
                     t0 = time.perf_counter()

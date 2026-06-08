@@ -8,9 +8,8 @@ hyperparameters. Compares against:
   - HMC-SA hand-tuned (no pilot)
   - bGSA = Bayesian-pilot HMC-SA
 
-Reports per-driver: best_val mean, std, fevals, wall_time, posterior 95%
-upper bound on best_val (the bGSA-specific statistic from
-the design notes Section 5)."""
+Reports per-driver: best_val mean, std, fevals, wall_time, and the posterior
+95% upper bound on best_val used by the bGSA comparison."""
 
 from __future__ import annotations
 
@@ -1319,8 +1318,8 @@ def metad_sa(
     # rate measures (F + V)-acceptance, and the bias's cup-filling
     # dynamics drive adaptive sigma toward "stay in same filled basin"
     # rather than exploration. Fixed sigma_rw works better empirically
-    # for metad-augmented chains; adaptive scaling lands in the swap-
-    # augmented variants (metad_sa_shared_bias, pt_metad_shared) where
+    # for metad-augmented chains; the swap-augmented variants
+    # (metad_sa_shared_bias, pt_metad_shared) use their own scaling where
     # PT swaps and walker exchange counteract the local-collapse pull.
     for epoch in range(n_epochs):
         T = tsallis_cool(t_init, q_v, epoch)
@@ -2099,10 +2098,9 @@ def parallel_tempering_hybrid(
     Metropolis; cold chains use q-HMC. Closes the gradient-mislead
     failure on multimodal landscapes -- the hot RW chain explores
     broadly without being trapped by misleading gradients, the cold
-    HMC chain refines once the chain is near a basin where the
+    HMC chain refines when the chain is near a basin where the
     gradient becomes informative. This is the standard PT-HMC
-    practice from Sminchisescu/Welling 2007 and is what the lit-
-    survey agent identified as 'Item 2: rung-specific kernels'.
+    practice from Sminchisescu/Welling 2007.
     """
     if n_chains < 2:
         raise ValueError("PT requires at least 2 chains")
@@ -2213,9 +2211,8 @@ def parallel_tempering_q_hmc(
     adjacent chains:
       alpha = min(1, exp((1/T_i - 1/T_j) * (F(x_i) - F(x_j))))
     The Cool component becomes the temperature ladder; the Exchange
-    component (this swap rule) is the new typed primitive that the
-    IISE Section 8.3 defers to "next paper". E1 (detailed balance
-    across the swap) holds by the standard parallel-tempering argument.
+    component is the swap rule. E1 (detailed balance across the swap)
+    holds by the standard parallel-tempering argument.
     """
     # Geometric temperature ladder: T_i = t_final * (t_init/t_final)^(i / (M-1))
     if n_chains < 2:
@@ -2363,10 +2360,9 @@ def bgsa_multichain(
 
 
 # -------------------------------------------------------------------------
-# v2 drivers: Latin hypercube + adaptive sigma + stagnation restart.
-# These are the three architectural fixes the v0.4.0 baselines lack;
-# they matter most on multi-cup landscapes (Rastrigin) where a single-
-# basin chain wastes budget.
+# Latin hypercube + adaptive sigma + stagnation restart drivers.
+# These mechanisms matter most on multi-cup landscapes (Rastrigin) where a
+# single-basin chain wastes budget.
 # -------------------------------------------------------------------------
 
 
@@ -3116,8 +3112,7 @@ def main():
     for seed in range(args.seeds):
         # SHARED PILOT: run once per seed; downstream bGSA drivers
         # reuse the (t_map, e_map, L_map, q_map, best_pos, pilot_calls)
-        # tuple. This was the largest source of feval overhead in the
-        # v0.4.0 demo (each driver re-ran a pilot of 1500-2400 fevals).
+        # tuple, avoiding repeated pilot costs across drivers.
         (
             t_map,
             e_map,
@@ -3654,7 +3649,7 @@ def main():
         if not sub:
             continue
         bvs = np.array([r["best_val"] for r in sub])
-        # 95% upper bound (bGSA's headline statistic per the design notes)
+        # 95% upper bound of best objective values across seeds.
         ci_upper = np.quantile(bvs, 0.95) if len(bvs) > 1 else bvs[0]
         print(
             f"  {label:<22}: mean = {bvs.mean():7.3f}  std = {bvs.std():6.3f}  "

@@ -113,10 +113,8 @@ where
     /// `dim` and `bound` parameterise the L1 neighbourhood sweep over
     /// `[-bound, bound]^dim`. `seed` makes the sweep reproducible.
     ///
-    /// This is the v0.3.2 fix for the gap where a deliberately-broken
-    /// AcceptRule whose `accept_prob` violated L3 still constructed
-    /// cleanly because the trait method that returned the law witness
-    /// could lie. See the design notes task A6.
+    /// The randomized sweep checks the executable law behavior rather than
+    /// trusting witness methods alone.
     #[allow(clippy::too_many_arguments)]
     pub fn checked_with_sweep(
         obj: O,
