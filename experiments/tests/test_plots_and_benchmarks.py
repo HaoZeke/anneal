@@ -1,5 +1,7 @@
 """Smoke tests for benchmark catalog + plot helpers (Dolan-More, More-Wild, Pareto)."""
 
+import csv
+import io
 import os
 import inspect
 import math
@@ -4170,6 +4172,38 @@ def test_sota_cutest_hybrid_defaults_match_core_hybrid_signature():
 
     assert sota_cutest.DEFAULT_HYBRID_N_POLISH == signature.parameters["n_polish"].default
     assert sota_cutest.DEFAULT_HYBRID_K_POLISH == signature.parameters["k_polish"].default
+
+
+def test_sota_cutest_streams_rows_as_methods_finish():
+    from experiments.scripts import sota_cutest
+
+    class FlushCountingStream(io.StringIO):
+        def __init__(self):
+            super().__init__()
+            self.flush_count = 0
+
+        def flush(self):
+            self.flush_count += 1
+            return super().flush()
+
+    stream = FlushCountingStream()
+    writer = csv.DictWriter(stream, fieldnames=sota_cutest.FIELDNAMES)
+    writer.writeheader()
+    row = {
+        "problem": "BOX3",
+        "dim": 3,
+        "method": "hybrid_de",
+        "seed": 0,
+        "best": -1.25,
+        "evals": 80,
+    }
+
+    sota_cutest._write_sota_row(writer, stream, row)
+
+    assert stream.flush_count == 1
+    lines = stream.getvalue().splitlines()
+    assert lines[0] == "problem,dim,method,seed,best,evals"
+    assert lines[1] == "BOX3,3,hybrid_de,0,-1.25,80"
 
 
 def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
