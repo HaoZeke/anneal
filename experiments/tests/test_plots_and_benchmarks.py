@@ -1678,7 +1678,7 @@ def test_cutest_bgsa_auto_includes_tensor_and_gle_candidates(monkeypatch):
     assert [seed for seed, *_rest in captured["tensor"]] == [7, 11]
     assert [seed for seed, *_rest in captured["gle"]] == [7, 11]
     assert all(call[1] == 81 for call in captured["tensor"])
-    assert all(call[1] == 81 for call in captured["gle"])
+    assert all(call[1] == 41 for call in captured["gle"])
     assert captured["tensor"][0][2].tolist() == pytest.approx([-1.0, -1.0])
     assert captured["tensor"][0][3].tolist() == pytest.approx([1.0, 1.0])
     assert captured["gle"][0][2].tolist() == pytest.approx([-1.0, -1.0])
@@ -1764,6 +1764,84 @@ def test_cutest_bgsa_auto_replicates_gle_when_it_wins(monkeypatch):
 
     assert best_val == -30.0
     assert captured["gle"] == [7, 11] + [seed for seed in range(7, 23) if seed not in {7, 11}]
+
+
+def test_cutest_bgsa_auto_stops_gle_family_after_nonfinite_screen(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"gle": []}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -4.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **kwargs):
+        captured["gle"].append((int(kwargs["seed"]), int(max_fevals)))
+        return {"best_val": float("inf"), "best_pos": np.zeros(2), "n_evals": 23}
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc, gle_langevin=gle_langevin)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (2.0, 40, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            1.0,
+            30,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            2.0,
+            70,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+
+    best_val, _fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -4.0
+    assert captured["gle"] == [(7, 41)]
 
 
 def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeypatch):
