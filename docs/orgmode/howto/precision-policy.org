@@ -3,7 +3,7 @@
 
 * Three Channels
 
-Any =Accept= that claims to implement the exact Metropolis (or Tsallis) rule under floating-point must use one of the three documented channels:
+Any =Accept= that claims to implement the exact Metropolis (or =Tsallis=) rule under floating-point must use one of the three documented channels:
 
 - C1 (compensated summation in the log-acceptance ratio)
 - C2 (log-domain formulation that never forms the ratio explicitly)

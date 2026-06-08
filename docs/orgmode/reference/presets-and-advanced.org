@@ -5,13 +5,13 @@
 
 - =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
 - =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
-- =Gsa(t_init, q_v, q_a)= :: Tsallis cooling + Tsallis visit + Tsallis accept.
+- =Gsa(t_init, =q_v=, q_a)= :: =Tsallis= cooling + =Tsallis= visit + =Tsallis= accept.
 
 All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
 
 * Pilot and low-discrepancy
 
-- =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, q_v).
+- =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, =q_v=).
 - =low_discrepancy_points(low, high, n, skip=1)= .
 
 * Polish (require grad)
@@ -28,9 +28,9 @@ All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
 * Device and ensemble (same kernel)
 
 - =run_device= (single chain, NumPy or CuPy bounds)
-- =run_ensemble= (batched, n_chains, same kernel)
+- =run_ensemble= (batched, =n_chains=, same kernel)
 
-* HMC / QMC variants (also exposed)
+* Hamiltonian Monte Carlo (HMC) / quasi-Monte Carlo (QMC) variants (also exposed)
 
 - =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and tests for current signatures).
 

@@ -11,7 +11,7 @@ It maintains one Beta posterior per chain on whether that chain has produced a n
 
 * Do I need to supply a gradient?
 
-Only for GLE, the polish variants, and HMC-style methods. Classical presets and additive independence are values-only.
+Only for generalized =Langevin= equation (GLE), the polish variants, and Hamiltonian Monte Carlo (HMC)-style methods. Classical presets and additive independence are values-only.
 
 * Precision and float16/float32 policy?
 

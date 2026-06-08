@@ -7,13 +7,13 @@ Polish, Device, and Scale
 =============================
 #+end_export
 
-After any stochastic driver you run a deterministic "last mile". The same polish component also works as a pure multi-start method (quasi-Monte Carlo (quasi-Monte Carlo (QMC)) or shifted-quasi-Monte Carlo (QMC)). The device path (NumPy or CuPy) and the batched ensemble runner execute the identical transition kernel; only the array namespace and leading batch axis change.
+After any stochastic driver you run a deterministic "last mile". The same polish component also works as a pure multi-start method (quasi-Monte Carlo (quasi-Monte Carlo (quasi-Monte Carlo (QMC))) or shifted-quasi-Monte Carlo (quasi-Monte Carlo (QMC))). The device path (NumPy or CuPy) and the batched ensemble runner execute the identical transition kernel; only the array namespace and leading batch axis change.
 
 #+begin_export rst
 .. admonition:: Reference
 
    DeviceHistory / EnsembleHistory, run_device, run_ensemble, the
-   projected-gradient =Armijo= backtrack, and the low-discrepancy
+   projected-gradient ==Armijo== backtrack, and the low-discrepancy
    screening live in python/anneal/device.py (thin wrappers) and the
    Rust runner / local_polish. The "same kernel" claim is the algebra
    in action: the five-component object is what gets executed on the
@@ -24,7 +24,7 @@ After any stochastic driver you run a deterministic "last mile". The same polish
 
 For polish variants a gradient is required. Device examples work with plain NumPy; GPU examples need CuPy on a CUDA machine.
 
-* Step 1: Polish after a stochastic run (projected =Armijo=)
+* Step 1: Polish after a stochastic run (projected ==Armijo==)
 
 #+begin_src python
 import numpy as np
@@ -48,9 +48,9 @@ refined = polish(rastrigin, grad_rastrigin, low, high, x0,
 print("After polish best:", refined["best_pos"], refined["best_val"])
 #+end_src
 
-The polish performs backtracking projected gradient steps with the =Armijo= sufficient-decrease test inside the box.
+The polish performs backtracking projected gradient steps with the ==Armijo== sufficient-decrease test inside the box.
 
-* Step 2: quasi-Monte Carlo (QMC) / shifted-quasi-Monte Carlo (QMC) polish as a standalone multi-start
+* Step 2: quasi-Monte Carlo (quasi-Monte Carlo (QMC)) / shifted-quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish as a standalone multi-start
 
 Screen low-discrepancy points (or shifted replicates) and send the best k of them to polish.
 
@@ -60,12 +60,12 @@ from anneal import qmc_polish, shifted_qmc_polish
 out_q = qmc_polish(rastrigin, grad_rastrigin, low, high,
                    n_starts=128, max_fevals_per_start=30,
                    seed=0, top_k=4)
-print("quasi-Monte Carlo (QMC) polish best:", out_q["best_val"])
+print("quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish best:", out_q["best_val"])
 
 out_s = shifted_qmc_polish(rastrigin, grad_rastrigin, low, high,
                            n_starts=64, max_fevals_per_start=30,
                            seed=0, n_replicates=2, top_k=1)
-print("Shifted quasi-Monte Carlo (QMC) polish best:", out_s["best_val"])
+print("Shifted quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish best:", out_s["best_val"])
 #+end_src
 
 * Step 3: Device and ensemble (identical kernel)
@@ -80,7 +80,7 @@ print("Device (host) best:", h1.best_val)
 
 # Batched ensemble (same kernel, extra batch axis)
 h2 = run_ensemble(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
-                  n_chains=256, n_epochs=4, steps_per_epoch=25, seed=9)
+                  =n_chains==256, n_epochs=4, steps_per_epoch=25, seed=9)
 print("Ensemble global best:", h2.global_best_val)
 #+end_src
 
@@ -88,9 +88,9 @@ Replace low/high with CuPy arrays and the kernels run on GPU with zero Python ov
 
 * Why this works (reuse)
 
-=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses. The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct. The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation are identical bit-for-bit. Consequently the noise-aware compensated Accept, the generalized Langevin equation (GLE) Move, the rank-1 independence Move, and every future improvement to any slot are automatically present on GPU and in large ensembles.
+=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses. The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct. The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation are identical bit-for-bit. Consequently the noise-aware compensated Accept, the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) Move, the rank-1 independence Move, and every future improvement to any slot are automatically present on GPU and in large ensembles.
 
-quasi-Monte Carlo (QMC) polish is likewise a pure filling of the same slots (a deterministic Cool that goes to zero, a Move that is projected gradient, an Accept that is =Armijo=). One change to the =Armijo= logic or the low-discrepancy generator instantly appears in every polish variant.
+quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish is likewise a pure filling of the same slots (a deterministic Cool that goes to zero, a Move that is projected gradient, an Accept that is ==Armijo==). One change to the ==Armijo== logic or the low-discrepancy generator instantly appears in every polish variant.
 
 * Figures and scale experiments
 

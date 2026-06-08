@@ -1,23 +1,23 @@
-#+TITLE: GLE Colored-Noise Langevin (generalized Langevin equation)
+#+TITLE: generalized =Langevin= equation (GLE) Colored-Noise =Langevin= (generalized =Langevin= equation)
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
 #+begin_export rst
 =============================
-generalized =Langevin= equation (GLE) Colored-Noise =Langevin=
+generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) Colored-Noise ==Langevin==
 =============================
 #+end_export
 
-generalized =Langevin= equation (GLE)-=Langevin= replaces the white-noise =Langevin= move with a generalized =Langevin= equation (generalized =Langevin= equation (GLE)) thermostat. An optimal-sampling drift matrix fitted once from the characteristic frequency flattens the noise spectrum. The same fitted matrix accelerates every gradient-capable driver.
+generalized ==Langevin== equation (generalized =Langevin= equation (GLE))-==Langevin== replaces the white-noise ==Langevin== move with a generalized ==Langevin== equation (generalized ==Langevin== equation (generalized =Langevin= equation (GLE))) thermostat. An optimal-sampling drift matrix fitted once from the characteristic frequency flattens the noise spectrum. The same fitted matrix accelerates every gradient-capable driver.
 
 #+begin_export rst
 .. admonition:: Reference
 
-   The BAB (B-A-B) propagator, stationary reseed per epoch, matrix_exp + ldl_sqrt
+   The BAB (B-A-B) (B-A-B) propagator, stationary reseed per epoch, matrix_exp + ldl_sqrt
    construction of the drift, and the reduction to the canonical
    form appear in src/methods/=gle_langevin=.rs and the corresponding
-   =eindir= GleThermostat / optimal_sampling_drift code. The "one drift
+   ==eindir== GleThermostat / optimal_sampling_drift code. The "one drift
    serves all gradient drivers" claim is a direct consequence of the
-   algebra (the generalized =Langevin= equation (GLE) object occupies exactly the Move slot).
+   algebra (the generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) object occupies exactly the Move slot).
 #+end_export
 
 * Prerequisites
@@ -50,24 +50,24 @@ high = np.full(5, 5.0)
 res = =gle_langevin=(rastrigin, grad_rastrigin, low, high,
                    max_fevals=4000, seed=11,
                    omega0=0.2, dt=0.2, n_epochs=40)
-print("generalized =Langevin= equation (GLE) best pos:", res["best_pos"])
-print("generalized =Langevin= equation (GLE) best val:", res["best_val"])
-print("generalized =Langevin= equation (GLE) evals:", res["n_evals"])
+print("generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) best pos:", res["best_pos"])
+print("generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) best val:", res["best_val"])
+print("generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) evals:", res["n_evals"])
 #+end_src
 
-Expected on this separable ill-conditioned problem: the colored-noise version reaches lower values in the same budget than a plain white-noise =Langevin= would, because the single fitted drift matrix equalizes efficiency across a decade of frequencies.
+Expected on this separable ill-conditioned problem: the colored-noise version reaches lower values in the same budget than a plain white-noise ==Langevin== would, because the single fitted drift matrix equalizes efficiency across a decade of frequencies.
 
 * Step 3: The thermostat inside (what the algebra buys)
 
-- =eindir= builds the optimal_sampling_drift matrix A for the chosen omega0.
-- The generalized =Langevin= equation (GLE) move kernel (B-A-B splitting + exact matrix exponential; the propagator from the generalized Langevin equation (GLE) literature) occupies the Move slot.
-- The same A works for any inner sampler that supplies a gradient (Hamiltonian Monte Carlo (HMC) variants, plain =Langevin=, future methods).
-- No per-preset generalized =Langevin= equation (GLE) code exists; the factoring guarantees it.
+- ==eindir== builds the optimal_sampling_drift matrix A for the chosen omega0.
+- The generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) move kernel (B-A-B splitting + exact matrix exponential; the propagator from the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) literature) occupies the Move slot.
+- The same A works for any inner sampler that supplies a gradient (Hamiltonian Monte Carlo (Hamiltonian Monte Carlo (HMC)) variants, plain ==Langevin==, future methods).
+- No per-preset generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) code exists; the factoring guarantees it.
 
 Stationary reseed per epoch keeps the auxiliary momenta consistent with the invariant measure even when the outer temperature schedule changes.
 
 * Why this works
 
-White-noise =Langevin= critically damps only one frequency. Real objectives have spectra spanning orders of magnitude (the classic "ill-conditioned" case). The generalized =Langevin= equation (GLE) drift matrix is the exact continuous-time solution that makes the integrated autocorrelation time flat from omega0 to ~100*omega0. Because Move is the only slot that knows the proposal shape, swapping the white-noise proposal for the generalized =Langevin= equation (GLE) proposal is a one-line component change that instantly benefits every gradient driver in the crate.
+White-noise ==Langevin== critically damps only one frequency. Real objectives have spectra spanning orders of magnitude (the classic "ill-conditioned" case). The generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) drift matrix is the exact continuous-time solution that makes the integrated autocorrelation time flat from omega0 to ~100*omega0. Because Move is the only slot that knows the proposal shape, swapping the white-noise proposal for the generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) proposal is a one-line component change that instantly benefits every gradient driver in the crate.
 
 See [[file:../explanation/gle-mechanics.org][gle-mechanics]] (T4) for the matrix construction and the canonical-form derivation.

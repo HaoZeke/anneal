@@ -17,6 +17,12 @@ returned =DeviceHistory= keeps every field in the same namespace and on the
 same device, and exposes a DLPack boundary for zero-copy handoff to other
 runtimes.
 
+The transition kernel that executes on the device (or in the batched
+ensemble) is exactly the same five-component object (Obj + Cool + Neigh +
+Move + Accept) that the classical presets and the advanced drivers
+construct. The algebra is what makes one kernel serve every driver on
+every backend.
+
 #+begin_src python
 import cupy as cp
 from anneal import Boltzmann, run_device

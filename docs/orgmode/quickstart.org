@@ -52,7 +52,7 @@ The three presets =Boltzmann=, =Fast=, =Gsa= all obey the same five-component al
 
 #+begin_src python
 import numpy as np
-from anneal import Boltzmann, Fast, Gsa, run
+from anneal import Boltzmann, Fast, =Gsa=, run
 
 def rosenbrock(x):
     return (1.0 - x[0])**2 + 100.0 * (x[1] - x[0]**2)**2
@@ -70,8 +70,8 @@ h2 = run(rosenbrock, low, high, Fast(t_init=5.0, gamma=0.5),
          n_epochs=30, steps_per_epoch=80, seed=42)
 print("Fast best:", h2.best_pos, h2.best_val)
 
-# Tsallis (Gsa)
-h3 = run(rosenbrock, low, high, Gsa(t_init=5.0, q_v=2.5, q_a=1.5),
+# =Tsallis= (=Gsa=)
+h3 = run(rosenbrock, low, high, =Gsa=(t_init=5.0, =q_v==2.5, q_a=1.5),
          n_epochs=30, steps_per_epoch=80, seed=42)
 print("Gsa best:", h3.best_pos, h3.best_val)
 #+end_src
