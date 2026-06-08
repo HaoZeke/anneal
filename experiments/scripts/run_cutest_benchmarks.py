@@ -1780,6 +1780,12 @@ def _run_cutest_additive_independence(
     return best_val, int(result.get("n_evals", 0))
 
 
+def _gle_langevin_screen_budget(k_per_epoch):
+    if k_per_epoch < 1:
+        raise ValueError("k_per_epoch must be positive")
+    return 1 + int(k_per_epoch)
+
+
 def _run_cutest_gle_langevin(
     anneal_module,
     prob,
@@ -1796,7 +1802,7 @@ def _run_cutest_gle_langevin(
     if n_epochs < 1 or k_per_epoch < 1 or not _has_finite_design_box(prob):
         return None
     design_low, design_high = _design_bounds(prob)
-    max_fevals = 1 + int(n_epochs) * int(k_per_epoch)
+    max_fevals = _gle_langevin_screen_budget(k_per_epoch)
     try:
         result = anneal_module.gle_langevin(
             prob.fn,
@@ -1805,7 +1811,7 @@ def _run_cutest_gle_langevin(
             design_high,
             int(max_fevals),
             seed=int(seed),
-            n_epochs=int(n_epochs),
+            n_epochs=1,
         )
     except Exception:
         return None
@@ -2273,7 +2279,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         k_per_epoch,
                     )
                     if gle_result is None:
-                        continue
+                        break
                     gle_bv, gle_calls = gle_result
                     gle_results.append((gle_seed, gle_bv, gle_calls))
                     outcomes.append((gle_bv, gle_calls))
@@ -2355,6 +2361,8 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     )
                     if gle_result is not None:
                         outcomes.append(gle_result)
+                    else:
+                        break
             if _candidate_family_matches_best(metad_results, initial_best):
                 seen_metad_seeds = {
                     metad_seed for metad_seed, _value, _calls in metad_results
