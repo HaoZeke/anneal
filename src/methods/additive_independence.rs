@@ -56,8 +56,12 @@ pub fn additive_independence_sa<O: Objective<f64>>(
     // Pilot evaluated on the true objective. A uniform random design gives
     // clean per-coordinate 1D coverage, which is what the separable additive
     // fit needs; a Halton design degrades on the high-prime axes in high
-    // dimension and would starve the surrogate on those coordinates.
-    let n_pilot = n_pilot.max(degree + 2).min(max_fevals);
+    // dimension and would starve the surrogate on those coordinates. Cap the
+    // pilot at half the budget so the independence sampler always gets to run.
+    let n_pilot = n_pilot
+        .max(degree + 2)
+        .min((max_fevals / 2).max(degree + 2))
+        .min(max_fevals);
     let mut pilot = Array2::<f64>::zeros((n_pilot, dim));
     for i in 0..n_pilot {
         for j in 0..dim {
