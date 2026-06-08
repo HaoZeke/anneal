@@ -4476,6 +4476,73 @@ def test_anneal_sota_qmc_hybrid_skips_gle_below_configured_dimension(monkeypatch
     assert best < 0.5
 
 
+def test_anneal_sota_qmc_hybrid_zoom_refines_narrow_elite_basin(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    target = np.array([0.125, -0.25], dtype=np.float64)
+    shoulders = np.array([0.32, -0.12], dtype=np.float64)
+    calls = {"zoom": 0}
+
+    def fake_zoom_population(low, high, n, skip=1, rng=None):
+        low = np.asarray(low, dtype=np.float64)
+        high = np.asarray(high, dtype=np.float64)
+        if np.all(low < target) and np.all(target < high):
+            calls["zoom"] += 1
+            rows = np.tile(target, (int(n), 1))
+            if int(n) > 1:
+                rows[1:] = 0.5 * (low + high)
+            return rows
+        return np.tile(0.5 * (low + high), (int(n), 1))
+
+    _install_fake_anneal_module(monkeypatch)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        fake_zoom_population,
+        raising=False,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def needle(x):
+        x = np.asarray(x, dtype=np.float64)
+        shoulder = -1.0 + float(np.sum((x - shoulders) ** 2))
+        if np.linalg.norm(x - target, ord=np.inf) <= 1e-12:
+            return -100.0
+        return shoulder
+
+    counter = sota_cutest.Counter(needle, budget=80)
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        dim=2,
+        grad=None,
+        rng=np.random.default_rng(23),
+        n_polish=1,
+        k_polish=1,
+        use_surrogate=False,
+        use_gle=False,
+        config=anneal_sota.AnnealHybridConfig(
+            population_min=4,
+            population_dim_multiplier=1,
+            population_max=4,
+            scout_budget_divisor=1,
+            elite_zoom_budget_divisor=4,
+            elite_zoom_candidates_per_member=3,
+            elite_zoom_levels=2,
+            elite_zoom_elite_count=2,
+            elite_zoom_radius_fraction=0.25,
+            elite_zoom_radius_shrink=0.25,
+        ),
+    )
+
+    assert calls["zoom"] > 0
+    assert counter.n <= counter.budget
+    assert best == -100.0
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
