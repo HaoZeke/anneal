@@ -1301,7 +1301,10 @@ def _run_cutest_qmc_polish(
         result.get("n_evals", 0),
         result.get("n_grads", 0),
     )
-    return float(result["best_val"]), work_units
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, work_units
 
 
 def _has_declared_cutest_bounds(prob):
@@ -1385,7 +1388,7 @@ def _native_qmc_first_degree_bound_supported(prob):
     return degree == 1
 
 
-def _native_qmc_box_stage_specs(dim, n_chains):
+def _native_qmc_box_stage_specs(dim, n_chains, include_full_polish=True):
     if dim < 1:
         raise ValueError("dim must be positive")
     if n_chains < 1:
@@ -1400,7 +1403,7 @@ def _native_qmc_box_stage_specs(dim, n_chains):
     for multiplier in coverage:
         n_starts = dim * multiplier
         top_values = [n_chains]
-        if multiplier > n_chains and dim <= n_chains * n_chains:
+        if multiplier > n_chains and include_full_polish:
             top_values.append(0)
         if multiplier == n_chains * n_chains:
             top_values.append(dim)
@@ -1494,12 +1497,17 @@ def _run_cutest_native_qmc_box_schedule(
     seed,
     n_chains,
     k_per_epoch,
+    include_full_polish=True,
 ):
     if grad_kind != "native" or not _has_finite_design_box(prob):
         return None
     best_val = None
     total_work = 0
-    for n_starts, top_k in _native_qmc_box_stage_specs(prob.dim, n_chains):
+    for n_starts, top_k in _native_qmc_box_stage_specs(
+        prob.dim,
+        n_chains,
+        include_full_polish=include_full_polish,
+    ):
         result = _run_cutest_qmc_polish(
             anneal_module,
             prob,
@@ -1676,7 +1684,10 @@ def _run_cutest_shifted_qmc_polish(
             result.get("n_evals", 0),
             result.get("n_grads", 0),
         )
-        return float(result["best_val"]), work_units
+        best_val = float(result["best_val"])
+        if not np.isfinite(best_val):
+            return None
+        return best_val, work_units
     if not hasattr(anneal_module, "polish"):
         return None
     starts = _low_discrepancy_starts(
@@ -1722,7 +1733,11 @@ def _run_cutest_shifted_qmc_polish(
 
 
 def _combine_candidate_results(*candidates):
-    valid = [candidate for candidate in candidates if candidate is not None]
+    valid = [
+        candidate
+        for candidate in candidates
+        if candidate is not None and np.isfinite(float(candidate[0]))
+    ]
     if not valid:
         return None
     best_val = min(value for value, _work in valid)
@@ -1795,6 +1810,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     int(n_chains),
                     int(k_per_epoch),
+                    include_full_polish=False,
                 )
             if int(prob.dim) <= int(n_chains) and not (
                 core_qmc_available
@@ -1921,6 +1937,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     int(n_chains),
                     int(k_per_epoch),
+                    include_full_polish=False,
                 )
                 if auto_best_start_polish is None:
                     auto_multistart_polish = _run_cutest_dominant_multistart_polish(
@@ -2205,7 +2222,13 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         best_pilot_pos=best_pilot_pos,
                     )
                     outcomes.append((metad_bv, metad_calls))
-            return min(value for value, _calls in outcomes), pilot_calls + sum(
+            finite_outcomes = [
+                (float(value), calls)
+                for value, calls in outcomes
+                if np.isfinite(float(value))
+            ]
+            best_outcomes = finite_outcomes if finite_outcomes else outcomes
+            return min(value for value, _calls in best_outcomes), pilot_calls + sum(
                 calls for _value, calls in outcomes
             )
         raise ValueError(f"Unknown bGSA driver: {driver}")
