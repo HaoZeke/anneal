@@ -1398,7 +1398,7 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
     ]
     assert all(isinstance(call[0], GradientCutestProblem) for call in captured["mix"])
     assert fevals == 11 + 30 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=2,
+        n_trajectories=10,
         l_steps=2,
     )
 
@@ -1520,7 +1520,7 @@ def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
         + 6
         + 3
         + cutest._rust_hmc_native_grad_work_units(
-            n_trajectories=2,
+            n_trajectories=10,
             l_steps=2,
         )
     )
@@ -2581,11 +2581,11 @@ def test_cutest_bgsa_auto_skips_metad_when_cv_is_undefined(monkeypatch):
     )
 
     assert best_val == -5.0
-    assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
+    assert captured["hmc_kwargs"]["steps_per_epoch"] == 5
     assert captured["hybrid_inner"] == 1
     assert captured["mix"] == [(7, 81), (11, 81)]
     assert fevals == 11 + 34 + 70 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=2,
+        n_trajectories=10,
         l_steps=2,
     )
 
