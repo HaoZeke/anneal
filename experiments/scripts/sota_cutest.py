@@ -22,13 +22,13 @@ import sys
 import numpy as np
 from scipy.optimize import basinhopping, differential_evolution, minimize
 
-from experiments.anneal_sota import qmc_annealed_hybrid
+from experiments.anneal_sota import (
+    DEFAULT_HYBRID_K_POLISH,
+    DEFAULT_HYBRID_N_POLISH,
+    qmc_annealed_hybrid,
+)
 from experiments.benchmarks.cutest_runner import configured_pycutest, default_cutest_config, load
 from experiments.scripts.run_cutest_full_suite import list_target_problems
-
-
-DEFAULT_HYBRID_N_POLISH = 6
-DEFAULT_HYBRID_K_POLISH = 8
 
 
 class _Budget(Exception):
