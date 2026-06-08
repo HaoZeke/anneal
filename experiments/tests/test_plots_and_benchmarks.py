@@ -1403,6 +1403,168 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
     )
 
 
+def test_cutest_bgsa_auto_replicates_bayesian_mixing_when_it_wins(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"mix": []}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = 4.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def bayesian_mixing_sa(_prob, seed, max_fevals, _return_diagnostics=False):
+        captured["mix"].append((seed, max_fevals))
+        if seed == 21:
+            return -20.0, 23
+        if seed == 11:
+            return -8.0, 17
+        return 3.0, 13
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (2.0, 40, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            1.0,
+            30,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            2.0,
+            70,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", bayesian_mixing_sa)
+
+    best_val, _fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -20.0
+    assert captured["mix"] == [(7, 81), (11, 81)] + [
+        (seed, 81) for seed in range(7, 23) if seed not in {7, 11}
+    ]
+
+
+def test_cutest_bgsa_auto_replicates_metad_when_it_wins(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"metad": []}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = 4.0
+        total_accepted = 0
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def bgsa_metad(seed, *_args, **_kwargs):
+        captured["metad"].append(seed)
+        return (-20.0 if seed == 19 else -5.0), 41, None, None, None, None
+
+    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.array([0.2, -0.2], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_metad=bgsa_metad,
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            1.0,
+            30,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            2.0,
+            70,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+
+    best_val, _fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -20.0
+    assert captured["metad"] == [8] + [seed for seed in range(7, 23) if seed != 8]
+
+
 def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
@@ -1724,6 +1886,65 @@ def test_cutest_bgsa_auto_combines_shifted_qmc_for_small_finite_box(monkeypatch)
 
     assert best_val == -41.0
     assert fevals > 6 + 11
+
+
+def test_cutest_shifted_qmc_polish_uses_core_replicas():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        design_low = np.array([-0.5, -0.5])
+        design_high = np.array([0.5, 0.5])
+
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def shifted_qmc_polish(
+        _obj_fn,
+        _grad_fn,
+        low,
+        high,
+        n_starts,
+        max_fevals_per_start,
+        **kwargs,
+    ):
+        captured.update(
+            {
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "n_replicates": kwargs["n_replicates"],
+                "top_k": kwargs["top_k"],
+            }
+        )
+        return {
+            "best_val": -9.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 5,
+            "n_grads": 2,
+        }
+
+    result = cutest._run_cutest_shifted_qmc_polish(
+        types.SimpleNamespace(shifted_qmc_polish=shifted_qmc_polish),
+        GradientCutestProblem(),
+        GradientCutestProblem().grad,
+        "native",
+        seed=7,
+        n_chains=4,
+        k_per_epoch=40,
+    )
+
+    assert result == (-9.0, 7)
+    np.testing.assert_allclose(captured["low"], [-0.5, -0.5])
+    np.testing.assert_allclose(captured["high"], [0.5, 0.5])
+    assert captured["n_starts"] == 128
+    assert captured["max_fevals_per_start"] == 160
+    assert captured["seed"] == 7
+    assert captured["n_replicates"] == 4
+    assert captured["top_k"] == 16
 
 
 def test_cutest_bgsa_auto_keeps_portfolio_after_qmc_candidate(monkeypatch):
