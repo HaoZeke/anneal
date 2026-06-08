@@ -280,6 +280,28 @@ def load_problem(name: str, args=None):
     return prob
 
 
+def _evict_problem_cache(name: str, args) -> None:
+    """Stream the suite: drop a problem's compiled pycutest cache once its cells
+    are done. Each CUTEst problem is decoded and compiled to a shared library;
+    keeping all of them caches the whole set on disk and exhausts it on the
+    large native-size problems. Evicting after each problem bounds peak disk to
+    a single problem (one per shard) rather than the full catalogue.
+    """
+    if not getattr(args, "evict_cache", False):
+        return
+    import os
+    import shutil
+    try:
+        import pycutest
+        pycutest.clear_cache(name)
+    except Exception:
+        pass
+    cache = os.environ.get("PYCUTEST_CACHE")
+    if cache:
+        for sub in (os.path.join(cache, "pycutest_cache", name), os.path.join(cache, name)):
+            shutil.rmtree(sub, ignore_errors=True)
+
+
 def centre_value(prob) -> float:
     f0 = float(prob.fn((prob.low + prob.high) / 2))
     return f0 if np.isfinite(f0) else 0.0
@@ -517,6 +539,7 @@ def run_suite(args) -> list[dict]:
                 break
             write_rows(args.out, rows)
 
+        _evict_problem_cache(target.name, args)
         completed_targets += 1
         if completed_targets % args.checkpoint_every == 0:
             write_rows(args.out, rows)
@@ -547,6 +570,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Total-degree of the Chebyshev surrogate.")
     parser.add_argument("--surrogate-pilot", type=int, default=None,
                         help="Pilot sample size (default scales with the basis size).")
+    parser.add_argument("--evict-cache", action="store_true",
+                        help="Stream the suite: drop each problem's compiled pycutest "
+                             "cache once its cells finish, bounding peak disk to one "
+                             "problem (one per shard) instead of the whole catalogue.")
     parser.add_argument("--load-timeout", type=int, default=30)
     parser.add_argument("--per-problem-timeout", type=int, default=180)
     parser.add_argument("--n-epochs", type=int, default=30)

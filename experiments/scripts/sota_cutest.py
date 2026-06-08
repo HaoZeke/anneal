@@ -162,6 +162,11 @@ def main():
                     best = c.best
                 rows.append(dict(problem=t.name, dim=dim, method=name, seed=s,
                                  best=best, evals=c.n))
+        try:                                   # stream: evict the compiled cache
+            import pycutest
+            pycutest.clear_cache(t.name)
+        except Exception:
+            pass
         print(f"  {t.name} (dim {dim}) done", flush=True)
 
     with open(args.out, "w", newline="") as f:
