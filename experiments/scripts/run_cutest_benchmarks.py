@@ -972,14 +972,6 @@ def _pt_hmc_inner_steps_per_epoch_budget(epoch_budget, n_chains, dim, l_steps, g
     return max(1, int(epoch_budget) // per_inner)
 
 
-def _ensemble_candidate_epoch_budget(epoch_budget, n_candidates):
-    if epoch_budget <= 0:
-        raise ValueError("epoch_budget must be positive")
-    if n_candidates <= 0:
-        raise ValueError("n_candidates must be positive")
-    return max(1, int(epoch_budget) // int(n_candidates))
-
-
 def _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains):
     pilot_steps = max(5, min(20, int(k_per_epoch) // 10))
     return {
@@ -1996,7 +1988,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         if driver == "bgsa_auto":
             import anneal
 
-            candidate_budget = _ensemble_candidate_epoch_budget(k_per_epoch, 4)
+            candidate_budget = int(k_per_epoch)
             hmc_bv, hmc_calls = _run_cutest_rust_hmc(
                 anneal,
                 prob,
