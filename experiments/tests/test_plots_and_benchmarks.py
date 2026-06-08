@@ -4179,6 +4179,28 @@ def test_sota_cutest_hybrid_defaults_match_core_hybrid_signature():
     assert 0.0 < anneal_sota.DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY < 1.0
 
 
+def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
+    from experiments import anneal_sota
+
+    config = anneal_sota.AnnealHybridConfig()
+
+    assert config.basin_polish_min_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MIN_DIMENSION
+    assert config.basin_polish_step == anneal_sota.DEFAULT_BASIN_POLISH_STEP
+    assert config.basin_polish_high_dimension == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION
+    assert (
+        config.basin_polish_high_dimension_step
+        == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP
+    )
+    assert anneal_sota._basin_polish_step_size(
+        config.basin_polish_min_dimension,
+        config,
+    ) == pytest.approx(config.basin_polish_step)
+    assert anneal_sota._basin_polish_step_size(
+        config.basin_polish_high_dimension,
+        config,
+    ) == pytest.approx(config.basin_polish_high_dimension_step)
+
+
 def test_sota_cutest_streams_rows_as_methods_finish():
     from experiments.scripts import sota_cutest
 
