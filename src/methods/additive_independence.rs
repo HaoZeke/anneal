@@ -15,8 +15,8 @@
 
 use eindir_core::{AdditiveSurrogate, Objective};
 use ndarray::{Array1, Array2};
-use rand::Rng;
 use rand::rngs::StdRng;
+use rand::Rng;
 use rand::SeedableRng;
 
 /// Result of a rank-1 independence-sampler run.
@@ -101,7 +101,9 @@ pub fn additive_independence_sa<O: Objective<f64>>(
     let block = (remaining / n_epochs).max(1);
     let t_hi = fx.abs().max(1.0);
     let t_lo = 1e-3 * t_hi;
-    let step: Array1<f64> = (0..dim).map(|j| 0.1 * (bounds.high[j] - bounds.low[j])).collect();
+    let step: Array1<f64> = (0..dim)
+        .map(|j| 0.1 * (bounds.high[j] - bounds.low[j]))
+        .collect();
 
     'epochs: for epoch in 0..n_epochs {
         if n_evals >= max_fevals {
@@ -167,7 +169,10 @@ mod tests {
     }
     impl Objective<f64> for Styb {
         fn eval(&self, x: ArrayView1<f64>) -> f64 {
-            0.5 * x.iter().map(|&v| v.powi(4) - 16.0 * v * v + 5.0 * v).sum::<f64>()
+            0.5 * x
+                .iter()
+                .map(|&v| v.powi(4) - 16.0 * v * v + 5.0 * v)
+                .sum::<f64>()
         }
         fn bounds(&self) -> &Bounds<f64> {
             &self.bounds
