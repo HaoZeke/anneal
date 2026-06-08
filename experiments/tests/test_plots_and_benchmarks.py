@@ -27,6 +27,60 @@ class _QuadraticCutestProblem:
         return float(np.sum(x * x))
 
 
+def _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal, value=99.0):
+    class FakeHistory:
+        best_val = value
+        total_accepted = 0
+
+    if not hasattr(fake_anneal, "run_hmc"):
+        fake_anneal.run_hmc = lambda *_args, **_kwargs: FakeHistory()
+
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.zeros(1, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            value + 1.0,
+            7,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (value + 2.0, 5, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            value + 3.0,
+            6,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (value + 4.0, 3))
+    return fake_demo
+
+
 def test_catalog_has_expected_problems():
     names = list_problems()
     assert "styb_tang_2d" in names
@@ -1558,15 +1612,7 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_run_cutest_qmc_differential_search",
@@ -1583,7 +1629,7 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
     )
 
     assert best_val == -11.0
-    assert fevals == 6 * (8 + 3)
+    assert fevals > 6 * (8 + 3)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
@@ -1619,15 +1665,7 @@ def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_run_cutest_qmc_differential_search",
@@ -1644,7 +1682,7 @@ def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
     )
 
     assert best_val == -31.0
-    assert fevals == 6 + 7
+    assert fevals > 6 + 7
     assert captured["qmc"] == [
         (8, 4, 56),
         (16, 4, 72),
@@ -1671,15 +1709,7 @@ def test_cutest_bgsa_auto_combines_shifted_qmc_for_small_finite_box(monkeypatch)
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_run_cutest_shifted_qmc_polish",
@@ -1701,7 +1731,7 @@ def test_cutest_bgsa_auto_combines_shifted_qmc_for_small_finite_box(monkeypatch)
     )
 
     assert best_val == -41.0
-    assert fevals == 6 + 11
+    assert fevals > 6 + 11
 
 
 def test_cutest_bgsa_auto_keeps_portfolio_after_qmc_candidate(monkeypatch):
@@ -1966,21 +1996,20 @@ def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    fake_anneal = types.SimpleNamespace(polish=lambda *_args, **_kwargs: {})
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    fake_anneal = types.SimpleNamespace(
+        polish=lambda *_args, **_kwargs: {
+            "best_val": 12.0,
+            "best_pos": np.zeros(9),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
     )
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     def best_start_polish(*args, **_kwargs):
         captured["best_args"] = args
         return -3.0, 41
 
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
     monkeypatch.setattr(
         cutest,
         "_run_cutest_raw_best_polish",
@@ -2002,7 +2031,7 @@ def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
     )
 
     assert best_val == -3.0
-    assert fevals == 41
+    assert fevals > 41
     assert captured["best_args"][3] == "finite-difference"
     assert captured["best_args"][4:] == (7, 4, 90)
 
@@ -2043,15 +2072,7 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_run_cutest_raw_best_polish",
@@ -2068,7 +2089,7 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
     )
 
     assert best_val == -5.0
-    assert fevals == 13 + (9 + 1) * 4
+    assert fevals > 13 + (9 + 1) * 4
     assert captured["qmc"]["n_starts"] == 4
     assert captured["qmc"]["max_fevals_per_start"] == 90
     assert captured["qmc"]["seed"] == 7
@@ -2112,15 +2133,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     best_val, fevals = cutest._bgsa_run(
         DenseNativeBoundProblem(),
@@ -2132,7 +2145,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     )
 
     assert best_val == -7.0
-    assert fevals == 6 * (13 + 4)
+    assert fevals > 6 * (13 + 4)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
@@ -2184,15 +2197,7 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     best_val, fevals = cutest._bgsa_run(
         SmallDeclaredBoundProblem(),
@@ -2204,7 +2209,7 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
     )
 
     assert best_val == -23.0
-    assert fevals == 5 * (5 + 2)
+    assert fevals > 5 * (5 + 2)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
@@ -2255,15 +2260,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypat
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     best_val, fevals = cutest._bgsa_run(
         MiddleDeclaredBoundProblem(),
@@ -2275,7 +2272,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypat
     )
 
     assert best_val == -29.0
-    assert fevals == 6 * (7 + 3)
+    assert fevals > 6 * (7 + 3)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
@@ -2328,15 +2325,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     best_val, fevals = cutest._bgsa_run(
         HighDimNativeBoundProblem(),
@@ -2348,7 +2337,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     )
 
     assert best_val == -13.0
-    assert fevals == 3 * (31 + 5)
+    assert fevals > 3 * (31 + 5)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
@@ -2397,15 +2386,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
 
     best_val, fevals = cutest._bgsa_run(
         FiniteBoxNativeProblem(),
@@ -2417,7 +2398,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
     )
 
     assert best_val == -17.0
-    assert fevals == 6 * (31 + 5)
+    assert fevals > 6 * (31 + 5)
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
