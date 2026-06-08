@@ -2540,6 +2540,7 @@ def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
             "best_pos": np.asarray(x0, dtype=np.float64),
             "n_evals": 2,
             "n_grads": 1,
+            "projected_stationary": True,
         }
 
     fake_anneal = types.SimpleNamespace(polish=polish)
@@ -2656,6 +2657,7 @@ def test_cutest_bgsa_auto_keeps_portfolio_for_dominant_high_dim_polish(monkeypat
             "best_pos": np.asarray(x0, dtype=np.float64),
             "n_evals": 2,
             "n_grads": 1,
+            "projected_stationary": True,
         }
 
     fake_anneal = types.SimpleNamespace(polish=polish)
@@ -2694,7 +2696,7 @@ def test_cutest_polish_bulk_dominates_worst_tail_only_for_separated_tail():
 def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class ActiveBoundProblem:
         name = "ACTIVEBOUND"
@@ -2770,14 +2772,14 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "low": np.asarray(low, dtype=np.float64),
             "high": np.asarray(high, dtype=np.float64),
             "n_starts": n_starts,
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -5.0,
             "best_pos": np.zeros(9),
@@ -2804,10 +2806,18 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
 
     assert best_val == -5.0
     assert fevals > 13 + (9 + 1) * 4
-    assert captured["qmc"]["n_starts"] == 4
-    assert captured["qmc"]["max_fevals_per_start"] == 90
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 2
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (36, 4, 524),
+        (72, 4, 848),
+        (72, 0, 848),
+        (144, 4, 1496),
+        (144, 0, 1496),
+        (144, 9, 1496),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
 
 
 def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
