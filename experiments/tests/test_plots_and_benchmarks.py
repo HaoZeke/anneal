@@ -4060,6 +4060,7 @@ def _install_fake_anneal_module(monkeypatch, **overrides):
 
 
 def test_sota_cutest_native_gradient_polish_consumes_budget(monkeypatch):
+    from experiments import anneal_sota
     from experiments.scripts import sota_cutest
 
     grad_calls = 0
@@ -4119,6 +4120,7 @@ def test_sota_cutest_native_gradient_polish_consumes_budget(monkeypatch):
         grad,
         np.random.default_rng(11),
         n_polish=2,
+        config=anneal_sota.AnnealHybridConfig(best1bin_enabled=False),
     )
 
     assert counter.n <= counter.budget
@@ -4195,6 +4197,7 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
         n_polish=2,
         k_polish=1,
         config=anneal_sota.AnnealHybridConfig(
+            best1bin_enabled=False,
             qmc_min_starts=5,
             qmc_starts_per_polish=1,
         ),
@@ -4391,7 +4394,10 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
         use_surrogate=True,
         surrogate_kind="tensor",
         use_gle=True,
-        config=anneal_sota.AnnealHybridConfig(gle_min_dimension=1),
+        config=anneal_sota.AnnealHybridConfig(
+            best1bin_enabled=False,
+            gle_min_dimension=1,
+        ),
     )
 
     assert calls["tensor_build"] >= 1
@@ -4432,6 +4438,7 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
         n_polish=1,
         surrogate_kind="additive",
         use_gle=False,
+        config=anneal_sota.AnnealHybridConfig(best1bin_enabled=False),
     )
     assert calls2["additive_fit"] == 1
 
@@ -4525,6 +4532,7 @@ def test_anneal_sota_qmc_hybrid_zoom_refines_narrow_elite_basin(monkeypatch):
         use_surrogate=False,
         use_gle=False,
         config=anneal_sota.AnnealHybridConfig(
+            best1bin_enabled=False,
             population_min=4,
             population_dim_multiplier=1,
             population_max=4,
@@ -4731,6 +4739,7 @@ def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
         return 2.0 * x
 
     config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
         population_min=4,
         population_dim_multiplier=1,
         population_max=4,
@@ -4798,6 +4807,7 @@ def test_anneal_sota_qmc_hybrid_ignores_nonfinite_surrogate_values(monkeypatch):
         return 2.0 * (x + 0.25)
 
     config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
         population_min=4,
         population_dim_multiplier=1,
         population_max=4,
