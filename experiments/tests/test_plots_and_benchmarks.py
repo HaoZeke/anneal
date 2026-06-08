@@ -3050,6 +3050,7 @@ def test_cutest_native_qmc_polish_budget_tracks_polished_work():
     assert cutest._native_qmc_polish_budget(200, 8, 64, top_k=4) == 17
     assert cutest._native_qmc_polish_budget(200, 8, 128, top_k=8) == 4
     assert cutest._native_qmc_polish_budget(200, 8, 64, top_k=0) == 1
+    assert cutest._native_qmc_polish_budget(200, 25, 200, top_k=4) == 1
 
 
 def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
@@ -3471,6 +3472,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
         for call in captured["qmc"]
     ] == [
         (100, 4, 12),
+        (200, 4, 1),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(25))
