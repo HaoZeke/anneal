@@ -2740,6 +2740,65 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
 
 
+def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": []}
+
+    class ConsensusBoundProblem:
+        name = "CONSENSUSBOUND"
+        dim = 8
+        low = np.full(8, -1.0)
+        high = np.full(8, 1.0)
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"].append({
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "top_k": kwargs["top_k"],
+        })
+        top_k = int(kwargs["top_k"])
+        n_polished = n_starts if top_k == 0 else min(top_k, n_starts)
+        return {
+            "best_val": -7.0,
+            "best_pos": np.zeros(8),
+            "n_evals": 13,
+            "n_grads": 4,
+            "n_polished": n_polished,
+            "polished_values": [-7.0] * n_polished,
+        }
+
+    result = cutest._run_cutest_native_qmc_box_schedule(
+        types.SimpleNamespace(qmc_polish=qmc_polish),
+        ConsensusBoundProblem(),
+        ConsensusBoundProblem().grad,
+        "native",
+        seed=7,
+        n_chains=4,
+        k_per_epoch=200,
+    )
+
+    assert result == (-7.0, 6 * (13 + 4))
+    assert all(call["top_k"] != 0 for call in captured["qmc"])
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (32, 4, 456),
+        (64, 4, 712),
+        (128, 4, 1224),
+        (128, 8, 1224),
+    ]
+
+
 def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 

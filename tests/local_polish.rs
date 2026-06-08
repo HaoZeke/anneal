@@ -133,6 +133,26 @@ fn qmc_polish_screens_center_anchor() {
 }
 
 #[test]
+fn qmc_polish_reports_polished_values() {
+    let obj = CenterQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * x[0], 2.0 * x[1]])
+    });
+
+    let result = qmc_projected_gradient_polish(&obj, &grad, 5, 8, 0, 1.0, 1e-10, 3);
+
+    assert_eq!(result.polished_values.len(), result.n_polished);
+    assert_eq!(result.polished_values.len(), 3);
+    assert!(result.polished_values.iter().all(|v| v.is_finite()));
+    assert!(
+        result
+            .polished_values
+            .iter()
+            .any(|v| *v == result.best_val)
+    );
+}
+
+#[test]
 fn shifted_qmc_polish_replicates_screened_designs() {
     let obj = CenterQuadratic::new();
     let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
