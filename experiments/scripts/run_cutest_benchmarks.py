@@ -38,6 +38,8 @@ FINITE_DIFFERENCE_GRAD_STEP = 1e-6
 COVERED_BOUND_POLISH_BUDGET_DIVISOR = 2
 QMC_DIFFERENTIAL_MUTATION_WEIGHT = 0.5
 QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
+# A moving projected-gradient step needs the start value and one trial value.
+PROJECTED_POLISH_MIN_FEVALS_FOR_STEP = 2
 
 
 def _low_discrepancy_starts(
@@ -1498,14 +1500,26 @@ def _native_qmc_box_stage_specs(dim, n_chains, include_full_polish=True):
     return tuple(specs)
 
 
-def _native_qmc_polish_budget(epoch_budget, dim, n_starts):
+def _qmc_polish_count(n_starts, top_k):
+    if n_starts < 1:
+        raise ValueError("n_starts must be positive")
+    if top_k < 0:
+        raise ValueError("top_k must be non-negative")
+    return int(n_starts) if int(top_k) == 0 else min(int(top_k), int(n_starts))
+
+
+def _native_qmc_polish_budget(epoch_budget, dim, n_starts, top_k=0):
     if epoch_budget < 1:
         raise ValueError("epoch_budget must be positive")
     if dim < 1:
         raise ValueError("dim must be positive")
     if n_starts < 1:
         raise ValueError("n_starts must be positive")
-    return int(epoch_budget) + int(dim) * int(n_starts)
+    polish_count = _qmc_polish_count(n_starts, top_k)
+    screening_work = int(n_starts)
+    remaining_work = max(1, int(epoch_budget) - screening_work)
+    per_step_work = _polish_work_units(int(dim), "native", 1, 1)
+    return max(1, remaining_work // max(1, per_step_work * polish_count))
 
 
 def _covered_local_polish_budget(epoch_budget, n_chains):
@@ -1592,6 +1606,14 @@ def _run_cutest_native_qmc_box_schedule(
     ):
         if top_k == 0 and skip_full_polish:
             continue
+        max_fevals_per_start = _native_qmc_polish_budget(
+            k_per_epoch,
+            prob.dim,
+            n_starts,
+            top_k=top_k,
+        )
+        if max_fevals_per_start < PROJECTED_POLISH_MIN_FEVALS_FOR_STEP:
+            continue
         result = _run_cutest_qmc_polish(
             anneal_module,
             prob,
@@ -1599,7 +1621,7 @@ def _run_cutest_native_qmc_box_schedule(
             grad_kind,
             seed,
             n_starts,
-            _native_qmc_polish_budget(k_per_epoch, prob.dim, n_starts),
+            max_fevals_per_start,
             top_k=top_k,
             return_polished_values=True,
         )
