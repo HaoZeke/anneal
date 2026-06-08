@@ -9,6 +9,7 @@ import tempfile
 import time
 import types
 import warnings
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -519,6 +520,37 @@ def test_cutest_config_accepts_explicit_pycutest_cache(tmp_path):
 
     assert config.cache_dir == cache
     assert (cache / "pycutest_cache_holder").is_dir()
+
+
+def test_cutest_sota_configuration_stays_explicit():
+    root = Path(__file__).resolve().parents[2]
+    checked = [
+        root / "benchmarks" / "cutest_runner.py",
+        root / "scripts" / "run_cutest_full_suite.py",
+        root / "scripts" / "run_cutest_benchmarks.py",
+        root / "scripts" / "sota_cutest.py",
+        root / "anneal_sota.py",
+    ]
+    forbidden = [
+        "os." + "environ",
+        "os." + "getenv",
+        "get" + "env(",
+        "set" + "env",
+        "std::" + "env",
+        "env" + "!(",
+        "option_" + "env" + "!(",
+        "dot" + "env",
+        "process." + "env",
+    ]
+
+    offenders = []
+    for path in checked:
+        text = path.read_text(encoding="utf-8")
+        for needle in forbidden:
+            if needle in text:
+                offenders.append(f"{path.relative_to(root)}: {needle}")
+
+    assert offenders == []
 
 
 def test_cutest_dependency_metadata_pins_pdfo_numpy_abi():
