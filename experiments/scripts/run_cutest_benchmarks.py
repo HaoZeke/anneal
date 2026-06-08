@@ -32,6 +32,8 @@ TARGET_ACCEPT_RATE = 0.234
 TARGET_SWAP_RATE = 0.234
 FINITE_DIFFERENCE_GRAD_STEP = 1e-6
 COVERED_BOUND_POLISH_BUDGET_DIVISOR = 2
+QMC_DIFFERENTIAL_MUTATION_WEIGHT = 0.5
+QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
 
 
 def _low_discrepancy_starts(
@@ -1502,6 +1504,92 @@ def _run_cutest_native_qmc_box_schedule(
     return best_val, total_work
 
 
+def _qmc_differential_population_size(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return max(4, 2 * int(dim) * int(n_chains))
+
+
+def _run_cutest_qmc_differential_search(
+    prob,
+    seed,
+    n_chains,
+    max_fevals_per_chain,
+):
+    dim = int(prob.dim)
+    if dim < 1 or n_chains < 1 or max_fevals_per_chain < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    pop_size = _qmc_differential_population_size(dim, n_chains)
+    best_val = float("inf")
+    best_pos = None
+    total_calls = 0
+    for chain in range(int(n_chains)):
+        chain_seed = int(seed) + int(chain)
+        rng = np.random.default_rng(chain_seed)
+        pop = np.ascontiguousarray(
+            _low_discrepancy_starts(
+                prob.low,
+                prob.high,
+                pop_size,
+                chain_seed,
+                design_low,
+                design_high,
+            )
+        )
+        values = np.asarray([float(prob.fn(x)) for x in pop], dtype=np.float64)
+        calls = int(pop_size)
+        finite = np.where(np.isfinite(values))[0]
+        if finite.size:
+            idx = int(finite[np.argmin(values[finite])])
+            if values[idx] < best_val:
+                best_val = float(values[idx])
+                best_pos = pop[idx].copy()
+        while calls < int(max_fevals_per_chain):
+            for idx in range(pop_size):
+                choices = [
+                    candidate for candidate in range(pop_size) if candidate != idx
+                ]
+                a, b, c = rng.choice(choices, 3, replace=False)
+                mutant = np.clip(
+                    pop[a]
+                    + QMC_DIFFERENTIAL_MUTATION_WEIGHT * (pop[b] - pop[c]),
+                    design_low,
+                    design_high,
+                )
+                cross = rng.random(dim) < QMC_DIFFERENTIAL_CROSSOVER_RATE
+                if not np.any(cross):
+                    cross[int(rng.integers(dim))] = True
+                trial = np.where(cross, mutant, pop[idx])
+                value = float(prob.fn(trial))
+                calls += 1
+                if np.isfinite(value) and (
+                    not np.isfinite(values[idx]) or value < values[idx]
+                ):
+                    pop[idx] = trial
+                    values[idx] = value
+                    if value < best_val:
+                        best_val = value
+                        best_pos = trial.copy()
+                if calls >= int(max_fevals_per_chain):
+                    break
+        total_calls += calls
+    if best_pos is None or not np.isfinite(best_val):
+        return None
+    return best_val, total_calls
+
+
+def _combine_candidate_results(*candidates):
+    valid = [candidate for candidate in candidates if candidate is not None]
+    if not valid:
+        return None
+    best_val = min(value for value, _work in valid)
+    total_work = sum(int(work) for _value, work in valid)
+    return best_val, total_work
+
+
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     """Run a v0.5 bGSA driver on a CUTEst problem. Reuses demo_bgsa's
     pilot + driver functions; we monkey-patch OBJ_FN/LOW/HIGH/OBJ_GRAD
@@ -1548,6 +1636,17 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(k_per_epoch),
                 )
                 if auto_best_start_polish is not None:
+                    if int(prob.dim) <= int(n_chains):
+                        auto_differential_search = _run_cutest_qmc_differential_search(
+                            prob,
+                            seed,
+                            int(n_chains),
+                            1 + int(n_epochs) * int(k_per_epoch),
+                        )
+                        return _combine_candidate_results(
+                            auto_best_start_polish,
+                            auto_differential_search,
+                        )
                     return auto_best_start_polish
             if int(prob.dim) <= int(n_chains) and not (
                 core_qmc_available

@@ -1556,6 +1556,63 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
     assert {call["seed"] for call in captured["qmc"]} == {7}
 
 
+def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
+    monkeypatch,
+):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": []}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"].append((n_starts, kwargs["top_k"], max_fevals_per_start))
+        return {
+            "best_val": 3.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_qmc_differential_search",
+        lambda *_args, **_kwargs: (-31.0, 7),
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -31.0
+    assert fevals == 6 + 7
+    assert captured["qmc"] == [
+        (8, 4, 56),
+        (16, 4, 72),
+        (16, 0, 72),
+        (32, 4, 104),
+        (32, 0, 104),
+        (32, 2, 104),
+    ]
+
+
 def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
