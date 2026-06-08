@@ -7,9 +7,9 @@
 //! witness methods alone.
 
 use ndarray::Array1;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use thiserror::Error;
 
 use crate::accept::AcceptRule;

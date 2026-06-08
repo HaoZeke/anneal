@@ -13,8 +13,8 @@
 //! This is the same fixed-temperature kernel used by parallel tempering; only
 //! the epoch stopping rule changes.
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;

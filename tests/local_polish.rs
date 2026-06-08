@@ -1,9 +1,9 @@
 use anneal_core::{
-    projected_gradient_polish, qmc_best1bin_scout, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish, AnalyticGradient,
+    AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish,
 };
 use eindir_core::{Bounds, Objective};
-use ndarray::{array, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 
 struct ShiftedQuadratic {
     bounds: Bounds<f64>,
@@ -189,10 +189,12 @@ fn qmc_polish_reports_projected_stationarity() {
         result.n_polished
     );
     assert_eq!(result.polished_projected_grad_norms.len(), 3);
-    assert!(result
-        .polished_projected_grad_norms
-        .iter()
-        .all(|norm| norm.is_finite() && *norm <= 1e-8));
+    assert!(
+        result
+            .polished_projected_grad_norms
+            .iter()
+            .all(|norm| norm.is_finite() && *norm <= 1e-8)
+    );
 }
 
 #[test]
