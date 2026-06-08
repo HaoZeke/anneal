@@ -1392,14 +1392,26 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
     )
 
     assert best_val == -8.0
-    assert [call[1:] for call in captured["mix"]] == [
+    expected_mix = [
         (7, 81, False),
         (11, 81, False),
+    ] + [
+        (seed, 81, False) for seed in range(7, 23) if seed not in {7, 11}
     ]
+    assert [call[1:] for call in captured["mix"]] == expected_mix
     assert all(isinstance(call[0], GradientCutestProblem) for call in captured["mix"])
-    assert fevals == 11 + 30 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=10,
-        l_steps=2,
+    assert (
+        fevals
+        == 11
+        + 13
+        + 15 * 17
+        + 40
+        + 30
+        + 70
+        + cutest._rust_hmc_native_grad_work_units(
+            n_trajectories=10,
+            l_steps=2,
+        )
     )
 
 
