@@ -151,19 +151,18 @@ def gle_langevin(
     high,
     max_fevals: int,
     seed: int = 0,
-    ns: int = 4,
-    omega_lo: float = 0.05,
-    omega_hi: float = 5.0,
+    omega0: float = 0.2,
     dt: float = 0.2,
     n_epochs: int = 40,
 ):
     """GLE-thermostatted Langevin annealing (colored-noise optimal sampling).
 
     Gradient-driven BAB Langevin dynamics with a generalized-Langevin
-    colored-noise thermostat whose drift flattens the sampling efficiency across
-    the frequency band ``[omega_lo, omega_hi]``, handling ill-conditioning the
-    way the ``1/sqrt(D)`` scale handles dimension. Returns
-    ``{best_pos, best_val, n_evals}``.
+    colored-noise thermostat. The fitted optimal-sampling drift, scaled to the
+    characteristic frequency ``omega0``, flattens the sampling efficiency across
+    ``[omega0, 100*omega0]`` -- handling ill-conditioning the way the
+    ``1/sqrt(D)`` scale handles dimension. Returns ``{best_pos, best_val,
+    n_evals}``.
     """
     out = _core_gle_langevin(
         obj_fn,
@@ -172,9 +171,7 @@ def gle_langevin(
         np.asarray(high, dtype=np.float64),
         int(max_fevals),
         int(seed),
-        int(ns),
-        float(omega_lo),
-        float(omega_hi),
+        float(omega0),
         float(dt),
         int(n_epochs),
     )

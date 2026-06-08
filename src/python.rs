@@ -543,8 +543,8 @@ fn additive_independence(
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
 /// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0, ns=4,
-                    omega_lo=0.05, omega_hi=5.0, dt=0.2, n_epochs=40))]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
+                    omega0=0.2, dt=0.2, n_epochs=40))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin(
     py: Python<'_>,
@@ -554,9 +554,7 @@ fn gle_langevin(
     high: PyReadonlyArray1<'_, f64>,
     max_fevals: usize,
     seed: u64,
-    ns: usize,
-    omega_lo: f64,
-    omega_hi: f64,
+    omega0: f64,
     dt: f64,
     n_epochs: usize,
 ) -> PyResult<Py<PyDict>> {
@@ -570,11 +568,8 @@ fn gle_langevin(
     if max_fevals < 1 {
         return Err(PyValueError::new_err("max_fevals must be positive"));
     }
-    if ns < 1 {
-        return Err(PyValueError::new_err("ns must be positive"));
-    }
-    if !(omega_hi > omega_lo && omega_lo > 0.0) {
-        return Err(PyValueError::new_err("require 0 < omega_lo < omega_hi"));
+    if omega0 <= 0.0 {
+        return Err(PyValueError::new_err("omega0 must be positive"));
     }
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
@@ -584,7 +579,7 @@ fn gle_langevin(
     };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let result = crate::methods::gle_langevin_sa(
-        &obj, &grad, seed, max_fevals, ns, omega_lo, omega_hi, dt, n_epochs,
+        &obj, &grad, seed, max_fevals, omega0, dt, n_epochs,
     );
     let out = PyDict::new(py);
     out.set_item(
