@@ -4215,6 +4215,82 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.basin_polish_high_dimension,
         config,
     ) == budget
+    assert (
+        config.global_anneal_portfolio_min_dimension
+        == anneal_sota.DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION
+    )
+    assert (
+        config.global_anneal_portfolio_max_dimension
+        == anneal_sota.DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION
+    )
+    assert (
+        config.global_anneal_dual_replicates
+        == anneal_sota.DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES
+    )
+    assert (
+        config.global_anneal_dual_replicate_budget
+        == anneal_sota.DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET
+    )
+    assert (
+        config.global_anneal_local_hop_iterations
+        == anneal_sota.DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
+    )
+
+
+def test_anneal_sota_global_portfolio_slices_shared_counter(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    calls = []
+
+    def consume_to_budget(counter):
+        while counter.n < counter.budget:
+            counter(np.zeros(5, dtype=np.float64))
+
+    def fake_dual(counter, bounds, *, maxfun, no_local_search, seed):
+        del bounds, no_local_search, seed
+        calls.append(("dual", counter.budget, maxfun))
+        consume_to_budget(counter)
+
+    def fake_hop(counter, x0, *, niter, minimizer_kwargs, seed):
+        del x0, niter, minimizer_kwargs, seed
+        calls.append(("hop", counter.budget, None))
+        consume_to_budget(counter)
+
+    monkeypatch.setattr(anneal_sota, "dual_annealing", fake_dual)
+    monkeypatch.setattr(anneal_sota, "basinhopping", fake_hop)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        global_anneal_portfolio_min_dimension=5,
+        global_anneal_portfolio_max_dimension=5,
+        global_anneal_dual_replicates=2,
+        global_anneal_dual_replicate_budget=3,
+        global_anneal_local_hop_iterations=10,
+        best1bin_enabled=False,
+    )
+    counter = sota_cutest.Counter(sphere, budget=8)
+
+    anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(5, -1.0),
+        np.full(5, 1.0),
+        dim=5,
+        grad=grad,
+        rng=np.random.default_rng(17),
+        config=config,
+    )
+
+    assert calls == [("dual", 3, 3), ("dual", 6, 3), ("hop", 8, None)]
+    assert counter.budget == 8
+    assert counter.n == counter.budget
 
 
 def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):
