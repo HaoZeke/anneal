@@ -1,7 +1,7 @@
 use anneal_core::run_rs_qmc_variant;
 use anneal_core::variant::gsa;
 use eindir_core::{Bounds, Objective};
-use ndarray::{array, ArrayView1};
+use ndarray::{ArrayView1, array};
 
 #[derive(Clone)]
 struct DeceptiveBasin {

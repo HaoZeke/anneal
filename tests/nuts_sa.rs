@@ -2,11 +2,11 @@
 //! composability with the existing run_rs / MultiChainSampler /
 //! ParallelTemperingSampler infrastructure.
 
+use anneal_core::ParallelTemperingSampler;
 use anneal_core::cool::LogCool;
 use anneal_core::geometric_ladder;
 use anneal_core::hmc::{GaussianMomentum, NutsSaSampler, QGaussianMomentum};
 use anneal_core::run_rs;
-use anneal_core::ParallelTemperingSampler;
 use eindir_core::FiniteDiffGradient;
 
 use eindir_core::objectives::StybTang2D;

@@ -7,7 +7,7 @@ use anneal_core::{BayesianMixingSampler, Sampler, State};
 
 use eindir_core::objectives::StybTang2D;
 use eindir_core::{Bounds, FPair};
-use ndarray::{array, Array1};
+use ndarray::{Array1, array};
 use rand::Rng;
 
 #[test]
