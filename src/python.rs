@@ -539,6 +539,63 @@ fn additive_independence(
     Ok(out.into())
 }
 
+/// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
+/// colored-noise (generalized Langevin) thermostat that flattens the sampling
+/// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0, ns=4,
+                    omega_lo=0.05, omega_hi=5.0, dt=0.2, n_epochs=40))]
+#[allow(clippy::too_many_arguments)]
+fn gle_langevin(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    max_fevals: usize,
+    seed: u64,
+    ns: usize,
+    omega_lo: f64,
+    omega_hi: f64,
+    dt: f64,
+    n_epochs: usize,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if max_fevals < 1 {
+        return Err(PyValueError::new_err("max_fevals must be positive"));
+    }
+    if ns < 1 {
+        return Err(PyValueError::new_err("ns must be positive"));
+    }
+    if !(omega_hi > omega_lo && omega_lo > 0.0) {
+        return Err(PyValueError::new_err("require 0 < omega_lo < omega_hi"));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let result = crate::methods::gle_langevin_sa(
+        &obj, &grad, seed, max_fevals, ns, omega_lo, omega_hi, dt, n_epochs,
+    );
+    let out = PyDict::new(py);
+    out.set_item(
+        "best_pos",
+        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
+    )?;
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("n_evals", result.n_evals)?;
+    Ok(out.into())
+}
+
 // ---------------------------------------------------------------------------
 // Preset enum + dispatch.
 // ---------------------------------------------------------------------------
@@ -735,6 +792,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(polish, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
+    m.add_function(wrap_pyfunction!(gle_langevin, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     Ok(())
 }
