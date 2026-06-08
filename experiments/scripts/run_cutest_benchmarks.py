@@ -2795,10 +2795,20 @@ def main():
             # solver error is recorded as a non-improving cell so the sweep
             # never dies on one driver.
             field_budget = 1 + args.n_epochs * args.k_fixed
-            # DIRECT is exponential in dimension and SHGO builds a simplicial
-            # complex, so neither is feasible past low dimension; skip them once
-            # the problem is large enough that they would dominate wall time.
-            _nonscalable = {"scipy_direct", "scipy_shgo"}
+            # DIRECT is exponential in dimension, SHGO builds a simplicial
+            # complex, and basin-hopping / dual annealing / COBYQA run inner
+            # restart or trust-region loops that overrun the work-unit budget by
+            # orders of magnitude at high dimension. Skip them once the problem
+            # is large enough that they would dominate wall time; the scalable,
+            # budget-respecting field (L-BFGS-B, DE, CMA-ES) remains the
+            # high-dimensional comparison.
+            _nonscalable = {
+                "scipy_direct",
+                "scipy_shgo",
+                "scipy_basinhopping",
+                "scipy_dual_annealing",
+                "scipy_cobyqa",
+            }
             for ext_name, ext_fn in SCIPY_DRIVERS.items():
                 if prob.dim > 30 and ext_name in _nonscalable:
                     continue
