@@ -44,10 +44,10 @@ pub mod runner;
 pub mod sampler;
 /// Reserved for the typed component algebra (Spec 2, v0.3.0).
 pub mod types;
-/// Checked-in package version metadata.
-pub mod version;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
 pub mod variant;
+/// Checked-in package version metadata.
+pub mod version;
 
 /// C ABI surface (cargo-c builds).
 #[cfg(feature = "capi")]
@@ -67,20 +67,21 @@ pub use grad::{AnalyticGradient, DifferentiableObjective, FiniteDiffGradient, Gr
 pub use history::{EpochLine, History, State};
 pub use hmc::{
     HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
-    OmelyanIntegrator, OMELYAN_LAMBDA,
+    OMELYAN_LAMBDA, OmelyanIntegrator,
 };
 pub use laws::LawViolation;
 pub use methods::{
-    estimate_gle_omega0, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa, gle_langevin_sa,
-    pilot_draws, pilot_draws_qmc, projected_gradient_polish, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish, BayesianMixingResult, BayesianMixingSampler,
-    GelmanRubin, GleLangevinResult, LaplacePosterior, LocalPolishResult, MultiChainResult,
-    MultiChainSampler, MultiChainState, ParallelTemperingSampler, PilotObservation, PilotPrior,
-    PtChainState, PtResult, QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
+    BayesianMixingResult, BayesianMixingSampler, GelmanRubin, GleLangevinResult, LaplacePosterior,
+    LocalPolishResult, MultiChainResult, MultiChainSampler, MultiChainState,
+    ParallelTemperingSampler, PilotObservation, PilotPrior, PtChainState, PtResult, Q_V_MAX,
+    Q_V_MIN, QmcPolishResult, TARGET_ACCEPT_RATE, estimate_gle_omega0, fit_laplace,
+    geometric_ladder, gle_langevin_adaptive_sa, gle_langevin_sa, pilot_draws, pilot_draws_qmc,
+    projected_gradient_polish, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish,
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
 pub use runner::{qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant};
 pub use sampler::Sampler;
-pub use version::ANNEAL_VERSION;
 pub use variant::SaVariant;
+pub use version::ANNEAL_VERSION;

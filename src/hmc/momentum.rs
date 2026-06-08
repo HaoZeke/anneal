@@ -148,8 +148,8 @@ impl Momentum for QGaussianMomentum {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn gaussian_kinetic_at_origin_is_zero() {

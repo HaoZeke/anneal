@@ -1,4 +1,4 @@
-use anneal_core::{pilot_draws_qmc, PilotPrior, Q_V_MAX, Q_V_MIN};
+use anneal_core::{PilotPrior, Q_V_MAX, Q_V_MIN, pilot_draws_qmc};
 
 #[test]
 fn qmc_pilot_draws_are_seeded_deterministic_and_bounded() {

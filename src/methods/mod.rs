@@ -19,18 +19,18 @@ pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 
-pub use additive_independence::{additive_independence_sa, AdditiveIndependenceResult};
+pub use additive_independence::{AdditiveIndependenceResult, additive_independence_sa};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
-    fit_laplace, pilot_draws, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,
-    Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
+    LaplacePosterior, PilotObservation, PilotPrior, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
+    fit_laplace, pilot_draws, pilot_draws_qmc,
 };
 pub use gle_langevin::{
-    estimate_gle_omega0, gle_langevin_adaptive_sa, gle_langevin_sa, GleLangevinResult,
+    GleLangevinResult, estimate_gle_omega0, gle_langevin_adaptive_sa, gle_langevin_sa,
 };
 pub use local_polish::{
-    projected_gradient_polish, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish, LocalPolishResult, QmcPolishResult,
+    LocalPolishResult, QmcPolishResult, projected_gradient_polish, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
-pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
+pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};
