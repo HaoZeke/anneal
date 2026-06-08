@@ -17,6 +17,8 @@ from .tensor_surrogate import AdditiveSurrogate, TensorTrainSurrogate
 HAS_SURROGATES = True
 HAS_LIBRARY_GLE = True
 library_gle_langevin = None
+DEFAULT_HYBRID_N_POLISH = 6
+DEFAULT_HYBRID_K_POLISH = 3
 
 
 @dataclass(frozen=True)
@@ -412,8 +414,8 @@ def qmc_annealed_hybrid(
     grad,
     rng: np.random.Generator,
     *,
-    n_polish: int = 6,
-    k_polish: int = 3,
+    n_polish: int = DEFAULT_HYBRID_N_POLISH,
+    k_polish: int = DEFAULT_HYBRID_K_POLISH,
     use_surrogate: bool = True,
     surrogate_kind: str = "tensor",
     use_gle: bool = True,
