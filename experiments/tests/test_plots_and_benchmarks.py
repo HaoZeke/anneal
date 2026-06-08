@@ -524,12 +524,13 @@ def test_cutest_config_accepts_explicit_pycutest_cache(tmp_path):
 
 def test_cutest_sota_configuration_stays_explicit():
     root = Path(__file__).resolve().parents[2]
+    experiments = root / "experiments"
     checked = [
-        root / "benchmarks" / "cutest_runner.py",
-        root / "scripts" / "run_cutest_full_suite.py",
-        root / "scripts" / "run_cutest_benchmarks.py",
-        root / "scripts" / "sota_cutest.py",
-        root / "anneal_sota.py",
+        experiments / "benchmarks" / "cutest_runner.py",
+        experiments / "scripts" / "run_cutest_full_suite.py",
+        experiments / "scripts" / "run_cutest_benchmarks.py",
+        experiments / "scripts" / "sota_cutest.py",
+        experiments / "anneal_sota.py",
     ]
     forbidden = [
         "os." + "environ",
