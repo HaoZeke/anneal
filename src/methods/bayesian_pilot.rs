@@ -31,9 +31,9 @@
 //! the diminishing-adaptation condition of Roberts/Rosenthal 2007
 //! doi:10.1239/jap/1183667414.
 //!
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Roberts/Rosenthal 2001 doi:10.1214/ss/1015346320: the asymptotically
 /// optimal acceptance rate for random-walk Metropolis on a generic
