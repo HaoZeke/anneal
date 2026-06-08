@@ -75,9 +75,26 @@ def _auto_sigma(low, high, dim):
     return float(np.clip(0.25 * diag / dim, 1e-6, diag / np.sqrt(dim)))
 
 
-def classical(counter, low, high, dim, grad, rng):
+def _comparison_box(prob):
+    low = np.asarray(getattr(prob, "design_low", prob.low), dtype=np.float64)
+    high = np.asarray(getattr(prob, "design_high", prob.high), dtype=np.float64)
+    anchor = getattr(prob, "x0", None)
+    if anchor is None:
+        anchor = 0.5 * (low + high)
+    anchor = np.asarray(anchor, dtype=np.float64).reshape(-1)
+    if anchor.shape != low.shape:
+        anchor = 0.5 * (low + high)
+    return low, high, np.clip(anchor, low, high)
+
+
+def classical(counter, low, high, dim, grad, rng, anchor=None):
     sigma = _auto_sigma(low, high, dim)
-    x = rng.uniform(low, high); fx = counter(x); epoch = 0
+    x = (
+        np.asarray(anchor, dtype=np.float64).copy()
+        if anchor is not None
+        else rng.uniform(low, high)
+    )
+    fx = counter(x); epoch = 0
     try:
         while True:
             temp = 5.0 * np.log(2.0) / np.log(epoch + 2.0)
@@ -102,6 +119,7 @@ def hybrid_de(
     n_polish=DEFAULT_HYBRID_N_POLISH,
     k_polish=DEFAULT_HYBRID_K_POLISH,
     config=None,
+    anchor=None,
 ):
     """Anneal benchmark entry backed by ``qmc_annealed_hybrid``."""
     return qmc_annealed_hybrid(
@@ -114,11 +132,17 @@ def hybrid_de(
         n_polish=n_polish,
         k_polish=k_polish,
         config=config,
+        anchor=anchor,
     )
 
 
-def sci_basinhopping(counter, low, high, dim, grad, rng):
-    bounds = list(zip(low, high)); x0 = rng.uniform(low, high)
+def sci_basinhopping(counter, low, high, dim, grad, rng, anchor=None):
+    bounds = list(zip(low, high))
+    x0 = (
+        np.asarray(anchor, dtype=np.float64).copy()
+        if anchor is not None
+        else rng.uniform(low, high)
+    )
     jac = _counted_jac(counter, grad)
     mk = {"method": "L-BFGS-B", "bounds": bounds}
     if jac is not None:
@@ -131,7 +155,8 @@ def sci_basinhopping(counter, low, high, dim, grad, rng):
     return counter.best
 
 
-def sci_de(counter, low, high, dim, grad, rng):
+def sci_de(counter, low, high, dim, grad, rng, anchor=None):
+    del anchor
     bounds = list(zip(low, high))
     try:
         differential_evolution(counter, bounds, maxiter=10 ** 6, polish=True,
@@ -200,14 +225,14 @@ def main():
             except Exception as exc:  # noqa: BLE001
                 print(f"  skip {t.name}: {type(exc).__name__}", flush=True)
                 continue
-            low = np.asarray(prob.low, float); high = np.asarray(prob.high, float)
+            low, high, anchor = _comparison_box(prob)
             dim = prob.dim
             for s in range(args.seeds):
                 for name, fnc in METHODS.items():
                     rng = np.random.default_rng(s)
                     c = Counter(prob.fn, args.budget)
                     try:
-                        best = fnc(c, low, high, dim, prob.grad, rng)
+                        best = fnc(c, low, high, dim, prob.grad, rng, anchor=anchor)
                     except (_Budget, Exception):  # noqa: BLE001
                         best = c.best
                     row = dict(problem=t.name, dim=dim, method=name, seed=s,
