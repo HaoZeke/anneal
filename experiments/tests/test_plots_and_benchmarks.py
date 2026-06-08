@@ -1237,7 +1237,7 @@ def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
     ) == 2
 
 
-def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
+def test_cutest_bgsa_auto_uses_standalone_branch_budgets(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
     captured = {}
@@ -1305,12 +1305,12 @@ def test_cutest_bgsa_auto_budgets_hmc_candidates(monkeypatch):
     )
 
     assert best_val == -5.0
-    assert captured["hmc_kwargs"]["steps_per_epoch"] == 1
-    assert captured["pt_inner"] == 2
+    assert captured["hmc_kwargs"]["steps_per_epoch"] == 5
+    assert captured["pt_inner"] == 10
     assert captured["hybrid_inner"] == 1
     assert captured["mix"] == [(7, 81), (11, 81)]
     assert fevals == 11 + 34 + 40 + 30 + 70 + cutest._rust_hmc_native_grad_work_units(
-        n_trajectories=2,
+        n_trajectories=10,
         l_steps=2,
     )
 
