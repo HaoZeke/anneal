@@ -119,14 +119,20 @@ def _native_qmc_polish(
         return None
     anneal = _anneal_module()
     remaining = counter.budget - counter.n
-    if remaining <= 0:
+    if remaining < 3:
         return None
-    n_starts = max(
+    requested_starts = max(
         config.qmc_min_starts,
         config.qmc_starts_per_polish * max(k_polish, 1),
     )
-    top_k = max(1, min(k_polish, n_starts))
-    max_fevals_per_start = max(1, remaining // (n_starts + top_k))
+    top_k = min(max(k_polish, 1), requested_starts, remaining // 3)
+    if top_k < 1:
+        return None
+    n_starts = max(top_k, min(requested_starts, remaining - 2 * top_k))
+    available_for_polish = remaining - n_starts
+    max_fevals_per_start = available_for_polish // (2 * top_k)
+    if max_fevals_per_start < 1:
+        return None
     bounds = anneal.Bounds(low, high, config.native_bounds_slack)
     objective = anneal.PyObjective(counter, bounds, grad_fn=grad_fn)
     return anneal.qmc_polish_objective(
