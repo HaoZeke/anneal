@@ -4129,6 +4129,16 @@ def test_sota_cutest_native_gradient_polish_consumes_budget(monkeypatch):
     assert np.isfinite(best)
 
 
+def test_sota_cutest_hybrid_defaults_match_core_hybrid_signature():
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    signature = inspect.signature(anneal_sota.qmc_annealed_hybrid)
+
+    assert sota_cutest.DEFAULT_HYBRID_N_POLISH == signature.parameters["n_polish"].default
+    assert sota_cutest.DEFAULT_HYBRID_K_POLISH == signature.parameters["k_polish"].default
+
+
 def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
