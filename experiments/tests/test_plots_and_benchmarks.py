@@ -4032,7 +4032,11 @@ def test_sota_cutest_native_gradient_polish_consumes_budget(monkeypatch):
             self.bounds = bounds
             self.grad_fn = grad_fn
 
-    def qmc_polish_objective(objective, *_args, **_kwargs):
+    def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
+        assert (
+            n_starts + 2 * kwargs["top_k"] * max_fevals_per_start
+            <= counter.budget - counter.n
+        )
         x = np.zeros(2, dtype=np.float64)
         value = objective.fn(x)
         objective.grad_fn(x)
@@ -4087,6 +4091,10 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
 
     def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
         calls["qmc"] += 1
+        assert (
+            n_starts + 2 * kwargs["top_k"] * max_fevals_per_start
+            <= counter.budget - counter.n
+        )
         x = np.array([0.25, -0.5], dtype=np.float64)
         value = objective.fn(x)
         grad = objective.grad_fn(x)
@@ -4271,7 +4279,11 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
             self.bounds = bounds
             self.grad_fn = grad_fn
 
-    def qmc_polish_objective(objective, *_args, **_kwargs):
+    def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
+        assert (
+            n_starts + 2 * kwargs["top_k"] * max_fevals_per_start
+            <= counter.budget - counter.n
+        )
         x = np.zeros(2, dtype=np.float64)
         value = objective.fn(x)
         objective.grad_fn(x)
