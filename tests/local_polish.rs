@@ -148,6 +148,23 @@ fn qmc_polish_reports_polished_values() {
 }
 
 #[test]
+fn qmc_polish_reports_projected_stationarity() {
+    let obj = CenterQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * x[0], 2.0 * x[1]])
+    });
+
+    let result = qmc_projected_gradient_polish(&obj, &grad, 5, 8, 0, 1.0, 1e-10, 3);
+
+    assert_eq!(result.polished_projected_grad_norms.len(), result.n_polished);
+    assert_eq!(result.polished_projected_grad_norms.len(), 3);
+    assert!(result
+        .polished_projected_grad_norms
+        .iter()
+        .all(|norm| norm.is_finite() && *norm <= 1e-8));
+}
+
+#[test]
 fn shifted_qmc_polish_replicates_screened_designs() {
     let obj = CenterQuadratic::new();
     let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
