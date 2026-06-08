@@ -4874,6 +4874,18 @@ def test_anneal_sota_qmc_best1bin_scout_stops_without_early_progress(monkeypatch
     assert best > 0.0
 
 
+def test_anneal_sota_qmc_best1bin_scout_uses_copied_rng():
+    from experiments import anneal_sota
+
+    rng = np.random.default_rng(123)
+    clone = anneal_sota._copy_generator(rng)
+    expected = np.random.default_rng(123)
+
+    assert clone.random(5).tolist() == pytest.approx(expected.random(5).tolist())
+    expected = np.random.default_rng(123)
+    assert rng.random(5).tolist() == pytest.approx(expected.random(5).tolist())
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest

@@ -187,6 +187,12 @@ def _best_finite(*values: float) -> float:
     return min(finite) if finite else float("inf")
 
 
+def _copy_generator(rng: np.random.Generator) -> np.random.Generator:
+    bit_generator = type(rng.bit_generator)()
+    bit_generator.state = rng.bit_generator.state
+    return np.random.Generator(bit_generator)
+
+
 def _differential_trial(pop, best_x, i, fi, cri, rng, low, high, config: AnnealHybridConfig):
     dim = len(low)
     idx = [j for j in range(len(pop)) if j != i]
@@ -448,7 +454,7 @@ def qmc_annealed_hybrid(
             low,
             high,
             dim=dim,
-            rng=rng,
+            rng=_copy_generator(rng),
             max_evals=scout_budget,
             config=config,
         )
