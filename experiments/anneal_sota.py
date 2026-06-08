@@ -29,7 +29,7 @@ class AnnealHybridConfig:
     initial_differential_weight: float = 0.5
     initial_crossover_rate: float = 0.9
     adaptation_probability: float = 0.1
-    elite_differential_probability: float = 0.5
+    elite_differential_probability: float = 0.0
     differential_weight_min: float = 0.1
     differential_weight_span: float = 0.9
     surrogate_proposal_probability: float = 0.35
@@ -175,7 +175,11 @@ def _differential_trial(pop, best_x, i, fi, cri, rng, low, high, config: AnnealH
     dim = len(low)
     idx = [j for j in range(len(pop)) if j != i]
     r1, r2, r3 = rng.choice(idx, 3, replace=False)
-    if rng.random() < config.elite_differential_probability:
+    if config.elite_differential_probability <= 0.0:
+        base = np.asarray(pop[int(r1)], dtype=np.float64)
+    elif config.elite_differential_probability >= 1.0:
+        base = np.asarray(best_x, dtype=np.float64)
+    elif rng.random() < config.elite_differential_probability:
         base = np.asarray(best_x, dtype=np.float64)
     else:
         base = np.asarray(pop[int(r1)], dtype=np.float64)
