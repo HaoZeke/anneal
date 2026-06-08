@@ -147,7 +147,8 @@ def _plain(counter, low, high, dim, rng):
     return min(best, counter.best)
 
 
-def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1):
+def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1, **sota_kwargs):
+    """Run the full hybrid path, including optional tensor and GLE wiring."""
     return qmc_annealed_hybrid(
         counter,
         low,
@@ -157,6 +158,7 @@ def hybrid_de(counter, low, high, dim, rng, n_polish=6, k_polish=1):
         rng=rng,
         n_polish=n_polish,
         k_polish=k_polish,
+        **sota_kwargs,
     )
 
 
