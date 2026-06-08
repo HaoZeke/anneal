@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# bootstrap_cutest.sh: clone + build the CUTEst stack into .bench/
-# so pycutest can find it. Prints the MASTSIF / SIFDECODE / CUTEST /
-# ARCHDEFS values expected by pycutest.
+# bootstrap_cutest.sh: clone + build the CUTEst stack into .bench/.
 #
 # Run from the anneal repo root via:
 #   pixi run -e verify bash experiments/benchmarks/bootstrap_cutest.sh
+# or pass an explicit project root:
+#   pixi run -e verify bash experiments/benchmarks/bootstrap_cutest.sh /path/to/project
 #
 # First-run cost: ~5-10 min (compiles 100+ Fortran objects). Subsequent
 # runs are no-ops.
 
 set -euo pipefail
 
-BENCH_DIR="${PIXI_PROJECT_ROOT:-$(pwd)}/.bench"
+PROJECT_ROOT="${1:-$(pwd)}"
+BENCH_DIR="$PROJECT_ROOT/.bench"
 mkdir -p "$BENCH_DIR"
 
 ARCHDEFS="$BENCH_DIR/ARCHDefs"
@@ -33,9 +34,6 @@ clone_or_pull https://github.com/ralna/ARCHDefs.git    "$ARCHDEFS"
 clone_or_pull https://github.com/ralna/SIFDecode.git   "$SIFDECODE"
 clone_or_pull https://github.com/ralna/CUTEst.git      "$CUTEST"
 clone_or_pull https://bitbucket.org/optrove/sif.git    "$MASTSIF"
-
-export ARCHDEFS SIFDECODE CUTEST MASTSIF
-export MYARCH="pc64.lnx.gfo"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -93,14 +91,10 @@ build_meson CUTEst "$CUTEST" \
 
 cat <<EOF
 
-[bootstrap] Done. Set the following env vars in your shell:
-  export ARCHDEFS=$ARCHDEFS
-  export SIFDECODE=$SIFDECODE/install
-  export CUTEST=$CUTEST/install
-  export MASTSIF=$MASTSIF
-  export MYARCH=$MYARCH
-  export PYCUTEST_CACHE=$BENCH_DIR/cache
+[bootstrap] Done. Use explicit CUTEst config flags:
+  --bench-root $PROJECT_ROOT
+  --pycutest-cache $BENCH_DIR/cache
 
-Then test:
-  pixi run -e verify python -c "import pycutest; print(pycutest.find_problems(constraints='U', n=[2,5])[:3])"
+Then test from the repo root:
+  pixi run -e verify python experiments/benchmarks/cutest_runner.py
 EOF

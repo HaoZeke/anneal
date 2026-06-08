@@ -35,16 +35,9 @@ pixi run -e python python -c "import anneal; print(anneal.__version__)"
 
 This pulls the pinned Rust toolchain, maturin build, test and docs tooling.
 
-* Environment Variables
+* Runtime Configuration
 
-No anneal-specific variables are required for normal use. The following affect device and threading behaviour when relevant:
-
-| Variable            | Effect |
-|---------------------+------------------------------------------------|
-| =CUDA_VISIBLE_DEVICES= | Restricts which GPU(s) =run_device= / =run_ensemble= see when CuPy arrays are passed. |
-| =OMP_NUM_THREADS=   | Caps CPU threads used by batched ensemble and some linear algebra in eindir primitives. |
-
-All configuration (temperature, scale, budget, seeds) is explicit in the call; reproducibility is obtained by passing =seed=.
+Anneal configuration is explicit in calls and config objects: temperature, scale, budget, seeds, devices, cache locations, and solver options are passed through API arguments rather than process variables. Reproducibility is obtained by passing =seed=.
 
 * Classical presets
 

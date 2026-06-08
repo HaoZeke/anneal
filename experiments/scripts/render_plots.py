@@ -9,17 +9,13 @@ from __future__ import annotations
 import argparse
 import csv
 import math
-import os
 import sys
-import tempfile
 from collections import defaultdict
 
+import matplotlib
 import numpy as np
 
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    os.path.join(tempfile.gettempdir(), "anneal-matplotlib"),
-)
+matplotlib.use("Agg", force=True)
 
 from experiments.cutest_convergence import DEFAULT_TAU, converged_mask
 from experiments.plots.data_profile import plot_data_profile

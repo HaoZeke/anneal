@@ -5,13 +5,6 @@ description = "Simulated annealing components on the eindir typed primitives."
 channels  = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]
 
-[activation.env]
-# Pixi inherits the host cargo config; the conda rust toolchain ships its
-# own gcc which does not understand -fuse-ld=/usr/bin/mold. Clear inherited
-# rustflags so the conda-managed linker is driven cleanly.
-CARGO_BUILD_RUSTFLAGS = ""
-RUSTFLAGS = ""
-
 [tasks]
 test     = "cargo test"
 test-all = "cargo test --all-features"
@@ -99,42 +92,36 @@ cma = ">=4.4"
 pdfo = ">=2.1"
 pycutest = ">=1.8.1, <2"
 
-[feature.verify.activation.env]
-# Mirror the default env's empty rustflags so that any incidental cargo
-# invocation under the verify env uses the conda-managed linker cleanly.
-CARGO_BUILD_RUSTFLAGS = ""
-RUSTFLAGS             = ""
-
 [feature.verify.tasks]
 setup-tlc       = "test -f .verify/tla2tools.jar || (mkdir -p .verify && curl -L -o .verify/tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar)"
 setup-apalache  = "test -x .verify/apalache/bin/apalache-mc || (mkdir -p .verify && curl -L https://github.com/apalache-mc/apalache/releases/download/v0.57.0/apalache.tgz | tar xz -C .verify && (test -d .verify/apalache || mv .verify/apalache-* .verify/apalache))"
 proofs-test     = "pytest proofs/tests/ -v"
-proofs-derive   = "PYTHONPATH=. python proofs/thm1_bsa_visit.py && PYTHONPATH=. python proofs/thm2_fsa_visit.py && PYTHONPATH=. python proofs/thm3_metropolis.py && PYTHONPATH=. python proofs/thm4_log_cool.py"
+proofs-derive   = "python -m proofs.thm1_bsa_visit && python -m proofs.thm2_fsa_visit && python -m proofs.thm3_metropolis && python -m proofs.thm4_log_cool"
 tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
 apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
-exp-test        = "PYTHONPATH=. pytest experiments/tests/ -v"
-exp1            = "PYTHONPATH=. python experiments/exp1_underflow.py --out data/exp1_underflow.csv --samples 200000"
-exp2            = "PYTHONPATH=. python experiments/exp2_cancellation.py --out data/exp2_cancellation.csv"
-exp3            = "PYTHONPATH=. python experiments/exp3_trajectory_bias.py --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
-exp4            = "PYTHONPATH=. python experiments/exp4_compensated.py --out data/exp4_compensated.csv --seeds 32 --n-epochs 200"
-exp3-summary    = "PYTHONPATH=. python experiments/scripts/exp3_summary.py data/exp3_trajectory.csv"
-bench-suite     = "PYTHONPATH=. python experiments/scripts/run_benchmarks.py --out data/benchmarks.csv --seeds 5 --n-epochs 100"
-bench-plots     = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/benchmarks.csv data/", depends-on = ["bench-suite"] }
+exp-test        = "pytest experiments/tests/ -v"
+exp1            = "python -m experiments.exp1_underflow --out data/exp1_underflow.csv --samples 200000"
+exp2            = "python -m experiments.exp2_cancellation --out data/exp2_cancellation.csv"
+exp3            = "python -m experiments.exp3_trajectory_bias --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
+exp4            = "python -m experiments.exp4_compensated --out data/exp4_compensated.csv --seeds 32 --n-epochs 200"
+exp3-summary    = "python -m experiments.scripts.exp3_summary data/exp3_trajectory.csv"
+bench-suite     = "python -m experiments.scripts.run_benchmarks --out data/benchmarks.csv --seeds 5 --n-epochs 100"
+bench-plots     = { cmd = "python -m experiments.scripts.render_plots data/benchmarks.csv data/", depends-on = ["bench-suite"] }
 all             = { depends-on = ["proofs-test", "proofs-derive", "tlc-small", "apalache-check"] }
 all-exp         = { depends-on = ["exp-test", "exp1", "exp2", "exp3", "exp4", "exp3-summary"] }
 all-bench       = { depends-on = ["bench-suite", "bench-plots"] }
 cutest-bootstrap = "bash experiments/benchmarks/bootstrap_cutest.sh"
-cutest-smoke    = "PYTHONPATH=. python experiments/benchmarks/cutest_runner.py"
-cutest-bench    = { cmd = "PYTHONPATH=. python experiments/scripts/run_cutest_benchmarks.py --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15", depends-on = ["python-build"] }
-cutest-plots    = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/cutest_benchmarks.csv data/cutest/", depends-on = ["cutest-bench"] }
-cutest-full     = { cmd = "PYTHONPATH=. python experiments/scripts/run_cutest_full_suite.py --out data/cutest_full_rust_bgsa.csv --seeds 3 --dim-cap 50 --n-epochs 30", depends-on = ["python-build"] }
-cutest-full-summary = { cmd = "PYTHONPATH=. python experiments/scripts/summarize_cutest_benchmarks.py data/cutest_full_rust_bgsa.csv --out data/cutest_full_summary.csv --min-problems 216", depends-on = ["cutest-full"] }
-cutest-full-plots = { cmd = "PYTHONPATH=. python experiments/scripts/render_plots.py data/cutest_full_rust_bgsa.csv data/cutest-full/", depends-on = ["cutest-full"] }
-mcmc-demo       = "PYTHONPATH=. python experiments/scripts/demo_mcmc_vs_classical.py --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
-bgsa-rastrigin  = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective rastrigin_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rastrigin.csv"
-bgsa-rosenbrock = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective rosenbrock_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rosenbrock.csv"
-bgsa-schwefel   = "PYTHONPATH=. python experiments/scripts/demo_bgsa.py --objective schwefel_20d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_schwefel.csv"
-bgsa-cross-plot = { cmd = "PYTHONPATH=. python experiments/scripts/plot_cross_landscape.py --rastrigin data/bgsa_rastrigin.csv --rosenbrock data/bgsa_rosenbrock.csv --schwefel data/bgsa_schwefel.csv --out-dir data/figs", depends-on = ["bgsa-rastrigin", "bgsa-rosenbrock", "bgsa-schwefel"] }
+cutest-smoke    = "python -m experiments.benchmarks.cutest_runner"
+cutest-bench    = { cmd = "python -m experiments.scripts.run_cutest_benchmarks --out data/cutest_benchmarks.csv --seeds 3 --n-epochs 15", depends-on = ["python-build"] }
+cutest-plots    = { cmd = "python -m experiments.scripts.render_plots data/cutest_benchmarks.csv data/cutest/", depends-on = ["cutest-bench"] }
+cutest-full     = { cmd = "python -m experiments.scripts.run_cutest_full_suite --out data/cutest_full_rust_bgsa.csv --seeds 3 --dim-cap 50 --n-epochs 30", depends-on = ["python-build"] }
+cutest-full-summary = { cmd = "python -m experiments.scripts.summarize_cutest_benchmarks data/cutest_full_rust_bgsa.csv --out data/cutest_full_summary.csv --min-problems 216", depends-on = ["cutest-full"] }
+cutest-full-plots = { cmd = "python -m experiments.scripts.render_plots data/cutest_full_rust_bgsa.csv data/cutest-full/", depends-on = ["cutest-full"] }
+mcmc-demo       = "python -m experiments.scripts.demo_mcmc_vs_classical --seeds 8 --n-epochs 30 --out data/mcmc_demo.csv"
+bgsa-rastrigin  = "python -m experiments.scripts.demo_bgsa --objective rastrigin_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rastrigin.csv"
+bgsa-rosenbrock = "python -m experiments.scripts.demo_bgsa --objective rosenbrock_5d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_rosenbrock.csv"
+bgsa-schwefel   = "python -m experiments.scripts.demo_bgsa --objective schwefel_20d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_schwefel.csv"
+bgsa-cross-plot = { cmd = "python -m experiments.scripts.plot_cross_landscape --rastrigin data/bgsa_rastrigin.csv --rosenbrock data/bgsa_rosenbrock.csv --schwefel data/bgsa_schwefel.csv --out-dir data/figs", depends-on = ["bgsa-rastrigin", "bgsa-rosenbrock", "bgsa-schwefel"] }
 
 [environments]
 default = { solve-group = "default" }

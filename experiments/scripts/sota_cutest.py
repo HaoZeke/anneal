@@ -1,14 +1,13 @@
 """Budget-matched SOTA comparison on the CUTEst set.
 
-Runs the jDE+SA+polish hybrid against scipy basin-hopping, differential
-evolution, and classical SA on CUTEst problems, every method capped at the same
-number of true objective evaluations. The hybrid's L-BFGS-B polish uses the
-native CUTEst gradient (counted), so the budget is honest. Outputs one row per
-(problem, method, seed) with the best objective reached, and a win-rate summary
-plus a Dolan-More-style performance profile over the converged cells.
+The ``hybrid_de`` entry is the anneal comparison point. It uses QMC seeding,
+optional tensor/additive surrogate proposals, optional library GLE segments when
+native gradients are available, and L-BFGS-B polish with counted gradients.
+The SciPy baselines use the same objective/gradient budget accounting through
+``Counter``.
 
 Run on a host with pycutest bootstrapped (see bootstrap_cutest.sh):
-  PYTHONPATH=. python experiments/scripts/sota_cutest.py --dim-cap 30 \
+  python -m experiments.scripts.sota_cutest --dim-cap 30 \
       --max-problems 60 --budget 8000 --seeds 3 --out results/sota_cutest.csv
 """
 
@@ -24,7 +23,7 @@ import numpy as np
 from scipy.optimize import basinhopping, differential_evolution, minimize
 
 from experiments.anneal_sota import qmc_annealed_hybrid
-from experiments.benchmarks.cutest_runner import load, setup_cutest_env
+from experiments.benchmarks.cutest_runner import configured_pycutest, default_cutest_config, load
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
 
@@ -137,16 +136,20 @@ def main():
     p.add_argument("--max-problems", type=int, default=60)
     p.add_argument("--budget", type=int, default=8000)
     p.add_argument("--seeds", type=int, default=3)
+    p.add_argument("--bench-root", default=None,
+                   help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.")
+    p.add_argument("--pycutest-cache", default=None,
+                   help="Explicit PyCUTEst cache directory; defaults to .bench/cache.")
     args = p.parse_args()
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    setup_cutest_env()
+    config = default_cutest_config(args.bench_root, cache_dir=args.pycutest_cache)
 
-    targets = list_target_problems(args.dim_cap)[: args.max_problems]
+    targets = list_target_problems(args.dim_cap, config=config)[: args.max_problems]
     print(f"{len(targets)} CUTEst problems, dim <= {args.dim_cap}, budget {args.budget}", flush=True)
     rows = []
     for t in targets:
         try:
-            prob = load(t.name, sif_params=None)
+            prob = load(t.name, sif_params=None, config=config)
         except Exception as exc:  # noqa: BLE001
             print(f"  skip {t.name}: {type(exc).__name__}", flush=True)
             continue
@@ -163,7 +166,7 @@ def main():
                 rows.append(dict(problem=t.name, dim=dim, method=name, seed=s,
                                  best=best, evals=c.n))
         try:                                   # stream: evict the compiled cache
-            import pycutest
+            pycutest = configured_pycutest(config)
             pycutest.clear_cache(t.name)
         except Exception:
             pass
