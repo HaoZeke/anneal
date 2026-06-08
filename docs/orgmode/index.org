@@ -1,6 +1,7 @@
 #+TITLE: anneal
 #+AUTHOR: anneal developers
 #+DATE: 2026
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
 #+begin_export rst
 .. image:: /_static/anneal_logo.png
@@ -9,42 +10,110 @@
    :alt: anneal
 #+end_export
 
-* About
+* Overview
 
-=anneal= provides simulated-annealing components on the eindir typed
-primitives. The Python user-facing surface is unchanged from the
-legacy package; the Rust crate =anneal-core= now backs the
-implementations, with =pyo3= bindings exposed as =anneal._core= and
-a C/C++ ABI for downstream native consumers.
+=anneal= is a library of simulated-annealing drivers built on the five
+typed components (Obj, Cool, Neigh, Move, Accept) and four composition
+laws (L1 symmetry of neighbors, L2 support of the proposal, L3 downhill
+moves accepted with probability 1, L4 monotone cooling) defined in the
+INFORMS Journal on Computing paper (IISE manuscript). Every driver
+(Boltzmann, Fast, Gsa, GLE-Langevin, additive independence, Bayesian
+pilot+mixer, parallel tempering, QMC polish, ...) is a different
+filling of those five slots; a change to any shared implementation
+(e.g. the noise-aware Accept or the batched device kernel) therefore
+appears in all of them.
 
-The method layer includes the classical BSA/FSA/GSA presets, HMC and
-Bayesian-BGSA controls, shifted low-discrepancy multistart polish,
-rank-1 tensor/additive independence proposals, and a colored-noise
-GLE-Langevin driver. These all enter through the same typed component
-surface rather than separate benchmark-only scripts.
+* Key Features
 
-* Contents
+- *Classical presets (Boltzmann, Fast, Gsa)* :: Logarithmic, reciprocal,
+  and Tsallis families. Identical call site via =run=; only the
+  component objects differ.
+- *Bayesian pilot + mixer (bGSA auto)* :: QMC pilot draws for (T0,
+  sigma, q_v), short chains, three-term posterior (prior + 0.234
+  target + improvement), per-chain Beta(4,1) on "produced new global
+  best", Thompson sampling every step with 0.05 incumbent guard. One
+  =max_proposals= knob; auto chain count.
+- *GLE colored-noise Langevin* :: Optimal-sampling drift matrix from
+  eindir fits the Move slot; BAB propagator + stationary reseed
+  flattens efficiency across a wide frequency band. Requires gradient.
+- *Rank-1 additive independence* :: Separable Chebyshev surrogate
+  fitted on values only; O(d) per proposal via product of 1D tempered
+  marginals + Metropolis correction. Dimension-free floor on separable
+  problems.
+- *QMC / shifted-QMC polish* :: Projected-gradient Armijo backtracking
+  on low-discrepancy (or shifted-replicate) starts. Deterministic last
+  mile after any stochastic driver.
+- *Device, ensemble, reuse* :: =run_device= (NumPy or CuPy) and
+  =run_ensemble= (batched) execute the identical transition kernel.
+  The reuse table (dimension scale, rank-1 independence, GLE drift,
+  batched device, noise-aware Accept, QMC polish) is the concrete
+  payoff of the factoring: one implementation change serves every
+  preset and advanced driver.
+
+See the [[file:architecture.org][architecture]] page for the five signatures and
+L1-L4, and the [[file:explanation/algebra.org][algebra]] explanation (T4) for the
+TLA+ invariants they enable.
 
 #+begin_export rst
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
+   :caption: Getting started
 
+   quickstart
    tutorials
+#+end_export
+
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to Guides
+
+   faq
+#+end_export
+
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: Explanation
+
    architecture
+#+end_export
+
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+
    spec
    bindings
    device
-   faq
-   contributing
    changelog
-   code_of_conduct
    used_by
 #+end_export
 
+#+begin_export rst
+.. toctree::
+   :maxdepth: 1
+   :caption: Development
+
+   contributing
+   code_of_conduct
+#+end_export
+
+(The full Diataxis toctrees with tutorials/classical-and-presets,
+tutorials/bayesian-pilot-mixer, howto/..., explanation/algebra,
+reference/glossary, dev/best_practices etc. are installed in Tasks 3
+and 4 together with the content files.)
+
 * Background
 
-=anneal= sits on top of =eindir=. The IISE manuscript at
-HaoZeke/anneal (paper) defines the typed component algebra
-(Obj / Cool / Neigh / Move / Accept and laws L1-L4); this crate
-hosts the four trait signatures, the BSA / FSA / GSA points, and
-the orchestrator loop.
+=anneal= is implemented in Rust (=anneal-core=) with Python bindings
+(=anneal=) and a C ABI. It rests on =eindir= for the Objective trait,
+Bounds clipping, low-discrepancy generators, GLE thermostat matrices,
+and surrogate primitives. All drivers are expressed through the same
+=Sampler= trait surface; the IISE paper supplies the mechanized proofs
+and the TLA+ Workflow specification.
+
+The reproducibility package =anneal_repro= regenerates every number,
+CUTEst profile, and figure from the paper sources (see [[file:used_by.org][used_by]]).
+

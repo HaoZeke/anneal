@@ -1,0 +1,165 @@
+#+TITLE: Quickstart
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+==========
+Quickstart
+==========
+#+end_export
+
+This page shows the current stable surface with minimal runnable examples.
+All examples use only symbols from =anneal= top level after =pip install anneal= (or =pixi -e python=).
+
+* Installation
+
+There are three installation modes.
+
+** Core (pip)
+
+#+begin_src bash
+pip install anneal
+#+end_src
+
+Gives the full public API: presets, =run=, =pilot_draws_qmc=, =additive_independence=, =gle_langevin=, polish variants, device runners, and low-discrepancy helpers.
+
+** Extras (none required today)
+
+Anneal ships with no mandatory heavy optional dependencies at the top level. JAX or CuPy are only pulled if you choose to supply array namespaces that need them (e.g. CuPy bounds to =run_device=).
+
+** Full reproducible stack (pixi)
+
+#+begin_src bash
+pixi install
+pixi run -e python python -c "import anneal; print(anneal.__version__)"
+#+end_src
+
+This pulls the pinned Rust toolchain, maturin build, test and docs tooling.
+
+* Environment Variables
+
+No anneal-specific variables are required for normal use. The following affect device and threading behaviour when relevant:
+
+| Variable            | Effect |
+|---------------------+------------------------------------------------|
+| =CUDA_VISIBLE_DEVICES= | Restricts which GPU(s) =run_device= / =run_ensemble= see when CuPy arrays are passed. |
+| =OMP_NUM_THREADS=   | Caps CPU threads used by batched ensemble and some linear algebra in eindir primitives. |
+
+All configuration (temperature, scale, budget, seeds) is explicit in the call; reproducibility is obtained by passing =seed=.
+
+* Classical presets
+
+The three presets =Boltzmann=, =Fast=, =Gsa= all obey the same five-component algebra and are invoked identically.
+
+#+begin_src python
+import numpy as np
+from anneal import Boltzmann, Fast, Gsa, run
+
+def rosenbrock(x):
+    return (1.0 - x[0])**2 + 100.0 * (x[1] - x[0]**2)**2
+
+low = np.array([-5.0, -5.0])
+high = np.array([5.0, 5.0])
+
+# Logarithmic cooling + Gaussian + Metropolis (Boltzmann)
+h1 = run(rosenbrock, low, high, Boltzmann(t_init=5.0, sigma=0.5),
+         n_epochs=30, steps_per_epoch=80, seed=42)
+print("Boltzmann best:", h1.best_pos, h1.best_val)
+
+# Reciprocal cooling + Cauchy + Metropolis (Fast)
+h2 = run(rosenbrock, low, high, Fast(t_init=5.0, gamma=0.5),
+         n_epochs=30, steps_per_epoch=80, seed=42)
+print("Fast best:", h2.best_pos, h2.best_val)
+
+# Tsallis (Gsa)
+h3 = run(rosenbrock, low, high, Gsa(t_init=5.0, q_v=2.5, q_a=1.5),
+         n_epochs=30, steps_per_epoch=80, seed=42)
+print("Gsa best:", h3.best_pos, h3.best_val)
+#+end_src
+
+Each returns a =History= with =best_pos=, =best_val=, =epochs= (list of =EpochLine=), etc.
+
+* Pilot draws for Bayesian warm-start
+
+= pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v). These are the "no-tuning" entry point.
+
+#+begin_src python
+from anneal import pilot_draws_qmc
+draws = pilot_draws_qmc(4, seed=0)
+print("Pilot (T0, sigma, q_v) draws:\n", draws)
+#+end_src
+
+See the Bayesian tutorial for feeding these into a short pilot run then the mixer (per-chain Beta posteriors on "produced new global best", Thompson sampling with 0.05 guard).
+
+* Advanced drivers (additive independence, GLE, polish)
+
+Additive independence (rank-1 surrogate, values only):
+
+#+begin_src python
+from anneal import additive_independence
+
+def rastrigin(x):
+    return 10.0 * len(x) + np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x))
+
+res = additive_independence(rastrigin, low, high, max_fevals=2000, seed=7,
+                            n_epochs=30, n_pilot=0)
+print("Additive best:", res["best_pos"], res["best_val"])
+#+end_src
+
+GLE-Langevin (requires gradient, colored noise via eindir thermostat):
+
+#+begin_src python
+from anneal import gle_langevin
+
+def grad_rastrigin(x):
+    return 2.0 * x + 20.0 * np.pi * np.sin(2.0 * np.pi * x)
+
+res_g = gle_langevin(rastrigin, grad_rastrigin, low, high, max_fevals=2000,
+                     seed=7, omega0=0.2, dt=0.2, n_epochs=30)
+print("GLE best:", res_g["best_pos"], res_g["best_val"])
+#+end_src
+
+QMC polish (deterministic last mile after any stochastic driver; requires gradient):
+
+#+begin_src python
+from anneal import qmc_polish
+
+# Assume best_x from a prior stochastic run
+best_x = np.array([0.1, -0.2])
+out = qmc_polish(rastrigin, grad_rastrigin, low, high,
+                 n_starts=32, max_fevals_per_start=40, seed=0, top_k=1)
+print("Polish best:", out["best_pos"], out["best_val"])
+#+end_src
+
+* Device and scale
+
+=run_device= and =run_ensemble= use the identical transition kernel; only the array namespace and leading batch axis change.
+
+#+begin_src python
+import numpy as np
+from anneal import Boltzmann, run_device, run_ensemble
+
+low = np.full(5, -5.0)
+high = np.full(5, 5.0)
+
+# Single chain on host (NumPy)
+h_dev = run_device(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
+                   n_epochs=10, steps_per_epoch=50, seed=1)
+print("Device best val:", h_dev.best_val)
+
+# Batched ensemble (still the same kernel)
+h_ens = run_ensemble(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
+                     n_chains=128, n_epochs=5, steps_per_epoch=30, seed=1)
+print("Ensemble global best:", h_ens.global_best_val)
+#+end_src
+
+Pass CuPy arrays instead of NumPy and the kernels stay on GPU (see device.org).
+
+* Next steps
+
+- Full step-by-step: [[file:tutorials.org][tutorials]] (legacy) and the new per-family tutorials (classical, Bayesian pilot+mixer, GLE colored noise, polish+device).
+- Why the algebra lets one change serve all drivers: [[file:architecture.org][architecture]] and [[file:explanation/algebra.org][algebra]] (T4).
+- Practical recipes: [[file:faq.org][faq]] and how-to guides (T4).
+- The typed specification and TLA+ invariants: [[file:spec.org][spec]].
+- The IISE/INFORMS paper and full reproducibility package: [[file:used_by.org][used_by]].
+
+All examples above are copy-paste runnable under =pip install anneal= or inside the =pixi -e python= environment.
