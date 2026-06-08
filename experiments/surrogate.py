@@ -162,8 +162,29 @@ class ActiveSubspaceEncoder:
     @classmethod
     def from_gradients(cls, origin, grads, low, high, k):
         """Active subspace from a stack of pilot gradients `grads` (N, n)."""
-        grads = np.atleast_2d(grads)
-        cov = grads.T @ grads / grads.shape[0]
+        grads = np.atleast_2d(np.asarray(grads, dtype=float))
+        finite = np.all(np.isfinite(grads), axis=1)
+        grads = grads[finite]
+        if grads.size == 0:
+            raise ValueError("active-subspace gradients must contain a finite row")
+
+        row_scale = np.max(np.abs(grads), axis=1)
+        usable = row_scale > 0.0
+        grads = grads[usable]
+        row_scale = row_scale[usable]
+        if grads.size == 0:
+            raise ValueError("active-subspace gradients must contain a nonzero row")
+
+        scaled = grads / row_scale[:, None]
+        row_norm = np.linalg.norm(scaled, axis=1)
+        usable = row_norm > 0.0
+        scaled = scaled[usable] / row_norm[usable, None]
+        if scaled.size == 0:
+            raise ValueError("active-subspace gradients must define a finite direction")
+
+        cov = scaled.T @ scaled / scaled.shape[0]
+        if not np.all(np.isfinite(cov)):
+            raise ValueError("active-subspace gradient covariance is not finite")
         evals, evecs = np.linalg.eigh(cov)
         basis = evecs[:, ::-1][:, :k]
         return cls(np.asarray(origin, float), basis,
@@ -212,22 +233,31 @@ def fit_reduced_surrogate(fn, grad, low, high, dim, *, k=3, degree=6,
     values = np.array([fn(x) for x in samples], dtype=float)
     work = float(n_pilot)
 
+    finite_values = np.isfinite(values)
+    if not np.any(finite_values):
+        raise ValueError("surrogate pilot must produce at least one finite objective value")
+    fit_samples = samples[finite_values]
+    fit_values = values[finite_values]
+
     origin = 0.5 * (low + high)
     if grad is not None:
         grads = np.array([grad(x) for x in samples], dtype=float)
-        encoder = ActiveSubspaceEncoder.from_gradients(origin, grads, low, high, k)
+        try:
+            encoder = ActiveSubspaceEncoder.from_gradients(origin, grads, low, high, k)
+        except (FloatingPointError, ValueError, np.linalg.LinAlgError):
+            encoder = ActiveSubspaceEncoder.from_samples(fit_samples, low, high, k)
         work += float(n_pilot)  # native gradient: one unit each
     else:
-        encoder = ActiveSubspaceEncoder.from_samples(samples, low, high, k)
+        encoder = ActiveSubspaceEncoder.from_samples(fit_samples, low, high, k)
 
-    reduced = np.array([encoder.encode(x) for x in samples])
+    reduced = np.array([encoder.encode(x) for x in fit_samples])
     r_low = reduced.min(axis=0)
     r_high = reduced.max(axis=0)
     spread = np.where(r_high > r_low, r_high - r_low, 1.0)
     r_low = r_low - pad * spread
     r_high = r_high + pad * spread
 
-    surrogate = ChebyshevSurrogate.fit(reduced, values, r_low, r_high, degree)
+    surrogate = ChebyshevSurrogate.fit(reduced, fit_values, r_low, r_high, degree)
     return ReducedFit(encoder, surrogate, r_low, r_high, work)
 
 
