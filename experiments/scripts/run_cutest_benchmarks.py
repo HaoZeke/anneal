@@ -1612,7 +1612,8 @@ def _run_cutest_native_qmc_box_schedule(
             n_starts,
             top_k=top_k,
         )
-        if max_fevals_per_start < PROJECTED_POLISH_MIN_FEVALS_FOR_STEP:
+        # Full lanes need a moving step; top-k lanes can certify screened starts.
+        if top_k == 0 and max_fevals_per_start < PROJECTED_POLISH_MIN_FEVALS_FOR_STEP:
             continue
         result = _run_cutest_qmc_polish(
             anneal_module,
