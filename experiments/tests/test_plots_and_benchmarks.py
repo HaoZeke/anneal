@@ -4633,6 +4633,72 @@ def test_anneal_sota_differential_trial_zero_elite_probability_preserves_rand_pa
     assert rng.vector_random_calls == 1
 
 
+def test_anneal_sota_qmc_best1bin_scout_uses_low_discrepancy_elite_step(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    target = np.array([0.5, -0.5], dtype=np.float64)
+
+    class FixedRng:
+        def choice(self, values, size, replace=False):
+            assert not replace
+            return np.asarray(values[:size])
+
+        def random(self, size=None):
+            if size is None:
+                return 0.0
+            return np.zeros(size, dtype=np.float64)
+
+        def integers(self, high):
+            return 0
+
+    def initial_population(low, high, n, skip=1, rng=None):
+        assert int(n) >= 4
+        return np.array(
+            [
+                [0.0, 0.0],
+                [0.25, -0.25],
+                [0.75, -0.25],
+                [0.25, 0.25],
+            ],
+            dtype=np.float64,
+        )
+
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        initial_population,
+        raising=False,
+    )
+
+    def needle(x):
+        x = np.asarray(x, dtype=np.float64)
+        if np.linalg.norm(x - target, ord=np.inf) <= 1e-12:
+            return -50.0
+        return float(np.sum(x * x))
+
+    counter = sota_cutest.Counter(needle, budget=12)
+    best = anneal_sota._qmc_best1bin_scout(
+        counter,
+        np.array([-1.0, -1.0], dtype=np.float64),
+        np.array([1.0, 1.0], dtype=np.float64),
+        dim=2,
+        rng=FixedRng(),
+        max_evals=12,
+        config=anneal_sota.AnnealHybridConfig(
+            best1bin_population_min=4,
+            best1bin_population_dim_multiplier=1,
+            best1bin_population_max=4,
+            best1bin_weight_min=1.0,
+            best1bin_weight_span=0.0,
+            best1bin_crossover_rate=1.0,
+        ),
+    )
+
+    assert counter.n <= counter.budget
+    assert best == -50.0
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
