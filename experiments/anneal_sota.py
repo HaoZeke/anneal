@@ -208,6 +208,15 @@ def _native_qmc_polish(
     )
 
 
+def _clipped_anchor(anchor, low, high):
+    if anchor is None:
+        return None
+    anchor_arr = np.asarray(anchor, dtype=np.float64).reshape(-1)
+    if anchor_arr.shape != low.shape:
+        raise ValueError("anchor must have the same shape as bounds")
+    return np.clip(anchor_arr, low, high)
+
+
 def _basin_polish_step_size(dim: int, config: AnnealHybridConfig) -> float:
     if (
         config.basin_polish_high_dimension > 0
@@ -256,7 +265,16 @@ def _global_anneal_portfolio_active(dim: int, config: AnnealHybridConfig) -> boo
     )
 
 
-def _global_anneal_portfolio(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+def _global_anneal_portfolio(
+    counter,
+    grad_fn,
+    low,
+    high,
+    dim,
+    rng,
+    config: AnnealHybridConfig,
+    anchor=None,
+):
     if (
         grad_fn is None
         or counter.n >= counter.budget
@@ -290,6 +308,7 @@ def _global_anneal_portfolio(counter, grad_fn, low, high, dim, rng, config: Anne
                     maxfun=maxfun,
                     no_local_search=False,
                     seed=int(dual_rng.integers(1 << 31)),
+                    x0=anchor,
                 )
             except Exception as exc:  # noqa: BLE001
                 if exc.__class__.__name__ != "_Budget":
@@ -300,7 +319,7 @@ def _global_anneal_portfolio(counter, grad_fn, low, high, dim, rng, config: Anne
             try:
                 basinhopping(
                     counter,
-                    hop_rng.uniform(low, high),
+                    anchor if anchor is not None else hop_rng.uniform(low, high),
                     niter=config.global_anneal_local_hop_iterations,
                     minimizer_kwargs=minimizer_kwargs,
                     seed=int(hop_rng.integers(1 << 31)),
@@ -636,6 +655,7 @@ def qmc_annealed_hybrid(
     surrogate_kind: str = "tensor",
     use_gle: bool = True,
     config: AnnealHybridConfig | None = None,
+    anchor=None,
 ):
     """QMC-seeded hybrid for fixed-budget benchmark comparisons.
 
@@ -648,6 +668,7 @@ def qmc_annealed_hybrid(
     config = AnnealHybridConfig() if config is None else config
     low = np.asarray(low, dtype=np.float64)
     high = np.asarray(high, dtype=np.float64)
+    anchor_arr = _clipped_anchor(anchor, low, high)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
     if _global_anneal_portfolio_active(dim, config):
@@ -659,6 +680,7 @@ def qmc_annealed_hybrid(
             dim,
             rng,
             config,
+            anchor=anchor_arr,
         )
         if counter.n >= counter.budget:
             return _best_finite(portfolio_best, counter.best)
@@ -729,7 +751,12 @@ def qmc_annealed_hybrid(
             max(config.population_min, config.population_dim_multiplier * dim),
         )
     )
-    pop = [rng.uniform(low, high) for _ in range(pop_size)]
+    pop = [
+        np.asarray(point, dtype=np.float64).copy()
+        for point in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
+    ]
+    if anchor_arr is not None and pop:
+        pop[0] = anchor_arr.copy()
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, config.initial_differential_weight)
     cr = np.full(pop_size, config.initial_crossover_rate)

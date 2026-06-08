@@ -4411,6 +4411,50 @@ def test_sota_cutest_shards_targets_by_stable_index():
         sota_cutest._shard_targets(targets, shard_index=3, shard_count=3)
 
 
+def test_sota_cutest_uses_design_bounds_and_anchor():
+    from experiments.scripts import sota_cutest
+
+    class Problem:
+        low = np.array([-10.0, -10.0])
+        high = np.array([10.0, 10.0])
+        design_low = np.array([-1.0, -2.0])
+        design_high = np.array([3.0, 4.0])
+        x0 = np.array([0.5, -0.25])
+
+    low, high, anchor = sota_cutest._comparison_box(Problem())
+
+    np.testing.assert_allclose(low, Problem.design_low)
+    np.testing.assert_allclose(high, Problem.design_high)
+    np.testing.assert_allclose(anchor, Problem.x0)
+
+
+def test_sota_cutest_hybrid_passes_anchor_to_core(monkeypatch):
+    from experiments.scripts import sota_cutest
+
+    captured = {}
+
+    def fake_hybrid(counter, low, high, dim, grad, rng, **kwargs):
+        del counter, low, high, dim, grad, rng
+        captured["anchor"] = kwargs["anchor"]
+        return -1.0
+
+    monkeypatch.setattr(sota_cutest, "qmc_annealed_hybrid", fake_hybrid)
+
+    anchor = np.array([0.25, -0.5], dtype=np.float64)
+    best = sota_cutest.hybrid_de(
+        object(),
+        np.array([-1.0, -1.0], dtype=np.float64),
+        np.array([1.0, 1.0], dtype=np.float64),
+        2,
+        None,
+        np.random.default_rng(3),
+        anchor=anchor,
+    )
+
+    assert best == -1.0
+    np.testing.assert_allclose(captured["anchor"], anchor)
+
+
 def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
@@ -4490,6 +4534,64 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
     assert counter.objective_evals > 0
     assert counter.grad_evals > 0
     assert best <= -3.0
+
+
+def test_anneal_sota_qmc_hybrid_anchors_initial_qmc_population(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    anchor = np.array([0.5, -0.5], dtype=np.float64)
+
+    def qmc_population(low, high, n, skip=1, rng=None):
+        del low, high, skip, rng
+        return np.array(
+            [
+                [-0.75, -0.75],
+                [-0.25, 0.25],
+                [0.25, 0.25],
+                [0.75, 0.75],
+            ][: int(n)],
+            dtype=np.float64,
+        )
+
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        qmc_population,
+        raising=False,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def objective(x):
+        x = np.asarray(x, dtype=np.float64)
+        if np.allclose(x, anchor):
+            return -5.0
+        return float(np.sum(x * x))
+
+    counter = sota_cutest.Counter(objective, budget=4)
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0], dtype=np.float64),
+        np.array([1.0, 1.0], dtype=np.float64),
+        dim=2,
+        grad=None,
+        rng=np.random.default_rng(29),
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        anchor=anchor,
+        config=anneal_sota.AnnealHybridConfig(
+            best1bin_enabled=False,
+            population_min=4,
+            population_dim_multiplier=1,
+            population_max=4,
+            scout_budget_divisor=1,
+        ),
+    )
+
+    assert counter.n == 4
+    assert best == -5.0
 
 
 def test_anneal_sota_low_discrepancy_population_is_deterministic(monkeypatch):
