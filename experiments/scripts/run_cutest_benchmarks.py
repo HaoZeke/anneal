@@ -1380,6 +1380,11 @@ def _native_qmc_middle_bound_supported(prob):
     return degree is not None and degree > 1
 
 
+def _native_qmc_first_degree_bound_supported(prob):
+    degree = _cutest_objective_degree(prob)
+    return degree == 1
+
+
 def _native_qmc_box_stage_specs(dim, n_chains):
     if dim < 1:
         raise ValueError("dim must be positive")
@@ -1395,7 +1400,7 @@ def _native_qmc_box_stage_specs(dim, n_chains):
     for multiplier in coverage:
         n_starts = dim * multiplier
         top_values = [n_chains]
-        if multiplier > n_chains:
+        if multiplier > n_chains and dim <= n_chains * n_chains:
             top_values.append(0)
         if multiplier == n_chains * n_chains:
             top_values.append(dim)
@@ -1514,6 +1519,29 @@ def _run_cutest_native_qmc_box_schedule(
     if best_val is None:
         return None
     return best_val, total_work
+
+
+def _run_cutest_native_qmc_bounded_screen(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    if grad_kind != "native" or not _has_finite_design_box(prob):
+        return None
+    return _run_cutest_qmc_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        seed,
+        int(prob.dim) * int(n_chains),
+        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+        top_k=_bounded_polish_top_k(n_chains),
+    )
 
 
 def _qmc_differential_population_size(dim, n_chains):
@@ -1798,6 +1826,19 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 prob
             ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
                 if (
+                    grad_kind == "native"
+                    and _native_qmc_first_degree_bound_supported(prob)
+                ):
+                    auto_best_start_polish = _run_cutest_native_qmc_bounded_screen(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+                elif (
                     grad_kind == "native"
                     and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
                 ):
