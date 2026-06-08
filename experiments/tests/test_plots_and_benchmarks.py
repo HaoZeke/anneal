@@ -4375,3 +4375,64 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
         use_gle=False,
     )
     assert calls2["additive_fit"] == 1
+
+
+def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    class TensorWithoutSampler:
+        @classmethod
+        def build(cls, *args, **kwargs):
+            return object()
+
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", True, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "TensorTrainSurrogate",
+        TensorWithoutSampler,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        surrogate_proposal_probability=1.0,
+        pilot_min_base=2,
+        pilot_min_samples=2,
+        pilot_dim_multiplier=1,
+        pilot_budget_divisor=10,
+        scout_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=80)
+
+    with pytest.raises(AttributeError, match="sample"):
+        anneal_sota.qmc_annealed_hybrid(
+            counter,
+            np.array([-1.0, -1.0]),
+            np.array([1.0, 1.0]),
+            2,
+            grad,
+            np.random.default_rng(1),
+            n_polish=1,
+            k_polish=1,
+            use_surrogate=True,
+            surrogate_kind="tensor",
+            use_gle=False,
+            config=config,
+        )

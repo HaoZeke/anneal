@@ -33,7 +33,6 @@ class AnnealHybridConfig:
     differential_weight_span: float = 0.9
     surrogate_proposal_probability: float = 0.35
     surrogate_temperature_floor: float = 1e-6
-    random_fallback_scale: float = 0.1
     pilot_min_base: int = 32
     pilot_dim_multiplier: int = 8
     pilot_min_samples: int = 128
@@ -265,14 +264,7 @@ def qmc_annealed_hybrid(
                 cri = cr[i]
                 if surr is not None and rng.random() < config.surrogate_proposal_probability:
                     T = max(temp, config.surrogate_temperature_floor)
-                    if hasattr(surr, "sample"):
-                        trial = surr.sample(1, T, rng)[0]
-                    else:
-                        trial = pop[i] + rng.normal(
-                            0,
-                            config.random_fallback_scale,
-                            dim,
-                        )
+                    trial = surr.sample(1, T, rng)[0]
                     trial = np.clip(trial, low, high)
                 else:
                     fi = (
