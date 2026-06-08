@@ -1,4 +1,7 @@
-use anneal_core::{projected_gradient_polish, qmc_projected_gradient_polish, AnalyticGradient};
+use anneal_core::{
+    projected_gradient_polish, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish, AnalyticGradient,
+};
 use eindir_core::{Bounds, Objective};
 use ndarray::{array, Array1, ArrayView1};
 
@@ -127,6 +130,20 @@ fn qmc_polish_screens_center_anchor() {
 
     assert!(result.best_val <= 1e-12);
     assert_eq!(result.best_pos.to_vec(), vec![0.0, 0.0]);
+}
+
+#[test]
+fn shifted_qmc_polish_replicates_screened_designs() {
+    let obj = CenterQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * x[0], 2.0 * x[1]])
+    });
+
+    let result = shifted_qmc_projected_gradient_polish(&obj, &grad, 4, 16, 7, 2, 1.0, 1e-10, 1);
+
+    assert!(result.best_val < 1e-12);
+    assert_eq!(result.n_starts, 8);
+    assert_eq!(result.n_polished, 2);
 }
 
 #[test]

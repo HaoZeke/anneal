@@ -17,6 +17,7 @@ from anneal import (
     run,
     run_hmc,
     run_qmc,
+    shifted_qmc_polish,
 )
 
 
@@ -164,6 +165,24 @@ def test_qmc_polish_refines_best_low_discrepancy_basin():
     assert result["n_polished"] == 8
     assert result["n_evals"] <= 8 * (32 + 1)
     assert result["best_pos"] == pytest.approx([-0.5, 1.0 / 3.0], abs=1e-4)
+
+
+def test_shifted_qmc_polish_exposes_replicated_designs():
+    result = shifted_qmc_polish(
+        shifted_quadratic,
+        shifted_quadratic_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        n_starts=4,
+        max_fevals_per_start=32,
+        seed=7,
+        n_replicates=2,
+        top_k=1,
+    )
+
+    assert result["best_val"] < 1e-10
+    assert result["n_starts"] == 8
+    assert result["n_polished"] == 2
 
 
 def test_low_discrepancy_points_are_bounded_and_deterministic():
