@@ -29,6 +29,7 @@ class AnnealHybridConfig:
     initial_differential_weight: float = 0.5
     initial_crossover_rate: float = 0.9
     adaptation_probability: float = 0.1
+    elite_differential_probability: float = 0.5
     differential_weight_min: float = 0.1
     differential_weight_span: float = 0.9
     surrogate_proposal_probability: float = 0.35
@@ -168,6 +169,20 @@ def _metropolis_accept(
 def _best_finite(*values: float) -> float:
     finite = [float(v) for v in values if math.isfinite(float(v))]
     return min(finite) if finite else float("inf")
+
+
+def _differential_trial(pop, best_x, i, fi, cri, rng, low, high, config: AnnealHybridConfig):
+    dim = len(low)
+    idx = [j for j in range(len(pop)) if j != i]
+    r1, r2, r3 = rng.choice(idx, 3, replace=False)
+    if rng.random() < config.elite_differential_probability:
+        base = np.asarray(best_x, dtype=np.float64)
+    else:
+        base = np.asarray(pop[int(r1)], dtype=np.float64)
+    mutant = base + fi * (np.asarray(pop[int(r2)]) - np.asarray(pop[int(r3)]))
+    mask = rng.random(dim) < cri
+    mask[rng.integers(dim)] = True
+    return np.clip(np.where(mask, mutant, pop[i]), low, high)
 
 
 def _elite_qmc_zoom(counter, pop, vals, low, high, rng, config: AnnealHybridConfig):
@@ -382,12 +397,17 @@ def qmc_annealed_hybrid(
                         if rng.random() < config.adaptation_probability
                         else cr[i]
                     )
-                    idx = [j for j in range(pop_size) if j != i]
-                    r1, r2, r3 = rng.choice(idx, 3, replace=False)
-                    mutant = pop[r1] + fi * (pop[r2] - pop[r3])
-                    mask = rng.random(dim) < cri
-                    mask[rng.integers(dim)] = True
-                    trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
+                    trial = _differential_trial(
+                        pop,
+                        best_x,
+                        i,
+                        fi,
+                        cri,
+                        rng,
+                        low,
+                        high,
+                        config,
+                    )
 
                 ft = float(counter(trial))
                 old = float(vals[i])
