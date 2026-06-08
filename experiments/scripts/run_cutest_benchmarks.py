@@ -1583,6 +1583,81 @@ def _run_cutest_qmc_differential_search(
     return best_val, total_calls
 
 
+def _shifted_qmc_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) * int(n_chains) * int(n_chains) * int(n_chains)
+
+
+def _shifted_qmc_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains) * int(n_chains)
+
+
+def _run_cutest_shifted_qmc_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    if not hasattr(anneal_module, "polish"):
+        return None
+    dim = int(prob.dim)
+    if dim < 1 or n_chains < 1 or k_per_epoch < 1:
+        return None
+    design_low, design_high = _design_bounds(prob)
+    width = design_high - design_low
+    if not np.all(np.isfinite(width)) or np.any(width <= 0.0):
+        return None
+    n_points = _shifted_qmc_start_count(dim, n_chains)
+    starts = _low_discrepancy_starts(
+        prob.low,
+        prob.high,
+        n_points,
+        0,
+        design_low,
+        design_high,
+    )
+    unit = (starts - design_low) / width
+    shift = np.random.default_rng(int(seed)).random(dim)
+    shifted = design_low + width * np.mod(unit + shift, 1.0)
+    screened = []
+    for start in shifted:
+        value = float(prob.fn(start))
+        if np.isfinite(value):
+            screened.append((value, np.ascontiguousarray(start, dtype=np.float64)))
+    if not screened:
+        return None
+    screened.sort(key=lambda item: item[0])
+    best_val = screened[0][0]
+    total_work = int(n_points)
+    for _value, start in screened[: _shifted_qmc_top_k(n_chains)]:
+        result = anneal_module.polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            start,
+            max_fevals=int(k_per_epoch) * int(n_chains),
+        )
+        total_work += _polish_work_units(
+            dim,
+            grad_kind,
+            result.get("n_evals", 0),
+            result.get("n_grads", 0),
+        )
+        value = float(result["best_val"])
+        if np.isfinite(value) and value < best_val:
+            best_val = value
+    return best_val, total_work
+
+
 def _combine_candidate_results(*candidates):
     valid = [candidate for candidate in candidates if candidate is not None]
     if not valid:
@@ -1639,6 +1714,15 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 if auto_best_start_polish is not None:
                     if int(prob.dim) <= int(n_chains):
+                        auto_shifted_qmc_polish = _run_cutest_shifted_qmc_polish(
+                            anneal,
+                            prob,
+                            grad_fn,
+                            grad_kind,
+                            seed,
+                            int(n_chains),
+                            int(k_per_epoch),
+                        )
                         auto_differential_search = _run_cutest_qmc_differential_search(
                             prob,
                             seed,
@@ -1647,6 +1731,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         )
                         return _combine_candidate_results(
                             auto_best_start_polish,
+                            auto_shifted_qmc_polish,
                             auto_differential_search,
                         )
                     return auto_best_start_polish
