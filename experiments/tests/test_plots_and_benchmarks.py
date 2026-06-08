@@ -1903,6 +1903,149 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
 
 
+def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": []}
+
+    class SmallDeclaredBoundProblem:
+        name = "SMALLBOUND"
+        dim = 4
+        low = np.full(4, -1.0)
+        high = np.full(4, 1.0)
+        has_cutest_bounds = True
+        objective_degree = 2
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"].append({
+            "grad_at_zero": grad_fn(np.zeros(4, dtype=np.float64)),
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "seed": kwargs["seed"],
+            "top_k": kwargs["top_k"],
+        })
+        return {
+            "best_val": -23.0,
+            "best_pos": np.zeros(4),
+            "n_evals": 5,
+            "n_grads": 2,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        SmallDeclaredBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -23.0
+    assert fevals == 5 * (5 + 2)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (16, 4, 264),
+        (32, 4, 328),
+        (32, 0, 328),
+        (64, 4, 456),
+        (64, 0, 456),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(4))
+
+
+def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": []}
+
+    class MiddleDeclaredBoundProblem:
+        name = "MIDDLEBOUND"
+        dim = 9
+        low = np.full(9, -1.0)
+        high = np.full(9, 1.0)
+        has_cutest_bounds = True
+        objective_degree = 2
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"].append({
+            "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "seed": kwargs["seed"],
+            "top_k": kwargs["top_k"],
+        })
+        return {
+            "best_val": -29.0,
+            "best_pos": np.zeros(9),
+            "n_evals": 7,
+            "n_grads": 3,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        MiddleDeclaredBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -29.0
+    assert fevals == 6 * (7 + 3)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (36, 4, 524),
+        (72, 4, 848),
+        (72, 0, 848),
+        (144, 4, 1496),
+        (144, 0, 1496),
+        (144, 9, 1496),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
+
+
 def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 

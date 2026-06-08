@@ -1351,6 +1351,21 @@ def _native_qmc_box_top_k(n_chains):
     return int(n_chains)
 
 
+def _cutest_objective_degree(prob):
+    raw = getattr(prob, "objective_degree", None)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _native_qmc_middle_bound_supported(prob):
+    degree = _cutest_objective_degree(prob)
+    return degree is not None and degree > 1
+
+
 def _native_qmc_box_stage_specs(dim, n_chains):
     if dim < 1:
         raise ValueError("dim must be positive")
@@ -1533,7 +1548,9 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
-            if int(prob.dim) <= int(n_chains):
+            if int(prob.dim) <= int(n_chains) and not (
+                grad_kind == "native" and _has_finite_design_box(prob)
+            ):
                 local_screen_starts = int(n_chains) + int(prob.dim)
                 auto_best_start_polish = _run_cutest_qmc_polish(
                     anneal,
@@ -1563,6 +1580,20 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 if (
                     grad_kind == "native"
                     and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
+                ):
+                    auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+                    if auto_best_start_polish is not None:
+                        return auto_best_start_polish
+                elif grad_kind == "native" and _native_qmc_middle_bound_supported(
+                    prob
                 ):
                     auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                         anneal,
