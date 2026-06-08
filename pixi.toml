@@ -81,7 +81,7 @@ python      = ">=3.11"
 sympy       = "*"
 pytest      = "*"
 pytest-cov  = "*"
-numpy       = ">=1.24"
+numpy       = ">=1.24,<2"
 matplotlib  = ">=3.6"
 scipy       = ">=1.11"
 openjdk     = ">=17"
@@ -89,6 +89,8 @@ curl        = "*"
 
 [feature.verify.pypi-dependencies]
 chemparseplot = ">=1.7.0"
+cma = ">=4.4"
+pdfo = ">=2.1"
 pycutest = ">=1.8.1, <2"
 
 [feature.verify.activation.env]
