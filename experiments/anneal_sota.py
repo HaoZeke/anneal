@@ -63,6 +63,7 @@ class AnnealHybridConfig:
     best1bin_enabled: bool = True
     best1bin_budget_divisor: int = 1
     best1bin_dimension_cap: int = 2
+    best1bin_replicates: int = 4
     best1bin_required_population: int = 4
     best1bin_population_min: int = 30
     best1bin_population_dim_multiplier: int = 15
@@ -72,6 +73,7 @@ class AnnealHybridConfig:
     best1bin_crossover_rate: float = 0.7
     best1bin_decision_budget_divisor: int = 4
     best1bin_continue_value_floor: float = 0.0
+    best1bin_continue_relative_above_floor: bool = False
     best1bin_continue_min_relative_improvement: float = 0.25
     best1bin_relative_improvement_scale_floor: float = 1.0
     qmc_min_starts: int = 2
@@ -359,6 +361,8 @@ def _qmc_best1bin_scout(
             return False
         if best_v < config.best1bin_continue_value_floor:
             return True
+        if not config.best1bin_continue_relative_above_floor:
+            return False
         if not math.isfinite(initial_best_v):
             return True
         improvement = initial_best_v - best_v
@@ -449,15 +453,33 @@ def qmc_annealed_hybrid(
             counter.budget - counter.n,
             counter.budget // config.best1bin_budget_divisor,
         )
-        best1bin_best = _qmc_best1bin_scout(
-            counter,
-            low,
-            high,
-            dim=dim,
-            rng=_copy_generator(rng),
-            max_evals=scout_budget,
-            config=config,
-        )
+        best1bin_best = float("inf")
+        scout_start = counter.n
+        seed_rng = _copy_generator(rng)
+        for replica in range(max(1, config.best1bin_replicates)):
+            remaining_scout = scout_budget - (counter.n - scout_start)
+            if remaining_scout <= 0 or counter.n >= counter.budget:
+                break
+            replica_rng = (
+                _copy_generator(rng)
+                if replica == 0
+                else np.random.default_rng(int(seed_rng.integers(1 << 31)))
+            )
+            replica_best = _qmc_best1bin_scout(
+                counter,
+                low,
+                high,
+                dim=dim,
+                rng=replica_rng,
+                max_evals=remaining_scout,
+                config=config,
+            )
+            best1bin_best = _best_finite(best1bin_best, replica_best)
+            if (
+                math.isfinite(best1bin_best)
+                and best1bin_best < config.best1bin_continue_value_floor
+            ):
+                break
         if counter.n >= counter.budget:
             return _best_finite(best1bin_best, counter.best)
     pop_size = int(
