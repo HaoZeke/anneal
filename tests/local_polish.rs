@@ -11,6 +11,32 @@ struct HighCornerLinear {
     bounds: Bounds<f64>,
 }
 
+struct CenterQuadratic {
+    bounds: Bounds<f64>,
+}
+
+impl CenterQuadratic {
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
+        }
+    }
+}
+
+impl Objective<f64> for CenterQuadratic {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        x[0].powi(2) + x[1].powi(2)
+    }
+}
+
 impl HighCornerLinear {
     fn new() -> Self {
         Self {
@@ -88,6 +114,19 @@ fn qmc_polish_screens_boundary_anchors() {
 
     assert!(result.best_val <= -2.0);
     assert_eq!(result.best_pos.to_vec(), vec![1.0, 1.0]);
+}
+
+#[test]
+fn qmc_polish_screens_center_anchor() {
+    let obj = CenterQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * x[0], 2.0 * x[1]])
+    });
+
+    let result = qmc_projected_gradient_polish(&obj, &grad, 5, 8, 0, 1.0, 1e-10, 1);
+
+    assert!(result.best_val <= 1e-12);
+    assert_eq!(result.best_pos.to_vec(), vec![0.0, 0.0]);
 }
 
 #[test]
