@@ -19,6 +19,7 @@ HAS_LIBRARY_GLE = True
 library_gle_langevin = None
 DEFAULT_HYBRID_N_POLISH = 6
 DEFAULT_HYBRID_K_POLISH = 12
+DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY = 0.5
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,7 @@ class AnnealHybridConfig:
     initial_differential_weight: float = 0.5
     initial_crossover_rate: float = 0.9
     adaptation_probability: float = 0.1
-    elite_differential_probability: float = 0.0
+    elite_differential_probability: float = DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY
     differential_weight_min: float = 0.1
     differential_weight_span: float = 0.9
     surrogate_proposal_probability: float = 0.35

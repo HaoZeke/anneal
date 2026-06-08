@@ -4172,6 +4172,11 @@ def test_sota_cutest_hybrid_defaults_match_core_hybrid_signature():
 
     assert sota_cutest.DEFAULT_HYBRID_N_POLISH == signature.parameters["n_polish"].default
     assert sota_cutest.DEFAULT_HYBRID_K_POLISH == signature.parameters["k_polish"].default
+    assert (
+        anneal_sota.AnnealHybridConfig().elite_differential_probability
+        == anneal_sota.DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY
+    )
+    assert 0.0 < anneal_sota.DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY < 1.0
 
 
 def test_sota_cutest_streams_rows_as_methods_finish():
