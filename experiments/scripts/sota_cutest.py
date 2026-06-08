@@ -88,7 +88,7 @@ def classical(counter, low, high, dim, grad, rng):
     return counter.best
 
 
-def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
+def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6, k_polish=3):
     """Anneal benchmark entry backed by ``qmc_annealed_hybrid``."""
     return qmc_annealed_hybrid(
         counter,
@@ -98,7 +98,7 @@ def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
         grad,
         rng,
         n_polish=n_polish,
-        k_polish=1,
+        k_polish=k_polish,
     )
 
 
