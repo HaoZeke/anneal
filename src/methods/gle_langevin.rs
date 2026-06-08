@@ -180,4 +180,49 @@ mod tests {
             res.best_val
         );
     }
+
+    #[test]
+    fn gle_frequency_estimate_tracks_quadratic_curvature() {
+        let dim = 2;
+        let omega = 3.0;
+        let curvature = omega * omega;
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -1.0),
+            Array1::from_elem(dim, 1.0),
+            0.0,
+        );
+        struct FrequencyQuadratic {
+            bounds: Bounds<f64>,
+            curvature: f64,
+        }
+        impl Objective<f64> for FrequencyQuadratic {
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                0.5 * self.curvature * x.iter().map(|xi| xi * xi).sum::<f64>()
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn dim(&self) -> usize {
+                self.bounds.dims
+            }
+        }
+        struct FrequencyGrad {
+            curvature: f64,
+            dim: usize,
+        }
+        impl Gradient<f64> for FrequencyGrad {
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                Array1::from_iter(x.iter().map(|xi| self.curvature * xi))
+            }
+            fn dim(&self) -> usize {
+                self.dim
+            }
+        }
+        let obj = FrequencyQuadratic { bounds, curvature };
+        let grad = FrequencyGrad { curvature, dim };
+
+        let estimated = estimate_gle_omega0(&obj, &grad);
+
+        assert!((estimated - omega).abs() <= omega * f64::EPSILON.cbrt());
+    }
 }
