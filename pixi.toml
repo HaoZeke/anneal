@@ -60,6 +60,12 @@ setup-rustdocgen = "test -x $CONDA_PREFIX/bin/sphinx-rustdocgen || cargo install
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "sphinx-build docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
 
+# rgpycrumbs/rsx-rs aligned named tasks for docs (Task 1 infra).
+# These are the entry points used by the plan verify commands and CI.
+docs-export = "emacs --batch -l docs/export.el"
+docs-build = { cmd = "cd docs && sphinx-build -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
+docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
+
 # verify env
 #
 # Bundles the verification toolchain that backs the IISE manuscript:
