@@ -68,6 +68,10 @@ class AnnealHybridConfig:
     best1bin_weight_min: float = 0.5
     best1bin_weight_span: float = 0.5
     best1bin_crossover_rate: float = 0.7
+    best1bin_decision_budget_divisor: int = 4
+    best1bin_continue_value_floor: float = 0.0
+    best1bin_continue_min_relative_improvement: float = 0.25
+    best1bin_relative_improvement_scale_floor: float = 1.0
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
     native_bounds_slack: float = 1e-9
@@ -331,6 +335,37 @@ def _qmc_best1bin_scout(
     else:
         best_x = np.asarray(pop[0], dtype=np.float64).copy()
         best_v = float("inf")
+    initial_best_v = best_v
+    decision_evals = (
+        max(
+            pop_size,
+            max_evals // config.best1bin_decision_budget_divisor,
+        )
+        if config.best1bin_decision_budget_divisor > 0
+        else max_evals
+    )
+    decision_checked = False
+
+    def should_continue_after_decision() -> bool:
+        if not math.isfinite(best_v):
+            return False
+        if best_v < config.best1bin_continue_value_floor:
+            return True
+        if not math.isfinite(initial_best_v):
+            return True
+        improvement = initial_best_v - best_v
+        scale = max(
+            abs(initial_best_v),
+            config.best1bin_relative_improvement_scale_floor,
+        )
+        if config.best1bin_continue_min_relative_improvement <= 0.0:
+            return improvement > 0.0
+        return improvement >= config.best1bin_continue_min_relative_improvement * scale
+
+    if counter.n - start_n >= decision_evals:
+        decision_checked = True
+        if not should_continue_after_decision():
+            return _best_finite(best_v, counter.best)
 
     try:
         while counter.n - start_n < max_evals:
@@ -359,6 +394,10 @@ def _qmc_best1bin_scout(
                     if ft < best_v:
                         best_v = ft
                         best_x = np.asarray(trial, dtype=np.float64).copy()
+                if not decision_checked and counter.n - start_n >= decision_evals:
+                    decision_checked = True
+                    if not should_continue_after_decision():
+                        return _best_finite(best_v, counter.best)
     except Exception as exc:  # noqa: BLE001
         if exc.__class__.__name__ != "_Budget":
             raise
