@@ -1599,16 +1599,14 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
             elif _has_declared_cutest_bounds(prob) and grad_kind == "native":
-                native_starts = _native_qmc_polish_start_count(prob.dim, n_chains)
-                auto_best_start_polish = _run_cutest_qmc_polish(
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
                     prob,
                     grad_fn,
                     grad_kind,
                     seed,
-                    native_starts,
-                    _native_qmc_polish_budget(k_per_epoch, prob.dim, native_starts),
-                    top_k=0,
+                    int(n_chains),
+                    int(k_per_epoch),
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
