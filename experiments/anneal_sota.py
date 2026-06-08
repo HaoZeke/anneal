@@ -157,6 +157,11 @@ def _metropolis_accept(
     return bool(rng.random() < math.exp(-delta / max(temp, floor)))
 
 
+def _best_finite(*values: float) -> float:
+    finite = [float(v) for v in values if math.isfinite(float(v))]
+    return min(finite) if finite else float("inf")
+
+
 def qmc_annealed_hybrid(
     counter,
     low,
@@ -195,9 +200,14 @@ def qmc_annealed_hybrid(
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, config.initial_differential_weight)
     cr = np.full(pop_size, config.initial_crossover_rate)
-    best_idx = int(np.argmin(vals))
+    finite_idx = np.flatnonzero(np.isfinite(vals))
+    if finite_idx.size:
+        best_idx = int(finite_idx[np.argmin(vals[finite_idx])])
+        best_v = float(vals[best_idx])
+    else:
+        best_idx = 0
+        best_v = float("inf")
     best_x = pop[best_idx].copy()
-    best_v = float(vals[best_idx])
     finite = vals[np.isfinite(vals)]
     temp0 = max(
         float(np.std(finite)) if finite.size > 1 else 1.0,
@@ -283,13 +293,17 @@ def qmc_annealed_hybrid(
                     mask[rng.integers(dim)] = True
                     trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
 
-                ft = counter(trial)
-                if _metropolis_accept(
-                    float(ft - vals[i]),
-                    temp,
-                    rng,
-                    floor=config.metropolis_temperature_floor,
-                ):
+                ft = float(counter(trial))
+                old = float(vals[i])
+                accept = False
+                if math.isfinite(ft):
+                    accept = (not math.isfinite(old)) or _metropolis_accept(
+                        ft - old,
+                        temp,
+                        rng,
+                        floor=config.metropolis_temperature_floor,
+                    )
+                if accept:
                     pop[i] = trial
                     vals[i] = ft
                     f[i] = fi
@@ -302,12 +316,19 @@ def qmc_annealed_hybrid(
             if counter.n - last_scout >= scout_every:
                 scout = low_discrepancy_population(low, high, 1, skip=scout_skip)[0]
                 scout_skip += 1
-                fs = counter(scout)
-                worst = int(np.argmax(vals))
-                if fs < vals[worst]:
+                fs = float(counter(scout))
+                nonfinite_idx = np.flatnonzero(~np.isfinite(vals))
+                worst = (
+                    int(nonfinite_idx[0])
+                    if nonfinite_idx.size
+                    else int(np.argmax(vals))
+                )
+                if math.isfinite(fs) and (
+                    not math.isfinite(float(vals[worst])) or fs < vals[worst]
+                ):
                     pop[worst] = scout
                     vals[worst] = fs
-                if fs < best_v:
+                if math.isfinite(fs) and fs < best_v:
                     best_v = float(fs)
                     best_x = scout.copy()
                 last_scout = counter.n
@@ -337,7 +358,8 @@ def qmc_annealed_hybrid(
                     )
                     if (
                         isinstance(gle_res, dict)
-                        and gle_res.get("best_val", float("inf")) < best_v
+                        and math.isfinite(float(gle_res.get("best_val", float("inf"))))
+                        and float(gle_res.get("best_val", float("inf"))) < best_v
                     ):
                         best_v = float(gle_res["best_val"])
                         if "best_pos" in gle_res:
@@ -378,14 +400,18 @@ def qmc_annealed_hybrid(
                             bounds=bounds,
                             options={"maxfun": maxfun, "maxiter": maxfun},
                         )
-                        if math.isfinite(float(res.fun)) and res.fun < vals[int(idx)]:
+                        res_fun = float(res.fun)
+                        old = float(vals[int(idx)])
+                        if math.isfinite(res_fun) and (
+                            not math.isfinite(old) or res_fun < old
+                        ):
                             pop[int(idx)] = np.asarray(res.x, dtype=np.float64)
-                            vals[int(idx)] = float(res.fun)
-                        if math.isfinite(float(res.fun)) and res.fun < best_v:
-                            best_v = float(res.fun)
+                            vals[int(idx)] = res_fun
+                        if math.isfinite(res_fun) and res_fun < best_v:
+                            best_v = res_fun
                             best_x = np.asarray(res.x, dtype=np.float64)
                 last_polish = counter.n
     except Exception as exc:  # noqa: BLE001
         if exc.__class__.__name__ != "_Budget":
             raise
-    return min(best_v, counter.best)
+    return _best_finite(best_v, counter.best)
