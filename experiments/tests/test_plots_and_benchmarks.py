@@ -2,6 +2,7 @@
 
 import os
 import inspect
+import math
 import multiprocessing as mp
 import sys
 import tempfile
@@ -4493,3 +4494,68 @@ def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
             use_gle=False,
             config=config,
         )
+
+
+def test_anneal_sota_qmc_hybrid_ignores_nonfinite_surrogate_values(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    class NanSurrogate:
+        @classmethod
+        def build(cls, *args, **kwargs):
+            class S:
+                def sample(self, n, temp, rng):
+                    return np.ones((n, 2), dtype=np.float64)
+
+            return S()
+
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", True, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "TensorTrainSurrogate",
+        NanSurrogate,
+        raising=False,
+    )
+
+    def objective(x):
+        x = np.asarray(x, dtype=np.float64)
+        if x[0] > 0.5:
+            return float("nan")
+        return float(np.sum((x + 0.25) ** 2))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * (x + 0.25)
+
+    config = anneal_sota.AnnealHybridConfig(
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        surrogate_proposal_probability=1.0,
+        pilot_min_base=2,
+        pilot_min_samples=2,
+        pilot_dim_multiplier=1,
+        pilot_budget_divisor=10,
+        scout_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(objective, budget=80)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        best = anneal_sota.qmc_annealed_hybrid(
+            counter,
+            np.array([-1.0, -1.0]),
+            np.array([1.0, 1.0]),
+            2,
+            grad,
+            np.random.default_rng(1),
+            n_polish=1,
+            k_polish=1,
+            use_surrogate=True,
+            surrogate_kind="tensor",
+            use_gle=False,
+            config=config,
+        )
+
+    assert math.isfinite(best)
+    assert math.isfinite(counter.best)
