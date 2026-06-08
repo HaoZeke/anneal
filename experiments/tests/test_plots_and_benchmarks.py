@@ -1530,6 +1530,11 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_qmc_differential_search",
+        lambda *_args, **_kwargs: None,
+    )
 
     best_val, fevals = cutest._bgsa_run(
         GradientCutestProblem(),
