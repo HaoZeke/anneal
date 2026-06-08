@@ -4391,6 +4391,7 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
         use_surrogate=True,
         surrogate_kind="tensor",
         use_gle=True,
+        config=anneal_sota.AnnealHybridConfig(gle_min_dimension=1),
     )
 
     assert calls["tensor_build"] >= 1
@@ -4433,6 +4434,46 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
         use_gle=False,
     )
     assert calls2["additive_fit"] == 1
+
+
+def test_anneal_sota_qmc_hybrid_skips_gle_below_configured_dimension(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    calls = {"gle": 0}
+
+    def fake_gle(*args, **kwargs):
+        calls["gle"] += 1
+        return {"best_val": -1.0}
+
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", True, raising=False)
+    monkeypatch.setattr(anneal_sota, "library_gle_langevin", fake_gle, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    counter = sota_cutest.Counter(sphere, budget=160)
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        dim=2,
+        grad=grad,
+        rng=np.random.default_rng(1),
+        n_polish=1,
+        k_polish=1,
+        use_surrogate=False,
+        use_gle=True,
+    )
+
+    assert calls["gle"] == 0
+    assert best < 0.5
 
 
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
