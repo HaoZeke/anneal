@@ -18,7 +18,7 @@ HAS_SURROGATES = True
 HAS_LIBRARY_GLE = True
 library_gle_langevin = None
 DEFAULT_HYBRID_N_POLISH = 6
-DEFAULT_HYBRID_K_POLISH = 3
+DEFAULT_HYBRID_K_POLISH = 12
 
 
 @dataclass(frozen=True)
