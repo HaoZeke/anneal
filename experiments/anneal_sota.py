@@ -50,7 +50,7 @@ class AnnealHybridConfig:
     gle_min_dimension: int = 3
     scout_budget_divisor: int = 3
     scout_gle_divisor: int = 2
-    elite_zoom_budget_divisor: int = 12
+    elite_zoom_budget_divisor: int = 0
     elite_zoom_min_budget: int = 8
     elite_zoom_elite_count: int = 3
     elite_zoom_candidates_per_member: int = 4
