@@ -13,20 +13,23 @@ Publications and reproducibility packages that use ~anneal~.
   five typed components and four composition laws, proves the four
   Generalized-SA limit reductions as mechanized symbolic identities, specifies
   the workflow class in TLA+, audits the finite-precision acceptance path, and
-  benchmarks eleven single-chain and Markov-chain drivers on the CUTEst set.
-  The implementation contributions -- the dimension-collapse surrogate, the
-  GPU-resident device backend, and the noise-aware acceptance rule -- each
-  enter a single component slot and serve every variant.
+  benchmarks the component families on the CUTEst set. The implementation
+  contributions -- shifted-QMC replicated polish, the tensor/additive
+  independence sampler, the GLE-Langevin colored-noise move, the
+  dimension-collapse surrogate, the GPU-resident device backend, and the
+  noise-aware acceptance rule -- each enter a typed component slot rather than
+  a one-off driver.
 
 * Reproducibility
 
 - The =anneal_repro= package regenerates every number and figure of the paper
   from source: the SymPy theorem witnesses, the TLA+ checks, the
-  finite-precision experiments, and the sharded CUTEst benchmark with its
-  performance, data, and Pareto profiles.
+  finite-precision experiments, the tensor and colored-noise derivations, and
+  the sharded CUTEst benchmark with its performance, data, and Pareto profiles.
 
 * Foundations
 
 - ~anneal~ is built on [[https://haozeke.github.io/eindir][eindir]], which provides the
   typed primitives (the =Objective= trait, =Bounds=, and the
-  dimension-collapse and Chebyshev surrogate transforms).
+  dimension-collapse, Chebyshev surrogate, low-discrepancy point-set, and
+  GLE thermostat primitives).

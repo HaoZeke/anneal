@@ -17,6 +17,12 @@ legacy package; the Rust crate =anneal-core= now backs the
 implementations, with =pyo3= bindings exposed as =anneal._core= and
 a C/C++ ABI for downstream native consumers.
 
+The method layer includes the classical BSA/FSA/GSA presets, HMC and
+Bayesian-BGSA controls, shifted low-discrepancy multistart polish,
+rank-1 tensor/additive independence proposals, and a colored-noise
+GLE-Langevin driver. These all enter through the same typed component
+surface rather than separate benchmark-only scripts.
+
 * Contents
 
 #+begin_export rst
