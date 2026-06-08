@@ -475,6 +475,7 @@ fn qmc_polish(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_starts", result.n_starts)?;
     out.set_item("n_polished", result.n_polished)?;
+    out.set_item("polished_values", result.polished_values)?;
     Ok(out.into())
 }
 
@@ -549,6 +550,7 @@ fn shifted_qmc_polish(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("n_starts", result.n_starts)?;
     out.set_item("n_polished", result.n_polished)?;
+    out.set_item("polished_values", result.polished_values)?;
     Ok(out.into())
 }
 
@@ -652,9 +654,8 @@ fn gle_langevin(
         bounds,
     };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
-    let result = crate::methods::gle_langevin_sa(
-        &obj, &grad, seed, max_fevals, omega0, dt, n_epochs,
-    );
+    let result =
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs);
     let out = PyDict::new(py);
     out.set_item(
         "best_pos",

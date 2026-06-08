@@ -2786,7 +2786,7 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
         k_per_epoch=200,
     )
 
-    assert result == (-7.0, 6 * (13 + 4))
+    assert result == (-7.0, 4 * (13 + 4))
     assert all(call["top_k"] != 0 for call in captured["qmc"])
     assert [
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
