@@ -27,6 +27,10 @@ from experiments.benchmarks.cutest_runner import configured_pycutest, default_cu
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
 
+DEFAULT_HYBRID_N_POLISH = 6
+DEFAULT_HYBRID_K_POLISH = 8
+
+
 class _Budget(Exception):
     pass
 
@@ -88,7 +92,16 @@ def classical(counter, low, high, dim, grad, rng):
     return counter.best
 
 
-def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6, k_polish=3):
+def hybrid_de(
+    counter,
+    low,
+    high,
+    dim,
+    grad,
+    rng,
+    n_polish=DEFAULT_HYBRID_N_POLISH,
+    k_polish=DEFAULT_HYBRID_K_POLISH,
+):
     """Anneal benchmark entry backed by ``qmc_annealed_hybrid``."""
     return qmc_annealed_hybrid(
         counter,
