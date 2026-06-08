@@ -4543,6 +4543,49 @@ def test_anneal_sota_qmc_hybrid_zoom_refines_narrow_elite_basin(monkeypatch):
     assert best == -100.0
 
 
+def test_anneal_sota_differential_trial_can_use_elite_base():
+    from experiments import anneal_sota
+
+    class FixedRng:
+        def __init__(self):
+            self.random_calls = 0
+
+        def choice(self, values, size, replace=False):
+            assert not replace
+            return np.asarray(values[:size])
+
+        def random(self, size=None):
+            self.random_calls += 1
+            if size is None:
+                return 0.0
+            return np.ones(size, dtype=np.float64)
+
+        def integers(self, high):
+            return 0
+
+    pop = [
+        np.array([0.0, 0.0], dtype=np.float64),
+        np.array([0.25, 0.25], dtype=np.float64),
+        np.array([0.75, 0.25], dtype=np.float64),
+        np.array([0.25, 0.75], dtype=np.float64),
+    ]
+    best_x = np.array([0.5, 0.5], dtype=np.float64)
+
+    trial = anneal_sota._differential_trial(
+        pop,
+        best_x,
+        i=0,
+        fi=0.5,
+        cri=1.0,
+        rng=FixedRng(),
+        low=np.array([-1.0, -1.0], dtype=np.float64),
+        high=np.array([1.0, 1.0], dtype=np.float64),
+        config=anneal_sota.AnnealHybridConfig(elite_differential_probability=1.0),
+    )
+
+    np.testing.assert_allclose(trial, np.array([0.75, 0.25]))
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
