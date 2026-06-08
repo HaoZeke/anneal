@@ -1704,6 +1704,103 @@ def test_cutest_bgsa_auto_combines_shifted_qmc_for_small_finite_box(monkeypatch)
     assert fevals == 6 + 11
 
 
+def test_cutest_bgsa_auto_keeps_portfolio_after_qmc_candidate(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": False, "pilot": False}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    class FakeHistory:
+        best_val = -5.0
+        total_accepted = 0
+
+    def qmc_polish(*_args, **_kwargs):
+        captured["qmc"] = True
+        return {
+            "best_val": 3.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    def run_hmc(*_args, **_kwargs):
+        return FakeHistory()
+
+    def run_pilot(*_args, **_kwargs):
+        captured["pilot"] = True
+        return (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        )
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish, run_hmc=run_hmc)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=run_pilot,
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            4.0,
+            7,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (2.0, 5, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            1.0,
+            6,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_shifted_qmc_polish",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_qmc_differential_search",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (9.0, 3))
+
+    best_val, _fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert captured == {"qmc": True, "pilot": True}
+    assert best_val == -5.0
+
+
 def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 

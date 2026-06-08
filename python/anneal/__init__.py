@@ -25,6 +25,7 @@ from anneal._core import (
     polish as _core_polish,
     qmc_polish as _core_qmc_polish,
     additive_independence as _core_additive_independence,
+    gle_langevin as _core_gle_langevin,
     run,
     run_hmc,
     run_qmc,
@@ -143,6 +144,44 @@ def additive_independence(
     return out
 
 
+def gle_langevin(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    max_fevals: int,
+    seed: int = 0,
+    ns: int = 4,
+    omega_lo: float = 0.05,
+    omega_hi: float = 5.0,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+):
+    """GLE-thermostatted Langevin annealing (colored-noise optimal sampling).
+
+    Gradient-driven BAB Langevin dynamics with a generalized-Langevin
+    colored-noise thermostat whose drift flattens the sampling efficiency across
+    the frequency band ``[omega_lo, omega_hi]``, handling ill-conditioning the
+    way the ``1/sqrt(D)`` scale handles dimension. Returns
+    ``{best_pos, best_val, n_evals}``.
+    """
+    out = _core_gle_langevin(
+        obj_fn,
+        grad_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(max_fevals),
+        int(seed),
+        int(ns),
+        float(omega_lo),
+        float(omega_hi),
+        float(dt),
+        int(n_epochs),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 __all__ = [
     "Boltzmann",
     "DeviceHistory",
@@ -158,6 +197,7 @@ __all__ = [
     "polish",
     "qmc_polish",
     "additive_independence",
+    "gle_langevin",
     "run",
     "run_device",
     "run_ensemble",
