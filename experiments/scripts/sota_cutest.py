@@ -89,6 +89,7 @@ def classical(counter, low, high, dim, grad, rng):
 
 
 def hybrid_de(counter, low, high, dim, grad, rng, n_polish=6):
+    """Anneal benchmark entry backed by ``qmc_annealed_hybrid``."""
     return qmc_annealed_hybrid(
         counter,
         low,
