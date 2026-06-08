@@ -36,7 +36,7 @@ These laws are what let one change to a shared slot implementation serve every d
 A single implementation change at one slot appears in every driver that uses that slot:
 
 - Dimension scale (Neigh/Move) -> classical + generalized =Langevin= equation (GLE) + PT
-- Rank-1 independence (Move + surrogate Obj) -> additive driver and any future independence proposal
+- Rank-1 independence (Move + surrogate Obj) -> additive driver and custom independence proposals
 - generalized =Langevin= equation (GLE) drift matrix (Move) -> every gradient-capable driver (no per-preset generalized =Langevin= equation (GLE) code)
 - Batched device kernel (the runner) -> =run_device= and =run_ensemble= for Boltzmann, Fast, Gsa (Tsallis), generalized =Langevin= equation (GLE), ...
 - Noise-aware Accept (the three channels) -> every preset and every advanced driver

@@ -9,6 +9,13 @@ on:
 permissions:
   contents: write
 
+# Release flow (abi3 wheels + towncrier changelog):
+# - Cargo.toml enables abi3-py310: wheels job builds one wheel per
+#   platform (no --find-interpreter, no per-Python matrix).
+# - Release preparation: run `pixi r towncrier-build` after fragments are
+#   merged so CHANGELOG.md is up to date under the marker.
+# - GH Release uses --generate-notes (supplements the towncrier history).
+
 jobs:
   native-libs:
     name: Native libs (${{ matrix.os }}, ${{ matrix.target }})
@@ -115,7 +122,9 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --features python --find-interpreter
+          # abi3 enabled in Cargo.toml (pyo3 with "abi3-py310") produces a
+          # single wheel per platform that works on all Python >=3.10.
+          args: --release --out dist --features python
           manylinux: auto
 
       - name: Validate wheels

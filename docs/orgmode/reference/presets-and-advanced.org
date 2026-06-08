@@ -14,7 +14,7 @@ All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
 - =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, =q_v=).
 - =low_discrepancy_points(low, high, n, skip=1)= .
 
-* Polish (require grad)
+* Polish (require grad — gradient support is provided by eindir; see :eindir:doc:`howto/gradients`)
 
 - =polish(obj, grad, low, high, x0, max_fevals=200, ...)=
 - =qmc_polish(obj, grad, low, high, n_starts, max_fevals_per_start, ...)=

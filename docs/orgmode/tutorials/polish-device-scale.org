@@ -88,9 +88,9 @@ Replace low/high with CuPy arrays and the kernels run on GPU with zero Python ov
 
 * Why this works (reuse)
 
-=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses. The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct. The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation are identical bit-for-bit. Consequently the noise-aware compensated Accept, the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) Move, the rank-1 independence Move, and every future improvement to any slot are automatically present on GPU and in large ensembles.
+=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses. The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct. The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation use the same code paths. Consequently the noise-aware compensated Accept, the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) Move, and the rank-1 independence Move are available on GPU and in large ensembles when the same slots are selected.
 
-quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish is likewise a pure filling of the same slots (a deterministic Cool that goes to zero, a Move that is projected gradient, an Accept that is ==Armijo==). One change to the ==Armijo== logic or the low-discrepancy generator instantly appears in every polish variant.
+quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish is likewise a pure filling of the same slots (a deterministic Cool that goes to zero, a Move that is projected gradient, an Accept that is ==Armijo==). The polish variants share the same ==Armijo== logic and low-discrepancy generator.
 
 * Figures and scale experiments
 

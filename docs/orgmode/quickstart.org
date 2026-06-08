@@ -98,7 +98,7 @@ res = additive_independence(rastrigin, low, high, max_fevals=2000, seed=7,
 print("Additive best:", res["best_pos"], res["best_val"])
 #+end_src
 
-GLE-Langevin (requires gradient, colored noise via eindir thermostat):
+GLE-Langevin (requires gradient — see :eindir:doc:`howto/gradients` for how to supply native gradients from Python/torch/JAX or analytic code; colored noise via eindir thermostat):
 
 #+begin_src python
 from anneal import gle_langevin

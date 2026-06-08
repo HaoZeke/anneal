@@ -11,9 +11,8 @@ pixi run -e python python-test
 
 * Conventional Commits
 
-Commit messages follow the Conventional Commits convention. The
-=cog= tool drives the changelog from these messages; please use
-the standard prefixes:
+Commit messages follow the Conventional Commits convention (enforced
+by cog in CI via cocogitto). Use the standard prefixes:
 
 - =feat:=   new functionality
 - =fix:=    bug fix
@@ -21,6 +20,28 @@ the standard prefixes:
 - =refactor:= behaviour-preserving code change
 - =chore:=  tooling, build, dependency updates
 - =ci:=     CI configuration
+
+* Changelog (towncrier)
+
+Changelog is assembled with towncrier from news fragments (not cog).
+For any user-visible or breaking change, add a fragment under
+=docs/newsfragments/= before merging the PR:
+
+- Name: =+short-desc.type.rst= (or =123.type.rst= for PR #) where type is
+  one of: added, changed, removed, fixed, deprecated, security, dev, misc.
+- Content: one or more lines describing the change (towncrier adds the
+  bullet and wires the issue link from filename when numeric).
+
+Preview/build locally (requires the uv feature or uv on PATH):
+
+#+BEGIN_SRC bash
+pixi r towncrier-draft   # preview, no write
+pixi r towncrier-build   # write to CHANGELOG.md and consume fragments
+#+END_SRC
+
+Run the build step as part of preparing a release tag (after version
+bump in relevant files). Fragments are required for changes that should
+appear in release notes.
 
 * Style
 

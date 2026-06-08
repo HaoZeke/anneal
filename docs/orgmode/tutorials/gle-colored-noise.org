@@ -61,13 +61,13 @@ Expected on this separable ill-conditioned problem: the colored-noise version re
 
 - ==eindir== builds the optimal_sampling_drift matrix A for the chosen omega0.
 - The generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) move kernel (B-A-B splitting + exact matrix exponential; the propagator from the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) literature) occupies the Move slot.
-- The same A works for any inner sampler that supplies a gradient (Hamiltonian Monte Carlo (Hamiltonian Monte Carlo (HMC)) variants, plain ==Langevin==, future methods).
+- The same A works for any inner sampler that supplies a gradient (Hamiltonian Monte Carlo (Hamiltonian Monte Carlo (HMC)) variants, plain ==Langevin==, custom methods).
 - No per-preset generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) code exists; the factoring guarantees it.
 
 Stationary reseed per epoch keeps the auxiliary momenta consistent with the invariant measure even when the outer temperature schedule changes.
 
 * Why this works
 
-White-noise ==Langevin== critically damps only one frequency. Real objectives have spectra spanning orders of magnitude (the classic "ill-conditioned" case). The generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) drift matrix is the exact continuous-time solution that makes the integrated autocorrelation time flat from omega0 to ~100*omega0. Because Move is the only slot that knows the proposal shape, swapping the white-noise proposal for the generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) proposal is a one-line component change that instantly benefits every gradient driver in the crate.
+White-noise ==Langevin== critically damps only one frequency. Real objectives have spectra spanning orders of magnitude (the classic "ill-conditioned" case). The generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) drift matrix is the exact continuous-time solution that makes the integrated autocorrelation time flat from omega0 to ~100*omega0. Because Move is the only slot that knows the proposal shape, swapping the white-noise proposal for the generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) proposal gives gradient drivers the same thermostat path.
 
 See [[file:../explanation/gle-mechanics.org][gle-mechanics]] (T4) for the matrix construction and the canonical-form derivation.

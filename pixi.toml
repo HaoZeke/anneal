@@ -1,6 +1,6 @@
 [workspace]
 name      = "anneal"
-version   = "0.2.0"
+version   = "0.4.0"
 description = "Simulated annealing components on the eindir typed primitives."
 channels  = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]
@@ -11,8 +11,15 @@ test-all = "cargo test --all-features"
 bench    = "cargo bench"
 build    = "cargo build --release"
 
+# towncrier newsfragments live under docs/ for changelog backfill and releases.
+# Fragments: docs/newsfragments/+foo.added.rst etc. (or 123.changed.rst).
+# Preview/build: pixi r towncrier-draft ; pixi r towncrier-build.
+towncrier-draft = { cmd = "uvx towncrier build --draft", description = "Preview release notes from newsfragments" }
+towncrier-build = { cmd = "uvx towncrier build", description = "Incorporate newsfragments into CHANGELOG.md for release preparation" }
+
 [dependencies]
 rust = ">=1.88"
+uv   = ">=0.6.0"
 
 [feature.python.dependencies]
 python  = ">=3.10"
@@ -44,6 +51,8 @@ pandoc = ">=3.1,<4"
 shibuya                    = ">=2026.1.9, <2027"
 sphinxcontrib-rust         = ">=1.0.0, <2"
 sphinx-rustdoc-postprocess = ">=0.1.0, <0.2"
+myst-parser                = ">=4.0.0, <5"
+sphinx-sitemap             = ">=2.7.0, <3"
 
 [feature.docs.tasks]
 # Keep the rustdoc generator inside the checked-out Pixi docs prefix.
