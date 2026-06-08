@@ -3089,6 +3089,50 @@ def test_cutest_native_qmc_schedule_uses_replicated_best_certificate():
     ]
 
 
+def test_cutest_native_qmc_schedule_times_out_slow_stage():
+    if "fork" not in mp.get_all_start_methods():
+        pytest.skip("QMC stage timeout uses fork where available")
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    class OneDimCutestProblem:
+        name = "SLOWQMC"
+        dim = 1
+        low = np.array([-1.0])
+        high = np.array([1.0])
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            return float(np.sum(np.asarray(x, dtype=np.float64) ** 2))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(*_args, **_kwargs):
+        time.sleep(5)
+        return {
+            "best_val": -1.0,
+            "best_pos": np.zeros(1, dtype=np.float64),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    start = time.perf_counter()
+    result = cutest._run_cutest_native_qmc_box_schedule(
+        types.SimpleNamespace(qmc_polish=qmc_polish),
+        OneDimCutestProblem(),
+        OneDimCutestProblem().grad,
+        "native",
+        seed=7,
+        n_chains=1,
+        k_per_epoch=40,
+        include_full_polish=False,
+        stage_timeout_s=0.05,
+    )
+
+    assert result is None
+    assert time.perf_counter() - start < 1.0
+
+
 def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
