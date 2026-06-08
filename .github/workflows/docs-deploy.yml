@@ -29,13 +29,8 @@ jobs:
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           environments: docs
 
-      - name: Add cargo bin to PATH
-        run: echo "${{ runner.temp }}/.cargo/bin" >> "$GITHUB_PATH"
-
       - name: Build documentation
         run: pixi run -e docs docbld
-        env:
-          CARGO_HOME: ${{ runner.temp }}/.cargo
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4

@@ -11,7 +11,7 @@ The MCMC-SA driver should:
 
 Reports a CSV row per (driver, seed) with total fevals, best_val,
 wall_time, and the per-epoch step trace for MCMC-SA. Pixi task
-`mcmc-demo` wires it up under the verify env."""
+`mcmc-demo` wires it up under the verify profile."""
 
 from __future__ import annotations
 

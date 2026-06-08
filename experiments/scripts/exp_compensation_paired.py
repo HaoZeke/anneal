@@ -9,7 +9,7 @@ paired differences (compensated - uncompensated). Reports:
   - paired delta + 95 percent bootstrap CI
   - Wilcoxon W, p-value, effect size (rank-biserial)
 
-Used by the verify env's `compensation-paired` task and cited in the
+Used by the verify profile's `compensation-paired` task and cited in the
 manuscript Section 5.4 narrative."""
 
 from __future__ import annotations
