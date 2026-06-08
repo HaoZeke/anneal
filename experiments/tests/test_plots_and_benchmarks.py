@@ -4186,10 +4186,15 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
 
     assert config.basin_polish_min_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MIN_DIMENSION
     assert config.basin_polish_step == anneal_sota.DEFAULT_BASIN_POLISH_STEP
+    assert config.basin_polish_budget_divisor == anneal_sota.DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
     assert config.basin_polish_high_dimension == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION
     assert (
         config.basin_polish_high_dimension_step
         == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP
+    )
+    assert (
+        config.basin_polish_high_dimension_budget_divisor
+        == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION_BUDGET_DIVISOR
     )
     assert anneal_sota._basin_polish_step_size(
         config.basin_polish_min_dimension,
@@ -4199,6 +4204,72 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.basin_polish_high_dimension,
         config,
     ) == pytest.approx(config.basin_polish_high_dimension_step)
+    budget = config.basin_polish_budget_divisor * config.basin_polish_local_budget
+    assert anneal_sota._basin_polish_budget(
+        budget,
+        config.basin_polish_min_dimension,
+        config,
+    ) == config.basin_polish_local_budget
+    assert anneal_sota._basin_polish_budget(
+        budget,
+        config.basin_polish_high_dimension,
+        config,
+    ) == budget
+
+
+def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    basin_budgets = []
+
+    def fake_basin(counter, grad_fn, low, high, dim, rng, config):
+        del grad_fn, low, high, dim, rng, config
+        basin_budgets.append(counter.budget)
+        while counter.n < counter.budget:
+            counter(np.zeros(6, dtype=np.float64))
+        return counter.best
+
+    monkeypatch.setattr(anneal_sota, "_annealed_basin_polish", fake_basin)
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        basin_polish_min_dimension=6,
+        basin_polish_budget_divisor=4,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(6, -1.0),
+        np.full(6, 1.0),
+        dim=6,
+        grad=grad,
+        rng=np.random.default_rng(13),
+        n_polish=1,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+    )
+
+    assert basin_budgets == [4]
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert counter.objective_evals > basin_budgets[0]
 
 
 def test_sota_cutest_streams_rows_as_methods_finish():

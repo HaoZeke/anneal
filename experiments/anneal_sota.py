@@ -1,4 +1,4 @@
-"""Anneal-native SOTA helpers for fixed-budget benchmark comparisons."""
+"""Anneal-native helpers for fixed-budget benchmark comparisons."""
 
 from __future__ import annotations
 
@@ -22,8 +22,10 @@ DEFAULT_HYBRID_K_POLISH = 12
 DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY = 0.5
 DEFAULT_BASIN_POLISH_MIN_DIMENSION = 6
 DEFAULT_BASIN_POLISH_STEP = 1.0
+DEFAULT_BASIN_POLISH_BUDGET_DIVISOR = 4
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION = 20
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP = 0.1
+DEFAULT_BASIN_POLISH_HIGH_DIMENSION_BUDGET_DIVISOR = 1
 
 
 @dataclass(frozen=True)
@@ -87,8 +89,12 @@ class AnnealHybridConfig:
     basin_polish_enabled: bool = True
     basin_polish_min_dimension: int = DEFAULT_BASIN_POLISH_MIN_DIMENSION
     basin_polish_step: float = DEFAULT_BASIN_POLISH_STEP
+    basin_polish_budget_divisor: int = DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
     basin_polish_high_dimension: int = DEFAULT_BASIN_POLISH_HIGH_DIMENSION
     basin_polish_high_dimension_step: float = DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP
+    basin_polish_high_dimension_budget_divisor: int = (
+        DEFAULT_BASIN_POLISH_HIGH_DIMENSION_BUDGET_DIVISOR
+    )
     basin_polish_local_budget: int = 800
     basin_polish_temperature: float = 1.0
     native_bounds_slack: float = 1e-9
@@ -190,6 +196,20 @@ def _basin_polish_step_size(dim: int, config: AnnealHybridConfig) -> float:
     ):
         return config.basin_polish_high_dimension_step
     return config.basin_polish_step
+
+
+def _basin_polish_budget(remaining: int, dim: int, config: AnnealHybridConfig) -> int:
+    if remaining <= 0:
+        return 0
+    divisor = config.basin_polish_budget_divisor
+    if (
+        config.basin_polish_high_dimension > 0
+        and dim >= config.basin_polish_high_dimension
+    ):
+        divisor = config.basin_polish_high_dimension_budget_divisor
+    if divisor <= 0:
+        return 0
+    return min(remaining, remaining // divisor)
 
 
 def _annealed_basin_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
@@ -534,7 +554,23 @@ def qmc_annealed_hybrid(
         and jac is not None
         and dim >= config.basin_polish_min_dimension
     ):
-        basin_best = _annealed_basin_polish(counter, grad, low, high, dim, rng, config)
+        basin_best = None
+        original_budget = counter.budget
+        basin_budget = _basin_polish_budget(original_budget - counter.n, dim, config)
+        if basin_budget > 0:
+            counter.budget = counter.n + basin_budget
+            try:
+                basin_best = _annealed_basin_polish(
+                    counter,
+                    grad,
+                    low,
+                    high,
+                    dim,
+                    rng,
+                    config,
+                )
+            finally:
+                counter.budget = original_budget
         if counter.n >= counter.budget:
             return _best_finite(basin_best, counter.best)
     if (
