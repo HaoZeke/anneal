@@ -2533,7 +2533,17 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypat
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
-    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail(
+            "first-degree bounded qmc screen should be terminal"
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
 
     best_val, fevals = cutest._bgsa_run(
         FirstDegreeDeclaredBoundProblem(),
@@ -2545,7 +2555,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypat
     )
 
     assert best_val == -31.0
-    assert fevals > 11 + 3
+    assert fevals == 11 + 3
     assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
     assert captured["qmc"]["n_starts"] == 36
     assert captured["qmc"]["max_fevals_per_start"] == 90
