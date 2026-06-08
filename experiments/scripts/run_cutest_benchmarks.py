@@ -1486,6 +1486,23 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
+                auto_multistart_polish = _run_cutest_multistart_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                if auto_multistart_polish is not None:
+                    polish_bv, polish_calls, polish_values = auto_multistart_polish
+                    if _polish_values_agree_to_roundoff(
+                        polish_values
+                    ) or _polish_best_dominates_sample(
+                        polish_values
+                    ) or _polish_bulk_dominates_worst_tail(polish_values):
+                        return polish_bv, polish_calls
             else:
                 auto_multistart_polish = _run_cutest_multistart_polish(
                     anneal,
