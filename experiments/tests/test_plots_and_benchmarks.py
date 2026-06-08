@@ -4255,8 +4255,8 @@ def test_anneal_sota_global_portfolio_slices_shared_counter(monkeypatch):
         while counter.n < counter.budget:
             counter(np.zeros(5, dtype=np.float64))
 
-    def fake_dual(counter, bounds, *, maxfun, no_local_search, seed):
-        del bounds, no_local_search, seed
+    def fake_dual(counter, bounds, *, maxfun, no_local_search, seed, x0=None):
+        del bounds, no_local_search, seed, x0
         calls.append(("dual", counter.budget, maxfun))
         consume_to_budget(counter)
 
