@@ -7,13 +7,16 @@ import pytest
 
 from anneal import (
     Boltzmann,
+    Bounds,
     Fast,
     Gsa,
     History,
+    PyObjective,
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
     qmc_polish,
+    qmc_polish_objective,
     run,
     run_hmc,
     run_qmc,
@@ -165,6 +168,32 @@ def test_qmc_polish_refines_best_low_discrepancy_basin():
     assert result["n_polished"] == 8
     assert result["n_evals"] <= 8 * (32 + 1)
     assert result["best_pos"] == pytest.approx([-0.5, 1.0 / 3.0], abs=1e-4)
+
+
+def test_pyobjective_native_gradient_handle_round_trips():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(shifted_quadratic, bounds, grad_fn=shifted_quadratic_grad)
+
+    assert obj.dim == 2
+    assert obj.eval(np.array([0.25, -0.4])) == pytest.approx(0.0)
+    assert obj.grad(np.array([0.5, -0.25])) == pytest.approx([0.5, 0.3])
+
+
+def test_qmc_polish_accepts_native_gradient_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(shifted_quadratic, bounds, grad_fn=shifted_quadratic_grad)
+
+    result = qmc_polish_objective(
+        obj,
+        n_starts=8,
+        max_fevals_per_start=32,
+        seed=7,
+        top_k=2,
+    )
+
+    assert result["best_val"] < 1e-10
+    assert result["n_polished"] == 2
+    assert result["best_pos"] == pytest.approx([0.25, -0.4], abs=1e-5)
 
 
 def test_shifted_qmc_polish_exposes_replicated_designs():
