@@ -1607,6 +1607,12 @@ def _shifted_qmc_top_k(n_chains):
     return int(n_chains) * int(n_chains)
 
 
+def _shifted_qmc_replicates(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains)
+
+
 def _run_cutest_shifted_qmc_polish(
     anneal_module,
     prob,
@@ -1616,8 +1622,6 @@ def _run_cutest_shifted_qmc_polish(
     n_chains,
     k_per_epoch,
 ):
-    if not hasattr(anneal_module, "polish"):
-        return None
     dim = int(prob.dim)
     if dim < 1 or n_chains < 1 or k_per_epoch < 1:
         return None
@@ -1626,6 +1630,27 @@ def _run_cutest_shifted_qmc_polish(
     if not np.all(np.isfinite(width)) or np.any(width <= 0.0):
         return None
     n_points = _shifted_qmc_start_count(dim, n_chains)
+    if hasattr(anneal_module, "shifted_qmc_polish"):
+        result = anneal_module.shifted_qmc_polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            int(n_points),
+            int(k_per_epoch) * int(n_chains),
+            seed=int(seed),
+            n_replicates=_shifted_qmc_replicates(n_chains),
+            top_k=_shifted_qmc_top_k(n_chains),
+        )
+        work_units = _polish_work_units(
+            dim,
+            grad_kind,
+            result.get("n_evals", 0),
+            result.get("n_grads", 0),
+        )
+        return float(result["best_val"]), work_units
+    if not hasattr(anneal_module, "polish"):
+        return None
     starts = _low_discrepancy_starts(
         prob.low,
         prob.high,
@@ -1677,6 +1702,27 @@ def _combine_candidate_results(*candidates):
     return best_val, total_work
 
 
+def _finite_best_value(candidates):
+    valid = [float(value) for value, _work in candidates if np.isfinite(float(value))]
+    return min(valid) if valid else float("inf")
+
+
+def _candidate_family_matches_best(results, best_value):
+    finite = [
+        float(value)
+        for _seed, value, _calls in results
+        if np.isfinite(float(value))
+    ]
+    return bool(finite) and min(finite) == float(best_value)
+
+
+def _auto_portfolio_seed_offsets(seed, n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    total = int(n_chains) * int(n_chains)
+    return tuple(int(seed) + offset for offset in range(total))
+
+
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     """Run a v0.5 bGSA driver on a CUTEst problem. Reuses demo_bgsa's
     pilot + driver functions; we monkey-patch OBJ_FN/LOW/HIGH/OBJ_GRAD
@@ -1722,28 +1768,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(n_chains),
                     int(k_per_epoch),
                 )
-                if auto_best_start_polish is not None:
-                    if int(prob.dim) <= int(n_chains):
-                        auto_shifted_qmc_polish = _run_cutest_shifted_qmc_polish(
-                            anneal,
-                            prob,
-                            grad_fn,
-                            grad_kind,
-                            seed,
-                            int(n_chains),
-                            int(k_per_epoch),
-                        )
-                        auto_differential_search = _run_cutest_qmc_differential_search(
-                            prob,
-                            seed,
-                            int(n_chains),
-                            1 + int(n_epochs) * int(k_per_epoch),
-                        )
-                        auto_best_start_polish = _combine_candidate_results(
-                            auto_best_start_polish,
-                            auto_shifted_qmc_polish,
-                            auto_differential_search,
-                        ) or auto_best_start_polish
             if int(prob.dim) <= int(n_chains) and not (
                 core_qmc_available
                 and grad_kind == "native"
@@ -1872,6 +1896,35 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     int(n_chains),
                     int(k_per_epoch),
+                )
+            if (
+                auto_best_start_polish is not None
+                and core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
+                and int(prob.dim) <= int(n_chains)
+            ):
+                auto_shifted_qmc_polish = _run_cutest_shifted_qmc_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                qmc_extras = [auto_best_start_polish, auto_shifted_qmc_polish]
+                if not _has_declared_cutest_bounds(prob):
+                    qmc_extras.append(
+                        _run_cutest_qmc_differential_search(
+                            prob,
+                            seed,
+                            int(n_chains),
+                            1 + int(n_epochs) * int(k_per_epoch),
+                        )
+                    )
+                auto_best_start_polish = (
+                    _combine_candidate_results(*qmc_extras) or auto_best_start_polish
                 )
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
@@ -2034,13 +2087,17 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     k_per_epoch,
                 )
                 outcomes.append((polish_bv, polish_calls))
-            for mix_seed in (seed, seed + 4):
+            mix_results = []
+            primary_mix_seeds = (int(seed), int(seed) + int(n_chains))
+            for mix_seed in primary_mix_seeds:
                 mix_bv, mix_calls = bayesian_mixing_sa(
                     prob,
                     mix_seed,
                     1 + int(n_epochs) * int(k_per_epoch),
                 )
+                mix_results.append((mix_seed, mix_bv, mix_calls))
                 outcomes.append((mix_bv, mix_calls))
+            metad_results = []
             if _metad_cv_supported(prob):
                 metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
                     seed + 1,
@@ -2054,6 +2111,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     sigma_rw=sigma_map,
                     best_pilot_pos=best_pilot_pos,
                 )
+                metad_results.append((int(seed) + 1, metad_bv, metad_calls))
                 pt_inner = max(1, candidate_budget // max(1, int(n_chains)))
                 pt_bv, pt_calls, _, _, _, _, _, _, _ = d.bgsa_pt_metad(
                     seed + 2,
@@ -2070,6 +2128,38 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     t_hot=t_hot,
                 )
                 outcomes.extend([(metad_bv, metad_calls), (pt_bv, pt_calls)])
+            initial_best = _finite_best_value(outcomes)
+            if _candidate_family_matches_best(mix_results, initial_best):
+                seen_mix_seeds = {mix_seed for mix_seed, _value, _calls in mix_results}
+                for mix_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if mix_seed in seen_mix_seeds:
+                        continue
+                    mix_bv, mix_calls = bayesian_mixing_sa(
+                        prob,
+                        mix_seed,
+                        1 + int(n_epochs) * int(k_per_epoch),
+                    )
+                    outcomes.append((mix_bv, mix_calls))
+            if _candidate_family_matches_best(metad_results, initial_best):
+                seen_metad_seeds = {
+                    metad_seed for metad_seed, _value, _calls in metad_results
+                }
+                for metad_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if metad_seed in seen_metad_seeds:
+                        continue
+                    metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
+                        metad_seed,
+                        n_epochs,
+                        candidate_budget,
+                        t_rw_map,
+                        e_map,
+                        L_map,
+                        q_map,
+                        pilot_calls=0,
+                        sigma_rw=sigma_map,
+                        best_pilot_pos=best_pilot_pos,
+                    )
+                    outcomes.append((metad_bv, metad_calls))
             return min(value for value, _calls in outcomes), pilot_calls + sum(
                 calls for _value, calls in outcomes
             )
