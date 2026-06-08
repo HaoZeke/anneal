@@ -512,10 +512,12 @@ fn additive_independence(
     if degree < 1 {
         return Err(PyValueError::new_err("degree must be positive"));
     }
-    let dim = low_vec.len();
-    // default pilot scales with dimension; the driver caps it below the budget
+    // The backfitting fit reuses every pilot point across all coordinates, so
+    // the pilot scales with the per-coordinate degree, not the dimension. A
+    // dimension-scaled pilot would swallow the whole budget on high-dimensional
+    // CUTEst problems and leave nothing to sample.
     let pilot = if n_pilot == 0 {
-        (16 * dim).max(8 * degree)
+        (32 * degree).max(256)
     } else {
         n_pilot
     };
