@@ -1534,7 +1534,8 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         if driver == "bgsa_auto":
             import anneal
 
-            if grad_kind == "native" and _has_finite_design_box(
+            core_qmc_available = hasattr(anneal, "qmc_polish")
+            if core_qmc_available and grad_kind == "native" and _has_finite_design_box(
                 prob
             ) and not _has_declared_cutest_bounds(prob):
                 auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
@@ -1549,7 +1550,9 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
             if int(prob.dim) <= int(n_chains) and not (
-                grad_kind == "native" and _has_finite_design_box(prob)
+                core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
             ):
                 local_screen_starts = int(n_chains) + int(prob.dim)
                 auto_best_start_polish = _run_cutest_qmc_polish(
