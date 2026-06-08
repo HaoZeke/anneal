@@ -1308,6 +1308,34 @@ def _bounded_polish_top_k(n_chains):
     return max(1, int(np.ceil(np.sqrt(float(n_chains)))))
 
 
+def _native_qmc_dense_dimension_is_covered(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) <= int(n_chains) * _bounded_polish_top_k(n_chains)
+
+
+def _native_qmc_polish_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    if _bounded_polish_dimension_is_covered(dim, n_chains):
+        return int(n_chains) + int(dim)
+    return int(n_chains) + int(np.ceil(np.sqrt(float(dim))))
+
+
+def _native_qmc_polish_budget(epoch_budget, dim, n_starts):
+    if epoch_budget < 1:
+        raise ValueError("epoch_budget must be positive")
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_starts < 1:
+        raise ValueError("n_starts must be positive")
+    return int(epoch_budget) + int(dim) * int(n_starts)
+
+
 def _covered_local_polish_budget(epoch_budget, n_chains):
     if epoch_budget < 1:
         raise ValueError("epoch_budget must be positive")
@@ -1400,6 +1428,27 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             elif _has_declared_cutest_bounds(
                 prob
             ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
+                if (
+                    grad_kind == "native"
+                    and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
+                ):
+                    native_starts = _native_qmc_polish_start_count(
+                        prob.dim, n_chains
+                    )
+                    auto_best_start_polish = _run_cutest_qmc_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        native_starts,
+                        _native_qmc_polish_budget(
+                            k_per_epoch, prob.dim, native_starts
+                        ),
+                        top_k=0,
+                    )
+                    if auto_best_start_polish is not None:
+                        return auto_best_start_polish
                 auto_best_start_polish = _run_cutest_qmc_polish(
                     anneal,
                     prob,
@@ -1420,6 +1469,20 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     seed,
                     int(n_chains),
                     _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                )
+                if auto_best_start_polish is not None:
+                    return auto_best_start_polish
+            elif _has_declared_cutest_bounds(prob) and grad_kind == "native":
+                native_starts = _native_qmc_polish_start_count(prob.dim, n_chains)
+                auto_best_start_polish = _run_cutest_qmc_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    native_starts,
+                    _native_qmc_polish_budget(k_per_epoch, prob.dim, native_starts),
+                    top_k=0,
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
