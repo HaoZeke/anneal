@@ -352,3 +352,90 @@ where
         n_polished,
     }
 }
+
+/// Refine replicated shifted low-discrepancy starts with bounded polish.
+pub fn shifted_qmc_projected_gradient_polish<O, G>(
+    obj: &O,
+    gradient: &G,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    n_replicates: usize,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    assert!(n_starts > 0, "n_starts must be positive");
+    assert!(
+        max_fevals_per_start > 0,
+        "max_fevals_per_start must be positive"
+    );
+    assert!(n_replicates > 0, "n_replicates must be positive");
+
+    let bounds = obj.bounds();
+    let mut best_pos = bounds.low.clone();
+    let mut best_val = f64::INFINITY;
+    let mut n_evals = 0usize;
+    let mut n_grads = 0usize;
+    let mut n_polished = 0usize;
+
+    for replica in 0..n_replicates {
+        let replica_seed = seed.wrapping_add(replica as u64);
+        let starts = eindir_core::shifted_low_discrepancy_points(
+            bounds,
+            n_starts,
+            crate::runner::qmc_skip_from_seed(replica_seed),
+            replica_seed,
+        );
+        let mut screened = Vec::with_capacity(n_starts);
+        for start in starts.outer_iter() {
+            let pos = bounds.clip(start);
+            let value = obj.eval(pos.view());
+            n_evals += 1;
+            if value.is_finite() {
+                if value < best_val {
+                    best_val = value;
+                    best_pos = pos.clone();
+                }
+                screened.push((value, pos));
+            }
+        }
+        screened.sort_by(|left, right| left.0.total_cmp(&right.0));
+
+        let polish_limit = if top_k == 0 {
+            screened.len()
+        } else {
+            top_k.min(screened.len())
+        };
+        for (_value, start) in screened.into_iter().take(polish_limit) {
+            let result = projected_gradient_polish(
+                obj,
+                gradient,
+                start,
+                max_fevals_per_start,
+                step0,
+                grad_tol,
+            );
+            n_evals += result.n_evals;
+            n_grads += result.n_grads;
+            n_polished += 1;
+            if result.best_val.is_finite() && result.best_val < best_val {
+                best_val = result.best_val;
+                best_pos = result.best_pos;
+            }
+        }
+    }
+
+    QmcPolishResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads,
+        n_starts: n_starts * n_replicates,
+        n_polished,
+    }
+}

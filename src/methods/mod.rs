@@ -27,7 +27,8 @@ pub use bayesian_pilot::{
     Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
 pub use local_polish::{
-    projected_gradient_polish, qmc_projected_gradient_polish, LocalPolishResult, QmcPolishResult,
+    projected_gradient_polish, qmc_projected_gradient_polish,
+    shifted_qmc_projected_gradient_polish, LocalPolishResult, QmcPolishResult,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
