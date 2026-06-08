@@ -592,8 +592,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-timeouts-per-target", type=int, default=0)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
-    parser.add_argument("--evict-cache", action="store_true",
-                        help="Clear the PyCUTEst cache before enumerating and loading targets.")
     return parser
 
 
