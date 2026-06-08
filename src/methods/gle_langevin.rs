@@ -19,6 +19,7 @@ use rand::SeedableRng;
 
 use crate::grad::Gradient;
 
+/// Characteristic frequency used when local curvature does not yield a finite estimate.
 pub const DEFAULT_GLE_OMEGA0: f64 = 0.2;
 const GLE_BAND_RATIO: f64 = 100.0;
 const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
