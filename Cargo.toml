@@ -16,13 +16,13 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [features]
 default = []
 capi = []
-python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/python"]
+python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
 [dependencies]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { git = "https://github.com/metatensor/dlpk.git", tag = "v0.1.5", features = ["ndarray", "half"] }
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "551130c3500badf6221bfa2cbee0b3648bd0009a" }
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "bf1ea5184a9f4a8e7d236a0fbd9a33548053e30a" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
