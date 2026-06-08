@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import sys
 import time
@@ -890,6 +891,7 @@ DRIVERS = [
     "mcmc_sa_sparse_budgeted",
     "pt_sa_budgeted",
     "bayesian_mixing_sa",
+    "additive_indep",
     "scipy_lbfgsb",
     "scipy_de",
     "scipy_dual_annealing",
@@ -2187,6 +2189,45 @@ def main():
                     wall_time_s=wt,
                     f_x0=f0,
                     solved=int(bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0),
+                )
+            )
+
+            # Rank-1 (mean-field) independence-sampler SA: the separable
+            # surrogate as a samplable tempered density, in the Rust core.
+            t0 = time.perf_counter()
+            try:
+                import anneal as _anneal_mod
+
+                add_budget = 1 + args.n_epochs * args.k_fixed
+                add_out = _anneal_mod.additive_independence(
+                    prob.fn,
+                    np.asarray(prob.low, dtype=np.float64),
+                    np.asarray(prob.high, dtype=np.float64),
+                    int(add_budget),
+                    seed=int(seed),
+                )
+                bv, nc = float(add_out["best_val"]), int(add_out["n_evals"])
+            except Exception as exc:
+                print(
+                    f"    additive_indep failed on {prob.name} seed {seed}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                bv, nc = float("nan"), 0
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="additive_indep",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(
+                        math.isfinite(bv)
+                        and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                    ),
                 )
             )
 
