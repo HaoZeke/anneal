@@ -47,6 +47,7 @@ class AnnealHybridConfig:
     gle_omega0: float | None = 0.2
     gle_dt: float = 0.2
     gle_n_epochs: int = 40
+    gle_min_dimension: int = 3
     scout_budget_divisor: int = 3
     scout_gle_divisor: int = 2
     qmc_min_starts: int = 2
@@ -262,7 +263,12 @@ def qmc_annealed_hybrid(
 
     gle_segment_budget = (
         max(config.gle_min_segment, counter.budget // config.gle_budget_divisor)
-        if (use_gle and jac is not None and HAS_LIBRARY_GLE)
+        if (
+            use_gle
+            and jac is not None
+            and HAS_LIBRARY_GLE
+            and dim >= config.gle_min_dimension
+        )
         else 0
     )
 
@@ -337,6 +343,7 @@ def qmc_annealed_hybrid(
                 use_gle
                 and jac is not None
                 and HAS_LIBRARY_GLE
+                and dim >= config.gle_min_dimension
                 and counter.n - last_scout >= scout_every // config.scout_gle_divisor
             ):
                 remaining_units = counter.budget - counter.n
