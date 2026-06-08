@@ -66,7 +66,10 @@ def cutest_env() -> dict:
         "CUTEST": os.path.join(bench, "CUTEst", "install"),
         "MASTSIF": os.path.join(bench, "sif"),
         "MYARCH": "pc64.lnx.gfo",
-        "PYCUTEST_CACHE": os.path.join(bench, "cache"),
+        "PYCUTEST_CACHE": os.environ.get(
+            "PYCUTEST_CACHE",
+            os.path.join(bench, "cache"),
+        ),
     }
     required_paths = {
         "SIFDecode decoder": os.path.join(env["SIFDECODE"], "bin", "sifdecoder"),
