@@ -2225,35 +2225,40 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 mix_results.append((mix_seed, mix_bv, mix_calls))
                 outcomes.append((mix_bv, mix_calls))
             tensor_results = []
-            for tensor_seed in primary_mix_seeds:
-                tensor_result = _run_cutest_additive_independence(
-                    anneal,
-                    prob,
-                    tensor_seed,
-                    n_epochs,
-                    k_per_epoch,
-                )
-                if tensor_result is None:
-                    continue
-                tensor_bv, tensor_calls = tensor_result
-                tensor_results.append((tensor_seed, tensor_bv, tensor_calls))
-                outcomes.append((tensor_bv, tensor_calls))
             gle_results = []
-            for gle_seed in primary_mix_seeds:
-                gle_result = _run_cutest_gle_langevin(
-                    anneal,
-                    prob,
-                    grad_fn,
-                    grad_kind,
-                    gle_seed,
-                    n_epochs,
-                    k_per_epoch,
-                )
-                if gle_result is None:
-                    continue
-                gle_bv, gle_calls = gle_result
-                gle_results.append((gle_seed, gle_bv, gle_calls))
-                outcomes.append((gle_bv, gle_calls))
+            tensor_gle_covered = _bounded_polish_dimension_is_covered(
+                prob.dim,
+                n_chains,
+            )
+            if tensor_gle_covered:
+                for tensor_seed in primary_mix_seeds:
+                    tensor_result = _run_cutest_additive_independence(
+                        anneal,
+                        prob,
+                        tensor_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if tensor_result is None:
+                        continue
+                    tensor_bv, tensor_calls = tensor_result
+                    tensor_results.append((tensor_seed, tensor_bv, tensor_calls))
+                    outcomes.append((tensor_bv, tensor_calls))
+                for gle_seed in primary_mix_seeds:
+                    gle_result = _run_cutest_gle_langevin(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        gle_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if gle_result is None:
+                        continue
+                    gle_bv, gle_calls = gle_result
+                    gle_results.append((gle_seed, gle_bv, gle_calls))
+                    outcomes.append((gle_bv, gle_calls))
             metad_results = []
             if _metad_cv_supported(prob):
                 metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
