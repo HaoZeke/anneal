@@ -44,6 +44,10 @@ class AnnealHybridConfig:
     additive_degree: int = 8
     gle_min_segment: int = 10
     gle_budget_divisor: int = 20
+    gle_shared_budget_units_per_step: int = 2
+    gle_omega0: float | None = 0.2
+    gle_dt: float = 0.2
+    gle_n_epochs: int = 40
     scout_budget_divisor: int = 3
     scout_gle_divisor: int = 2
     qmc_min_starts: int = 2
@@ -316,8 +320,12 @@ def qmc_annealed_hybrid(
                 and HAS_LIBRARY_GLE
                 and counter.n - last_scout >= scout_every // config.scout_gle_divisor
             ):
-                maxf = min(gle_segment_budget, counter.budget - counter.n)
-                if maxf > 0:
+                remaining_units = counter.budget - counter.n
+                maxf = min(
+                    gle_segment_budget,
+                    remaining_units // config.gle_shared_budget_units_per_step,
+                )
+                if maxf >= 2:
                     gle_res = _library_gle_langevin()(
                         counter,
                         jac,
@@ -325,6 +333,9 @@ def qmc_annealed_hybrid(
                         high,
                         max_fevals=maxf,
                         seed=int(rng.integers(1 << 31)),
+                        omega0=config.gle_omega0,
+                        dt=config.gle_dt,
+                        n_epochs=config.gle_n_epochs,
                     )
                     if (
                         isinstance(gle_res, dict)
