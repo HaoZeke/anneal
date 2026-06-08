@@ -24,6 +24,7 @@ from anneal._core import (
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     qmc_polish as _core_qmc_polish,
+    shifted_qmc_polish as _core_shifted_qmc_polish,
     additive_independence as _core_additive_independence,
     gle_langevin as _core_gle_langevin,
     run,
@@ -100,6 +101,37 @@ def qmc_polish(
         int(n_starts),
         int(max_fevals_per_start),
         int(seed),
+        float(step0),
+        float(grad_tol),
+        int(top_k),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def shifted_qmc_polish(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    n_starts: int,
+    max_fevals_per_start: int,
+    seed: int = 0,
+    n_replicates: int = 1,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+    top_k: int = 0,
+):
+    """Refine shifted low-discrepancy replicas with bounded polish."""
+    out = _core_shifted_qmc_polish(
+        obj_fn,
+        grad_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(n_starts),
+        int(max_fevals_per_start),
+        int(seed),
+        int(n_replicates),
         float(step0),
         float(grad_tol),
         int(top_k),
@@ -193,6 +225,7 @@ __all__ = [
     "pilot_draws_qmc",
     "polish",
     "qmc_polish",
+    "shifted_qmc_polish",
     "additive_independence",
     "gle_langevin",
     "run",
