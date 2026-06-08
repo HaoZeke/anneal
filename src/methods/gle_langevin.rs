@@ -12,12 +12,12 @@
 //! is handled by the noise spectrum exactly as the `1/sqrt(D)` proposal scale
 //! handles dimension; both are Move-slot transforms every driver could read.
 
-use eindir_core::{GleThermostat, Objective, optimal_sampling_drift};
+use eindir_core::{optimal_sampling_drift, GleThermostat, Objective};
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 
-use crate::grad::Gradient;
+use eindir_core::Gradient;
 
 /// Characteristic frequency used when local curvature does not yield a finite estimate.
 pub const DEFAULT_GLE_OMEGA0: f64 = 0.2;
@@ -240,7 +240,11 @@ mod tests {
     }
     impl Objective<f64> for IllConditioned {
         fn eval(&self, x: ArrayView1<f64>) -> f64 {
-            self.a.iter().zip(x.iter()).map(|(&ai, &xi)| ai * xi * xi).sum()
+            self.a
+                .iter()
+                .zip(x.iter())
+                .map(|(&ai, &xi)| ai * xi * xi)
+                .sum()
         }
         fn bounds(&self) -> &Bounds<f64> {
             &self.bounds
@@ -273,7 +277,10 @@ mod tests {
             Array1::from_elem(dim, 5.0),
             0.0,
         );
-        let obj = IllConditioned { bounds, a: a.clone() };
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
         let grad = IllGrad { a };
         let centre_val = obj.eval(Array1::<f64>::zeros(dim).view()); // 0 at the optimum
         let res = gle_langevin_sa(&obj, &grad, 0, 4000, 0.2, 0.2, 40);

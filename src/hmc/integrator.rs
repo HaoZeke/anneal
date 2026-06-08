@@ -11,8 +11,8 @@
 
 use ndarray::Array1;
 
-use crate::grad::Gradient;
 use crate::hmc::momentum::Momentum;
+use eindir_core::Gradient;
 
 /// Omelyan minimum-norm coefficient for the second-order PQPQP update.
 pub const OMELYAN_LAMBDA: f64 = 0.193_183_327_503_783_6;

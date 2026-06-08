@@ -4,10 +4,10 @@
 
 use anneal_core::cool::LogCool;
 use anneal_core::geometric_ladder;
-use anneal_core::grad::FiniteDiffGradient;
 use anneal_core::hmc::{GaussianMomentum, NutsSaSampler, QGaussianMomentum};
 use anneal_core::run_rs;
 use anneal_core::ParallelTemperingSampler;
+use eindir_core::FiniteDiffGradient;
 
 use eindir_core::objectives::StybTang2D;
 
@@ -62,15 +62,7 @@ fn nuts_sa_drops_into_parallel_tempering() {
     let obj = StybTang2D::new();
     let grad = FiniteDiffGradient::new(StybTang2D::new());
     let cool = LogCool::new(5.0_f64, 2.0);
-    let sampler = NutsSaSampler::new(
-        obj,
-        grad,
-        cool.clone(),
-        GaussianMomentum,
-        0.1,
-        5.0,
-        4,
-    );
+    let sampler = NutsSaSampler::new(obj, grad, cool.clone(), GaussianMomentum, 0.1, 5.0, 4);
     let temps = geometric_ladder(0.5, 10.0, 3);
     let pt = ParallelTemperingSampler::new(sampler, temps, 20, 5);
     let result = pt.run(&cool, 10, 99);

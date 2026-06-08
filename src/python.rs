@@ -14,8 +14,8 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use eindir_core::{Bounds, Objective};
 use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
+use eindir_core::{Bounds, Objective};
 
 use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};

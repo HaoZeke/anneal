@@ -25,10 +25,10 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
 use crate::cool::Cooling;
-use crate::grad::Gradient;
 use crate::history::State;
 use crate::hmc::momentum::Momentum;
 use crate::sampler::Sampler;
+use eindir_core::Gradient;
 
 /// Diagnostic for a single NUTS step.
 #[derive(Clone, Debug)]
