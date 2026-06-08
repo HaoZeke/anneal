@@ -10,12 +10,11 @@
 //! loop control. This module ships the MCMC-style point of the
 //! typed algebra.
 //!
-//! See the IISE manuscript Section 8.3 "Extension to distributed and
-//! parallel-tempering settings" and the design notes
-//! for the full unification story.
+//! This is the same fixed-temperature kernel used by parallel tempering; only
+//! the epoch stopping rule changes.
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::history::{EpochLine, History, State};
 use crate::sampler::Sampler;

@@ -12,13 +12,8 @@
 //!   5. Accepts the candidate with the standard HMC-Metropolis
 //!      probability `min(1, exp(H_old - H_new))`.
 //!
-//! Phase 3a ships Gaussian + q-Gaussian momentum (both inherit the
-//! Gaussian U-turn predicate via the `Momentum` trait default).
-//! Phase 3b will refine the U-turn for q-Gaussian when the
-//! `Z_q(p) > 0` guard becomes meaningful at higher q.
-//!
-//! See `the design notes`
-//! Section "NUTS Phase 3 design" for the full pseudocode.
+//! Gaussian and q-Gaussian momentum both use the `Momentum` trait's U-turn
+//! predicate, with divergence guarded by the Hamiltonian threshold.
 
 use eindir_core::{Bounds, FPair, Objective};
 use ndarray::{Array1, ArrayView1};

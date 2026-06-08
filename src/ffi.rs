@@ -1,5 +1,5 @@
-//! C ABI surface. Filled in once the typed algebra lands; the only export
-//! today is the package version string for downstream sanity checks.
+//! C ABI surface. The exported package version lets downstream loaders check
+//! the linked `anneal-core` build.
 
 use std::os::raw::c_char;
 

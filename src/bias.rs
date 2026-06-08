@@ -1,15 +1,15 @@
 //! `trait Bias<S>`: cost-augmenting operator for enhanced-sampling
 //! methods inside SA. The standard well-tempered metadynamics
 //! (Barducci/Bussi/Parrinello 2008) is the canonical impl; the trait
-//! is open so SGOOP-style or VES bias kernels can land later.
+//! is open so SGOOP-style or VES bias kernels can implement the same surface.
 //!
 //! Composition with the existing typed algebra:
 //!   - `Bias` augments the cost: `F_eff(x) = F(x) + V(s(x))`.
 //!   - `Sampler` sees `F_eff` via a wrapped objective.
 //!   - The bias is a stateful component: `deposit` mutates internal
 //!     state, `potential` reads it.
-//!
-//! See `the design notes`.
+//! This keeps biasing in the objective transform instead of folding it into
+//! the sampler implementation.
 
 use ndarray::{Array1, Array2, ArrayView1};
 

@@ -1,11 +1,7 @@
-//! `trait Exchange<T>`: the parallel-tempering swap operator that
-//! anneal v0.4.0 promotes from the Python demo into a typed algebra
-//! primitive.
-//!
-//! The IISE manuscript Section 8.3 calls Exchange "the next paper":
-//! parallel tempering with M chains at distinct temperatures with
-//! periodic chain-state swaps. The composition law E1 (detailed balance
-//! across the swap) is satisfied by Metropolis acceptance.
+//! `trait Exchange<T>`: the parallel-tempering swap operator that handles
+//! periodic swaps between chains at distinct temperatures. The composition
+//! law E1 (detailed balance across the swap) is satisfied by Metropolis
+//! acceptance.
 //!
 //! Within the typed algebra:
 //!   - Cool, Neigh, Move, Accept stay per-chain unchanged.
@@ -16,9 +12,6 @@
 //!     and runs M of them in parallel at a temperature ladder, calling
 //!     the Exchange every `swap_period` steps to attempt adjacent-pair
 //!     swaps.
-//!
-//! See `the design notes`
-//! Section P3 for the full design.
 
 use num_traits::Float;
 
@@ -36,8 +29,7 @@ pub trait Exchange<T: Float>: Send + Sync {
 
     /// Optional witness for E1 (detailed balance). Default returns true
     /// since the Metropolis swap below satisfies E1 by construction;
-    /// custom `Exchange` impls can override and the
-    /// `ParallelTemperingSampler::checked_with_sweep` (future) can run
+    /// custom `Exchange` impls can override when they need executable
     /// proptest sweeps.
     fn satisfies_detailed_balance(&self) -> bool {
         true
@@ -94,7 +86,11 @@ impl<T: Float + Send + Sync> Exchange<T> for TsallisExchange<T> {
             return T::zero();
         }
         let p = bracket.powf(T::one() / (self.q - T::one()));
-        if p > T::one() { T::one() } else { p }
+        if p > T::one() {
+            T::one()
+        } else {
+            p
+        }
     }
 }
 
@@ -151,8 +147,9 @@ mod tests {
         // Mildly favourable swap: f_i=2 cold, f_j=1 hot, T_i=0.5, T_j=2.
         let a_t = t.swap_accept_prob(2.0_f64, 0.5, 1.0, 2.0);
         let a_m = m.swap_accept_prob(2.0_f64, 0.5, 1.0, 2.0);
-        assert_eq!(a_m, 1.0); // log_alpha = 1.5 > 0
-        // Tsallis: bracket = 1 - 0.5*1*1.5 = 0.25; p = 0.25^{1/0.5} = 0.0625
+        // Metropolis gives log_alpha = 1.5 > 0 and clamps to one.
+        assert_eq!(a_m, 1.0);
+        // Tsallis: bracket = 1 - 0.5*1*1.5 = 0.25; p = 0.25^{1/0.5}.
         assert!(a_t > 0.0 && a_t < 1.0);
         assert!((a_t - 0.0625).abs() < 1e-9);
     }

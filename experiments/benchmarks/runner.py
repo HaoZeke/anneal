@@ -9,9 +9,8 @@ optimum and a per-problem tolerance (default `max(1e-6, 0.01 * |f_star|)`).
 Use NaN for fevals/best_val on failed runs so the profile helpers
 treat them as `+inf`.
 
-Solvers wired today: `boltzmann`, `fast`, `gsa` from the precision-
-aware Python runner. `scipy_dual_annealing` and the CUTEst-driven
-solvers slot in as additional columns once available.
+The solver table is data-driven so additional runners can be added as
+columns without changing the profile format.
 """
 
 from __future__ import annotations

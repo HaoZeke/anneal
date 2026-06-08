@@ -6,9 +6,6 @@
 //! sampler is wired. Our `run_rs` previously monomorphised on five type
 //! parameters `<O, C, N, M, A>`; this trait gives the driver a single
 //! type bound and a single dispatch point.
-//!
-//! See `the design notes`
-//! task A1 for the design rationale.
 
 use eindir_core::{Bounds, FPair};
 use ndarray::Array1;
@@ -27,8 +24,8 @@ use crate::variant::SaVariant;
 ///
 /// The trait is intentionally minimal: state, temperature schedule, and
 /// proposal+accept logic all live behind `step`. This lets the driver
-/// loop (`run_rs`) treat any sampler -- preset, custom, or future
-/// adaptive variants -- through a single dispatch point.
+/// loop (`run_rs`) treat preset, custom, and adaptive variants through a
+/// single dispatch point.
 pub trait Sampler<T: Float>: Send + Sync {
     /// Draws an initial state from the sampler's prior (uniform on the
     /// objective's bounds for the shipped impl).

@@ -1,8 +1,7 @@
 """Dimension-collapse + Chebyshev surrogate for the CUTEst drivers.
 
-This is the Python side of the typed `Obj`-transform that lands in
-`eindir-core` as `ReducedObjective` and `ChebyshevSurrogate` (v0.4.0). A
-high-dimensional objective is collapsed onto a low-dimensional active
+This is the Python side of the typed objective transform. A high-dimensional
+objective is collapsed onto a low-dimensional active
 subspace and, after a pilot phase, replaced by a cheap total-degree
 Chebyshev model with an analytic gradient.
 
@@ -31,7 +30,7 @@ def total_degree_terms(k: int, degree: int) -> list[tuple[int, ...]]:
 
     Total-degree truncation keeps the basis size polynomial in `k` rather
     than the `(degree+1)**k` of a tensor-product grid, which is what makes a
-    Chebyshev model usable once the active subspace has collapsed the search
+    Chebyshev model usable after the active subspace has collapsed the search
     to a few coordinates.
     """
     terms = []

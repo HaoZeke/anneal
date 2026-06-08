@@ -4,12 +4,12 @@
 //!
 //! Composition: PT is orthogonal to the inner Sampler. Whether the
 //! inner kernel is random-walk Metropolis (`SaVariant`),
-//! HMC (`HmcSaSampler`), or a future custom sampler, PT lifts it to
-//! a multi-temperature ensemble.
+//! HMC (`HmcSaSampler`), or a custom sampler, PT lifts it to a
+//! multi-temperature ensemble.
 
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 use crate::cool::Cooling;
 use crate::exchange::{Exchange, MetropolisExchange};
@@ -57,7 +57,7 @@ pub fn geometric_ladder(t_cold: f64, t_hot: f64, n_chains: usize) -> Vec<f64> {
 /// PT driver. Constraint: the inner sampler's `Cooling` is bypassed --
 /// each chain operates at a fixed temperature from the ladder, NOT at
 /// the cooling schedule's epoch-indexed value. PT and cooling are
-/// orthogonal; combining them is future work.
+/// orthogonal in this driver.
 pub struct ParallelTemperingSampler<S: Sampler<f64>, E: Exchange<f64> = MetropolisExchange> {
     /// Shared inner-sampler logic.
     pub sampler: S,

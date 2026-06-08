@@ -1,11 +1,9 @@
 //! `run_rs`: the pure-Rust SA driver loop. Drives any `Sampler<f64>`
-//! and returns a `History`. Pre-A1 this took the five-parameter
-//! `SaVariant` directly; the `Sampler` trait extraction (Stan-style)
-//! lets the loop treat preset variants and future adaptive samplers
-//! through a single dispatch point. See `src/sampler.rs` for rationale.
+//! and returns a `History`. The `Sampler` trait keeps the driver loop
+//! independent of the concrete proposal and acceptance machinery.
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History, State};

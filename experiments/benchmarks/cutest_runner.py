@@ -9,9 +9,7 @@ to clone+build CUTEst into .bench/. Pass the resulting paths through
 Selected manifest: 12 unconstrained or bound-constrained CUTEst
 problems with `n in [2, 30]`, hand-picked to span the standard
 test-set difficulty spectrum (Rosenbrock-like ravines, Powell
-singularity, trigonometric multi-modality, etc.). The hand-pick is
-the v0.3.x manifest; v0.4 will switch to pycutest.find_problems()
-once the SIF classification index is sorted out.
+singularity, trigonometric multi-modality, etc.).
 """
 
 from __future__ import annotations
