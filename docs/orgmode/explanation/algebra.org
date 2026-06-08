@@ -1,0 +1,54 @@
+#+TITLE: The Typed Component Algebra and the Four Laws
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+.. admonition:: Reference
+
+   The five signatures, L1-L4, the TLA+ invariants (TypeOK,
+   BestMonotone, SymmetricNeighbors, MonotoneCooling), and the
+   liveness properties are the subject of the IISE manuscript
+   (INFORMS Journal on Computing, under review). The TLA+
+   sources live in =tla/=; the SymPy witnesses that the four
+   classical families are limit cases live in =proofs/=.
+#+end_export
+
+* The five components (signatures)
+
+- =Obj= :: Only thing that knows the objective F (and its gradient when supplied). Every driver ultimately calls =obj.eval= or =grad.grad=.
+- =Cool= :: Only thing that knows the temperature schedule T(k). Must be monotone non-increasing (L4).
+- =Neigh= :: Knows the neighbourhood / scale at the current T. For classical: 1/sqrt(D) or temperature-dependent width.
+- =Move= :: Knows the actual proposal shape at T. This is where GLE drift matrices, rank-1 independence products, Tsallis visits, etc. live.
+- =Accept= :: Knows the acceptance probability. Must satisfy L3 (downhill = 1) and the finite-precision contract when it claims exactness.
+
+The =Sampler= trait (initial_state, step, qmc_bounds, initial_state_from_position) is the runtime realisation of an object that fills all five slots.
+
+* The four laws (plain English)
+
+- L1 (symmetry) :: If y is a neighbour of x then x is a neighbour of y. Required for the SymmetricNeighbors TLA+ invariant and for detailed balance of the inner Metropolis step.
+- L2 (support) :: The proposal can reach any point in the box from any other point in finitely many steps. Required for the eventual reach of the global best (liveness).
+- L3 (downhill) :: Any proposal that strictly decreases F is accepted with probability 1. Required for BestMonotone (the recorded best never worsens).
+- L4 (monotone cooling) :: T(k+1) <= T(k). Required for MonotoneCooling and for the Hajek-style a.s. convergence arguments that carry over to the production phase after a Bayesian pilot.
+
+These laws are what let one change to a shared slot implementation serve every driver without breaking the safety or liveness properties proved in TLA+.
+
+* Reuse table (the concrete payoff)
+
+A single implementation change at one slot appears in every driver that uses that slot:
+
+- Dimension scale (Neigh/Move) -> classical + GLE + PT
+- Rank-1 independence (Move + surrogate Obj) -> additive driver and any future independence proposal
+- GLE drift matrix (Move) -> every gradient-capable driver (no per-preset GLE code)
+- Batched device kernel (the runner) -> =run_device= and =run_ensemble= for Boltzmann, Fast, Gsa, GLE, ...
+- Noise-aware Accept (the three channels) -> every preset and every advanced driver
+- QMC polish (deterministic Cool + projected-gradient Move + Armijo Accept) -> post-processing after any stochastic phase
+
+* How every advanced driver is still just the algebra
+
+- Bayesian pilot :: only ever writes Cool/Neigh/Move hyperparameters; the inner chains are ordinary Samplers.
+- Bayesian mixer :: orthogonal lift that chooses which Sampler receives the next proposal; the per-chain Beta logic is outside the five slots.
+- Additive independence :: fits a surrogate that serves as Obj for the true evaluations, Move for the product proposals, and Accept (Metropolis) on the true F; tempering re-uses the Cool slot.
+- GLE :: the drift matrix + BAB propagator is exactly a Move implementation; the rest of the driver is a standard Langevin skeleton.
+- Polish (QMC or shifted) :: deterministic Cool that goes to zero, Move = projected Armijo, Accept = Armijo test.
+- Parallel tempering / mcmc_sa :: PT is any inner Sampler + geometric ladder (Cool) + swap (new Exchange component); mcmc_sa is the Gelman-Rubin termination variant of the fixed-K loop. Both still obey the same five signatures and L1-L4.
+
+See the family subsections in [[file:../architecture.org][architecture]] for the "on a random problem" numbers and the exact source links.

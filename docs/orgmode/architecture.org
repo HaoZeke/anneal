@@ -31,19 +31,50 @@ The Rust crate produces three artefacts:
 - *C++.* The hand-written =include/anneal-core.hpp= wraps the C ABI
   in =namespace anneal= for ergonomic C++ use.
 
-* Method Families
+* The five signatures (summary)
 
-- *Component presets.* =Boltzmann=, =Fast=, and =Gsa= instantiate the
-  five typed SA signatures directly.
-- *Bayesian BGSA.* The CUTEst auto portfolio screens HMC, PT-hybrid,
-  Bayesian-mixing, metadynamics, and local-polish candidates under one
-  objective interface.
-- *QMC polish.* =qmc_polish= and =shifted_qmc_polish= use bounded
-  low-discrepancy designs from =eindir= and expose replicated shifts
-  through the Python API.
-- *Tensor independence.* =additive_independence= fits a rank-1
-  additive/tensor surrogate and samples tempered independence
-  proposals corrected against the true objective.
-- *Colored-noise dynamics.* =gle_langevin= uses a generalized
-  Langevin thermostat with an optimal-sampling drift matrix from
-  =eindir=.
+See [[file:explanation/algebra.org][algebra]] for the full types and the mapping to the TLA+ invariants. In one sentence each:
+
+- =Obj= is the only component that knows F.
+- =Cool= is the only component that knows the schedule T(k).
+- =Neigh= knows the scale at T.
+- =Move= knows the proposal shape at T (this is where GLE, independence, and the classical visit distributions live).
+- =Accept= knows the acceptance rule (and the three finite-precision channels).
+
+* The four laws (summary)
+
+L1 symmetry, L2 support, L3 downhill=1, L4 monotone in T. Each is required both for the TLA+ safety invariants (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling) and for the "one change serves all" property.
+
+* Method Families (detailed)
+
+** Classical presets (Boltzmann, Fast, Gsa)
+
+Slots: Cool + Neigh/Move (the three families differ only in those three slots). On a 2-D Styblinski-Tang problem all three reach the known global basin from the same QMC start in < 2000 evaluations; the only visible difference is the tail behaviour of the proposal (Gaussian vs Cauchy vs Tsallis). Payoff: the orchestrator, device kernel, and Accept are identical for all three. Source: =src/variant.rs= and the preset constructors in =python/anneal/__init__.py=.
+
+** Bayesian pilot (bayesian_pilot.rs)
+
+Slots: only ever writes Cool/Neigh/Move hyperparameters. Prior draws (logN on T0/sigma, truncated on q_v), short chains, three-term Laplace posterior (prior + Roberts-Rosenthal 0.234 on logit scale + improvement term), MAP + warm-start. q_v is the continuous model-selection axis between BSA (q_v=1), FSA (q_v=2), and heavy-tail. On a 5-D quadratic the pilot with 20 short chains typically returns a (T0, sigma, q_v) triple that lets a 100-epoch production run beat a hand-tuned classical baseline. Source: =src/methods/bayesian_pilot.rs=.
+
+** Bayesian mixer / bGSA auto (bayesian_mixing.rs)
+
+Slots: orthogonal lift over any inner Sampler. Single =max_proposals= knob, auto n_chains = min(budget/64, sqrt(dim)) clamped 2-4, QMC starts via =eindir= when bounds present, per-chain Beta(4/1,4) on "produced new global best", Thompson sample every step with 0.05 incumbent guard. The 6-step trace in the Bayesian tutorial shows the alpha/beta updates and the guard in action. Payoff: the user never chooses n_chains or per-chain schedules; the same mixer works around a classical preset or a GLE inner. Source: =src/methods/bayesian_mixing.rs= and the Python re-implementation in =experiments/scripts/demo_bgsa.py=.
+
+** GLE-Langevin (gle_langevin.rs + eindir gle.rs)
+
+Slots: Move (the GLE object). White-noise Langevin critically damps one frequency; GLE uses ns auxiliary momenta + optimal_sampling_drift matrix A so the noise spectrum flattens efficiency across [omega0, 100*omega0]. BAB propagator, stationary reseed per epoch, exact matrix_exp + ldl_sqrt. On a 5-D Rastrigin the colored-noise version with the fitted drift reaches lower values in the same budget than a plain Langevin at the same omega0. Payoff: the same fitted drift matrix from =eindir= is dropped into the Move slot of any gradient-capable driver; no per-preset GLE code exists. Source: =src/methods/gle_langevin.rs=.
+
+** Additive / rank-1 tensor independence (additive_independence.rs)
+
+Slots: Obj (surrogate for fitting), Move (product of 1-D tempered marginals), Accept (Metropolis on true F), Cool (by tempering). Pilot fits separable Chebyshev surrogate on true Obj, then per-epoch draws full coordinate vector from the product, O(d) per proposal. On a separable 20-D problem the acceptance floor stays high while classical methods collapse. Payoff: one fitted object serves four slots; dimension-free behaviour appears automatically for any separable objective. Source: =src/methods/additive_independence.rs=.
+
+** Local / QMC / shifted-QMC polish (local_polish.rs)
+
+Slots: Cool (deterministic schedule to zero), Move (projected-gradient backtracking Armijo on a bounded box), Accept (Armijo test). QMC version screens low-discrepancy starts (or shifted replicates), sends top-k to polish. Exposed as the deterministic last mile after any stochastic driver. On the output of a short Bayesian mixer run the polish typically recovers another 1-2 digits. Payoff: the same Armijo logic and low-discrepancy generator are used whether you call =polish=, =qmc_polish=, or =shifted_qmc_polish=. Source: =src/methods/local_polish.rs= and =python/anneal/__init__.py= wrappers.
+
+** Parallel tempering and mcmc_sa
+
+PT is an orthogonal lift (any inner Sampler + geometric ladder (Cool) + swap). mcmc_sa is the Gelman-Rubin termination variant of the fixed-K loop. Both still obey the same five signatures and L1-L4. Source: =src/methods/parallel_tempering.rs= and =src/methods/mcmc_sa.rs=.
+
+* Layout (implementation)
+
+(The original crate layout section continues below; the family descriptions above are the "deep" content required by the maximal docs design.)

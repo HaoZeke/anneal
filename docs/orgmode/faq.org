@@ -8,3 +8,7 @@ MIT. See =LICENSE= in the repository root.
 
 See =CITATION.cff= in the repository root, or use the Zenodo DOI
 badge in the README.
+
+* Driver choice, Bayesian mixer, gradients, precision channels, reproducibility
+
+See [[file:howto/faq.org][howto/faq]] (the Diataxis how-to layer). The questions that were previously collected here now live with the short recipes.

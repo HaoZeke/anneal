@@ -1,0 +1,37 @@
+#+TITLE: Presets and Advanced Drivers
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Classical (values only)
+
+- =Boltzmann(t_init, sigma)= :: Logarithmic cooling + Gaussian + Metropolis.
+- =Fast(t_init, gamma)= :: Reciprocal cooling + Cauchy + Metropolis.
+- =Gsa(t_init, q_v, q_a)= :: Tsallis cooling + Tsallis visit + Tsallis accept.
+
+All called via =run(obj, low, high, preset, n_epochs, steps_per_epoch, seed)=.
+
+* Pilot and low-discrepancy
+
+- =pilot_draws_qmc(n, seed)= -> (n,3) array of (T0, sigma, q_v).
+- =low_discrepancy_points(low, high, n, skip=1)= .
+
+* Polish (require grad)
+
+- =polish(obj, grad, low, high, x0, max_fevals=200, ...)=
+- =qmc_polish(obj, grad, low, high, n_starts, max_fevals_per_start, ...)=
+- =shifted_qmc_polish(..., n_replicates=1, ...)=
+
+* Advanced drivers
+
+- =additive_independence(obj, low, high, max_fevals, seed=0, degree=8, ... n_pilot=0)= (values only, rank-1 surrogate).
+- =gle_langevin(obj, grad, low, high, max_fevals, seed=0, omega0=0.2, dt=0.2, n_epochs=40)= (gradient, colored noise).
+
+* Device and ensemble (same kernel)
+
+- =run_device= (single chain, NumPy or CuPy bounds)
+- =run_ensemble= (batched, n_chains, same kernel)
+
+* HMC / QMC variants (also exposed)
+
+- =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and tests for current signatures).
+
+All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device=).

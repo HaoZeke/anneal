@@ -1,0 +1,11 @@
+#+TITLE: Glossary
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+- =Obj=, =Cool=, =Neigh=, =Move=, =Accept= :: The five typed components. See [[file:../explanation/algebra.org][algebra]].
+- L1-L4 :: The four composition laws. See [[file:../explanation/algebra.org][algebra]].
+- QMC :: Quasi-Monte Carlo (low-discrepancy sequences, here used for pilot starts and polish multistart).
+- GLE :: Generalized Langevin equation (colored-noise thermostat with optimal-sampling drift).
+- BSA / FSA / GSA :: Boltzmann, Fast, and Generalized (Tsallis) simulated annealing.
+- MAP :: Maximum a posteriori (the point estimate returned by the Bayesian pilot).
+- Thompson sampling :: Draw from each arm's posterior and pick the max (used by the mixer on the per-chain Beta posteriors).
+- BAB propagator :: The B-A-B splitting integrator used by the GLE move.

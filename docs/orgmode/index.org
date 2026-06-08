@@ -71,6 +71,10 @@ TLA+ invariants they enable.
    :maxdepth: 1
    :caption: How-to Guides
 
+   howto/install
+   howto/choose-driver
+   howto/precision-policy
+   howto/faq
    faq
 #+end_export
 
@@ -80,6 +84,9 @@ TLA+ invariants they enable.
    :caption: Explanation
 
    architecture
+   explanation/algebra
+   explanation/bayesian-details
+   explanation/gle-mechanics
 #+end_export
 
 #+begin_export rst
@@ -88,6 +95,8 @@ TLA+ invariants they enable.
    :caption: Reference
 
    spec
+   reference/glossary
+   reference/presets-and-advanced
    bindings
    device
    changelog
@@ -100,6 +109,7 @@ TLA+ invariants they enable.
    :caption: Development
 
    contributing
+   dev/best_practices
    code_of_conduct
 #+end_export
 
