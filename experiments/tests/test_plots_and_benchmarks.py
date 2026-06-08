@@ -4003,6 +4003,78 @@ def test_sota_cutest_native_gradient_polish_consumes_budget():
     assert np.isfinite(best)
 
 
+def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    calls = {"bounds": 0, "objective": 0, "qmc": 0}
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            calls["bounds"] += 1
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            calls["objective"] += 1
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
+        calls["qmc"] += 1
+        x = np.array([0.25, -0.5], dtype=np.float64)
+        value = objective.fn(x)
+        grad = objective.grad_fn(x)
+        assert np.all(np.isfinite(grad))
+        assert n_starts >= 2
+        assert max_fevals_per_start >= 1
+        assert kwargs["top_k"] >= 1
+        return {
+            "best_val": min(-3.0, value),
+            "best_pos": np.zeros(2),
+            "n_evals": 1,
+            "n_grads": 1,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_polish_objective=qmc_polish_objective,
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    counter = sota_cutest.Counter(sphere, budget=48)
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        dim=2,
+        grad=grad,
+        rng=np.random.default_rng(19),
+        n_polish=2,
+        k_polish=1,
+    )
+
+    assert calls == {"bounds": 1, "objective": 1, "qmc": 1}
+    assert counter.n <= counter.budget
+    assert counter.objective_evals > 0
+    assert counter.grad_evals > 0
+    assert best <= -3.0
+
+
 def test_anneal_sota_low_discrepancy_population_is_deterministic():
     from experiments.anneal_sota import low_discrepancy_population
 
