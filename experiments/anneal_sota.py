@@ -50,6 +50,13 @@ class AnnealHybridConfig:
     gle_min_dimension: int = 3
     scout_budget_divisor: int = 3
     scout_gle_divisor: int = 2
+    elite_zoom_budget_divisor: int = 12
+    elite_zoom_min_budget: int = 8
+    elite_zoom_elite_count: int = 3
+    elite_zoom_candidates_per_member: int = 4
+    elite_zoom_levels: int = 5
+    elite_zoom_radius_fraction: float = 0.2
+    elite_zoom_radius_shrink: float = 0.25
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
     native_bounds_slack: float = 1e-9
@@ -161,6 +168,89 @@ def _metropolis_accept(
 def _best_finite(*values: float) -> float:
     finite = [float(v) for v in values if math.isfinite(float(v))]
     return min(finite) if finite else float("inf")
+
+
+def _elite_qmc_zoom(counter, pop, vals, low, high, rng, config: AnnealHybridConfig):
+    finite_idx = np.flatnonzero(np.isfinite(vals))
+    remaining = counter.budget - counter.n
+    if (
+        finite_idx.size == 0
+        or remaining <= 0
+        or config.elite_zoom_budget_divisor <= 0
+        or config.elite_zoom_elite_count <= 0
+        or config.elite_zoom_candidates_per_member <= 0
+        or config.elite_zoom_levels <= 0
+        or config.elite_zoom_radius_fraction <= 0.0
+        or config.elite_zoom_radius_shrink <= 0.0
+    ):
+        return None
+
+    zoom_budget = min(
+        remaining,
+        max(
+            config.elite_zoom_min_budget,
+            counter.budget // config.elite_zoom_budget_divisor,
+        ),
+    )
+    if zoom_budget <= 0:
+        return None
+
+    elite_count = min(config.elite_zoom_elite_count, finite_idx.size)
+    elite_order = finite_idx[np.argsort(vals[finite_idx])[:elite_count]]
+    width = high - low
+    active = width > 0.0
+    if not np.any(active):
+        return None
+    base_radius = np.where(active, width * config.elite_zoom_radius_fraction, 0.0)
+    best_local_v = float("inf")
+    best_local_x = None
+    used = 0
+    skip = int(rng.integers(1, 1 << 31))
+
+    for level in range(config.elite_zoom_levels):
+        radius = base_radius * (config.elite_zoom_radius_shrink ** level)
+        if not np.any(radius > 0.0):
+            break
+        for idx in elite_order:
+            remaining = min(zoom_budget - used, counter.budget - counter.n)
+            if remaining <= 0:
+                break
+            n_batch = min(config.elite_zoom_candidates_per_member, remaining)
+            center = np.asarray(pop[int(idx)], dtype=np.float64)
+            zoom_low = np.maximum(low, center - radius)
+            zoom_high = np.minimum(high, center + radius)
+            if np.any(zoom_high < zoom_low):
+                continue
+            points = low_discrepancy_population(
+                zoom_low,
+                zoom_high,
+                n_batch,
+                skip=skip,
+                rng=rng,
+            )
+            skip += n_batch
+            for trial in points:
+                ft = float(counter(trial))
+                used += 1
+                if not math.isfinite(ft):
+                    continue
+                slot = int(idx)
+                if ft < float(vals[slot]):
+                    pop[slot] = np.asarray(trial, dtype=np.float64)
+                    vals[slot] = ft
+                if ft < best_local_v:
+                    best_local_v = ft
+                    best_local_x = np.asarray(trial, dtype=np.float64)
+                if used >= zoom_budget or counter.n >= counter.budget:
+                    break
+            if used >= zoom_budget or counter.n >= counter.budget:
+                break
+        if used >= zoom_budget or counter.n >= counter.budget:
+            break
+
+    if best_local_x is None:
+        return None
+    return best_local_x, best_local_v
 
 
 def qmc_annealed_hybrid(
@@ -374,6 +464,12 @@ def qmc_annealed_hybrid(
                 last_scout = counter.n  # throttle
 
             if counter.n - last_polish >= polish_every:
+                zoom = _elite_qmc_zoom(counter, pop, vals, low, high, rng, config)
+                if zoom is not None:
+                    zoom_x, zoom_v = zoom
+                    if math.isfinite(zoom_v) and zoom_v < best_v:
+                        best_v = zoom_v
+                        best_x = zoom_x
                 used_native_polish = False
                 if jac is not None:
                     native = _native_qmc_polish(
