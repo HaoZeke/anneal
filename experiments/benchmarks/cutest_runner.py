@@ -226,6 +226,43 @@ def load_default_manifest() -> list[CutestProblem]:
     return [load(name, sif_params=params) for name, params in DEFAULT_MANIFEST]
 
 
+# Scalable unconstrained problems at higher dimension, to test the
+# dimension-robustness thesis: population-based and simplex external solvers
+# degrade as n grows, while the 1/sqrt(D) proposal scale, the dimension-collapse
+# surrogate, and the separable independence sampler are built to hold. Spans
+# separable (SROSENBR, QUARTC, ARWHEAD), ill-conditioned (VARDIM, PENALTY1,
+# NONDIA), and general coupled (EXTROSNB, WOODS, BROYDN7D) landscapes.
+HIGHDIM_MANIFEST = [
+    ("SROSENBR",  {"N": 100}),         # separable Rosenbrock
+    ("EXTROSNB",  {"N": 100}),         # extended Rosenbrock (coupled, ill-cond)
+    ("ARWHEAD",   {"N": 100}),         # almost-separable
+    ("NONDIA",    {"N": 100}),         # Shanno, ill-conditioned
+    ("WOODS",     {"N": 100}),         # coupled quartic
+    ("POWELLSG",  {"N": 100}),         # group-separable singular
+    ("ENGVAL1",   {"N": 100}),         # sum of squares
+    ("VARDIM",    {"N": 100}),         # ill-conditioned
+    ("PENALTY1",  {"N": 100}),         # ill-conditioned penalty
+    ("QUARTC",    {"N": 100}),         # separable quartic
+    ("TOINTGSS",  {"N": 100}),         # Toint Gaussian
+    ("BROYDN7D",  {"N": 100}),         # Broyden tridiagonal
+    ("FREUROTH",  {"N": 100}),         # Freudenstein-Roth
+    ("COSINE",    {"N": 100}),         # trigonometric
+    ("DIXMAANA",  {"M": 30}),          # n = 3M = 90
+]
+
+
+def load_highdim_manifest() -> list[CutestProblem]:
+    """Load the high-dimensional scalable manifest, skipping any problem that
+    fails to decode (SIF parameter names vary across problems)."""
+    out = []
+    for name, params in HIGHDIM_MANIFEST:
+        try:
+            out.append(load(name, sif_params=params))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  skip {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return out
+
+
 def main():
     """Smoke test: load every problem in the default manifest, evaluate
     f(x0), and print n / f(x0). Use as `pixi run -e verify cutest-smoke`."""
