@@ -1769,6 +1769,8 @@ def test_cutest_bgsa_auto_replicates_gle_when_it_wins(monkeypatch):
 def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
+    captured = {"tensor": 0, "gle": 0}
+
     class HighDimProblem:
         name = "BOUND50"
         dim = 50
@@ -1790,13 +1792,18 @@ def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeyp
     def run_hmc(*_args, **_kwargs):
         return FakeHistory()
 
-    def unavailable_lane(*_args, **_kwargs):
-        raise AssertionError("uncovered tensor/GLE lane should not run")
+    def additive_independence(*_args, **_kwargs):
+        captured["tensor"] += 1
+        return {"best_val": 3.0, "best_pos": np.zeros(50), "n_evals": 9}
+
+    def gle_langevin(*_args, **_kwargs):
+        captured["gle"] += 1
+        return {"best_val": 2.0, "best_pos": np.zeros(50), "n_evals": 7}
 
     fake_anneal = types.SimpleNamespace(
         run_hmc=run_hmc,
-        additive_independence=unavailable_lane,
-        gle_langevin=unavailable_lane,
+        additive_independence=additive_independence,
+        gle_langevin=gle_langevin,
     )
     fake_demo = types.SimpleNamespace(
         OBJ_FN=None,
@@ -1852,6 +1859,7 @@ def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeyp
     )
 
     assert best_val == -1.0
+    assert captured == {"tensor": 0, "gle": 0}
 
 
 def test_cutest_bgsa_auto_polishes_qmc_pilot_candidate(monkeypatch):
