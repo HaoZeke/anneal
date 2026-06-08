@@ -7,13 +7,13 @@ Classical Presets
 ========================
 #+end_export
 
-This tutorial shows the three classical presets (=Boltzmann=, =Fast=, ==Gsa==) and the single =run= surface. All three occupy the same five component slots; only the concrete =Cool=, =Neigh=, and =Move= objects differ.
+This tutorial shows the three classical presets (=Boltzmann=, =Fast=, =Gsa (Tsallis)=) and the single =run= surface. All three occupy the same five component slots; only the concrete =Cool=, =Neigh=, and =Move= objects differ.
 
 #+begin_export rst
 .. admonition:: Reference
 
    The typed component algebra and the reduction of the three
-   Generalized-SA families to the five slots are the core of the IISE
+   Generalized-SA families to the five slots are the core of the IISE (Institute of Industrial and Systems Engineers)
    manuscript (INFORMS Journal on Computing, under review). See
    [[file:../used_by.org][used_by]] and the reproducibility package for the
    mechanized SymPy witnesses of the four limit cases.
@@ -35,7 +35,7 @@ The call is identical. Only the preset object changes.
 
 #+begin_src python
 import numpy as np
-from anneal import Boltzmann, Fast, =Gsa=, run
+from anneal import Boltzmann, Fast, =Gsa (Tsallis)=, run
 
 def rosenbrock(x):
     """Classic 2-D Rosenbrock (separable in a transformed coordinate)."""
@@ -55,9 +55,9 @@ h_f = run(rosenbrock, low, high,
 print("Fast:", h_f.best_pos, h_f.best_val)
 
 h_g = run(rosenbrock, low, high,
-          =Gsa=(t_init=5.0, =q_v==2.5, q_a=1.5),
+          =Gsa (Tsallis)=(t_init=5.0, =q_v==2.5, q_a=1.5),
           n_epochs=20, steps_per_epoch=100, seed=42)
-print("=Gsa=:", h_g.best_pos, h_g.best_val)
+print("=Gsa (Tsallis)=:", h_g.best_pos, h_g.best_val)
 #+end_src
 
 Expected: three different trajectories, all reaching a point near (1,1) with value near 0 (global min is 0 at (1,1)). The histories contain =epochs= (list of =EpochLine= with =best_val=, =accept_rate=, =T= etc.).
@@ -65,9 +65,9 @@ Expected: three different trajectories, all reaching a point near (1,1) with val
 * Step 2: What the call actually does (slot view)
 
 - =Obj= is the user =rosenbrock= (only thing that knows F).
-- =Cool= is supplied by the preset (logarithmic for Boltzmann, reciprocal for Fast, =Tsallis= power for =Gsa=).
-- =Neigh= and =Move= together realize the proposal shape at the current T (Gaussian scale for Boltzmann, Cauchy for Fast, =Tsallis= visit for =Gsa=).
-- =Accept= is always Metropolis (or =Tsallis= accept for =Gsa=) with the noise-aware compensated path when the crate was built with the finite-precision feature.
+- =Cool= is supplied by the preset (logarithmic for Boltzmann, reciprocal for Fast, =Tsallis= power for =Gsa (Tsallis)=).
+- =Neigh= and =Move= together realize the proposal shape at the current T (Gaussian scale for Boltzmann, Cauchy for Fast, =Tsallis= visit for =Gsa (Tsallis)=).
+- =Accept= is always Metropolis (or =Tsallis= accept for =Gsa (Tsallis)=) with the noise-aware compensated path when the crate was built with the finite-precision feature.
 
 Because all three presets implement the same =Sampler= trait, =run= (the orchestrator) is oblivious to which family is inside.
 
@@ -83,4 +83,4 @@ The =History= also carries the final state and per-epoch diagnostics that the Ba
 
 * Why this works
 
-The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2). The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the quasi-Monte Carlo (QMC) polish are shared verbatim.
+The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2). The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish are shared verbatim.

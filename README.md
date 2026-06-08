@@ -4,11 +4,9 @@
 
 # Anneal
 
-Simulated-annealing components on the eindir typed primitives. One surface, many drivers: classical presets, Bayesian pilot+mixer, GLE colored noise, rank-1 additive independence, QMC polish, device/ensemble scale. All obey the same five-component algebra (Obj / Cool / Neigh / Move / Accept) and four laws.
+Simulated-annealing components on the =eindir= typed primitives. One surface, many drivers: classical presets, Bayesian pilot+mixer, generalized =Langevin= equation (GLE) colored noise, rank-1 additive independence, quasi-Monte Carlo (QMC) polish, device/ensemble scale. All obey the same five-component algebra (Obj / Cool / Neigh / Move / Accept) and four laws.
 
-[![Documentation](https://img.shields.io/badge/docs-anneal.rgoswami.me-blue)](https://anneal.rgoswami.me)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![DOI](https://zenodo.org/badge/597892274.svg)](https://zenodo.org/doi/10.5281/zenodo.10672746)
+Documentation: https://anneal.rgoswami.me . License: Massachusetts Institute of Technology (MIT). DOI: https://zenodo.org/doi/10.5281/zenodo.10672746 .
 
 ## Install
 
@@ -22,7 +20,7 @@ Full stack (pinned Rust + Python + docs):
 pixi install
 ```
 
-## 8-line modern example (additive independence + GLE polish)
+## 8-line modern example (additive independence + generalized =Langevin= equation (GLE) polish)
 
 ```python
 import numpy as np
@@ -47,7 +45,7 @@ refined = qmc_polish(rastrigin, grad_rastrigin, low, high,
 print(refined["best_val"])
 ```
 
-Full docs, tutorials (classical, Bayesian pilot+mixer with Beta trace, GLE, polish+device), algebra, how-tos, and reference at https://anneal.rgoswami.me .
+Full docs, tutorials (classical, Bayesian pilot+mixer with Beta trace, generalized =Langevin= equation (GLE), polish+device), algebra, how-tos, and reference at https://anneal.rgoswami.me .
 
 ## Development
 
@@ -62,4 +60,4 @@ See `pixi.toml` and `docs/export.el` (modeled on rgpycrumbs/rsx-rs patterns).
 
 ## License and citation
 
-MIT. See `LICENSE.txt` and `CITATION.cff`. The reference publication is the IISE/INFORMS Journal on Computing paper (typed component algebras, mechanized equivalences, TLA+ spec). Reproducibility package: HaoZeke/anneal_repro.
+MIT (see `LICENSE.txt`). Citation: `CITATION.cff` or the Zenodo (Digital Object Identifier). The reference publication is the Institute of Industrial and Systems Engineers (IISE)/INFORMS Journal on Computing paper (typed component algebras, mechanized equivalences, Temporal Logic of Actions (Temporal Logic of Actions (=TLA+=)) spec). Reproducibility package: HaoZeke/anneal_repro.
