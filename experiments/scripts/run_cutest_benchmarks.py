@@ -2091,6 +2091,41 @@ def main():
                 )
             )
 
+            # External field at budget parity: scipy global optimisers, CMA-ES,
+            # and PDFO, each capped at the same work-unit budget as the SA/MCMC
+            # drivers via _BudgetedObjective. A missing optional package or a
+            # solver error is recorded as a non-improving cell so the sweep
+            # never dies on one driver.
+            field_budget = 1 + args.n_epochs * args.k_fixed
+            for ext_name, ext_fn in SCIPY_DRIVERS.items():
+                t0 = time.perf_counter()
+                try:
+                    bv, nc = ext_fn(prob, seed, field_budget)
+                    field_ok = True
+                except Exception as exc:
+                    print(
+                        f"    {ext_name} failed on {prob.name} seed {seed}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    bv, nc, field_ok = float("nan"), 0, False
+                wt = time.perf_counter() - t0
+                rows.append(
+                    dict(
+                        problem=prob.name,
+                        dim=prob.dim,
+                        driver=ext_name,
+                        seed=seed,
+                        fevals=nc,
+                        best_val=bv,
+                        wall_time_s=wt,
+                        f_x0=f0,
+                        solved=int(
+                            field_ok
+                            and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                        ),
+                    )
+                )
+
             # v0.5 bGSA stack on the same CUTEst problem.
             for bgsa_drv in ["bgsa", "bgsa_metad", "bgsa_pt_metad", "bgsa_auto"]:
                 try:
