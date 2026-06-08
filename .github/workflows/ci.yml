@@ -90,7 +90,7 @@ jobs:
           .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy
 
       - name: maturin develop
-        run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip
+        run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip3
 
       - name: pytest
         run: .venv/bin/python -m pytest pytest/
