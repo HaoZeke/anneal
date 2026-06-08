@@ -1474,7 +1474,7 @@ def _run_cutest_dominant_multistart_polish(
         or _polish_best_dominates_sample(polish_values)
         or _polish_bulk_dominates_worst_tail(polish_values)
     ):
-        return polish_bv, polish_calls
+        return polish_bv, polish_calls, polish_values
     return None
 
 
@@ -1767,8 +1767,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         local_screen_starts,
                         _covered_local_polish_budget(k_per_epoch, n_chains),
                     )
-                if auto_best_start_polish is not None:
-                    return auto_best_start_polish
             elif _has_declared_cutest_bounds(
                 prob
             ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
@@ -1838,8 +1836,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         int(n_chains),
                         int(k_per_epoch),
                     )
-                    if auto_multistart_polish is not None:
-                        return auto_multistart_polish
             elif (
                 _has_finite_design_box(prob)
                 and grad_kind == "native"
@@ -1864,8 +1860,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         int(n_chains),
                         int(k_per_epoch),
                     )
-                    if auto_multistart_polish is not None:
-                        return auto_multistart_polish
             else:
                 auto_multistart_polish = _run_cutest_dominant_multistart_polish(
                     anneal,
@@ -1876,8 +1870,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(n_chains),
                     int(k_per_epoch),
                 )
-                if auto_multistart_polish is not None:
-                    return auto_multistart_polish
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
         out = d.run_pilot(
