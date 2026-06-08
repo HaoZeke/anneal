@@ -2468,7 +2468,13 @@ def main():
             # solver error is recorded as a non-improving cell so the sweep
             # never dies on one driver.
             field_budget = 1 + args.n_epochs * args.k_fixed
+            # DIRECT is exponential in dimension and SHGO builds a simplicial
+            # complex, so neither is feasible past low dimension; skip them once
+            # the problem is large enough that they would dominate wall time.
+            _nonscalable = {"scipy_direct", "scipy_shgo"}
             for ext_name, ext_fn in SCIPY_DRIVERS.items():
+                if prob.dim > 30 and ext_name in _nonscalable:
+                    continue
                 t0 = time.perf_counter()
                 try:
                     bv, nc = ext_fn(prob, seed, field_budget)
