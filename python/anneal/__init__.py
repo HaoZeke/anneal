@@ -24,6 +24,7 @@ from anneal._core import (
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     qmc_polish as _core_qmc_polish,
+    additive_independence as _core_additive_independence,
     run,
     run_hmc,
     run_qmc,
@@ -106,6 +107,42 @@ def qmc_polish(
     return out
 
 
+def additive_independence(
+    obj_fn,
+    low,
+    high,
+    max_fevals: int,
+    seed: int = 0,
+    degree: int = 8,
+    grid_m: int = 65,
+    local_frac: float = 0.2,
+    n_epochs: int = 40,
+    n_pilot: int = 0,
+):
+    """Rank-1 (mean-field) independence-sampler SA.
+
+    Fits a separable additive surrogate ``c + sum_j g_j(x_j)`` and spends the
+    budget on tempered per-coordinate independence proposals accepted by
+    Metropolis on the true objective. Values only (no gradient). For a separable
+    objective the proposal places every coordinate at its tempered optimum at
+    once. Returns ``{best_pos, best_val, n_evals}``.
+    """
+    out = _core_additive_independence(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(max_fevals),
+        int(seed),
+        int(degree),
+        int(grid_m),
+        float(local_frac),
+        int(n_epochs),
+        int(n_pilot),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 __all__ = [
     "Boltzmann",
     "DeviceHistory",
@@ -120,6 +157,7 @@ __all__ = [
     "pilot_draws_qmc",
     "polish",
     "qmc_polish",
+    "additive_independence",
     "run",
     "run_device",
     "run_ensemble",
