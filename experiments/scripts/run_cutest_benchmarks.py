@@ -1732,6 +1732,71 @@ def _run_cutest_shifted_qmc_polish(
     return best_val, total_work
 
 
+def _run_cutest_additive_independence(
+    anneal_module,
+    prob,
+    seed,
+    n_epochs,
+    k_per_epoch,
+):
+    if not hasattr(anneal_module, "additive_independence"):
+        return None
+    if n_epochs < 1 or k_per_epoch < 1 or not _has_finite_design_box(prob):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    max_fevals = 1 + int(n_epochs) * int(k_per_epoch)
+    try:
+        result = anneal_module.additive_independence(
+            prob.fn,
+            design_low,
+            design_high,
+            int(max_fevals),
+            seed=int(seed),
+            n_epochs=int(n_epochs),
+        )
+    except Exception:
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, int(result.get("n_evals", 0))
+
+
+def _run_cutest_gle_langevin(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_epochs,
+    k_per_epoch,
+):
+    if not hasattr(anneal_module, "gle_langevin"):
+        return None
+    if grad_kind != "native":
+        return None
+    if n_epochs < 1 or k_per_epoch < 1 or not _has_finite_design_box(prob):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    max_fevals = 1 + int(n_epochs) * int(k_per_epoch)
+    try:
+        result = anneal_module.gle_langevin(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            int(max_fevals),
+            seed=int(seed),
+            n_epochs=int(n_epochs),
+        )
+    except Exception:
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, int(result.get("n_evals", 0))
+
+
 def _combine_candidate_results(*candidates):
     valid = [
         candidate
@@ -2159,6 +2224,36 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 mix_results.append((mix_seed, mix_bv, mix_calls))
                 outcomes.append((mix_bv, mix_calls))
+            tensor_results = []
+            for tensor_seed in primary_mix_seeds:
+                tensor_result = _run_cutest_additive_independence(
+                    anneal,
+                    prob,
+                    tensor_seed,
+                    n_epochs,
+                    k_per_epoch,
+                )
+                if tensor_result is None:
+                    continue
+                tensor_bv, tensor_calls = tensor_result
+                tensor_results.append((tensor_seed, tensor_bv, tensor_calls))
+                outcomes.append((tensor_bv, tensor_calls))
+            gle_results = []
+            for gle_seed in primary_mix_seeds:
+                gle_result = _run_cutest_gle_langevin(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    gle_seed,
+                    n_epochs,
+                    k_per_epoch,
+                )
+                if gle_result is None:
+                    continue
+                gle_bv, gle_calls = gle_result
+                gle_results.append((gle_seed, gle_bv, gle_calls))
+                outcomes.append((gle_bv, gle_calls))
             metad_results = []
             if _metad_cv_supported(prob):
                 metad_bv, metad_calls, _, _, _, _ = d.bgsa_metad(
@@ -2202,6 +2297,41 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         1 + int(n_epochs) * int(k_per_epoch),
                     )
                     outcomes.append((mix_bv, mix_calls))
+            if _candidate_family_matches_best(tensor_results, initial_best):
+                seen_tensor_seeds = {
+                    tensor_seed
+                    for tensor_seed, _value, _calls in tensor_results
+                }
+                for tensor_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if tensor_seed in seen_tensor_seeds:
+                        continue
+                    tensor_result = _run_cutest_additive_independence(
+                        anneal,
+                        prob,
+                        tensor_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if tensor_result is not None:
+                        outcomes.append(tensor_result)
+            if _candidate_family_matches_best(gle_results, initial_best):
+                seen_gle_seeds = {
+                    gle_seed for gle_seed, _value, _calls in gle_results
+                }
+                for gle_seed in _auto_portfolio_seed_offsets(seed, n_chains):
+                    if gle_seed in seen_gle_seeds:
+                        continue
+                    gle_result = _run_cutest_gle_langevin(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        gle_seed,
+                        n_epochs,
+                        k_per_epoch,
+                    )
+                    if gle_result is not None:
+                        outcomes.append(gle_result)
             if _candidate_family_matches_best(metad_results, initial_best):
                 seen_metad_seeds = {
                     metad_seed for metad_seed, _value, _calls in metad_results

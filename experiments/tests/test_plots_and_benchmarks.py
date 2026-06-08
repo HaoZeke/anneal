@@ -1587,7 +1587,7 @@ def test_cutest_bgsa_auto_includes_tensor_and_gle_candidates(monkeypatch):
             return np.asarray(x, dtype=np.float64)
 
     class FakeHistory:
-        best_val = 4.0
+        best_val = -20.0
         total_accepted = 0
 
     def run_hmc(*_args, **_kwargs):
@@ -1674,7 +1674,7 @@ def test_cutest_bgsa_auto_includes_tensor_and_gle_candidates(monkeypatch):
         driver="bgsa_auto",
     )
 
-    assert best_val == -13.0
+    assert best_val == -20.0
     assert [seed for seed, *_rest in captured["tensor"]] == [7, 11]
     assert [seed for seed, *_rest in captured["gle"]] == [7, 11]
     assert all(call[1] == 81 for call in captured["tensor"])
@@ -1705,7 +1705,8 @@ def test_cutest_bgsa_auto_replicates_gle_when_it_wins(monkeypatch):
     def gle_langevin(*_args, **kwargs):
         seed = int(kwargs["seed"])
         captured["gle"].append(seed)
-        return {"best_val": -30.0 if seed == 18 else -12.0, "best_pos": np.zeros(2), "n_evals": 23}
+        value = -30.0 if seed == 18 else -12.0
+        return {"best_val": value, "best_pos": np.zeros(2), "n_evals": 23}
 
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc, gle_langevin=gle_langevin)
     fake_demo = types.SimpleNamespace(
