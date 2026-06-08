@@ -808,7 +808,7 @@ def test_bayesian_mixing_sa_initializes_from_low_discrepancy_design():
 def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {"qmc": []}
+    captured = {}
 
     class FakeHistory:
         best_val = -1.25
@@ -1498,7 +1498,7 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
 def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class GradientCutestProblem(_QuadraticCutestProblem):
         def grad(self, x):
