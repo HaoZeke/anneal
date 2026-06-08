@@ -1351,6 +1351,34 @@ def _native_qmc_box_top_k(n_chains):
     return int(n_chains)
 
 
+def _native_qmc_box_stage_specs(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    dim = int(dim)
+    n_chains = int(n_chains)
+    coverage = [n_chains, 2 * n_chains]
+    if dim <= n_chains * n_chains:
+        coverage.append(n_chains * n_chains)
+    seen = set()
+    specs = []
+    for multiplier in coverage:
+        n_starts = dim * multiplier
+        top_values = [n_chains]
+        if multiplier > n_chains:
+            top_values.append(0)
+        if multiplier == n_chains * n_chains:
+            top_values.append(dim)
+        for top_k in top_values:
+            key = (n_starts, top_k)
+            if key in seen:
+                continue
+            seen.add(key)
+            specs.append((n_starts, top_k))
+    return tuple(specs)
+
+
 def _native_qmc_polish_budget(epoch_budget, dim, n_starts):
     if epoch_budget < 1:
         raise ValueError("epoch_budget must be positive")
@@ -1424,6 +1452,41 @@ def _run_cutest_dominant_multistart_polish(
     return None
 
 
+def _run_cutest_native_qmc_box_schedule(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    if grad_kind != "native" or not _has_finite_design_box(prob):
+        return None
+    best_val = None
+    total_work = 0
+    for n_starts, top_k in _native_qmc_box_stage_specs(prob.dim, n_chains):
+        result = _run_cutest_qmc_polish(
+            anneal_module,
+            prob,
+            grad_fn,
+            grad_kind,
+            seed,
+            n_starts,
+            _native_qmc_polish_budget(k_per_epoch, prob.dim, n_starts),
+            top_k=top_k,
+        )
+        if result is None:
+            continue
+        value, work_units = result
+        total_work += int(work_units)
+        if best_val is None or value < best_val:
+            best_val = value
+    if best_val is None:
+        return None
+    return best_val, total_work
+
+
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
     """Run a v0.5 bGSA driver on a CUTEst problem. Reuses demo_bgsa's
     pilot + driver functions; we monkey-patch OBJ_FN/LOW/HIGH/OBJ_GRAD
@@ -1456,6 +1519,20 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
         if driver == "bgsa_auto":
             import anneal
 
+            if grad_kind == "native" and _has_finite_design_box(
+                prob
+            ) and not _has_declared_cutest_bounds(prob):
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                if auto_best_start_polish is not None:
+                    return auto_best_start_polish
             if int(prob.dim) <= int(n_chains):
                 local_screen_starts = int(n_chains) + int(prob.dim)
                 auto_best_start_polish = _run_cutest_qmc_polish(
@@ -1487,20 +1564,14 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     grad_kind == "native"
                     and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
                 ):
-                    native_starts = _native_qmc_polish_start_count(
-                        prob.dim, n_chains
-                    )
-                    auto_best_start_polish = _run_cutest_qmc_polish(
+                    auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                         anneal,
                         prob,
                         grad_fn,
                         grad_kind,
                         seed,
-                        native_starts,
-                        _native_qmc_polish_budget(
-                            k_per_epoch, prob.dim, native_starts
-                        ),
-                        top_k=0,
+                        int(n_chains),
+                        int(k_per_epoch),
                     )
                     if auto_best_start_polish is not None:
                         return auto_best_start_polish
@@ -1553,16 +1624,14 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 if auto_multistart_polish is not None:
                     return auto_multistart_polish
             elif _has_finite_design_box(prob) and grad_kind == "native":
-                native_starts = _native_qmc_box_start_count(prob.dim, n_chains)
-                auto_best_start_polish = _run_cutest_qmc_polish(
+                auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
                     prob,
                     grad_fn,
                     grad_kind,
                     seed,
-                    native_starts,
-                    _native_qmc_polish_budget(k_per_epoch, prob.dim, native_starts),
-                    top_k=_native_qmc_box_top_k(n_chains),
+                    int(n_chains),
+                    int(k_per_epoch),
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
