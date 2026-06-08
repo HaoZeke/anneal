@@ -704,8 +704,12 @@ def test_cutest_full_suite_loads_target_outside_driver_timeout(monkeypatch, tmp_
     monkeypatch.setattr(
         suite,
         "list_target_problems",
-        lambda _dim_cap, exclude_names=None: [suite.TargetProblem("QUAD2", "bound", 2)],
+        lambda _dim_cap, exclude_names=None, config=None: [
+            suite.TargetProblem("QUAD2", "bound", 2)
+        ],
     )
+    config = types.SimpleNamespace(cache_dir=tmp_path / "cache")
+    monkeypatch.setattr(suite, "cutest_config_from_args", lambda _args: config)
     monkeypatch.setattr(suite, "load_problem", fake_load_problem)
     monkeypatch.setattr(suite, "run_driver_cell", fake_run_driver_cell)
 
@@ -3930,8 +3934,10 @@ def test_cutest_cma_es_is_budgeted_and_finite():
     assert np.isfinite(best_val)
 
 
-def test_sota_compare_methods_respect_common_budget():
+def test_sota_compare_methods_respect_common_budget(monkeypatch):
     from experiments import sota_compare
+
+    _install_fake_anneal_module(monkeypatch)
 
     def sphere(x):
         x = np.asarray(x, dtype=np.float64)
@@ -3962,7 +3968,40 @@ def test_sota_compare_methods_respect_common_budget():
         assert np.isfinite(best)
 
 
-def test_sota_cutest_native_gradient_polish_consumes_budget():
+def _fake_radical_inverse(index: int, base: int) -> float:
+    inv_base = 1.0 / float(base)
+    fraction = inv_base
+    value = 0.0
+    while index > 0:
+        value += (index % base) * fraction
+        index //= base
+        fraction *= inv_base
+    return value
+
+
+def _fake_low_discrepancy_points(low, high, n, skip=1):
+    low = np.asarray(low, dtype=np.float64)
+    high = np.asarray(high, dtype=np.float64)
+    bases = (2, 3, 5, 7, 11, 13, 17, 19)
+    if low.size > len(bases):
+        raise AssertionError("test helper needs more prime bases")
+    unit = np.empty((int(n), low.size), dtype=np.float64)
+    for row in range(int(n)):
+        index = int(skip) + row
+        for axis, base in enumerate(bases[: low.size]):
+            unit[row, axis] = _fake_radical_inverse(index, base)
+    return low + (high - low) * unit
+
+
+def _install_fake_anneal_module(monkeypatch, **overrides):
+    attrs = {"low_discrepancy_points": _fake_low_discrepancy_points}
+    attrs.update(overrides)
+    module = types.SimpleNamespace(**attrs)
+    monkeypatch.setitem(sys.modules, "anneal", module)
+    return module
+
+
+def test_sota_cutest_native_gradient_polish_consumes_budget(monkeypatch):
     from experiments.scripts import sota_cutest
 
     grad_calls = 0
@@ -3980,6 +4019,35 @@ def test_sota_cutest_native_gradient_polish_consumes_budget():
     low = np.array([-1.0, -1.0])
     high = np.array([1.0, 1.0])
     counter = sota_cutest.Counter(sphere, budget=80)
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_polish_objective(objective, *_args, **_kwargs):
+        x = np.zeros(2, dtype=np.float64)
+        value = objective.fn(x)
+        objective.grad_fn(x)
+        return {"best_val": value, "best_pos": x}
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        gle_langevin=lambda *_args, **_kwargs: {
+            "best_val": 0.0,
+            "best_pos": np.zeros(2, dtype=np.float64),
+        },
+        qmc_polish_objective=qmc_polish_objective,
+    )
 
     best = sota_cutest.hybrid_de(
         counter,
@@ -4023,7 +4091,7 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
         value = objective.fn(x)
         grad = objective.grad_fn(x)
         assert np.all(np.isfinite(grad))
-        assert n_starts >= 2
+        assert n_starts == 5
         assert max_fevals_per_start >= 1
         assert kwargs["top_k"] >= 1
         return {
@@ -4033,12 +4101,12 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
             "n_grads": 1,
         }
 
-    fake_anneal = types.SimpleNamespace(
+    _install_fake_anneal_module(
+        monkeypatch,
         Bounds=FakeBounds,
         PyObjective=FakeObjective,
         qmc_polish_objective=qmc_polish_objective,
     )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
     monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
 
@@ -4060,6 +4128,10 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
         rng=np.random.default_rng(19),
         n_polish=2,
         k_polish=1,
+        config=anneal_sota.AnnealHybridConfig(
+            qmc_min_starts=5,
+            qmc_starts_per_polish=1,
+        ),
     )
 
     assert calls == {"bounds": 1, "objective": 1, "qmc": 1}
@@ -4069,9 +4141,10 @@ def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
     assert best <= -3.0
 
 
-def test_anneal_sota_low_discrepancy_population_is_deterministic():
+def test_anneal_sota_low_discrepancy_population_is_deterministic(monkeypatch):
     from experiments.anneal_sota import low_discrepancy_population
 
+    _install_fake_anneal_module(monkeypatch)
     low = np.array([-1.0, -2.0, -3.0])
     high = np.array([1.0, 2.0, 3.0])
 
@@ -4084,9 +4157,10 @@ def test_anneal_sota_low_discrepancy_population_is_deterministic():
     assert np.allclose(first, second)
 
 
-def test_anneal_sota_shifted_low_discrepancy_population_is_seeded():
+def test_anneal_sota_shifted_low_discrepancy_population_is_seeded(monkeypatch):
     from experiments.anneal_sota import low_discrepancy_population
 
+    _install_fake_anneal_module(monkeypatch)
     low = np.array([-1.0, -1.0])
     high = np.array([1.0, 1.0])
 
@@ -4100,9 +4174,11 @@ def test_anneal_sota_shifted_low_discrepancy_population_is_seeded():
     assert not np.allclose(first, third)
 
 
-def test_anneal_sota_qmc_hybrid_sees_deceptive_basin():
+def test_anneal_sota_qmc_hybrid_sees_deceptive_basin(monkeypatch):
     from experiments import sota_compare
     from experiments.anneal_sota import qmc_annealed_hybrid
+
+    _install_fake_anneal_module(monkeypatch)
 
     def deceptive_basin(x):
         x = np.asarray(x, dtype=np.float64)
@@ -4126,3 +4202,160 @@ def test_anneal_sota_qmc_hybrid_sees_deceptive_basin():
 
     assert counter.n <= counter.budget
     assert best < -0.7
+
+
+def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypatch):
+    """Exercise surrogate proposals, GLE routing, and native-gradient polish."""
+    from experiments import anneal_sota
+
+    calls = {"tensor_build": 0, "additive_fit": 0, "gle": 0, "grad": 0}
+
+    class FakeTensor:
+        @classmethod
+        def build(cls, *a, **k):
+            calls["tensor_build"] += 1
+            counter_arg, grad_arg = a[0], a[1]
+            before = counter_arg.grad_evals
+            grad_arg(np.zeros(2))
+            assert counter_arg.grad_evals == before + 1
+
+            class S:
+                def sample(self, n, T, rng):
+                    return np.zeros((n, 2))
+
+                def pilot_work_units(self):
+                    return 10.0
+
+            return S()
+
+    class FakeAdditive:
+        @classmethod
+        def fit(cls, *a, **k):
+            calls["additive_fit"] += 1
+
+            class S:
+                def sample(self, n, T, rng):
+                    return np.zeros((n, 2))
+
+            return S()
+
+    def fake_gle(counter, grad, low, high, **k):
+        calls["gle"] += 1
+        grad(np.zeros(2))
+        for _ in range(5):
+            try:
+                counter(np.zeros(2))
+            except Exception:
+                break
+        return {"best_val": -1.0}
+
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", True, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", True, raising=False)
+    monkeypatch.setattr(anneal_sota, "TensorTrainSurrogate", FakeTensor, raising=False)
+    monkeypatch.setattr(anneal_sota, "AdditiveSurrogate", FakeAdditive, raising=False)
+    monkeypatch.setattr(anneal_sota, "library_gle_langevin", fake_gle, raising=False)
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_polish_objective(objective, *_args, **_kwargs):
+        x = np.zeros(2, dtype=np.float64)
+        value = objective.fn(x)
+        objective.grad_fn(x)
+        return {"best_val": value, "best_pos": x}
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_polish_objective=qmc_polish_objective,
+    )
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    def grad(x):
+        calls["grad"] += 1
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    from experiments.scripts import sota_cutest
+
+    counter = sota_cutest.Counter(sphere, budget=400)
+    orig = counter.counted_grad
+
+    def counted(grad_fn):
+        wrapped = orig(grad_fn)
+
+        def j(x):
+            calls["grad"] += 1
+            return wrapped(x)
+
+        return j
+
+    counter.counted_grad = counted
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        dim=2,
+        grad=grad,
+        rng=np.random.default_rng(42),
+        n_polish=1,
+        k_polish=1,
+        use_surrogate=True,
+        surrogate_kind="tensor",
+        use_gle=True,
+    )
+
+    assert calls["tensor_build"] >= 1
+    assert calls["gle"] >= 1
+    assert calls["grad"] > 0
+    assert counter.n <= counter.budget
+    assert counter.objective_evals > 0
+    assert counter.grad_evals > 0
+    assert best <= 0.1
+
+    calls2 = {"additive_fit": 0}
+
+    class AdditiveForBranch:
+        @classmethod
+        def fit(cls, *args, **kwargs):
+            calls2["additive_fit"] += 1
+
+            class S:
+                def sample(self, n, temp, rng):
+                    return np.zeros((n, 2))
+
+            return S()
+
+    monkeypatch.setattr(
+        anneal_sota,
+        "AdditiveSurrogate",
+        AdditiveForBranch,
+        raising=False,
+    )
+    counter2 = sota_cutest.Counter(sphere, budget=200)
+    anneal_sota.qmc_annealed_hybrid(
+        counter2,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        2,
+        grad,
+        np.random.default_rng(1),
+        n_polish=1,
+        surrogate_kind="additive",
+        use_gle=False,
+    )
+    assert calls2["additive_fit"] == 1
