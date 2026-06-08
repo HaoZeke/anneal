@@ -2943,6 +2943,67 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
     ]
 
 
+def test_cutest_native_qmc_schedule_uses_replicated_best_certificate():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"qmc": []}
+
+    class StableBestBoundProblem:
+        name = "STABLEBESTBOUND"
+        dim = 8
+        low = np.full(8, -1.0)
+        high = np.full(8, 1.0)
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    stage_values = [
+        [-100.0, -20.0, -10.0, -1.0],
+        [-100.0, -30.0, -15.0, -2.0],
+    ]
+
+    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"].append({
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "top_k": kwargs["top_k"],
+        })
+        values = stage_values[min(len(captured["qmc"]) - 1, len(stage_values) - 1)]
+        return {
+            "best_val": min(values),
+            "best_pos": np.zeros(8),
+            "n_evals": 13,
+            "n_grads": 4,
+            "n_polished": len(values),
+            "polished_values": values,
+            "polished_stationary": [False] * len(values),
+        }
+
+    result = cutest._run_cutest_native_qmc_box_schedule(
+        types.SimpleNamespace(qmc_polish=qmc_polish),
+        StableBestBoundProblem(),
+        StableBestBoundProblem().grad,
+        "native",
+        seed=7,
+        n_chains=4,
+        k_per_epoch=200,
+    )
+
+    assert result == (-100.0, 2 * (13 + 4))
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (32, 4, 456),
+        (64, 4, 712),
+    ]
+
+
 def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
