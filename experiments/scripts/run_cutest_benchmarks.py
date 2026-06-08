@@ -1108,6 +1108,14 @@ def _polish_values_agree_to_roundoff(values):
     return float(np.max(arr) - np.min(arr)) <= tolerance
 
 
+def _values_match_to_roundoff(left, right):
+    if not np.isfinite(left) or not np.isfinite(right):
+        return False
+    scale = max(1.0, abs(float(left)), abs(float(right)))
+    tolerance = np.sqrt(np.finfo(np.float64).eps) * scale
+    return abs(float(left) - float(right)) <= tolerance
+
+
 def _polished_values_from_result(result):
     raw_values = result.get("polished_values", ())
     try:
@@ -1158,14 +1166,35 @@ def _polish_bulk_dominates_worst_tail(values):
     return bulk_worst * np.sqrt(float(arr.size)) <= tail
 
 
-def _polish_values_are_terminal(values, stationary):
-    if not _polish_stationarity_supports_terminal(values, stationary):
-        return False
+def _polish_values_have_terminal_shape(values):
     return (
         _polish_values_agree_to_roundoff(values)
         or _polish_best_dominates_sample(values)
         or _polish_bulk_dominates_worst_tail(values)
     )
+
+
+def _polish_values_are_terminal(values, stationary):
+    if not _polish_stationarity_supports_terminal(values, stationary):
+        return False
+    return _polish_values_have_terminal_shape(values)
+
+
+def _polish_values_replicate_terminal(previous_values, values):
+    previous_arr = np.asarray(previous_values, dtype=np.float64)
+    arr = np.asarray(values, dtype=np.float64)
+    if (
+        previous_arr.size == 0
+        or arr.size == 0
+        or not np.all(np.isfinite(previous_arr))
+        or not np.all(np.isfinite(arr))
+    ):
+        return False
+    if not _polish_values_have_terminal_shape(previous_arr):
+        return False
+    if not _polish_values_have_terminal_shape(arr):
+        return False
+    return _values_match_to_roundoff(float(np.min(previous_arr)), float(np.min(arr)))
 
 
 def _run_cutest_multistart_polish(
@@ -1533,6 +1562,7 @@ def _run_cutest_native_qmc_box_schedule(
     total_work = 0
     skip_full_polish = False
     terminal = False
+    previous_terminal_polished_values = None
     for n_starts, top_k in _native_qmc_box_stage_specs(
         prob.dim,
         n_chains,
@@ -1557,13 +1587,22 @@ def _run_cutest_native_qmc_box_schedule(
         total_work += int(work_units)
         if best_val is None or value < best_val:
             best_val = value
-        if top_k != 0 and _polish_values_are_terminal(
-            polished_values,
-            polished_stationary,
-        ):
-            terminal = True
-            skip_full_polish = True
-            break
+        if top_k != 0:
+            if _polish_values_are_terminal(polished_values, polished_stationary):
+                terminal = True
+                skip_full_polish = True
+                break
+            if _polish_values_replicate_terminal(
+                previous_terminal_polished_values,
+                polished_values,
+            ):
+                terminal = True
+                skip_full_polish = True
+                break
+            if _polish_values_have_terminal_shape(polished_values):
+                previous_terminal_polished_values = polished_values
+            else:
+                previous_terminal_polished_values = None
     if best_val is None:
         return None
     if return_terminal:
