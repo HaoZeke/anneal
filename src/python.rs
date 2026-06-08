@@ -551,6 +551,125 @@ fn qmc_polish_objective(
     qmc_polish_result_to_dict(py, result)
 }
 
+/// Runs a QMC best/1/bin differential-evolution scout.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, max_evals, seed = 0, population_size = 30, weight_min = 0.5, weight_span = 0.5, crossover_rate = 0.7))]
+fn qmc_best1bin_scout(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    max_evals: usize,
+    seed: u64,
+    population_size: usize,
+    weight_min: f64,
+    weight_span: f64,
+    crossover_rate: f64,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if max_evals < 1 {
+        return Err(PyValueError::new_err("max_evals must be positive"));
+    }
+    if population_size < 4 {
+        return Err(PyValueError::new_err("population_size must be at least 4"));
+    }
+    if max_evals < population_size {
+        return Err(PyValueError::new_err(
+            "max_evals must cover the initial population",
+        ));
+    }
+    if !weight_min.is_finite() || weight_min < 0.0 {
+        return Err(PyValueError::new_err(
+            "weight_min must be finite and non-negative",
+        ));
+    }
+    if !weight_span.is_finite() || weight_span < 0.0 {
+        return Err(PyValueError::new_err(
+            "weight_span must be finite and non-negative",
+        ));
+    }
+    if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
+        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+    }
+
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = crate::qmc_best1bin_scout(
+        &obj,
+        max_evals,
+        seed,
+        population_size,
+        weight_min,
+        weight_span,
+        crossover_rate,
+    );
+    qmc_polish_result_to_dict(py, result)
+}
+
+/// Runs a QMC best/1/bin scout using an `eindir` native objective handle.
+#[pyfunction]
+#[pyo3(signature = (objective, max_evals, seed = 0, population_size = 30, weight_min = 0.5, weight_span = 0.5, crossover_rate = 0.7))]
+fn qmc_best1bin_scout_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    max_evals: usize,
+    seed: u64,
+    population_size: usize,
+    weight_min: f64,
+    weight_span: f64,
+    crossover_rate: f64,
+) -> PyResult<Py<PyDict>> {
+    if max_evals < 1 {
+        return Err(PyValueError::new_err("max_evals must be positive"));
+    }
+    if population_size < 4 {
+        return Err(PyValueError::new_err("population_size must be at least 4"));
+    }
+    if max_evals < population_size {
+        return Err(PyValueError::new_err(
+            "max_evals must cover the initial population",
+        ));
+    }
+    if !weight_min.is_finite() || weight_min < 0.0 {
+        return Err(PyValueError::new_err(
+            "weight_min must be finite and non-negative",
+        ));
+    }
+    if !weight_span.is_finite() || weight_span < 0.0 {
+        return Err(PyValueError::new_err(
+            "weight_span must be finite and non-negative",
+        ));
+    }
+    if !crossover_rate.is_finite() || !(0.0..=1.0).contains(&crossover_rate) {
+        return Err(PyValueError::new_err("crossover_rate must be in [0, 1]"));
+    }
+
+    let result = crate::qmc_best1bin_scout(
+        &*objective,
+        max_evals,
+        seed,
+        population_size,
+        weight_min,
+        weight_span,
+        crossover_rate,
+    );
+    qmc_polish_result_to_dict(py, result)
+}
+
 /// Refines shifted QMC starts with bounded projected-gradient polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, n_replicates = 1, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
@@ -971,6 +1090,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(polish, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_polish_objective, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_best1bin_scout, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_best1bin_scout_objective, m)?)?;
     m.add_function(wrap_pyfunction!(shifted_qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_gle_omega0, m)?)?;
