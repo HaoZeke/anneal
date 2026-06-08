@@ -4206,6 +4206,29 @@ def test_sota_cutest_streams_rows_as_methods_finish():
     assert lines[1] == "BOX3,3,hybrid_de,0,-1.25,80"
 
 
+def test_sota_cutest_shards_targets_by_stable_index():
+    from experiments.scripts import sota_cutest
+
+    targets = ["A", "B", "C", "D", "E", "F"]
+
+    assert sota_cutest._shard_targets(targets, shard_index=0, shard_count=3) == [
+        "A",
+        "D",
+    ]
+    assert sota_cutest._shard_targets(targets, shard_index=1, shard_count=3) == [
+        "B",
+        "E",
+    ]
+    assert sota_cutest._shard_targets(targets, shard_index=2, shard_count=3) == [
+        "C",
+        "F",
+    ]
+    with pytest.raises(ValueError, match="shard_count"):
+        sota_cutest._shard_targets(targets, shard_index=0, shard_count=0)
+    with pytest.raises(ValueError, match="shard_index"):
+        sota_cutest._shard_targets(targets, shard_index=3, shard_count=3)
+
+
 def test_anneal_sota_qmc_hybrid_uses_native_gradient_handle(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
