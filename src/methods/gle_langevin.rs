@@ -12,10 +12,10 @@
 //! is handled by the noise spectrum exactly as the `1/sqrt(D)` proposal scale
 //! handles dimension; both are Move-slot transforms every driver could read.
 
-use eindir_core::{GleThermostat, Objective, optimal_sampling_drift};
+use eindir_core::{optimal_sampling_drift, GleThermostat, Objective};
 use ndarray::{Array1, Array2};
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 
 use eindir_core::Gradient;
 
