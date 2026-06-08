@@ -143,6 +143,12 @@ def sci_de(counter, low, high, dim, grad, rng):
 
 METHODS = {"hybrid_de": hybrid_de, "basinhopping": sci_basinhopping,
            "diff_evol": sci_de, "classical": classical}
+FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
+
+
+def _write_sota_row(writer, stream, row):
+    writer.writerow(row)
+    stream.flush()
 
 
 def main():
@@ -163,34 +169,36 @@ def main():
     targets = list_target_problems(args.dim_cap, config=config)[: args.max_problems]
     print(f"{len(targets)} CUTEst problems, dim <= {args.dim_cap}, budget {args.budget}", flush=True)
     rows = []
-    for t in targets:
-        try:
-            prob = load(t.name, sif_params=None, config=config)
-        except Exception as exc:  # noqa: BLE001
-            print(f"  skip {t.name}: {type(exc).__name__}", flush=True)
-            continue
-        low = np.asarray(prob.low, float); high = np.asarray(prob.high, float)
-        dim = prob.dim
-        for s in range(args.seeds):
-            for name, fnc in METHODS.items():
-                rng = np.random.default_rng(s)
-                c = Counter(prob.fn, args.budget)
-                try:
-                    best = fnc(c, low, high, dim, prob.grad, rng)
-                except (_Budget, Exception):  # noqa: BLE001
-                    best = c.best
-                rows.append(dict(problem=t.name, dim=dim, method=name, seed=s,
-                                 best=best, evals=c.n))
-        try:                                   # stream: evict the compiled cache
-            pycutest = configured_pycutest(config)
-            pycutest.clear_cache(t.name)
-        except Exception:
-            pass
-        print(f"  {t.name} (dim {dim}) done", flush=True)
-
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["problem", "dim", "method", "seed", "best", "evals"])
-        w.writeheader(); w.writerows(rows)
+        w = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        w.writeheader()
+        f.flush()
+        for t in targets:
+            try:
+                prob = load(t.name, sif_params=None, config=config)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  skip {t.name}: {type(exc).__name__}", flush=True)
+                continue
+            low = np.asarray(prob.low, float); high = np.asarray(prob.high, float)
+            dim = prob.dim
+            for s in range(args.seeds):
+                for name, fnc in METHODS.items():
+                    rng = np.random.default_rng(s)
+                    c = Counter(prob.fn, args.budget)
+                    try:
+                        best = fnc(c, low, high, dim, prob.grad, rng)
+                    except (_Budget, Exception):  # noqa: BLE001
+                        best = c.best
+                    row = dict(problem=t.name, dim=dim, method=name, seed=s,
+                               best=best, evals=c.n)
+                    rows.append(row)
+                    _write_sota_row(w, f, row)
+            try:
+                pycutest = configured_pycutest(config)
+                pycutest.clear_cache(t.name)
+            except Exception:
+                pass
+            print(f"  {t.name} (dim {dim}) done", flush=True)
 
     # win-rate summary: per (problem, seed), which method reached the lowest best
     methods = list(METHODS)
