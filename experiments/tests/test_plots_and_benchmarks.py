@@ -4934,6 +4934,41 @@ def test_anneal_sota_qmc_hybrid_tries_shifted_best1bin_replicas(monkeypatch):
     assert best <= -1.0
 
 
+def test_anneal_sota_annealed_basin_polish_descends_bounded_quadratic():
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    target = np.array([0.2, -0.3, 0.1], dtype=np.float64)
+
+    def shifted_sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        diff = x - target
+        return float(np.dot(diff, diff))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * (x - target)
+
+    counter = sota_cutest.Counter(shifted_sphere, budget=80)
+    best = anneal_sota._annealed_basin_polish(
+        counter,
+        grad,
+        np.full(3, -1.0),
+        np.full(3, 1.0),
+        3,
+        np.random.default_rng(7),
+        anneal_sota.AnnealHybridConfig(
+            basin_polish_step=0.1,
+            basin_polish_local_budget=10,
+        ),
+    )
+
+    assert counter.n <= counter.budget
+    assert counter.objective_evals > 0
+    assert counter.grad_evals > 0
+    assert best <= 1e-10
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest

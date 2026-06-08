@@ -79,6 +79,11 @@ class AnnealHybridConfig:
     best1bin_relative_improvement_scale_floor: float = 1.0
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
+    basin_polish_enabled: bool = True
+    basin_polish_min_dimension: int = 20
+    basin_polish_step: float = 0.1
+    basin_polish_local_budget: int = 800
+    basin_polish_temperature: float = 1.0
     native_bounds_slack: float = 1e-9
     local_polish_min_fevals: int = 20
     metropolis_temperature_floor: float = 1e-12
@@ -169,6 +174,67 @@ def _native_qmc_polish(
         seed=int(rng.integers(1 << 31)),
         top_k=top_k,
     )
+
+
+def _annealed_basin_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+    if grad_fn is None or counter.n >= counter.budget:
+        return None
+    jac = _counted_jac(counter, grad_fn)
+    if jac is None:
+        return None
+    if config.basin_polish_step <= 0.0 or config.basin_polish_local_budget <= 0:
+        return None
+    bounds = list(zip(low, high))
+
+    def local_polish(x0):
+        remaining = counter.budget - counter.n
+        if remaining <= 0:
+            return None
+        maxfun = min(config.basin_polish_local_budget, remaining)
+        return minimize(
+            counter,
+            x0,
+            method="L-BFGS-B",
+            jac=jac,
+            bounds=bounds,
+            options={"maxfun": maxfun, "maxiter": maxfun},
+        )
+
+    try:
+        result = local_polish(rng.uniform(low, high))
+        if result is None:
+            return None
+        x = np.asarray(result.x, dtype=np.float64)
+        fx = float(result.fun)
+        best = fx
+        while counter.n < counter.budget:
+            trial = np.clip(
+                x + rng.uniform(-config.basin_polish_step, config.basin_polish_step, dim),
+                low,
+                high,
+            )
+            result = local_polish(trial)
+            if result is None:
+                break
+            fy = float(result.fun)
+            if math.isfinite(fy) and fy < best:
+                best = fy
+            if math.isfinite(fy) and (
+                fy < fx
+                or _metropolis_accept(
+                    fy - fx,
+                    config.basin_polish_temperature,
+                    rng,
+                    floor=config.metropolis_temperature_floor,
+                )
+            ):
+                x = np.asarray(result.x, dtype=np.float64)
+                fx = fy
+        return _best_finite(best, counter.best)
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+    return _best_finite(counter.best)
 
 
 def _metropolis_accept(
@@ -446,6 +512,14 @@ def qmc_annealed_hybrid(
     high = np.asarray(high, dtype=np.float64)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    if (
+        config.basin_polish_enabled
+        and jac is not None
+        and dim >= config.basin_polish_min_dimension
+    ):
+        basin_best = _annealed_basin_polish(counter, grad, low, high, dim, rng, config)
+        if counter.n >= counter.budget:
+            return _best_finite(basin_best, counter.best)
     if (
         config.best1bin_enabled
         and config.best1bin_budget_divisor > 0
