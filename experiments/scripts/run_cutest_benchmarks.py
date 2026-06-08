@@ -1743,12 +1743,11 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                             int(n_chains),
                             1 + int(n_epochs) * int(k_per_epoch),
                         )
-                        return _combine_candidate_results(
+                        auto_best_start_polish = _combine_candidate_results(
                             auto_best_start_polish,
                             auto_shifted_qmc_polish,
                             auto_differential_search,
-                        )
-                    return auto_best_start_polish
+                        ) or auto_best_start_polish
             if int(prob.dim) <= int(n_chains) and not (
                 core_qmc_available
                 and grad_kind == "native"
@@ -1793,8 +1792,6 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         int(n_chains),
                         int(k_per_epoch),
                     )
-                    if auto_best_start_polish is not None:
-                        return auto_best_start_polish
                 elif grad_kind == "native" and _native_qmc_middle_bound_supported(
                     prob
                 ):
@@ -1807,31 +1804,27 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         int(n_chains),
                         int(k_per_epoch),
                     )
-                    if auto_best_start_polish is not None:
-                        return auto_best_start_polish
-                auto_best_start_polish = _run_cutest_qmc_polish(
-                    anneal,
-                    prob,
-                    _finite_difference_gradient(prob),
-                    "finite-difference",
-                    seed,
-                    int(n_chains),
-                    _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
-                    top_k=_bounded_polish_top_k(n_chains),
-                )
-                if auto_best_start_polish is not None:
-                    return auto_best_start_polish
-                auto_best_start_polish = _run_cutest_raw_best_polish(
-                    anneal,
-                    prob,
-                    _finite_difference_gradient(prob),
-                    "finite-difference",
-                    seed,
-                    int(n_chains),
-                    _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
-                )
-                if auto_best_start_polish is not None:
-                    return auto_best_start_polish
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_qmc_polish(
+                        anneal,
+                        prob,
+                        _finite_difference_gradient(prob),
+                        "finite-difference",
+                        seed,
+                        int(n_chains),
+                        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                        top_k=_bounded_polish_top_k(n_chains),
+                    )
+                if auto_best_start_polish is None:
+                    auto_best_start_polish = _run_cutest_raw_best_polish(
+                        anneal,
+                        prob,
+                        _finite_difference_gradient(prob),
+                        "finite-difference",
+                        seed,
+                        int(n_chains),
+                        _covered_bound_polish_budget(k_per_epoch, prob.dim, n_chains),
+                    )
             elif _has_declared_cutest_bounds(prob) and grad_kind == "native":
                 auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
@@ -1842,19 +1835,18 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(n_chains),
                     int(k_per_epoch),
                 )
-                if auto_best_start_polish is not None:
-                    return auto_best_start_polish
-                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
-                    anneal,
-                    prob,
-                    grad_fn,
-                    grad_kind,
-                    seed,
-                    int(n_chains),
-                    int(k_per_epoch),
-                )
-                if auto_multistart_polish is not None:
-                    return auto_multistart_polish
+                if auto_best_start_polish is None:
+                    auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+                    if auto_multistart_polish is not None:
+                        return auto_multistart_polish
             elif _has_finite_design_box(prob) and grad_kind == "native":
                 auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
@@ -1865,19 +1857,18 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(n_chains),
                     int(k_per_epoch),
                 )
-                if auto_best_start_polish is not None:
-                    return auto_best_start_polish
-                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
-                    anneal,
-                    prob,
-                    grad_fn,
-                    grad_kind,
-                    seed,
-                    int(n_chains),
-                    int(k_per_epoch),
-                )
-                if auto_multistart_polish is not None:
-                    return auto_multistart_polish
+                if auto_best_start_polish is None:
+                    auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                        anneal,
+                        prob,
+                        grad_fn,
+                        grad_kind,
+                        seed,
+                        int(n_chains),
+                        int(k_per_epoch),
+                    )
+                    if auto_multistart_polish is not None:
+                        return auto_multistart_polish
             else:
                 auto_multistart_polish = _run_cutest_dominant_multistart_polish(
                     anneal,
