@@ -1847,7 +1847,11 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     )
                     if auto_multistart_polish is not None:
                         return auto_multistart_polish
-            elif _has_finite_design_box(prob) and grad_kind == "native":
+            elif (
+                _has_finite_design_box(prob)
+                and grad_kind == "native"
+                and auto_best_start_polish is None
+            ):
                 auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
                     prob,
