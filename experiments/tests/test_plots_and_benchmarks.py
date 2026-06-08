@@ -808,7 +808,7 @@ def test_bayesian_mixing_sa_initializes_from_low_discrepancy_design():
 def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class FakeHistory:
         best_val = -1.25
@@ -1505,14 +1505,14 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
             return np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "low": np.asarray(low, dtype=np.float64),
             "high": np.asarray(high, dtype=np.float64),
             "n_starts": n_starts,
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -11.0,
             "best_pos": np.zeros(2),
@@ -1541,11 +1541,19 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
     )
 
     assert best_val == -11.0
-    assert fevals == 8 + 3
-    assert captured["qmc"]["n_starts"] == 6
-    assert captured["qmc"]["max_fevals_per_start"] == 160
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 0
+    assert fevals == 6 * (8 + 3)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (8, 4, 56),
+        (16, 4, 72),
+        (16, 0, 72),
+        (32, 4, 104),
+        (32, 0, 104),
+        (32, 2, 104),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
 
 
 def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
