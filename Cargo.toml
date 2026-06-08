@@ -22,7 +22,7 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { git = "https://github.com/metatensor/dlpk.git", tag = "v0.1.5", features = ["ndarray", "half"] }
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "bf1ea5184a9f4a8e7d236a0fbd9a33548053e30a" }
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "bf1ea51aa3cb913b31686c47180e5d7e9a73244e" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
