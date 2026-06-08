@@ -262,8 +262,12 @@ Temporary Items
 
 # Sphinx build artefacts (regenerated from docs/orgmode/*.org via orgbld)
 docs/source/*.rst
+docs/source/**/*.rst
 docs/source/crates/
 docs/build/
+
+# pixi.lock is the repository environment lock; uv.lock is local tool output.
+/uv.lock
 
 # Verify env: tla2tools.jar + apalache tarball staged by setup tasks
 .verify/
