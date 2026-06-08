@@ -1294,6 +1294,17 @@ def _has_declared_cutest_bounds(prob):
     return bool(getattr(prob, "has_cutest_bounds", False))
 
 
+def _has_finite_design_box(prob):
+    low, high = _design_bounds(prob)
+    return (
+        low.shape == high.shape
+        and low.size > 0
+        and np.all(np.isfinite(low))
+        and np.all(np.isfinite(high))
+        and np.all(high > low)
+    )
+
+
 def _bounded_polish_dimension_is_covered(dim, n_chains):
     if dim < 1:
         raise ValueError("dim must be positive")
@@ -1324,6 +1335,20 @@ def _native_qmc_polish_start_count(dim, n_chains):
     if _bounded_polish_dimension_is_covered(dim, n_chains):
         return int(n_chains) + int(dim)
     return int(n_chains) + int(np.ceil(np.sqrt(float(dim))))
+
+
+def _native_qmc_box_start_count(dim, n_chains):
+    if dim < 1:
+        raise ValueError("dim must be positive")
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(dim) * int(n_chains)
+
+
+def _native_qmc_box_top_k(n_chains):
+    if n_chains < 1:
+        raise ValueError("n_chains must be positive")
+    return int(n_chains)
 
 
 def _native_qmc_polish_budget(epoch_budget, dim, n_starts):
@@ -1367,6 +1392,36 @@ def _hmc_initial_position(best_pilot_pos, dim: int) -> np.ndarray | None:
 
 def _metad_cv_supported(prob) -> bool:
     return int(np.asarray(prob.low).size) >= 2 and int(np.asarray(prob.high).size) >= 2
+
+
+def _run_cutest_dominant_multistart_polish(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    n_chains,
+    k_per_epoch,
+):
+    auto_multistart_polish = _run_cutest_multistart_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        seed,
+        int(n_chains),
+        int(k_per_epoch),
+    )
+    if auto_multistart_polish is None:
+        return None
+    polish_bv, polish_calls, polish_values = auto_multistart_polish
+    if (
+        _polish_values_agree_to_roundoff(polish_values)
+        or _polish_best_dominates_sample(polish_values)
+        or _polish_bulk_dominates_worst_tail(polish_values)
+    ):
+        return polish_bv, polish_calls
+    return None
 
 
 def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
@@ -1486,7 +1541,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 )
                 if auto_best_start_polish is not None:
                     return auto_best_start_polish
-                auto_multistart_polish = _run_cutest_multistart_polish(
+                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
                     anneal,
                     prob,
                     grad_fn,
@@ -1496,15 +1551,34 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(k_per_epoch),
                 )
                 if auto_multistart_polish is not None:
-                    polish_bv, polish_calls, polish_values = auto_multistart_polish
-                    if _polish_values_agree_to_roundoff(
-                        polish_values
-                    ) or _polish_best_dominates_sample(
-                        polish_values
-                    ) or _polish_bulk_dominates_worst_tail(polish_values):
-                        return polish_bv, polish_calls
+                    return auto_multistart_polish
+            elif _has_finite_design_box(prob) and grad_kind == "native":
+                native_starts = _native_qmc_box_start_count(prob.dim, n_chains)
+                auto_best_start_polish = _run_cutest_qmc_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    native_starts,
+                    _native_qmc_polish_budget(k_per_epoch, prob.dim, native_starts),
+                    top_k=_native_qmc_box_top_k(n_chains),
+                )
+                if auto_best_start_polish is not None:
+                    return auto_best_start_polish
+                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
+                    anneal,
+                    prob,
+                    grad_fn,
+                    grad_kind,
+                    seed,
+                    int(n_chains),
+                    int(k_per_epoch),
+                )
+                if auto_multistart_polish is not None:
+                    return auto_multistart_polish
             else:
-                auto_multistart_polish = _run_cutest_multistart_polish(
+                auto_multistart_polish = _run_cutest_dominant_multistart_polish(
                     anneal,
                     prob,
                     grad_fn,
@@ -1514,13 +1588,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(k_per_epoch),
                 )
                 if auto_multistart_polish is not None:
-                    polish_bv, polish_calls, polish_values = auto_multistart_polish
-                    if _polish_values_agree_to_roundoff(
-                        polish_values
-                    ) or _polish_best_dominates_sample(
-                        polish_values
-                    ) or _polish_bulk_dominates_worst_tail(polish_values):
-                        return polish_bv, polish_calls
+                    return auto_multistart_polish
         # Run the pilot.
         pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
         out = d.run_pilot(
