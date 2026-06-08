@@ -58,6 +58,16 @@ class AnnealHybridConfig:
     elite_zoom_levels: int = 5
     elite_zoom_radius_fraction: float = 0.2
     elite_zoom_radius_shrink: float = 0.25
+    best1bin_enabled: bool = True
+    best1bin_budget_divisor: int = 1
+    best1bin_dimension_cap: int = 2
+    best1bin_required_population: int = 4
+    best1bin_population_min: int = 30
+    best1bin_population_dim_multiplier: int = 15
+    best1bin_population_max: int = 60
+    best1bin_weight_min: float = 0.5
+    best1bin_weight_span: float = 0.5
+    best1bin_crossover_rate: float = 0.7
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
     native_bounds_slack: float = 1e-9
@@ -272,6 +282,89 @@ def _elite_qmc_zoom(counter, pop, vals, low, high, rng, config: AnnealHybridConf
     return best_local_x, best_local_v
 
 
+def _qmc_best1bin_scout(
+    counter,
+    low,
+    high,
+    *,
+    dim: int,
+    rng: np.random.Generator,
+    max_evals: int,
+    config: AnnealHybridConfig,
+):
+    if max_evals <= 0 or config.best1bin_budget_divisor <= 0:
+        return float("inf")
+    pop_size = int(
+        min(
+            config.best1bin_population_max,
+            max(
+                config.best1bin_population_min,
+                config.best1bin_population_dim_multiplier * dim,
+            ),
+            max_evals,
+        )
+    )
+    if pop_size < config.best1bin_required_population:
+        return float("inf")
+
+    start_n = counter.n
+    pop = list(low_discrepancy_population(low, high, pop_size, skip=1, rng=rng))
+    vals = []
+    try:
+        for point in pop:
+            if counter.n - start_n >= max_evals:
+                break
+            vals.append(float(counter(point)))
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+    pop = pop[: len(vals)]
+    vals = np.asarray(vals, dtype=np.float64)
+    if len(pop) < config.best1bin_required_population:
+        return _best_finite(counter.best)
+
+    finite_idx = np.flatnonzero(np.isfinite(vals))
+    if finite_idx.size:
+        best_idx = int(finite_idx[np.argmin(vals[finite_idx])])
+        best_x = np.asarray(pop[best_idx], dtype=np.float64).copy()
+        best_v = float(vals[best_idx])
+    else:
+        best_x = np.asarray(pop[0], dtype=np.float64).copy()
+        best_v = float("inf")
+
+    try:
+        while counter.n - start_n < max_evals:
+            weight = (
+                config.best1bin_weight_min
+                + config.best1bin_weight_span * rng.random()
+            )
+            for i in range(len(pop)):
+                if counter.n - start_n >= max_evals:
+                    break
+                idx = [j for j in range(len(pop)) if j != i]
+                r0, r1 = rng.choice(idx, 2, replace=False)
+                mutant = best_x + weight * (
+                    np.asarray(pop[int(r0)], dtype=np.float64)
+                    - np.asarray(pop[int(r1)], dtype=np.float64)
+                )
+                mask = rng.random(dim) < config.best1bin_crossover_rate
+                mask[rng.integers(dim)] = True
+                trial = np.clip(np.where(mask, mutant, pop[i]), low, high)
+                ft = float(counter(trial))
+                if math.isfinite(ft) and (
+                    not math.isfinite(float(vals[i])) or ft < float(vals[i])
+                ):
+                    pop[i] = trial
+                    vals[i] = ft
+                    if ft < best_v:
+                        best_v = ft
+                        best_x = np.asarray(trial, dtype=np.float64).copy()
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+    return _best_finite(best_v, counter.best)
+
+
 def qmc_annealed_hybrid(
     counter,
     low,
@@ -300,6 +393,26 @@ def qmc_annealed_hybrid(
     high = np.asarray(high, dtype=np.float64)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    if (
+        config.best1bin_enabled
+        and config.best1bin_budget_divisor > 0
+        and dim <= config.best1bin_dimension_cap
+    ):
+        scout_budget = min(
+            counter.budget - counter.n,
+            counter.budget // config.best1bin_budget_divisor,
+        )
+        best1bin_best = _qmc_best1bin_scout(
+            counter,
+            low,
+            high,
+            dim=dim,
+            rng=rng,
+            max_evals=scout_budget,
+            config=config,
+        )
+        if counter.n >= counter.budget:
+            return _best_finite(best1bin_best, counter.best)
     pop_size = int(
         min(
             config.population_max,
