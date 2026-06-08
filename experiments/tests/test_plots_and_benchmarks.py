@@ -1825,7 +1825,7 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
 def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class DenseNativeBoundProblem:
         name = "DENSEBOUND"
@@ -1842,7 +1842,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
             "low": np.asarray(low, dtype=np.float64),
             "high": np.asarray(high, dtype=np.float64),
@@ -1850,7 +1850,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -7.0,
             "best_pos": np.zeros(8),
@@ -1879,18 +1879,26 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     )
 
     assert best_val == -7.0
-    assert fevals == 13 + 4
-    assert captured["qmc"]["n_starts"] == 12
-    assert captured["qmc"]["max_fevals_per_start"] == 296
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 0
-    assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
+    assert fevals == 6 * (13 + 4)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (32, 4, 456),
+        (64, 4, 712),
+        (64, 0, 712),
+        (128, 4, 1224),
+        (128, 0, 1224),
+        (128, 8, 1224),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
 
 
 def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class HighDimNativeBoundProblem:
         name = "HIGHBOUND"
@@ -1907,7 +1915,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "grad_at_zero": grad_fn(np.zeros(25, dtype=np.float64)),
             "low": np.asarray(low, dtype=np.float64),
             "high": np.asarray(high, dtype=np.float64),
@@ -1915,7 +1923,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -13.0,
             "best_pos": np.zeros(25),
@@ -1944,18 +1952,23 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     )
 
     assert best_val == -13.0
-    assert fevals == 31 + 5
-    assert captured["qmc"]["n_starts"] == 9
-    assert captured["qmc"]["max_fevals_per_start"] == 425
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 0
-    assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(25))
+    assert fevals == 3 * (31 + 5)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (100, 4, 2700),
+        (200, 4, 5200),
+        (200, 0, 5200),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(25))
 
 
 def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class FiniteBoxNativeProblem:
         name = "FINITEBOX"
@@ -1971,7 +1984,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
             return 2.0 * np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
             "low": np.asarray(low, dtype=np.float64),
             "high": np.asarray(high, dtype=np.float64),
@@ -1979,7 +1992,7 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -17.0,
             "best_pos": np.zeros(8),
@@ -2008,12 +2021,20 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
     )
 
     assert best_val == -17.0
-    assert fevals == 31 + 5
-    assert captured["qmc"]["n_starts"] == 32
-    assert captured["qmc"]["max_fevals_per_start"] == 456
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 4
-    assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
+    assert fevals == 6 * (31 + 5)
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (32, 4, 456),
+        (64, 4, 712),
+        (64, 0, 712),
+        (128, 4, 1224),
+        (128, 0, 1224),
+        (128, 8, 1224),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(8))
 
 
 def test_cutest_bgsa_auto_keeps_portfolio_for_uncovered_bounds(monkeypatch):
