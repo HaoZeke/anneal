@@ -38,6 +38,8 @@ pub struct QmcPolishResult {
     pub n_starts: usize,
     /// Number of screened starts sent to local refinement.
     pub n_polished: usize,
+    /// Objective values returned by each local refinement, in polish order.
+    pub polished_values: Vec<f64>,
 }
 
 fn projected_gradient(
@@ -331,12 +333,14 @@ where
     };
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
+    let mut polished_values = Vec::with_capacity(polish_limit);
     for (_value, start) in screened.into_iter().take(polish_limit) {
         let result =
             projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol);
         n_evals += result.n_evals;
         n_grads += result.n_grads;
         n_polished += 1;
+        polished_values.push(result.best_val);
         if result.best_val.is_finite() && result.best_val < best_val {
             best_val = result.best_val;
             best_pos = result.best_pos;
@@ -350,6 +354,7 @@ where
         n_grads,
         n_starts,
         n_polished,
+        polished_values,
     }
 }
 
@@ -382,6 +387,7 @@ where
     let mut n_evals = 0usize;
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
+    let mut polished_values = Vec::new();
 
     for replica in 0..n_replicates {
         let replica_seed = seed.wrapping_add(replica as u64);
@@ -423,6 +429,7 @@ where
             n_evals += result.n_evals;
             n_grads += result.n_grads;
             n_polished += 1;
+            polished_values.push(result.best_val);
             if result.best_val.is_finite() && result.best_val < best_val {
                 best_val = result.best_val;
                 best_pos = result.best_pos;
@@ -437,5 +444,6 @@ where
         n_grads,
         n_starts: n_starts * n_replicates,
         n_polished,
+        polished_values,
     }
 }

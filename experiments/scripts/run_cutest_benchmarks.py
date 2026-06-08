@@ -1104,6 +1104,15 @@ def _polish_values_agree_to_roundoff(values):
     return float(np.max(arr) - np.min(arr)) <= tolerance
 
 
+def _polished_values_from_result(result):
+    raw_values = result.get("polished_values", ())
+    try:
+        values = np.asarray(raw_values, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        return tuple()
+    return tuple(float(value) for value in values)
+
+
 def _polish_best_dominates_sample(values):
     arr = np.asarray(values, dtype=np.float64)
     if arr.size < 2 or not np.all(np.isfinite(arr)):
@@ -1279,6 +1288,7 @@ def _run_cutest_qmc_polish(
     n_starts,
     max_fevals_per_start,
     top_k=0,
+    return_polished_values=False,
 ):
     if not hasattr(anneal_module, "qmc_polish"):
         return None
@@ -1304,6 +1314,8 @@ def _run_cutest_qmc_polish(
     best_val = float(result["best_val"])
     if not np.isfinite(best_val):
         return None
+    if return_polished_values:
+        return best_val, work_units, _polished_values_from_result(result)
     return best_val, work_units
 
 
@@ -1503,11 +1515,14 @@ def _run_cutest_native_qmc_box_schedule(
         return None
     best_val = None
     total_work = 0
+    skip_full_polish = False
     for n_starts, top_k in _native_qmc_box_stage_specs(
         prob.dim,
         n_chains,
         include_full_polish=include_full_polish,
     ):
+        if top_k == 0 and skip_full_polish:
+            continue
         result = _run_cutest_qmc_polish(
             anneal_module,
             prob,
@@ -1517,13 +1532,16 @@ def _run_cutest_native_qmc_box_schedule(
             n_starts,
             _native_qmc_polish_budget(k_per_epoch, prob.dim, n_starts),
             top_k=top_k,
+            return_polished_values=True,
         )
         if result is None:
             continue
-        value, work_units = result
+        value, work_units, polished_values = result
         total_work += int(work_units)
         if best_val is None or value < best_val:
             best_val = value
+        if top_k != 0 and _polish_values_agree_to_roundoff(polished_values):
+            skip_full_polish = True
     if best_val is None:
         return None
     return best_val, total_work
