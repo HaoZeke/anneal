@@ -1556,15 +1556,7 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
         }
 
     fake_anneal = types.SimpleNamespace(polish=polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_low_discrepancy_starts",
@@ -1581,7 +1573,7 @@ def test_cutest_bgsa_auto_uses_best_qmc_start_when_design_covers_dimension(monke
     )
 
     assert best_val == -1.0
-    assert fevals == 4 + 2 + 1
+    assert fevals > 4 + 2 + 1
     assert captured["max_fevals"] == [160]
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[[1]])
 
@@ -1870,15 +1862,7 @@ def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
         }
 
     fake_anneal = types.SimpleNamespace(polish=polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_low_discrepancy_starts",
@@ -1895,11 +1879,11 @@ def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     )
 
     assert best_val == -1.0
-    assert fevals == 4 + 2 * (2 + 1)
+    assert fevals > 4 + 2 * (2 + 1)
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts[:2])
 
 
-def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypatch):
+def test_cutest_bgsa_auto_keeps_portfolio_for_dominant_high_dim_polish(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
     captured = {"polish_x0": []}
@@ -1937,15 +1921,7 @@ def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypat
         }
 
     fake_anneal = types.SimpleNamespace(polish=polish)
-    fake_demo = types.SimpleNamespace(
-        OBJ_FN=None,
-        OBJ_GRAD=None,
-        LOW=None,
-        HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
-    )
-    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
-    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
     monkeypatch.setattr(
         cutest,
         "_low_discrepancy_starts",
@@ -1962,7 +1938,7 @@ def test_cutest_bgsa_auto_skips_portfolio_for_dominant_high_dim_polish(monkeypat
     )
 
     assert best_val == 1.0
-    assert fevals == 4 * (2 + 1)
+    assert fevals > 4 * (2 + 1)
     np.testing.assert_allclose(np.asarray(captured["polish_x0"]), starts)
 
 
