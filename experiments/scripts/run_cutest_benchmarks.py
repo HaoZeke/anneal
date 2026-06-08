@@ -1838,6 +1838,10 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                         int(n_chains),
                         int(k_per_epoch),
                     )
+                    if auto_best_start_polish is not None and np.isfinite(
+                        float(auto_best_start_polish[0])
+                    ):
+                        return auto_best_start_polish
                 elif (
                     grad_kind == "native"
                     and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
