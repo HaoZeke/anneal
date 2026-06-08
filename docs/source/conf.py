@@ -3,7 +3,8 @@ import os
 project   = "anneal"
 copyright = "2026--present, anneal developers"
 author    = "anneal developers"
-release   = "0.2.0"
+release   = "0.4.0"
+version   = "0.4.0"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -28,6 +29,14 @@ html_theme_options = {
     "light_logo": "_static/anneal_icon.png",
     "dark_logo": "_static/anneal_icon.png",
     "og_image_url": "https://anneal.rgoswami.me/_static/og-image.png",
+}
+
+html_context = {
+    "source_type": "github",
+    "source_user": "HaoZeke",
+    "source_repo": "anneal",
+    "source_version": "main",
+    "source_docs_path": "/docs/source/",
 }
 
 intersphinx_mapping = {
