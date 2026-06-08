@@ -4520,7 +4520,7 @@ def test_anneal_sota_qmc_hybrid_zoom_refines_narrow_elite_basin(monkeypatch):
         dim=2,
         grad=None,
         rng=np.random.default_rng(23),
-        n_polish=1,
+        n_polish=4,
         k_polish=1,
         use_surrogate=False,
         use_gle=False,
