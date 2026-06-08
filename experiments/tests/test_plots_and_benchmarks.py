@@ -2972,7 +2972,9 @@ def test_cutest_qmc_polish_uses_native_objective_handle():
     assert captured["bounds"][1].tolist() == pytest.approx([3.0, 4.0])
     assert captured["bounds"][2] == pytest.approx(1e-9)
     assert captured["objective"].fn(np.array([2.0, 3.0])) == pytest.approx(13.0)
-    assert captured["objective"].grad_fn(np.array([2.0, 3.0])).tolist() == pytest.approx([12.0, 0.0])
+    assert captured["objective"].grad_fn(
+        np.array([2.0, 3.0])
+    ).tolist() == pytest.approx([12.0, 0.0])
     assert captured["qmc"] == (
         6,
         19,

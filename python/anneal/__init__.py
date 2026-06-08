@@ -15,15 +15,18 @@ import numpy as np
 
 from anneal._core import (
     Boltzmann,
+    Bounds,
     EpochLine,
     Fast,
     Gsa,
     History,
+    PyObjective,
     __version__,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     qmc_polish as _core_qmc_polish,
+    qmc_polish_objective as _core_qmc_polish_objective,
     shifted_qmc_polish as _core_shifted_qmc_polish,
     additive_independence as _core_additive_independence,
     estimate_gle_omega0 as _core_estimate_gle_omega0,
@@ -99,6 +102,29 @@ def qmc_polish(
         grad_fn,
         np.asarray(low, dtype=np.float64),
         np.asarray(high, dtype=np.float64),
+        int(n_starts),
+        int(max_fevals_per_start),
+        int(seed),
+        float(step0),
+        float(grad_tol),
+        int(top_k),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_polish_objective(
+    objective,
+    n_starts: int,
+    max_fevals_per_start: int,
+    seed: int = 0,
+    step0: float = 1.0,
+    grad_tol: float = 1e-8,
+    top_k: int = 0,
+):
+    """Refine QMC starts with a native ``PyObjective`` gradient handle."""
+    out = _core_qmc_polish_objective(
+        objective,
         int(n_starts),
         int(max_fevals_per_start),
         int(seed),
@@ -229,18 +255,21 @@ def gle_langevin(
 
 __all__ = [
     "Boltzmann",
+    "Bounds",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
     "Fast",
     "Gsa",
     "History",
+    "PyObjective",
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
     "pilot_draws_qmc",
     "polish",
     "qmc_polish",
+    "qmc_polish_objective",
     "shifted_qmc_polish",
     "additive_independence",
     "estimate_gle_omega0",

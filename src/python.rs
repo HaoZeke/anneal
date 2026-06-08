@@ -15,6 +15,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use eindir_core::{Bounds, Objective};
+use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 
 use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};
@@ -228,7 +229,7 @@ struct CallablePyGradient {
     dim: usize,
 }
 
-impl crate::grad::Gradient<f64> for CallablePyGradient {
+impl eindir_core::Gradient<f64> for CallablePyGradient {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
@@ -484,6 +485,70 @@ fn qmc_polish(
     )?;
     out.set_item("polished_stationary", result.polished_stationary)?;
     Ok(out.into())
+}
+
+fn qmc_polish_result_to_dict(
+    py: Python<'_>,
+    result: crate::QmcPolishResult,
+) -> PyResult<Py<PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item(
+        "best_pos",
+        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
+    )?;
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("n_starts", result.n_starts)?;
+    out.set_item("n_polished", result.n_polished)?;
+    out.set_item("polished_values", result.polished_values)?;
+    out.set_item(
+        "polished_projected_grad_norms",
+        result.polished_projected_grad_norms,
+    )?;
+    out.set_item("polished_stationary", result.polished_stationary)?;
+    Ok(out.into())
+}
+
+/// Refines QMC starts using an `eindir` native objective/gradient handle.
+#[pyfunction]
+#[pyo3(signature = (objective, n_starts, max_fevals_per_start, seed = 0, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
+fn qmc_polish_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    seed: u64,
+    step0: f64,
+    grad_tol: f64,
+    top_k: usize,
+) -> PyResult<Py<PyDict>> {
+    if n_starts < 1 {
+        return Err(PyValueError::new_err("n_starts must be positive"));
+    }
+    if max_fevals_per_start < 1 {
+        return Err(PyValueError::new_err(
+            "max_fevals_per_start must be positive",
+        ));
+    }
+    if step0 <= 0.0 {
+        return Err(PyValueError::new_err("step0 must be positive"));
+    }
+    if grad_tol < 0.0 {
+        return Err(PyValueError::new_err("grad_tol must be non-negative"));
+    }
+
+    let result = crate::qmc_projected_gradient_polish(
+        &*objective,
+        &*objective,
+        n_starts,
+        max_fevals_per_start,
+        seed,
+        step0,
+        grad_tol,
+        top_k,
+    );
+    qmc_polish_result_to_dict(py, result)
 }
 
 /// Refines shifted QMC starts with bounded projected-gradient polish.
@@ -897,12 +962,15 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGsa>()?;
     m.add_class::<PyEpochLine>()?;
     m.add_class::<PyHistory>()?;
+    m.add_class::<EindirPyBounds>()?;
+    m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
     m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(run_hmc, m)?)?;
     m.add_function(wrap_pyfunction!(polish, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_polish, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_polish_objective, m)?)?;
     m.add_function(wrap_pyfunction!(shifted_qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_gle_omega0, m)?)?;
