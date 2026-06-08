@@ -627,12 +627,37 @@ fn additive_independence(
     Ok(out.into())
 }
 
+/// Estimate the characteristic frequency used to scale the GLE drift.
+#[pyfunction]
+fn estimate_gle_omega0(
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+) -> PyResult<f64> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    Ok(crate::methods::estimate_gle_omega0(&obj, &grad))
+}
+
 /// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
 /// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
-                    omega0=0.2, dt=0.2, n_epochs=40))]
+                    omega0=None, dt=0.2, n_epochs=40))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin(
     py: Python<'_>,
@@ -642,7 +667,7 @@ fn gle_langevin(
     high: PyReadonlyArray1<'_, f64>,
     max_fevals: usize,
     seed: u64,
-    omega0: f64,
+    omega0: Option<f64>,
     dt: f64,
     n_epochs: usize,
 ) -> PyResult<Py<PyDict>> {
@@ -656,7 +681,7 @@ fn gle_langevin(
     if max_fevals < 1 {
         return Err(PyValueError::new_err("max_fevals must be positive"));
     }
-    if omega0 <= 0.0 {
+    if omega0.is_some_and(|omega| omega <= 0.0) {
         return Err(PyValueError::new_err("omega0 must be positive"));
     }
     let dim = low_vec.len();
@@ -666,8 +691,11 @@ fn gle_langevin(
         bounds,
     };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
-    let result =
-        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs);
+    let result = if let Some(omega0) = omega0 {
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs)
+    } else {
+        crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs)
+    };
     let out = PyDict::new(py);
     out.set_item(
         "best_pos",
@@ -675,6 +703,8 @@ fn gle_langevin(
     )?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
+    out.set_item("omega0", result.omega0)?;
+    out.set_item("dt", result.dt)?;
     Ok(out.into())
 }
 
@@ -875,6 +905,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(shifted_qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_gle_omega0, m)?)?;
     m.add_function(wrap_pyfunction!(gle_langevin, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     Ok(())

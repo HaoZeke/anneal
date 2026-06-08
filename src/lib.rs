@@ -69,11 +69,13 @@ pub use hmc::{
 };
 pub use laws::LawViolation;
 pub use methods::{
-    fit_laplace, geometric_ladder, pilot_draws, pilot_draws_qmc, projected_gradient_polish,
+    estimate_gle_omega0, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa,
+    gle_langevin_sa, pilot_draws, pilot_draws_qmc, projected_gradient_polish,
     qmc_projected_gradient_polish, shifted_qmc_projected_gradient_polish, BayesianMixingResult,
-    BayesianMixingSampler, GelmanRubin, LaplacePosterior, LocalPolishResult, MultiChainResult,
-    MultiChainSampler, MultiChainState, ParallelTemperingSampler, PilotObservation, PilotPrior,
-    PtChainState, PtResult, QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
+    BayesianMixingSampler, GelmanRubin, GleLangevinResult, LaplacePosterior, LocalPolishResult,
+    MultiChainResult, MultiChainSampler, MultiChainState, ParallelTemperingSampler,
+    PilotObservation, PilotPrior, PtChainState, PtResult, QmcPolishResult, Q_V_MAX, Q_V_MIN,
+    TARGET_ACCEPT_RATE,
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;

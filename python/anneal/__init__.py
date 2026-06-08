@@ -26,6 +26,7 @@ from anneal._core import (
     qmc_polish as _core_qmc_polish,
     shifted_qmc_polish as _core_shifted_qmc_polish,
     additive_independence as _core_additive_independence,
+    estimate_gle_omega0 as _core_estimate_gle_omega0,
     gle_langevin as _core_gle_langevin,
     run,
     run_hmc,
@@ -176,6 +177,18 @@ def additive_independence(
     return out
 
 
+def estimate_gle_omega0(obj_fn, grad_fn, low, high):
+    """Estimate the local characteristic frequency for GLE colored noise."""
+    return float(
+        _core_estimate_gle_omega0(
+            obj_fn,
+            grad_fn,
+            np.asarray(low, dtype=np.float64),
+            np.asarray(high, dtype=np.float64),
+        )
+    )
+
+
 def gle_langevin(
     obj_fn,
     grad_fn,
@@ -183,7 +196,7 @@ def gle_langevin(
     high,
     max_fevals: int,
     seed: int = 0,
-    omega0: float = 0.2,
+    omega0: float | None = None,
     dt: float = 0.2,
     n_epochs: int = 40,
 ):
@@ -192,10 +205,13 @@ def gle_langevin(
     Gradient-driven BAB Langevin dynamics with a generalized-Langevin
     colored-noise thermostat. The fitted optimal-sampling drift, scaled to the
     characteristic frequency ``omega0``, flattens the sampling efficiency across
-    ``[omega0, 100*omega0]`` -- handling ill-conditioning the way the
+    ``[omega0, 100*omega0]``. When ``omega0`` is ``None`` the frequency is
+    estimated from local gradient curvature over the provided bounds. This
+    handles ill-conditioning the way the
     ``1/sqrt(D)`` scale handles dimension. Returns ``{best_pos, best_val,
-    n_evals}``.
+    n_evals, omega0, dt}``.
     """
+    omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin(
         obj_fn,
         grad_fn,
@@ -203,7 +219,7 @@ def gle_langevin(
         np.asarray(high, dtype=np.float64),
         int(max_fevals),
         int(seed),
-        float(omega0),
+        omega_arg,
         float(dt),
         int(n_epochs),
     )
@@ -227,6 +243,7 @@ __all__ = [
     "qmc_polish",
     "shifted_qmc_polish",
     "additive_independence",
+    "estimate_gle_omega0",
     "gle_langevin",
     "run",
     "run_device",

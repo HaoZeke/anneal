@@ -19,6 +19,12 @@ use rand::SeedableRng;
 
 use crate::grad::Gradient;
 
+pub const DEFAULT_GLE_OMEGA0: f64 = 0.2;
+const GLE_BAND_RATIO: f64 = 100.0;
+const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
+const GLE_MIN_TIMESTEP: f64 = 1e-6;
+const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
+
 /// Result of a GLE-Langevin annealing run.
 #[derive(Clone, Debug)]
 pub struct GleLangevinResult {
@@ -28,6 +34,79 @@ pub struct GleLangevinResult {
     pub best_val: f64,
     /// Gradient evaluations consumed (the work unit at parity with the field).
     pub n_evals: usize,
+    /// Characteristic frequency used to scale the colored-noise drift.
+    pub omega0: f64,
+    /// Timestep after resolving the upper end of the GLE frequency band.
+    pub dt: f64,
+}
+
+fn fallback_gle_omega0(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
+    let diagonal = low
+        .iter()
+        .zip(high.iter())
+        .map(|(lo, hi)| {
+            let width = hi - lo;
+            width * width
+        })
+        .sum::<f64>()
+        .sqrt();
+    if diagonal.is_finite() && diagonal > 0.0 {
+        (1.0 / diagonal).max(GLE_FREQUENCY_FLOOR)
+    } else {
+        DEFAULT_GLE_OMEGA0
+    }
+}
+
+/// Estimate the characteristic GLE frequency from local gradient curvature.
+pub fn estimate_gle_omega0<O, G>(obj: &O, grad: &G) -> f64
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let bounds = obj.bounds();
+    let dim = bounds.dims;
+    if dim == 0 {
+        return DEFAULT_GLE_OMEGA0;
+    }
+    let low = &bounds.low;
+    let high = &bounds.high;
+    let center = (low + high) * 0.5;
+    let rel_step = f64::EPSILON.cbrt();
+    let min_step = f64::EPSILON.sqrt();
+    let mut frequencies = Vec::with_capacity(dim);
+    for axis in 0..dim {
+        let width = high[axis] - low[axis];
+        if !width.is_finite() || width <= 0.0 {
+            continue;
+        }
+        let step = (rel_step * width.abs()).max(min_step);
+        let mut xp = center.clone();
+        let mut xm = center.clone();
+        xp[axis] = (center[axis] + step).min(high[axis]);
+        xm[axis] = (center[axis] - step).max(low[axis]);
+        let denom = xp[axis] - xm[axis];
+        if !denom.is_finite() || denom.abs() <= min_step {
+            continue;
+        }
+        let gp = grad.grad(xp.view());
+        let gm = grad.grad(xm.view());
+        if gp.len() != dim
+            || gm.len() != dim
+            || gp.iter().any(|v| !v.is_finite())
+            || gm.iter().any(|v| !v.is_finite())
+        {
+            continue;
+        }
+        let curvature = (gp[axis] - gm[axis]) / denom;
+        if curvature.is_finite() && curvature != 0.0 {
+            frequencies.push(curvature.abs().sqrt());
+        }
+    }
+    frequencies.sort_by(|left, right| left.total_cmp(right));
+    frequencies
+        .into_iter()
+        .find(|omega| omega.is_finite() && *omega > 0.0)
+        .unwrap_or_else(|| fallback_gle_omega0(low, high))
 }
 
 /// Run GLE-thermostatted Langevin annealing on `obj` with gradient `grad`.
@@ -52,13 +131,19 @@ where
     G: Gradient<f64>,
 {
     assert!(max_fevals > 0, "max_fevals must be positive");
+    assert!(
+        omega0.is_finite() && omega0 > 0.0,
+        "omega0 must be positive"
+    );
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     let mut rng = StdRng::seed_from_u64(seed);
 
     // The fitted drift covers [omega0, 100 omega0]; resolve the fastest with dt.
-    let omega_hi = 100.0 * omega0;
-    let dt = dt.min(0.2 / omega_hi.max(1e-12)).max(1e-6);
+    let omega_hi = GLE_BAND_RATIO * omega0;
+    let dt = dt
+        .min(GLE_TIMESTEP_RESOLUTION / omega_hi.max(GLE_FREQUENCY_FLOOR))
+        .max(GLE_MIN_TIMESTEP);
     let drift = optimal_sampling_drift(omega0);
     let ns = drift.nrows() - 1;
 
@@ -119,7 +204,26 @@ where
         best_pos: best_pos.to_vec(),
         best_val,
         n_evals,
+        omega0,
+        dt,
     }
+}
+
+/// Run GLE-Langevin annealing with a frequency estimated from the objective.
+pub fn gle_langevin_adaptive_sa<O, G>(
+    obj: &O,
+    grad: &G,
+    seed: u64,
+    max_fevals: usize,
+    dt: f64,
+    n_epochs: usize,
+) -> GleLangevinResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let omega0 = estimate_gle_omega0(obj, grad);
+    gle_langevin_sa(obj, grad, seed, max_fevals, omega0, dt, n_epochs)
 }
 
 #[cfg(test)]
