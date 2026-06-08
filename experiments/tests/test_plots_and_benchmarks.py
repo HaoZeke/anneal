@@ -4586,6 +4586,53 @@ def test_anneal_sota_differential_trial_can_use_elite_base():
     np.testing.assert_allclose(trial, np.array([0.75, 0.25]))
 
 
+def test_anneal_sota_differential_trial_zero_elite_probability_preserves_rand_path():
+    from experiments import anneal_sota
+
+    class CountingRng:
+        def __init__(self):
+            self.scalar_random_calls = 0
+            self.vector_random_calls = 0
+
+        def choice(self, values, size, replace=False):
+            assert not replace
+            return np.asarray(values[:size])
+
+        def random(self, size=None):
+            if size is None:
+                self.scalar_random_calls += 1
+                return 0.0
+            self.vector_random_calls += 1
+            return np.zeros(size, dtype=np.float64)
+
+        def integers(self, high):
+            return 0
+
+    pop = [
+        np.array([0.0, 0.0], dtype=np.float64),
+        np.array([0.25, 0.25], dtype=np.float64),
+        np.array([0.75, 0.25], dtype=np.float64),
+        np.array([0.25, 0.75], dtype=np.float64),
+    ]
+    rng = CountingRng()
+
+    trial = anneal_sota._differential_trial(
+        pop,
+        np.array([0.5, 0.5], dtype=np.float64),
+        i=0,
+        fi=0.5,
+        cri=1.0,
+        rng=rng,
+        low=np.array([-1.0, -1.0], dtype=np.float64),
+        high=np.array([1.0, 1.0], dtype=np.float64),
+        config=anneal_sota.AnnealHybridConfig(elite_differential_probability=0.0),
+    )
+
+    np.testing.assert_allclose(trial, np.array([0.5, 0.0]))
+    assert rng.scalar_random_calls == 0
+    assert rng.vector_random_calls == 1
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
