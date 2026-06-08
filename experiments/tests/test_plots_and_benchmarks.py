@@ -2755,7 +2755,7 @@ def test_cutest_bgsa_auto_uses_raw_best_polish_for_covered_bounds(monkeypatch):
 def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": []}
 
     class ActiveBoundProblem:
         name = "ACTIVEBOUND"
@@ -3157,12 +3157,14 @@ def test_cutest_bgsa_auto_ignores_degree_metadata_without_stationarity(monkeypat
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
         })
+        stage = len(captured["qmc"])
+        best_val = -31.0 if stage == 1 else -31.0 + float(stage)
         return {
-            "best_val": -31.0,
+            "best_val": best_val,
             "best_pos": np.zeros(9),
             "n_evals": 11,
             "n_grads": 3,
-            "polished_values": [-31.0, -4.0, -2.0, -1.0],
+            "polished_values": [best_val, -4.0, -2.0, -1.0],
         }
 
     class FakeHistory:
