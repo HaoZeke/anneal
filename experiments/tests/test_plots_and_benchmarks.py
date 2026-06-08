@@ -2497,6 +2497,62 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypat
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
 
 
+def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class FirstDegreeDeclaredBoundProblem:
+        name = "FIRSTDEGREEBOUND"
+        dim = 9
+        low = np.full(9, -1.0)
+        high = np.full(9, 1.0)
+        has_cutest_bounds = True
+        objective_degree = 1
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc"] = {
+            "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
+            "n_starts": n_starts,
+            "max_fevals_per_start": max_fevals_per_start,
+            "seed": kwargs["seed"],
+            "top_k": kwargs["top_k"],
+        }
+        return {
+            "best_val": -31.0,
+            "best_pos": np.zeros(9),
+            "n_evals": 11,
+            "n_grads": 3,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal)
+
+    best_val, fevals = cutest._bgsa_run(
+        FirstDegreeDeclaredBoundProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -31.0
+    assert fevals > 11 + 3
+    assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
+    assert captured["qmc"]["n_starts"] == 36
+    assert captured["qmc"]["max_fevals_per_start"] == 90
+    assert captured["qmc"]["seed"] == 7
+    assert captured["qmc"]["top_k"] == 2
+
+
 def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
@@ -2553,7 +2609,6 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
     ] == [
         (100, 4, 2700),
         (200, 4, 5200),
-        (200, 0, 5200),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(25))
