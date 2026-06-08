@@ -9,11 +9,11 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
 use crate::cool::Cooling;
-use crate::grad::Gradient;
 use crate::history::State;
 use crate::hmc::integrator::{HmcIntegrator, LeapfrogIntegrator};
 use crate::hmc::momentum::{GaussianMomentum, Momentum};
 use crate::sampler::Sampler;
+use eindir_core::Gradient;
 
 /// HMC-driven SA sampler with pluggable momentum kernel.
 ///

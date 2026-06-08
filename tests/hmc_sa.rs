@@ -3,10 +3,10 @@
 
 use anneal_core::accept::Metropolis;
 use anneal_core::cool::LogCool;
-use anneal_core::grad::{AnalyticGradient, FiniteDiffGradient, Gradient};
 use anneal_core::hmc::{HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, OmelyanIntegrator};
 use anneal_core::run_rs;
 use anneal_core::sampler::Sampler;
+use eindir_core::{AnalyticGradient, FiniteDiffGradient, Gradient};
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,7 +27,7 @@ impl CountingZeroGradient {
     }
 }
 
-impl anneal_core::Gradient<f64> for CountingZeroGradient {
+impl eindir_core::Gradient<f64> for CountingZeroGradient {
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Array1::zeros(x.len())
