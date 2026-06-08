@@ -101,6 +101,7 @@ def hybrid_de(
     rng,
     n_polish=DEFAULT_HYBRID_N_POLISH,
     k_polish=DEFAULT_HYBRID_K_POLISH,
+    config=None,
 ):
     """Anneal benchmark entry backed by ``qmc_annealed_hybrid``."""
     return qmc_annealed_hybrid(
@@ -112,6 +113,7 @@ def hybrid_de(
         rng,
         n_polish=n_polish,
         k_polish=k_polish,
+        config=config,
     )
 
 
