@@ -1137,6 +1137,14 @@ def _polish_bulk_dominates_worst_tail(values):
     return bulk_worst * np.sqrt(float(arr.size)) <= tail
 
 
+def _polish_values_are_terminal(values):
+    return (
+        _polish_values_agree_to_roundoff(values)
+        or _polish_best_dominates_sample(values)
+        or _polish_bulk_dominates_worst_tail(values)
+    )
+
+
 def _run_cutest_multistart_polish(
     anneal_module,
     prob,
@@ -1510,12 +1518,14 @@ def _run_cutest_native_qmc_box_schedule(
     n_chains,
     k_per_epoch,
     include_full_polish=True,
+    return_terminal=False,
 ):
     if grad_kind != "native" or not _has_finite_design_box(prob):
         return None
     best_val = None
     total_work = 0
     skip_full_polish = False
+    terminal = False
     for n_starts, top_k in _native_qmc_box_stage_specs(
         prob.dim,
         n_chains,
@@ -1540,10 +1550,14 @@ def _run_cutest_native_qmc_box_schedule(
         total_work += int(work_units)
         if best_val is None or value < best_val:
             best_val = value
-        if top_k != 0 and _polish_values_agree_to_roundoff(polished_values):
+        if top_k != 0 and _polish_values_are_terminal(polished_values):
+            terminal = True
             skip_full_polish = True
+            break
     if best_val is None:
         return None
+    if return_terminal:
+        return best_val, total_work, terminal
     return best_val, total_work
 
 
@@ -1900,7 +1914,13 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     int(n_chains),
                     int(k_per_epoch),
                     include_full_polish=False,
+                    return_terminal=True,
                 )
+                if auto_best_start_polish is not None:
+                    polish_bv, polish_calls, qmc_terminal = auto_best_start_polish
+                    auto_best_start_polish = (polish_bv, polish_calls)
+                    if qmc_terminal and np.isfinite(float(polish_bv)):
+                        return auto_best_start_polish
             if int(prob.dim) <= int(n_chains) and not (
                 core_qmc_available
                 and grad_kind == "native"
