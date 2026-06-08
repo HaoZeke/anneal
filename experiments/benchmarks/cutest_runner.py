@@ -113,6 +113,7 @@ class CutestProblem:
     design_high: np.ndarray
     has_cutest_bounds: bool
     f_star: float | None  # may be None for problems without a stored optimum
+    objective_degree: int | None = None
 
 
 def effective_design_bounds(
@@ -165,6 +166,14 @@ def load(
     setup_cutest_env()
     import pycutest
     p = pycutest.import_problem(name, sifParams=sif_params)
+    try:
+        properties = pycutest.problem_properties(name)
+    except Exception:
+        properties = {}
+    try:
+        objective_degree = int(properties["degree"])
+    except (KeyError, TypeError, ValueError):
+        objective_degree = None
 
     bl_finite = _is_finite_bound(p.bl)
     bu_finite = _is_finite_bound(p.bu)
@@ -201,6 +210,7 @@ def load(
         design_high=design_high,
         has_cutest_bounds=bool(np.any(bl_finite | bu_finite)),
         f_star=f_star,
+        objective_degree=objective_degree,
     )
 
 
