@@ -27,3 +27,14 @@ micromamba activate anneal-dev
 
 # License
 MIT.
+
+## Documentation
+
+Docs use a dedicated pixi environment:
+
+``` sh
+pixi run -e docs docs-export
+pixi run -e docs docs-build
+```
+
+See `pixi.toml` `[feature.docs]` (modeled on rgpycrumbs/rsx-rs patterns) and `docs/export.el`. Full rewrite of this README follows in the docs maximal task series.
