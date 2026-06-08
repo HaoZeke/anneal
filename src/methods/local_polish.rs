@@ -21,6 +21,10 @@ pub struct LocalPolishResult {
     pub n_evals: usize,
     /// Gradient evaluations consumed by the refinement.
     pub n_grads: usize,
+    /// Norm of the projected gradient at `best_pos`.
+    pub projected_grad_norm: f64,
+    /// Whether the projected gradient satisfies the requested tolerance.
+    pub projected_stationary: bool,
 }
 
 /// Result of QMC-seeded bounded local refinement.
@@ -40,6 +44,10 @@ pub struct QmcPolishResult {
     pub n_polished: usize,
     /// Objective values returned by each local refinement, in polish order.
     pub polished_values: Vec<f64>,
+    /// Projected-gradient norms returned by each local refinement, in polish order.
+    pub polished_projected_grad_norms: Vec<f64>,
+    /// Stationarity flags returned by each local refinement, in polish order.
+    pub polished_stationary: Vec<bool>,
 }
 
 fn projected_gradient(
@@ -85,6 +93,24 @@ fn active_descent_direction(
 
 fn vector_norm(x: &Array1<f64>) -> f64 {
     x.iter().map(|v| v * v).sum::<f64>().sqrt()
+}
+
+fn projected_grad_norm<G>(
+    gradient: &G,
+    x: &Array1<f64>,
+    low: &Array1<f64>,
+    high: &Array1<f64>,
+) -> Option<f64>
+where
+    G: Gradient<f64>,
+{
+    let grad = gradient.grad(x.view());
+    if grad.len() != x.len() || grad.iter().any(|v| !v.is_finite()) {
+        return None;
+    }
+    let pgrad = projected_gradient(x, &grad, low, high);
+    let norm = vector_norm(&pgrad);
+    norm.is_finite().then_some(norm)
 }
 
 fn box_diagonal(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
@@ -190,6 +216,8 @@ where
     let mut inverse_hessian = scaled_identity(x.len(), step0);
     let mut prev_x = None;
     let mut prev_pgrad = None;
+    let mut final_projected_grad_norm = f64::INFINITY;
+    let mut final_grad_matches_x = false;
 
     while n_evals < max_fevals {
         let grad = gradient.grad(x.view());
@@ -198,8 +226,9 @@ where
             break;
         }
         let pgrad = projected_gradient(&x, &grad, low, high);
-        let norm2 = pgrad.iter().map(|v| v * v).sum::<f64>();
-        if norm2.sqrt() <= grad_tol {
+        final_projected_grad_norm = vector_norm(&pgrad);
+        final_grad_matches_x = true;
+        if final_projected_grad_norm <= grad_tol {
             break;
         }
         if let (Some(px), Some(pg)) = (prev_x.take(), prev_pgrad.take()) {
@@ -246,6 +275,7 @@ where
                         best_val = trial_value;
                         best_pos = x.clone();
                     }
+                    final_grad_matches_x = false;
                     accepted = true;
                     break;
                 }
@@ -272,11 +302,21 @@ where
         }
     }
 
+    if !final_grad_matches_x {
+        n_grads += 1;
+        final_projected_grad_norm =
+            projected_grad_norm(gradient, &best_pos, low, high).unwrap_or(f64::INFINITY);
+    }
+    let projected_stationary =
+        final_projected_grad_norm.is_finite() && final_projected_grad_norm <= grad_tol;
+
     LocalPolishResult {
         best_pos,
         best_val,
         n_evals,
         n_grads,
+        projected_grad_norm: final_projected_grad_norm,
+        projected_stationary,
     }
 }
 
@@ -334,6 +374,8 @@ where
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
     let mut polished_values = Vec::with_capacity(polish_limit);
+    let mut polished_projected_grad_norms = Vec::with_capacity(polish_limit);
+    let mut polished_stationary = Vec::with_capacity(polish_limit);
     for (_value, start) in screened.into_iter().take(polish_limit) {
         let result =
             projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol);
@@ -341,6 +383,8 @@ where
         n_grads += result.n_grads;
         n_polished += 1;
         polished_values.push(result.best_val);
+        polished_projected_grad_norms.push(result.projected_grad_norm);
+        polished_stationary.push(result.projected_stationary);
         if result.best_val.is_finite() && result.best_val < best_val {
             best_val = result.best_val;
             best_pos = result.best_pos;
@@ -355,6 +399,8 @@ where
         n_starts,
         n_polished,
         polished_values,
+        polished_projected_grad_norms,
+        polished_stationary,
     }
 }
 
@@ -388,6 +434,8 @@ where
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
     let mut polished_values = Vec::new();
+    let mut polished_projected_grad_norms = Vec::new();
+    let mut polished_stationary = Vec::new();
 
     for replica in 0..n_replicates {
         let replica_seed = seed.wrapping_add(replica as u64);
@@ -430,6 +478,8 @@ where
             n_grads += result.n_grads;
             n_polished += 1;
             polished_values.push(result.best_val);
+            polished_projected_grad_norms.push(result.projected_grad_norm);
+            polished_stationary.push(result.projected_stationary);
             if result.best_val.is_finite() && result.best_val < best_val {
                 best_val = result.best_val;
                 best_pos = result.best_pos;
@@ -445,5 +495,7 @@ where
         n_starts: n_starts * n_replicates,
         n_polished,
         polished_values,
+        polished_projected_grad_norms,
+        polished_stationary,
     }
 }

@@ -1072,6 +1072,7 @@ def _run_cutest_rust_polish(
     grad_kind,
     best_pilot_pos,
     max_fevals,
+    return_stationarity=False,
 ):
     bounds_dim = int(np.asarray(prob.low).size)
     x0 = _hmc_initial_position(best_pilot_pos, bounds_dim)
@@ -1092,7 +1093,10 @@ def _run_cutest_rust_polish(
         result.get("n_evals", 0),
         result.get("n_grads", 0),
     )
-    return float(result["best_val"]), work_units
+    best_val = float(result["best_val"])
+    if return_stationarity:
+        return best_val, work_units, bool(result.get("projected_stationary", False))
+    return best_val, work_units
 
 
 def _polish_values_agree_to_roundoff(values):
@@ -1111,6 +1115,23 @@ def _polished_values_from_result(result):
     except (TypeError, ValueError):
         return tuple()
     return tuple(float(value) for value in values)
+
+
+def _polished_stationary_from_result(result):
+    raw_values = result.get("polished_stationary", ())
+    try:
+        values = np.asarray(raw_values, dtype=np.bool_).reshape(-1)
+    except (TypeError, ValueError):
+        return tuple()
+    return tuple(bool(value) for value in values)
+
+
+def _polish_stationarity_supports_terminal(values, stationary):
+    value_arr = np.asarray(values, dtype=np.float64)
+    if value_arr.size == 0 or not np.all(np.isfinite(value_arr)):
+        return False
+    stationary_arr = np.asarray(stationary, dtype=np.bool_).reshape(-1)
+    return stationary_arr.size == value_arr.size and bool(np.all(stationary_arr))
 
 
 def _polish_best_dominates_sample(values):
@@ -1137,7 +1158,9 @@ def _polish_bulk_dominates_worst_tail(values):
     return bulk_worst * np.sqrt(float(arr.size)) <= tail
 
 
-def _polish_values_are_terminal(values):
+def _polish_values_are_terminal(values, stationary):
+    if not _polish_stationarity_supports_terminal(values, stationary):
+        return False
     return (
         _polish_values_agree_to_roundoff(values)
         or _polish_best_dominates_sample(values)
@@ -1171,21 +1194,24 @@ def _run_cutest_multistart_polish(
     except Exception:
         return None
     outcomes = []
+    stationary_values = []
     total_work = 0
     for start in starts:
-        best_val, work_units = _run_cutest_rust_polish(
+        best_val, work_units, stationary = _run_cutest_rust_polish(
             anneal_module,
             prob,
             grad_fn,
             grad_kind,
             start,
             max_fevals_per_start,
+            return_stationarity=True,
         )
         outcomes.append(float(best_val))
+        stationary_values.append(bool(stationary))
         total_work += int(work_units)
     if not outcomes:
         return None
-    return min(outcomes), total_work, outcomes
+    return min(outcomes), total_work, outcomes, stationary_values
 
 
 def _run_cutest_best_start_polish(
@@ -1323,7 +1349,12 @@ def _run_cutest_qmc_polish(
     if not np.isfinite(best_val):
         return None
     if return_polished_values:
-        return best_val, work_units, _polished_values_from_result(result)
+        return (
+            best_val,
+            work_units,
+            _polished_values_from_result(result),
+            _polished_stationary_from_result(result),
+        )
     return best_val, work_units
 
 
@@ -1386,26 +1417,6 @@ def _native_qmc_box_top_k(n_chains):
     if n_chains < 1:
         raise ValueError("n_chains must be positive")
     return int(n_chains)
-
-
-def _cutest_objective_degree(prob):
-    raw = getattr(prob, "objective_degree", None)
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _native_qmc_middle_bound_supported(prob):
-    degree = _cutest_objective_degree(prob)
-    return degree is not None and degree > 1
-
-
-def _native_qmc_first_degree_bound_supported(prob):
-    degree = _cutest_objective_degree(prob)
-    return degree == 1
 
 
 def _native_qmc_box_stage_specs(dim, n_chains, include_full_polish=True):
@@ -1499,12 +1510,8 @@ def _run_cutest_dominant_multistart_polish(
     )
     if auto_multistart_polish is None:
         return None
-    polish_bv, polish_calls, polish_values = auto_multistart_polish
-    if (
-        _polish_values_agree_to_roundoff(polish_values)
-        or _polish_best_dominates_sample(polish_values)
-        or _polish_bulk_dominates_worst_tail(polish_values)
-    ):
+    polish_bv, polish_calls, polish_values, polish_stationary = auto_multistart_polish
+    if _polish_values_are_terminal(polish_values, polish_stationary):
         return polish_bv, polish_calls, polish_values
     return None
 
@@ -1546,11 +1553,14 @@ def _run_cutest_native_qmc_box_schedule(
         )
         if result is None:
             continue
-        value, work_units, polished_values = result
+        value, work_units, polished_values, polished_stationary = result
         total_work += int(work_units)
         if best_val is None or value < best_val:
             best_val = value
-        if top_k != 0 and _polish_values_are_terminal(polished_values):
+        if top_k != 0 and _polish_values_are_terminal(
+            polished_values,
+            polished_stationary,
+        ):
             terminal = True
             skip_full_polish = True
             break
@@ -1950,39 +1960,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             elif _has_declared_cutest_bounds(
                 prob
             ) and _bounded_polish_dimension_is_covered(prob.dim, n_chains):
-                if (
-                    grad_kind == "native"
-                    and _native_qmc_first_degree_bound_supported(prob)
-                ):
-                    auto_best_start_polish = _run_cutest_native_qmc_bounded_screen(
-                        anneal,
-                        prob,
-                        grad_fn,
-                        grad_kind,
-                        seed,
-                        int(n_chains),
-                        int(k_per_epoch),
-                    )
-                    if auto_best_start_polish is not None and np.isfinite(
-                        float(auto_best_start_polish[0])
-                    ):
-                        return auto_best_start_polish
-                elif (
-                    grad_kind == "native"
-                    and _native_qmc_dense_dimension_is_covered(prob.dim, n_chains)
-                ):
-                    auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
-                        anneal,
-                        prob,
-                        grad_fn,
-                        grad_kind,
-                        seed,
-                        int(n_chains),
-                        int(k_per_epoch),
-                    )
-                elif grad_kind == "native" and _native_qmc_middle_bound_supported(
-                    prob
-                ):
+                if grad_kind == "native":
                     auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                         anneal,
                         prob,
