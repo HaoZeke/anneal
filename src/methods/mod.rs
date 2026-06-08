@@ -20,7 +20,9 @@ pub mod mcmc_sa;
 pub mod parallel_tempering;
 
 pub use additive_independence::{additive_independence_sa, AdditiveIndependenceResult};
-pub use gle_langevin::{gle_langevin_sa, GleLangevinResult};
+pub use gle_langevin::{
+    estimate_gle_omega0, gle_langevin_adaptive_sa, gle_langevin_sa, GleLangevinResult,
+};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
     fit_laplace, pilot_draws, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,

@@ -1866,6 +1866,22 @@ def _run_cutest_gle_langevin(
         return None
     design_low, design_high = _design_bounds(prob)
     max_fevals = _gle_langevin_screen_budget(k_per_epoch)
+    kwargs = {
+        "seed": int(seed),
+        "n_epochs": 1,
+    }
+    if hasattr(anneal_module, "estimate_gle_omega0"):
+        try:
+            omega0 = anneal_module.estimate_gle_omega0(
+                prob.fn,
+                grad_fn,
+                design_low,
+                design_high,
+            )
+            if np.isfinite(float(omega0)) and float(omega0) > 0.0:
+                kwargs["omega0"] = float(omega0)
+        except Exception:
+            pass
     try:
         result = anneal_module.gle_langevin(
             prob.fn,
@@ -1873,8 +1889,7 @@ def _run_cutest_gle_langevin(
             design_low,
             design_high,
             int(max_fevals),
-            seed=int(seed),
-            n_epochs=1,
+            **kwargs,
         )
     except Exception:
         return None
