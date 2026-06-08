@@ -7,9 +7,9 @@
 //! HMC (`HmcSaSampler`), or a custom sampler, PT lifts it to a
 //! multi-temperature ensemble.
 
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 use crate::cool::Cooling;
 use crate::exchange::{Exchange, MetropolisExchange};

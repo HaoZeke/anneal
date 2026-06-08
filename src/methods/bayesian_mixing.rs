@@ -4,8 +4,8 @@
 //! Chain count, incumbent protection, and proposal allocation are derived
 //! online from a Beta-Bernoulli posterior over global-best improvements.
 
-use rand::SeedableRng;
 use rand::rngs::StdRng;
+use rand::SeedableRng;
 use rand_distr::{Beta, Distribution};
 
 use crate::history::{EpochLine, History, State};

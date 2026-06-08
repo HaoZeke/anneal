@@ -15,9 +15,9 @@
 
 use eindir_core::{AdditiveSurrogate, Objective};
 use ndarray::{Array1, Array2};
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 /// Result of a rank-1 independence-sampler run.
 #[derive(Clone, Debug)]
