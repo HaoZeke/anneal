@@ -13,6 +13,8 @@ It maintains one Beta posterior per chain on whether that chain has produced a n
 
 Only for generalized =Langevin= equation (GLE), the polish variants, and Hamiltonian Monte Carlo (HMC)-style methods. Classical presets and additive independence are values-only.
 
+See :eindir:doc:`howto/gradients` for how to provide one (including ``grad_fn`` on ``eindir.PyObjective`` for native derivatives from external frameworks). The ``Gradient`` trait and adapters now live in ``eindir_core``.
+
 * Precision and float16/float32 policy?
 
 The Rust core is f64 throughout. The device path respects the namespace of the bounds you pass (CuPy float32 arrays will keep everything in float32 on the GPU). The three-channel Accept contract is what guarantees that the acceptance decision remains monotone even when intermediate quantities underflow or cancel.

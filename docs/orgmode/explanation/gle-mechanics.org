@@ -11,4 +11,4 @@ See the dedicated tutorial [[file:../tutorials/gle-colored-noise.org][gle-colore
 
 The construction (white-noise critically damps one frequency; generalized =Langevin= equation (GLE) uses number of auxiliary (=N_s=) momenta + optimal_sampling_drift matrix A so the spectrum is flat on [omega0, 100*omega0], BAB (B-A-B) propagator, stationary reseed, exact matrix_exp + ldl_sqrt) lives in ==eindir== (GleThermostat) and is consumed verbatim by =src/methods/gle_langevin.rs=.
 
-Because the generalized =Langevin= equation (GLE) object is a pure filling of the Move slot, any future improvement to the thermostat (different canonical form, a-la-carte correctness vs acceleration, new drift fitting) instantly benefits every gradient driver without touching the classical presets or the orchestrator.
+Because the generalized =Langevin= equation (GLE) object is a pure filling of the Move slot, thermostat variants (different canonical form, a-la-carte correctness vs acceleration, new drift fitting) can be reused by gradient drivers without touching the classical presets or the orchestrator.

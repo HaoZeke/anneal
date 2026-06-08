@@ -25,6 +25,14 @@ All examples and user code should import from =anneal= (or =anneal._core= for th
 - Last-mile accuracy: any of the polish variants.
 - No gradient but separable: additive independence gives the dimension-free floor.
 
+All gradient types, the =Gradient= / =DifferentiableObjective= traits, analytic implementations on the surrogates (=ReducedObjective=, =ChebyshevSurrogate=, =AdditiveSurrogate=), the =AnalyticGradient= / =FiniteDiffGradient= adapters, and Python support (including =grad_fn= on =PyObjective=) live in =eindir=.
+
+See:
+
+- :eindir:doc:`howto/gradients`
+- :eindir:doc:`explanation/primitives`
+- The =eindir.gradient= module in the eindir Rust API (intersphinx cross-reference from this documentation set).
+
 ** Reproducibility
 
 Always pass an explicit =seed= to the top-level call. The Rust side uses =StdRng= seeded from that value; the quasi-Monte Carlo (QMC) helpers use a derived skip. For cross-language bit-identical runs, the C API and the Python wrappers use the same underlying streams.
