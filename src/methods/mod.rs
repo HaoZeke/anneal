@@ -11,12 +11,14 @@
 //! Accept) is silent on this loop control, so both styles are
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
+pub mod additive_independence;
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 
+pub use additive_independence::{additive_independence_sa, AdditiveIndependenceResult};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
     fit_laplace, pilot_draws, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,
