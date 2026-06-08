@@ -139,6 +139,63 @@ def test_performance_profile_masks_all_failed_rows_without_warning():
     assert ax.get_legend() is not None
 
 
+def test_active_subspace_encoder_scales_huge_gradients_without_overflow():
+    from experiments.surrogate import ActiveSubspaceEncoder
+
+    low = np.full(3, -1.0)
+    high = np.full(3, 1.0)
+    origin = np.zeros(3)
+    huge = np.finfo(float).max / 8.0
+    grads = np.array(
+        [
+            [huge, 2.0 * huge, -huge],
+            [-huge, huge, 0.5 * huge],
+            [0.25 * huge, -0.5 * huge, huge],
+        ],
+        dtype=float,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        encoder = ActiveSubspaceEncoder.from_gradients(origin, grads, low, high, k=2)
+
+    assert encoder.basis.shape == (3, 2)
+    assert np.all(np.isfinite(encoder.basis))
+    assert encoder.basis.T @ encoder.basis == pytest.approx(np.eye(2), abs=1e-10)
+
+
+def test_reduced_surrogate_falls_back_when_gradients_are_unusable():
+    from experiments.surrogate import fit_reduced_surrogate
+
+    low = np.full(3, -1.0)
+    high = np.full(3, 1.0)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=float)
+        return float(np.dot(x, x))
+
+    def broken_grad(_x):
+        return np.array([np.inf, np.nan, -np.inf])
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        fit = fit_reduced_surrogate(
+            sphere,
+            broken_grad,
+            low,
+            high,
+            dim=3,
+            k=2,
+            degree=2,
+            n_pilot=12,
+            rng=0,
+        )
+
+    assert fit.encoder.basis.shape == (3, 2)
+    assert np.all(np.isfinite(fit.encoder.basis))
+    assert np.all(np.isfinite(fit.surrogate.coeffs))
+
+
 def test_data_profile_renders():
     pytest.importorskip("matplotlib")
     pytest.importorskip("chemparseplot")
