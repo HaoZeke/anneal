@@ -906,6 +906,7 @@ DRIVERS = [
     "pt_sa_budgeted",
     "bayesian_mixing_sa",
     "additive_indep",
+    "gle_langevin",
     "scipy_lbfgsb",
     "scipy_de",
     "scipy_dual_annealing",
@@ -2318,6 +2319,49 @@ def main():
                     problem=prob.name,
                     dim=prob.dim,
                     driver="additive_indep",
+                    seed=seed,
+                    fevals=nc,
+                    best_val=bv,
+                    wall_time_s=wt,
+                    f_x0=f0,
+                    solved=int(
+                        math.isfinite(bv)
+                        and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                    ),
+                )
+            )
+
+            # GLE-thermostatted Langevin: colored-noise dynamics in the Rust
+            # core. Gradient-driven; uses the native CUTEst gradient when
+            # available, else finite differences.
+            t0 = time.perf_counter()
+            try:
+                import anneal as _anneal_mod
+
+                gle_budget = 1 + args.n_epochs * args.k_fixed
+                gle_grad_fn, _gk = _cutest_gradient(prob)
+                gle_low, gle_high = _design_bounds(prob)
+                gle_out = _anneal_mod.gle_langevin(
+                    prob.fn,
+                    gle_grad_fn,
+                    np.asarray(gle_low, dtype=np.float64),
+                    np.asarray(gle_high, dtype=np.float64),
+                    int(gle_budget),
+                    seed=int(seed),
+                )
+                bv, nc = float(gle_out["best_val"]), int(gle_out["n_evals"])
+            except Exception as exc:
+                print(
+                    f"    gle_langevin failed on {prob.name} seed {seed}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                bv, nc = float("nan"), 0
+            wt = time.perf_counter() - t0
+            rows.append(
+                dict(
+                    problem=prob.name,
+                    dim=prob.dim,
+                    driver="gle_langevin",
                     seed=seed,
                     fevals=nc,
                     best_val=bv,
