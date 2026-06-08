@@ -2591,6 +2591,7 @@ def test_cutest_bgsa_auto_returns_dominant_native_qmc_screen(monkeypatch):
             "n_grads": 3,
             "polished_values": [-100.0, -20.0, -10.0, -1.0],
             "polished_projected_grad_norms": [0.0, 0.0, 0.0, 0.0],
+            "polished_stationary": [True, True, True, True],
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
@@ -2909,6 +2910,7 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
             "n_polished": n_polished,
             "polished_values": [-7.0] * n_polished,
             "polished_projected_grad_norms": [0.0] * n_polished,
+            "polished_stationary": [True] * n_polished,
         }
 
     result = cutest._run_cutest_native_qmc_box_schedule(
@@ -2942,7 +2944,6 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
         low = np.full(4, -1.0)
         high = np.full(4, 1.0)
         has_cutest_bounds = True
-        objective_degree = 2
 
         def fn(self, x):
             x = np.asarray(x, dtype=np.float64)

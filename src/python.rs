@@ -406,6 +406,8 @@ fn polish(
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
+    out.set_item("projected_grad_norm", result.projected_grad_norm)?;
+    out.set_item("projected_stationary", result.projected_stationary)?;
     Ok(out.into())
 }
 
@@ -476,6 +478,11 @@ fn qmc_polish(
     out.set_item("n_starts", result.n_starts)?;
     out.set_item("n_polished", result.n_polished)?;
     out.set_item("polished_values", result.polished_values)?;
+    out.set_item(
+        "polished_projected_grad_norms",
+        result.polished_projected_grad_norms,
+    )?;
+    out.set_item("polished_stationary", result.polished_stationary)?;
     Ok(out.into())
 }
 
@@ -551,6 +558,11 @@ fn shifted_qmc_polish(
     out.set_item("n_starts", result.n_starts)?;
     out.set_item("n_polished", result.n_polished)?;
     out.set_item("polished_values", result.polished_values)?;
+    out.set_item(
+        "polished_projected_grad_norms",
+        result.polished_projected_grad_norms,
+    )?;
+    out.set_item("polished_stationary", result.polished_stationary)?;
     Ok(out.into())
 }
 
