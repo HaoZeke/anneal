@@ -1618,6 +1618,55 @@ def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
     ]
 
 
+def test_cutest_bgsa_auto_combines_shifted_qmc_for_small_finite_box(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def qmc_polish(_obj_fn, _grad_fn, _low, _high, _n_starts, _max_fevals, **_kwargs):
+        return {
+            "best_val": 3.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: pytest.fail("portfolio should be skipped"),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_shifted_qmc_polish",
+        lambda *_args, **_kwargs: (-41.0, 11),
+    )
+    monkeypatch.setattr(
+        cutest,
+        "_run_cutest_qmc_differential_search",
+        lambda *_args, **_kwargs: None,
+    )
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bgsa_auto",
+    )
+
+    assert best_val == -41.0
+    assert fevals == 6 + 11
+
+
 def test_cutest_bgsa_auto_polishes_ambiguous_qmc_start_screen(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
