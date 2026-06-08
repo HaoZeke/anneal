@@ -2248,10 +2248,10 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
         (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
         for call in captured["qmc"]
     ] == [
-        (8, 4, 56),
-        (16, 4, 72),
-        (32, 4, 104),
-        (32, 2, 104),
+        (8, 4, 4),
+        (16, 4, 3),
+        (32, 4, 1),
+        (32, 2, 2),
     ]
     assert {call["seed"] for call in captured["qmc"]} == {7}
 
@@ -2296,10 +2296,10 @@ def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
     assert best_val == -31.0
     assert fevals > 6 + 7
     assert captured["qmc"] == [
-        (8, 4, 56),
-        (16, 4, 72),
-        (32, 4, 104),
-        (32, 2, 104),
+        (8, 4, 4),
+        (16, 4, 3),
+        (32, 4, 1),
+        (32, 2, 2),
     ]
 
 
