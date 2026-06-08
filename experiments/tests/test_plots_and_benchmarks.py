@@ -4886,6 +4886,53 @@ def test_anneal_sota_qmc_best1bin_scout_uses_copied_rng():
     assert rng.random(5).tolist() == pytest.approx(expected.random(5).tolist())
 
 
+def test_anneal_sota_qmc_hybrid_tries_shifted_best1bin_replicas(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    calls = []
+
+    def fake_scout(counter, low, high, *, dim, rng, max_evals, config):
+        calls.append(max_evals)
+        counter.n += min(max_evals, 2)
+        counter.objective_evals += min(max_evals, 2)
+        value = 1.0 if len(calls) == 1 else -1.0
+        counter.best = min(counter.best, value)
+        return value
+
+    monkeypatch.setattr(anneal_sota, "_qmc_best1bin_scout", fake_scout)
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum(x * x))
+
+    counter = sota_cutest.Counter(sphere, budget=20)
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        dim=2,
+        grad=None,
+        rng=np.random.default_rng(5),
+        n_polish=100,
+        config=anneal_sota.AnnealHybridConfig(
+            population_min=4,
+            population_dim_multiplier=1,
+            best1bin_replicates=3,
+            best1bin_required_population=4,
+            best1bin_population_min=4,
+            best1bin_population_dim_multiplier=1,
+            best1bin_population_max=4,
+        ),
+    )
+
+    assert len(calls) == 2
+    assert calls[1] < calls[0]
+    assert best <= -1.0
+
+
 def test_anneal_sota_qmc_hybrid_rejects_surrogate_without_sample(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
