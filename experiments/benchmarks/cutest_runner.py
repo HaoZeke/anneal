@@ -3,8 +3,8 @@ shared-runner Problem dataclass so the existing experiments infra
 (MCMC-SA, classical SA, sparse skip) drives them without changes.
 
 Bootstrap: run `bash experiments/benchmarks/bootstrap_cutest.sh` once
-to clone+build CUTEst into .bench/. Then export the env vars printed
-by the bootstrap (or use the cutest_env() helper here).
+to clone+build CUTEst into .bench/. Pass the resulting paths through
+`CutestConfig` when using a non-default location.
 
 Selected manifest: 12 unconstrained or bound-constrained CUTEst
 problems with `n in [2, 30]`, hand-picked to span the standard
@@ -16,9 +16,12 @@ once the SIF classification index is sorted out.
 
 from __future__ import annotations
 
-import os
+import importlib.util
+import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
 
 import numpy as np
 
@@ -53,52 +56,188 @@ def _is_finite_bound(b: np.ndarray) -> np.ndarray:
     return np.isfinite(b) & (np.abs(b) < _BOUND_INF)
 
 
-def cutest_env() -> dict:
-    """Returns the env-var dict pycutest expects.
+@dataclass(frozen=True)
+class CutestConfig:
+    """Filesystem configuration for a bootstrapped CUTEst/PyCUTEst stack."""
 
-    Reads from the .bench/ directory in the repo root; raises
-    RuntimeError with a clear message if the bootstrap hasn't run."""
-    root = os.environ.get("PIXI_PROJECT_ROOT", os.getcwd())
-    bench = os.path.join(root, ".bench")
-    env = {
-        "ARCHDEFS": os.path.join(bench, "ARCHDefs"),
-        "SIFDECODE": os.path.join(bench, "SIFDecode", "install"),
-        "CUTEST": os.path.join(bench, "CUTEst", "install"),
-        "MASTSIF": os.path.join(bench, "sif"),
-        "MYARCH": "pc64.lnx.gfo",
-        "PYCUTEST_CACHE": os.environ.get(
-            "PYCUTEST_CACHE",
-            os.path.join(bench, "cache"),
-        ),
-    }
-    required_paths = {
-        "SIFDecode decoder": os.path.join(env["SIFDECODE"], "bin", "sifdecoder"),
-        "CUTEst single library": os.path.join(env["CUTEST"], "lib", "libcutest_single.a"),
-        "CUTEst double library": os.path.join(env["CUTEST"], "lib", "libcutest_double.a"),
-        "MASTSIF catalogue": env["MASTSIF"],
-    }
-    missing = [f"{label} ({path})" for label, path in required_paths.items() if not os.path.exists(path)]
-    if missing:
-        joined = "; ".join(missing)
-        raise RuntimeError(
-            "CUTEst bootstrap incomplete. Run "
-            "'bash experiments/benchmarks/bootstrap_cutest.sh' first "
-            f"(looked in {bench}; missing {joined})"
-        )
-    os.makedirs(os.path.join(env["PYCUTEST_CACHE"], "pycutest_cache_holder"), exist_ok=True)
-    return env
+    bench_dir: Path
+    cache_dir: Path
+    myarch: str = "pc64.lnx.gfo"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bench_dir", Path(self.bench_dir))
+        object.__setattr__(self, "cache_dir", Path(self.cache_dir))
+
+    @classmethod
+    def from_root(
+        cls,
+        root: str | Path | None = None,
+        *,
+        cache_dir: str | Path | None = None,
+        myarch: str = "pc64.lnx.gfo",
+    ) -> "CutestConfig":
+        project_root = Path.cwd() if root is None else Path(root)
+        bench_dir = project_root / ".bench"
+        cache = bench_dir / "cache" if cache_dir is None else Path(cache_dir)
+        return cls(bench_dir=bench_dir, cache_dir=cache, myarch=myarch)
+
+    @property
+    def archdefs_dir(self) -> Path:
+        return self.bench_dir / "ARCHDefs"
+
+    @property
+    def sifdecode_install(self) -> Path:
+        return self.bench_dir / "SIFDecode" / "install"
+
+    @property
+    def sifdecoder(self) -> Path:
+        return self.sifdecode_install / "bin" / "sifdecoder"
+
+    @property
+    def cutest_install(self) -> Path:
+        return self.bench_dir / "CUTEst" / "install"
+
+    @property
+    def cutest_include_dir(self) -> Path:
+        return self.cutest_install / "include"
+
+    @property
+    def cutest_header(self) -> Path:
+        return self.cutest_include_dir / "cutest.h"
+
+    @property
+    def cutest_single_library(self) -> Path:
+        return self.cutest_install / "lib" / "libcutest_single.a"
+
+    @property
+    def cutest_double_library(self) -> Path:
+        return self.cutest_install / "lib" / "libcutest_double.a"
+
+    @property
+    def mastsif_dir(self) -> Path:
+        return self.bench_dir / "sif"
+
+    @property
+    def pycutest_cache_holder(self) -> Path:
+        return self.cache_dir / "pycutest_cache_holder"
+
+    def validate(self) -> "CutestConfig":
+        """Validate required files and ensure the explicit PyCUTEst cache exists."""
+
+        required_paths = {
+            "SIFDecode decoder": self.sifdecoder,
+            "CUTEst include header": self.cutest_header,
+            "CUTEst single library": self.cutest_single_library,
+            "CUTEst double library": self.cutest_double_library,
+            "MASTSIF catalogue": self.mastsif_dir,
+        }
+        missing = [
+            f"{label} ({path})"
+            for label, path in required_paths.items()
+            if not path.exists()
+        ]
+        if missing:
+            joined = "; ".join(missing)
+            raise RuntimeError(
+                "CUTEst bootstrap incomplete. Run "
+                "'bash experiments/benchmarks/bootstrap_cutest.sh' first "
+                f"(looked in {self.bench_dir}; missing {joined})"
+            )
+        self.pycutest_cache_holder.mkdir(parents=True, exist_ok=True)
+        return self
 
 
-def setup_cutest_env() -> None:
-    """Install the CUTEst env vars into the running process and prepend
-    the SIFDecode bin dir to PATH. Idempotent."""
-    env = cutest_env()
-    for k, v in env.items():
-        os.environ[k] = v
-    sif_bin = os.path.join(env["SIFDECODE"], "bin")
-    path = os.environ.get("PATH", "")
-    if sif_bin not in path:
-        os.environ["PATH"] = f"{sif_bin}:{path}"
+def default_cutest_config(
+    root: str | Path | None = None,
+    *,
+    cache_dir: str | Path | None = None,
+) -> CutestConfig:
+    return CutestConfig.from_root(root, cache_dir=cache_dir).validate()
+
+
+def _pycutest_package_dir() -> Path:
+    spec = importlib.util.find_spec("pycutest")
+    if spec is None or spec.submodule_search_locations is None:
+        raise RuntimeError("PyCUTEst is not installed")
+    return Path(next(iter(spec.submodule_search_locations)))
+
+
+def _pycutest_version(init_path: Path) -> str:
+    text = init_path.read_text(encoding="utf-8")
+    match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", text)
+    return match.group(1) if match else "0"
+
+
+def _load_pycutest_submodule(package_dir: Path, name: str):
+    fullname = f"pycutest.{name}"
+    if fullname in sys.modules:
+        return sys.modules[fullname]
+    spec = importlib.util.spec_from_file_location(fullname, package_dir / f"{name}.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load PyCUTEst submodule {name}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[fullname] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _install_pycutest_path_providers(system_paths, config: CutestConfig) -> None:
+    system_paths.get_cutest_path = lambda: str(config.cutest_double_library)
+    system_paths.get_cutest_include_path = lambda: str(config.cutest_include_dir)
+    system_paths.get_sifdecoder_path = lambda: str(config.sifdecoder)
+    system_paths.get_mastsif_path = lambda: str(config.mastsif_dir)
+    system_paths.get_cache_path = lambda: str(config.cache_dir)
+
+
+def configured_pycutest(config: CutestConfig | None = None):
+    """Return PyCUTEst configured from explicit paths instead of process state."""
+
+    existing = sys.modules.get("pycutest")
+    if existing is not None and all(
+        hasattr(existing, name)
+        for name in ("import_problem", "clear_cache", "problem_properties", "find_problems")
+    ):
+        return existing
+
+    config = default_cutest_config() if config is None else config.validate()
+    package_dir = _pycutest_package_dir()
+    package = ModuleType("pycutest")
+    package.__file__ = str(package_dir / "__init__.py")
+    package.__path__ = [str(package_dir)]
+    package.__package__ = "pycutest"
+    package.__version__ = _pycutest_version(package_dir / "__init__.py")
+    package.__all__ = []
+    sys.modules["pycutest"] = package
+
+    system_paths = _load_pycutest_submodule(package_dir, "system_paths")
+    _install_pycutest_path_providers(system_paths, config)
+    for stale in ("pycutest.install_scripts", "pycutest.build_interface", "pycutest.sifdecode_extras"):
+        sys.modules.pop(stale, None)
+
+    build_interface = _load_pycutest_submodule(package_dir, "build_interface")
+    sifdecode_extras = _load_pycutest_submodule(package_dir, "sifdecode_extras")
+    problem_class = _load_pycutest_submodule(package_dir, "problem_class")
+
+    package.import_problem = build_interface.import_problem
+    package.clear_cache = build_interface.clear_cache
+    package.all_cached_problems = build_interface.all_cached_problems
+    package.print_available_sif_params = sifdecode_extras.print_available_sif_params
+    package.problem_properties = sifdecode_extras.problem_properties
+    package.find_problems = sifdecode_extras.find_problems
+    package.CUTEstProblem = problem_class.CUTEstProblem
+    package.__all__ = [
+        "import_problem",
+        "clear_cache",
+        "all_cached_problems",
+        "print_available_sif_params",
+        "problem_properties",
+        "find_problems",
+        "CUTEstProblem",
+    ]
+    cache_path = str(config.cache_dir)
+    if cache_path not in sys.path:
+        sys.path.append(cache_path)
+    return package
 
 
 @dataclass(frozen=True)
@@ -154,6 +293,7 @@ def load(
     sif_params: dict | None = None,
     x_box: float = 5.0,
     f_star: float | None = None,
+    config: CutestConfig | None = None,
 ) -> CutestProblem:
     """Loads a CUTEst problem and wraps it as a CutestProblem.
 
@@ -166,8 +306,7 @@ def load(
         f_star: known global optimum if available (used by the bench
             "solved" predicate). None means "use a tolerance from x0".
     """
-    setup_cutest_env()
-    import pycutest
+    pycutest = configured_pycutest(config)
     p = pycutest.import_problem(name, sifParams=sif_params)
     try:
         properties = pycutest.problem_properties(name)
@@ -221,9 +360,9 @@ def list_default_manifest() -> list[tuple[str, dict | None]]:
     return list(DEFAULT_MANIFEST)
 
 
-def load_default_manifest() -> list[CutestProblem]:
+def load_default_manifest(config: CutestConfig | None = None) -> list[CutestProblem]:
     """Load every (name, sif_params) pair from the default manifest."""
-    return [load(name, sif_params=params) for name, params in DEFAULT_MANIFEST]
+    return [load(name, sif_params=params, config=config) for name, params in DEFAULT_MANIFEST]
 
 
 # Scalable unconstrained problems at higher dimension, to test the
@@ -251,13 +390,13 @@ HIGHDIM_MANIFEST = [
 ]
 
 
-def load_highdim_manifest() -> list[CutestProblem]:
+def load_highdim_manifest(config: CutestConfig | None = None) -> list[CutestProblem]:
     """Load the high-dimensional scalable manifest, skipping any problem that
     fails to decode (SIF parameter names vary across problems)."""
     out = []
     for name, params in HIGHDIM_MANIFEST:
         try:
-            out.append(load(name, sif_params=params))
+            out.append(load(name, sif_params=params, config=config))
         except Exception as exc:  # noqa: BLE001
             print(f"  skip {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
     return out
@@ -266,14 +405,14 @@ def load_highdim_manifest() -> list[CutestProblem]:
 def main():
     """Smoke test: load every problem in the default manifest, evaluate
     f(x0), and print n / f(x0). Use as `pixi run -e verify cutest-smoke`."""
-    setup_cutest_env()
+    config = default_cutest_config()
     print(f"Loading {len(DEFAULT_MANIFEST)} CUTEst problems...\n")
     print(f"{'name':<10} {'n':>4} {'f(x0)':>16} {'box low':>10} {'box high':>10}")
     print("-" * 56)
     bad = []
     for name, params in DEFAULT_MANIFEST:
         try:
-            prob = load(name, sif_params=params)
+            prob = load(name, sif_params=params, config=config)
             mid = (prob.low + prob.high) / 2
             fval = prob.fn(mid)
             print(f"{name:<10} {prob.dim:>4} {fval:>16.4g} {prob.low.min():>10.2g} {prob.high.max():>10.2g}")

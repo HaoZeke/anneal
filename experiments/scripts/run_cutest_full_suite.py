@@ -30,7 +30,12 @@ from queue import Empty
 
 import numpy as np
 
-from experiments.benchmarks.cutest_runner import cutest_env, load, setup_cutest_env
+from experiments.benchmarks.cutest_runner import (
+    CutestConfig,
+    configured_pycutest,
+    default_cutest_config,
+    load,
+)
 from experiments.scripts.run_cutest_benchmarks import (
     DRIVERS as MANIFEST_DRIVERS,
     SCIPY_DRIVERS,
@@ -114,11 +119,23 @@ def _collect_kind(pycutest, kind: str, dim_cap: int, exclude_names: set[str]) ->
     return selected
 
 
-def list_target_problems(dim_cap: int, exclude_names: Iterable[str] | None = None) -> list[TargetProblem]:
+def cutest_config_from_args(args=None) -> CutestConfig:
+    if args is None:
+        return default_cutest_config()
+    return default_cutest_config(
+        getattr(args, "bench_root", None),
+        cache_dir=getattr(args, "pycutest_cache", None),
+    )
+
+
+def list_target_problems(
+    dim_cap: int,
+    exclude_names: Iterable[str] | None = None,
+    config: CutestConfig | None = None,
+) -> list[TargetProblem]:
     """Enumerate unique unconstrained and bound-constrained CUTEst targets."""
 
-    setup_cutest_env()
-    import pycutest
+    pycutest = configured_pycutest(config)
 
     excluded = set(exclude_names or ())
     by_name: dict[str, TargetProblem] = {}
@@ -154,8 +171,8 @@ def parse_drivers(raw: str | None) -> tuple[str, ...]:
     return drivers
 
 
-def evict_pycutest_cache() -> None:
-    cache_root = Path(cutest_env()["PYCUTEST_CACHE"])
+def evict_pycutest_cache(config: CutestConfig | None = None) -> None:
+    cache_root = (default_cutest_config() if config is None else config.validate()).cache_dir
     cache_root.mkdir(parents=True, exist_ok=True)
     for child in cache_root.iterdir():
         if child.is_dir():
@@ -305,7 +322,7 @@ def maybe_reduce(prob, args):
 
 
 def load_problem(name: str, args=None):
-    prob = load(name, sif_params=None)
+    prob = load(name, sif_params=None, config=cutest_config_from_args(args))
     if args is not None:
         prob = maybe_reduce(prob, args)
     return prob
@@ -329,17 +346,14 @@ def _evict_problem_cache(name: str, args) -> None:
     """
     if not getattr(args, "evict_cache", False):
         return
-    import os
-    import shutil
     try:
-        import pycutest
+        pycutest = configured_pycutest(cutest_config_from_args(args))
         pycutest.clear_cache(name)
     except Exception:
         pass
-    cache = os.environ.get("PYCUTEST_CACHE")
-    if cache:
-        for sub in (os.path.join(cache, "pycutest_cache", name), os.path.join(cache, name)):
-            shutil.rmtree(sub, ignore_errors=True)
+    cache = cutest_config_from_args(args).cache_dir
+    for sub in (cache / "pycutest_cache" / name, cache / name):
+        shutil.rmtree(sub, ignore_errors=True)
 
 
 def centre_value(prob) -> float:
@@ -500,13 +514,18 @@ def run_driver_cell(problem_ref, driver: str, seed: int, args) -> tuple[float, i
 
 def run_suite(args) -> list[dict]:
     drivers = parse_drivers(args.drivers)
+    config = cutest_config_from_args(args)
     rows = load_existing_rows(args.out, resume=not args.no_resume)
     seen = resume_keys(rows)
 
     if args.evict_cache:
-        evict_pycutest_cache()
+        evict_pycutest_cache(config)
 
-    targets = list_target_problems(args.dim_cap, exclude_names=args.exclude_problem)
+    targets = list_target_problems(
+        args.dim_cap,
+        exclude_names=args.exclude_problem,
+        config=config,
+    )
     if args.max_problems is not None:
         targets = targets[: args.max_problems]
     targets = shard_targets(targets, args.shard_index, args.shard_count)
@@ -618,6 +637,10 @@ def run_suite(args) -> list[dict]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="data/cutest_full.csv")
+    parser.add_argument("--bench-root", default=None,
+                        help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.")
+    parser.add_argument("--pycutest-cache", default=None,
+                        help="Explicit PyCUTEst cache directory; defaults to .bench/cache.")
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--dim-cap", type=int, default=50)
     parser.add_argument("--reduce", action="store_true",

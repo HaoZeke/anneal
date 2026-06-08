@@ -355,7 +355,7 @@ def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
     )
 
     monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
-    monkeypatch.setattr(suite, "setup_cutest_env", lambda: None)
+    monkeypatch.setattr(suite, "configured_pycutest", lambda _config=None: fake_pycutest)
 
     assert suite.list_target_problems(dim_cap=10) == [
         suite.TargetProblem("BOX3", "bound", 3),
@@ -432,37 +432,34 @@ def test_cutest_effective_design_bounds_shrink_extreme_finite_bounds():
     assert np.all(design_high <= high)
 
 
-def test_cutest_env_requires_cutest_install(tmp_path, monkeypatch):
-    from experiments.benchmarks.cutest_runner import cutest_env
+def test_cutest_config_requires_cutest_install(tmp_path):
+    from experiments.benchmarks.cutest_runner import CutestConfig
 
     bench = tmp_path / ".bench"
     (bench / "SIFDecode" / "install" / "bin").mkdir(parents=True)
     (bench / "sif").mkdir(parents=True)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("PIXI_PROJECT_ROOT", raising=False)
 
     with pytest.raises(RuntimeError, match="CUTEst bootstrap incomplete"):
-        cutest_env()
+        CutestConfig.from_root(tmp_path).validate()
 
 
-def test_cutest_env_honors_existing_pycutest_cache(tmp_path, monkeypatch):
-    from experiments.benchmarks.cutest_runner import cutest_env
+def test_cutest_config_accepts_explicit_pycutest_cache(tmp_path):
+    from experiments.benchmarks.cutest_runner import CutestConfig
 
     bench = tmp_path / ".bench"
     (bench / "SIFDecode" / "install" / "bin").mkdir(parents=True)
     (bench / "SIFDecode" / "install" / "bin" / "sifdecoder").touch()
     (bench / "CUTEst" / "install" / "lib").mkdir(parents=True)
+    (bench / "CUTEst" / "install" / "include").mkdir(parents=True)
+    (bench / "CUTEst" / "install" / "include" / "cutest.h").touch()
     (bench / "CUTEst" / "install" / "lib" / "libcutest_single.a").touch()
     (bench / "CUTEst" / "install" / "lib" / "libcutest_double.a").touch()
     (bench / "sif").mkdir(parents=True)
     cache = tmp_path / "cache-shard"
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("PIXI_PROJECT_ROOT", raising=False)
-    monkeypatch.setenv("PYCUTEST_CACHE", str(cache))
 
-    env = cutest_env()
+    config = CutestConfig.from_root(tmp_path, cache_dir=cache).validate()
 
-    assert env["PYCUTEST_CACHE"] == str(cache)
+    assert config.cache_dir == cache
     assert (cache / "pycutest_cache_holder").is_dir()
 
 
@@ -623,11 +620,8 @@ def test_cutest_full_suite_evicts_pycutest_cache(tmp_path, monkeypatch):
     stale.mkdir(parents=True)
     (stale / "compiled.so").write_text("stale", encoding="utf-8")
     (cache / "stale.txt").write_text("stale", encoding="utf-8")
-    monkeypatch.setattr(
-        suite,
-        "cutest_env",
-        lambda: {"PYCUTEST_CACHE": str(cache)},
-    )
+    config = types.SimpleNamespace(cache_dir=cache)
+    monkeypatch.setattr(suite, "default_cutest_config", lambda: config)
 
     suite.evict_pycutest_cache()
 
@@ -1036,7 +1030,7 @@ def test_cutest_loader_preserves_native_gradient(monkeypatch):
         import_problem=lambda *_args, **_kwargs: NativeProblem()
     )
     monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
-    monkeypatch.setattr(cutest_runner, "setup_cutest_env", lambda: None)
+    monkeypatch.setattr(cutest_runner, "configured_pycutest", lambda _config=None: fake_pycutest)
 
     prob = cutest_runner.load("NATIVEGRAD")
 
