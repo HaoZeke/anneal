@@ -678,6 +678,50 @@ def test_cutest_full_suite_cell_timeout_terminates_hanging_driver(monkeypatch):
     assert status == "timeout"
 
 
+def test_cutest_full_suite_loads_target_outside_driver_timeout(monkeypatch, tmp_path):
+    from experiments.scripts import run_cutest_full_suite as suite
+
+    loaded = _QuadraticCutestProblem()
+    load_calls = []
+    cell_refs = []
+
+    def fake_load_problem(name, args=None):
+        load_calls.append((name, args))
+        return loaded
+
+    def fake_run_driver_cell(problem_ref, _driver, _seed, _args):
+        cell_refs.append(problem_ref)
+        return 0.0, 1, 2.0, "ok"
+
+    args = types.SimpleNamespace(
+        checkpoint_every=10,
+        dim_cap=50,
+        drivers="classical",
+        evict_cache=False,
+        exclude_problem=[],
+        max_problems=None,
+        max_timeouts_per_target=0,
+        no_resume=True,
+        out=str(tmp_path / "rows.csv"),
+        seeds=2,
+        shard_count=1,
+        shard_index=0,
+    )
+    monkeypatch.setattr(
+        suite,
+        "list_target_problems",
+        lambda _dim_cap, exclude_names=None: [suite.TargetProblem("QUAD2", "bound", 2)],
+    )
+    monkeypatch.setattr(suite, "load_problem", fake_load_problem)
+    monkeypatch.setattr(suite, "run_driver_cell", fake_run_driver_cell)
+
+    rows = suite.run_suite(args)
+
+    assert load_calls == [("QUAD2", args)]
+    assert cell_refs == [loaded, loaded]
+    assert [row["status"] for row in rows] == ["ok", "ok"]
+
+
 def test_bgsa_log_acceptance_probability_is_stable():
     from experiments.scripts.demo_bgsa import _log_accept_probability
 
