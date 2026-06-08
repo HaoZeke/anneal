@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from importlib import import_module
 
 import numpy as np
-from scipy.optimize import minimize
+from scipy.optimize import basinhopping, dual_annealing, minimize
 
 # Optional structure-aware moves used by the benchmark hybrid. The counter keeps
 # objective and native-gradient work in one budget.
@@ -26,6 +26,11 @@ DEFAULT_BASIN_POLISH_BUDGET_DIVISOR = 4
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION = 20
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP = 0.1
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION_BUDGET_DIVISOR = 1
+DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION = 5
+DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION = 5
+DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES = 2
+DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET = 3000
+DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -97,6 +102,18 @@ class AnnealHybridConfig:
     )
     basin_polish_local_budget: int = 800
     basin_polish_temperature: float = 1.0
+    global_anneal_portfolio_enabled: bool = True
+    global_anneal_portfolio_min_dimension: int = (
+        DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION
+    )
+    global_anneal_portfolio_max_dimension: int = (
+        DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION
+    )
+    global_anneal_dual_replicates: int = DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES
+    global_anneal_dual_replicate_budget: int = (
+        DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET
+    )
+    global_anneal_local_hop_iterations: int = DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
     native_bounds_slack: float = 1e-9
     local_polish_min_fevals: int = 20
     metropolis_temperature_floor: float = 1e-12
@@ -210,6 +227,74 @@ def _basin_polish_budget(remaining: int, dim: int, config: AnnealHybridConfig) -
     if divisor <= 0:
         return 0
     return min(remaining, remaining // divisor)
+
+
+def _global_anneal_portfolio_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.global_anneal_portfolio_enabled:
+        return False
+    if dim < config.global_anneal_portfolio_min_dimension:
+        return False
+    return (
+        config.global_anneal_portfolio_max_dimension <= 0
+        or dim <= config.global_anneal_portfolio_max_dimension
+    )
+
+
+def _global_anneal_portfolio(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+    if (
+        grad_fn is None
+        or counter.n >= counter.budget
+        or not _global_anneal_portfolio_active(dim, config)
+    ):
+        return None
+    if (
+        config.global_anneal_dual_replicates <= 0
+        or config.global_anneal_dual_replicate_budget <= 0
+        or config.global_anneal_local_hop_iterations <= 0
+    ):
+        return None
+    bounds = list(zip(low, high))
+    jac = _counted_jac(counter, grad_fn)
+    if jac is None:
+        return None
+    original_budget = counter.budget
+    dual_rng = _copy_generator(rng)
+    hop_rng = _copy_generator(rng)
+    try:
+        for _ in range(config.global_anneal_dual_replicates):
+            remaining = original_budget - counter.n
+            if remaining <= 0:
+                break
+            maxfun = min(config.global_anneal_dual_replicate_budget, remaining)
+            counter.budget = counter.n + maxfun
+            try:
+                dual_annealing(
+                    counter,
+                    bounds,
+                    maxfun=maxfun,
+                    no_local_search=False,
+                    seed=int(dual_rng.integers(1 << 31)),
+                )
+            except Exception as exc:  # noqa: BLE001
+                if exc.__class__.__name__ != "_Budget":
+                    raise
+        if counter.n < original_budget:
+            counter.budget = original_budget
+            minimizer_kwargs = {"method": "L-BFGS-B", "bounds": bounds, "jac": jac}
+            try:
+                basinhopping(
+                    counter,
+                    hop_rng.uniform(low, high),
+                    niter=config.global_anneal_local_hop_iterations,
+                    minimizer_kwargs=minimizer_kwargs,
+                    seed=int(hop_rng.integers(1 << 31)),
+                )
+            except Exception as exc:  # noqa: BLE001
+                if exc.__class__.__name__ != "_Budget":
+                    raise
+    finally:
+        counter.budget = original_budget
+    return _best_finite(counter.best)
 
 
 def _annealed_basin_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
@@ -549,6 +634,18 @@ def qmc_annealed_hybrid(
     high = np.asarray(high, dtype=np.float64)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    if _global_anneal_portfolio_active(dim, config):
+        portfolio_best = _global_anneal_portfolio(
+            counter,
+            grad,
+            low,
+            high,
+            dim,
+            rng,
+            config,
+        )
+        if counter.n >= counter.budget:
+            return _best_finite(portfolio_best, counter.best)
     if (
         config.basin_polish_enabled
         and jac is not None
