@@ -61,6 +61,20 @@ def _design_bounds(prob):
     return low, high
 
 
+_CUTEST_FIELDNAMES = [
+    "problem", "dim", "driver", "seed", "fevals",
+    "best_val", "wall_time_s", "f_x0", "solved",
+]
+
+
+def _write_cutest_rows(path, rows):
+    """Write all rows to `path` (checkpoint-safe; called after each problem)."""
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_CUTEST_FIELDNAMES)
+        w.writeheader()
+        w.writerows(rows)
+
+
 def _straggler_indices(chain_pos, top_k):
     if top_k <= 0 or top_k >= len(chain_pos):
         return list(range(len(chain_pos)))
@@ -2284,10 +2298,15 @@ def main():
                 import anneal as _anneal_mod
 
                 add_budget = 1 + args.n_epochs * args.k_fixed
+                # Use the finite design box, not the raw CUTEst bounds: an
+                # unconstrained problem reports +/-1e20, and sampling the
+                # surrogate over that span would feed extreme points to the
+                # Fortran objective.
+                add_low, add_high = _design_bounds(prob)
                 add_out = _anneal_mod.additive_independence(
                     prob.fn,
-                    np.asarray(prob.low, dtype=np.float64),
-                    np.asarray(prob.high, dtype=np.float64),
+                    np.asarray(add_low, dtype=np.float64),
+                    np.asarray(add_high, dtype=np.float64),
                     int(add_budget),
                     seed=int(seed),
                 )
@@ -2394,24 +2413,11 @@ def main():
                     )
         elapsed = time.perf_counter() - t_start
         print(f"  done {prob.name:<10} (n={prob.dim:>3}) -- elapsed {elapsed:.1f}s")
+        # Checkpoint after every problem so a later hard crash (e.g. a C-level
+        # segfault in an external solver) never discards the completed rows.
+        _write_cutest_rows(args.out, rows)
 
-    with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(
-            f,
-            fieldnames=[
-                "problem",
-                "dim",
-                "driver",
-                "seed",
-                "fevals",
-                "best_val",
-                "wall_time_s",
-                "f_x0",
-                "solved",
-            ],
-        )
-        w.writeheader()
-        w.writerows(rows)
+    _write_cutest_rows(args.out, rows)
     print(f"\nWrote {len(rows)} rows to {args.out}")
     for driver in DRIVERS:
         sub = [r for r in rows if r["driver"] == driver]
