@@ -1844,6 +1844,47 @@ def test_cutest_bgsa_auto_stops_gle_family_after_nonfinite_screen(monkeypatch):
     assert captured["gle"] == [(7, 41)]
 
 
+def test_cutest_gle_screen_passes_system_frequency():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def estimate_gle_omega0(_obj_fn, grad_fn, low, high):
+        captured["estimate"] = (
+            np.asarray(low, dtype=np.float64),
+            np.asarray(high, dtype=np.float64),
+            np.asarray(grad_fn(np.zeros(2)), dtype=np.float64),
+        )
+        return 1.25
+
+    def gle_langevin(*_args, **kwargs):
+        captured["omega0"] = kwargs["omega0"]
+        return {"best_val": -8.0, "best_pos": np.zeros(2), "n_evals": 17}
+
+    result = cutest._run_cutest_gle_langevin(
+        types.SimpleNamespace(
+            estimate_gle_omega0=estimate_gle_omega0,
+            gle_langevin=gle_langevin,
+        ),
+        GradientCutestProblem(),
+        GradientCutestProblem().grad,
+        "native",
+        seed=7,
+        n_epochs=2,
+        k_per_epoch=40,
+    )
+
+    assert result == (-8.0, 17)
+    assert captured["omega0"] == pytest.approx(1.25)
+    assert captured["estimate"][0].tolist() == pytest.approx([-1.0, -1.0])
+    assert captured["estimate"][1].tolist() == pytest.approx([1.0, 1.0])
+    assert captured["estimate"][2].tolist() == pytest.approx([0.0, 0.0])
+
+
 def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
