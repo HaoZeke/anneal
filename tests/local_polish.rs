@@ -1,10 +1,36 @@
-use anneal_core::{projected_gradient_polish, AnalyticGradient};
+use anneal_core::{projected_gradient_polish, qmc_projected_gradient_polish, AnalyticGradient};
 use eindir_core::{Bounds, Objective};
 use ndarray::{array, Array1, ArrayView1};
 
 struct ShiftedQuadratic {
     bounds: Bounds<f64>,
     weights: Array1<f64>,
+}
+
+struct HighCornerLinear {
+    bounds: Bounds<f64>,
+}
+
+impl HighCornerLinear {
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
+        }
+    }
+}
+
+impl Objective<f64> for HighCornerLinear {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        -(x[0] + x[1])
+    }
 }
 
 impl ShiftedQuadratic {
@@ -51,6 +77,17 @@ fn projected_gradient_polish_refines_bounded_quadratic() {
     assert!(result.n_grads <= 64);
     assert!((result.best_pos[0] - 0.25).abs() < 1e-5);
     assert!((result.best_pos[1] + 0.4).abs() < 1e-5);
+}
+
+#[test]
+fn qmc_polish_screens_boundary_anchors() {
+    let obj = HighCornerLinear::new();
+    let grad = AnalyticGradient::new(2, |_x: ArrayView1<f64>| Array1::from_vec(vec![-1.0, -1.0]));
+
+    let result = qmc_projected_gradient_polish(&obj, &grad, 2, 8, 0, 1.0, 1e-10, 2);
+
+    assert!(result.best_val <= -2.0);
+    assert_eq!(result.best_pos.to_vec(), vec![1.0, 1.0]);
 }
 
 #[test]

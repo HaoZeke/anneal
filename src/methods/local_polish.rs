@@ -300,7 +300,7 @@ where
     );
 
     let bounds = obj.bounds();
-    let starts = eindir_core::low_discrepancy_points(
+    let starts = eindir_core::boundary_anchored_low_discrepancy_points(
         bounds,
         n_starts,
         crate::runner::qmc_skip_from_seed(seed),
