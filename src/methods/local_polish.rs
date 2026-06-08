@@ -4,6 +4,8 @@
 use eindir_core::Gradient;
 use eindir_core::Objective;
 use ndarray::{Array1, Array2};
+use rand::rngs::StdRng;
+use rand::{Rng, SeedableRng};
 
 const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
@@ -48,6 +50,27 @@ pub struct QmcPolishResult {
     pub polished_projected_grad_norms: Vec<f64>,
     /// Stationarity flags returned by each local refinement, in polish order.
     pub polished_stationary: Vec<bool>,
+}
+
+fn sample_index_excluding<R: Rng + ?Sized>(rng: &mut R, len: usize, excluded: usize) -> usize {
+    let mut idx = rng.random_range(0..(len - 1));
+    if idx >= excluded {
+        idx += 1;
+    }
+    idx
+}
+
+fn sample_two_indices_excluding<R: Rng + ?Sized>(
+    rng: &mut R,
+    len: usize,
+    excluded: usize,
+) -> (usize, usize) {
+    let first = sample_index_excluding(rng, len, excluded);
+    let mut second = sample_index_excluding(rng, len, excluded);
+    while second == first {
+        second = sample_index_excluding(rng, len, excluded);
+    }
+    (first, second)
 }
 
 fn projected_gradient(
@@ -401,6 +424,112 @@ where
         polished_values,
         polished_projected_grad_norms,
         polished_stationary,
+    }
+}
+
+/// Run a QMC-initialized `best/1/bin` differential-evolution scout.
+pub fn qmc_best1bin_scout<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    population_size: usize,
+    weight_min: f64,
+    weight_span: f64,
+    crossover_rate: f64,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
+    assert!(max_evals > 0, "max_evals must be positive");
+    assert!(population_size >= 4, "population_size must be at least 4");
+    assert!(
+        max_evals >= population_size,
+        "max_evals must cover the initial population"
+    );
+    assert!(
+        weight_min.is_finite() && weight_min >= 0.0,
+        "weight_min must be finite and non-negative"
+    );
+    assert!(
+        weight_span.is_finite() && weight_span >= 0.0,
+        "weight_span must be finite and non-negative"
+    );
+    assert!(
+        crossover_rate.is_finite() && (0.0..=1.0).contains(&crossover_rate),
+        "crossover_rate must be in [0, 1]"
+    );
+
+    let bounds = obj.bounds();
+    let dim = bounds.dims;
+    assert!(dim > 0, "objective dimension must be positive");
+    let mut rng = StdRng::seed_from_u64(seed);
+    let starts = eindir_core::shifted_low_discrepancy_points(
+        bounds,
+        population_size,
+        crate::runner::qmc_skip_from_seed(seed),
+        seed,
+    );
+    let mut population: Vec<Array1<f64>> = starts
+        .outer_iter()
+        .map(|point| bounds.clip(point))
+        .collect();
+    let mut values = Vec::with_capacity(population_size);
+    let mut best_pos = population[0].clone();
+    let mut best_val = f64::INFINITY;
+    let mut n_evals = 0usize;
+
+    for point in &population {
+        let value = obj.eval(point.view());
+        n_evals += 1;
+        values.push(value);
+        if value.is_finite() && value < best_val {
+            best_val = value;
+            best_pos = point.clone();
+        }
+    }
+
+    while n_evals < max_evals {
+        let weight = weight_min + weight_span * rng.random::<f64>();
+        for slot in 0..population.len() {
+            if n_evals >= max_evals {
+                break;
+            }
+            let (left, right) = sample_two_indices_excluding(&mut rng, population.len(), slot);
+            let mut mutant = best_pos.clone();
+            for axis in 0..dim {
+                mutant[axis] += weight * (population[left][axis] - population[right][axis]);
+            }
+            let forced_axis = rng.random_range(0..dim);
+            let mut trial = population[slot].clone();
+            for axis in 0..dim {
+                if axis == forced_axis || rng.random::<f64>() < crossover_rate {
+                    trial[axis] = mutant[axis];
+                }
+            }
+            let trial = bounds.clip(trial.view());
+            let value = obj.eval(trial.view());
+            n_evals += 1;
+            if value.is_finite() && (!values[slot].is_finite() || value < values[slot]) {
+                population[slot] = trial.clone();
+                values[slot] = value;
+                if value < best_val {
+                    best_val = value;
+                    best_pos = trial;
+                }
+            }
+        }
+    }
+
+    QmcPolishResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads: 0,
+        n_starts: population_size,
+        n_polished: 0,
+        polished_values: Vec::new(),
+        polished_projected_grad_norms: Vec::new(),
+        polished_stationary: Vec::new(),
     }
 }
 

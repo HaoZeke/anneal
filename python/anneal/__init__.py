@@ -25,6 +25,8 @@ from anneal._core import (
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
+    qmc_best1bin_scout as _core_qmc_best1bin_scout,
+    qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
     qmc_polish as _core_qmc_polish,
     qmc_polish_objective as _core_qmc_polish_objective,
     shifted_qmc_polish as _core_shifted_qmc_polish,
@@ -131,6 +133,56 @@ def qmc_polish_objective(
         float(step0),
         float(grad_tol),
         int(top_k),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_best1bin_scout(
+    obj_fn,
+    low,
+    high,
+    max_evals: int,
+    seed: int = 0,
+    population_size: int = 30,
+    weight_min: float = 0.5,
+    weight_span: float = 0.5,
+    crossover_rate: float = 0.7,
+):
+    """Run a QMC best/1/bin differential-evolution scout."""
+    out = _core_qmc_best1bin_scout(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(max_evals),
+        int(seed),
+        int(population_size),
+        float(weight_min),
+        float(weight_span),
+        float(crossover_rate),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_best1bin_scout_objective(
+    objective,
+    max_evals: int,
+    seed: int = 0,
+    population_size: int = 30,
+    weight_min: float = 0.5,
+    weight_span: float = 0.5,
+    crossover_rate: float = 0.7,
+):
+    """Run a QMC best/1/bin scout with a native ``PyObjective`` handle."""
+    out = _core_qmc_best1bin_scout_objective(
+        objective,
+        int(max_evals),
+        int(seed),
+        int(population_size),
+        float(weight_min),
+        float(weight_span),
+        float(crossover_rate),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -268,6 +320,8 @@ __all__ = [
     "low_discrepancy_points",
     "pilot_draws_qmc",
     "polish",
+    "qmc_best1bin_scout",
+    "qmc_best1bin_scout_objective",
     "qmc_polish",
     "qmc_polish_objective",
     "shifted_qmc_polish",
