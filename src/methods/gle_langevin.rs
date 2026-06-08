@@ -32,20 +32,18 @@ pub struct GleLangevinResult {
 
 /// Run GLE-thermostatted Langevin annealing on `obj` with gradient `grad`.
 ///
-/// `max_fevals` bounds the gradient evaluations (one per dynamics step). `ns` is
-/// the number of auxiliary momenta, `omega_lo`/`omega_hi` the target frequency
-/// band the colored noise flattens, `dt` the timestep (clamped so the fastest
-/// band frequency is resolved), and `n_epochs` the number of geometric
-/// temperature levels. Returns the best objective value at budget parity.
-#[allow(clippy::too_many_arguments)]
+/// `max_fevals` bounds the gradient evaluations (one per dynamics step).
+/// `omega0` is the characteristic frequency the fitted optimal-sampling drift is
+/// scaled to (it flattens the sampling efficiency across `[omega0, 100 omega0]`),
+/// `dt` the timestep (clamped so the fastest band frequency is resolved), and
+/// `n_epochs` the number of geometric temperature levels. Returns the best
+/// objective value at budget parity.
 pub fn gle_langevin_sa<O, G>(
     obj: &O,
     grad: &G,
     seed: u64,
     max_fevals: usize,
-    ns: usize,
-    omega_lo: f64,
-    omega_hi: f64,
+    omega0: f64,
     dt: f64,
     n_epochs: usize,
 ) -> GleLangevinResult
@@ -58,9 +56,11 @@ where
     let dim = bounds.dims;
     let mut rng = StdRng::seed_from_u64(seed);
 
-    // Resolve the fastest band frequency: dt must keep omega_hi*dt well below 1.
+    // The fitted drift covers [omega0, 100 omega0]; resolve the fastest with dt.
+    let omega_hi = 100.0 * omega0;
     let dt = dt.min(0.2 / omega_hi.max(1e-12)).max(1e-6);
-    let drift = optimal_sampling_drift(omega_lo, omega_hi, ns);
+    let drift = optimal_sampling_drift(omega0);
+    let ns = drift.nrows() - 1;
 
     // Start at the box centre with a thermalised momentum.
     let mut x: Array1<f64> = (&bounds.low + &bounds.high) * 0.5;
@@ -171,7 +171,7 @@ mod tests {
         let obj = IllConditioned { bounds, a: a.clone() };
         let grad = IllGrad { a };
         let centre_val = obj.eval(Array1::<f64>::zeros(dim).view()); // 0 at the optimum
-        let res = gle_langevin_sa(&obj, &grad, 0, 4000, 4, 0.05, 5.0, 0.2, 40);
+        let res = gle_langevin_sa(&obj, &grad, 0, 4000, 0.2, 0.2, 40);
         assert!(res.n_evals <= 4000);
         // optimum is 0; require the run to get close from the start basin
         assert!(
