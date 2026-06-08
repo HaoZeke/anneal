@@ -63,7 +63,7 @@ class AnnealHybridConfig:
     best1bin_enabled: bool = True
     best1bin_budget_divisor: int = 1
     best1bin_dimension_cap: int = 2
-    best1bin_replicates: int = 4
+    best1bin_replicates: int = 5
     best1bin_required_population: int = 4
     best1bin_population_min: int = 30
     best1bin_population_dim_multiplier: int = 15
