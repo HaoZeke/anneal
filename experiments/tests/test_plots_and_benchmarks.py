@@ -4185,6 +4185,7 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
     config = anneal_sota.AnnealHybridConfig()
 
     assert config.basin_polish_min_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MIN_DIMENSION
+    assert config.basin_polish_max_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MAX_DIMENSION
     assert config.basin_polish_step == anneal_sota.DEFAULT_BASIN_POLISH_STEP
     assert config.basin_polish_budget_divisor == anneal_sota.DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
     assert config.basin_polish_high_dimension == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION
@@ -4204,6 +4205,13 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.basin_polish_high_dimension,
         config,
     ) == pytest.approx(config.basin_polish_high_dimension_step)
+    assert anneal_sota._basin_polish_active(config.basin_polish_min_dimension, config)
+    assert anneal_sota._basin_polish_active(config.basin_polish_max_dimension, config)
+    assert not anneal_sota._basin_polish_active(
+        config.basin_polish_max_dimension + 1,
+        config,
+    )
+    assert anneal_sota._basin_polish_active(config.basin_polish_high_dimension, config)
     budget = config.basin_polish_budget_divisor * config.basin_polish_local_budget
     assert anneal_sota._basin_polish_budget(
         budget,

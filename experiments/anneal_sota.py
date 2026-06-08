@@ -21,6 +21,7 @@ DEFAULT_HYBRID_N_POLISH = 6
 DEFAULT_HYBRID_K_POLISH = 12
 DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY = 0.5
 DEFAULT_BASIN_POLISH_MIN_DIMENSION = 6
+DEFAULT_BASIN_POLISH_MAX_DIMENSION = 8
 DEFAULT_BASIN_POLISH_STEP = 1.0
 DEFAULT_BASIN_POLISH_BUDGET_DIVISOR = 4
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION = 20
@@ -93,6 +94,7 @@ class AnnealHybridConfig:
     qmc_starts_per_polish: int = 4
     basin_polish_enabled: bool = True
     basin_polish_min_dimension: int = DEFAULT_BASIN_POLISH_MIN_DIMENSION
+    basin_polish_max_dimension: int = DEFAULT_BASIN_POLISH_MAX_DIMENSION
     basin_polish_step: float = DEFAULT_BASIN_POLISH_STEP
     basin_polish_budget_divisor: int = DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
     basin_polish_high_dimension: int = DEFAULT_BASIN_POLISH_HIGH_DIMENSION
@@ -213,6 +215,20 @@ def _basin_polish_step_size(dim: int, config: AnnealHybridConfig) -> float:
     ):
         return config.basin_polish_high_dimension_step
     return config.basin_polish_step
+
+
+def _basin_polish_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.basin_polish_enabled:
+        return False
+    in_mid_range = dim >= config.basin_polish_min_dimension and (
+        config.basin_polish_max_dimension <= 0
+        or dim <= config.basin_polish_max_dimension
+    )
+    in_high_range = (
+        config.basin_polish_high_dimension > 0
+        and dim >= config.basin_polish_high_dimension
+    )
+    return in_mid_range or in_high_range
 
 
 def _basin_polish_budget(remaining: int, dim: int, config: AnnealHybridConfig) -> int:
@@ -647,9 +663,8 @@ def qmc_annealed_hybrid(
         if counter.n >= counter.budget:
             return _best_finite(portfolio_best, counter.best)
     if (
-        config.basin_polish_enabled
+        _basin_polish_active(dim, config)
         and jac is not None
-        and dim >= config.basin_polish_min_dimension
     ):
         basin_best = None
         original_budget = counter.budget
