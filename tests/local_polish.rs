@@ -1,5 +1,6 @@
 use anneal_core::{
-    AnalyticGradient, projected_gradient_polish, qmc_projected_gradient_polish,
+    AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout,
+    qmc_projected_gradient_polish,
     shifted_qmc_projected_gradient_polish,
 };
 use eindir_core::{Bounds, Objective};
@@ -18,7 +19,19 @@ struct CenterQuadratic {
     bounds: Bounds<f64>,
 }
 
+struct SmoothNeedle {
+    bounds: Bounds<f64>,
+}
+
 impl CenterQuadratic {
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
+        }
+    }
+}
+
+impl SmoothNeedle {
     fn new() -> Self {
         Self {
             bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
@@ -37,6 +50,22 @@ impl Objective<f64> for CenterQuadratic {
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
         x[0].powi(2) + x[1].powi(2)
+    }
+}
+
+impl Objective<f64> for SmoothNeedle {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        let dx0 = x[0] - 0.5;
+        let dx1 = x[1] + 0.5;
+        -(-40.0 * (dx0 * dx0 + dx1 * dx1)).exp()
     }
 }
 
@@ -167,6 +196,19 @@ fn qmc_polish_reports_projected_stationarity() {
             .iter()
             .all(|norm| norm.is_finite() && *norm <= 1e-8)
     );
+}
+
+#[test]
+fn qmc_best1bin_scout_refines_smooth_low_dimensional_basin() {
+    let obj = SmoothNeedle::new();
+
+    let result = qmc_best1bin_scout(&obj, 240, 0, 30, 0.5, 0.5, 0.7);
+
+    assert!(result.best_val < -0.85, "best value: {}", result.best_val);
+    assert!(result.n_evals <= 240);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.n_starts, 30);
+    assert_eq!(result.n_polished, 0);
 }
 
 #[test]
