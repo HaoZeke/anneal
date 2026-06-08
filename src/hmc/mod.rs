@@ -10,8 +10,8 @@ pub mod nuts;
 pub mod sampler;
 
 pub use integrator::{
-    HmcIntegrator, LeapfrogIntegrator, LeapfrogResult, OmelyanIntegrator, OMELYAN_LAMBDA,
+    HmcIntegrator, LeapfrogIntegrator, LeapfrogResult, OMELYAN_LAMBDA, OmelyanIntegrator,
 };
 pub use momentum::{GaussianMomentum, Momentum, QGaussianMomentum};
-pub use nuts::{nuts_step, NutsSaSampler, NutsTransition};
+pub use nuts::{NutsSaSampler, NutsTransition, nuts_step};
 pub use sampler::HmcSaSampler;
