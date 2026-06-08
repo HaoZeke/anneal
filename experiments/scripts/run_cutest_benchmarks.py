@@ -1353,21 +1353,43 @@ def _run_cutest_qmc_polish(
     top_k=0,
     return_polished_values=False,
 ):
-    if not hasattr(anneal_module, "qmc_polish"):
+    has_objective_api = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_polish_objective")
+    )
+    has_callable_api = hasattr(anneal_module, "qmc_polish")
+    if not has_objective_api and not has_callable_api:
         return None
     if n_starts < 1 or max_fevals_per_start < 1:
         return None
     design_low, design_high = _design_bounds(prob)
-    result = anneal_module.qmc_polish(
-        prob.fn,
-        grad_fn,
-        design_low,
-        design_high,
-        int(n_starts),
-        int(max_fevals_per_start),
-        seed=int(seed),
-        top_k=int(top_k),
-    )
+    result = None
+    if grad_kind == "native" and has_objective_api:
+        try:
+            bounds = anneal_module.Bounds(design_low, design_high, 1e-9)
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            result = anneal_module.qmc_polish_objective(
+                objective,
+                int(n_starts),
+                int(max_fevals_per_start),
+                seed=int(seed),
+                top_k=int(top_k),
+            )
+        except Exception:
+            result = None
+    if result is None:
+        if not has_callable_api:
+            return None
+        result = anneal_module.qmc_polish(
+            prob.fn,
+            grad_fn,
+            design_low,
+            design_high,
+            int(n_starts),
+            int(max_fevals_per_start),
+            seed=int(seed),
+            top_k=int(top_k),
+        )
     work_units = _polish_work_units(
         int(np.asarray(prob.low).size),
         grad_kind,

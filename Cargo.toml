@@ -16,7 +16,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 [features]
 default = []
 capi = []
-python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3"]
+python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/python"]
 
 [dependencies]
 thiserror   = "2"
