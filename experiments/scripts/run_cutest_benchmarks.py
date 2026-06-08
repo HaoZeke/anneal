@@ -21,7 +21,10 @@ import time
 
 import numpy as np
 
-from experiments.benchmarks.cutest_runner import load_default_manifest
+from experiments.benchmarks.cutest_runner import (
+    load_default_manifest,
+    load_highdim_manifest,
+)
 from experiments.shared.runner import (
     gelman_rubin_max,
     gaussian_propose,
@@ -2094,11 +2097,22 @@ def main():
     p.add_argument("--k-max", type=int, default=200)
     p.add_argument("--rhat-threshold", type=float, default=1.2)
     p.add_argument("--straggler-top-k", type=int, default=2)
+    p.add_argument(
+        "--manifest",
+        choices=["default", "highdim"],
+        default="default",
+        help="default: 12 low-dim problems; highdim: scalable problems at n~100 "
+        "to test dimension robustness.",
+    )
     args = p.parse_args()
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    print("Loading CUTEst manifest...")
-    problems = load_default_manifest()
+    print(f"Loading CUTEst manifest ({args.manifest})...")
+    problems = (
+        load_highdim_manifest()
+        if args.manifest == "highdim"
+        else load_default_manifest()
+    )
     print(
         f"Loaded {len(problems)} problems. Running {args.seeds} seeds x "
         f"{len(DRIVERS)} drivers = {args.seeds * len(DRIVERS) * len(problems)} cells."
