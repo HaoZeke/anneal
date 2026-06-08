@@ -2905,6 +2905,81 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
     assert {call["seed"] for call in captured["qmc"]} == {7}
 
 
+def test_cutest_qmc_polish_uses_native_objective_handle():
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class NativeBoundProblem:
+        name = "NATIVEHANDLE"
+        dim = 2
+        low = np.array([-1.0, -2.0], dtype=np.float64)
+        high = np.array([3.0, 4.0], dtype=np.float64)
+        has_cutest_bounds = True
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.dot(x, x))
+
+        def grad(self, x):
+            return np.array([10.0 + x[0], -3.0 + x[1]], dtype=np.float64)
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            captured["bounds"] = (
+                np.asarray(low, dtype=np.float64),
+                np.asarray(high, dtype=np.float64),
+                float(slack),
+            )
+
+    class FakePyObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
+        captured["objective"] = objective
+        captured["qmc"] = (n_starts, max_fevals_per_start, kwargs)
+        return {
+            "best_val": -13.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 17,
+            "n_grads": 5,
+        }
+
+    def qmc_polish(*_args, **_kwargs):
+        pytest.fail("callable-pair qmc_polish should not run when handle API exists")
+
+    result = cutest._run_cutest_qmc_polish(
+        types.SimpleNamespace(
+            Bounds=FakeBounds,
+            PyObjective=FakePyObjective,
+            qmc_polish_objective=qmc_polish_objective,
+            qmc_polish=qmc_polish,
+        ),
+        NativeBoundProblem(),
+        NativeBoundProblem().grad,
+        "native",
+        seed=11,
+        n_starts=6,
+        max_fevals_per_start=19,
+        top_k=2,
+    )
+
+    assert result == (-13.0, 17 + 5)
+    assert captured["bounds"][0].tolist() == pytest.approx([-1.0, -2.0])
+    assert captured["bounds"][1].tolist() == pytest.approx([3.0, 4.0])
+    assert captured["bounds"][2] == pytest.approx(1e-9)
+    assert captured["objective"].fn(np.array([2.0, 3.0])) == pytest.approx(13.0)
+    assert captured["objective"].grad_fn(np.array([2.0, 3.0])).tolist() == pytest.approx([12.0, 0.0])
+    assert captured["qmc"] == (
+        6,
+        19,
+        {"seed": 11, "top_k": 2},
+    )
+
+
 def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
