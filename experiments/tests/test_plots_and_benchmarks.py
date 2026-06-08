@@ -2590,6 +2590,7 @@ def test_cutest_bgsa_auto_returns_dominant_native_qmc_screen(monkeypatch):
             "n_evals": 10,
             "n_grads": 3,
             "polished_values": [-100.0, -20.0, -10.0, -1.0],
+            "polished_projected_grad_norms": [0.0, 0.0, 0.0, 0.0],
         }
 
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
@@ -2907,6 +2908,7 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
             "n_grads": 4,
             "n_polished": n_polished,
             "polished_values": [-7.0] * n_polished,
+            "polished_projected_grad_norms": [0.0] * n_polished,
         }
 
     result = cutest._run_cutest_native_qmc_box_schedule(
@@ -2992,7 +2994,7 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(4))
 
 
-def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypatch):
+def test_cutest_bgsa_auto_uses_native_qmc_for_middle_bounds_without_degree_hint(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
     captured = {"qmc": []}
@@ -3003,7 +3005,6 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypat
         low = np.full(9, -1.0)
         high = np.full(9, 1.0)
         has_cutest_bounds = True
-        objective_degree = 2
 
         def fn(self, x):
             x = np.asarray(x, dtype=np.float64)
@@ -3056,13 +3057,13 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_two_middle_bounds(monkeypat
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
 
 
-def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypatch):
+def test_cutest_bgsa_auto_ignores_degree_metadata_without_stationarity(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    captured = {}
+    captured = {"qmc": [], "pilot": 0}
 
-    class FirstDegreeDeclaredBoundProblem:
-        name = "FIRSTDEGREEBOUND"
+    class MisleadingDegreeBoundProblem:
+        name = "MISLEADINGDEGREEBOUND"
         dim = 9
         low = np.full(9, -1.0)
         high = np.full(9, 1.0)
@@ -3077,35 +3078,83 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypat
             return 2.0 * np.asarray(x, dtype=np.float64)
 
     def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"] = {
+        captured["qmc"].append({
             "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
             "n_starts": n_starts,
             "max_fevals_per_start": max_fevals_per_start,
             "seed": kwargs["seed"],
             "top_k": kwargs["top_k"],
-        }
+        })
         return {
             "best_val": -31.0,
             "best_pos": np.zeros(9),
             "n_evals": 11,
             "n_grads": 3,
+            "polished_values": [-31.0, -4.0, -2.0, -1.0],
         }
 
+    class FakeHistory:
+        best_val = 12.0
+        total_accepted = 0
+
+    def run_pilot(*_args, **_kwargs):
+        captured["pilot"] += 1
+        return (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.4,
+            np.zeros(9, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        )
+
     fake_anneal = types.SimpleNamespace(qmc_polish=qmc_polish)
+    fake_anneal.run_hmc = lambda *_args, **_kwargs: FakeHistory()
+    fake_anneal.polish = lambda *_args, **_kwargs: {
+        "best_val": 10.0,
+        "best_pos": np.zeros(9),
+        "n_evals": 1,
+        "n_grads": 1,
+    }
     fake_demo = types.SimpleNamespace(
         OBJ_FN=None,
         OBJ_GRAD=None,
         LOW=None,
         HIGH=None,
-        run_pilot=lambda *_args, **_kwargs: pytest.fail(
-            "first-degree bounded qmc screen should be terminal"
+        run_pilot=run_pilot,
+        bgsa_pt_hybrid_v2=lambda *_args, **_kwargs: (
+            11.0,
+            7,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ),
+        bgsa_metad=lambda *_args, **_kwargs: (13.0, 5, None, None, None, None),
+        bgsa_pt_metad=lambda *_args, **_kwargs: (
+            14.0,
+            6,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ),
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (15.0, 3))
 
     best_val, fevals = cutest._bgsa_run(
-        FirstDegreeDeclaredBoundProblem(),
+        MisleadingDegreeBoundProblem(),
         seed=7,
         n_epochs=2,
         k_per_epoch=200,
@@ -3114,12 +3163,21 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_degree_one_middle_bounds(monkeypat
     )
 
     assert best_val == -31.0
-    assert fevals == 11 + 3
-    assert captured["qmc"]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
-    assert captured["qmc"]["n_starts"] == 36
-    assert captured["qmc"]["max_fevals_per_start"] == 90
-    assert captured["qmc"]["seed"] == 7
-    assert captured["qmc"]["top_k"] == 2
+    assert fevals > 11 + 3
+    assert captured["pilot"] == 1
+    assert [
+        (call["n_starts"], call["top_k"], call["max_fevals_per_start"])
+        for call in captured["qmc"]
+    ] == [
+        (36, 4, 524),
+        (72, 4, 848),
+        (72, 0, 848),
+        (144, 4, 1496),
+        (144, 0, 1496),
+        (144, 9, 1496),
+    ]
+    assert {call["seed"] for call in captured["qmc"]} == {7}
+    assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(9))
 
 
 def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
