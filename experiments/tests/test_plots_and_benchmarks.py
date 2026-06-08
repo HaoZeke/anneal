@@ -4558,7 +4558,7 @@ def test_anneal_sota_differential_trial_can_use_elite_base():
             self.random_calls += 1
             if size is None:
                 return 0.0
-            return np.ones(size, dtype=np.float64)
+            return np.zeros(size, dtype=np.float64)
 
         def integers(self, high):
             return 0
