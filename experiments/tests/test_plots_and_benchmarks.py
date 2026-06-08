@@ -4700,6 +4700,7 @@ def test_anneal_sota_qmc_best1bin_scout_uses_low_discrepancy_elite_step(monkeypa
             best1bin_weight_min=1.0,
             best1bin_weight_span=0.0,
             best1bin_crossover_rate=1.0,
+            best1bin_decision_budget_divisor=0,
         ),
     )
 
