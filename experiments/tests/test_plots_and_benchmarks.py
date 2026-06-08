@@ -412,6 +412,22 @@ def test_cutest_env_honors_existing_pycutest_cache(tmp_path, monkeypatch):
     assert (cache / "pycutest_cache_holder").is_dir()
 
 
+def test_cutest_dependency_metadata_pins_pdfo_numpy_abi():
+    from pathlib import Path
+
+    tomllib = pytest.importorskip("tomllib")
+    root = Path(__file__).resolve().parents[2]
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    pixi = tomllib.loads((root / "pixi.toml").read_text(encoding="utf-8"))
+
+    cutest_deps = pyproject["project"]["optional-dependencies"]["cutest"]
+
+    assert any(dep.startswith("numpy") and "<2" in dep for dep in cutest_deps)
+    assert any(dep.startswith("pdfo") for dep in cutest_deps)
+    assert "<2" in pixi["feature"]["verify"]["dependencies"]["numpy"]
+    assert "pdfo" in pixi["feature"]["verify"]["pypi-dependencies"]
+
+
 def test_cutest_summary_reports_status_and_winners(tmp_path):
     from experiments.scripts.summarize_cutest_benchmarks import summarize_csv
 
