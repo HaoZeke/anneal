@@ -956,7 +956,7 @@ fn run_qmc(
 /// pyo3 module initialiser. Exposed to Python as `anneal._core`.
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add("__version__", crate::version::ANNEAL_VERSION)?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;
     m.add_class::<PyGsa>()?;

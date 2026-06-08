@@ -44,6 +44,8 @@ pub mod runner;
 pub mod sampler;
 /// Reserved for the typed component algebra (Spec 2, v0.3.0).
 pub mod types;
+/// Checked-in package version metadata.
+pub mod version;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
 pub mod variant;
 
@@ -80,4 +82,5 @@ pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;
 pub use runner::{qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant};
 pub use sampler::Sampler;
+pub use version::ANNEAL_VERSION;
 pub use variant::SaVariant;

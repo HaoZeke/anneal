@@ -120,13 +120,9 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
-.env
+# Python local prefixes
 .venv
-env/
 venv/
-ENV/
-env.bak/
 venv.bak/
 
 # Spyder project settings
@@ -269,7 +265,7 @@ docs/build/
 # pixi.lock is the repository environment lock; uv.lock is local tool output.
 /uv.lock
 
-# Verify env: tla2tools.jar + apalache tarball staged by setup tasks
+# Verify profile: tla2tools.jar + apalache tarball staged by setup tasks
 .verify/
 
 # TLC writes counterexample state graphs into states/ on failed checks

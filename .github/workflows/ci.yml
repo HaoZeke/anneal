@@ -23,16 +23,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
-
-      - name: Setup sccache environment
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
@@ -62,61 +52,48 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
-
-      - name: Setup sccache environment
-        shell: bash
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Configure pyo3 + linker for macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          PYBIN="$(which python)"
-          echo "PYO3_PYTHON=$PYBIN" >> "$GITHUB_ENV"
-          # Allow pyo3 extension-module symbols to remain undefined at
-          # link time on macOS; the dynamic loader resolves them against
-          # the embedding interpreter at run time.
-          {
-            echo "RUSTFLAGS=-C link-arg=-undefined -C link-arg=dynamic_lookup"
-          } >> "$GITHUB_ENV"
-
       - name: cargo test
+        if: runner.os != 'macOS'
         run: cargo test
 
+      - name: cargo test (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test
+
       - name: cargo test --all-features
+        if: runner.os != 'macOS'
         run: cargo test --all-features
+
+      - name: cargo test --all-features (macOS)
+        if: runner.os == 'macOS'
+        run: >-
+          cargo
+          --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
+          test --all-features
 
       - name: Create virtualenv
         shell: bash
-        run: |
-          python -m venv .venv
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            echo "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
-          else
-            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
-          fi
-          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+        run: python -m venv .venv
 
       - name: Install maturin + pytest
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install "maturin>=1.5,<2" pytest numpy
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy
 
       - name: maturin develop
-        run: maturin develop --features python
+        run: .venv/bin/python -m maturin develop --features python --pip-path .venv/bin/pip
 
       - name: pytest
-        run: pytest pytest/
+        run: .venv/bin/python -m pytest pytest/
 
   ffi-smoke:
     name: FFI smoke (linux + cargo-c + valgrind)
@@ -126,16 +103,6 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
-        with:
-          version: "v0.10.0"
-
-      - name: Setup sccache environment
-        run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
 
       - name: Install system dependencies
         run: |

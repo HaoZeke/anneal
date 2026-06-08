@@ -46,10 +46,8 @@ sphinxcontrib-rust         = ">=1.0.0, <2"
 sphinx-rustdoc-postprocess = ">=0.1.0, <0.2"
 
 [feature.docs.tasks]
-# --root $CONDA_PREFIX lands the binary at .pixi/envs/docs/bin/sphinx-rustdocgen
-# so it is on PATH inside the docs env. Without this, cargo defaults to
-# ~/.cargo/bin which is not on PATH for pixi-spawned shells.
-setup-rustdocgen = "test -x $CONDA_PREFIX/bin/sphinx-rustdocgen || cargo install --root $CONDA_PREFIX sphinx-rustdocgen"
+# Keep the rustdoc generator inside the checked-out Pixi docs prefix.
+setup-rustdocgen = "test -x .pixi/envs/docs/bin/sphinx-rustdocgen || cargo install --root .pixi/envs/docs sphinx-rustdocgen"
 orgbld           = "emacs --batch -l docs/export.el"
 docbld           = { cmd = "sphinx-build docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
 
@@ -59,7 +57,7 @@ docs-export = "emacs --batch -l docs/export.el"
 docs-build = { cmd = "cd docs && sphinx-build -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
 docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
 
-# verify env
+# verify profile
 #
 # Bundles the verification toolchain that backs the IISE manuscript:
 #   - sympy proofs runner (proofs/, pytest harness)

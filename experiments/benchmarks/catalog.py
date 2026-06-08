@@ -7,7 +7,7 @@ so the same registry powers (a) the Dolan-Moré / Moré-Wild profiles
 in plots/, (b) the IISE Section 6 benchmarking table.
 
 The deeper CUTEst / GALAHAD integration via pycutest lives in
-`cutest_runner.py` once `pycutest` lands in the verify env (system
+`cutest_runner.py` once `pycutest` lands in the verify profile (system
 deps: gfortran + sifdecode); see the design pass at
 `the design notes`
 when it lands.

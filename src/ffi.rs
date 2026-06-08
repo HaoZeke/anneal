@@ -9,5 +9,5 @@ use std::os::raw::c_char;
 /// the binary's read-only data segment and is never freed.
 #[unsafe(no_mangle)]
 pub extern "C" fn anneal_core_version() -> *const c_char {
-    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
+    crate::version::ANNEAL_VERSION_NUL.as_ptr() as *const c_char
 }
