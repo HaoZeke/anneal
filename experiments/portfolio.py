@@ -49,7 +49,7 @@ class PortfolioConfig:
     slice_dim_multiplier: int = 8
     slice_min: int = 32
     restart_floor: float = 0.12
-    improvement_rtol: float = 1e-5
+    improvement_rtol: float = 1e-4
     improvement_atol: float = 1e-12
     discount: float = 0.97
     prior_success: float = 1.0
@@ -403,12 +403,30 @@ def _arm_surrogate(ctx, state, slice_budget: int) -> None:
     gen = state.setdefault("gen", 0)
     finite = y[keep]
     state.setdefault("temp0", max(float(np.std(finite)), 1e-6))
-    # Geometric ladder: separable structure rewards aggressive cooling,
-    # and a rejected cold slice costs one slice only.
-    temp = max(state["temp0"] * 0.5 ** gen, 1e-12)
+    # The modal point (per-coordinate argmin, the T -> 0 limit of the
+    # tempered marginals) tests the surrogate's global candidate at the
+    # cost of one evaluation; for separable objectives it is the global
+    # minimizer once the fit settles.
+    modal = np.empty(dim)
+    for j in range(dim):
+        xs_j, g_j = surr._coord_grid_energy(j, 65)
+        modal[j] = xs_j[int(np.argmin(g_j))]
+    before_modal = rec.best
+    modal_val = rec(np.clip(modal, low, high))
+    if (
+        ctx["jac"] is not None
+        and math.isfinite(modal_val)
+        and modal_val < before_modal
+        and rec.n + 4 <= rec.budget
+    ):
+        _lbfgs(rec, ctx["jac"], modal, ctx["bounds"], (rec.budget - rec.n) // 2)
+    # Cool with budget progress so the ladder reaches the cold regime
+    # regardless of how often the arm is pulled.
+    total = ctx.get("total_budget", rec.budget)
+    progress = rec.n / max(total, 1)
+    temp = max(state["temp0"] * 0.5 ** (int(12.0 * progress) + gen), 1e-12)
     f_cur = rec.best
-    n_prop = min(slice_budget, max(8, slice_budget))
-    proposals = surr.sample(n_prop, temp, rng)
+    proposals = surr.sample(slice_budget, temp, rng)
     for trial in proposals:
         if rec.n >= rec.budget:
             break
@@ -480,7 +498,7 @@ def thompson_portfolio(
     ctx = {
         "rec": rec, "low": low, "high": high, "dim": int(dim),
         "rng": rng, "config": config, "jac": jac, "grad": grad,
-        "bounds": bounds,
+        "bounds": bounds, "total_budget": counter.budget,
     }
     total_budget = counter.budget
     final_polish = (

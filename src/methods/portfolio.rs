@@ -108,7 +108,7 @@ impl Default for PortfolioConfig {
             slice_dim_multiplier: 8,
             slice_min: 32,
             restart_floor: 0.12,
-            improvement_rtol: 1e-5,
+            improvement_rtol: 1e-4,
             improvement_atol: 1e-12,
             discount: 0.97,
             final_polish_fraction: 0.06,
@@ -651,10 +651,34 @@ fn run_arm<O, G>(
                 bounds.clone(),
                 config.surrogate_degree,
             );
-            // Geometric ladder: separable structure rewards aggressive
-            // cooling, and a rejected cold slice costs one slice only.
-            let temp = (archive_temp0(ledger) * 0.5_f64.powi(states.surrogate_gen as i32))
-                .max(1e-12);
+            // The modal point (per-coordinate argmin, the T -> 0 limit of
+            // the tempered marginals) tests the surrogate's global
+            // candidate at the cost of one evaluation; for separable
+            // objectives it is the global minimizer once the fit settles.
+            let modal = surr.sample(1, 1e-15, config.surrogate_grid, rng);
+            let before_modal = ledger.best_get();
+            let modal_x = bounds.clip(modal.row(0));
+            let modal_val = obj.eval(modal_x.view());
+            if let Some(grad) = grad {
+                if modal_val.is_finite()
+                    && modal_val < before_modal
+                    && ledger.remaining() >= 4
+                {
+                    projected_gradient_polish(
+                        obj,
+                        grad,
+                        modal_x,
+                        ledger.remaining() / 2,
+                        1.0,
+                        1e-8,
+                    );
+                }
+            }
+            // Cool with budget progress so the ladder reaches the cold
+            // regime regardless of how often the arm is pulled.
+            let progress = ledger.used_get() as f64 / ledger.cap_get().max(1) as f64;
+            let exponent = (12.0 * progress) as i32 + states.surrogate_gen as i32;
+            let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
             let proposals = surr.sample(slice, temp, config.surrogate_grid, rng);
             let mut f_cur = ledger.best_get();
             for i in 0..proposals.nrows() {
