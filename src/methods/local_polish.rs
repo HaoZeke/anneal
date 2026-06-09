@@ -8,6 +8,10 @@ use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
+use crate::accept::{AcceptRule, TsallisAccept};
+use crate::cool::{Cooling, TsallisCool};
+use crate::movekernel::{MoveKernel, TsallisVisit};
+
 const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
 const MIN_BACKTRACK_STEP: f64 = f64::EPSILON;
@@ -147,6 +151,23 @@ fn box_diagonal(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
         })
         .sum::<f64>()
         .sqrt()
+}
+
+fn unit_coordinate(pos: f64, low: f64, high: f64) -> f64 {
+    let width = high - low;
+    if width > 0.0 && width.is_finite() {
+        ((pos - low) / width).clamp(0.0, 1.0)
+    } else {
+        0.5
+    }
+}
+
+fn unit_to_box(unit: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> Array1<f64> {
+    Array1::from_iter(
+        unit.iter()
+            .enumerate()
+            .map(|(axis, value)| low[axis] + (high[axis] - low[axis]) * (*value).clamp(0.0, 1.0)),
+    )
 }
 
 fn initial_line_search_step(direction: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> f64 {
@@ -535,6 +556,114 @@ where
     }
 }
 
+/// Run bounded QMC-initialized generalized simulated annealing.
+pub fn qmc_gsa_global_search<O>(
+    obj: &O,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
+    assert!(max_evals > 0, "max_evals must be positive");
+    assert!(n_chains > 0, "n_chains must be positive");
+    assert!(
+        t_init.is_finite() && t_init > 0.0,
+        "t_init must be finite and positive"
+    );
+    assert!(
+        q_v.is_finite() && q_v > 1.0 && q_v < 3.0,
+        "q_v must lie in (1, 3)"
+    );
+    assert!(q_a.is_finite(), "q_a must be finite");
+
+    let bounds = obj.bounds();
+    let dim = bounds.dims;
+    assert!(dim > 0, "objective dimension must be positive");
+    let chain_count = n_chains.min(max_evals).max(1);
+    let starts = eindir_core::shifted_low_discrepancy_points(
+        bounds,
+        chain_count,
+        crate::runner::qmc_skip_from_seed(seed),
+        seed,
+    );
+    let mut rng = StdRng::seed_from_u64(seed);
+    let cooling = TsallisCool::new(t_init, q_v);
+    let visit = TsallisVisit::new(q_v);
+    let accept = TsallisAccept::new(q_a);
+    let mut units = Vec::with_capacity(chain_count);
+    let mut values = Vec::with_capacity(chain_count);
+    let mut best_pos = bounds.clip(starts.row(0));
+    let mut best_val = f64::INFINITY;
+    let mut n_evals = 0usize;
+
+    for start in starts.outer_iter() {
+        let pos = bounds.clip(start);
+        let unit = Array1::from_iter(
+            (0..dim).map(|axis| unit_coordinate(pos[axis], bounds.low[axis], bounds.high[axis])),
+        );
+        let value = obj.eval(pos.view());
+        n_evals += 1;
+        if value.is_finite() && value < best_val {
+            best_val = value;
+            best_pos = pos.clone();
+        }
+        units.push(unit);
+        values.push(value);
+    }
+
+    let mut epoch = 0usize;
+    while n_evals < max_evals {
+        let temp = cooling.temperature(epoch);
+        for chain in 0..chain_count {
+            if n_evals >= max_evals {
+                break;
+            }
+            let proposal_unit = visit
+                .propose(units[chain].view(), temp, &mut rng)
+                .mapv(|value| value.clamp(0.0, 1.0));
+            let proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            let proposal_val = obj.eval(proposal_pos.view());
+            n_evals += 1;
+            if proposal_val.is_finite() && proposal_val < best_val {
+                best_val = proposal_val;
+                best_pos = proposal_pos.clone();
+            }
+            let accepted = if !proposal_val.is_finite() {
+                false
+            } else if !values[chain].is_finite() {
+                true
+            } else {
+                let probability = accept
+                    .accept_prob(proposal_val - values[chain], temp)
+                    .clamp(0.0, 1.0);
+                rng.random::<f64>() < probability
+            };
+            if accepted {
+                units[chain] = proposal_unit;
+                values[chain] = proposal_val;
+            }
+        }
+        epoch += 1;
+    }
+
+    QmcPolishResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads: 0,
+        n_starts: chain_count,
+        n_polished: 0,
+        polished_values: Vec::new(),
+        polished_projected_grad_norms: Vec::new(),
+        polished_stationary: Vec::new(),
+    }
+}
+
 /// Poll a local trust region with shifted low-discrepancy batches.
 pub fn qmc_trust_region_poll<O>(
     obj: &O,
@@ -585,9 +714,9 @@ where
             break;
         }
         let scale = base_radius_fraction * 2.0_f64.powi(level as i32);
-        let radius = Array1::from_iter((0..bounds.dims).map(|axis| {
-            ((bounds.high[axis] - bounds.low[axis]) * scale).max(0.0)
-        }));
+        let radius = Array1::from_iter(
+            (0..bounds.dims).map(|axis| ((bounds.high[axis] - bounds.low[axis]) * scale).max(0.0)),
+        );
         let remaining = max_evals - n_evals;
         let n_batch = batch_size.min(remaining);
         let line_probes_per_axis = (n_batch / bounds.dims.max(1)).max(1);
@@ -617,12 +746,14 @@ where
         if n_evals >= max_evals {
             break;
         }
-        let zoom_low = Array1::from_iter((0..bounds.dims).map(|axis| {
-            (current_center[axis] - radius[axis]).max(bounds.low[axis])
-        }));
-        let zoom_high = Array1::from_iter((0..bounds.dims).map(|axis| {
-            (current_center[axis] + radius[axis]).min(bounds.high[axis])
-        }));
+        let zoom_low = Array1::from_iter(
+            (0..bounds.dims)
+                .map(|axis| (current_center[axis] - radius[axis]).max(bounds.low[axis])),
+        );
+        let zoom_high = Array1::from_iter(
+            (0..bounds.dims)
+                .map(|axis| (current_center[axis] + radius[axis]).min(bounds.high[axis])),
+        );
         let zoom_bounds = Bounds::new(zoom_low, zoom_high, bounds.slack);
         let replica_count = bounds.dims.min(n_batch).max(1);
         let points_per_replica = n_batch.div_ceil(replica_count).max(1);
@@ -633,8 +764,7 @@ where
             }
             let remaining_direct = n_batch - direct_points;
             let replica_batch = points_per_replica.min(remaining_direct);
-            let level_seed = seed
-                .wrapping_add((level * replica_count + replica) as u64);
+            let level_seed = seed.wrapping_add((level * replica_count + replica) as u64);
             let points = eindir_core::shifted_low_discrepancy_points(
                 &zoom_bounds,
                 replica_batch,

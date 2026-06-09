@@ -48,6 +48,13 @@ DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES = 2
 DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET = 3000
 DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS = 1_000_000
+DEFAULT_QMC_GSA_GLOBAL_MIN_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
+DEFAULT_QMC_GSA_GLOBAL_MAX_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
+DEFAULT_QMC_GSA_GLOBAL_BUDGET_DIVISOR = 2
+DEFAULT_QMC_GSA_GLOBAL_CHAINS = 0
+DEFAULT_QMC_GSA_GLOBAL_T_INIT = 1.0
+DEFAULT_QMC_GSA_GLOBAL_Q_V = 2.62
+DEFAULT_QMC_GSA_GLOBAL_Q_A = 1.7
 
 
 @dataclass(frozen=True)
@@ -161,6 +168,14 @@ class AnnealHybridConfig:
         DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET
     )
     global_anneal_local_hop_iterations: int = DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
+    qmc_gsa_global_enabled: bool = True
+    qmc_gsa_global_min_dimension: int = DEFAULT_QMC_GSA_GLOBAL_MIN_DIMENSION
+    qmc_gsa_global_max_dimension: int = DEFAULT_QMC_GSA_GLOBAL_MAX_DIMENSION
+    qmc_gsa_global_budget_divisor: int = DEFAULT_QMC_GSA_GLOBAL_BUDGET_DIVISOR
+    qmc_gsa_global_chains: int = DEFAULT_QMC_GSA_GLOBAL_CHAINS
+    qmc_gsa_global_t_init: float = DEFAULT_QMC_GSA_GLOBAL_T_INIT
+    qmc_gsa_global_q_v: float = DEFAULT_QMC_GSA_GLOBAL_Q_V
+    qmc_gsa_global_q_a: float = DEFAULT_QMC_GSA_GLOBAL_Q_A
     native_bounds_slack: float = 1e-9
     local_polish_min_fevals: int = 20
     metropolis_temperature_floor: float = 1e-12
@@ -270,6 +285,78 @@ def _clipped_anchor(anchor, low, high):
     if anchor_arr.shape != low.shape:
         raise ValueError("anchor must have the same shape as bounds")
     return np.clip(anchor_arr, low, high)
+
+
+def _qmc_gsa_global_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.qmc_gsa_global_enabled:
+        return False
+    if dim < config.qmc_gsa_global_min_dimension:
+        return False
+    return (
+        config.qmc_gsa_global_max_dimension <= 0
+        or dim <= config.qmc_gsa_global_max_dimension
+    )
+
+
+def _qmc_gsa_global_budget(
+    remaining: int,
+    config: AnnealHybridConfig,
+) -> int:
+    if remaining <= 0 or config.qmc_gsa_global_budget_divisor <= 0:
+        return 0
+    return min(remaining, remaining // config.qmc_gsa_global_budget_divisor)
+
+
+def _qmc_gsa_global_chain_count(dim: int, config: AnnealHybridConfig) -> int:
+    if config.qmc_gsa_global_chains > 0:
+        return int(config.qmc_gsa_global_chains)
+    chains = max(1, int(config.shifted_qmc_polish_chain_count))
+    return max(int(config.qmc_min_starts), int(dim) * chains)
+
+
+def _native_qmc_gsa_global_search(counter, low, high, dim, rng, config):
+    if counter.n >= counter.budget or not _qmc_gsa_global_active(dim, config):
+        return None
+    slice_budget = _qmc_gsa_global_budget(counter.budget - counter.n, config)
+    if slice_budget <= 0:
+        return None
+    try:
+        anneal = _anneal_module()
+    except ModuleNotFoundError as exc:
+        if exc.name != "anneal":
+            raise
+        return None
+    if not all(
+        hasattr(anneal, name)
+        for name in ("Bounds", "PyObjective", "qmc_gsa_global_search_objective")
+    ):
+        return None
+    original_budget = counter.budget
+    counter.budget = counter.n + slice_budget
+    try:
+        bounds = anneal.Bounds(low, high, config.native_bounds_slack)
+        objective = anneal.PyObjective(counter, bounds)
+        result = anneal.qmc_gsa_global_search_objective(
+            objective,
+            slice_budget,
+            seed=int(rng.integers(1 << 31)),
+            n_chains=min(_qmc_gsa_global_chain_count(dim, config), slice_budget),
+            t_init=config.qmc_gsa_global_t_init,
+            q_v=config.qmc_gsa_global_q_v,
+            q_a=config.qmc_gsa_global_q_a,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+        result = None
+    finally:
+        counter.budget = original_budget
+    if not isinstance(result, dict):
+        return None
+    best_val = float(result.get("best_val", float("inf")))
+    if math.isfinite(best_val) and best_val < counter.best:
+        counter.best = best_val
+    return result
 
 
 def _boundary_qmc_polish_active(dim: int, config: AnnealHybridConfig) -> bool:
@@ -944,6 +1031,7 @@ def qmc_annealed_hybrid(
     anchor_arr = _clipped_anchor(anchor, low, high)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    qmc_gsa_best_x = None
     boundary_best_x = None
     boundary_polish_consumed = False
     shifted_best_x = None
@@ -961,6 +1049,23 @@ def qmc_annealed_hybrid(
         )
         if counter.n >= counter.budget:
             return _best_finite(portfolio_best, counter.best)
+    qmc_gsa = _native_qmc_gsa_global_search(
+        counter,
+        low,
+        high,
+        dim,
+        rng,
+        config,
+    )
+    if isinstance(qmc_gsa, dict) and "best_pos" in qmc_gsa:
+        qmc_gsa_best_x = _clipped_anchor(qmc_gsa["best_pos"], low, high)
+    if counter.n >= counter.budget:
+        qmc_gsa_best = (
+            float(qmc_gsa.get("best_val", float("inf")))
+            if isinstance(qmc_gsa, dict)
+            else float("inf")
+        )
+        return _best_finite(qmc_gsa_best, counter.best)
     if (
         _basin_polish_active(dim, config)
         and jac is not None
@@ -1035,6 +1140,8 @@ def qmc_annealed_hybrid(
             if shifted_best_x is not None
             else boundary_best_x
             if boundary_best_x is not None
+            else qmc_gsa_best_x
+            if qmc_gsa_best_x is not None
             else anchor_arr
         )
         trust_region = _native_qmc_trust_region_poll(
@@ -1108,6 +1215,8 @@ def qmc_annealed_hybrid(
         pop[0] = boundary_best_x.copy()
     elif shifted_best_x is not None and pop:
         pop[0] = shifted_best_x.copy()
+    elif qmc_gsa_best_x is not None and pop:
+        pop[0] = qmc_gsa_best_x.copy()
     elif anchor_arr is not None and pop:
         pop[0] = anchor_arr.copy()
     vals = np.array([counter(p) for p in pop], dtype=np.float64)

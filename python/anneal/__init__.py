@@ -27,6 +27,8 @@ from anneal._core import (
     polish as _core_polish,
     qmc_best1bin_scout as _core_qmc_best1bin_scout,
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
+    qmc_gsa_global_search as _core_qmc_gsa_global_search,
+    qmc_gsa_global_search_objective as _core_qmc_gsa_global_search_objective,
     qmc_polish as _core_qmc_polish,
     qmc_polish_objective as _core_qmc_polish_objective,
     qmc_trust_region_poll as _core_qmc_trust_region_poll,
@@ -185,6 +187,56 @@ def qmc_best1bin_scout_objective(
         float(weight_min),
         float(weight_span),
         float(crossover_rate),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_gsa_global_search(
+    obj_fn,
+    low,
+    high,
+    max_evals: int,
+    seed: int = 0,
+    n_chains: int = 30,
+    t_init: float = 1.0,
+    q_v: float = 2.62,
+    q_a: float = 1.7,
+):
+    """Run bounded QMC-initialized generalized simulated annealing."""
+    out = _core_qmc_gsa_global_search(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(max_evals),
+        int(seed),
+        int(n_chains),
+        float(t_init),
+        float(q_v),
+        float(q_a),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_gsa_global_search_objective(
+    objective,
+    max_evals: int,
+    seed: int = 0,
+    n_chains: int = 30,
+    t_init: float = 1.0,
+    q_v: float = 2.62,
+    q_a: float = 1.7,
+):
+    """Run bounded QMC-initialized GSA with a native objective handle."""
+    out = _core_qmc_gsa_global_search_objective(
+        objective,
+        int(max_evals),
+        int(seed),
+        int(n_chains),
+        float(t_init),
+        float(q_v),
+        float(q_a),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -374,6 +426,8 @@ __all__ = [
     "polish",
     "qmc_best1bin_scout",
     "qmc_best1bin_scout_objective",
+    "qmc_gsa_global_search",
+    "qmc_gsa_global_search_objective",
     "qmc_polish",
     "qmc_polish_objective",
     "qmc_trust_region_poll",
