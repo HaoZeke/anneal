@@ -203,7 +203,12 @@ def _native_qmc_polish(
 ):
     if grad_fn is None:
         return None
-    anneal = _anneal_module()
+    try:
+        anneal = _anneal_module()
+    except ModuleNotFoundError as exc:
+        if exc.name != "anneal":
+            raise
+        return None
     if not all(
         hasattr(anneal, name)
         for name in ("Bounds", "PyObjective", "qmc_polish_objective")

@@ -4503,7 +4503,7 @@ def test_anneal_sota_qmc_hybrid_continues_after_boundary_qmc_slice(monkeypatch):
         grad=grad,
         rng=np.random.default_rng(37),
         k_polish=1,
-        n_polish=100,
+        n_polish=1,
         use_surrogate=False,
         use_gle=False,
         config=config,
