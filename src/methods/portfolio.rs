@@ -489,13 +489,14 @@ fn run_arm<O, G>(
             // best ones refined; positive-density restarts carry the
             // global convergence guarantee.
             if let Some(grad) = grad {
-                // One third screening, two thirds descent.
+                // One third screening, two thirds descent; the single
+                // polished start gets the full descent depth, which
+                // ill-conditioned valleys need more than breadth.
                 let n_starts = (slice / 3).max(4);
-                let top_k = 2usize.min(n_starts);
-                let per_start = slice.saturating_sub(n_starts) / (2 * top_k).max(1);
+                let per_start = slice.saturating_sub(n_starts) / 2;
                 if per_start >= 2 {
                     qmc_projected_gradient_polish(
-                        obj, grad, n_starts, per_start, seed, 1.0, 1e-8, top_k,
+                        obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
                     );
                     return;
                 }
@@ -519,13 +520,10 @@ fn run_arm<O, G>(
                 .unwrap_or_else(|| ledger.incumbent(&bounds));
             let mut f_cur = state.f_cur.min(ledger.best_get());
             let temp = ladder_temperature(archive_temp0(ledger), state.generation);
-            let n_hops = 3usize;
-            let per_hop = (slice / n_hops).max(4);
             let width = &bounds.high - &bounds.low;
-            for _ in 0..n_hops {
-                if ledger.remaining() < 4 {
-                    break;
-                }
+            // One full-depth descent per slice: ill-conditioned valleys
+            // reward depth over hop count.
+            if ledger.remaining() >= 4 {
                 let mut trial = x_cur.clone();
                 for j in 0..dim {
                     let w = if width[j] > 0.0 { width[j] } else { 1.0 };
@@ -533,12 +531,10 @@ fn run_arm<O, G>(
                     trial[j] += state.step * w * noise;
                 }
                 let trial = bounds.clip(trial.view());
-                let res = projected_gradient_polish(obj, grad, trial, per_hop / 2, 1.0, 1e-8);
+                let res = projected_gradient_polish(obj, grad, trial, slice / 2, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
-                    continue;
-                }
-                if res.best_val < f_cur || metropolis(res.best_val - f_cur, temp, rng) {
+                } else if res.best_val < f_cur || metropolis(res.best_val - f_cur, temp, rng) {
                     x_cur = res.best_pos;
                     f_cur = res.best_val;
                     state.step = (state.step * HOP_GROW).min(1.0);

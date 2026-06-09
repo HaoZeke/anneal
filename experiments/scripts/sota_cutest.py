@@ -245,7 +245,17 @@ def main():
                    help="Stable shard index for distributed CUTEst sweeps.")
     p.add_argument("--shard-count", type=int, default=1,
                    help="Number of stable shards in the distributed CUTEst sweep.")
+    p.add_argument("--methods", default=None,
+                   help="Comma-separated subset of methods to run.")
     args = p.parse_args()
+    if args.methods:
+        requested = [m.strip() for m in args.methods.split(",") if m.strip()]
+        unknown = sorted(set(requested) - set(METHODS))
+        if unknown:
+            p.error(f"unknown methods: {unknown}")
+        methods = {m: METHODS[m] for m in requested}
+    else:
+        methods = dict(METHODS)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     config = default_cutest_config(args.bench_root, cache_dir=args.pycutest_cache)
 
@@ -270,7 +280,7 @@ def main():
             low, high, anchor = _comparison_box(prob)
             dim = prob.dim
             for s in range(args.seeds):
-                for name, fnc in METHODS.items():
+                for name, fnc in methods.items():
                     rng = np.random.default_rng(s)
                     c = Counter(prob.fn, args.budget)
                     try:
@@ -289,7 +299,6 @@ def main():
             print(f"  {t.name} (dim {dim}) done", flush=True)
 
     # win-rate summary: per (problem, seed), which method reached the lowest best
-    methods = list(METHODS)
     wins = {m: 0 for m in methods}
     cells = {}
     for r in rows:
