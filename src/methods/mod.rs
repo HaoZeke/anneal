@@ -26,7 +26,8 @@ pub use bayesian_pilot::{
     Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
 pub use gle_langevin::{
-    estimate_gle_omega0, gle_langevin_adaptive_sa, gle_langevin_sa, GleLangevinResult,
+    estimate_gle_omega0, estimate_gle_preconditioner, gle_langevin_adaptive_sa,
+    gle_langevin_preconditioned_sa, gle_langevin_sa, GleLangevinResult, GlePreconditioner,
 };
 pub use local_polish::{
     projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,

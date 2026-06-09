@@ -1019,12 +1019,62 @@ fn estimate_gle_omega0(
     Ok(crate::methods::estimate_gle_omega0(&obj, &grad))
 }
 
+fn gle_langevin_x0(
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+    dim: usize,
+) -> PyResult<Option<Array1<f64>>> {
+    let Some(x0) = x0 else {
+        return Ok(None);
+    };
+    let values = x0.as_slice()?.to_vec();
+    if values.len() != dim {
+        return Err(PyValueError::new_err(
+            "x0 must have the same length as the bounds",
+        ));
+    }
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(PyValueError::new_err("x0 must contain only finite values"));
+    }
+    Ok(Some(Array1::from_vec(values)))
+}
+
+fn validate_gle_args(max_fevals: usize, omega0: Option<f64>) -> PyResult<()> {
+    if max_fevals < 1 {
+        return Err(PyValueError::new_err("max_fevals must be positive"));
+    }
+    if omega0.is_some_and(|omega| !omega.is_finite() || omega <= 0.0) {
+        return Err(PyValueError::new_err("omega0 must be positive"));
+    }
+    Ok(())
+}
+
+fn gle_langevin_result_to_dict(
+    py: Python<'_>,
+    result: crate::methods::GleLangevinResult,
+) -> PyResult<Py<PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item(
+        "best_pos",
+        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
+    )?;
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("omega0", result.omega0)?;
+    out.set_item("dt", result.dt)?;
+    out.set_item(
+        "preconditioner_diag",
+        PyArray1::from_vec(py, result.preconditioner_diag.iter().copied().collect()),
+    )?;
+    out.set_item("n_preconditioner_grads", result.n_preconditioner_grads)?;
+    Ok(out.into())
+}
+
 /// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
 /// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
-                    omega0=None, dt=0.2, n_epochs=40))]
+                    omega0=None, dt=0.2, n_epochs=40, x0=None))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin(
     py: Python<'_>,
@@ -1037,6 +1087,7 @@ fn gle_langevin(
     omega0: Option<f64>,
     dt: f64,
     n_epochs: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1045,13 +1096,9 @@ fn gle_langevin(
             "low and high must have the same length",
         ));
     }
-    if max_fevals < 1 {
-        return Err(PyValueError::new_err("max_fevals must be positive"));
-    }
-    if omega0.is_some_and(|omega| omega <= 0.0) {
-        return Err(PyValueError::new_err("omega0 must be positive"));
-    }
+    validate_gle_args(max_fevals, omega0)?;
     let dim = low_vec.len();
+    let x0 = gle_langevin_x0(x0, dim)?;
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
     let obj = CallableObjective {
         fn_: obj_fn,
@@ -1059,20 +1106,137 @@ fn gle_langevin(
     };
     let grad = CallablePyGradient { fn_: grad_fn, dim };
     let result = if let Some(omega0) = omega0 {
-        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs)
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
     } else {
-        crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs)
+        crate::methods::gle_langevin_adaptive_sa(&obj, &grad, seed, max_fevals, dt, n_epochs, x0)
     };
-    let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
-    out.set_item("best_val", result.best_val)?;
-    out.set_item("n_evals", result.n_evals)?;
-    out.set_item("omega0", result.omega0)?;
-    out.set_item("dt", result.dt)?;
-    Ok(out.into())
+    gle_langevin_result_to_dict(py, result)
+}
+
+/// GLE-Langevin annealing with a diagonal adaptive coordinate preconditioner.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
+                    omega0=None, dt=0.2, n_epochs=40, x0=None))]
+#[allow(clippy::too_many_arguments)]
+fn gle_langevin_preconditioned(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    max_fevals: usize,
+    seed: u64,
+    omega0: Option<f64>,
+    dt: f64,
+    n_epochs: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    validate_gle_args(max_fevals, omega0)?;
+    let dim = low_vec.len();
+    let x0 = gle_langevin_x0(x0, dim)?;
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let grad = CallablePyGradient { fn_: grad_fn, dim };
+    let result = if let Some(omega0) = omega0 {
+        crate::methods::gle_langevin_sa(&obj, &grad, seed, max_fevals, omega0, dt, n_epochs, x0)
+    } else {
+        crate::methods::gle_langevin_preconditioned_sa(
+            &obj, &grad, seed, max_fevals, dt, n_epochs, x0,
+        )
+    };
+    gle_langevin_result_to_dict(py, result)
+}
+
+/// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
+#[pyfunction]
+#[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None))]
+#[allow(clippy::too_many_arguments)]
+fn gle_langevin_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    max_fevals: usize,
+    seed: u64,
+    omega0: Option<f64>,
+    dt: f64,
+    n_epochs: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<Py<PyDict>> {
+    validate_gle_args(max_fevals, omega0)?;
+    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let result = if let Some(omega0) = omega0 {
+        crate::methods::gle_langevin_sa(
+            &*objective,
+            &*objective,
+            seed,
+            max_fevals,
+            omega0,
+            dt,
+            n_epochs,
+            x0,
+        )
+    } else {
+        crate::methods::gle_langevin_adaptive_sa(
+            &*objective,
+            &*objective,
+            seed,
+            max_fevals,
+            dt,
+            n_epochs,
+            x0,
+        )
+    };
+    gle_langevin_result_to_dict(py, result)
+}
+
+/// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
+#[pyfunction]
+#[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None))]
+#[allow(clippy::too_many_arguments)]
+fn gle_langevin_preconditioned_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    max_fevals: usize,
+    seed: u64,
+    omega0: Option<f64>,
+    dt: f64,
+    n_epochs: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<Py<PyDict>> {
+    validate_gle_args(max_fevals, omega0)?;
+    let x0 = gle_langevin_x0(x0, objective.dim())?;
+    let result = if let Some(omega0) = omega0 {
+        crate::methods::gle_langevin_sa(
+            &*objective,
+            &*objective,
+            seed,
+            max_fevals,
+            omega0,
+            dt,
+            n_epochs,
+            x0,
+        )
+    } else {
+        crate::methods::gle_langevin_preconditioned_sa(
+            &*objective,
+            &*objective,
+            seed,
+            max_fevals,
+            dt,
+            n_epochs,
+            x0,
+        )
+    };
+    gle_langevin_result_to_dict(py, result)
 }
 
 // ---------------------------------------------------------------------------
@@ -1283,6 +1447,9 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_gle_omega0, m)?)?;
     m.add_function(wrap_pyfunction!(gle_langevin, m)?)?;
+    m.add_function(wrap_pyfunction!(gle_langevin_objective, m)?)?;
+    m.add_function(wrap_pyfunction!(gle_langevin_preconditioned, m)?)?;
+    m.add_function(wrap_pyfunction!(gle_langevin_preconditioned_objective, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     Ok(())
 }

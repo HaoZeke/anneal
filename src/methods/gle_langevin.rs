@@ -39,6 +39,23 @@ pub struct GleLangevinResult {
     pub omega0: f64,
     /// Timestep after resolving the upper end of the GLE frequency band.
     pub dt: f64,
+    /// Diagonal entries of the position-space preconditioning matrix.
+    pub preconditioner_diag: Vec<f64>,
+    /// Gradient probes spent estimating the preconditioner.
+    pub n_preconditioner_grads: usize,
+}
+
+/// Diagonal GLE preconditioner in transformed coordinates.
+#[derive(Clone, Debug)]
+pub struct GlePreconditioner {
+    /// Coordinate scale `x_j = scale_j z_j`.
+    pub scale: Array1<f64>,
+    /// Diagonal entries of the position-space preconditioner.
+    pub diag: Array1<f64>,
+    /// Characteristic transformed frequency.
+    pub omega0: f64,
+    /// Gradient probes consumed by the estimate.
+    pub n_grads: usize,
 }
 
 fn fallback_gle_omega0(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
@@ -55,6 +72,128 @@ fn fallback_gle_omega0(low: &Array1<f64>, high: &Array1<f64>) -> f64 {
         (1.0 / diagonal).max(GLE_FREQUENCY_FLOOR)
     } else {
         DEFAULT_GLE_OMEGA0
+    }
+}
+
+fn unit_gle_preconditioner(dim: usize, omega0: f64) -> GlePreconditioner {
+    GlePreconditioner {
+        scale: Array1::from_elem(dim, 1.0),
+        diag: Array1::from_elem(dim, 1.0),
+        omega0,
+        n_grads: 0,
+    }
+}
+
+fn splitmix64(mut x: u64) -> u64 {
+    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    let mut z = x;
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn rademacher(seed: u64, probe: usize, axis: usize) -> f64 {
+    let mixed = splitmix64(
+        seed ^ ((probe as u64).wrapping_mul(0xD1B5_4A32_D192_ED03))
+            ^ ((axis as u64).wrapping_mul(0xABC9_83B5_0FAC_03D7)),
+    );
+    if mixed & 1 == 0 {
+        -1.0
+    } else {
+        1.0
+    }
+}
+
+/// Estimate a diagonal coordinate preconditioner from local gradient curvature.
+pub fn estimate_gle_preconditioner<O, G>(
+    obj: &O,
+    grad: &G,
+    seed: u64,
+    max_probes: usize,
+) -> GlePreconditioner
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let bounds = obj.bounds();
+    let dim = bounds.dims;
+    if dim == 0 {
+        return unit_gle_preconditioner(0, DEFAULT_GLE_OMEGA0);
+    }
+    let low = &bounds.low;
+    let high = &bounds.high;
+    let fallback = fallback_gle_omega0(low, high);
+    let center = (low + high) * 0.5;
+    let probes = max_probes;
+    if probes == 0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    let min_width = low
+        .iter()
+        .zip(high.iter())
+        .filter_map(|(lo, hi)| {
+            let width = hi - lo;
+            (width.is_finite() && width > 0.0).then_some(width)
+        })
+        .fold(f64::INFINITY, f64::min);
+    if !min_width.is_finite() || min_width <= 0.0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    let step = (f64::EPSILON.cbrt() * min_width).max(f64::EPSILON.sqrt());
+    let mut curvature = Array1::<f64>::zeros(dim);
+    let mut used = 0usize;
+    let mut n_grads = 0usize;
+
+    for probe in 0..probes {
+        let direction = Array1::from_iter((0..dim).map(|axis| rademacher(seed, probe, axis)));
+        let xp = bounds.clip((&center + &(&direction * step)).view());
+        let xm = bounds.clip((&center - &(&direction * step)).view());
+        let gp = grad.grad(xp.view());
+        let gm = grad.grad(xm.view());
+        n_grads += 2;
+        if gp.len() != dim
+            || gm.len() != dim
+            || gp.iter().any(|value| !value.is_finite())
+            || gm.iter().any(|value| !value.is_finite())
+        {
+            continue;
+        }
+        let hv = (&gp - &gm) * (0.5 / step);
+        curvature += &(&direction * &hv);
+        used += 1;
+    }
+
+    if used == 0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    curvature.mapv_inplace(|value| (value / used as f64).abs());
+
+    let mut positive: Vec<f64> = curvature
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > GLE_FREQUENCY_FLOOR)
+        .collect();
+    if positive.is_empty() {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    positive.sort_by(|left, right| left.total_cmp(right));
+    let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
+    let min_scale = 1.0 / GLE_PRECONDITIONER_MAX_SCALE;
+    let scale = curvature.mapv(|value| {
+        if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
+            (reference / value)
+                .sqrt()
+                .clamp(min_scale, GLE_PRECONDITIONER_MAX_SCALE)
+        } else {
+            1.0
+        }
+    });
+    let diag = scale.mapv(|value| value * value);
+    GlePreconditioner {
+        scale,
+        diag,
+        omega0: reference.sqrt().max(GLE_FREQUENCY_FLOOR),
+        n_grads,
     }
 }
 
@@ -126,6 +265,42 @@ pub fn gle_langevin_sa<O, G>(
     omega0: f64,
     dt: f64,
     n_epochs: usize,
+    x0: Option<Array1<f64>>,
+) -> GleLangevinResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let dim = obj.bounds().dims;
+    let scale = Array1::from_elem(dim, 1.0);
+    run_gle_langevin_scaled_sa(
+        obj,
+        grad,
+        seed,
+        max_fevals,
+        omega0,
+        dt,
+        n_epochs,
+        x0,
+        &scale,
+        Array1::from_elem(dim, 1.0),
+        0,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_gle_langevin_scaled_sa<O, G>(
+    obj: &O,
+    grad: &G,
+    seed: u64,
+    max_fevals: usize,
+    omega0: f64,
+    dt: f64,
+    n_epochs: usize,
+    x0: Option<Array1<f64>>,
+    scale: &Array1<f64>,
+    preconditioner_diag: Array1<f64>,
+    n_preconditioner_grads: usize,
 ) -> GleLangevinResult
 where
     O: Objective<f64>,
@@ -138,6 +313,7 @@ where
     );
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
+    assert_eq!(scale.len(), dim, "scale length must match dimension");
     let mut rng = StdRng::seed_from_u64(seed);
 
     // The fitted drift covers [omega0, 100 omega0]; resolve the fastest with dt.
@@ -149,21 +325,27 @@ where
     let ns = drift.nrows() - 1;
 
     // Start at the box centre with a thermalised momentum.
-    let mut x: Array1<f64> = (&bounds.low + &bounds.high) * 0.5;
+    let mut x: Array1<f64> = x0
+        .filter(|candidate| {
+            candidate.len() == dim && candidate.iter().all(|value| value.is_finite())
+        })
+        .map(|candidate| bounds.clip(candidate.view()))
+        .unwrap_or_else(|| (&bounds.low + &bounds.high) * 0.5);
     let mut fx = obj.eval(x.view());
     let mut best_val = fx;
     let mut best_pos = x.clone();
 
     let t_hi = fx.abs().max(1.0);
     let t_lo = 1e-3 * t_hi;
-    let n_epochs = n_epochs.clamp(1, max_fevals);
-    let steps = (max_fevals / n_epochs).max(1);
+    let dynamics_budget = max_fevals.saturating_sub(n_preconditioner_grads).max(1);
+    let n_epochs = n_epochs.clamp(1, dynamics_budget);
+    let steps = (dynamics_budget / n_epochs).max(1);
 
     // Auxiliary GLE state: (ns+1) x dim, row 0 is the physical momentum; the
     // per-epoch loop reseeds it at the current temperature.
     let mut s: Array2<f64>;
     let mut g = grad.grad(x.view());
-    let mut n_evals = 1usize;
+    let mut n_evals = n_preconditioner_grads + 1;
 
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
@@ -177,9 +359,9 @@ where
         for _ in 0..steps {
             // B: half momentum kick from the force (mass = 1)
             let mut p: Array1<f64> = s.row(0).to_owned();
-            p = &p - &(&g * (0.5 * dt));
+            p = &p - &(&(&g * scale) * (0.5 * dt));
             // A: drift the position, clip to the box
-            x = &x + &(&p * dt);
+            x = &x + &(&(&p * scale) * dt);
             x = bounds.clip(x.view());
             g = grad.grad(x.view());
             n_evals += 1;
@@ -190,7 +372,7 @@ where
             }
             fx = fy;
             // B: second half kick
-            p = &p - &(&g * (0.5 * dt));
+            p = &p - &(&(&g * scale) * (0.5 * dt));
             // O: GLE colored-noise thermostat on the momentum
             s.row_mut(0).assign(&p);
             gle.step(&mut s.view_mut(), &mut rng);
@@ -207,7 +389,45 @@ where
         n_evals,
         omega0,
         dt,
+        preconditioner_diag: preconditioner_diag.to_vec(),
+        n_preconditioner_grads,
     }
+}
+
+/// Run GLE-Langevin annealing with a diagonal adaptive coordinate transform.
+pub fn gle_langevin_preconditioned_sa<O, G>(
+    obj: &O,
+    grad: &G,
+    seed: u64,
+    max_fevals: usize,
+    dt: f64,
+    n_epochs: usize,
+    x0: Option<Array1<f64>>,
+) -> GleLangevinResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let max_probes = max_fevals.saturating_sub(1).checked_div(2).unwrap_or(0);
+    let preconditioner = if max_probes > 0 {
+        estimate_gle_preconditioner(obj, grad, seed, max_probes)
+    } else {
+        let bounds = obj.bounds();
+        unit_gle_preconditioner(bounds.dims, fallback_gle_omega0(&bounds.low, &bounds.high))
+    };
+    run_gle_langevin_scaled_sa(
+        obj,
+        grad,
+        seed,
+        max_fevals,
+        preconditioner.omega0,
+        dt,
+        n_epochs,
+        x0,
+        &preconditioner.scale,
+        preconditioner.diag,
+        preconditioner.n_grads.min(max_fevals.saturating_sub(1)),
+    )
 }
 
 /// Run GLE-Langevin annealing with a frequency estimated from the objective.
@@ -218,13 +438,14 @@ pub fn gle_langevin_adaptive_sa<O, G>(
     max_fevals: usize,
     dt: f64,
     n_epochs: usize,
+    x0: Option<Array1<f64>>,
 ) -> GleLangevinResult
 where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
     let omega0 = estimate_gle_omega0(obj, grad);
-    gle_langevin_sa(obj, grad, seed, max_fevals, omega0, dt, n_epochs)
+    gle_langevin_sa(obj, grad, seed, max_fevals, omega0, dt, n_epochs, x0)
 }
 
 #[cfg(test)]
@@ -283,7 +504,7 @@ mod tests {
         };
         let grad = IllGrad { a };
         let centre_val = obj.eval(Array1::<f64>::zeros(dim).view()); // 0 at the optimum
-        let res = gle_langevin_sa(&obj, &grad, 0, 4000, 0.2, 0.2, 40);
+        let res = gle_langevin_sa(&obj, &grad, 0, 4000, 0.2, 0.2, 40, None);
         assert!(res.n_evals <= 4000);
         // optimum is 0; require the run to get close from the start basin
         assert!(
@@ -404,11 +625,14 @@ mod tests {
         };
         let grad = IllGrad { a };
 
-        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20);
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None);
 
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_preconditioner_grads > 0);
         assert!(res.n_evals <= 300);
-        assert!(res.preconditioner_diag.iter().all(|value| value.is_finite() && *value > 0.0));
+        assert!(res
+            .preconditioner_diag
+            .iter()
+            .all(|value| value.is_finite() && *value > 0.0));
     }
 }

@@ -2099,8 +2099,13 @@ def _run_cutest_bayesian_adaptive_gle(
         "dt": _bayesian_gle_dt(e_map),
         "n_epochs": max(1, min(int(n_epochs), int(max_fevals))),
     }
+    gle_langevin = getattr(
+        anneal_module,
+        "gle_langevin_preconditioned",
+        anneal_module.gle_langevin,
+    )
     try:
-        result = anneal_module.gle_langevin(
+        result = gle_langevin(
             prob.fn,
             grad_fn,
             local_low,
