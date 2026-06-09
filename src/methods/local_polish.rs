@@ -11,6 +11,7 @@ const ARMIJO_SUFFICIENT_DECREASE: f64 = 1e-4;
 const BACKTRACK_SHRINK: f64 = 0.5;
 const MIN_BACKTRACK_STEP: f64 = f64::EPSILON;
 const FULL_LINE_SEARCH_STEP: f64 = 1.0;
+const TRUST_REGION_RADIUS_DIMENSION_SCALE: f64 = 2.0;
 
 /// Result of bounded local refinement.
 #[derive(Clone, Debug)]
@@ -526,6 +527,107 @@ where
         n_evals,
         n_grads: 0,
         n_starts: population_size,
+        n_polished: 0,
+        polished_values: Vec::new(),
+        polished_projected_grad_norms: Vec::new(),
+        polished_stationary: Vec::new(),
+    }
+}
+
+/// Poll a local trust region with shifted low-discrepancy batches.
+pub fn qmc_trust_region_poll<O>(
+    obj: &O,
+    center: Array1<f64>,
+    max_evals: usize,
+    seed: u64,
+    radius_fraction: f64,
+    n_levels: usize,
+    points_per_level: usize,
+) -> QmcPolishResult
+where
+    O: Objective<f64>,
+{
+    assert!(max_evals > 0, "max_evals must be positive");
+    assert!(
+        radius_fraction.is_finite() && radius_fraction >= 0.0,
+        "radius_fraction must be finite and non-negative"
+    );
+    let bounds = obj.bounds();
+    assert_eq!(
+        center.len(),
+        bounds.dims,
+        "center dimension must match objective bounds"
+    );
+
+    let levels = n_levels.max(1);
+    let dim_scale = (bounds.dims * bounds.dims).max(1) as f64;
+    let base_radius_fraction = if radius_fraction > 0.0 {
+        radius_fraction
+    } else {
+        1.0 / (TRUST_REGION_RADIUS_DIMENSION_SCALE * dim_scale)
+    };
+    let inferred_points_per_level = max_evals.saturating_sub(1).div_ceil(levels).max(1);
+    let batch_size = if points_per_level == 0 {
+        inferred_points_per_level
+    } else {
+        points_per_level
+    };
+
+    let mut n_evals = 0usize;
+    let mut current_center = bounds.clip(center.view());
+    let mut best_pos = current_center.clone();
+    let mut best_val = obj.eval(best_pos.view());
+    n_evals += 1;
+
+    for level in 0..levels {
+        if n_evals >= max_evals {
+            break;
+        }
+        let scale = base_radius_fraction * 2.0_f64.powi(level as i32);
+        let radius = Array1::from_iter((0..bounds.dims).map(|axis| {
+            ((bounds.high[axis] - bounds.low[axis]) * scale).max(0.0)
+        }));
+        let zoom_low = Array1::from_iter((0..bounds.dims).map(|axis| {
+            (current_center[axis] - radius[axis]).max(bounds.low[axis])
+        }));
+        let zoom_high = Array1::from_iter((0..bounds.dims).map(|axis| {
+            (current_center[axis] + radius[axis]).min(bounds.high[axis])
+        }));
+        let zoom_bounds = Bounds::new(zoom_low, zoom_high, bounds.slack);
+        let remaining = max_evals - n_evals;
+        let n_batch = batch_size.min(remaining);
+        let level_seed = seed.wrapping_add(level as u64);
+        let points = eindir_core::shifted_low_discrepancy_points(
+            &zoom_bounds,
+            n_batch,
+            crate::runner::qmc_skip_from_seed(level_seed),
+            level_seed,
+        );
+        let mut level_improved = false;
+        for point in points.outer_iter() {
+            let pos = bounds.clip(point);
+            let value = obj.eval(pos.view());
+            n_evals += 1;
+            if value.is_finite() && value < best_val {
+                best_val = value;
+                best_pos = pos;
+                level_improved = true;
+            }
+            if n_evals >= max_evals {
+                break;
+            }
+        }
+        if level_improved {
+            current_center = best_pos.clone();
+        }
+    }
+
+    QmcPolishResult {
+        best_pos,
+        best_val,
+        n_evals,
+        n_grads: 0,
+        n_starts: n_evals,
         n_polished: 0,
         polished_values: Vec::new(),
         polished_projected_grad_norms: Vec::new(),

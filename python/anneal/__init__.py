@@ -29,6 +29,8 @@ from anneal._core import (
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
     qmc_polish as _core_qmc_polish,
     qmc_polish_objective as _core_qmc_polish_objective,
+    qmc_trust_region_poll as _core_qmc_trust_region_poll,
+    qmc_trust_region_poll_objective as _core_qmc_trust_region_poll_objective,
     shifted_qmc_polish as _core_shifted_qmc_polish,
     additive_independence as _core_additive_independence,
     estimate_gle_omega0 as _core_estimate_gle_omega0,
@@ -188,6 +190,56 @@ def qmc_best1bin_scout_objective(
     return out
 
 
+def qmc_trust_region_poll(
+    obj_fn,
+    low,
+    high,
+    center,
+    max_evals: int,
+    seed: int = 0,
+    radius_fraction: float = 0.0,
+    n_levels: int = 3,
+    points_per_level: int = 0,
+):
+    """Run a local shifted-QMC trust-region poll."""
+    out = _core_qmc_trust_region_poll(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        np.asarray(center, dtype=np.float64),
+        int(max_evals),
+        int(seed),
+        float(radius_fraction),
+        int(n_levels),
+        int(points_per_level),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def qmc_trust_region_poll_objective(
+    objective,
+    center,
+    max_evals: int,
+    seed: int = 0,
+    radius_fraction: float = 0.0,
+    n_levels: int = 3,
+    points_per_level: int = 0,
+):
+    """Run a local shifted-QMC trust-region poll with a native objective handle."""
+    out = _core_qmc_trust_region_poll_objective(
+        objective,
+        np.asarray(center, dtype=np.float64),
+        int(max_evals),
+        int(seed),
+        float(radius_fraction),
+        int(n_levels),
+        int(points_per_level),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 def shifted_qmc_polish(
     obj_fn,
     grad_fn,
@@ -324,6 +376,8 @@ __all__ = [
     "qmc_best1bin_scout_objective",
     "qmc_polish",
     "qmc_polish_objective",
+    "qmc_trust_region_poll",
+    "qmc_trust_region_poll_objective",
     "shifted_qmc_polish",
     "additive_independence",
     "estimate_gle_omega0",
