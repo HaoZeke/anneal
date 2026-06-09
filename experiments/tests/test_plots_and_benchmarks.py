@@ -2445,6 +2445,150 @@ def test_cutest_bayesian_adaptive_gle_uses_low_dimensional_scout(monkeypatch):
     assert captured["gle_max_fevals"] == 41
 
 
+def test_cutest_bayesian_adaptive_gle_extends_productive_scout_arm(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {"scout_budgets": [], "scout_seeds": []}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
+        captured["gle_max_fevals"] = int(max_fevals)
+        return {
+            "best_val": 1.0,
+            "best_pos": np.array([0.3, -0.3], dtype=np.float64),
+            "n_evals": 12,
+        }
+
+    scout_values = iter([-4.0, -40.0])
+
+    def qmc_best1bin_scout(_obj_fn, _low, _high, max_evals, **kwargs):
+        captured["scout_budgets"].append(int(max_evals))
+        captured["scout_seeds"].append(int(kwargs["seed"]))
+        return {
+            "best_val": next(scout_values),
+            "best_pos": np.array([-0.4, 0.4], dtype=np.float64),
+            "n_evals": 6,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        gle_langevin=gle_langevin,
+        qmc_best1bin_scout=qmc_best1bin_scout,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -40.0
+    assert fevals == 50
+    assert captured["scout_budgets"] == [27, 42]
+    assert captured["scout_seeds"] == [8, 9]
+    assert captured["gle_max_fevals"] == 41
+
+
+def test_cutest_bayesian_adaptive_gle_routes_native_qmc_polish_arm(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
+        captured["gle_max_fevals"] = int(max_fevals)
+        return {
+            "best_val": 2.0,
+            "best_pos": np.array([0.3, -0.3], dtype=np.float64),
+            "n_evals": 12,
+        }
+
+    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+        captured["qmc_polish"] = {
+            "n_starts": int(n_starts),
+            "max_fevals_per_start": int(max_fevals_per_start),
+            "top_k": int(kwargs["top_k"]),
+            "seed": int(kwargs["seed"]),
+        }
+        return {
+            "best_val": -33.0,
+            "n_evals": 8,
+            "n_grads": 8,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        gle_langevin=gle_langevin,
+        qmc_polish=qmc_polish,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -33.0
+    assert fevals == 53
+    assert captured["qmc_polish"] == {
+        "n_starts": 4,
+        "max_fevals_per_start": 8,
+        "top_k": 2,
+        "seed": 10,
+    }
+    assert captured["gle_max_fevals"] == 54
+
+
 def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
