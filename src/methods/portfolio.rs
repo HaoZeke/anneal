@@ -1007,7 +1007,8 @@ where
             break;
         }
         if remaining < slice {
-            // Budget tail: spend the remainder polishing the incumbent.
+            // Budget tail: drive the incumbent to projected
+            // stationarity at the measurement resolution.
             if let Some(grad) = budgeted_grad.as_ref() {
                 projected_gradient_polish(
                     &budgeted_obj,
@@ -1015,7 +1016,7 @@ where
                     ledger.incumbent(&bounds),
                     (remaining / 2).max(2),
                     1.0,
-                    1e-8,
+                    1e-12,
                 );
             } else if remaining >= 8 {
                 qmc_trust_region_poll(
@@ -1031,10 +1032,11 @@ where
             break;
         }
         round += 1;
-        // Decaying uniform floor min(1, K/m): early rounds explore every
-        // arm, late rounds are pure Thompson; every arm, including the
-        // restart arm, is played infinitely often.
-        let floor = (k as f64 / round as f64).min(1.0);
+        // Decaying uniform floor min(1, 1/m): the Beta(1, 1) priors
+        // already explore, so the floor only certifies that every arm,
+        // including the restart arm, is played infinitely often
+        // (sum 1/(mK) diverges); its cumulative cost is ln(n) slices.
+        let floor = (1.0 / round as f64).min(1.0);
         let choice = if rng.random::<f64>() < floor {
             rng.random_range(0..k)
         } else {
