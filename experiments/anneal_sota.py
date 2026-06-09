@@ -34,6 +34,9 @@ DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT = 2
 DEFAULT_SHIFTED_QMC_POLISH_STEP = 1.0
 DEFAULT_SHIFTED_QMC_POLISH_GRAD_TOL = 1e-8
 DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK = 2
+DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
+DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
+DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR = DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES = 2
@@ -99,6 +102,10 @@ class AnnealHybridConfig:
     best1bin_relative_improvement_scale_floor: float = 1.0
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
+    boundary_qmc_polish_enabled: bool = True
+    boundary_qmc_polish_min_dimension: int = DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION
+    boundary_qmc_polish_max_dimension: int = DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION
+    boundary_qmc_polish_budget_divisor: int = DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
     shifted_qmc_polish_enabled: bool = True
     shifted_qmc_polish_min_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
     shifted_qmc_polish_max_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
@@ -235,6 +242,58 @@ def _clipped_anchor(anchor, low, high):
     if anchor_arr.shape != low.shape:
         raise ValueError("anchor must have the same shape as bounds")
     return np.clip(anchor_arr, low, high)
+
+
+def _boundary_qmc_polish_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.boundary_qmc_polish_enabled:
+        return False
+    if dim < config.boundary_qmc_polish_min_dimension:
+        return False
+    return (
+        config.boundary_qmc_polish_max_dimension <= 0
+        or dim <= config.boundary_qmc_polish_max_dimension
+    )
+
+
+def _boundary_qmc_polish_budget(
+    remaining: int,
+    config: AnnealHybridConfig,
+) -> int:
+    if remaining <= 0 or config.boundary_qmc_polish_budget_divisor <= 0:
+        return 0
+    return min(remaining, remaining // config.boundary_qmc_polish_budget_divisor)
+
+
+def _boundary_qmc_polish(counter, grad_fn, low, high, rng, k_polish, config):
+    if grad_fn is None or counter.n >= counter.budget:
+        return None
+    slice_budget = _boundary_qmc_polish_budget(counter.budget - counter.n, config)
+    if slice_budget <= 0:
+        return None
+    original_budget = counter.budget
+    counter.budget = counter.n + slice_budget
+    try:
+        result = _native_qmc_polish(
+            counter,
+            grad_fn,
+            low,
+            high,
+            rng,
+            k_polish=k_polish,
+            config=config,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+        result = None
+    finally:
+        counter.budget = original_budget
+    if not isinstance(result, dict):
+        return None
+    best_val = float(result.get("best_val", float("inf")))
+    if math.isfinite(best_val) and best_val < counter.best:
+        counter.best = best_val
+    return result
 
 
 def _shifted_qmc_polish_active(dim: int, config: AnnealHybridConfig) -> bool:
@@ -792,6 +851,7 @@ def qmc_annealed_hybrid(
     anchor_arr = _clipped_anchor(anchor, low, high)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    boundary_best_x = None
     shifted_best_x = None
     if _global_anneal_portfolio_active(dim, config):
         portfolio_best = _global_anneal_portfolio(
@@ -829,6 +889,28 @@ def qmc_annealed_hybrid(
                 counter.budget = original_budget
         if counter.n >= counter.budget:
             return _best_finite(basin_best, counter.best)
+    if (
+        _boundary_qmc_polish_active(dim, config)
+        and jac is not None
+    ):
+        boundary = _boundary_qmc_polish(
+            counter,
+            grad,
+            low,
+            high,
+            rng,
+            k_polish,
+            config,
+        )
+        if isinstance(boundary, dict) and "best_pos" in boundary:
+            boundary_best_x = _clipped_anchor(boundary["best_pos"], low, high)
+        if counter.n >= counter.budget:
+            boundary_best = (
+                float(boundary.get("best_val", float("inf")))
+                if isinstance(boundary, dict)
+                else float("inf")
+            )
+            return _best_finite(boundary_best, counter.best)
     if (
         _shifted_qmc_polish_active(dim, config)
         and jac is not None
@@ -899,7 +981,9 @@ def qmc_annealed_hybrid(
         np.asarray(point, dtype=np.float64).copy()
         for point in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
     ]
-    if shifted_best_x is not None and pop:
+    if boundary_best_x is not None and pop:
+        pop[0] = boundary_best_x.copy()
+    elif shifted_best_x is not None and pop:
         pop[0] = shifted_best_x.copy()
     elif anchor_arr is not None and pop:
         pop[0] = anchor_arr.copy()
