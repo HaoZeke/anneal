@@ -25,6 +25,7 @@ const GLE_BAND_RATIO: f64 = 100.0;
 const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
 const GLE_MIN_TIMESTEP: f64 = 1e-6;
 const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
+const GLE_PRECONDITIONER_MAX_SCALE: f64 = 32.0;
 
 /// Result of a GLE-Langevin annealing run.
 #[derive(Clone, Debug)]
