@@ -86,7 +86,11 @@ impl<T: Float + Send + Sync> Exchange<T> for TsallisExchange<T> {
             return T::zero();
         }
         let p = bracket.powf(T::one() / (self.q - T::one()));
-        if p > T::one() { T::one() } else { p }
+        if p > T::one() {
+            T::one()
+        } else {
+            p
+        }
     }
 }
 

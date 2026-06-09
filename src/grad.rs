@@ -12,8 +12,8 @@
 // Re-export the shared typed primitives so anneal drivers and downstream
 // callers use the same derivative traits.
 pub use eindir_core::{
-    DifferentiableObjective, Gradient,
     gradient::{AnalyticGradient, FiniteDiffGradient},
+    DifferentiableObjective, Gradient,
 };
 
 // Objective is part of the same public surface as Gradient.
