@@ -588,6 +588,35 @@ where
         let radius = Array1::from_iter((0..bounds.dims).map(|axis| {
             ((bounds.high[axis] - bounds.low[axis]) * scale).max(0.0)
         }));
+        let remaining = max_evals - n_evals;
+        let n_batch = batch_size.min(remaining);
+        let line_probes_per_axis = (n_batch / bounds.dims.max(1)).max(1);
+        let mut level_improved = false;
+        for axis in 0..bounds.dims {
+            for probe in 1..=line_probes_per_axis {
+                if n_evals >= max_evals {
+                    break;
+                }
+                let scalar = 2.0 * eindir_core::radical_inverse(probe as u64, 2) - 1.0;
+                if scalar.abs() <= f64::EPSILON {
+                    continue;
+                }
+                let mut trial = current_center.clone();
+                trial[axis] += radius[axis] * scalar;
+                let trial = bounds.clip(trial.view());
+                let value = obj.eval(trial.view());
+                n_evals += 1;
+                if value.is_finite() && value < best_val {
+                    best_val = value;
+                    best_pos = trial;
+                    current_center = best_pos.clone();
+                    level_improved = true;
+                }
+            }
+        }
+        if n_evals >= max_evals {
+            break;
+        }
         let zoom_low = Array1::from_iter((0..bounds.dims).map(|axis| {
             (current_center[axis] - radius[axis]).max(bounds.low[axis])
         }));
@@ -595,11 +624,8 @@ where
             (current_center[axis] + radius[axis]).min(bounds.high[axis])
         }));
         let zoom_bounds = Bounds::new(zoom_low, zoom_high, bounds.slack);
-        let remaining = max_evals - n_evals;
-        let n_batch = batch_size.min(remaining);
         let replica_count = bounds.dims.min(n_batch).max(1);
         let points_per_replica = n_batch.div_ceil(replica_count).max(1);
-        let mut level_improved = false;
         let mut direct_points = 0usize;
         for replica in 0..replica_count {
             if n_evals >= max_evals || direct_points >= n_batch {
