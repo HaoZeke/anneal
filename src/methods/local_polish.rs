@@ -616,11 +616,13 @@ where
         values.push(value);
     }
 
+    let refine_budget = max_evals / dim.saturating_add(1);
+    let global_budget = chain_count.max(max_evals.saturating_sub(refine_budget));
     let mut epoch = 0usize;
-    while n_evals < max_evals {
+    while n_evals < global_budget {
         let temp = cooling.temperature(epoch);
         for chain in 0..chain_count {
-            if n_evals >= max_evals {
+            if n_evals >= global_budget {
                 break;
             }
             let proposal_unit = visit
@@ -649,6 +651,25 @@ where
             }
         }
         epoch += 1;
+    }
+    if n_evals < max_evals && best_val.is_finite() {
+        let trust_seed = seed
+            .wrapping_add(max_evals as u64)
+            .wrapping_add((dim * chain_count) as u64);
+        let trust = qmc_trust_region_poll(
+            obj,
+            best_pos.clone(),
+            max_evals - n_evals,
+            trust_seed,
+            0.0,
+            dim.max(1),
+            0,
+        );
+        n_evals += trust.n_evals;
+        if trust.best_val.is_finite() && trust.best_val < best_val {
+            best_val = trust.best_val;
+            best_pos = trust.best_pos;
+        }
     }
 
     QmcPolishResult {
