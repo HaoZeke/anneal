@@ -25,7 +25,6 @@ const GLE_BAND_RATIO: f64 = 100.0;
 const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
 const GLE_MIN_TIMESTEP: f64 = 1e-6;
 const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
-const GLE_PRECONDITIONER_MAX_SCALE: f64 = 32.0;
 
 /// Result of a GLE-Langevin annealing run.
 #[derive(Clone, Debug)]
@@ -93,16 +92,10 @@ fn splitmix64(mut x: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-fn rademacher(seed: u64, probe: usize, axis: usize) -> f64 {
-    let mixed = splitmix64(
-        seed ^ ((probe as u64).wrapping_mul(0xD1B5_4A32_D192_ED03))
-            ^ ((axis as u64).wrapping_mul(0xABC9_83B5_0FAC_03D7)),
-    );
-    if mixed & 1 == 0 {
-        -1.0
-    } else {
-        1.0
-    }
+fn axis_probe_order(seed: u64, dim: usize) -> Vec<usize> {
+    let mut axes = (0..dim).collect::<Vec<_>>();
+    axes.sort_by_key(|axis| splitmix64(seed ^ (*axis as u64)));
+    axes
 }
 
 /// Estimate a diagonal coordinate preconditioner from local gradient curvature.
@@ -125,30 +118,29 @@ where
     let high = &bounds.high;
     let fallback = fallback_gle_omega0(low, high);
     let center = (low + high) * 0.5;
-    let probes = max_probes;
+    let probes = max_probes.min(dim);
     if probes == 0 {
         return unit_gle_preconditioner(dim, fallback);
     }
-    let min_width = low
-        .iter()
-        .zip(high.iter())
-        .filter_map(|(lo, hi)| {
-            let width = hi - lo;
-            (width.is_finite() && width > 0.0).then_some(width)
-        })
-        .fold(f64::INFINITY, f64::min);
-    if !min_width.is_finite() || min_width <= 0.0 {
-        return unit_gle_preconditioner(dim, fallback);
-    }
-    let step = (f64::EPSILON.cbrt() * min_width).max(f64::EPSILON.sqrt());
-    let mut curvature = Array1::<f64>::zeros(dim);
-    let mut used = 0usize;
+    let rel_step = f64::EPSILON.cbrt();
+    let min_step = f64::EPSILON.sqrt();
+    let mut curvature = Array1::<f64>::from_elem(dim, f64::NAN);
     let mut n_grads = 0usize;
 
-    for probe in 0..probes {
-        let direction = Array1::from_iter((0..dim).map(|axis| rademacher(seed, probe, axis)));
-        let xp = bounds.clip((&center + &(&direction * step)).view());
-        let xm = bounds.clip((&center - &(&direction * step)).view());
+    for axis in axis_probe_order(seed, dim).into_iter().take(probes) {
+        let width = high[axis] - low[axis];
+        if !width.is_finite() || width <= 0.0 {
+            continue;
+        }
+        let step = (rel_step * width.abs()).max(min_step);
+        let mut xp = center.clone();
+        let mut xm = center.clone();
+        xp[axis] = (center[axis] + step).min(high[axis]);
+        xm[axis] = (center[axis] - step).max(low[axis]);
+        let denom = xp[axis] - xm[axis];
+        if !denom.is_finite() || denom.abs() <= min_step {
+            continue;
+        }
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
         n_grads += 2;
@@ -159,15 +151,11 @@ where
         {
             continue;
         }
-        let hv = (&gp - &gm) * (0.5 / step);
-        curvature += &(&direction * &hv);
-        used += 1;
+        let axis_curvature = ((gp[axis] - gm[axis]) / denom).abs();
+        if axis_curvature.is_finite() && axis_curvature > GLE_FREQUENCY_FLOOR {
+            curvature[axis] = axis_curvature;
+        }
     }
-
-    if used == 0 {
-        return unit_gle_preconditioner(dim, fallback);
-    }
-    curvature.mapv_inplace(|value| (value / used as f64).abs());
 
     let mut positive: Vec<f64> = curvature
         .iter()
@@ -178,13 +166,10 @@ where
         return unit_gle_preconditioner(dim, fallback);
     }
     positive.sort_by(|left, right| left.total_cmp(right));
-    let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
-    let min_scale = 1.0 / GLE_PRECONDITIONER_MAX_SCALE;
+    let reference = positive[0].max(GLE_FREQUENCY_FLOOR);
     let scale = curvature.mapv(|value| {
         if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
-            (reference / value)
-                .sqrt()
-                .clamp(min_scale, GLE_PRECONDITIONER_MAX_SCALE)
+            (reference / value).sqrt()
         } else {
             1.0
         }

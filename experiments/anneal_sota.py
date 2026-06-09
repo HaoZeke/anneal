@@ -83,7 +83,7 @@ class AnnealHybridConfig:
     gle_min_segment: int = 10
     gle_budget_divisor: int = 20
     gle_shared_budget_units_per_step: int = 2
-    gle_omega0: float | None = 0.2
+    gle_omega0: float | None = None
     gle_dt: float = 0.2
     gle_n_epochs: int = 40
     gle_min_dimension: int = 3
@@ -168,7 +168,7 @@ class AnnealHybridConfig:
         DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATE_BUDGET
     )
     global_anneal_local_hop_iterations: int = DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
-    qmc_gsa_global_enabled: bool = True
+    qmc_gsa_global_enabled: bool = False
     qmc_gsa_global_min_dimension: int = DEFAULT_QMC_GSA_GLOBAL_MIN_DIMENSION
     qmc_gsa_global_max_dimension: int = DEFAULT_QMC_GSA_GLOBAL_MAX_DIMENSION
     qmc_gsa_global_budget_divisor: int = DEFAULT_QMC_GSA_GLOBAL_BUDGET_DIVISOR
@@ -187,7 +187,11 @@ def _anneal_module():
 
 
 def _library_gle_langevin():
-    return library_gle_langevin or _anneal_module().gle_langevin
+    if library_gle_langevin is not None:
+        return library_gle_langevin
+    anneal = _anneal_module()
+    gle_langevin = getattr(anneal, "gle_langevin_preconditioned", None)
+    return gle_langevin or anneal.gle_langevin
 
 
 def low_discrepancy_population(
@@ -1386,6 +1390,7 @@ def qmc_annealed_hybrid(
                         omega0=config.gle_omega0,
                         dt=config.gle_dt,
                         n_epochs=config.gle_n_epochs,
+                        x0=best_x,
                     )
                     if (
                         isinstance(gle_res, dict)
