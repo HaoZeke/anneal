@@ -857,6 +857,7 @@ def qmc_annealed_hybrid(
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
     boundary_best_x = None
+    boundary_polish_consumed = False
     shifted_best_x = None
     if _global_anneal_portfolio_active(dim, config):
         portfolio_best = _global_anneal_portfolio(
@@ -900,7 +901,7 @@ def qmc_annealed_hybrid(
     ):
         boundary = _boundary_qmc_polish(
             counter,
-            grad,
+            jac,
             low,
             high,
             rng,
@@ -909,6 +910,7 @@ def qmc_annealed_hybrid(
         )
         if isinstance(boundary, dict) and "best_pos" in boundary:
             boundary_best_x = _clipped_anchor(boundary["best_pos"], low, high)
+            boundary_polish_consumed = True
         if counter.n >= counter.budget:
             boundary_best = (
                 float(boundary.get("best_val", float("inf")))
@@ -1179,8 +1181,9 @@ def qmc_annealed_hybrid(
                     if math.isfinite(zoom_v) and zoom_v < best_v:
                         best_v = zoom_v
                         best_x = zoom_x
-                used_native_polish = False
-                if jac is not None:
+                used_native_polish = boundary_polish_consumed
+                boundary_polish_consumed = False
+                if jac is not None and not used_native_polish:
                     native = _native_qmc_polish(
                         counter,
                         jac,
