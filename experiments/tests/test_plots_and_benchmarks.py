@@ -2378,6 +2378,73 @@ def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
     assert captured["polish_x0"].tolist() == pytest.approx([0.3, -0.3])
 
 
+def test_cutest_bayesian_adaptive_gle_uses_low_dimensional_scout(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
+        captured["gle_max_fevals"] = int(max_fevals)
+        return {
+            "best_val": 4.0,
+            "best_pos": np.array([0.3, -0.3], dtype=np.float64),
+            "n_evals": 19,
+        }
+
+    def qmc_best1bin_scout(_obj_fn, _low, _high, max_evals, **kwargs):
+        captured["scout_max_evals"] = int(max_evals)
+        captured["scout_seed"] = int(kwargs["seed"])
+        return {
+            "best_val": -30.0,
+            "best_pos": np.array([-0.4, 0.4], dtype=np.float64),
+            "n_evals": 7,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        gle_langevin=gle_langevin,
+        qmc_best1bin_scout=qmc_best1bin_scout,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -30.0
+    assert fevals == 38
+    assert captured["scout_max_evals"] == 54
+    assert captured["scout_seed"] == 8
+    assert captured["gle_max_fevals"] == 55
+
+
 def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
