@@ -102,6 +102,10 @@ fn gle_preconditioner_probe_budget(max_fevals: usize, dim: usize) -> usize {
     probe_pairs.min(root_budget).min(dim)
 }
 
+fn gle_lower_band_frequency(target_frequency: f64) -> f64 {
+    (target_frequency / GLE_BAND_RATIO.sqrt()).max(GLE_FREQUENCY_FLOOR)
+}
+
 /// Estimate a diagonal coordinate preconditioner from local gradient curvature.
 pub fn estimate_gle_preconditioner<O, G>(
     obj: &O,
@@ -191,7 +195,7 @@ where
     GlePreconditioner {
         scale,
         diag,
-        omega0: reference.sqrt().max(GLE_FREQUENCY_FLOOR),
+        omega0: gle_lower_band_frequency(reference.sqrt()),
         n_grads,
     }
 }
