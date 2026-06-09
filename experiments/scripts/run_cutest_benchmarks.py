@@ -41,6 +41,7 @@ QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
 # A moving projected-gradient step needs the start value and one trial value.
 PROJECTED_POLISH_MIN_FEVALS_FOR_STEP = 2
 CUTEST_NATIVE_BOUNDS_SLACK = 1e-9
+BAYESIAN_GLE_POLISH_BUDGET_DIVISOR = 2
 
 
 def _low_discrepancy_starts(
@@ -2148,7 +2149,10 @@ def _run_cutest_bayesian_adaptive_gle(
     polish_budget = 0
     gle_fevals = int(remaining_fevals)
     if hasattr(anneal_module, "polish") and remaining_fevals >= 4:
-        polish_budget = max(1, int(remaining_fevals) // 4)
+        polish_budget = max(
+            1,
+            int(remaining_fevals) // BAYESIAN_GLE_POLISH_BUDGET_DIVISOR,
+        )
         gle_fevals = max(1, int(remaining_fevals) - int(polish_budget))
     local_low, local_high = _bayesian_gle_local_box(
         prob,
