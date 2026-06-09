@@ -1072,23 +1072,6 @@ def qmc_annealed_hybrid(
                 counter.budget = original_budget
         if counter.n >= counter.budget:
             return _best_finite(basin_best, counter.best)
-    qmc_gsa = _native_qmc_gsa_global_search(
-        counter,
-        low,
-        high,
-        dim,
-        rng,
-        config,
-    )
-    if isinstance(qmc_gsa, dict) and "best_pos" in qmc_gsa:
-        qmc_gsa_best_x = _clipped_anchor(qmc_gsa["best_pos"], low, high)
-    if counter.n >= counter.budget:
-        qmc_gsa_best = (
-            float(qmc_gsa.get("best_val", float("inf")))
-            if isinstance(qmc_gsa, dict)
-            else float("inf")
-        )
-        return _best_finite(qmc_gsa_best, counter.best)
     if (
         _boundary_qmc_polish_active(dim, config)
         and jac is not None
@@ -1140,8 +1123,6 @@ def qmc_annealed_hybrid(
             if shifted_best_x is not None
             else boundary_best_x
             if boundary_best_x is not None
-            else qmc_gsa_best_x
-            if qmc_gsa_best_x is not None
             else anchor_arr
         )
         trust_region = _native_qmc_trust_region_poll(
@@ -1161,6 +1142,23 @@ def qmc_annealed_hybrid(
                 else float("inf")
             )
             return _best_finite(trust_region_best, counter.best)
+    qmc_gsa = _native_qmc_gsa_global_search(
+        counter,
+        low,
+        high,
+        dim,
+        rng,
+        config,
+    )
+    if isinstance(qmc_gsa, dict) and "best_pos" in qmc_gsa:
+        qmc_gsa_best_x = _clipped_anchor(qmc_gsa["best_pos"], low, high)
+    if counter.n >= counter.budget:
+        qmc_gsa_best = (
+            float(qmc_gsa.get("best_val", float("inf")))
+            if isinstance(qmc_gsa, dict)
+            else float("inf")
+        )
+        return _best_finite(qmc_gsa_best, counter.best)
     if (
         config.best1bin_enabled
         and config.best1bin_budget_divisor > 0
