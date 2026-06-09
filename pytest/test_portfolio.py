@@ -1,4 +1,4 @@
-"""Tests for the Thompson-allocated portfolio driver."""
+"""Tests for the native Thompson-allocated portfolio driver."""
 
 import math
 
@@ -7,45 +7,7 @@ import pytest
 
 anneal = pytest.importorskip("anneal")
 
-from experiments.portfolio import (  # noqa: E402
-    PortfolioConfig,
-    RESTART_ARM,
-    _ArmPosterior,
-    _enabled_arms,
-    thompson_portfolio,
-)
 from experiments.tensor_surrogate import AdditiveSurrogate  # noqa: E402
-
-
-class _Budget(Exception):
-    pass
-
-
-class Counter:
-    def __init__(self, fn, budget):
-        self.fn = fn
-        self.budget = budget
-        self.n = 0
-        self.best = float("inf")
-
-    def _consume(self):
-        if self.n >= self.budget:
-            raise _Budget()
-        self.n += 1
-
-    def __call__(self, x):
-        self._consume()
-        v = float(self.fn(np.asarray(x, float).reshape(-1)))
-        if math.isfinite(v) and v < self.best:
-            self.best = v
-        return v
-
-    def counted_grad(self, grad):
-        def jac(x):
-            self._consume()
-            return np.asarray(grad(np.asarray(x, float).reshape(-1)), float)
-
-        return jac
 
 
 def _styblinski_tang(dim):
@@ -75,57 +37,50 @@ def _rastrigin(dim):
 def test_budget_is_never_exceeded():
     dim = 6
     fn, grad, low, high = _rastrigin(dim)
-    budget = 600
-    counter = Counter(fn, budget)
-    thompson_portfolio(counter, low, high, dim, grad, np.random.default_rng(7))
-    assert counter.n <= budget
+    out = anneal.global_optimize(fn, low, high, budget=600, seed=7, grad_fn=grad)
+    assert out["n_evals"] + out["n_grads"] <= 600
+    assert math.isfinite(out["best_val"])
 
 
 def test_budget_respected_without_gradients():
     dim = 4
     fn, _, low, high = _rastrigin(dim)
-    budget = 400
-    counter = Counter(fn, budget)
-    thompson_portfolio(counter, low, high, dim, None, np.random.default_rng(3))
-    assert counter.n <= budget
-    assert math.isfinite(counter.best)
+    out = anneal.global_optimize(fn, low, high, budget=400, seed=3)
+    assert out["n_evals"] <= 400
+    assert out["n_grads"] == 0
+    assert math.isfinite(out["best_val"])
 
 
-def test_portfolio_beats_uniform_random_on_styblinski_tang():
+def test_portfolio_reaches_global_basin_on_styblinski_tang():
+    dim = 6
+    fn, grad, low, high = _styblinski_tang(dim)
+    hits = 0
+    for seed in range(4):
+        out = anneal.global_optimize(
+            fn, low, high, budget=1500, seed=seed, grad_fn=grad
+        )
+        if out["best_val"] < -39.166 * dim * 0.99:
+            hits += 1
+    assert hits >= 3, f"global basin hit on {hits}/4 seeds"
+
+
+def test_portfolio_beats_uniform_random():
     dim = 6
     fn, grad, low, high = _styblinski_tang(dim)
     budget = 1500
-    counter = Counter(fn, budget)
-    best = thompson_portfolio(
-        counter, low, high, dim, grad, np.random.default_rng(11)
-    )
+    out = anneal.global_optimize(fn, low, high, budget=budget, seed=11, grad_fn=grad)
     rng = np.random.default_rng(11)
-    rand_counter = Counter(fn, budget)
-    try:
-        while True:
-            rand_counter(rng.uniform(low, high))
-    except _Budget:
-        pass
-    assert best < rand_counter.best
-    # The 6D global minimum sits at about -39.166 * dim; the portfolio with
-    # gradients and a final polish reaches the global basin reliably.
-    assert best < -39.166 * dim * 0.95
+    rand_best = min(fn(rng.uniform(low, high)) for _ in range(budget))
+    assert out["best_val"] < rand_best
 
 
-def test_posterior_discounting_bounds_counts():
-    config = PortfolioConfig(discount=0.9)
-    post = _ArmPosterior(config)
-    for _ in range(500):
-        post.update(True)
-    # Discounting caps the effective count at 1/(1-gamma) + prior.
-    assert post.alpha <= 1.0 + 1.0 / (1.0 - 0.9) + 1.0
-    assert post.beta >= 1.0
-
-
-def test_restart_arm_always_enabled():
-    config = PortfolioConfig()
-    assert RESTART_ARM in _enabled_arms(2, None, config)
-    assert RESTART_ARM in _enabled_arms(30, lambda x: x, config)
+def test_arm_statistics_are_reported():
+    dim = 10
+    fn, grad, low, high = _rastrigin(dim)
+    out = anneal.global_optimize(fn, low, high, budget=4000, seed=5, grad_fn=grad)
+    assert "explore" in out["arm_pulls"]
+    assert sum(out["arm_pulls"].values()) > 0
+    assert set(out["arm_successes"]) == set(out["arm_pulls"])
 
 
 def test_additive_surrogate_from_points_recovers_separable():

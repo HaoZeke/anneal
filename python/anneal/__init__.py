@@ -523,22 +523,22 @@ def global_optimize(
     budget: int,
     seed: int = 0,
     grad_fn=None,
-    restart_floor: float = 0.12,
-    discount: float = 0.97,
-    slice_divisor: int = 40,
-    final_polish_fraction: float = 0.06,
 ):
     """Thompson-allocated portfolio global optimizer.
 
     One generic driver with a single budget knob. A discounted
     Beta-Bernoulli posterior over the library's building blocks (QMC
-    restart descent, adaptive basin hopping, preconditioned
-    GLE-Langevin, best/1/bin differential evolution, generalized
-    simulated annealing, archive-fit additive-surrogate independence
-    proposals, and shifted-QMC trust-region polls) allocates budget
-    slices by Thompson sampling. A probability floor on the QMC restart
-    arm preserves the restart-measure convergence guarantee. Objective
-    and native-gradient evaluations share the budget at one unit each.
+    restart descent, adaptive basin hopping, archive-fit
+    additive-surrogate independence proposals, best/1/bin differential
+    evolution, preconditioned GLE-Langevin, shifted-QMC trust-region
+    polls, generalized simulated annealing, the Bayesian-pilot tuned
+    classical point, parallel tempering, q-Gaussian HMC, and the
+    active-subspace collapse) allocates budget slices by Thompson
+    sampling under a decaying uniform floor that preserves the
+    restart-measure convergence guarantee. Objective and
+    native-gradient evaluations share the budget at one unit each;
+    every scheduler quantity derives from the budget, the dimension,
+    and the arm count.
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
@@ -549,8 +549,6 @@ def global_optimize(
         enables the gradient arms and the final polish. Pass
         ``jax.grad(f)``, a torch ``.backward()`` wrapper, or an
         analytic gradient.
-      restart_floor, discount, slice_divisor, final_polish_fraction:
-        allocation controls; the defaults are problem-independent.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -562,10 +560,6 @@ def global_optimize(
         int(budget),
         int(seed),
         grad_fn,
-        float(restart_floor),
-        float(discount),
-        int(slice_divisor),
-        float(final_polish_fraction),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -576,10 +570,6 @@ def global_optimize_objective(
     budget: int,
     seed: int = 0,
     use_gradient: bool = True,
-    restart_floor: float = 0.12,
-    discount: float = 0.97,
-    slice_divisor: int = 40,
-    final_polish_fraction: float = 0.06,
 ):
     """Portfolio global optimizer over a native ``PyObjective`` handle."""
     out = _core_global_optimize_objective(
@@ -587,10 +577,6 @@ def global_optimize_objective(
         int(budget),
         int(seed),
         bool(use_gradient),
-        float(restart_floor),
-        float(discount),
-        int(slice_divisor),
-        float(final_polish_fraction),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

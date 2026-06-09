@@ -1,21 +1,27 @@
 //! Thompson-allocated portfolio over the typed algebra's building blocks.
 //!
-//! One generic global optimizer with a single budget knob. Each building
-//! block (QMC-seeded multistart descent, adaptive basin hopping,
-//! preconditioned GLE-Langevin, best/1/bin differential evolution,
-//! generalized simulated annealing, archive-fit additive-surrogate
-//! independence proposals, and shifted-QMC trust-region polls) is an arm
-//! of a Bernoulli bandit. A discounted Beta-Bernoulli posterior tracks
-//! the probability that one budget slice of an arm improves the
-//! incumbent; Thompson sampling allocates the next slice. A probability
-//! floor on the QMC restart arm keeps the restart measure scheduled
-//! infinitely often, which preserves the restart arm's global
-//! convergence guarantee no matter how the posterior concentrates.
+//! One generic global optimizer with a single knob: the budget. Each
+//! building block is an arm of a Bernoulli bandit; a discounted
+//! Beta-Bernoulli posterior tracks the probability that one budget
+//! slice of an arm improves the incumbent, and Thompson sampling
+//! allocates the next slice. A decaying uniform floor `min(1, K/m)` on
+//! round `m` keeps every arm scheduled infinitely often, which
+//! preserves the QMC restart arm's global convergence guarantee and is
+//! the order-optimal floor for the allocation regret.
 //!
-//! Work accounting is uniform: every true-objective evaluation and every
-//! native-gradient evaluation costs one unit of the shared budget. The
-//! additive surrogate is fit from the archive of already-charged
-//! evaluations, so its proposals cost only their acceptance tests.
+//! Scheduler quantities derive from the problem and the budget rather
+//! than from tuning knobs: the slice size affords a few gradient-
+//! equivalents and at least several expected rounds per arm; the
+//! posterior discount sets the effective memory to the slice horizon;
+//! the active arm count is capped by what the horizon can rank; the
+//! budget tail funds a final polish from the incumbent. Arm-internal
+//! constants reuse the defaults of the standalone drivers they wrap.
+//!
+//! Work accounting is uniform: every true-objective evaluation and
+//! every native-gradient evaluation costs one unit of the shared
+//! budget. The additive surrogate is fit from the archive of already-
+//! charged evaluations, so its proposals cost only their acceptance
+//! tests.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -25,7 +31,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rand_distr::{Beta, Distribution};
 
-use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective};
+use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
 use crate::cool::LogCool;
 use crate::exchange::TsallisExchange;
@@ -39,113 +45,63 @@ use crate::methods::local_polish::{
     qmc_trust_region_poll,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
-use crate::runner::{run_rs, run_rs_variant};
+use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant};
 
-/// Tuning surface for the portfolio driver. The defaults are uniform
-/// across problems; the only per-run input is the budget.
-#[derive(Clone, Debug)]
-pub struct PortfolioConfig {
-    /// Budget slice as a fraction of the total: `budget / slice_divisor`.
-    pub slice_divisor: usize,
-    /// Lower bound on the slice in units of `dim + 1`.
-    pub slice_dim_multiplier: usize,
-    /// Absolute lower bound on the slice.
-    pub slice_min: usize,
-    /// Probability floor for the QMC restart arm.
-    pub restart_floor: f64,
-    /// Relative incumbent improvement that counts as a slice success.
-    pub improvement_rtol: f64,
-    /// Absolute incumbent improvement that counts as a slice success.
-    pub improvement_atol: f64,
-    /// Discount factor for the Beta-Bernoulli posterior.
-    pub discount: f64,
-    /// Fraction of the budget reserved for the final gradient polish.
-    pub final_polish_fraction: f64,
-    /// Minimum reserved final-polish budget.
-    pub final_polish_min: usize,
-    /// Archive capacity for surrogate fitting.
-    pub archive_cap: usize,
-    /// Fraction of an explore slice spent screening QMC starts.
-    pub explore_eval_fraction: f64,
-    /// Initial basin-hop step as a fraction of the box width.
-    pub hop_initial_step: f64,
-    /// Multiplicative step growth after an accepted hop.
-    pub hop_step_grow: f64,
-    /// Multiplicative step shrink after a rejected hop.
-    pub hop_step_shrink: f64,
-    /// Chebyshev degree of the archive-fit additive surrogate.
-    pub surrogate_degree: usize,
-    /// Minimum archived evaluations before the surrogate arm activates.
-    pub surrogate_min_archive: usize,
-    /// Inverse-CDF grid resolution for surrogate sampling.
-    pub surrogate_grid: usize,
-    /// Minimum dimension for the GLE arm.
-    pub gle_min_dim: usize,
-    /// GLE integrator timestep.
-    pub gle_dt: f64,
-    /// GLE annealing epochs per slice.
-    pub gle_n_epochs: usize,
-    /// Differential-evolution population floor.
-    pub de_pop_min: usize,
-    /// Differential-evolution population per dimension.
-    pub de_pop_dim_multiplier: usize,
-    /// Differential-evolution population cap.
-    pub de_pop_max: usize,
-    /// Differential-evolution weight floor.
-    pub de_weight_min: f64,
-    /// Differential-evolution weight span above the floor.
-    pub de_weight_span: f64,
-    /// Differential-evolution crossover rate.
-    pub de_crossover: f64,
-    /// GSA initial temperature.
-    pub gsa_t_init: f64,
-    /// GSA visiting shape parameter.
-    pub gsa_q_v: f64,
-    /// GSA acceptance shape parameter.
-    pub gsa_q_a: f64,
-    /// Trust-region poll level count.
-    pub tr_levels: usize,
-    /// Metropolis temperature floor.
-    pub metropolis_floor: f64,
-}
+// ---------------------------------------------------------------------------
+// Scheduler constants. Two numbers govern the allocation; everything
+// else is derived from the budget, the dimension, and the arm count.
+// ---------------------------------------------------------------------------
 
-impl Default for PortfolioConfig {
-    fn default() -> Self {
-        Self {
-            slice_divisor: 40,
-            slice_dim_multiplier: 8,
-            slice_min: 32,
-            restart_floor: 0.12,
-            improvement_rtol: 1e-4,
-            improvement_atol: 1e-12,
-            discount: 0.97,
-            final_polish_fraction: 0.06,
-            final_polish_min: 50,
-            archive_cap: 8192,
-            explore_eval_fraction: 0.35,
-            hop_initial_step: 0.25,
-            hop_step_grow: 1.3,
-            hop_step_shrink: 0.75,
-            surrogate_degree: 8,
-            surrogate_min_archive: 64,
-            surrogate_grid: 65,
-            gle_min_dim: 2,
-            gle_dt: 0.2,
-            gle_n_epochs: 40,
-            de_pop_min: 16,
-            de_pop_dim_multiplier: 4,
-            de_pop_max: 48,
-            de_weight_min: 0.5,
-            de_weight_span: 0.5,
-            de_crossover: 0.7,
-            gsa_t_init: 1.0,
-            gsa_q_v: 2.62,
-            gsa_q_a: 1.7,
-            tr_levels: 3,
-            metropolis_floor: 1e-12,
-        }
-    }
-}
+/// A slice must afford a few gradient-descent steps (one step costs one
+/// objective and one gradient unit, so `4 * (dim + 1)` covers screening
+/// plus descent for every arm).
+const SLICE_GRAD_EQUIVALENTS: usize = 4;
+/// Expected rounds per arm the posterior needs before its ranking means
+/// anything; also caps the active arm count by the slice horizon.
+const ROUNDS_PER_ARM: usize = 8;
+/// Slice success threshold: relative incumbent improvement one decade
+/// below the Dolan-More convergence resolution `tau = 1e-3`, so
+/// sub-resolution grinding earns no posterior credit.
+const IMPROVEMENT_RTOL: f64 = 1e-4;
+/// Metropolis temperature floor shared by the acceptance helpers.
+const METROPOLIS_FLOOR: f64 = 1e-12;
+
+// ---------------------------------------------------------------------------
+// Arm constants: the defaults of the standalone drivers each arm wraps.
+// ---------------------------------------------------------------------------
+
+/// GSA visiting index; the manuscript's generalized-SA default.
+const GSA_Q_V: f64 = 2.62;
+/// GSA acceptance index; the manuscript's generalized-SA default.
+const GSA_Q_A: f64 = 1.7;
+/// GLE integrator timestep, matching the thermostat band resolution.
+const GLE_DT: f64 = 0.2;
+/// GLE annealing epochs, matching the standalone driver default.
+const GLE_EPOCHS: usize = 40;
+/// Storn-Price population sizing: `4 * dim` clamped to a workable range.
+const DE_POP_PER_DIM: usize = 4;
+const DE_POP_MIN: usize = 16;
+const DE_POP_MAX: usize = 48;
+/// Storn-Price crossover and dithered weight range.
+const DE_CROSSOVER: f64 = 0.7;
+const DE_WEIGHT_MIN: f64 = 0.5;
+const DE_WEIGHT_SPAN: f64 = 0.5;
+/// Basin-hop step adaptation: grow on accept, shrink on reject, in the
+/// classic stochastic-approximation ratio.
+const HOP_STEP0: f64 = 0.25;
+const HOP_GROW: f64 = 1.3;
+const HOP_SHRINK: f64 = 0.75;
+/// Omelyan trajectory length for the HMC arm.
+const HMC_L_STEPS: usize = 5;
+/// Additive-surrogate fit degree and inverse-CDF grid, matching the
+/// standalone `additive_independence` defaults.
+const SURROGATE_DEGREE: usize = 8;
+const SURROGATE_GRID: usize = 65;
+/// Active-subspace rank for the reduced arm; the arm requires
+/// `dim > 2 * REDUCED_K` so the collapse actually removes coordinates.
+const REDUCED_K: usize = 4;
+/// Pilot chains drawn for the Bayesian-pilot variant arm.
+const PILOT_CHAINS: usize = 5;
 
 /// Per-arm pull statistics reported by the driver.
 #[derive(Clone, Debug)]
@@ -195,7 +151,7 @@ struct BudgetLedger {
 }
 
 impl BudgetLedger {
-    fn new(budget: usize, archive_cap: usize, dim: usize) -> Self {
+    fn new(budget: usize, dim: usize) -> Self {
         Self {
             cap: AtomicUsize::new(budget),
             used: AtomicUsize::new(0),
@@ -207,7 +163,9 @@ impl BudgetLedger {
                 archive_x: Vec::new(),
                 archive_y: Vec::new(),
             }),
-            archive_cap,
+            // Every archive entry costs one budget unit, so the budget
+            // itself bounds the archive.
+            archive_cap: budget,
             dim,
         }
     }
@@ -354,14 +312,15 @@ impl ArmPosterior {
 enum ArmKind {
     Explore,
     Hop,
-    Gle,
+    Surrogate,
     De,
+    Gle,
+    TrPoll,
     Gsa,
     Variant,
     Pt,
     Hmc,
-    Surrogate,
-    TrPoll,
+    Reduced,
 }
 
 impl ArmKind {
@@ -369,14 +328,15 @@ impl ArmKind {
         match self {
             ArmKind::Explore => "explore",
             ArmKind::Hop => "hop",
-            ArmKind::Gle => "gle",
+            ArmKind::Surrogate => "surrogate",
             ArmKind::De => "de",
+            ArmKind::Gle => "gle",
+            ArmKind::TrPoll => "tr_poll",
             ArmKind::Gsa => "gsa",
             ArmKind::Variant => "variant",
             ArmKind::Pt => "pt",
             ArmKind::Hmc => "hmc",
-            ArmKind::Surrogate => "surrogate",
-            ArmKind::TrPoll => "tr_poll",
+            ArmKind::Reduced => "reduced",
         }
     }
 }
@@ -404,14 +364,14 @@ struct ArmStates {
     seed_counter: u64,
 }
 
-fn metropolis(delta: f64, temp: f64, rng: &mut StdRng, floor: f64) -> bool {
+fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
     if delta <= 0.0 {
         return true;
     }
     if !delta.is_finite() {
         return false;
     }
-    rng.random::<f64>() < (-delta / temp.max(floor)).exp()
+    rng.random::<f64>() < (-delta / temp.max(METROPOLIS_FLOOR)).exp()
 }
 
 fn ladder_temperature(temp0: f64, generation: usize) -> f64 {
@@ -434,6 +394,68 @@ fn archive_temp0(ledger: &BudgetLedger) -> f64 {
     var.sqrt().max(1e-6)
 }
 
+fn mean_width(bounds: &Bounds<f64>) -> f64 {
+    let dim = bounds.dims.max(1);
+    let mut total = 0.0;
+    for j in 0..bounds.dims {
+        let w = bounds.high[j] - bounds.low[j];
+        total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
+    }
+    total / dim as f64
+}
+
+/// Top-`k` orthonormal basis of the empirical gradient covariance by
+/// subspace iteration with matvecs over the stored gradients; no dense
+/// `n x n` matrix and no external eigensolver.
+fn active_subspace_basis(grads: &[Array1<f64>], dim: usize, k: usize, seed: u64) -> Array2<f64> {
+    let mut state = seed | 1;
+    let mut next = move || {
+        // xorshift64*: deterministic basis init without an RNG object.
+        state ^= state >> 12;
+        state ^= state << 25;
+        state ^= state >> 27;
+        (state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+    };
+    let mut basis = Array2::<f64>::zeros((dim, k));
+    for value in basis.iter_mut() {
+        *value = next();
+    }
+    for _ in 0..30 {
+        // Y = (sum_g g g^T) B via matvecs.
+        let mut y = Array2::<f64>::zeros((dim, k));
+        for g in grads {
+            let proj = g.dot(&basis);
+            for col in 0..k {
+                let w = proj[col];
+                for row in 0..dim {
+                    y[[row, col]] += g[row] * w;
+                }
+            }
+        }
+        // Gram-Schmidt re-orthonormalization.
+        for col in 0..k {
+            for prev in 0..col {
+                let dot: f64 = (0..dim).map(|r| y[[r, col]] * y[[r, prev]]).sum();
+                for row in 0..dim {
+                    y[[row, col]] -= dot * y[[row, prev]];
+                }
+            }
+            let norm: f64 = (0..dim).map(|r| y[[r, col]] * y[[r, col]]).sum::<f64>().sqrt();
+            if norm > 1e-300 {
+                for row in 0..dim {
+                    y[[row, col]] /= norm;
+                }
+            } else {
+                for row in 0..dim {
+                    y[[row, col]] = next();
+                }
+            }
+        }
+        basis = y;
+    }
+    basis
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_arm<O, G>(
     arm: ArmKind,
@@ -441,9 +463,9 @@ fn run_arm<O, G>(
     grad: Option<&BudgetedGradient<'_, G>>,
     ledger: &BudgetLedger,
     states: &mut ArmStates,
-    config: &PortfolioConfig,
     rng: &mut StdRng,
     slice: usize,
+    budget: usize,
 ) where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -454,8 +476,12 @@ fn run_arm<O, G>(
     let seed = rng.random::<u64>() ^ states.seed_counter;
     match arm {
         ArmKind::Explore => {
+            // QMC restart arm: screened Cranley-Patterson Halton starts,
+            // best ones refined; positive-density restarts carry the
+            // global convergence guarantee.
             if let Some(grad) = grad {
-                let n_starts = ((slice as f64 * config.explore_eval_fraction) as usize).max(4);
+                // One third screening, two thirds descent.
+                let n_starts = (slice / 3).max(4);
                 let top_k = 2usize.min(n_starts);
                 let per_start = slice.saturating_sub(n_starts) / (2 * top_k).max(1);
                 if per_start >= 2 {
@@ -465,32 +491,23 @@ fn run_arm<O, G>(
                     return;
                 }
             }
-            let chains = (slice / 8).clamp(2, 4 * dim.max(1));
             if slice >= 8 {
-                qmc_gsa_global_search(
-                    obj,
-                    slice,
-                    seed,
-                    chains,
-                    config.gsa_t_init,
-                    config.gsa_q_v,
-                    config.gsa_q_a,
-                );
+                let chains = (slice / 8).clamp(2, 4 * dim.max(1));
+                qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
             }
         }
         ArmKind::Hop => {
             let Some(grad) = grad else { return };
             let state = states.hop.get_or_insert_with(|| HopState {
-                step: config.hop_initial_step,
+                step: HOP_STEP0,
                 x_cur: None,
                 f_cur: f64::INFINITY,
                 generation: 0,
             });
-            let x_init = state
+            let mut x_cur = state
                 .x_cur
                 .clone()
                 .unwrap_or_else(|| ledger.incumbent(&bounds));
-            let mut x_cur = x_init;
             let mut f_cur = state.f_cur.min(ledger.best_get());
             let temp = ladder_temperature(archive_temp0(ledger), state.generation);
             let n_hops = 3usize;
@@ -509,49 +526,90 @@ fn run_arm<O, G>(
                 let trial = bounds.clip(trial.view());
                 let res = projected_gradient_polish(obj, grad, trial, per_hop / 2, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
-                    state.step = (state.step * config.hop_step_shrink).max(1e-4);
+                    state.step = (state.step * HOP_SHRINK).max(1e-4);
                     continue;
                 }
-                if res.best_val < f_cur
-                    || metropolis(res.best_val - f_cur, temp, rng, config.metropolis_floor)
-                {
+                if res.best_val < f_cur || metropolis(res.best_val - f_cur, temp, rng) {
                     x_cur = res.best_pos;
                     f_cur = res.best_val;
-                    state.step = (state.step * config.hop_step_grow).min(1.0);
+                    state.step = (state.step * HOP_GROW).min(1.0);
                 } else {
-                    state.step = (state.step * config.hop_step_shrink).max(1e-4);
+                    state.step = (state.step * HOP_SHRINK).max(1e-4);
                 }
             }
             state.x_cur = Some(x_cur);
             state.f_cur = f_cur;
             state.generation += 1;
         }
-        ArmKind::Gle => {
-            let Some(grad) = grad else { return };
-            let maxf = slice / 2;
-            if maxf < 4 {
+        ArmKind::Surrogate => {
+            // Archive-fit additive surrogate: the fit costs nothing, the
+            // modal point tests the global candidate for one evaluation,
+            // and tempered independence proposals carry the
+            // dimension-free acceptance bound.
+            let min_points = (SURROGATE_DEGREE + 2).max(4 * dim);
+            let (xs, ys) = {
+                let inner = ledger.inner.lock().expect("ledger lock");
+                let n = inner.archive_y.len();
+                if n < min_points {
+                    return;
+                }
+                let mut keep_x = Vec::with_capacity(n * dim);
+                let mut keep_y = Vec::with_capacity(n);
+                for i in 0..n {
+                    if inner.archive_y[i].is_finite() {
+                        keep_x.extend_from_slice(&inner.archive_x[i * dim..(i + 1) * dim]);
+                        keep_y.push(inner.archive_y[i]);
+                    }
+                }
+                (keep_x, keep_y)
+            };
+            if ys.len() < min_points {
                 return;
             }
-            gle_langevin_preconditioned_sa(
-                obj,
-                grad,
-                seed,
-                maxf,
-                config.gle_dt,
-                config.gle_n_epochs,
-                Some(ledger.incumbent(&bounds)),
-                None,
-            );
+            let x_arr = Array2::from_shape_vec((ys.len(), dim), xs).expect("archive shape");
+            let y_arr = Array1::from_vec(ys);
+            let surr =
+                AdditiveSurrogate::fit(x_arr.view(), y_arr.view(), bounds.clone(), SURROGATE_DEGREE);
+            // The modal point is the T -> 0 limit of the tempered
+            // marginals; for separable objectives it is the surrogate's
+            // global candidate, tested at the cost of one evaluation.
+            let modal = surr.sample(1, 1e-15, SURROGATE_GRID, rng);
+            let before_modal = ledger.best_get();
+            let modal_x = bounds.clip(modal.row(0));
+            let modal_val = obj.eval(modal_x.view());
+            if let Some(grad) = grad {
+                if modal_val.is_finite() && modal_val < before_modal && ledger.remaining() >= 4 {
+                    projected_gradient_polish(obj, grad, modal_x, ledger.remaining() / 2, 1.0, 1e-8);
+                }
+            }
+            // Cool with budget progress so the ladder reaches the cold
+            // regime regardless of how often the arm is pulled.
+            let progress = ledger.used_get() as f64 / budget.max(1) as f64;
+            let exponent = (12.0 * progress) as i32 + states.surrogate_gen as i32;
+            let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
+            let proposals = surr.sample(slice, temp, SURROGATE_GRID, rng);
+            let mut f_cur = ledger.best_get();
+            for i in 0..proposals.nrows() {
+                if ledger.exhausted() {
+                    break;
+                }
+                let trial = bounds.clip(proposals.row(i));
+                let ft = obj.eval(trial.view());
+                if ft.is_finite() && metropolis(ft - f_cur, temp, rng) {
+                    f_cur = ft;
+                }
+            }
+            states.surrogate_gen += 1;
         }
         ArmKind::De => {
             if states.de.is_none() {
-                let pop_size = (config.de_pop_dim_multiplier * dim)
-                    .clamp(config.de_pop_min, config.de_pop_max)
+                let pop_size = (DE_POP_PER_DIM * dim)
+                    .clamp(DE_POP_MIN, DE_POP_MAX)
                     .min(slice.max(4));
                 let points = eindir_core::shifted_low_discrepancy_points(
                     &bounds,
                     pop_size,
-                    crate::runner::qmc_skip_from_seed(seed),
+                    qmc_skip_from_seed(seed),
                     seed,
                 );
                 let mut pop = Vec::with_capacity(pop_size);
@@ -587,7 +645,7 @@ fn run_arm<O, G>(
             let mut best_x = state.pop[best_i].clone();
             let mut used = 0usize;
             while used < slice && !ledger.exhausted() {
-                let weight = config.de_weight_min + config.de_weight_span * rng.random::<f64>();
+                let weight = DE_WEIGHT_MIN + DE_WEIGHT_SPAN * rng.random::<f64>();
                 for i in 0..n {
                     if used >= slice || ledger.exhausted() {
                         break;
@@ -603,9 +661,8 @@ fn run_arm<O, G>(
                     let forced = rng.random_range(0..dim);
                     let mut trial = state.pop[i].clone();
                     for j in 0..dim {
-                        if j == forced || rng.random::<f64>() < config.de_crossover {
-                            trial[j] =
-                                best_x[j] + weight * (state.pop[r0][j] - state.pop[r1][j]);
+                        if j == forced || rng.random::<f64>() < DE_CROSSOVER {
+                            trial[j] = best_x[j] + weight * (state.pop[r0][j] - state.pop[r1][j]);
                         }
                     }
                     let trial = bounds.clip(trial.view());
@@ -622,40 +679,49 @@ fn run_arm<O, G>(
                 }
             }
         }
+        ArmKind::Gle => {
+            let Some(grad) = grad else { return };
+            let maxf = slice / 2;
+            if maxf < 4 {
+                return;
+            }
+            gle_langevin_preconditioned_sa(
+                obj,
+                grad,
+                seed,
+                maxf,
+                GLE_DT,
+                GLE_EPOCHS,
+                Some(ledger.incumbent(&bounds)),
+                None,
+            );
+        }
+        ArmKind::TrPoll => {
+            if slice < 8 {
+                return;
+            }
+            qmc_trust_region_poll(obj, ledger.incumbent(&bounds), slice, seed, 0.0, 3, 0);
+        }
         ArmKind::Gsa => {
             if slice < 8 {
                 return;
             }
             let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-            qmc_gsa_global_search(
-                obj,
-                slice,
-                seed,
-                chains,
-                config.gsa_t_init,
-                config.gsa_q_v,
-                config.gsa_q_a,
-            );
+            qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
         }
         ArmKind::Variant => {
             // Bayesian-pilot tuned classical point: the first slice runs
             // short Metropolis pilot chains at QMC-drawn hyperparameters
-            // and fits the Laplace posterior over (T_0, sigma, q_v); later
-            // slices run the MAP variant through the typed driver loop.
-            let width_scale = {
-                let mut total = 0.0;
-                for j in 0..dim {
-                    let w = bounds.high[j] - bounds.low[j];
-                    total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
-                }
-                (total / dim as f64) / 10.0
-            };
+            // and fits the Laplace posterior over (T_0, sigma, q_v);
+            // later slices run the MAP point through the typed driver.
+            // The pilot prior's sigma convention matches a width-10 box,
+            // so sigma scales with the mean box width.
+            let width_scale = mean_width(&bounds) / 10.0;
             if states.pilot.is_none() {
                 let prior = PilotPrior::default();
-                let n_pilot = 5usize;
-                let draws = pilot_draws_qmc(&prior, n_pilot, seed);
-                let per_chain = (slice / n_pilot.max(1)).max(8);
-                let mut observations = Vec::with_capacity(n_pilot);
+                let draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed);
+                let per_chain = (slice / PILOT_CHAINS.max(1)).max(8);
+                let mut observations = Vec::with_capacity(PILOT_CHAINS);
                 for (t_init, sigma, q_v) in draws {
                     if ledger.exhausted() {
                         break;
@@ -672,9 +738,7 @@ fn run_arm<O, G>(
                         if ledger.exhausted() {
                             break;
                         }
-                        let temp = (t_init * std::f64::consts::LN_2
-                            / ((step / 10 + 2) as f64).ln())
-                        .max(1e-12);
+                        let temp = ladder_temperature(t_init, step / 10);
                         let mut prop = cur.clone();
                         for value in prop.iter_mut() {
                             let noise: f64 = rand_distr::StandardNormal.sample(rng);
@@ -683,14 +747,7 @@ fn run_arm<O, G>(
                         let prop = bounds.clip(prop.view());
                         let prop_val = obj.eval(prop.view());
                         steps += 1;
-                        if prop_val.is_finite()
-                            && metropolis(
-                                prop_val - cur_val,
-                                temp,
-                                rng,
-                                config.metropolis_floor,
-                            )
-                        {
+                        if prop_val.is_finite() && metropolis(prop_val - cur_val, temp, rng) {
                             cur = prop;
                             cur_val = prop_val;
                             accepts += 1;
@@ -727,7 +784,7 @@ fn run_arm<O, G>(
                     fresh_obj,
                     posterior.t_init_map.max(1e-9),
                     posterior.q_v_map.clamp(1.05, 2.95),
-                    config.gsa_q_a,
+                    GSA_Q_A,
                 ) {
                     run_rs_variant(variant, epochs, steps, seed);
                 }
@@ -751,15 +808,13 @@ fn run_arm<O, G>(
                 inner: obj.inner,
                 ledger,
             };
-            let Ok(variant) =
-                crate::variant::gsa(fresh_obj, t0, config.gsa_q_v, config.gsa_q_a)
-            else {
+            let Ok(variant) = crate::variant::gsa(fresh_obj, t0, GSA_Q_V, GSA_Q_A) else {
                 return;
             };
             let cool = LogCool::new(t0, 2.0);
             let pt = ParallelTemperingSampler::with_exchange(
                 variant,
-                TsallisExchange::new(config.gsa_q_a),
+                TsallisExchange::new(GSA_Q_A),
                 temps,
                 k_inner,
                 4,
@@ -771,25 +826,16 @@ fn run_arm<O, G>(
             // minimum-norm integrator; heavy-tailed momentum helps the
             // trajectory escape local cups.
             let Some(grad) = grad else { return };
-            let l_steps = 5usize;
-            let trajectory_cost = 2 * l_steps + 3;
+            let trajectory_cost = 2 * HMC_L_STEPS + 3;
             let n_trajectories = (slice / trajectory_cost).max(1);
             let epochs = 8usize.min(n_trajectories).max(1);
             let steps = (n_trajectories / epochs).max(1);
             let t0 = archive_temp0(ledger).max(1e-6);
-            let mean_width = {
-                let mut total = 0.0;
-                for j in 0..dim {
-                    let w = bounds.high[j] - bounds.low[j];
-                    total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
-                }
-                total / dim as f64
-            };
-            let epsilon = (0.02 * mean_width / (dim as f64).sqrt()).max(1e-9);
+            let epsilon = (0.02 * mean_width(&bounds) / (dim as f64).sqrt()).max(1e-9);
             let q_max = 1.0 + 2.0 / dim as f64;
             let q = (1.0 + 1.5 / dim as f64).min(q_max - 1e-6);
             let cool = LogCool::new(t0, 2.0);
-            let integrator = OmelyanIntegrator::new(epsilon, l_steps, t0);
+            let integrator = OmelyanIntegrator::new(epsilon, HMC_L_STEPS, t0);
             let fresh_obj = BudgetedObjective {
                 inner: obj.inner,
                 ledger,
@@ -808,131 +854,112 @@ fn run_arm<O, G>(
             .with_initial_pos(ledger.incumbent(&bounds));
             run_rs(sampler, &cool, epochs, steps, seed);
         }
-        ArmKind::Surrogate => {
-            let min_points = config.surrogate_min_archive.max(4 * dim);
-            let (xs, ys) = {
-                let inner = ledger.inner.lock().expect("ledger lock");
-                let n = inner.archive_y.len();
-                if n < min_points {
+        ArmKind::Reduced => {
+            // Active-subspace collapse: charged pilot gradients estimate
+            // the dominant gradient-covariance directions, then GSA
+            // searches the collapsed box anchored at the incumbent.
+            let Some(grad) = grad else { return };
+            if dim <= 2 * REDUCED_K {
+                return;
+            }
+            let m = (2 * REDUCED_K).min(slice / 2).max(2);
+            let points = eindir_core::shifted_low_discrepancy_points(
+                &bounds,
+                m,
+                qmc_skip_from_seed(seed),
+                seed,
+            );
+            let mut grads = Vec::with_capacity(m);
+            for i in 0..points.nrows() {
+                if ledger.exhausted() {
                     return;
                 }
-                let mut keep_x = Vec::with_capacity(n * dim);
-                let mut keep_y = Vec::with_capacity(n);
-                for i in 0..n {
-                    if inner.archive_y[i].is_finite() {
-                        keep_x.extend_from_slice(&inner.archive_x[i * dim..(i + 1) * dim]);
-                        keep_y.push(inner.archive_y[i]);
-                    }
+                let g = grad.grad(points.row(i));
+                if g.len() == dim && g.iter().all(|v| v.is_finite()) {
+                    grads.push(g);
                 }
-                (keep_x, keep_y)
+            }
+            if grads.len() < 2 {
+                return;
+            }
+            let basis = active_subspace_basis(&grads, dim, REDUCED_K, seed);
+            let radius = 0.5
+                * (0..dim)
+                    .map(|j| {
+                        let w = bounds.high[j] - bounds.low[j];
+                        if w.is_finite() && w > 0.0 { w * w } else { 1.0 }
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+            let red_bounds = Bounds::new(
+                Array1::from_elem(REDUCED_K, -radius),
+                Array1::from_elem(REDUCED_K, radius),
+                1e-9,
+            );
+            let fresh_obj = BudgetedObjective {
+                inner: obj.inner,
+                ledger,
             };
-            if ys.len() < min_points {
-                return;
-            }
-            let x_arr = Array2::from_shape_vec((ys.len(), dim), xs).expect("archive shape");
-            let y_arr = Array1::from_vec(ys);
-            let surr = AdditiveSurrogate::fit(
-                x_arr.view(),
-                y_arr.view(),
-                bounds.clone(),
-                config.surrogate_degree,
-            );
-            // The modal point (per-coordinate argmin, the T -> 0 limit of
-            // the tempered marginals) tests the surrogate's global
-            // candidate at the cost of one evaluation; for separable
-            // objectives it is the global minimizer once the fit settles.
-            let modal = surr.sample(1, 1e-15, config.surrogate_grid, rng);
-            let before_modal = ledger.best_get();
-            let modal_x = bounds.clip(modal.row(0));
-            let modal_val = obj.eval(modal_x.view());
-            if let Some(grad) = grad {
-                if modal_val.is_finite()
-                    && modal_val < before_modal
-                    && ledger.remaining() >= 4
-                {
-                    projected_gradient_polish(
-                        obj,
-                        grad,
-                        modal_x,
-                        ledger.remaining() / 2,
-                        1.0,
-                        1e-8,
-                    );
-                }
-            }
-            // Cool with budget progress so the ladder reaches the cold
-            // regime regardless of how often the arm is pulled.
-            let progress = ledger.used_get() as f64 / ledger.cap_get().max(1) as f64;
-            let exponent = (12.0 * progress) as i32 + states.surrogate_gen as i32;
-            let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
-            let proposals = surr.sample(slice, temp, config.surrogate_grid, rng);
-            let mut f_cur = ledger.best_get();
-            for i in 0..proposals.nrows() {
-                if ledger.exhausted() {
-                    break;
-                }
-                let trial = bounds.clip(proposals.row(i));
-                let ft = obj.eval(trial.view());
-                if ft.is_finite() && metropolis(ft - f_cur, temp, rng, config.metropolis_floor) {
-                    f_cur = ft;
-                }
-            }
-            states.surrogate_gen += 1;
-        }
-        ArmKind::TrPoll => {
-            if slice < 8 {
-                return;
-            }
-            qmc_trust_region_poll(
-                obj,
+            let reduced = ReducedObjective::new(
+                fresh_obj,
                 ledger.incumbent(&bounds),
-                slice,
-                seed,
-                0.0,
-                config.tr_levels,
-                0,
+                basis,
+                red_bounds,
             );
+            let remaining_slice = slice.saturating_sub(grads.len());
+            if remaining_slice >= 8 {
+                let chains = (remaining_slice / 8).clamp(2, 4 * REDUCED_K);
+                qmc_gsa_global_search(
+                    &reduced,
+                    remaining_slice,
+                    seed,
+                    chains,
+                    1.0,
+                    GSA_Q_V,
+                    GSA_Q_A,
+                );
+            }
         }
     }
 }
 
-fn enabled_arms(dim: usize, has_grad: bool, config: &PortfolioConfig) -> Vec<ArmKind> {
+/// Arms in priority order; the horizon cap truncates from the back, so
+/// the core stays active at small budgets and the full library unlocks
+/// as the slice count grows.
+fn enabled_arms(dim: usize, has_grad: bool, n_slices: usize) -> Vec<ArmKind> {
     let mut arms = vec![ArmKind::Explore];
     if has_grad {
         arms.push(ArmKind::Hop);
     }
+    arms.push(ArmKind::Surrogate);
     arms.push(ArmKind::De);
-    if has_grad && dim >= config.gle_min_dim {
+    if has_grad {
         arms.push(ArmKind::Gle);
     }
+    arms.push(ArmKind::TrPoll);
     arms.push(ArmKind::Gsa);
     arms.push(ArmKind::Variant);
     arms.push(ArmKind::Pt);
     if has_grad {
         arms.push(ArmKind::Hmc);
+        if dim > 2 * REDUCED_K {
+            arms.push(ArmKind::Reduced);
+        }
     }
-    arms.push(ArmKind::Surrogate);
-    arms.push(ArmKind::TrPoll);
+    // The posterior needs ROUNDS_PER_ARM pulls per arm to rank them;
+    // activate only as many arms as the horizon can rank (the D4 regret
+    // grows with K, and a starved arm is worse than an absent one).
+    let k_active = (n_slices / ROUNDS_PER_ARM).clamp(4, arms.len());
+    arms.truncate(k_active);
     arms
-}
-
-fn slice_budget(budget: usize, dim: usize, config: &PortfolioConfig) -> usize {
-    (budget / config.slice_divisor.max(1))
-        .max(config.slice_dim_multiplier * (dim + 1))
-        .max(config.slice_min)
 }
 
 /// Runs the portfolio driver under a shared work-unit budget.
 ///
 /// `budget` bounds combined true-objective and native-gradient
-/// evaluations. `grad` enables the gradient arms and the final polish.
-pub fn portfolio_optimize<O, G>(
-    obj: &O,
-    grad: Option<&G>,
-    budget: usize,
-    seed: u64,
-    config: &PortfolioConfig,
-) -> PortfolioResult
+/// evaluations and is the driver's only required parameter. `grad`
+/// enables the gradient arms and the final polish.
+pub fn portfolio_optimize<O, G>(obj: &O, grad: Option<&G>, budget: usize, seed: u64) -> PortfolioResult
 where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -942,7 +969,7 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
 
-    let ledger = BudgetLedger::new(budget, config.archive_cap, dim);
+    let ledger = BudgetLedger::new(budget, dim);
     let budgeted_obj = BudgetedObjective {
         inner: obj,
         ledger: &ledger,
@@ -952,66 +979,59 @@ where
         ledger: &ledger,
     });
 
-    let final_polish = if grad.is_some() {
-        ((budget as f64 * config.final_polish_fraction) as usize).max(config.final_polish_min)
-    } else {
-        0
-    };
-    let main_ceiling = budget.saturating_sub(final_polish);
-    let slice = slice_budget(budget, dim, config);
-    let arms = enabled_arms(dim, grad.is_some(), config);
-    let mut posteriors: Vec<ArmPosterior> = arms
-        .iter()
-        .map(|_| ArmPosterior::new(config.discount))
-        .collect();
+    // Derived scheduler quantities; see the module constants for the
+    // two governing numbers.
+    let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX).len();
+    let slice = (SLICE_GRAD_EQUIVALENTS * (dim + 1))
+        .max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
+    let n_slices = (budget / slice.max(1)).max(1);
+    let arms = enabled_arms(dim, grad.is_some(), n_slices);
+    debug_assert_eq!(arms[0], RESTART_ARM);
+    // Posterior memory matches the slice horizon.
+    let discount = 1.0 - 1.0 / (n_slices.max(2) as f64);
+    let mut posteriors: Vec<ArmPosterior> =
+        arms.iter().map(|_| ArmPosterior::new(discount)).collect();
     let mut states = ArmStates::default();
     let mut rng = StdRng::seed_from_u64(seed);
+    let k = arms.len();
 
-    let run_slice = |arm_idx: usize,
-                         states: &mut ArmStates,
-                         posteriors: &mut Vec<ArmPosterior>,
-                         rng: &mut StdRng| {
-        let before = ledger.best_get();
-        let ceiling = (ledger.used_get() + slice).min(main_ceiling);
-        ledger.cap_set(ceiling);
-        let this_slice = ceiling.saturating_sub(ledger.used_get());
-        if this_slice == 0 {
-            ledger.cap_set(budget);
-            return;
-        }
-        run_arm(
-            arms[arm_idx],
-            &budgeted_obj,
-            budgeted_grad.as_ref(),
-            &ledger,
-            states,
-            config,
-            rng,
-            this_slice,
-        );
-        ledger.cap_set(budget);
-        let scale = if before.is_finite() { before.abs() } else { 1.0 };
-        let threshold = config.improvement_atol + config.improvement_rtol * scale.max(1.0);
-        let after = ledger.best_get();
-        posteriors[arm_idx].update(after.is_finite() && after < before - threshold);
-    };
-
-    // Warm start: one slice per arm in declaration order.
-    for idx in 0..arms.len() {
-        if ledger.used_get() + 4 > main_ceiling {
+    let mut round = 0usize;
+    loop {
+        let remaining = ledger.remaining();
+        if remaining < 4 {
             break;
         }
-        run_slice(idx, &mut states, &mut posteriors, &mut rng);
-    }
-
-    // Thompson allocation with the restart-arm floor.
-    let restart_idx = arms
-        .iter()
-        .position(|a| *a == RESTART_ARM)
-        .expect("restart arm is always enabled");
-    while ledger.used_get() + 4 <= main_ceiling {
-        let choice = if rng.random::<f64>() < config.restart_floor {
-            restart_idx
+        if remaining < slice {
+            // Budget tail: spend the remainder polishing the incumbent.
+            if let Some(grad) = budgeted_grad.as_ref() {
+                projected_gradient_polish(
+                    &budgeted_obj,
+                    grad,
+                    ledger.incumbent(&bounds),
+                    (remaining / 2).max(2),
+                    1.0,
+                    1e-8,
+                );
+            } else if remaining >= 8 {
+                qmc_trust_region_poll(
+                    &budgeted_obj,
+                    ledger.incumbent(&bounds),
+                    remaining,
+                    rng.random::<u64>(),
+                    0.0,
+                    3,
+                    0,
+                );
+            }
+            break;
+        }
+        round += 1;
+        // Decaying uniform floor min(1, K/m): early rounds explore every
+        // arm, late rounds are pure Thompson; every arm, including the
+        // restart arm, is played infinitely often.
+        let floor = (k as f64 / round as f64).min(1.0);
+        let choice = if rng.random::<f64>() < floor {
+            rng.random_range(0..k)
         } else {
             let mut best_idx = 0usize;
             let mut best_draw = f64::NEG_INFINITY;
@@ -1024,22 +1044,24 @@ where
             }
             best_idx
         };
-        run_slice(choice, &mut states, &mut posteriors, &mut rng);
-    }
-
-    // Final polish from the incumbent with the reserved budget.
-    if let Some(grad) = budgeted_grad.as_ref() {
-        let remaining = ledger.remaining();
-        if remaining >= 4 {
-            projected_gradient_polish(
-                &budgeted_obj,
-                grad,
-                ledger.incumbent(&bounds),
-                remaining / 2,
-                1.0,
-                1e-8,
-            );
-        }
+        let before = ledger.best_get();
+        let ceiling = ledger.used_get() + slice;
+        ledger.cap_set(ceiling.min(budget));
+        run_arm(
+            arms[choice],
+            &budgeted_obj,
+            budgeted_grad.as_ref(),
+            &ledger,
+            &mut states,
+            &mut rng,
+            slice,
+            budget,
+        );
+        ledger.cap_set(budget);
+        let scale = if before.is_finite() { before.abs() } else { 1.0 };
+        let threshold = IMPROVEMENT_RTOL * scale.max(1.0);
+        let after = ledger.best_get();
+        posteriors[choice].update(after.is_finite() && after < before - threshold);
     }
 
     let best_pos = ledger.incumbent(&bounds).to_vec();
@@ -1068,8 +1090,7 @@ mod tests {
     #[test]
     fn budget_is_never_exceeded() {
         let obj = Rastrigin::<6>::new();
-        let config = PortfolioConfig::default();
-        let result = portfolio_optimize(&obj, Some(&obj), 600, 7, &config);
+        let result = portfolio_optimize(&obj, Some(&obj), 600, 7);
         assert!(result.n_evals + result.n_grads <= 600);
         assert!(result.best_val.is_finite());
     }
@@ -1077,8 +1098,7 @@ mod tests {
     #[test]
     fn budget_respected_without_gradients() {
         let obj = Rastrigin::<4>::new();
-        let config = PortfolioConfig::default();
-        let result = portfolio_optimize::<_, Rastrigin<4>>(&obj, None, 400, 3, &config);
+        let result = portfolio_optimize::<_, Rastrigin<4>>(&obj, None, 400, 3);
         assert!(result.n_evals <= 400);
         assert_eq!(result.n_grads, 0);
         assert!(result.best_val.is_finite());
@@ -1087,8 +1107,7 @@ mod tests {
     #[test]
     fn portfolio_reaches_styblinski_tang_basin() {
         let obj = StybTang2D::new();
-        let config = PortfolioConfig::default();
-        let result = portfolio_optimize(&obj, Some(&obj), 1200, 11, &config);
+        let result = portfolio_optimize(&obj, Some(&obj), 1200, 11);
         // Global minimum is about -78.332 for the 2D Styblinski-Tang form.
         assert!(
             result.best_val < -78.0,
@@ -1099,11 +1118,22 @@ mod tests {
 
     #[test]
     fn restart_arm_is_always_first() {
-        let config = PortfolioConfig::default();
-        let arms = enabled_arms(5, false, &config);
+        let arms = enabled_arms(5, false, usize::MAX);
         assert_eq!(arms[0], RESTART_ARM);
-        let arms = enabled_arms(5, true, &config);
+        let arms = enabled_arms(30, true, usize::MAX);
         assert_eq!(arms[0], RESTART_ARM);
+        // The full library is active at a generous horizon.
+        assert!(arms.contains(&ArmKind::Reduced));
+        assert!(arms.contains(&ArmKind::Hmc));
+        assert!(arms.contains(&ArmKind::Pt));
+    }
+
+    #[test]
+    fn horizon_caps_active_arms() {
+        let few = enabled_arms(30, true, 16);
+        let many = enabled_arms(30, true, usize::MAX);
+        assert!(few.len() < many.len());
+        assert!(few.len() >= 4);
     }
 
     #[test]
@@ -1114,5 +1144,20 @@ mod tests {
         }
         assert!(posterior.alpha <= 1.0 + 1.0 / (1.0 - 0.9) + 1.0);
         assert!(posterior.beta >= 1.0);
+    }
+
+    #[test]
+    fn active_subspace_recovers_dominant_direction() {
+        // Gradients aligned with e0 dominate the covariance.
+        let dim = 10;
+        let mut grads = Vec::new();
+        for i in 0..8 {
+            let mut g = Array1::zeros(dim);
+            g[0] = 10.0 + i as f64;
+            g[1] = 0.1;
+            grads.push(g);
+        }
+        let basis = active_subspace_basis(&grads, dim, 2, 13);
+        assert!(basis[[0, 0]].abs() > 0.99, "first column aligns with e0");
     }
 }

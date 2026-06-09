@@ -37,4 +37,4 @@ pub use local_polish::{
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
-pub use portfolio::{portfolio_optimize, ArmStat, PortfolioConfig, PortfolioResult};
+pub use portfolio::{portfolio_optimize, ArmStat, PortfolioResult};

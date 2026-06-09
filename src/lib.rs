@@ -75,7 +75,7 @@ pub use methods::{
     shifted_qmc_projected_gradient_polish, ArmStat, BayesianMixingResult, BayesianMixingSampler,
     GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,
     MultiChainResult, MultiChainSampler, MultiChainState, ParallelTemperingSampler,
-    PilotObservation, PilotPrior, PortfolioConfig, PortfolioResult, PtChainState, PtResult,
+    PilotObservation, PilotPrior, PortfolioResult, PtChainState, PtResult,
     QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
 pub use movekernel::MoveKernel;
