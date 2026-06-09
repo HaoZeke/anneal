@@ -2081,7 +2081,7 @@ def test_cutest_bayesian_adaptive_gle_uses_pilot_box_and_budget(monkeypatch):
 
     assert best_val == -14.0
     assert fevals == 86
-    assert captured["max_fevals"] == 55
+    assert captured["max_fevals"] == 54
     assert captured["omega0"] is None
     assert captured["dt"] == pytest.approx(0.2)
     assert captured["n_epochs"] == 3
