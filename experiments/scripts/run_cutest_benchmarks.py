@@ -912,6 +912,7 @@ DRIVERS = [
     "bayesian_mixing_sa",
     "additive_indep",
     "gle_langevin",
+    "bayesian_adaptive_gle",
     "scipy_lbfgsb",
     "scipy_de",
     "scipy_dual_annealing",
@@ -1944,6 +1945,119 @@ def _run_cutest_gle_langevin(
     return best_val, int(result.get("n_evals", 0))
 
 
+def _bayesian_gle_dt(e_map):
+    try:
+        dt = float(e_map)
+    except (TypeError, ValueError):
+        dt = 0.2
+    if not np.isfinite(dt) or dt <= 0.0:
+        dt = 0.2
+    return float(np.clip(dt, 1e-4, 0.2))
+
+
+def _bayesian_gle_local_box(prob, t_map, sigma_map, best_pilot_pos, t_hot):
+    design_low, design_high = _design_bounds(prob)
+    width = design_high - design_low
+    dim = int(design_low.size)
+    midpoint = 0.5 * (design_low + design_high)
+    try:
+        center = np.asarray(best_pilot_pos, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        center = midpoint
+    if center.shape != design_low.shape or not np.all(np.isfinite(center)):
+        center = midpoint
+    center = np.clip(center, design_low, design_high)
+
+    try:
+        sigma = abs(float(sigma_map))
+    except (TypeError, ValueError):
+        sigma = _auto_sigma(prob)
+    if not np.isfinite(sigma) or sigma <= 0.0:
+        sigma = _auto_sigma(prob)
+
+    try:
+        cold = float(t_map)
+    except (TypeError, ValueError):
+        cold = 1.0
+    try:
+        hot = float(t_hot)
+    except (TypeError, ValueError):
+        hot = cold
+    cold = cold if np.isfinite(cold) and cold > 0.0 else 1.0
+    hot = hot if np.isfinite(hot) and hot > 0.0 else cold
+    temp_ratio = np.sqrt(max(hot, cold) / cold)
+
+    scalar_radius = sigma * temp_ratio * np.sqrt(max(dim, 1))
+    if not np.isfinite(scalar_radius) or scalar_radius <= 0.0:
+        scalar_radius = _auto_sigma(prob) * np.sqrt(max(dim, 1))
+    min_radius = 0.02 * width
+    max_radius = 0.5 * width
+    radius = np.clip(
+        np.full(dim, scalar_radius, dtype=np.float64),
+        min_radius,
+        max_radius,
+    )
+    low = np.maximum(design_low, center - radius)
+    high = np.minimum(design_high, center + radius)
+    bad = ~(np.isfinite(low) & np.isfinite(high) & (high > low))
+    if np.any(bad):
+        low = low.copy()
+        high = high.copy()
+        low[bad] = design_low[bad]
+        high[bad] = design_high[bad]
+    return low, high
+
+
+def _run_cutest_bayesian_adaptive_gle(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    max_fevals,
+    n_epochs,
+    t_map,
+    e_map,
+    sigma_map,
+    best_pilot_pos,
+    t_hot,
+):
+    if not hasattr(anneal_module, "gle_langevin"):
+        return None
+    if grad_kind != "native":
+        return None
+    if n_epochs < 1 or max_fevals < 1 or not _has_finite_design_box(prob):
+        return None
+    local_low, local_high = _bayesian_gle_local_box(
+        prob,
+        t_map,
+        sigma_map,
+        best_pilot_pos,
+        t_hot,
+    )
+    kwargs = {
+        "seed": int(seed),
+        "omega0": None,
+        "dt": _bayesian_gle_dt(e_map),
+        "n_epochs": max(1, min(int(n_epochs), int(max_fevals))),
+    }
+    try:
+        result = anneal_module.gle_langevin(
+            prob.fn,
+            grad_fn,
+            local_low,
+            local_high,
+            int(max_fevals),
+            **kwargs,
+        )
+    except Exception:
+        return None
+    best_val = float(result["best_val"])
+    if not np.isfinite(best_val):
+        return None
+    return best_val, int(result.get("n_evals", 0))
+
+
 def _combine_candidate_results(*candidates):
     valid = [
         candidate
@@ -2198,6 +2312,29 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             t_rw_map,
             features,
         ) = out
+        if driver == "bayesian_adaptive_gle":
+            import anneal
+
+            total_budget = 1 + int(n_epochs) * int(k_per_epoch)
+            gle_budget = max(1, total_budget - int(pilot_calls))
+            gle_result = _run_cutest_bayesian_adaptive_gle(
+                anneal,
+                prob,
+                grad_fn,
+                grad_kind,
+                seed,
+                gle_budget,
+                n_epochs,
+                t_map,
+                e_map,
+                sigma_map,
+                best_pilot_pos,
+                t_hot,
+            )
+            if gle_result is None:
+                return float("nan"), int(pilot_calls)
+            best_val, gle_calls = gle_result
+            return best_val, int(pilot_calls) + int(gle_calls)
         if driver == "bgsa":
             import anneal
 
