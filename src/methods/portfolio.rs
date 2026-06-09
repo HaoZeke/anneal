@@ -651,7 +651,10 @@ fn run_arm<O, G>(
                 bounds.clone(),
                 config.surrogate_degree,
             );
-            let temp = ladder_temperature(archive_temp0(ledger), states.surrogate_gen);
+            // Geometric ladder: separable structure rewards aggressive
+            // cooling, and a rejected cold slice costs one slice only.
+            let temp = (archive_temp0(ledger) * 0.5_f64.powi(states.surrogate_gen as i32))
+                .max(1e-12);
             let proposals = surr.sample(slice, temp, config.surrogate_grid, rng);
             let mut f_cur = ledger.best_get();
             for i in 0..proposals.nrows() {

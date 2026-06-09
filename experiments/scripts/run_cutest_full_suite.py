@@ -44,6 +44,7 @@ from experiments.scripts.run_cutest_benchmarks import (
     classical_sa,
     mcmc_sa,
     mcmc_sa_budgeted,
+    portfolio_sa,
     pt_sa_budgeted,
 )
 
@@ -434,6 +435,12 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
         )
     if driver == "bayesian_mixing_sa":
         return bayesian_mixing_sa(
+            prob,
+            seed,
+            1 + args.n_epochs * args.k_fixed,
+        )
+    if driver == "portfolio":
+        return portfolio_sa(
             prob,
             seed,
             1 + args.n_epochs * args.k_fixed,

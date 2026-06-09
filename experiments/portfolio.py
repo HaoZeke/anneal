@@ -403,7 +403,9 @@ def _arm_surrogate(ctx, state, slice_budget: int) -> None:
     gen = state.setdefault("gen", 0)
     finite = y[keep]
     state.setdefault("temp0", max(float(np.std(finite)), 1e-6))
-    temp = _temperature(state, gen)
+    # Geometric ladder: separable structure rewards aggressive cooling,
+    # and a rejected cold slice costs one slice only.
+    temp = max(state["temp0"] * 0.5 ** gen, 1e-12)
     f_cur = rec.best
     n_prop = min(slice_budget, max(8, slice_budget))
     proposals = surr.sample(n_prop, temp, rng)
