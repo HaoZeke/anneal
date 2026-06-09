@@ -620,6 +620,33 @@ mod tests {
     }
 
     #[test]
+    fn gle_preconditioner_probe_updates_every_diagonal_coordinate() {
+        let dim = 64;
+        let a = Array1::from_iter((0..dim).map(|axis| 0.5 + axis as f64));
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -4.0),
+            Array1::from_elem(dim, 4.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a: a.clone() };
+
+        let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, 1);
+        let target_curvature = preconditioner.omega0 * preconditioner.omega0;
+
+        assert_eq!(preconditioner.n_grads, 2);
+        for (diag, curvature) in preconditioner.diag.iter().zip(a.iter().map(|ai| 2.0 * ai)) {
+            assert!(
+                (diag * curvature - target_curvature).abs() <= target_curvature * 1e-8,
+                "diag {diag} did not balance curvature {curvature} toward {target_curvature}",
+            );
+        }
+    }
+
+    #[test]
     fn preconditioned_gle_reports_matrix_and_probe_work() {
         let dim = 8;
         let a = Array1::from_vec(vec![0.05, 0.2, 1.0, 5.0, 50.0, 0.5, 2.0, 10.0]);
