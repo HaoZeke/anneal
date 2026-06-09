@@ -1,6 +1,7 @@
 //! Bounded local refinement used as the deterministic polish stage after a
 //! stochastic annealing or pilot phase.
 
+use eindir_core::Bounds;
 use eindir_core::Gradient;
 use eindir_core::Objective;
 use ndarray::{Array1, Array2};
