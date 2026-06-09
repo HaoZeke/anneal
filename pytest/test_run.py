@@ -17,6 +17,8 @@ from anneal import (
     polish,
     qmc_best1bin_scout,
     qmc_best1bin_scout_objective,
+    qmc_gsa_global_search,
+    qmc_gsa_global_search_objective,
     qmc_polish,
     qmc_polish_objective,
     qmc_trust_region_poll,
@@ -231,6 +233,49 @@ def test_qmc_best1bin_scout_accepts_native_objective_handle():
         max_evals=240,
         seed=0,
         population_size=30,
+    )
+
+    assert result["best_val"] < -0.85
+    assert result["n_evals"] <= 240
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
+    assert isinstance(result["best_pos"], np.ndarray)
+
+
+def test_qmc_gsa_global_search_uses_bounded_visiting_distribution():
+    result = qmc_gsa_global_search(
+        smooth_needle,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        max_evals=240,
+        seed=0,
+        n_chains=30,
+        t_init=1.0,
+        q_v=2.62,
+        q_a=1.7,
+    )
+
+    assert result["best_val"] < -0.85
+    assert result["n_evals"] <= 240
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
+    assert isinstance(result["best_pos"], np.ndarray)
+    assert np.all(result["best_pos"] >= -1.0)
+    assert np.all(result["best_pos"] <= 1.0)
+
+
+def test_qmc_gsa_global_search_accepts_native_objective_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(smooth_needle, bounds)
+
+    result = qmc_gsa_global_search_objective(
+        obj,
+        max_evals=240,
+        seed=0,
+        n_chains=30,
+        t_init=1.0,
+        q_v=2.62,
+        q_a=1.7,
     )
 
     assert result["best_val"] < -0.85

@@ -4562,6 +4562,22 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         == anneal_sota.DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
     )
     assert (
+        config.qmc_gsa_global_min_dimension
+        == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_MIN_DIMENSION
+    )
+    assert (
+        config.qmc_gsa_global_max_dimension
+        == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_MAX_DIMENSION
+    )
+    assert (
+        config.qmc_gsa_global_budget_divisor
+        == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_BUDGET_DIVISOR
+    )
+    assert config.qmc_gsa_global_chains == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_CHAINS
+    assert config.qmc_gsa_global_t_init == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_T_INIT
+    assert config.qmc_gsa_global_q_v == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_Q_V
+    assert config.qmc_gsa_global_q_a == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_Q_A
+    assert (
         config.shifted_qmc_polish_min_dimension
         == anneal_sota.DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
     )
@@ -4662,6 +4678,18 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
     assert anneal_sota._shifted_qmc_replicates(config) == (
         config.shifted_qmc_polish_chain_count
     )
+    assert anneal_sota._qmc_gsa_global_active(
+        config.qmc_gsa_global_min_dimension,
+        config,
+    )
+    assert not anneal_sota._qmc_gsa_global_active(
+        config.qmc_gsa_global_min_dimension - 1,
+        config,
+    )
+    assert not anneal_sota._qmc_gsa_global_active(
+        config.qmc_gsa_global_max_dimension + 1,
+        config,
+    )
 
 
 def test_anneal_sota_global_portfolio_slices_shared_counter(monkeypatch):
@@ -4718,6 +4746,121 @@ def test_anneal_sota_global_portfolio_slices_shared_counter(monkeypatch):
     assert calls == [("dual", 3, 3), ("dual", 6, 3), ("hop", 8, None)]
     assert counter.budget == 8
     assert counter.n == counter.budget
+
+
+def test_anneal_sota_qmc_hybrid_continues_after_gsa_global_slice(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    gsa_calls = []
+    evaluated = []
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_gsa_global_search_objective(
+        objective,
+        max_evals,
+        *,
+        seed,
+        n_chains,
+        t_init,
+        q_v,
+        q_a,
+    ):
+        gsa_calls.append(
+            (
+                counter.budget,
+                int(max_evals),
+                int(seed),
+                int(n_chains),
+                float(t_init),
+                float(q_v),
+                float(q_a),
+            )
+        )
+        best_pos = np.full(4, 0.5, dtype=np.float64)
+        value = objective.fn(best_pos)
+        return {
+            "best_val": min(-8.0, value),
+            "best_pos": best_pos,
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    def fake_population(low, high, n, skip=1, rng=None):
+        del high, skip, rng
+        return np.zeros((n, len(low)), dtype=np.float64)
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_gsa_global_search_objective=qmc_gsa_global_search_objective,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        fake_population,
+        raising=False,
+    )
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        evaluated.append(x.tolist())
+        return float(np.dot(x, x))
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        basin_polish_enabled=False,
+        boundary_qmc_polish_enabled=False,
+        shifted_qmc_polish_enabled=False,
+        trust_region_qmc_poll_enabled=False,
+        qmc_gsa_global_min_dimension=4,
+        qmc_gsa_global_max_dimension=4,
+        qmc_gsa_global_budget_divisor=2,
+        qmc_gsa_global_chains=6,
+        qmc_gsa_global_t_init=1.0,
+        qmc_gsa_global_q_v=2.62,
+        qmc_gsa_global_q_a=1.7,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(4, -1.0),
+        np.full(4, 1.0),
+        dim=4,
+        grad=None,
+        rng=np.random.default_rng(47),
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+    )
+
+    assert len(gsa_calls) == 1
+    assert gsa_calls[0][0:2] == (8, 8)
+    assert gsa_calls[0][3:] == (6, 1.0, 2.62, 1.7)
+    assert sum(point == [0.5, 0.5, 0.5, 0.5] for point in evaluated) >= 2
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert best <= -8.0
 
 
 def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):

@@ -1,6 +1,7 @@
 use anneal_core::{
-    AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout, qmc_projected_gradient_polish,
-    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    qmc_projected_gradient_polish, qmc_trust_region_poll,
+    shifted_qmc_projected_gradient_polish,
 };
 use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1, array};
@@ -234,6 +235,20 @@ fn qmc_best1bin_scout_refines_smooth_low_dimensional_basin() {
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.n_starts, 30);
     assert_eq!(result.n_polished, 0);
+}
+
+#[test]
+fn qmc_gsa_global_search_uses_bounded_visiting_distribution() {
+    let obj = SmoothNeedle::new();
+
+    let result = qmc_gsa_global_search(&obj, 240, 0, 30, 1.0, 2.62, 1.7);
+
+    assert!(result.best_val < -0.85, "best value: {}", result.best_val);
+    assert!(result.n_evals <= 240);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.n_starts, 30);
+    assert_eq!(result.n_polished, 0);
+    assert!(result.best_pos.iter().all(|value| (-1.0..=1.0).contains(value)));
 }
 
 #[test]
