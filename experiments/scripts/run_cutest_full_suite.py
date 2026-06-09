@@ -310,13 +310,23 @@ def maybe_reduce(prob, args):
     def reduced_grad(r, _g=surrogate_grad):
         return _g(r)
 
+    reduced_low = np.asarray(fit.reduced_low, dtype=float)
+    reduced_high = np.asarray(fit.reduced_high, dtype=float)
+    reduced_x0 = np.clip(
+        fit.encoder.encode(np.asarray(prob.x0, dtype=float)),
+        reduced_low,
+        reduced_high,
+    )
     reduced = dataclasses.replace(
         prob,
         dim=fit.surrogate.k,
         fn=reduced_fn,
         grad=reduced_grad,
-        low=np.asarray(fit.reduced_low, dtype=float),
-        high=np.asarray(fit.reduced_high, dtype=float),
+        low=reduced_low,
+        high=reduced_high,
+        x0=reduced_x0,
+        design_low=reduced_low.copy(),
+        design_high=reduced_high.copy(),
     )
     _REDUCTION_PILOT_WORK[prob.name] = float(fit.pilot_work_units)
     return reduced
