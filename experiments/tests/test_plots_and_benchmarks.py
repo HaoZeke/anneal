@@ -2378,6 +2378,75 @@ def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
     assert captured["polish_x0"].tolist() == pytest.approx([0.3, -0.3])
 
 
+def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(*_args, **_kwargs):
+        raise AssertionError("scalar GLE core should not be called")
+
+    def gle_langevin_preconditioned(_obj_fn, grad_fn, low, high, max_fevals, **kwargs):
+        captured["low"] = np.asarray(low, dtype=np.float64)
+        captured["high"] = np.asarray(high, dtype=np.float64)
+        captured["max_fevals"] = int(max_fevals)
+        captured["omega0"] = kwargs.get("omega0")
+        captured["grad"] = np.asarray(grad_fn(np.zeros(2)), dtype=np.float64)
+        return {
+            "best_val": -17.0,
+            "best_pos": np.zeros(2),
+            "n_evals": 19,
+            "preconditioner_diag": np.array([0.5, 2.0], dtype=np.float64),
+            "n_preconditioner_grads": 4,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        gle_langevin=gle_langevin,
+        gle_langevin_preconditioned=gle_langevin_preconditioned,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -17.0
+    assert fevals == 32
+    assert captured["max_fevals"] == 109
+    assert captured["omega0"] is None
+    assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])
+    assert captured["low"].tolist() == pytest.approx([-0.4618802, -0.4618802])
+    assert captured["high"].tolist() == pytest.approx([0.4618802, 0.4618802])
+
+
 def test_cutest_bayesian_adaptive_gle_reports_unsupported_without_native_gradient(
     monkeypatch,
 ):

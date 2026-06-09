@@ -359,4 +359,56 @@ mod tests {
 
         assert!((estimated - omega).abs() <= omega * f64::EPSILON.cbrt());
     }
+
+    #[test]
+    fn gle_preconditioner_balances_diagonal_quadratic_curvatures() {
+        let dim = 5;
+        let a = Array1::from_vec(vec![0.05, 0.2, 1.0, 5.0, 50.0]);
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -4.0),
+            Array1::from_elem(dim, 4.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a: a.clone() };
+
+        let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, 8);
+        let target_curvature = preconditioner.omega0 * preconditioner.omega0;
+
+        assert_eq!(preconditioner.diag.len(), dim);
+        assert_eq!(preconditioner.scale.len(), dim);
+        assert!(preconditioner.n_grads > 0);
+        for (diag, curvature) in preconditioner.diag.iter().zip(a.iter().map(|ai| 2.0 * ai)) {
+            assert!(
+                (diag * curvature - target_curvature).abs() <= target_curvature * 1e-8,
+                "diag {diag} did not balance curvature {curvature} toward {target_curvature}",
+            );
+        }
+    }
+
+    #[test]
+    fn preconditioned_gle_reports_matrix_and_probe_work() {
+        let dim = 8;
+        let a = Array1::from_vec(vec![0.05, 0.2, 1.0, 5.0, 50.0, 0.5, 2.0, 10.0]);
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -5.0),
+            Array1::from_elem(dim, 5.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a };
+
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20);
+
+        assert_eq!(res.preconditioner_diag.len(), dim);
+        assert!(res.n_preconditioner_grads > 0);
+        assert!(res.n_evals <= 300);
+        assert!(res.preconditioner_diag.iter().all(|value| value.is_finite() && *value > 0.0));
+    }
 }
