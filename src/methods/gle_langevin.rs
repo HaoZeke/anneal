@@ -332,6 +332,17 @@ where
     let mut s: Array2<f64>;
     let mut g = grad.grad(x.view());
     let mut n_evals = n_preconditioner_grads + 1;
+    if n_evals >= max_fevals {
+        return GleLangevinResult {
+            best_pos: best_pos.to_vec(),
+            best_val,
+            n_evals,
+            omega0,
+            dt,
+            preconditioner_diag: preconditioner_diag.to_vec(),
+            n_preconditioner_grads,
+        };
+    }
 
     'outer: for epoch in 0..n_epochs {
         let frac = epoch as f64 / (n_epochs.max(2) - 1) as f64;
