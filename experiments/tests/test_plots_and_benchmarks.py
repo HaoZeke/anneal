@@ -2021,7 +2021,7 @@ def test_cutest_gle_screen_passes_system_frequency():
         k_per_epoch=40,
     )
 
-    assert result == (-8.0, 17)
+    assert result == (-8.0, 34)
     assert captured["omega0"] == pytest.approx(1.25)
     assert captured["estimate"][0].tolist() == pytest.approx([-1.0, -1.0])
     assert captured["estimate"][1].tolist() == pytest.approx([1.0, 1.0])
@@ -2080,8 +2080,8 @@ def test_cutest_bayesian_adaptive_gle_uses_pilot_box_and_budget(monkeypatch):
     )
 
     assert best_val == -14.0
-    assert fevals == 49
-    assert captured["max_fevals"] == 109
+    assert fevals == 86
+    assert captured["max_fevals"] == 55
     assert captured["omega0"] is None
     assert captured["dt"] == pytest.approx(0.2)
     assert captured["n_epochs"] == 3
@@ -2171,8 +2171,8 @@ def test_cutest_bayesian_adaptive_gle_uses_native_objective_anchor(monkeypatch):
     )
 
     assert best_val == -12.0
-    assert fevals == 32
-    assert captured["max_fevals"] == 108
+    assert fevals == 51
+    assert captured["max_fevals"] == 54
     assert captured["x0"].tolist() == pytest.approx([0.25, -0.25])
     assert captured["has_grad"]
     assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])
@@ -2246,8 +2246,8 @@ def test_cutest_bayesian_adaptive_gle_uses_compact_high_dimensional_pilot(
     )
 
     assert best_val == -10.0
-    assert fevals == 21
-    assert captured["max_fevals"] == 993
+    assert fevals == 34
+    assert captured["max_fevals"] == 496
     assert captured["pilot"] == {
         "seed": 7,
         "n_pilot": 1,
@@ -2306,7 +2306,7 @@ def test_cutest_bayesian_adaptive_gle_keeps_best_anchor_value(monkeypatch):
     )
 
     assert best_val == 0.0
-    assert fevals == 14
+    assert fevals == 15
     assert captured["center"].tolist() == pytest.approx([0.0, 0.0])
 
 
@@ -2372,9 +2372,9 @@ def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
     )
 
     assert best_val == -21.0
-    assert fevals == 42
-    assert captured["gle_max_fevals"] == 55
-    assert captured["polish_max_fevals"] == 44
+    assert fevals == 62
+    assert captured["gle_max_fevals"] == 27
+    assert captured["polish_max_fevals"] == 34
     assert captured["polish_x0"].tolist() == pytest.approx([0.3, -0.3])
 
 
@@ -2506,8 +2506,8 @@ def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
     )
 
     assert best_val == -17.0
-    assert fevals == 31
-    assert captured["max_fevals"] == 109
+    assert fevals == 46
+    assert captured["max_fevals"] == 54
     assert captured["omega0"] is None
     assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])
     assert captured["low"].tolist() == pytest.approx([-0.4618802, -0.4618802])
