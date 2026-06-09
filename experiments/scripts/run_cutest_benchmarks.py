@@ -2081,6 +2081,11 @@ def _run_cutest_bayesian_adaptive_gle(
         if np.isfinite(anchor_val):
             return anchor_val, int(anchor_calls)
         return None
+    polish_budget = 0
+    gle_fevals = int(remaining_fevals)
+    if hasattr(anneal_module, "polish") and remaining_fevals >= 4:
+        polish_budget = max(1, int(remaining_fevals) // 4)
+        gle_fevals = max(1, int(remaining_fevals) - int(polish_budget))
     local_low, local_high = _bayesian_gle_local_box(
         prob,
         t_map,
@@ -2100,7 +2105,7 @@ def _run_cutest_bayesian_adaptive_gle(
             grad_fn,
             local_low,
             local_high,
-            int(remaining_fevals),
+            int(gle_fevals),
             **kwargs,
         )
     except Exception:
@@ -2112,9 +2117,50 @@ def _run_cutest_bayesian_adaptive_gle(
         if np.isfinite(anchor_val):
             return anchor_val, int(anchor_calls)
         return None
+    work_units = int(anchor_calls) + int(result.get("n_evals", 0))
     if np.isfinite(anchor_val):
         best_val = min(best_val, anchor_val)
-    return best_val, int(anchor_calls) + int(result.get("n_evals", 0))
+    if polish_budget > 0:
+        available_work = int(max_fevals) - int(work_units)
+        if available_work >= 2:
+            try:
+                polish_start = np.asarray(
+                    result.get("best_pos", anchor_pos),
+                    dtype=np.float64,
+                ).reshape(-1)
+            except (TypeError, ValueError):
+                polish_start = anchor_pos
+            if polish_start.shape == anchor_pos.shape and np.all(
+                np.isfinite(polish_start)
+            ):
+                design_low, design_high = _design_bounds(prob)
+                polish_eval_cap = max(
+                    1,
+                    min(int(polish_budget), int(available_work) // 2),
+                )
+                try:
+                    polish_result = anneal_module.polish(
+                        prob.fn,
+                        grad_fn,
+                        design_low,
+                        design_high,
+                        np.clip(polish_start, design_low, design_high),
+                        max_fevals=int(polish_eval_cap),
+                    )
+                except Exception:
+                    polish_result = None
+                if polish_result is not None:
+                    polish_val = float(polish_result["best_val"])
+                    polish_work = _polish_work_units(
+                        int(anchor_pos.size),
+                        grad_kind,
+                        polish_result.get("n_evals", 0),
+                        polish_result.get("n_grads", 0),
+                    )
+                    work_units += int(polish_work)
+                    if np.isfinite(polish_val):
+                        best_val = min(best_val, polish_val)
+    return best_val, int(work_units)
 
 
 def _combine_candidate_results(*candidates):

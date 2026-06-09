@@ -2223,6 +2223,74 @@ def test_cutest_bayesian_adaptive_gle_keeps_best_anchor_value(monkeypatch):
     assert captured["center"].tolist() == pytest.approx([0.0, 0.0])
 
 
+def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
+        captured["gle_max_fevals"] = int(max_fevals)
+        return {
+            "best_val": 4.0,
+            "best_pos": np.array([0.3, -0.3], dtype=np.float64),
+            "n_evals": 20,
+        }
+
+    def polish(_obj_fn, _grad_fn, _low, _high, x0, **kwargs):
+        captured["polish_x0"] = np.asarray(x0, dtype=np.float64)
+        captured["polish_max_fevals"] = int(kwargs["max_fevals"])
+        return {
+            "best_val": -21.0,
+            "best_pos": np.array([0.0, 0.0]),
+            "n_evals": 5,
+            "n_grads": 5,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        gle_langevin=gle_langevin,
+        polish=polish,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(2, dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -21.0
+    assert fevals == 42
+    assert captured["gle_max_fevals"] == 82
+    assert captured["polish_max_fevals"] == 27
+    assert captured["polish_x0"].tolist() == pytest.approx([0.3, -0.3])
+
+
 def test_cutest_bayesian_adaptive_gle_reports_unsupported_without_native_gradient(
     monkeypatch,
 ):
