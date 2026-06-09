@@ -1341,6 +1341,24 @@ def qmc_annealed_hybrid(
                         if math.isfinite(res_fun) and res_fun < best_v:
                             best_v = res_fun
                             best_x = np.asarray(res.x, dtype=np.float64)
+                if _trust_region_qmc_poll_active(dim, config) and counter.n < counter.budget:
+                    trust_region = _native_qmc_trust_region_poll(
+                        counter,
+                        best_x,
+                        low,
+                        high,
+                        rng,
+                        config,
+                    )
+                    if trust_region is not None:
+                        trust_best = float(trust_region.get("best_val", float("inf")))
+                        if math.isfinite(trust_best) and trust_best < best_v:
+                            best_v = trust_best
+                            if "best_pos" in trust_region:
+                                best_x = np.asarray(
+                                    trust_region["best_pos"],
+                                    dtype=np.float64,
+                                )
                 last_polish = counter.n
     except Exception as exc:  # noqa: BLE001
         if exc.__class__.__name__ != "_Budget":

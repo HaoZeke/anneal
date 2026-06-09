@@ -989,6 +989,16 @@ def _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains):
     }
 
 
+def _bayesian_adaptive_gle_pilot_budget():
+    return {
+        "n_pilot": 1,
+        "pilot_steps": 1,
+        "n_rw_pilot": 0,
+        "rw_steps": 1,
+        "n_scout": 0,
+    }
+
+
 def _cutest_gradient(prob):
     native_grad = getattr(prob, "grad", None)
     if callable(native_grad):
@@ -2008,6 +2018,43 @@ def _bayesian_gle_local_box(prob, t_map, sigma_map, best_pilot_pos, t_hot):
     return low, high
 
 
+def _bayesian_gle_anchor(prob, best_pilot_pos):
+    design_low, design_high = _design_bounds(prob)
+    midpoint = 0.5 * (design_low + design_high)
+    candidates = []
+    try:
+        pilot_pos = np.asarray(best_pilot_pos, dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        pilot_pos = None
+    if (
+        pilot_pos is not None
+        and pilot_pos.shape == midpoint.shape
+        and np.all(np.isfinite(pilot_pos))
+    ):
+        candidates.append(np.clip(pilot_pos, design_low, design_high))
+    candidates.append(midpoint)
+
+    unique = []
+    for candidate in candidates:
+        if any(np.array_equal(candidate, seen) for seen in unique):
+            continue
+        unique.append(candidate)
+
+    calls = 0
+    best_pos = unique[0]
+    best_val = float("inf")
+    for candidate in unique:
+        calls += 1
+        try:
+            value = float(prob.fn(candidate))
+        except Exception:
+            continue
+        if np.isfinite(value) and value < best_val:
+            best_val = value
+            best_pos = candidate
+    return best_pos, best_val, calls
+
+
 def _run_cutest_bayesian_adaptive_gle(
     anneal_module,
     prob,
@@ -2028,11 +2075,17 @@ def _run_cutest_bayesian_adaptive_gle(
         return None
     if n_epochs < 1 or max_fevals < 1 or not _has_finite_design_box(prob):
         return None
+    anchor_pos, anchor_val, anchor_calls = _bayesian_gle_anchor(prob, best_pilot_pos)
+    remaining_fevals = int(max_fevals) - int(anchor_calls)
+    if remaining_fevals < 1:
+        if np.isfinite(anchor_val):
+            return anchor_val, int(anchor_calls)
+        return None
     local_low, local_high = _bayesian_gle_local_box(
         prob,
         t_map,
         sigma_map,
-        best_pilot_pos,
+        anchor_pos,
         t_hot,
     )
     kwargs = {
@@ -2047,15 +2100,21 @@ def _run_cutest_bayesian_adaptive_gle(
             grad_fn,
             local_low,
             local_high,
-            int(max_fevals),
+            int(remaining_fevals),
             **kwargs,
         )
     except Exception:
+        if np.isfinite(anchor_val):
+            return anchor_val, int(anchor_calls)
         return None
     best_val = float(result["best_val"])
     if not np.isfinite(best_val):
+        if np.isfinite(anchor_val):
+            return anchor_val, int(anchor_calls)
         return None
-    return best_val, int(result.get("n_evals", 0))
+    if np.isfinite(anchor_val):
+        best_val = min(best_val, anchor_val)
+    return best_val, int(anchor_calls) + int(result.get("n_evals", 0))
 
 
 def _combine_candidate_results(*candidates):
@@ -2290,7 +2349,11 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     _combine_candidate_results(*qmc_extras) or auto_best_start_polish
                 )
         # Run the pilot.
-        pilot_budget = _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
+        pilot_budget = (
+            _bayesian_adaptive_gle_pilot_budget()
+            if driver == "bayesian_adaptive_gle"
+            else _bgsa_pilot_budget(n_epochs, k_per_epoch, n_chains)
+        )
         out = d.run_pilot(
             seed,
             pilot_budget["n_pilot"],
