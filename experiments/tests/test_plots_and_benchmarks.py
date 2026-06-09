@@ -4263,6 +4263,30 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.shifted_qmc_projected_step_work
         == anneal_sota.DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK
     )
+    assert (
+        config.boundary_qmc_polish_min_dimension
+        == anneal_sota.DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION
+    )
+    assert (
+        config.boundary_qmc_polish_max_dimension
+        == anneal_sota.DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION
+    )
+    assert (
+        config.boundary_qmc_polish_budget_divisor
+        == anneal_sota.DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
+    )
+    assert anneal_sota._boundary_qmc_polish_active(
+        config.boundary_qmc_polish_min_dimension,
+        config,
+    )
+    assert not anneal_sota._boundary_qmc_polish_active(
+        config.boundary_qmc_polish_min_dimension - 1,
+        config,
+    )
+    assert not anneal_sota._boundary_qmc_polish_active(
+        config.boundary_qmc_polish_max_dimension + 1,
+        config,
+    )
     assert anneal_sota._shifted_qmc_polish_active(
         config.shifted_qmc_polish_min_dimension,
         config,
@@ -4401,6 +4425,96 @@ def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):
     assert counter.budget == 16
     assert counter.n == counter.budget
     assert counter.objective_evals > basin_budgets[0]
+
+
+def test_anneal_sota_qmc_hybrid_continues_after_boundary_qmc_slice(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    qmc_calls = []
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_polish_objective(objective, n_starts, max_fevals_per_start, **kwargs):
+        qmc_calls.append(
+            (
+                counter.budget,
+                int(n_starts),
+                int(max_fevals_per_start),
+                int(kwargs["top_k"]),
+            )
+        )
+        value = objective.fn(np.zeros(3, dtype=np.float64))
+        objective.grad_fn(np.zeros(3, dtype=np.float64))
+        return {
+            "best_val": min(-4.0, value),
+            "best_pos": np.zeros(3, dtype=np.float64),
+            "n_evals": 1,
+            "n_grads": 1,
+        }
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_polish_objective=qmc_polish_objective,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        shifted_qmc_polish_enabled=False,
+        boundary_qmc_polish_min_dimension=3,
+        boundary_qmc_polish_max_dimension=3,
+        boundary_qmc_polish_budget_divisor=2,
+        qmc_min_starts=4,
+        qmc_starts_per_polish=1,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(3, -1.0),
+        np.full(3, 1.0),
+        dim=3,
+        grad=grad,
+        rng=np.random.default_rng(37),
+        k_polish=1,
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+    )
+
+    assert qmc_calls == [(8, 4, 2, 1)]
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert counter.objective_evals > 1
+    assert counter.grad_evals >= 1
+    assert best <= -4.0
 
 
 def test_anneal_sota_qmc_hybrid_continues_after_shifted_qmc_slice(monkeypatch):
