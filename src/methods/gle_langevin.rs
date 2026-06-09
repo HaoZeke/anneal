@@ -119,27 +119,15 @@ fn splitmix64(mut value: u64) -> u64 {
     value ^ (value >> 31)
 }
 
-fn gcd_usize(mut left: usize, mut right: usize) -> usize {
-    while right != 0 {
-        let next = left % right;
-        left = right;
-        right = next;
-    }
-    left
-}
-
-fn gle_probe_axes(seed: u64, dim: usize, probes: usize) -> Vec<usize> {
-    if dim == 0 || probes == 0 {
-        return Vec::new();
-    }
-    let start = (splitmix64(seed) as usize) % dim;
-    let mut stride = ((splitmix64(seed ^ 0xD1B5_4A32_D192_ED03) as usize) % dim).max(1);
-    while gcd_usize(stride, dim) != 1 {
-        stride = (stride % dim) + 1;
-    }
-    (0..probes)
-        .map(|offset| (start + offset * stride) % dim)
-        .collect()
+/// Deterministic Rademacher direction for one curvature probe.
+///
+/// One probe pair recovers the full diagonal exactly when the Hessian
+/// is diagonal: `d_i (H d)_i = H_ii` for `d_i in {-1, +1}`.
+fn gle_probe_direction(seed: u64, probe: usize, dim: usize) -> Array1<f64> {
+    Array1::from_iter((0..dim).map(|axis| {
+        let bits = splitmix64(seed ^ ((probe as u64) << 32) ^ axis as u64);
+        if bits & 1 == 0 { 1.0 } else { -1.0 }
+    }))
 }
 
 /// Estimate a diagonal coordinate preconditioner from local gradient curvature.
@@ -178,18 +166,14 @@ where
         return unit_gle_preconditioner(dim, fallback);
     }
     let step = (f64::EPSILON.cbrt() * min_width).max(f64::EPSILON.sqrt());
-    let mut curvature = Array1::<f64>::from_elem(dim, f64::NAN);
+    let mut curvature_sum = Array1::<f64>::zeros(dim);
+    let mut used = 0usize;
     let mut n_grads = 0usize;
 
-    for axis in gle_probe_axes(seed, dim, probes) {
-        let mut xp = center.clone();
-        let mut xm = center.clone();
-        xp[axis] = (center[axis] + step).min(high[axis]);
-        xm[axis] = (center[axis] - step).max(low[axis]);
-        let denom = xp[axis] - xm[axis];
-        if !denom.is_finite() || denom.abs() <= f64::EPSILON.sqrt() {
-            continue;
-        }
+    for probe in 0..probes {
+        let direction = gle_probe_direction(seed, probe, dim);
+        let xp = bounds.clip((&center + &(&direction * step)).view());
+        let xm = bounds.clip((&center - &(&direction * step)).view());
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
         n_grads += 2;
@@ -200,11 +184,15 @@ where
         {
             continue;
         }
-        let value = ((gp[axis] - gm[axis]) / denom).abs();
-        if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
-            curvature[axis] = value;
-        }
+        let hv = (&gp - &gm) * (0.5 / step);
+        curvature_sum += &(&direction * &hv);
+        used += 1;
     }
+
+    if used == 0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    let curvature = curvature_sum.mapv(|value| (value / used as f64).abs());
 
     let mut positive: Vec<f64> = curvature
         .iter()
