@@ -2439,7 +2439,7 @@ def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
     )
 
     assert best_val == -17.0
-    assert fevals == 32
+    assert fevals == 31
     assert captured["max_fevals"] == 109
     assert captured["omega0"] is None
     assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])

@@ -37,6 +37,9 @@ from anneal._core import (
     additive_independence as _core_additive_independence,
     estimate_gle_omega0 as _core_estimate_gle_omega0,
     gle_langevin as _core_gle_langevin,
+    gle_langevin_objective as _core_gle_langevin_objective,
+    gle_langevin_preconditioned as _core_gle_langevin_preconditioned,
+    gle_langevin_preconditioned_objective as _core_gle_langevin_preconditioned_objective,
     run,
     run_hmc,
     run_qmc,
@@ -381,6 +384,7 @@ def gle_langevin(
     omega0: float | None = None,
     dt: float = 0.2,
     n_epochs: int = 40,
+    x0=None,
 ):
     """GLE-thermostatted Langevin annealing (colored-noise optimal sampling).
 
@@ -404,8 +408,103 @@ def gle_langevin(
         omega_arg,
         float(dt),
         int(n_epochs),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    out["preconditioner_diag"] = np.asarray(
+        out["preconditioner_diag"],
+        dtype=np.float64,
+    )
+    return out
+
+
+def gle_langevin_objective(
+    objective,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0=None,
+):
+    """GLE-Langevin annealing with a native ``PyObjective`` gradient handle."""
+    omega_arg = None if omega0 is None else float(omega0)
+    out = _core_gle_langevin_objective(
+        objective,
+        int(max_fevals),
+        int(seed),
+        omega_arg,
+        float(dt),
+        int(n_epochs),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    out["preconditioner_diag"] = np.asarray(
+        out["preconditioner_diag"],
+        dtype=np.float64,
+    )
+    return out
+
+
+def gle_langevin_preconditioned(
+    obj_fn,
+    grad_fn,
+    low,
+    high,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0=None,
+):
+    """GLE-Langevin with an adaptive diagonal coordinate preconditioner."""
+    omega_arg = None if omega0 is None else float(omega0)
+    out = _core_gle_langevin_preconditioned(
+        obj_fn,
+        grad_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(max_fevals),
+        int(seed),
+        omega_arg,
+        float(dt),
+        int(n_epochs),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    out["preconditioner_diag"] = np.asarray(
+        out["preconditioner_diag"],
+        dtype=np.float64,
+    )
+    return out
+
+
+def gle_langevin_preconditioned_objective(
+    objective,
+    max_fevals: int,
+    seed: int = 0,
+    omega0: float | None = None,
+    dt: float = 0.2,
+    n_epochs: int = 40,
+    x0=None,
+):
+    """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle."""
+    omega_arg = None if omega0 is None else float(omega0)
+    out = _core_gle_langevin_preconditioned_objective(
+        objective,
+        int(max_fevals),
+        int(seed),
+        omega_arg,
+        float(dt),
+        int(n_epochs),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    out["preconditioner_diag"] = np.asarray(
+        out["preconditioner_diag"],
+        dtype=np.float64,
+    )
     return out
 
 
@@ -436,6 +535,9 @@ __all__ = [
     "additive_independence",
     "estimate_gle_omega0",
     "gle_langevin",
+    "gle_langevin_objective",
+    "gle_langevin_preconditioned",
+    "gle_langevin_preconditioned_objective",
     "run",
     "run_device",
     "run_ensemble",
