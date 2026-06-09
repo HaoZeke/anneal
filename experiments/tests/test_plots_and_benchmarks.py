@@ -4393,6 +4393,30 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.boundary_qmc_polish_budget_divisor
         == anneal_sota.DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
     )
+    assert (
+        config.trust_region_qmc_poll_min_dimension
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_MIN_DIMENSION
+    )
+    assert (
+        config.trust_region_qmc_poll_max_dimension
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_MAX_DIMENSION
+    )
+    assert (
+        config.trust_region_qmc_poll_budget_divisor
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_BUDGET_DIVISOR
+    )
+    assert (
+        config.trust_region_qmc_poll_radius_fraction
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_RADIUS_FRACTION
+    )
+    assert (
+        config.trust_region_qmc_poll_levels
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_LEVELS
+    )
+    assert (
+        config.trust_region_qmc_poll_points_per_level
+        == anneal_sota.DEFAULT_TRUST_REGION_QMC_POLL_POINTS_PER_LEVEL
+    )
     assert anneal_sota._boundary_qmc_polish_active(
         config.boundary_qmc_polish_min_dimension,
         config,
@@ -4403,6 +4427,18 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
     )
     assert not anneal_sota._boundary_qmc_polish_active(
         config.boundary_qmc_polish_max_dimension + 1,
+        config,
+    )
+    assert anneal_sota._trust_region_qmc_poll_active(
+        config.trust_region_qmc_poll_min_dimension,
+        config,
+    )
+    assert not anneal_sota._trust_region_qmc_poll_active(
+        config.trust_region_qmc_poll_min_dimension - 1,
+        config,
+    )
+    assert not anneal_sota._trust_region_qmc_poll_active(
+        config.trust_region_qmc_poll_max_dimension + 1,
         config,
     )
     assert anneal_sota._shifted_qmc_polish_active(
@@ -4633,6 +4669,105 @@ def test_anneal_sota_qmc_hybrid_continues_after_boundary_qmc_slice(monkeypatch):
     assert counter.objective_evals > 1
     assert counter.grad_evals >= 1
     assert best <= -4.0
+
+
+def test_anneal_sota_qmc_hybrid_continues_after_trust_region_qmc_slice(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    poll_calls = []
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_trust_region_poll_objective(
+        objective,
+        center,
+        max_evals,
+        *,
+        seed,
+        radius_fraction,
+        n_levels,
+        points_per_level,
+    ):
+        del seed
+        poll_calls.append(
+            (
+                counter.budget,
+                int(max_evals),
+                float(radius_fraction),
+                int(n_levels),
+                int(points_per_level),
+                np.asarray(center, dtype=np.float64).tolist(),
+            )
+        )
+        objective.fn(np.zeros(3, dtype=np.float64))
+        return {
+            "best_val": -6.0,
+            "best_pos": np.zeros(3, dtype=np.float64),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_trust_region_poll_objective=qmc_trust_region_poll_objective,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        boundary_qmc_polish_enabled=False,
+        shifted_qmc_polish_enabled=False,
+        trust_region_qmc_poll_min_dimension=3,
+        trust_region_qmc_poll_max_dimension=3,
+        trust_region_qmc_poll_budget_divisor=2,
+        trust_region_qmc_poll_radius_fraction=0.0,
+        trust_region_qmc_poll_levels=2,
+        trust_region_qmc_poll_points_per_level=0,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(3, -1.0),
+        np.full(3, 1.0),
+        dim=3,
+        grad=None,
+        rng=np.random.default_rng(41),
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+        anchor=np.full(3, 0.25),
+    )
+
+    assert poll_calls == [(8, 8, 0.0, 2, 0, [0.25, 0.25, 0.25])]
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert counter.objective_evals > 1
+    assert counter.grad_evals == 0
+    assert best <= -6.0
 
 
 def test_anneal_sota_qmc_hybrid_continues_after_shifted_qmc_slice(monkeypatch):
