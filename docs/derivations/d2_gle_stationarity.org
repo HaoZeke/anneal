@@ -1,0 +1,324 @@
+* D2: GLE move-kernel stationarity at fixed temperature
+:PROPERTIES:
+:CUSTOM_ID: d2-gle-move-kernel-stationarity-at-fixed-temperature
+:END:
+** Setup
+:PROPERTIES:
+:CUSTOM_ID: setup
+:END:
+The generalized Langevin equation (GLE) thermostat in
+=eindir/src/gle.rs= realizes colored-noise dynamics through a Markovian
+augmentation. The physical coordinate \(x \in \mathbb{R}^d\) carries
+momentum \(p\), and \(n_s\) auxiliary momenta
+\(s = (s_1, \dots, s_{n_s})\) shape a frequency-dependent friction.
+Stack the augmented momentum state as
+\(z = (p, s_1, \dots, s_{n_s})^\top \in
+\mathbb{R}^{n_s + 1}\) (per physical coordinate; coordinates decouple in
+the bath so we analyze one). The continuous dynamics is
+
+\[
+\begin{aligned}
+\dot{x} &= p, \\
+dz &= -A_p\, z\, dt \;-\; (\nabla f(x))\, e_0\, dt \;+\; B_p\, dW,
+\end{aligned}
+\tag{D2.1}
+\]
+
+where \(e_0 = (1, 0, \dots, 0)^\top\) injects the force only into the
+physical momentum, \(A_p \in \mathbb{R}^{(n_s+1)\times(n_s+1)}\) is the
+drift acting on \((p, s)\), \(B_p\) the diffusion, and \(W\) a standard
+Wiener process. The drift and diffusion satisfy the
+*fluctuation-dissipation* relation (the convention in
+=eindir/src/gle.rs=, lines 191-192)
+
+\[
+A_p\, C \;+\; C\, A_p^\top \;=\; B_p\, B_p^\top,
+\qquad C = T\, I,
+\tag{D2.2}
+\]
+
+the *sampling* (canonical) thermostat: the augmented covariance is
+isotropic at temperature \(T\). The "a la carte" property is that (D2.2)
+fixes correctness (through \(C\)) while leaving \(A_p\) free to tune
+acceleration.
+
+For the fitted =optimal_sampling_drift=, each bath block is a damped
+oscillator with eigenvalues \(-\Gamma_k \pm i\Omega_k\), skew-coupled to
+\(p\). The oscillator and coupling terms are skew, so \(A_p + A_p^\top\)
+is diagonal and non-negative; with \(C = T I\), (D2.2) gives
+\(B_p B_p^\top = T (A_p + A_p^\top)\), a diagonal positive-semidefinite
+matrix, hence a valid noise covariance.
+
+** Part (a): the augmented OU sub-dynamics leaves \(N(0, C)\) invariant exactly
+:PROPERTIES:
+:CUSTOM_ID: part-a-the-augmented-ou-sub-dynamics-leaves-n0-c-invariant-exactly
+:END:
+Freeze \(x\) (drop the force term), so the bath obeys the linear OU SDE
+
+\[
+dz \;=\; -A_p\, z\, dt + B_p\, dW.
+\tag{D2.3}
+\]
+
+*** Proposition D2.1 (continuous OU invariance)
+:PROPERTIES:
+:CUSTOM_ID: proposition-d2.1-continuous-ou-invariance
+:END:
+If (D2.2) holds with \(C = T I\), then \(N(0, C)\) is the unique
+stationary distribution of (D2.3), provided \(A_p\) is positive-stable
+(all eigenvalues have positive real part) and \((A_p, B_p)\) is
+controllable.
+
+*Proof.* The covariance \(\Sigma(t) = \mathrm{Cov}(z_t)\) of a linear OU
+process solves the matrix differential equation
+\(\dot{\Sigma} = -A_p \Sigma - \Sigma
+A_p^\top + B_p B_p^\top\). A stationary covariance \(\Sigma_\infty\) is
+a fixed point, i.e. solves the Lyapunov equation
+\(A_p \Sigma_\infty + \Sigma_\infty
+A_p^\top = B_p B_p^\top\). By (D2.2), \(\Sigma_\infty = C = T I\) is
+exactly such a solution. Positive-stability of \(A_p\) makes the
+Lyapunov solution unique, and the OU process is Gaussian, so its
+stationary law is \(N(0, C)\). The Gaussian density
+\(\rho_C(z) \propto \exp(-z^\top C^{-1} z / 2) = \exp(-\|z\|^2 / 2T)\)
+is the tempered Maxwell-Boltzmann momentum law, as required.
+\(\qquad\blacksquare\)
+
+*** Proposition D2.2 (exact discrete OU step preserves \(C\) identically)
+:PROPERTIES:
+:CUSTOM_ID: proposition-d2.2-exact-discrete-ou-step-preserves-c-identically
+:END:
+The integrator does not discretize (D2.3) approximately; it uses the
+*exact* OU transition. For step \(dt\), set
+
+\[
+\mathrm{T} = e^{-dt\, A_p},
+\qquad
+S S^\top = C - \mathrm{T}\, C\, \mathrm{T}^\top,
+\qquad
+z' = \mathrm{T}\, z + S\, \xi,\quad \xi \sim N(0, I).
+\tag{D2.4}
+\]
+
+If \(z \sim N(0, C)\) then \(z' \sim N(0, C)\) exactly, with no
+\(O(dt)\) or \(O(dt^2)\) error.
+
+*Proof.* \(z'\) is Gaussian with mean zero and covariance
+
+\[
+\mathrm{Cov}(z') = \mathrm{T}\, C\, \mathrm{T}^\top + S S^\top
+= \mathrm{T}\, C\, \mathrm{T}^\top + \big(C - \mathrm{T}\, C\, \mathrm{T}^\top\big)
+= C.
+\]
+
+The cancellation is algebraic and holds for any \(\mathrm{T}\), so the
+choice (D2.4) makes \(N(0, C)\) stationary for the discrete bath step to
+machine precision; the only error is the floating-point evaluation of
+\(e^{-dt A_p}\) and the LDL\(^\top\) root of \(S S^\top\) (=ldl_sqrt=).
+The positive-semidefiniteness of \(C - \mathrm{T} C \mathrm{T}^\top\)
+(needed for a real \(S\)) follows from (D2.2):
+\(C - \mathrm{T} C \mathrm{T}^\top = \int_0^{dt} e^{-\tau A_p} B_p B_p^\top
+e^{-\tau A_p^\top}\, d\tau \succeq 0\). \(\qquad\blacksquare\)
+
+This is why =eindir/src/gle.rs= documents that the bath leaves the
+Boltzmann momentum law invariant for *any* valid drift \(A_p\):
+correctness rides on (D2.2) and (D2.4) alone, independent of the
+acceleration tuning.
+
+** Part (b): BAB splitting, harmonic-limit invariant, and anharmonic bias
+:PROPERTIES:
+:CUSTOM_ID: part-b-bab-splitting-harmonic-limit-invariant-and-anharmonic-bias
+:END:
+The full Move (=anneal/src/methods/gle_langevin.rs=) integrates (D2.1)
+by a symmetric BAB splitting. Write the generator
+\(\mathcal{L} = \mathcal{L}_B +
+\mathcal{L}_A\), where the deterministic Hamiltonian flow (\(B\) blocks:
+position drift and force kick) is
+
+\[
+\mathcal{L}_A = p \cdot \nabla_x - \nabla f(x)\cdot \nabla_p,
+\]
+
+and the OU bath (\(B\) thermostat half-steps) is
+\(\mathcal{L}_B = -\,(A_p z)\cdot
+\nabla_z + \tfrac{1}{2}(B_p B_p^\top) : \nabla_z \nabla_z\). The BAB
+step over \(dt\) composes
+
+\[
+\Phi_{dt}^{\mathrm{BAB}}
+= e^{\frac{dt}{2}\mathcal{L}_B}\;
+  e^{dt\,\mathcal{L}_A}\;
+  e^{\frac{dt}{2}\mathcal{L}_B},
+\tag{D2.5}
+\]
+
+with the *exact* OU sub-flow \(e^{\frac{dt}{2}\mathcal{L}_B}\) from
+(D2.4).
+
+*** Harmonic limit
+:PROPERTIES:
+:CUSTOM_ID: harmonic-limit
+:END:
+Suppose \(f\) is quadratic, \(f(x) = \tfrac12 x^\top H x\) with
+\(H \succ 0\). Then \(\mathcal{L}_A\) generates a /linear/ Hamiltonian
+flow and the joint \((x, z)\)-dynamics is a linear OU process. The
+target tempered Gibbs measure on \((x, p)\) is
+
+\[
+\pi_T(x, p) \;\propto\; \exp\!\Big(-\tfrac{1}{T}\big[f(x) + \tfrac12 p^\top p\big]\Big),
+\tag{D2.6}
+\]
+
+a Gaussian with covariance \(\mathrm{diag}(T H^{-1}, T I)\) on
+\((x, p)\), augmented by \(N(0, T I)\) on the auxiliary \(s\). Each
+factor of (D2.5) preserves the appropriate Gaussian exactly: the OU
+half-steps preserve the momentum/auxiliary Gaussian by Proposition D2.2,
+and the symplectic linear flow \(e^{dt
+\mathcal{L}_A}\) preserves the joint quadratic Hamiltonian's Gibbs
+Gaussian exactly (Verlet/leapfrog is exact-in-distribution for Gaussian
+targets under a linear force, because it is a symplectic linear map
+conjugate to the exact flow). The composition of measure-preserving maps
+preserves the product Gaussian, so:
+
+#+begin_quote
+In the harmonic limit the BAB integrator with exact OU sub-step has
+invariant distribution equal to the tempered Gibbs measure (D2.6) on the
+\((x, p)\) marginals, with *zero discretization bias*, for every \(dt\)
+in the leapfrog stability region \(dt < 2/\sqrt{\lambda_{\max}(H)}\).
+
+#+end_quote
+
+*** Anharmonic bias
+:PROPERTIES:
+:CUSTOM_ID: anharmonic-bias
+:END:
+For general \(C^3\) anharmonic \(f\), the splitting (D2.5) no longer
+preserves \(\pi_T\) exactly. The Baker-Campbell-Hausdorff expansion of
+(D2.5) gives a modified generator
+\(\widetilde{\mathcal{L}} = \mathcal{L} + dt^2\, \mathcal{E} +
+O(dt^4)\) (the symmetric BAB split kills the \(O(dt)\) term, so the
+leading error is \(O(dt^2)\)). The stationary distribution
+\(\widetilde{\pi}_{T, dt}\) of the discrete chain differs from \(\pi_T\)
+by
+
+\[
+\widetilde{\pi}_{T, dt}(x, p)
+= \pi_T(x, p)\,\big(1 + dt^2\, h(x, p) + O(dt^4)\big),
+\tag{D2.7}
+\]
+
+with \(h\) a bounded function determined by \(\mathcal{E}\) and
+depending on the third and fourth derivatives of \(f\). The bias in any
+smooth observable \(g\) is
+
+\[
+\Big|\,\mathbb{E}_{\widetilde{\pi}_{T, dt}}[g] - \mathbb{E}_{\pi_T}[g]\,\Big|
+\;=\; O(dt^2),
+\tag{D2.8}
+\]
+
+the standard weak order-2 accuracy of symmetric splitting integrators
+for Langevin dynamics (Leimkuhler and Matthews, 2015, Chapter 7;
+Bou-Rabee and Owhadi, 2010). The constant scales with
+\(\sup\|\nabla^3 f\|\) and \(\sup\|\nabla^4 f\|\) on the support. *To
+remove the \(O(dt^2)\) bias entirely*, wrap the GLE proposal in a
+Metropolis correction against the true \(f\) (the GLE Move feeds the
+\(\mathrm{Accept}\) slot exactly as in D1); this is the route the
+algebra makes available without changing the bath.
+
+** Part (c): ergodicity of the continuous dynamics (Hormander conditions)
+:PROPERTIES:
+:CUSTOM_ID: part-c-ergodicity-of-the-continuous-dynamics-hormander-conditions
+:END:
+For the continuous dynamics (D2.1) to sample
+\(\pi_T(x) \propto e^{-f(x)/T}\) *marginally* in \(x\), two conditions
+suffice.
+
+*(C1) Hypoellipticity (Hormander's bracket condition).* Noise enters
+only the auxiliary/physical momentum channel (\(B_p\) has rank
+\(\le n_s + 1\) and zero rows on the \(x\) block), so the generator
+\(\mathcal{L}\) is degenerate-elliptic. The dynamics is hypoelliptic
+when the Lie algebra generated by the noise vector fields
+\(\{B_p e_i\}\) and their iterated commutators with the drift
+\(\{A_p, \nabla f\}\) spans the full tangent space
+\(\mathbb{R}^{d(n_s+2)}\) at every point. Concretely, the position \(x\)
+receives randomness only through the chain
+\(\text{noise} \to s \to p \to x\); the bracket
+\([\mathcal{L}_A, \mathcal{L}_B]\) must propagate fluctuations from the
+bath into \(p\) and then into \(x\). For the damped-oscillator drift
+with non-zero coupling \(c_k \ne 0\) and a non-degenerate force Hessian,
+the bracket condition holds (Hormander, 1967; Pavliotis, 2014, Section
+6.3). This gives a smooth transition density.
+
+*(C2) Confinement / drift condition.* \(f\) is \(C^2\), bounded below,
+and grows at infinity (\(f(x) \to \infty\) as \(\|x\| \to \infty\), or
+\(f\) is confined to the bounded box with reflecting/clamped boundaries)
+so that a Lyapunov function
+\(V(x, z) = f(x) + \tfrac12 \|z\|^2 + \text{const}\) yields a geometric
+drift condition \(\mathcal{L} V \le -\alpha V + \beta\, \mathbf{1}_K\)
+on a compact set \(K\).
+
+Under (C1)+(C2), the augmented process is geometrically ergodic with
+unique invariant measure
+\(\propto \exp\!\big(-\tfrac1T[f(x) + \tfrac12\|z\|^2]\big)\)
+(Mattingly, Stuart and Higham, 2002; Pavliotis, 2014, Theorem 6.16).
+Marginally integrating out \(z\) recovers the Gibbs target
+
+\[
+\int \exp\!\Big(-\tfrac1T\big[f(x) + \tfrac12 \|z\|^2\big]\Big)\, dz
+\;\propto\; e^{-f(x)/T} \;=\; Z_f(T)\, \pi_T(x),
+\]
+
+so the \(x\)-marginal of the stationary law is exactly \(\pi_T\). The
+colored-noise spectrum set by \(A_p\) controls the /rate/ of convergence
+(the optimal-sampling fit flattens the worst normalized efficiency to
+\(0.13\) versus \(0.07\) for the best single white-noise friction,
+=eindir/src/gle.rs= line 169) but not the /target/, which (D2.2) pins to
+\(\pi_T\).
+
+** Connection to the algebra
+:PROPERTIES:
+:CUSTOM_ID: connection-to-the-algebra
+:END:
+The GLE bath sits entirely in the \(\mathrm{Move}\) slot: it is a
+temperature-indexed proposal kernel \(\mathrm{Move}(x, T)\) whose
+invariant momentum law is \(N(0, T I)\) by Part (a). Law (L4)
+(temperature monotonicity of acceptance) is untouched because the bath
+proposes; acceptance stays in its own slot. When the GLE proposal is
+Metropolized against the true \(f\), laws (L1)/(L3) of the
+\(\mathrm{Accept}\) slot remove the \(O(dt^2)\) anharmonic bias of Part
+(b), giving exact sampling of \(\pi_T\) at fixed \(T\) regardless of
+step size.
+
+** Witness
+:PROPERTIES:
+:CUSTOM_ID: witness
+:END:
+=proofs/d2_gle_stationarity.py= verifies symbolically on a \(2\times2\)
+block (\(n_s = 1\)): the FDT relation
+\(A_p C + C A_p^\top = T(A_p + A_p^\top)\) is symmetric and diagonal;
+\(C = T I\) solves the Lyapunov equation; and the exact discrete OU step
+\(z' = \mathrm{T} z + S\xi\) with \(SS^\top = C - \mathrm{T} C
+\mathrm{T}^\top\) preserves \(\mathrm{Cov} = C\) for *any* propagator
+\(\mathrm{T}\) (so the invariance is an identity, not an approximation).
+Numerically it confirms FDT and covariance preservation for the fitted
+\(n_s = 12\) =optimal_sampling_drift=. Tests in
+=proofs/tests/test_d2_gle_stationarity.py=.
+
+** References
+:PROPERTIES:
+:CUSTOM_ID: references
+:END:
+- Ceriotti, M., Bussi, G. and Parrinello, M. (2010). Colored-noise
+  thermostats a la carte. J. Chem. Theory Comput. 6(4), 1170-1180.
+- Leimkuhler, B. and Matthews, C. (2015). Molecular Dynamics: With
+  Deterministic and Stochastic Numerical Methods. Springer.
+- Bou-Rabee, N. and Owhadi, H. (2010). Long-run accuracy of variational
+  integrators in the stochastic context. SIAM J. Numer. Anal. 48(1),
+  278-297.
+- Mattingly, J. C., Stuart, A. M. and Higham, D. J. (2002). Ergodicity
+  for SDEs and approximations: locally Lipschitz vector fields and
+  degenerate noise. Stochastic Process. Appl. 101(2), 185-232.
+- Pavliotis, G. A. (2014). Stochastic Processes and Applications.
+  Springer Texts in Applied Mathematics 60.
+- Hormander, L. (1967). Hypoelliptic second order differential
+  equations. Acta Math. 119, 147-171.
