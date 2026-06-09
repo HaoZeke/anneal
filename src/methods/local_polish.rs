@@ -597,36 +597,48 @@ where
         let zoom_bounds = Bounds::new(zoom_low, zoom_high, bounds.slack);
         let remaining = max_evals - n_evals;
         let n_batch = batch_size.min(remaining);
-        let level_seed = seed.wrapping_add(level as u64);
-        let points = eindir_core::shifted_low_discrepancy_points(
-            &zoom_bounds,
-            n_batch,
-            crate::runner::qmc_skip_from_seed(level_seed),
-            level_seed,
-        );
+        let replica_count = bounds.dims.min(n_batch).max(1);
+        let points_per_replica = n_batch.div_ceil(replica_count).max(1);
         let mut level_improved = false;
-        for point in points.outer_iter() {
-            let pos = bounds.clip(point);
-            let value = obj.eval(pos.view());
-            n_evals += 1;
-            if value.is_finite() && value < best_val {
-                best_val = value;
-                best_pos = pos;
-                level_improved = true;
-            }
-            if n_evals >= max_evals {
+        let mut direct_points = 0usize;
+        for replica in 0..replica_count {
+            if n_evals >= max_evals || direct_points >= n_batch {
                 break;
             }
-            let reflected = bounds.clip((&current_center * 2.0 - &point).view());
-            let reflected_value = obj.eval(reflected.view());
-            n_evals += 1;
-            if reflected_value.is_finite() && reflected_value < best_val {
-                best_val = reflected_value;
-                best_pos = reflected;
-                level_improved = true;
-            }
-            if n_evals >= max_evals {
-                break;
+            let remaining_direct = n_batch - direct_points;
+            let replica_batch = points_per_replica.min(remaining_direct);
+            let level_seed = seed
+                .wrapping_add((level * replica_count + replica) as u64);
+            let points = eindir_core::shifted_low_discrepancy_points(
+                &zoom_bounds,
+                replica_batch,
+                crate::runner::qmc_skip_from_seed(level_seed),
+                level_seed,
+            );
+            for point in points.outer_iter() {
+                direct_points += 1;
+                let pos = bounds.clip(point);
+                let value = obj.eval(pos.view());
+                n_evals += 1;
+                if value.is_finite() && value < best_val {
+                    best_val = value;
+                    best_pos = pos;
+                    level_improved = true;
+                }
+                if n_evals >= max_evals {
+                    break;
+                }
+                let reflected = bounds.clip((&current_center * 2.0 - &point).view());
+                let reflected_value = obj.eval(reflected.view());
+                n_evals += 1;
+                if reflected_value.is_finite() && reflected_value < best_val {
+                    best_val = reflected_value;
+                    best_pos = reflected;
+                    level_improved = true;
+                }
+                if n_evals >= max_evals {
+                    break;
+                }
             }
         }
         if level_improved {
