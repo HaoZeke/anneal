@@ -2322,7 +2322,7 @@ def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
     def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
         captured["gle_max_fevals"] = int(max_fevals)
         return {
-            "best_val": 4.0,
+            "best_val": -4.0,
             "best_pos": np.array([0.3, -0.3], dtype=np.float64),
             "n_evals": 20,
         }
