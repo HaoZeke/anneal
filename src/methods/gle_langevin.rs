@@ -15,7 +15,7 @@
 use eindir_core::{optimal_sampling_drift, GleThermostat, Objective};
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 
 use eindir_core::Gradient;
 
@@ -29,6 +29,8 @@ const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
 const GLE_MIN_TIMESTEP: f64 = 1e-6;
 /// Numerical floor for positive frequencies and curvatures.
 const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
+/// Largest coordinate stretch or shrink allowed in the diagonal transform.
+const GLE_PRECONDITIONER_MAX_SCALE: f64 = 32.0;
 /// Final annealing temperature as a fraction of the initial temperature.
 const GLE_ANNEAL_TEMPERATURE_FLOOR_RATIO: f64 = 1e-3;
 
@@ -90,18 +92,8 @@ fn unit_gle_preconditioner(dim: usize, omega0: f64) -> GlePreconditioner {
     }
 }
 
-fn splitmix64(mut x: u64) -> u64 {
-    x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = x;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-fn axis_probe_order(seed: u64, dim: usize) -> Vec<usize> {
-    let mut axes = (0..dim).collect::<Vec<_>>();
-    axes.sort_by_key(|axis| splitmix64(seed ^ (*axis as u64)));
-    axes
+fn rademacher_direction<R: Rng + ?Sized>(rng: &mut R, dim: usize) -> Array1<f64> {
+    Array1::from_iter((0..dim).map(|_| if rng.random::<bool>() { 1.0 } else { -1.0 }))
 }
 
 fn gle_preconditioner_probe_budget(max_fevals: usize, dim: usize) -> usize {
@@ -130,29 +122,31 @@ where
     let high = &bounds.high;
     let fallback = fallback_gle_omega0(low, high);
     let center = (low + high) * 0.5;
-    let probes = max_probes.min(dim);
+    let probes = max_probes;
     if probes == 0 {
         return unit_gle_preconditioner(dim, fallback);
     }
-    let rel_step = f64::EPSILON.cbrt();
-    let min_step = f64::EPSILON.sqrt();
-    let mut curvature = Array1::<f64>::from_elem(dim, f64::NAN);
+    let min_width = low
+        .iter()
+        .zip(high.iter())
+        .filter_map(|(lo, hi)| {
+            let width = hi - lo;
+            (width.is_finite() && width > 0.0).then_some(width)
+        })
+        .fold(f64::INFINITY, f64::min);
+    if !min_width.is_finite() || min_width <= 0.0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    let step = (f64::EPSILON.cbrt() * min_width).max(f64::EPSILON.sqrt());
+    let mut curvature = Array1::<f64>::zeros(dim);
+    let mut used = 0usize;
     let mut n_grads = 0usize;
+    let mut rng = StdRng::seed_from_u64(seed);
 
-    for axis in axis_probe_order(seed, dim).into_iter().take(probes) {
-        let width = high[axis] - low[axis];
-        if !width.is_finite() || width <= 0.0 {
-            continue;
-        }
-        let step = (rel_step * width.abs()).max(min_step);
-        let mut xp = center.clone();
-        let mut xm = center.clone();
-        xp[axis] = (center[axis] + step).min(high[axis]);
-        xm[axis] = (center[axis] - step).max(low[axis]);
-        let denom = xp[axis] - xm[axis];
-        if !denom.is_finite() || denom.abs() <= min_step {
-            continue;
-        }
+    for _ in 0..probes {
+        let direction = rademacher_direction(&mut rng, dim);
+        let xp = bounds.clip((&center + &(&direction * step)).view());
+        let xm = bounds.clip((&center - &(&direction * step)).view());
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
         n_grads += 2;
@@ -163,11 +157,15 @@ where
         {
             continue;
         }
-        let axis_curvature = ((gp[axis] - gm[axis]) / denom).abs();
-        if axis_curvature.is_finite() && axis_curvature > GLE_FREQUENCY_FLOOR {
-            curvature[axis] = axis_curvature;
-        }
+        let hv = (&gp - &gm) * (0.5 / step);
+        curvature += &(&direction * &hv);
+        used += 1;
     }
+
+    if used == 0 {
+        return unit_gle_preconditioner(dim, fallback);
+    }
+    curvature.mapv_inplace(|value| (value / used as f64).abs());
 
     let mut positive: Vec<f64> = curvature
         .iter()
@@ -178,10 +176,13 @@ where
         return unit_gle_preconditioner(dim, fallback);
     }
     positive.sort_by(|left, right| left.total_cmp(right));
-    let reference = positive[0].max(GLE_FREQUENCY_FLOOR);
+    let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
+    let min_scale = 1.0 / GLE_PRECONDITIONER_MAX_SCALE;
     let scale = curvature.mapv(|value| {
         if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
-            (reference / value).sqrt()
+            (reference / value)
+                .sqrt()
+                .clamp(min_scale, GLE_PRECONDITIONER_MAX_SCALE)
         } else {
             1.0
         }
