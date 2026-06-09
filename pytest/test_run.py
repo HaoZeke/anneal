@@ -51,6 +51,16 @@ def shifted_quadratic_grad(x: np.ndarray) -> np.ndarray:
     return np.array([2.0 * (x[0] - 0.25), 2.0 * (x[1] + 0.4)])
 
 
+def anisotropic_quadratic(x: np.ndarray) -> float:
+    arr = np.asarray(x, dtype=np.float64)
+    return float(arr[0] * arr[0] + 4.0 * arr[1] * arr[1])
+
+
+def anisotropic_quadratic_grad(x: np.ndarray) -> np.ndarray:
+    arr = np.asarray(x, dtype=np.float64)
+    return np.array([2.0 * arr[0], 8.0 * arr[1]], dtype=np.float64)
+
+
 def smooth_needle(x: np.ndarray) -> float:
     dx = np.asarray(x, dtype=np.float64) - np.array([0.5, -0.5])
     return float(-np.exp(-40.0 * np.dot(dx, dx)))
@@ -264,6 +274,23 @@ def test_preconditioned_gle_langevin_accepts_native_objective_handle():
     assert result["best_pos"] == pytest.approx(x0)
     assert result["best_val"] == pytest.approx(0.0)
     assert result["preconditioner_diag"] == pytest.approx([1.0, 1.0])
+
+
+def test_preconditioned_gle_langevin_honors_probe_count():
+    result = gle_langevin_preconditioned(
+        anisotropic_quadratic,
+        anisotropic_quadratic_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        max_fevals=12,
+        seed=7,
+        x0=np.array([0.5, 0.5]),
+        preconditioner_probes=2,
+    )
+
+    assert result["n_preconditioner_grads"] == 4
+    assert result["n_evals"] <= 12
+    assert result["preconditioner_diag"] == pytest.approx([4.0, 1.0])
 
 
 def test_qmc_polish_accepts_native_gradient_handle():

@@ -457,9 +457,11 @@ def gle_langevin_preconditioned(
     dt: float = 0.2,
     n_epochs: int = 40,
     x0=None,
+    preconditioner_probes: int | None = None,
 ):
     """GLE-Langevin with an adaptive diagonal coordinate preconditioner."""
     omega_arg = None if omega0 is None else float(omega0)
+    probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned(
         obj_fn,
         grad_fn,
@@ -471,6 +473,7 @@ def gle_langevin_preconditioned(
         float(dt),
         int(n_epochs),
         None if x0 is None else np.asarray(x0, dtype=np.float64),
+        probe_arg,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     out["preconditioner_diag"] = np.asarray(
@@ -488,9 +491,11 @@ def gle_langevin_preconditioned_objective(
     dt: float = 0.2,
     n_epochs: int = 40,
     x0=None,
+    preconditioner_probes: int | None = None,
 ):
     """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle."""
     omega_arg = None if omega0 is None else float(omega0)
+    probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned_objective(
         objective,
         int(max_fevals),
@@ -499,6 +504,7 @@ def gle_langevin_preconditioned_objective(
         float(dt),
         int(n_epochs),
         None if x0 is None else np.asarray(x0, dtype=np.float64),
+        probe_arg,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     out["preconditioner_diag"] = np.asarray(

@@ -1921,6 +1921,14 @@ def _gle_core_budget(work_budget):
     return max(1, int(work_budget) // 2)
 
 
+def _gle_preconditioner_probe_count(dim, gle_fevals):
+    full_sweep_grads = 2 * max(0, int(dim))
+    available = max(0, int(gle_fevals))
+    if full_sweep_grads > 0 and full_sweep_grads <= available - full_sweep_grads:
+        return int(dim)
+    return None
+
+
 def _gle_cutest_work_units(result):
     gradient_units = max(0, int(result.get("n_evals", 0)))
     preconditioner_grads = max(0, int(result.get("n_preconditioner_grads", 0)))
@@ -1968,6 +1976,13 @@ def _run_cutest_gle_langevin(
         "n_epochs": 1,
         "x0": 0.5 * (design_low + design_high),
     }
+    preconditioned_kwargs = {
+        **kwargs,
+        "preconditioner_probes": _gle_preconditioner_probe_count(
+            prob.dim,
+            gle_fevals,
+        ),
+    }
     if not has_native_preconditioned and not has_callable_preconditioned and hasattr(
         anneal_module,
         "estimate_gle_omega0",
@@ -1995,7 +2010,7 @@ def _run_cutest_gle_langevin(
                 result = anneal_module.gle_langevin_preconditioned_objective(
                     objective,
                     int(gle_fevals),
-                    **kwargs,
+                    **preconditioned_kwargs,
                 )
             else:
                 result = anneal_module.gle_langevin_objective(
@@ -2015,7 +2030,7 @@ def _run_cutest_gle_langevin(
                 design_low,
                 design_high,
                 int(gle_fevals),
-                **kwargs,
+                **(preconditioned_kwargs if has_callable_preconditioned else kwargs),
             )
     except Exception:
         return None
@@ -2352,6 +2367,13 @@ def _run_cutest_bayesian_adaptive_gle(
         "n_epochs": max(1, min(int(n_epochs), int(max_fevals))),
         "x0": np.clip(anchor_pos, local_low, local_high),
     }
+    preconditioned_kwargs = {
+        **kwargs,
+        "preconditioner_probes": _gle_preconditioner_probe_count(
+            prob.dim,
+            gle_fevals,
+        ),
+    }
     try:
         result = None
         if has_native_preconditioned or has_native_scalar:
@@ -2365,7 +2387,7 @@ def _run_cutest_bayesian_adaptive_gle(
                 result = anneal_module.gle_langevin_preconditioned_objective(
                     objective,
                     int(gle_fevals),
-                    **kwargs,
+                    **preconditioned_kwargs,
                 )
             else:
                 result = anneal_module.gle_langevin_objective(
@@ -2385,7 +2407,7 @@ def _run_cutest_bayesian_adaptive_gle(
                 local_low,
                 local_high,
                 int(gle_fevals),
-                **kwargs,
+                **(preconditioned_kwargs if has_callable_preconditioned else kwargs),
             )
     except Exception:
         candidates = []
