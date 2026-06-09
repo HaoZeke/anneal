@@ -4770,6 +4770,115 @@ def test_anneal_sota_qmc_hybrid_continues_after_trust_region_qmc_slice(monkeypat
     assert best <= -6.0
 
 
+def test_anneal_sota_qmc_hybrid_trust_polls_scheduled_native_polish(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    trust_calls = []
+    native_calls = 0
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def qmc_trust_region_poll_objective(
+        objective,
+        center,
+        max_evals,
+        *,
+        seed,
+        radius_fraction,
+        n_levels,
+        points_per_level,
+    ):
+        del seed, radius_fraction, n_levels, points_per_level
+        trust_calls.append((counter.budget, int(max_evals), center.tolist()))
+        objective.fn(np.zeros(3, dtype=np.float64))
+        return {
+            "best_val": -7.0,
+            "best_pos": np.zeros(3, dtype=np.float64),
+            "n_evals": 1,
+            "n_grads": 0,
+        }
+
+    def native_qmc_polish(counter_arg, jac, low, high, rng, *, k_polish, config):
+        del counter_arg, jac, low, high, rng, k_polish, config
+        nonlocal native_calls
+        native_calls += 1
+        if native_calls == 1:
+            return {
+                "best_val": -2.0,
+                "best_pos": np.full(3, 0.5, dtype=np.float64),
+            }
+        return None
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        qmc_trust_region_poll_objective=qmc_trust_region_poll_objective,
+    )
+    monkeypatch.setattr(anneal_sota, "_native_qmc_polish", native_qmc_polish)
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        boundary_qmc_polish_enabled=False,
+        shifted_qmc_polish_enabled=False,
+        trust_region_qmc_poll_min_dimension=3,
+        trust_region_qmc_poll_max_dimension=3,
+        trust_region_qmc_poll_budget_divisor=2,
+        trust_region_qmc_poll_levels=2,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(3, -1.0),
+        np.full(3, 1.0),
+        dim=3,
+        grad=grad,
+        rng=np.random.default_rng(43),
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+    )
+
+    assert trust_calls
+    assert trust_calls[0][2] == [0.5, 0.5, 0.5]
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert best <= -7.0
+
+
 def test_anneal_sota_qmc_hybrid_continues_after_shifted_qmc_slice(monkeypatch):
     from experiments import anneal_sota
     from experiments.scripts import sota_cutest
