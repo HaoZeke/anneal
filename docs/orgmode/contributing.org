@@ -11,8 +11,8 @@ pixi run -e python python-test
 
 * Conventional Commits
 
-Commit messages follow the Conventional Commits convention (enforced
-by cog in CI via cocogitto). Use the standard prefixes:
+Commit messages follow the Conventional Commits convention (enforced by cog in CI via cocogitto).
+Use the standard prefixes:
 
 - =feat:=   new functionality
 - =fix:=    bug fix
@@ -24,13 +24,10 @@ by cog in CI via cocogitto). Use the standard prefixes:
 * Changelog (towncrier)
 
 Changelog is assembled with towncrier from news fragments (not cog).
-For any user-visible or breaking change, add a fragment under
-=docs/newsfragments/= before merging the PR:
+For any user-visible or breaking change, add a fragment under =docs/newsfragments/= before merging the PR:
 
-- Name: =+short-desc.type.rst= (or =123.type.rst= for PR #) where type is
-  one of: added, changed, removed, fixed, deprecated, security, dev, misc.
-- Content: one or more lines describing the change (towncrier adds the
-  bullet and wires the issue link from filename when numeric).
+- Name: =+short-desc.type.rst= (or =123.type.rst= for PR #) where type is one of: added, changed, removed, fixed, deprecated, security, dev, misc.
+- Content: one or more lines describing the change (towncrier adds the bullet and wires the issue link from filename when numeric).
 
 Preview/build locally (requires the uv feature or uv on PATH):
 
@@ -39,17 +36,15 @@ pixi r towncrier-draft   # preview, no write
 pixi r towncrier-build   # write to CHANGELOG.md and consume fragments
 #+END_SRC
 
-Run the build step as part of preparing a release tag (after version
-bump in relevant files). Fragments are required for changes that should
-appear in release notes.
+Run the build step as part of preparing a release tag (after version bump in relevant files).
+Fragments are required for changes that should appear in release notes.
 
 * Style
 
-Rust code is formatted with =cargo fmt= and linted with =cargo
-clippy --all-features -- -D warnings=. Python code follows
-=ruff=.
+Rust code is formatted with =cargo fmt= and linted with =cargo clippy --all-features -- -D warnings=.
+Python code follows =ruff=.
 
 * Tests
 
-Rust tests under =tests/= and =benches/=; Python tests under
-=pytest/=. The full pixi-driven matrix is what CI exercises.
+Rust tests under =tests/= and =benches/=; Python tests under =pytest/=.
+The full pixi-driven matrix is what CI exercises.

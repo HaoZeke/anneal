@@ -9,8 +9,11 @@ Any =Accept= that claims to implement the exact Metropolis (or =Tsallis=) rule u
 - C2 (log-domain formulation that never forms the ratio explicitly)
 - C3 (online-suffix-averaging / OSA guard against cancellation when comparing the incumbent)
 
-The crate builds with the safe default. The experiments under =experiments/exp1_underflow.py= ... =exp4_compensated.py= demonstrate the failure modes each channel closes (underflow in the ratio, cancellation when the incumbent is already the best-so-far, etc.).
+The crate builds with the safe default.
+The experiments under =experiments/exp1_underflow.py= ...
+=exp4_compensated.py= demonstrate the failure modes each channel closes (underflow in the ratio, cancellation when the incumbent is already the best-so-far, etc.).
 
 See the IISE manuscript section on finite-precision effects and the SymPy witnesses in =proofs/= for the exact identities that the three channels preserve.
 
-In user code you do not choose the channel; you choose an =Accept= implementation that advertises the contract. All presets and advanced drivers in the current surface use a channel that passes the laws checker.
+In user code you do not choose the channel; you choose an =Accept= implementation that advertises the contract.
+All presets and advanced drivers in the current surface use a channel that passes the laws checker.

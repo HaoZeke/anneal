@@ -3,22 +3,33 @@
 
 * How do I pick between the presets?
 
-See [[file:choose-driver.org][choose-driver]]. In short: values only and no separability assumption -> =Boltzmann= (or =Fast= for heavier tails). Separable or low effective dimension -> =additive_independence=. Gradient + ill-conditioned -> =gle_langevin=. Single budget, auto everything -> the Bayesian mixer pattern.
+See [[file:choose-driver.org][choose-driver]].
+In short: values only and no separability assumption -> =Boltzmann= (or =Fast= for heavier tails).
+Separable or low effective dimension -> =additive_independence=.
+Gradient + ill-conditioned -> =gle_langevin=.
+Single budget, auto everything -> the Bayesian mixer pattern.
 
 * What is the Bayesian mixer and when does it help?
 
-It maintains one Beta posterior per chain on whether that chain has produced a new global best. Thompson sampling (with 0.05 incumbent guard) decides which chain receives the next proposal. On problems with a few "good" regions the mixer quickly concentrates the budget on the chains that are making progress. See the dedicated tutorial for the numerical trace.
+It maintains one Beta posterior per chain on whether that chain has produced a new global best.
+Thompson sampling (with 0.05 incumbent guard) decides which chain receives the next proposal.
+On problems with a few "good" regions the mixer quickly concentrates the budget on the chains that are making progress.
+See the dedicated tutorial for the numerical trace.
 
 * Do I need to supply a gradient?
 
-Only for generalized =Langevin= equation (GLE), the polish variants, and Hamiltonian Monte Carlo (HMC)-style methods. Classical presets and additive independence are values-only.
+Only for generalized =Langevin= equation (GLE), the polish variants, and Hamiltonian Monte Carlo (HMC)-style methods.
+Classical presets and additive independence are values-only.
 
 See :eindir:doc:`howto/gradients` for how to provide one (including ``grad_fn`` on ``eindir.PyObjective`` for native derivatives from external frameworks). The ``Gradient`` trait and adapters now live in ``eindir_core``.
 
 * Precision and float16/float32 policy?
 
-The Rust core is f64 throughout. The device path respects the namespace of the bounds you pass (CuPy float32 arrays will keep everything in float32 on the GPU). The three-channel Accept contract is what guarantees that the acceptance decision remains monotone even when intermediate quantities underflow or cancel.
+The Rust core is f64 throughout.
+The device path respects the namespace of the bounds you pass (CuPy float32 arrays will keep everything in float32 on the GPU).
+The three-channel Accept contract is what guarantees that the acceptance decision remains monotone even when intermediate quantities underflow or cancel.
 
 * Reproducibility guarantees?
 
-Pass =seed= to every top-level entry point. The same seed on the same objective and bounds produces the same sequence of states (modulo any non-deterministic GPU scheduling when you use =run_device= with atomics; the CPU path is deterministic).
+Pass =seed= to every top-level entry point.
+The same seed on the same objective and bounds produces the same sequence of states (modulo any non-deterministic GPU scheduling when you use =run_device= with atomics; the CPU path is deterministic).

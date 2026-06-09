@@ -24,7 +24,9 @@ Gives the full public API: presets, =run=, =pilot_draws_qmc=, =additive_independ
 
 ** Extras (none required today)
 
-Anneal ships with no mandatory heavy optional dependencies at the top level. JAX or CuPy are only pulled if you choose to supply array namespaces that need them (e.g. CuPy bounds to =run_device=).
+Anneal ships with no mandatory heavy optional dependencies at the top level.
+JAX or CuPy are only pulled if you choose to supply array namespaces that need them (e.g.
+CuPy bounds to =run_device=).
 
 ** Full reproducible stack (pixi)
 
@@ -37,7 +39,8 @@ This pulls the pinned Rust toolchain, maturin build, test and docs tooling.
 
 * Runtime Configuration
 
-Anneal configuration is explicit in calls and config objects: temperature, scale, budget, seeds, devices, cache locations, and solver options are passed through API arguments rather than process variables. Reproducibility is obtained by passing =seed=.
+Anneal configuration is explicit in calls and config objects: temperature, scale, budget, seeds, devices, cache locations, and solver options are passed through API arguments rather than process variables.
+Reproducibility is obtained by passing =seed=.
 
 * Classical presets
 
@@ -73,7 +76,8 @@ Each returns a =History= with =best_pos=, =best_val=, =epochs= (list of =EpochLi
 
 * Pilot draws for Bayesian warm-start
 
-= pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v). These are the "no-tuning" entry point.
+= pilot_draws_qmc= returns (n,3) draws of (T0, sigma, q_v) from the BGSA pilot prior (log-normal on scale quantities, truncated on q_v).
+These are the "no-tuning" entry point.
 
 #+begin_src python
 from anneal import pilot_draws_qmc

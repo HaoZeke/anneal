@@ -14,20 +14,27 @@
 
 * The five components (signatures)
 
-- =Obj= :: Only thing that knows the objective F (and its gradient when supplied). Every driver ultimately calls =obj.eval= or =grad.grad=.
-- =Cool= :: Only thing that knows the temperature schedule T(k). Must be monotone non-increasing (L4).
+- =Obj= :: Only thing that knows the objective F (and its gradient when supplied).
+Every driver ultimately calls =obj.eval= or =grad.grad=.
+- =Cool= :: Only thing that knows the temperature schedule T(k).
+Must be monotone non-increasing (L4).
 - =Neigh= :: Knows the neighbourhood / scale at the current T. For classical: 1/sqrt(D) or temperature-dependent width.
 - =Move= :: Knows the actual proposal shape at T. This is where generalized =Langevin= equation (GLE) drift matrices, rank-1 independence products, =Tsallis= visits, etc. live.
-- =Accept= :: Knows the acceptance probability. Must satisfy L3 (downhill = 1) and the finite-precision contract when it claims exactness.
+- =Accept= :: Knows the acceptance probability.
+Must satisfy L3 (downhill = 1) and the finite-precision contract when it claims exactness.
 
 The =Sampler= trait (=initial_state=, step, =qmc_bounds=, initial_state_from_position) is the runtime realisation of an object that fills all five slots.
 
 * The four laws (plain English)
 
-- L1 (symmetry) :: If y is a neighbour of x then x is a neighbour of y. Required for the SymmetricNeighbors Temporal Logic of Actions (TLA+)+ invariant and for detailed balance of the inner Metropolis step.
-- L2 (support) :: The proposal can reach any point in the box from any other point in finitely many steps. Required for the eventual reach of the global best (liveness properties).
-- L3 (downhill) :: Any proposal that strictly decreases F is accepted with probability 1. Required for BestMonotone (the recorded best never worsens).
-- L4 (monotone cooling) :: T(k+1) <= T(k). Required for MonotoneCooling and for the Hajek-style a.s. convergence arguments that carry over to the production phase after a Bayesian pilot.
+- L1 (symmetry) :: If y is a neighbour of x then x is a neighbour of y.
+Required for the SymmetricNeighbors Temporal Logic of Actions (TLA+)+ invariant and for detailed balance of the inner Metropolis step.
+- L2 (support) :: The proposal can reach any point in the box from any other point in finitely many steps.
+Required for the eventual reach of the global best (liveness properties).
+- L3 (downhill) :: Any proposal that strictly decreases F is accepted with probability 1.
+Required for BestMonotone (the recorded best never worsens).
+- L4 (monotone cooling) :: T(k+1) <= T(k).
+Required for MonotoneCooling and for the Hajek-style a.s. convergence arguments that carry over to the production phase after a Bayesian pilot.
 
 These laws are what let one change to a shared slot implementation serve every driver without breaking the safety or liveness properties proved in Temporal Logic of Actions (TLA+)+.
 
@@ -49,6 +56,7 @@ A single implementation change at one slot appears in every driver that uses tha
 - Additive independence :: fits a surrogate that serves as Obj for the true evaluations, Move for the product proposals, and Accept (Metropolis) on the true F; tempering re-uses the Cool slot.
 - generalized =Langevin= equation (GLE) :: the drift matrix + BAB (B-A-B) propagator is exactly a Move implementation; the rest of the driver is a standard =Langevin= skeleton.
 - Polish (quasi-Monte Carlo (QMC) or shifted) :: deterministic Cool that goes to zero, Move = projected =Armijo=, Accept = =Armijo= test.
-- Parallel tempering / =mcmc_sa= :: PT is any inner Sampler + geometric ladder (Cool) + swap (new Exchange component); =mcmc_sa= is the Gelman-Rubin termination variant of the fixed-K loop. Both still obey the same five signatures and L1-L4.
+- Parallel tempering / =mcmc_sa= :: PT is any inner Sampler + geometric ladder (Cool) + swap (new Exchange component); =mcmc_sa= is the Gelman-Rubin termination variant of the fixed-K loop.
+Both still obey the same five signatures and L1-L4.
 
 See the family subsections in [[file:../architecture.org][architecture]] for the "on a random problem" numbers and the exact source links.

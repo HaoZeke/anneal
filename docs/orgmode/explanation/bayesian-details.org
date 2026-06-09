@@ -9,6 +9,7 @@ Bayesian Pilot and Mixer Details
 
 See the dedicated tutorial [[file:../tutorials/bayesian-pilot-mixer.org][bayesian-pilot-mixer]] for the pilot draws, the 6-step Beta trace, the 0.05 guard, the auto chain formula, and the Thompson step.
 
-The three-term posterior (prior + Roberts-Rosenthal 0.234 on logit scale + improvement term) and the per-chain Beta(4/1,4) on "produced new global best" are the two places the same "count successes, shrink toward target" reasoning appears. Both are deliberately outside the five core slots so that the inner Samplers remain ordinary L1-L4 objects.
+The three-term posterior (prior + Roberts-Rosenthal 0.234 on logit scale + improvement term) and the per-chain Beta(4/1,4) on "produced new global best" are the two places the same "count successes, shrink toward target" reasoning appears.
+Both are deliberately outside the five core slots so that the inner Samplers remain ordinary L1-L4 objects.
 
 The full auto-orchestrator that runs several families in the pilot phase and then allocates the remaining budget to the current winner lives in the experiments tree (demo_bgsa.py and the bgsa_* pixi tasks).
