@@ -7,7 +7,9 @@ generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) Colore
 =============================
 #+end_export
 
-generalized ==Langevin== equation (generalized =Langevin= equation (GLE))-==Langevin== replaces the white-noise ==Langevin== move with a generalized ==Langevin== equation (generalized ==Langevin== equation (generalized =Langevin= equation (GLE))) thermostat. An optimal-sampling drift matrix fitted once from the characteristic frequency flattens the noise spectrum. The same fitted matrix accelerates every gradient-capable driver.
+generalized ==Langevin== equation (generalized =Langevin= equation (GLE))-==Langevin== replaces the white-noise ==Langevin== move with a generalized ==Langevin== equation (generalized ==Langevin== equation (generalized =Langevin= equation (GLE))) thermostat.
+An optimal-sampling drift matrix fitted once from the characteristic frequency flattens the noise spectrum.
+The same fitted matrix accelerates every gradient-capable driver.
 
 #+begin_export rst
 .. admonition:: Reference
@@ -22,7 +24,8 @@ generalized ==Langevin== equation (generalized =Langevin= equation (GLE))-==Lang
 
 * Prerequisites
 
-Gradient of the objective required. Bounds.
+Gradient of the objective required.
+Bounds.
 
 #+begin_src bash
 pip install anneal

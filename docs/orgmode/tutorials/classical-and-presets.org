@@ -7,7 +7,8 @@ Classical Presets
 ========================
 #+end_export
 
-This tutorial shows the three classical presets (=Boltzmann=, =Fast=, =Gsa (Tsallis)=) and the single =run= surface. All three occupy the same five component slots; only the concrete =Cool=, =Neigh=, and =Move= objects differ.
+This tutorial shows the three classical presets (=Boltzmann=, =Fast=, =Gsa (Tsallis)=) and the single =run= surface.
+All three occupy the same five component slots; only the concrete =Cool=, =Neigh=, and =Move= objects differ.
 
 #+begin_export rst
 .. admonition:: Reference
@@ -31,7 +32,8 @@ pip install anneal
 
 * Step 1: One surface, three presets
 
-The call is identical. Only the preset object changes.
+The call is identical.
+Only the preset object changes.
 
 #+begin_src python
 import numpy as np
@@ -60,7 +62,8 @@ h_g = run(rosenbrock, low, high,
 print("=Gsa (Tsallis)=:", h_g.best_pos, h_g.best_val)
 #+end_src
 
-Expected: three different trajectories, all reaching a point near (1,1) with value near 0 (global min is 0 at (1,1)). The histories contain =epochs= (list of =EpochLine= with =best_val=, =accept_rate=, =T= etc.).
+Expected: three different trajectories, all reaching a point near (1,1) with value near 0 (global min is 0 at (1,1)).
+The histories contain =epochs= (list of =EpochLine= with =best_val=, =accept_rate=, =T= etc.).
 
 * Step 2: What the call actually does (slot view)
 
@@ -83,4 +86,5 @@ The =History= also carries the final state and per-epoch diagnostics that the Ba
 
 * Why this works
 
-The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2). The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish are shared verbatim.
+The algebra guarantees that any correct filling of the five slots produces a chain whose best-so-far is monotone (L3 + L4) and whose neighbors are symmetric (L1) with support covering the box (L2).
+The three classical families are three different fillings that the literature already proved converge; the Rust implementation factors them so that the orchestrator loop, the device kernel, the noise-aware Accept, and the quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish are shared verbatim.

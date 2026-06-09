@@ -2,25 +2,20 @@
 
 * Python (maturin)
 
-The Python package =anneal= ships from PyPI as a maturin-built
-wheel. The Rust extension is exposed as the submodule
-=anneal._core=. The package source lives at =python/anneal/= in the
-repo and is installed via =maturin develop --features python=
-during development.
+The Python package =anneal= ships from PyPI as a maturin-built wheel.
+The Rust extension is exposed as the submodule =anneal._core=.
+The package source lives at =python/anneal/= in the repo and is installed via =maturin develop --features python= during development.
 
 * C and C++ (cargo-c)
 
-The Rust crate produces a =cdylib=, =staticlib=, generated header
-=anneal-core.h=, and pkg-config metadata =anneal-core.pc= via
-cargo-c.
+The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.
 
 #+BEGIN_SRC bash
 cargo cinstall --release --prefix /usr/local
 pkg-config --cflags --libs anneal-core
 #+END_SRC
 
-A hand-written companion header =anneal-core.hpp= wraps the C
-declarations in =namespace anneal= for ergonomic C++ usage.
+A hand-written companion header =anneal-core.hpp= wraps the C declarations in =namespace anneal= for ergonomic C++ usage.
 
 * Build-system glue
 

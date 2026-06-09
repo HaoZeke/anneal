@@ -7,7 +7,9 @@ Polish, Device, and Scale
 =============================
 #+end_export
 
-After any stochastic driver you run a deterministic "last mile". The same polish component also works as a pure multi-start method (quasi-Monte Carlo (quasi-Monte Carlo (quasi-Monte Carlo (QMC))) or shifted-quasi-Monte Carlo (quasi-Monte Carlo (QMC))). The device path (NumPy or CuPy) and the batched ensemble runner execute the identical transition kernel; only the array namespace and leading batch axis change.
+After any stochastic driver you run a deterministic "last mile".
+The same polish component also works as a pure multi-start method (quasi-Monte Carlo (quasi-Monte Carlo (quasi-Monte Carlo (QMC))) or shifted-quasi-Monte Carlo (quasi-Monte Carlo (QMC))).
+The device path (NumPy or CuPy) and the batched ensemble runner execute the identical transition kernel; only the array namespace and leading batch axis change.
 
 #+begin_export rst
 .. admonition:: Reference
@@ -22,7 +24,8 @@ After any stochastic driver you run a deterministic "last mile". The same polish
 
 * Prerequisites
 
-For polish variants a gradient is required. Device examples work with plain NumPy; GPU examples need CuPy on a CUDA machine.
+For polish variants a gradient is required.
+Device examples work with plain NumPy; GPU examples need CuPy on a CUDA machine.
 
 * Step 1: Polish after a stochastic run (projected ==Armijo==)
 
@@ -84,14 +87,19 @@ h2 = run_ensemble(rastrigin, low, high, Boltzmann(t_init=10.0, sigma=1.0),
 print("Ensemble global best:", h2.global_best_val)
 #+end_src
 
-Replace low/high with CuPy arrays and the kernels run on GPU with zero Python overhead inside the loop. The returned DeviceHistory / EnsembleHistory keep every field on the original device and expose DLPack.
+Replace low/high with CuPy arrays and the kernels run on GPU with zero Python overhead inside the loop.
+The returned DeviceHistory / EnsembleHistory keep every field on the original device and expose DLPack.
 
 * Why this works (reuse)
 
-=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses. The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct. The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation use the same code paths. Consequently the noise-aware compensated Accept, the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) Move, and the rank-1 independence Move are available on GPU and in large ensembles when the same slots are selected.
+=run_device= and =run_ensemble= are thin shims around the same Rust runner that =run= uses.
+The transition kernel they execute is the five-component Sampler object (Obj + Cool + Neigh + Move + Accept) that the presets and advanced drivers construct.
+The batched device path only adds a leading axis to state and to the objective/gradient evaluations; the acceptance logic, cooling schedule, and proposal generation use the same code paths.
+Consequently the noise-aware compensated Accept, the generalized =Langevin= equation (generalized =Langevin= equation (GLE)) Move, and the rank-1 independence Move are available on GPU and in large ensembles when the same slots are selected.
 
 quasi-Monte Carlo (quasi-Monte Carlo (QMC)) polish is likewise a pure filling of the same slots (a deterministic Cool that goes to zero, a Move that is projected gradient, an Accept that is ==Armijo==). The polish variants share the same ==Armijo== logic and low-discrepancy generator.
 
 * Figures and scale experiments
 
-GPU vs host scaling curves, ensemble saturation plots, and the CUTEst performance profiles that include the polish post-processing step are produced by =experiments/scripts/render_plots.py= and the =cutest-full= pixi tasks. All numbers in the paper were regenerated from the identical sources (see [[file:../used-by page.org][used-by page]]).
+GPU vs host scaling curves, ensemble saturation plots, and the CUTEst performance profiles that include the polish post-processing step are produced by =experiments/scripts/render_plots.py= and the =cutest-full= pixi tasks.
+All numbers in the paper were regenerated from the identical sources (see [[file:../used-by page.org][used-by page]]).

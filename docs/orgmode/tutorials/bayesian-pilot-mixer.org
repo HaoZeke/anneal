@@ -7,7 +7,8 @@ Bayesian Pilot and Mixer
 ===========================
 #+end_export
 
-The Bayesian pilot + mixer (bGSA auto-allocation) removes the usual tuning knobs. You supply a single budget (==max_proposals==); everything else (chain count, per-chain temperatures, allocation) follows online from a Beta-Bernoulli posterior.
+The Bayesian pilot + mixer (bGSA auto-allocation) removes the usual tuning knobs.
+You supply a single budget (==max_proposals==); everything else (chain count, per-chain temperatures, allocation) follows online from a Beta-Bernoulli posterior.
 
 #+begin_export rst
 .. admonition:: Reference
@@ -24,7 +25,8 @@ The Bayesian pilot + mixer (bGSA auto-allocation) removes the usual tuning knobs
 
 * Prerequisites
 
-Values-only objective (no gradient required). Bounds recommended for quasi-Monte Carlo (quasi-Monte Carlo (QMC)) seeding.
+Values-only objective (no gradient required).
+Bounds recommended for quasi-Monte Carlo (quasi-Monte Carlo (QMC)) seeding.
 
 #+begin_src bash
 pip install anneal
@@ -44,16 +46,15 @@ print("Pilot draws (T0, sigma, ==q_v==):\n", draws)
 
 Typical output (rounded):
 
-Pilot draws (T0, sigma, ==q_v==):
- [[ 4.82  0.71  1.34]
-  [ 7.15  1.12  2.11]
-  ...
+Pilot draws (T0, sigma, ==q_v==): [[ 4.82  0.71  1.34] [ 7.15  1.12  2.11] ...
 
-Each row is a candidate Hyperparameter triple. In a full bGSA run the pilot executes short chains at a subset of these, observes acceptance rates and improvement sizes, then returns the maximum a posteriori (maximum a posteriori (MAP)) triple for the production phase.
+Each row is a candidate Hyperparameter triple.
+In a full bGSA run the pilot executes short chains at a subset of these, observes acceptance rates and improvement sizes, then returns the maximum a posteriori (maximum a posteriori (MAP)) triple for the production phase.
 
 * Step 2: The mixer on a 5-D random problem (concrete trace)
 
-Consider a 5-D quadratic "random problem" (shifted Rastrigin-like) whose global min is known. With a small budget we watch the per-chain Beta posteriors evolve.
+Consider a 5-D quadratic "random problem" (shifted Rastrigin-like) whose global min is known.
+With a small budget we watch the per-chain Beta posteriors evolve.
 
 The mixer starts:
 
@@ -65,31 +66,20 @@ The mixer starts:
 
 A 6-step trace (illustrative numbers consistent with the update rules):
 
-Step 0 (init): chains 0,1 ; alpha=[4,1], beta=[1,4]
-  Thompson draws: chain0 ~ 0.78, chain1 ~ 0.19 -> run chain 0
-  No improvement yet.
+Step 0 (init): chains 0,1 ; alpha=[4,1], beta=[1,4] Thompson draws: chain0 ~ 0.78, chain1 ~ 0.19 -> run chain 0 No improvement yet.
 
-Step 1: Thompson: chain0 ~ 0.81, chain1 ~ 0.22 -> chain 0 improves global best
-  -> alpha[0] = 5, beta[0] = 1
+Step 1: Thompson: chain0 ~ 0.81, chain1 ~ 0.22 -> chain 0 improves global best -> alpha[0] = 5, beta[0] = 1
 
-Step 2: Thompson: chain0 ~ 0.91, chain1 ~ 0.11 -> chain 0 again (still best)
-  -> no new global; beta[0] = 2
+Step 2: Thompson: chain0 ~ 0.91, chain1 ~ 0.11 -> chain 0 again (still best) -> no new global; beta[0] = 2
 
-Step 3: Thompson: chain0 ~ 0.64, chain1 ~ 0.33 -> chain 0
-  -> chain 1 produces new global best
-  -> alpha[1] = 2, beta[1] = 4
+Step 3: Thompson: chain0 ~ 0.64, chain1 ~ 0.33 -> chain 0 -> chain 1 produces new global best -> alpha[1] = 2, beta[1] = 4
 
-Step 4: Thompson draws now favor chain 1 (its Beta(2,4) can still beat the
-  depleted chain 0). Chain 1 improves again -> alpha[1] = 3
+Step 4: Thompson draws now favor chain 1 (its Beta(2,4) can still beat the depleted chain 0).
+Chain 1 improves again -> alpha[1] = 3
 
-Step 5: Guard prevents thrashing: even if a draw slightly favors chain 0,
-  the +0.05 margin keeps the current incumbent (chain 1) unless a clear
-  winner appears.
+Step 5: Guard prevents thrashing: even if a draw slightly favors chain 0, the +0.05 margin keeps the current incumbent (chain 1) unless a clear winner appears.
 
-The Python surface does not expose the internal mixer directly (the full
-auto-orchestration lives in the experiments tree), but ==pilot_draws_qmc==
-plus the exposed advanced drivers let you reproduce the same
-"one-budget, auto everything" behaviour by hand or via the demo scripts.
+The Python surface does not expose the internal mixer directly (the full auto-orchestration lives in the experiments tree), but ==pilot_draws_qmc== plus the exposed advanced drivers let you reproduce the same "one-budget, auto everything" behaviour by hand or via the demo scripts.
 
 #+begin_src python
 # High-level illustration (the real bGSA driver is in experiments)
@@ -110,7 +100,10 @@ The exposed =additive_independence= and =gle_langevin= already embed pilot logic
 
 * Why this works (slot view + algebra)
 
-The pilot only ever touches =Cool= and =Neigh/Move= parameters (it never changes Obj or Accept). The mixer is an orthogonal lift over the Sampler trait: it chooses which inner chain (that is which state + its own Cool/Neigh/Move/Accept tuple) receives the next proposal. Because every inner sampler obeys L1-L4, the outer mixer automatically inherits BestMonotone and the other =Temporal Logic of Actions (TLA+)+= invariants (Temporal Logic of Actions). The Beta update is exactly the improvement term that appears in the three-term posterior of the pilot; both pieces are instances of the same "count successes, shrink toward target" reasoning.
+The pilot only ever touches =Cool= and =Neigh/Move= parameters (it never changes Obj or Accept).
+The mixer is an orthogonal lift over the Sampler trait: it chooses which inner chain (that is which state + its own Cool/Neigh/Move/Accept tuple) receives the next proposal.
+Because every inner sampler obeys L1-L4, the outer mixer automatically inherits BestMonotone and the other =Temporal Logic of Actions (TLA+)+= invariants (Temporal Logic of Actions).
+The Beta update is exactly the improvement term that appears in the three-term posterior of the pilot; both pieces are instances of the same "count successes, shrink toward target" reasoning.
 
 * Figures
 

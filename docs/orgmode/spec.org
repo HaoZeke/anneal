@@ -2,4 +2,6 @@
 
 The typed component algebra, the five signatures, L1-L4, the =Sampler= trait, how every advanced driver (additive, gle, mixer, polish, PT, mcmc) still obeys the same surface, and the finite-precision contract (three channels) are now in [[file:explanation/algebra.org][explanation/algebra]].
 
-The TLA+ sources (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling, liveness) live in =tla/=. The SymPy witnesses for the four limit reductions live in =proofs/=. The full proofs and the INFORMS paper are the authoritative reference; this page is the web-sized summary.
+The TLA+ sources (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling, liveness) live in =tla/=.
+The SymPy witnesses for the four limit reductions live in =proofs/=.
+The full proofs and the INFORMS paper are the authoritative reference; this page is the web-sized summary.
