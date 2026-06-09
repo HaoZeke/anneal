@@ -1,6 +1,6 @@
 use anneal_core::{
     AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use eindir_core::{Bounds, Objective};
 use ndarray::{Array1, ArrayView1, array};
@@ -22,6 +22,10 @@ struct SmoothNeedle {
     bounds: Bounds<f64>,
 }
 
+struct LocalShiftedQuadratic {
+    bounds: Bounds<f64>,
+}
+
 impl CenterQuadratic {
     fn new() -> Self {
         Self {
@@ -31,6 +35,14 @@ impl CenterQuadratic {
 }
 
 impl SmoothNeedle {
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
+        }
+    }
+}
+
+impl LocalShiftedQuadratic {
     fn new() -> Self {
         Self {
             bounds: Bounds::new(array![-1.0, -1.0], array![1.0, 1.0], 0.0),
@@ -65,6 +77,20 @@ impl Objective<f64> for SmoothNeedle {
         let dx0 = x[0] - 0.5;
         let dx1 = x[1] + 0.5;
         -(-40.0 * (dx0 * dx0 + dx1 * dx1)).exp()
+    }
+}
+
+impl Objective<f64> for LocalShiftedQuadratic {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        (x[0] - 0.12).powi(2) + (x[1] + 0.08).powi(2)
     }
 }
 
@@ -208,6 +234,20 @@ fn qmc_best1bin_scout_refines_smooth_low_dimensional_basin() {
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.n_starts, 30);
     assert_eq!(result.n_polished, 0);
+}
+
+#[test]
+fn qmc_trust_region_poll_improves_local_shifted_basin() {
+    let obj = LocalShiftedQuadratic::new();
+
+    let result = qmc_trust_region_poll(&obj, array![0.0, 0.0], 96, 7, 0.25, 2, 24);
+
+    assert!(result.best_val < 0.0025, "best value: {}", result.best_val);
+    assert!(result.n_evals <= 96);
+    assert_eq!(result.n_grads, 0);
+    assert_eq!(result.n_polished, 0);
+    assert!(result.best_pos[0] > 0.08);
+    assert!(result.best_pos[1] < -0.04);
 }
 
 #[test]

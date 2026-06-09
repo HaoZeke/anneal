@@ -19,6 +19,8 @@ from anneal import (
     qmc_best1bin_scout_objective,
     qmc_polish,
     qmc_polish_objective,
+    qmc_trust_region_poll,
+    qmc_trust_region_poll_objective,
     run,
     run_hmc,
     run_qmc,
@@ -236,6 +238,46 @@ def test_qmc_best1bin_scout_accepts_native_objective_handle():
     assert result["n_grads"] == 0
     assert result["n_polished"] == 0
     assert isinstance(result["best_pos"], np.ndarray)
+
+
+def test_qmc_trust_region_poll_refines_nearby_basin():
+    result = qmc_trust_region_poll(
+        shifted_quadratic,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        np.array([0.0, 0.0]),
+        max_evals=96,
+        seed=7,
+        radius_fraction=0.5,
+        n_levels=2,
+        points_per_level=24,
+    )
+
+    assert result["best_val"] < 0.03
+    assert result["n_evals"] <= 96
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
+    assert isinstance(result["best_pos"], np.ndarray)
+
+
+def test_qmc_trust_region_poll_accepts_native_objective_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(shifted_quadratic, bounds)
+
+    result = qmc_trust_region_poll_objective(
+        obj,
+        np.array([0.0, 0.0]),
+        max_evals=96,
+        seed=7,
+        radius_fraction=0.5,
+        n_levels=2,
+        points_per_level=24,
+    )
+
+    assert result["best_val"] < 0.03
+    assert result["n_evals"] <= 96
+    assert result["n_grads"] == 0
+    assert result["n_polished"] == 0
 
 
 def test_shifted_qmc_polish_exposes_replicated_designs():
