@@ -20,13 +20,14 @@ import os
 import sys
 
 import numpy as np
-from scipy.optimize import basinhopping, differential_evolution, minimize
+from scipy.optimize import basinhopping, differential_evolution, dual_annealing, minimize
 
 from experiments.anneal_sota import (
     DEFAULT_HYBRID_K_POLISH,
     DEFAULT_HYBRID_N_POLISH,
     qmc_annealed_hybrid,
 )
+from experiments.portfolio import thompson_portfolio
 from experiments.benchmarks.cutest_runner import configured_pycutest, default_cutest_config, load
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
@@ -155,6 +156,26 @@ def sci_basinhopping(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
+def portfolio(counter, low, high, dim, grad, rng, anchor=None):
+    """Thompson-allocated portfolio over anneal building blocks."""
+    return thompson_portfolio(counter, low, high, dim, grad, rng, anchor=anchor)
+
+
+def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
+    bounds = list(zip(low, high))
+    x0 = (
+        np.asarray(anchor, dtype=np.float64).copy()
+        if anchor is not None
+        else None
+    )
+    try:
+        dual_annealing(counter, bounds, maxfun=10 ** 9, maxiter=10 ** 9,
+                       seed=int(rng.integers(1 << 31)), x0=x0)
+    except _Budget:
+        pass
+    return counter.best
+
+
 def sci_de(counter, low, high, dim, grad, rng, anchor=None):
     del anchor
     bounds = list(zip(low, high))
@@ -166,7 +187,8 @@ def sci_de(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
-METHODS = {"hybrid_de": hybrid_de, "basinhopping": sci_basinhopping,
+METHODS = {"portfolio": portfolio, "hybrid_de": hybrid_de,
+           "basinhopping": sci_basinhopping, "dual_annealing": sci_dual_annealing,
            "diff_evol": sci_de, "classical": classical}
 FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
 

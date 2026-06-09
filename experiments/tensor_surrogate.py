@@ -177,6 +177,25 @@ class AdditiveSurrogate:
         coeffs = sol[1:].reshape(dim, degree)
         return cls(low, high, intercept, coeffs, degree, float(n_pilot))
 
+    @classmethod
+    def from_points(cls, X, y, low, high, *, degree=8):
+        """Fit from already-evaluated points; charges no objective work."""
+        X = np.asarray(X, float)
+        y = np.asarray(y, float).reshape(-1)
+        low = np.asarray(low, float).reshape(-1)
+        high = np.asarray(high, float).reshape(-1)
+        n, dim = X.shape
+        span = np.where(high > low, high - low, 1.0)
+        blocks = [np.ones((n, 1))]
+        for j in range(dim):
+            t = np.clip(2.0 * (X[:, j] - low[j]) / span[j] - 1.0, -1.0, 1.0)
+            blocks.append(_cheb_design(t, degree))
+        design = np.concatenate(blocks, axis=1)
+        sol, *_ = np.linalg.lstsq(design, y, rcond=None)
+        intercept = float(sol[0])
+        coeffs = sol[1:].reshape(dim, degree)
+        return cls(low, high, intercept, coeffs, degree, 0.0)
+
     def _coord_grid_energy(self, j: int, grid_m: int):
         t = np.linspace(-1.0, 1.0, grid_m)
         feats = _cheb_design(t, self.degree)         # (grid_m, degree)
