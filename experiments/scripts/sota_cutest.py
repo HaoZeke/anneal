@@ -157,7 +157,33 @@ def sci_basinhopping(counter, low, high, dim, grad, rng, anchor=None):
 
 
 def portfolio(counter, low, high, dim, grad, rng, anchor=None):
-    """Thompson-allocated portfolio over anneal building blocks."""
+    """Native Thompson-allocated portfolio over anneal building blocks."""
+    del anchor
+    import anneal
+
+    remaining = counter.budget - counter.n
+    if remaining <= 0:
+        return counter.best
+    jac = counter.counted_grad(grad) if grad is not None else None
+    try:
+        out = anneal.global_optimize(
+            counter,
+            low,
+            high,
+            budget=remaining,
+            seed=int(rng.integers(1 << 31)),
+            grad_fn=jac,
+        )
+        best = float(out.get("best_val", float("inf")))
+        if math.isfinite(best) and best < counter.best:
+            counter.best = best
+    except _Budget:
+        pass
+    return counter.best
+
+
+def portfolio_py(counter, low, high, dim, grad, rng, anchor=None):
+    """Python reference implementation of the portfolio driver."""
     return thompson_portfolio(counter, low, high, dim, grad, rng, anchor=anchor)
 
 

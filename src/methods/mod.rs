@@ -18,6 +18,7 @@ pub mod gle_langevin;
 pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
+pub mod portfolio;
 
 pub use additive_independence::{additive_independence_sa, AdditiveIndependenceResult};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
@@ -36,3 +37,4 @@ pub use local_polish::{
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
+pub use portfolio::{portfolio_optimize, ArmStat, PortfolioConfig, PortfolioResult};
