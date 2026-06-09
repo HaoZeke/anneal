@@ -1074,8 +1074,7 @@ fn gle_langevin_result_to_dict(
 /// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
-                    omega0=None, dt=0.2, n_epochs=40, x0=None,
-                    preconditioner_probes=None))]
+                    omega0=None, dt=0.2, n_epochs=40, x0=None))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin(
     py: Python<'_>,
@@ -1089,7 +1088,6 @@ fn gle_langevin(
     dt: f64,
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
-    preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1118,7 +1116,8 @@ fn gle_langevin(
 /// GLE-Langevin annealing with a diagonal adaptive coordinate preconditioner.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
-                    omega0=None, dt=0.2, n_epochs=40, x0=None))]
+                    omega0=None, dt=0.2, n_epochs=40, x0=None,
+                    preconditioner_probes=None))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin_preconditioned(
     py: Python<'_>,
@@ -1132,6 +1131,7 @@ fn gle_langevin_preconditioned(
     dt: f64,
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1169,7 +1169,7 @@ fn gle_langevin_preconditioned(
 /// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
-                    n_epochs=40, x0=None, preconditioner_probes=None))]
+                    n_epochs=40, x0=None))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin_objective(
     py: Python<'_>,
@@ -1180,7 +1180,6 @@ fn gle_langevin_objective(
     dt: f64,
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
-    preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
     let x0 = gle_langevin_x0(x0, objective.dim())?;
@@ -1211,7 +1210,8 @@ fn gle_langevin_objective(
 
 /// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
 #[pyfunction]
-#[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2, n_epochs=40, x0=None))]
+#[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
+                    n_epochs=40, x0=None, preconditioner_probes=None))]
 #[allow(clippy::too_many_arguments)]
 fn gle_langevin_preconditioned_objective(
     py: Python<'_>,
@@ -1222,6 +1222,7 @@ fn gle_langevin_preconditioned_objective(
     dt: f64,
     n_epochs: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    preconditioner_probes: Option<usize>,
 ) -> PyResult<Py<PyDict>> {
     validate_gle_args(max_fevals, omega0)?;
     let x0 = gle_langevin_x0(x0, objective.dim())?;
