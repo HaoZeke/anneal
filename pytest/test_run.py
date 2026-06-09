@@ -12,6 +12,8 @@ from anneal import (
     Gsa,
     History,
     PyObjective,
+    gle_langevin,
+    gle_langevin_objective,
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
@@ -188,6 +190,41 @@ def test_pyobjective_native_gradient_handle_round_trips():
     assert obj.dim == 2
     assert obj.eval(np.array([0.25, -0.4])) == pytest.approx(0.0)
     assert obj.grad(np.array([0.5, -0.25])) == pytest.approx([0.5, 0.3])
+
+
+def test_gle_langevin_accepts_initial_position():
+    x0 = np.array([0.25, -0.4])
+
+    result = gle_langevin(
+        shifted_quadratic,
+        shifted_quadratic_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        max_fevals=1,
+        seed=7,
+        x0=x0,
+    )
+
+    assert result["n_evals"] == 1
+    assert result["best_pos"] == pytest.approx(x0)
+    assert result["best_val"] == pytest.approx(0.0)
+
+
+def test_gle_langevin_accepts_native_objective_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(shifted_quadratic, bounds, grad_fn=shifted_quadratic_grad)
+    x0 = np.array([0.25, -0.4])
+
+    result = gle_langevin_objective(
+        obj,
+        max_fevals=1,
+        seed=7,
+        x0=x0,
+    )
+
+    assert result["n_evals"] == 1
+    assert result["best_pos"] == pytest.approx(x0)
+    assert result["best_val"] == pytest.approx(0.0)
 
 
 def test_qmc_polish_accepts_native_gradient_handle():

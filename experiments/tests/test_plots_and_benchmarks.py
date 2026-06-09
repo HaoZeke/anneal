@@ -2091,6 +2091,93 @@ def test_cutest_bayesian_adaptive_gle_uses_pilot_box_and_budget(monkeypatch):
     assert captured["high"].tolist() == pytest.approx([0.4618802, 0.4618802])
 
 
+def test_cutest_bayesian_adaptive_gle_uses_native_objective_anchor(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class AnchoredProblem:
+        name = "ANCHORGLE"
+        dim = 2
+        low = np.array([-1.0, -1.0], dtype=np.float64)
+        high = np.array([1.0, 1.0], dtype=np.float64)
+        design_low = low
+        design_high = high
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum((x - np.array([0.25, -0.25])) ** 2))
+
+        def grad(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return 2.0 * (x - np.array([0.25, -0.25]))
+
+    class FakeBounds:
+        def __init__(self, low, high, slack):
+            self.low = np.asarray(low, dtype=np.float64)
+            self.high = np.asarray(high, dtype=np.float64)
+            self.slack = slack
+
+    class FakeObjective:
+        def __init__(self, fn, bounds, grad_fn=None):
+            self.fn = fn
+            self.bounds = bounds
+            self.grad_fn = grad_fn
+
+    def gle_langevin_objective(objective, max_fevals, **kwargs):
+        captured["max_fevals"] = int(max_fevals)
+        captured["x0"] = np.asarray(kwargs["x0"], dtype=np.float64)
+        captured["has_grad"] = callable(objective.grad_fn)
+        captured["grad"] = np.asarray(objective.grad_fn(captured["x0"]), dtype=np.float64)
+        return {
+            "best_val": -12.0,
+            "best_pos": captured["x0"],
+            "n_evals": 19,
+        }
+
+    fake_anneal = types.SimpleNamespace(
+        Bounds=FakeBounds,
+        PyObjective=FakeObjective,
+        gle_langevin_objective=gle_langevin_objective,
+    )
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.array([0.25, -0.25], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        AnchoredProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -12.0
+    assert fevals == 32
+    assert captured["max_fevals"] == 108
+    assert captured["x0"].tolist() == pytest.approx([0.25, -0.25])
+    assert captured["has_grad"]
+    assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])
+
+
 def test_cutest_bayesian_adaptive_gle_uses_compact_high_dimensional_pilot(
     monkeypatch,
 ):
@@ -4565,6 +4652,7 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.qmc_gsa_global_min_dimension
         == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_MIN_DIMENSION
     )
+    assert not config.qmc_gsa_global_enabled
     assert (
         config.qmc_gsa_global_max_dimension
         == anneal_sota.DEFAULT_QMC_GSA_GLOBAL_MAX_DIMENSION
@@ -4678,7 +4766,7 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
     assert anneal_sota._shifted_qmc_replicates(config) == (
         config.shifted_qmc_polish_chain_count
     )
-    assert anneal_sota._qmc_gsa_global_active(
+    assert not anneal_sota._qmc_gsa_global_active(
         config.qmc_gsa_global_min_dimension,
         config,
     )
@@ -4827,6 +4915,7 @@ def test_anneal_sota_qmc_hybrid_continues_after_gsa_global_slice(monkeypatch):
         boundary_qmc_polish_enabled=False,
         shifted_qmc_polish_enabled=False,
         trust_region_qmc_poll_enabled=False,
+        qmc_gsa_global_enabled=True,
         qmc_gsa_global_min_dimension=4,
         qmc_gsa_global_max_dimension=4,
         qmc_gsa_global_budget_divisor=2,

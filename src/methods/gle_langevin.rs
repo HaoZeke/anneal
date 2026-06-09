@@ -294,6 +294,28 @@ mod tests {
     }
 
     #[test]
+    fn gle_langevin_starts_from_supplied_anchor() {
+        let dim = 2;
+        let a = Array1::from_vec(vec![1.0, 2.0]);
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -1.0),
+            Array1::from_elem(dim, 1.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a };
+        let x0 = Array1::from_vec(vec![0.25, -0.5]);
+
+        let res = gle_langevin_sa(&obj, &grad, 11, 1, 0.2, 0.2, 1, Some(x0.clone()));
+
+        assert_eq!(res.n_evals, 1);
+        assert_eq!(res.best_pos, x0.to_vec());
+    }
+
+    #[test]
     fn gle_frequency_estimate_tracks_quadratic_curvature() {
         let dim = 2;
         let omega = 3.0;
