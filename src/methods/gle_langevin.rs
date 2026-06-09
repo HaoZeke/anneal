@@ -607,7 +607,7 @@ mod tests {
         let grad = IllGrad { a: a.clone() };
 
         let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, 8);
-        let target_curvature = preconditioner.omega0 * preconditioner.omega0;
+        let target_curvature = GLE_BAND_RATIO * preconditioner.omega0 * preconditioner.omega0;
 
         assert_eq!(preconditioner.diag.len(), dim);
         assert_eq!(preconditioner.scale.len(), dim);
@@ -636,7 +636,7 @@ mod tests {
         let grad = IllGrad { a: a.clone() };
 
         let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, 1);
-        let target_curvature = preconditioner.omega0 * preconditioner.omega0;
+        let target_curvature = GLE_BAND_RATIO * preconditioner.omega0 * preconditioner.omega0;
 
         assert_eq!(preconditioner.n_grads, 2);
         for (diag, curvature) in preconditioner.diag.iter().zip(a.iter().map(|ai| 2.0 * ai)) {
