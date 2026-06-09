@@ -1821,7 +1821,7 @@ def test_cutest_bgsa_auto_includes_tensor_and_gle_candidates(monkeypatch):
     assert [seed for seed, *_rest in captured["tensor"]] == [7, 11]
     assert [seed for seed, *_rest in captured["gle"]] == [7, 11]
     assert all(call[1] == 81 for call in captured["tensor"])
-    assert all(call[1] == 41 for call in captured["gle"])
+    assert all(call[1] == 20 for call in captured["gle"])
     assert captured["tensor"][0][2].tolist() == pytest.approx([-1.0, -1.0])
     assert captured["tensor"][0][3].tolist() == pytest.approx([1.0, 1.0])
     assert captured["gle"][0][2].tolist() == pytest.approx([-1.0, -1.0])
@@ -1984,7 +1984,7 @@ def test_cutest_bgsa_auto_stops_gle_family_after_nonfinite_screen(monkeypatch):
     )
 
     assert best_val == -4.0
-    assert captured["gle"] == [(7, 41)]
+    assert captured["gle"] == [(7, 20)]
 
 
 def test_cutest_gle_screen_passes_system_frequency():
