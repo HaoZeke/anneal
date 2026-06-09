@@ -2080,8 +2080,8 @@ def test_cutest_bayesian_adaptive_gle_uses_pilot_box_and_budget(monkeypatch):
     )
 
     assert best_val == -14.0
-    assert fevals == 48
-    assert captured["max_fevals"] == 110
+    assert fevals == 49
+    assert captured["max_fevals"] == 109
     assert captured["omega0"] is None
     assert captured["dt"] == pytest.approx(0.2)
     assert captured["n_epochs"] == 3
@@ -2089,6 +2089,138 @@ def test_cutest_bayesian_adaptive_gle_uses_pilot_box_and_budget(monkeypatch):
     assert captured["grad"].tolist() == pytest.approx([0.0, 0.0])
     assert captured["low"].tolist() == pytest.approx([-0.4618802, -0.4618802])
     assert captured["high"].tolist() == pytest.approx([0.4618802, 0.4618802])
+
+
+def test_cutest_bayesian_adaptive_gle_uses_compact_high_dimensional_pilot(
+    monkeypatch,
+):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class HighDimProblem:
+        name = "EG2LIKE"
+        dim = 1000
+        low = np.full(dim, -1.0)
+        high = np.full(dim, 1.0)
+
+        def fn(self, x):
+            x = np.asarray(x, dtype=np.float64)
+            return float(np.sum(x * x))
+
+        def grad(self, x):
+            return 2.0 * np.asarray(x, dtype=np.float64)
+
+    def run_pilot(seed, n_pilot, pilot_steps, **kwargs):
+        captured["pilot"] = {
+            "seed": seed,
+            "n_pilot": n_pilot,
+            "pilot_steps": pilot_steps,
+            "dim": kwargs["dim"],
+            "n_rw_pilot": kwargs["n_rw_pilot"],
+            "rw_steps": kwargs["rw_steps"],
+            "n_scout": kwargs["n_scout"],
+        }
+        return (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.zeros(1000, dtype=np.float64),
+            7,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        )
+
+    def gle_langevin(_obj_fn, _grad_fn, _low, _high, max_fevals, **_kwargs):
+        captured["max_fevals"] = int(max_fevals)
+        return {"best_val": -10.0, "best_pos": np.zeros(1000), "n_evals": 13}
+
+    fake_anneal = types.SimpleNamespace(gle_langevin=gle_langevin)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=run_pilot,
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        HighDimProblem(),
+        seed=7,
+        n_epochs=5,
+        k_per_epoch=200,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == -10.0
+    assert fevals == 21
+    assert captured["max_fevals"] == 993
+    assert captured["pilot"] == {
+        "seed": 7,
+        "n_pilot": 1,
+        "pilot_steps": 1,
+        "dim": 1000,
+        "n_rw_pilot": 0,
+        "rw_steps": 1,
+        "n_scout": 0,
+    }
+
+
+def test_cutest_bayesian_adaptive_gle_keeps_best_anchor_value(monkeypatch):
+    from experiments.scripts import run_cutest_benchmarks as cutest
+
+    captured = {}
+
+    class GradientCutestProblem(_QuadraticCutestProblem):
+        def grad(self, x):
+            return np.asarray(x, dtype=np.float64)
+
+    def gle_langevin(_obj_fn, _grad_fn, low, high, _max_fevals, **_kwargs):
+        captured["center"] = 0.5 * (
+            np.asarray(low, dtype=np.float64) + np.asarray(high, dtype=np.float64)
+        )
+        return {"best_val": 5.0, "best_pos": np.zeros(2), "n_evals": 1}
+
+    fake_anneal = types.SimpleNamespace(gle_langevin=gle_langevin)
+    fake_demo = types.SimpleNamespace(
+        OBJ_FN=None,
+        OBJ_GRAD=None,
+        LOW=None,
+        HIGH=None,
+        run_pilot=lambda *_args, **_kwargs: (
+            3.0,
+            0.25,
+            2,
+            1.1,
+            0.2,
+            np.array([0.8, 0.8], dtype=np.float64),
+            11,
+            8.0,
+            2.0,
+            {"grad_sens": 0.0},
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
+    monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
+
+    best_val, fevals = cutest._bgsa_run(
+        GradientCutestProblem(),
+        seed=7,
+        n_epochs=3,
+        k_per_epoch=40,
+        n_chains=4,
+        driver="bayesian_adaptive_gle",
+    )
+
+    assert best_val == 0.0
+    assert fevals == 14
+    assert captured["center"].tolist() == pytest.approx([0.0, 0.0])
 
 
 def test_cutest_bayesian_adaptive_gle_reports_unsupported_without_native_gradient(
