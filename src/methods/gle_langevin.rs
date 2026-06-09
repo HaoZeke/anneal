@@ -29,8 +29,8 @@ const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
 const GLE_MIN_TIMESTEP: f64 = 1e-6;
 /// Numerical floor for positive frequencies and curvatures.
 const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
-/// Largest coordinate stretch or shrink allowed in the diagonal transform.
-const GLE_PRECONDITIONER_MAX_SCALE: f64 = 32.0;
+/// Coordinate stretch is bounded by the fitted thermostat frequency band.
+const GLE_PRECONDITIONER_MAX_SCALE: f64 = GLE_BAND_RATIO;
 /// Final annealing temperature as a fraction of the initial temperature.
 const GLE_ANNEAL_TEMPERATURE_FLOOR_RATIO: f64 = 1e-3;
 
@@ -92,14 +92,26 @@ fn unit_gle_preconditioner(dim: usize, omega0: f64) -> GlePreconditioner {
     }
 }
 
-fn rademacher_direction<R: Rng + ?Sized>(rng: &mut R, dim: usize) -> Array1<f64> {
-    Array1::from_iter((0..dim).map(|_| if rng.random::<bool>() { 1.0 } else { -1.0 }))
-}
-
-fn gle_preconditioner_probe_budget(max_fevals: usize, dim: usize) -> usize {
+fn default_gle_preconditioner_probe_budget(max_fevals: usize, dim: usize) -> usize {
     let probe_pairs = max_fevals.saturating_sub(1).checked_div(2).unwrap_or(0);
     let root_budget = (probe_pairs as f64).sqrt().floor() as usize;
     probe_pairs.min(root_budget).min(dim)
+}
+
+fn gle_preconditioner_probe_budget(
+    max_fevals: usize,
+    dim: usize,
+    configured_probes: Option<usize>,
+) -> usize {
+    let probe_pairs = max_fevals.saturating_sub(1).checked_div(2).unwrap_or(0);
+    configured_probes
+        .unwrap_or_else(|| default_gle_preconditioner_probe_budget(max_fevals, dim))
+        .min(probe_pairs)
+        .min(dim)
+}
+
+fn rademacher_direction<R: Rng + ?Sized>(rng: &mut R, dim: usize) -> Array1<f64> {
+    Array1::from_iter((0..dim).map(|_| if rng.random::<bool>() { 1.0 } else { -1.0 }))
 }
 
 fn gle_lower_band_frequency(target_frequency: f64) -> f64 {
@@ -417,12 +429,14 @@ pub fn gle_langevin_preconditioned_sa<O, G>(
     dt: f64,
     n_epochs: usize,
     x0: Option<Array1<f64>>,
+    max_preconditioner_probes: Option<usize>,
 ) -> GleLangevinResult
 where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
-    let max_probes = gle_preconditioner_probe_budget(max_fevals, obj.bounds().dims);
+    let max_probes =
+        gle_preconditioner_probe_budget(max_fevals, obj.bounds().dims, max_preconditioner_probes);
     let preconditioner = if max_probes > 0 {
         estimate_gle_preconditioner(obj, grad, seed, max_probes)
     } else {
@@ -610,7 +624,7 @@ mod tests {
         };
         let grad = IllGrad { a: a.clone() };
 
-        let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, 8);
+        let preconditioner = estimate_gle_preconditioner(&obj, &grad, 13, dim);
         let target_curvature = GLE_BAND_RATIO * preconditioner.omega0 * preconditioner.omega0;
 
         assert_eq!(preconditioner.diag.len(), dim);
@@ -666,7 +680,7 @@ mod tests {
         };
         let grad = IllGrad { a };
 
-        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None);
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None, None);
 
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_preconditioner_grads > 0);
@@ -692,8 +706,8 @@ mod tests {
         };
         let grad = IllGrad { a };
 
-        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None);
-        let expected_probe_cap = 2 * gle_preconditioner_probe_budget(300, dim);
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None, None);
+        let expected_probe_cap = 2 * gle_preconditioner_probe_budget(300, dim, None);
 
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(
@@ -701,6 +715,28 @@ mod tests {
             "used {} gradient probes",
             res.n_preconditioner_grads,
         );
+        assert!(res.n_evals <= 300);
+    }
+
+    #[test]
+    fn preconditioned_gle_honors_configured_probe_count() {
+        let dim = 8;
+        let a = Array1::from_iter((0..dim).map(|axis| 1.0 + axis as f64));
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -5.0),
+            Array1::from_elem(dim, 5.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a };
+
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None, Some(dim));
+
+        assert_eq!(res.n_preconditioner_grads, 2 * dim);
+        assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_evals <= 300);
     }
 }

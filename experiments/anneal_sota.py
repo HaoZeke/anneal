@@ -86,6 +86,7 @@ class AnnealHybridConfig:
     gle_omega0: float | None = None
     gle_dt: float = 0.2
     gle_n_epochs: int = 40
+    gle_preconditioner_probes: int | None = None
     gle_min_dimension: int = 3
     scout_budget_divisor: int = 3
     scout_gle_divisor: int = 2
@@ -1380,17 +1381,24 @@ def qmc_annealed_hybrid(
                     remaining_units // config.gle_shared_budget_units_per_step,
                 )
                 if maxf >= 2:
+                    gle_kwargs = {
+                        "seed": int(rng.integers(1 << 31)),
+                        "omega0": config.gle_omega0,
+                        "dt": config.gle_dt,
+                        "n_epochs": config.gle_n_epochs,
+                        "x0": best_x,
+                    }
+                    if config.gle_preconditioner_probes is not None:
+                        gle_kwargs["preconditioner_probes"] = (
+                            config.gle_preconditioner_probes
+                        )
                     gle_res = _library_gle_langevin()(
                         counter,
                         jac,
                         low,
                         high,
                         max_fevals=maxf,
-                        seed=int(rng.integers(1 << 31)),
-                        omega0=config.gle_omega0,
-                        dt=config.gle_dt,
-                        n_epochs=config.gle_n_epochs,
-                        x0=best_x,
+                        **gle_kwargs,
                     )
                     if (
                         isinstance(gle_res, dict)
