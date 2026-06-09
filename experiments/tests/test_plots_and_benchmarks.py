@@ -2373,8 +2373,8 @@ def test_cutest_bayesian_adaptive_gle_polishes_gle_candidate(monkeypatch):
 
     assert best_val == -21.0
     assert fevals == 42
-    assert captured["gle_max_fevals"] == 82
-    assert captured["polish_max_fevals"] == 27
+    assert captured["gle_max_fevals"] == 55
+    assert captured["polish_max_fevals"] == 44
     assert captured["polish_x0"].tolist() == pytest.approx([0.3, -0.3])
 
 
