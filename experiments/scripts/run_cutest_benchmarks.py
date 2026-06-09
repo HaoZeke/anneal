@@ -908,6 +908,35 @@ def bayesian_mixing_sa(prob, seed, max_fevals, return_diagnostics=False):
     return best_val, n_calls
 
 
+def portfolio_sa(prob, seed, max_fevals):
+    """Native Thompson-portfolio driver under the shared work-unit budget.
+
+    Native gradients are charged at one work unit each inside the Rust
+    budget ledger, matching the suite convention. Problems without a
+    native gradient run the values-only arm set; finite-difference
+    gradients at ``dim + 1`` units per call are not worth the spend
+    inside the shared budget.
+    """
+    if max_fevals < 1:
+        raise ValueError("max_fevals must be positive")
+    import anneal
+
+    grad_fn, grad_kind = _cutest_gradient(prob)
+    if grad_kind != "native":
+        grad_fn = None
+    design_low, design_high = _design_bounds(prob)
+    out = anneal.global_optimize(
+        prob.fn,
+        design_low,
+        design_high,
+        budget=int(max_fevals),
+        seed=int(seed),
+        grad_fn=grad_fn,
+    )
+    work_units = int(out.get("n_evals", 0)) + int(out.get("n_grads", 0))
+    return float(out.get("best_val", float("inf"))), work_units
+
+
 DRIVERS = [
     "classical",
     "mcmc_sa",
@@ -916,6 +945,7 @@ DRIVERS = [
     "mcmc_sa_sparse_budgeted",
     "pt_sa_budgeted",
     "bayesian_mixing_sa",
+    "portfolio",
     "additive_indep",
     "gle_langevin",
     "bayesian_adaptive_gle",
