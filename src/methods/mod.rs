@@ -30,7 +30,7 @@ pub use gle_langevin::{
 };
 pub use local_polish::{
     LocalPolishResult, QmcPolishResult, projected_gradient_polish, qmc_best1bin_scout,
-    qmc_projected_gradient_polish, shifted_qmc_projected_gradient_polish,
+    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{ParallelTemperingSampler, PtChainState, PtResult, geometric_ladder};

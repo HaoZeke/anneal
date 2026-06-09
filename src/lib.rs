@@ -74,7 +74,7 @@ pub use methods::{
     Q_V_MIN, QmcPolishResult, TARGET_ACCEPT_RATE, estimate_gle_omega0, fit_laplace,
     geometric_ladder, gle_langevin_adaptive_sa, gle_langevin_sa, pilot_draws, pilot_draws_qmc,
     projected_gradient_polish, qmc_best1bin_scout, qmc_projected_gradient_polish,
-    shifted_qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 pub use movekernel::MoveKernel;
 pub use neigh::Neighborhood;

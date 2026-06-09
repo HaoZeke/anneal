@@ -670,6 +670,106 @@ fn qmc_best1bin_scout_objective(
     qmc_polish_result_to_dict(py, result)
 }
 
+/// Runs a local shifted-QMC trust-region poll.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
+fn qmc_trust_region_poll(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    center: PyReadonlyArray1<'_, f64>,
+    max_evals: usize,
+    seed: u64,
+    radius_fraction: f64,
+    n_levels: usize,
+    points_per_level: usize,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    let center_vec = center.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() || low_vec.len() != center_vec.len() {
+        return Err(PyValueError::new_err(
+            "low, high, and center must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if max_evals < 1 {
+        return Err(PyValueError::new_err("max_evals must be positive"));
+    }
+    if !radius_fraction.is_finite() || radius_fraction < 0.0 {
+        return Err(PyValueError::new_err(
+            "radius_fraction must be finite and non-negative",
+        ));
+    }
+    if n_levels < 1 {
+        return Err(PyValueError::new_err("n_levels must be positive"));
+    }
+
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = crate::qmc_trust_region_poll(
+        &obj,
+        Array1::from_vec(center_vec),
+        max_evals,
+        seed,
+        radius_fraction,
+        n_levels,
+        points_per_level,
+    );
+    qmc_polish_result_to_dict(py, result)
+}
+
+/// Runs a local shifted-QMC trust-region poll using a native objective handle.
+#[pyfunction]
+#[pyo3(signature = (objective, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
+fn qmc_trust_region_poll_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    center: PyReadonlyArray1<'_, f64>,
+    max_evals: usize,
+    seed: u64,
+    radius_fraction: f64,
+    n_levels: usize,
+    points_per_level: usize,
+) -> PyResult<Py<PyDict>> {
+    let center_vec = center.as_slice()?.to_vec();
+    if center_vec.len() != objective.dim() {
+        return Err(PyValueError::new_err(
+            "center dimension must match objective bounds",
+        ));
+    }
+    if max_evals < 1 {
+        return Err(PyValueError::new_err("max_evals must be positive"));
+    }
+    if !radius_fraction.is_finite() || radius_fraction < 0.0 {
+        return Err(PyValueError::new_err(
+            "radius_fraction must be finite and non-negative",
+        ));
+    }
+    if n_levels < 1 {
+        return Err(PyValueError::new_err("n_levels must be positive"));
+    }
+
+    let result = crate::qmc_trust_region_poll(
+        &*objective,
+        Array1::from_vec(center_vec),
+        max_evals,
+        seed,
+        radius_fraction,
+        n_levels,
+        points_per_level,
+    );
+    qmc_polish_result_to_dict(py, result)
+}
+
 /// Refines shifted QMC starts with bounded projected-gradient polish.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, seed = 0, n_replicates = 1, step0 = 1.0, grad_tol = 1e-8, top_k = 0))]
@@ -1092,6 +1192,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(qmc_polish_objective, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_best1bin_scout, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_best1bin_scout_objective, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_trust_region_poll, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_trust_region_poll_objective, m)?)?;
     m.add_function(wrap_pyfunction!(shifted_qmc_polish, m)?)?;
     m.add_function(wrap_pyfunction!(additive_independence, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_gle_omega0, m)?)?;
