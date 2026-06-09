@@ -45,6 +45,7 @@ BAYESIAN_GLE_POLISH_BUDGET_DIVISOR = 2
 BAYESIAN_GLE_SCOUT_MAX_DIM = 4
 BAYESIAN_GLE_SCOUT_BUDGET_DIVISOR = 4
 BAYESIAN_GLE_SCOUT_DEFAULT_POPULATION = 30
+BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR = 2
 
 
 def _low_discrepancy_starts(
@@ -2191,6 +2192,70 @@ def _run_bayesian_gle_low_dimensional_scout(
     return best_val, int(result.get("n_evals", 0)), best_pos
 
 
+def _bayesian_gle_scout_followup_budget(
+    scout_budget,
+    gle_fevals,
+    available_work,
+):
+    if available_work < 4:
+        return 0
+    return max(4, min(int(available_work), max(int(scout_budget), int(gle_fevals))))
+
+
+def _run_bayesian_gle_qmc_polish_arm(
+    anneal_module,
+    prob,
+    grad_fn,
+    grad_kind,
+    seed,
+    available_work,
+    n_chains,
+):
+    dim = int(getattr(prob, "dim", np.asarray(prob.low).size))
+    if dim < 1 or int(available_work) < 1:
+        return None
+    has_qmc_polish = hasattr(anneal_module, "qmc_polish") or all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_polish_objective")
+    )
+    if not has_qmc_polish:
+        return None
+    n_chains = max(1, int(n_chains))
+    top_k = _bounded_polish_top_k(n_chains)
+    start_ceiling = _native_qmc_polish_start_count(dim, n_chains)
+    work_scaled_starts = max(
+        n_chains,
+        int(available_work)
+        // max(
+            1,
+            BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR * dim
+            + BAYESIAN_GLE_QMC_POLISH_WORK_PER_START_DIVISOR,
+        ),
+    )
+    n_starts = max(1, min(start_ceiling, work_scaled_starts))
+    top_k = min(top_k, n_starts)
+    screening_work = int(n_starts)
+    if int(available_work) <= screening_work:
+        return None
+    polish_count = _qmc_polish_count(n_starts, top_k)
+    per_step_work = _polish_work_units(dim, grad_kind, 1, 1)
+    max_fevals_per_start = max(
+        1,
+        (int(available_work) - screening_work)
+        // max(1, per_step_work * polish_count),
+    )
+    return _run_cutest_qmc_polish(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        int(seed),
+        int(n_starts),
+        int(max_fevals_per_start),
+        top_k=int(top_k),
+    )
+
+
 def _run_cutest_bayesian_adaptive_gle(
     anneal_module,
     prob,
@@ -2204,6 +2269,7 @@ def _run_cutest_bayesian_adaptive_gle(
     sigma_map,
     best_pilot_pos,
     t_hot,
+    n_chains=1,
 ):
     has_native_preconditioned = all(
         hasattr(anneal_module, name)
@@ -2363,6 +2429,47 @@ def _run_cutest_bayesian_adaptive_gle(
         if anchor_val < best_val:
             best_val = float(anchor_val)
             best_pos = anchor_pos
+    if scout_result is not None:
+        scout_val, _scout_work, _scout_pos = scout_result
+        available_work = int(max_fevals) - int(work_units)
+        followup_budget = _bayesian_gle_scout_followup_budget(
+            scout_budget,
+            gle_fevals,
+            available_work,
+        )
+        if (
+            followup_budget > 0
+            and np.isfinite(scout_val)
+            and scout_val <= best_val
+        ):
+            followup_scout = _run_bayesian_gle_low_dimensional_scout(
+                anneal_module,
+                prob,
+                int(seed) + 2,
+                int(followup_budget),
+            )
+            if followup_scout is not None:
+                scout_val, scout_work, scout_pos = followup_scout
+                work_units += int(scout_work)
+                if np.isfinite(scout_val) and scout_val < best_val:
+                    best_val = float(scout_val)
+                    best_pos = scout_pos
+    available_work = int(max_fevals) - int(work_units)
+    qmc_polish_result = _run_bayesian_gle_qmc_polish_arm(
+        anneal_module,
+        prob,
+        grad_fn,
+        grad_kind,
+        int(seed) + 3,
+        int(available_work),
+        int(n_chains),
+    )
+    if qmc_polish_result is not None:
+        qmc_polish_val, qmc_polish_work = qmc_polish_result
+        if int(qmc_polish_work) <= available_work:
+            work_units += int(qmc_polish_work)
+            if np.isfinite(qmc_polish_val) and qmc_polish_val < best_val:
+                best_val = float(qmc_polish_val)
     if polish_budget > 0:
         available_work = int(max_fevals) - int(work_units)
         if available_work >= 2:
@@ -2676,6 +2783,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                 sigma_map,
                 best_pilot_pos,
                 t_hot,
+                n_chains=n_chains,
             )
             if gle_result is None:
                 return float("nan"), int(pilot_calls)

@@ -2439,9 +2439,9 @@ def test_cutest_bayesian_adaptive_gle_uses_low_dimensional_scout(monkeypatch):
     )
 
     assert best_val == -30.0
-    assert fevals == 57
-    assert captured["scout_max_evals"] == 27
-    assert captured["scout_seed"] == 8
+    assert fevals == 64
+    assert captured["scout_max_evals"] == 41
+    assert captured["scout_seed"] == 9
     assert captured["gle_max_fevals"] == 41
 
 
@@ -2508,8 +2508,8 @@ def test_cutest_bayesian_adaptive_gle_extends_productive_scout_arm(monkeypatch):
     )
 
     assert best_val == -40.0
-    assert fevals == 50
-    assert captured["scout_budgets"] == [27, 42]
+    assert fevals == 48
+    assert captured["scout_budgets"] == [27, 41]
     assert captured["scout_seeds"] == [8, 9]
     assert captured["gle_max_fevals"] == 41
 
@@ -2579,10 +2579,10 @@ def test_cutest_bayesian_adaptive_gle_routes_native_qmc_polish_arm(monkeypatch):
     )
 
     assert best_val == -33.0
-    assert fevals == 53
+    assert fevals == 52
     assert captured["qmc_polish"] == {
-        "n_starts": 4,
-        "max_fevals_per_start": 8,
+        "n_starts": 6,
+        "max_fevals_per_start": 19,
         "top_k": 2,
         "seed": 10,
     }
