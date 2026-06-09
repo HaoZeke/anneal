@@ -636,4 +636,31 @@ mod tests {
             .iter()
             .all(|value| value.is_finite() && *value > 0.0));
     }
+
+    #[test]
+    fn preconditioned_gle_caps_curvature_probe_work() {
+        const EXPECTED_MAX_PROBE_GRADS: usize = 32;
+        let dim = 64;
+        let a = Array1::from_iter((0..dim).map(|axis| 1.0 + axis as f64));
+        let bounds = Bounds::new(
+            Array1::from_elem(dim, -5.0),
+            Array1::from_elem(dim, 5.0),
+            0.0,
+        );
+        let obj = IllConditioned {
+            bounds,
+            a: a.clone(),
+        };
+        let grad = IllGrad { a };
+
+        let res = gle_langevin_preconditioned_sa(&obj, &grad, 0, 300, 0.2, 20, None);
+
+        assert_eq!(res.preconditioner_diag.len(), dim);
+        assert!(
+            res.n_preconditioner_grads <= EXPECTED_MAX_PROBE_GRADS,
+            "used {} gradient probes",
+            res.n_preconditioner_grads,
+        );
+        assert!(res.n_evals <= 300);
+    }
 }
