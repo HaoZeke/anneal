@@ -15,7 +15,7 @@
 use eindir_core::{optimal_sampling_drift, GleThermostat, Objective};
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::SeedableRng;
 
 use eindir_core::Gradient;
 
@@ -29,8 +29,6 @@ const GLE_TIMESTEP_RESOLUTION: f64 = 0.2;
 const GLE_MIN_TIMESTEP: f64 = 1e-6;
 /// Numerical floor for positive frequencies and curvatures.
 const GLE_FREQUENCY_FLOOR: f64 = 1e-12;
-/// Coordinate stretch is bounded by the fitted thermostat frequency band.
-const GLE_PRECONDITIONER_MAX_SCALE: f64 = GLE_BAND_RATIO;
 /// Final annealing temperature as a fraction of the initial temperature.
 const GLE_ANNEAL_TEMPERATURE_FLOOR_RATIO: f64 = 1e-3;
 
@@ -110,12 +108,38 @@ fn gle_preconditioner_probe_budget(
         .min(dim)
 }
 
-fn rademacher_direction<R: Rng + ?Sized>(rng: &mut R, dim: usize) -> Array1<f64> {
-    Array1::from_iter((0..dim).map(|_| if rng.random::<bool>() { 1.0 } else { -1.0 }))
-}
-
 fn gle_lower_band_frequency(target_frequency: f64) -> f64 {
     (target_frequency / GLE_BAND_RATIO.sqrt()).max(GLE_FREQUENCY_FLOOR)
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    value ^ (value >> 31)
+}
+
+fn gcd_usize(mut left: usize, mut right: usize) -> usize {
+    while right != 0 {
+        let next = left % right;
+        left = right;
+        right = next;
+    }
+    left
+}
+
+fn gle_probe_axes(seed: u64, dim: usize, probes: usize) -> Vec<usize> {
+    if dim == 0 || probes == 0 {
+        return Vec::new();
+    }
+    let start = (splitmix64(seed) as usize) % dim;
+    let mut stride = ((splitmix64(seed ^ 0xD1B5_4A32_D192_ED03) as usize) % dim).max(1);
+    while gcd_usize(stride, dim) != 1 {
+        stride = (stride % dim) + 1;
+    }
+    (0..probes)
+        .map(|offset| (start + offset * stride) % dim)
+        .collect()
 }
 
 /// Estimate a diagonal coordinate preconditioner from local gradient curvature.
@@ -154,15 +178,18 @@ where
         return unit_gle_preconditioner(dim, fallback);
     }
     let step = (f64::EPSILON.cbrt() * min_width).max(f64::EPSILON.sqrt());
-    let mut curvature = Array1::<f64>::zeros(dim);
-    let mut used = 0usize;
+    let mut curvature = Array1::<f64>::from_elem(dim, f64::NAN);
     let mut n_grads = 0usize;
-    let mut rng = StdRng::seed_from_u64(seed);
 
-    for _ in 0..probes {
-        let direction = rademacher_direction(&mut rng, dim);
-        let xp = bounds.clip((&center + &(&direction * step)).view());
-        let xm = bounds.clip((&center - &(&direction * step)).view());
+    for axis in gle_probe_axes(seed, dim, probes) {
+        let mut xp = center.clone();
+        let mut xm = center.clone();
+        xp[axis] = (center[axis] + step).min(high[axis]);
+        xm[axis] = (center[axis] - step).max(low[axis]);
+        let denom = xp[axis] - xm[axis];
+        if !denom.is_finite() || denom.abs() <= f64::EPSILON.sqrt() {
+            continue;
+        }
         let gp = grad.grad(xp.view());
         let gm = grad.grad(xm.view());
         n_grads += 2;
@@ -173,15 +200,11 @@ where
         {
             continue;
         }
-        let hv = (&gp - &gm) * (0.5 / step);
-        curvature += &(&direction * &hv);
-        used += 1;
+        let value = ((gp[axis] - gm[axis]) / denom).abs();
+        if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
+            curvature[axis] = value;
+        }
     }
-
-    if used == 0 {
-        return unit_gle_preconditioner(dim, fallback);
-    }
-    curvature.mapv_inplace(|value| (value / used as f64).abs());
 
     let mut positive: Vec<f64> = curvature
         .iter()
@@ -193,12 +216,9 @@ where
     }
     positive.sort_by(|left, right| left.total_cmp(right));
     let reference = positive[positive.len() / 2].max(GLE_FREQUENCY_FLOOR);
-    let min_scale = 1.0 / GLE_PRECONDITIONER_MAX_SCALE;
     let scale = curvature.mapv(|value| {
         if value.is_finite() && value > GLE_FREQUENCY_FLOOR {
-            (reference / value)
-                .sqrt()
-                .clamp(min_scale, GLE_PRECONDITIONER_MAX_SCALE)
+            (reference / value).sqrt()
         } else {
             1.0
         }
