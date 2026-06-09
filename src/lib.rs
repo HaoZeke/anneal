@@ -70,11 +70,12 @@ pub use laws::LawViolation;
 pub use methods::{
     estimate_gle_omega0, estimate_gle_preconditioner, fit_laplace, geometric_ladder,
     gle_langevin_adaptive_sa, gle_langevin_preconditioned_sa, gle_langevin_sa, pilot_draws,
-    pilot_draws_qmc, projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
-    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
-    BayesianMixingResult, BayesianMixingSampler, GelmanRubin, GleLangevinResult, GlePreconditioner,
-    LaplacePosterior, LocalPolishResult, MultiChainResult, MultiChainSampler, MultiChainState,
-    ParallelTemperingSampler, PilotObservation, PilotPrior, PtChainState, PtResult,
+    pilot_draws_qmc, portfolio_optimize, projected_gradient_polish, qmc_best1bin_scout,
+    qmc_gsa_global_search, qmc_projected_gradient_polish, qmc_trust_region_poll,
+    shifted_qmc_projected_gradient_polish, ArmStat, BayesianMixingResult, BayesianMixingSampler,
+    GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,
+    MultiChainResult, MultiChainSampler, MultiChainState, ParallelTemperingSampler,
+    PilotObservation, PilotPrior, PortfolioConfig, PortfolioResult, PtChainState, PtResult,
     QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
 pub use movekernel::MoveKernel;

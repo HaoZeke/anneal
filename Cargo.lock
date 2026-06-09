@@ -298,6 +298,8 @@ dependencies = [
  "dlpk",
  "ndarray 0.17.2",
  "num-traits",
+ "numpy",
+ "pyo3",
  "rand",
  "rand_distr",
  "thiserror",

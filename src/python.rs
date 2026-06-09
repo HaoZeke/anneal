@@ -1253,6 +1253,169 @@ fn gle_langevin_preconditioned_objective(
 }
 
 // ---------------------------------------------------------------------------
+// Thompson-allocated portfolio driver.
+// ---------------------------------------------------------------------------
+
+fn portfolio_result_to_dict(
+    py: Python<'_>,
+    result: crate::PortfolioResult,
+) -> PyResult<Py<PyDict>> {
+    let out = PyDict::new(py);
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos))?;
+    out.set_item("best_val", result.best_val)?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    let pulls = PyDict::new(py);
+    let successes = PyDict::new(py);
+    for stat in &result.arm_stats {
+        pulls.set_item(stat.name, stat.pulls)?;
+        successes.set_item(stat.name, stat.successes)?;
+    }
+    out.set_item("arm_pulls", pulls)?;
+    out.set_item("arm_successes", successes)?;
+    Ok(out.into())
+}
+
+fn portfolio_config_from_args(
+    restart_floor: f64,
+    discount: f64,
+    slice_divisor: usize,
+    final_polish_fraction: f64,
+) -> PyResult<crate::PortfolioConfig> {
+    if !(0.0..1.0).contains(&restart_floor) {
+        return Err(PyValueError::new_err("restart_floor must lie in [0, 1)"));
+    }
+    if !(0.0..=1.0).contains(&discount) {
+        return Err(PyValueError::new_err("discount must lie in [0, 1]"));
+    }
+    if slice_divisor == 0 {
+        return Err(PyValueError::new_err("slice_divisor must be positive"));
+    }
+    if !(0.0..1.0).contains(&final_polish_fraction) {
+        return Err(PyValueError::new_err(
+            "final_polish_fraction must lie in [0, 1)",
+        ));
+    }
+    Ok(crate::PortfolioConfig {
+        restart_floor,
+        discount,
+        slice_divisor,
+        final_polish_fraction,
+        ..crate::PortfolioConfig::default()
+    })
+}
+
+/// Runs the Thompson-allocated portfolio global optimizer.
+///
+/// One generic driver with a single budget knob: a discounted
+/// Beta-Bernoulli posterior over the library's building blocks (QMC
+/// restart descent, adaptive basin hopping, preconditioned
+/// GLE-Langevin, best/1/bin differential evolution, generalized
+/// simulated annealing, archive-fit additive-surrogate independence
+/// proposals, and shifted-QMC trust-region polls) allocates budget
+/// slices by Thompson sampling. Objective and native-gradient
+/// evaluations share the budget at one unit each.
+///
+/// Args:
+///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
+///   low, high: numpy box bounds.
+///   budget: combined objective + gradient evaluation budget.
+///   seed: RNG seed.
+///   grad_fn: optional gradient callable; enables the gradient arms
+///            and the final polish.
+///   restart_floor: probability floor for the QMC restart arm.
+///   discount: posterior discount factor.
+///   slice_divisor: budget slices per run (`budget / slice_divisor`).
+///   final_polish_fraction: budget fraction reserved for the final
+///            gradient polish.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, restart_floor = 0.12, discount = 0.97, slice_divisor = 40, final_polish_fraction = 0.06))]
+#[allow(clippy::too_many_arguments)]
+fn global_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    restart_floor: f64,
+    discount: f64,
+    slice_divisor: usize,
+    final_polish_fraction: f64,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    let config = portfolio_config_from_args(
+        restart_floor,
+        discount,
+        slice_divisor,
+        final_polish_fraction,
+    )?;
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = match grad_fn {
+        Some(grad_fn) => {
+            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            crate::portfolio_optimize(&obj, Some(&grad), budget, seed, &config)
+        }
+        None => {
+            crate::portfolio_optimize::<_, CallablePyGradient>(&obj, None, budget, seed, &config)
+        }
+    };
+    portfolio_result_to_dict(py, result)
+}
+
+/// Runs the portfolio global optimizer with a native objective handle.
+#[pyfunction]
+#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, restart_floor = 0.12, discount = 0.97, slice_divisor = 40, final_polish_fraction = 0.06))]
+#[allow(clippy::too_many_arguments)]
+fn global_optimize_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    budget: usize,
+    seed: u64,
+    use_gradient: bool,
+    restart_floor: f64,
+    discount: f64,
+    slice_divisor: usize,
+    final_polish_fraction: f64,
+) -> PyResult<Py<PyDict>> {
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    let config = portfolio_config_from_args(
+        restart_floor,
+        discount,
+        slice_divisor,
+        final_polish_fraction,
+    )?;
+    let result = if use_gradient {
+        crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed, &config)
+    } else {
+        crate::portfolio_optimize::<_, PyObjective>(&*objective, None, budget, seed, &config)
+    };
+    portfolio_result_to_dict(py, result)
+}
+
+// ---------------------------------------------------------------------------
 // Preset enum + dispatch.
 // ---------------------------------------------------------------------------
 
@@ -1464,5 +1627,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gle_langevin_preconditioned, m)?)?;
     m.add_function(wrap_pyfunction!(gle_langevin_preconditioned_objective, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
+    m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
     Ok(())
 }

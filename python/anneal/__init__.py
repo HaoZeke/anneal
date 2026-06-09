@@ -40,6 +40,8 @@ from anneal._core import (
     gle_langevin_objective as _core_gle_langevin_objective,
     gle_langevin_preconditioned as _core_gle_langevin_preconditioned,
     gle_langevin_preconditioned_objective as _core_gle_langevin_preconditioned_objective,
+    global_optimize as _core_global_optimize,
+    global_optimize_objective as _core_global_optimize_objective,
     run,
     run_hmc,
     run_qmc,
@@ -514,6 +516,86 @@ def gle_langevin_preconditioned_objective(
     return out
 
 
+def global_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    restart_floor: float = 0.12,
+    discount: float = 0.97,
+    slice_divisor: int = 40,
+    final_polish_fraction: float = 0.06,
+):
+    """Thompson-allocated portfolio global optimizer.
+
+    One generic driver with a single budget knob. A discounted
+    Beta-Bernoulli posterior over the library's building blocks (QMC
+    restart descent, adaptive basin hopping, preconditioned
+    GLE-Langevin, best/1/bin differential evolution, generalized
+    simulated annealing, archive-fit additive-surrogate independence
+    proposals, and shifted-QMC trust-region polls) allocates budget
+    slices by Thompson sampling. A probability floor on the QMC restart
+    arm preserves the restart-measure convergence guarantee. Objective
+    and native-gradient evaluations share the budget at one unit each.
+
+    Args:
+      obj_fn: callable ``f(numpy.ndarray) -> float``.
+      low, high: box bounds.
+      budget: combined objective + gradient evaluation budget.
+      seed: RNG seed.
+      grad_fn: optional gradient callable ``g(x) -> numpy.ndarray``;
+        enables the gradient arms and the final polish. Pass
+        ``jax.grad(f)``, a torch ``.backward()`` wrapper, or an
+        analytic gradient.
+      restart_floor, discount, slice_divisor, final_polish_fraction:
+        allocation controls; the defaults are problem-independent.
+
+    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
+    ``n_grads``, ``arm_pulls``, and ``arm_successes``.
+    """
+    out = _core_global_optimize(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(budget),
+        int(seed),
+        grad_fn,
+        float(restart_floor),
+        float(discount),
+        int(slice_divisor),
+        float(final_polish_fraction),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def global_optimize_objective(
+    objective,
+    budget: int,
+    seed: int = 0,
+    use_gradient: bool = True,
+    restart_floor: float = 0.12,
+    discount: float = 0.97,
+    slice_divisor: int = 40,
+    final_polish_fraction: float = 0.06,
+):
+    """Portfolio global optimizer over a native ``PyObjective`` handle."""
+    out = _core_global_optimize_objective(
+        objective,
+        int(budget),
+        int(seed),
+        bool(use_gradient),
+        float(restart_floor),
+        float(discount),
+        int(slice_divisor),
+        float(final_polish_fraction),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 __all__ = [
     "Boltzmann",
     "Bounds",
@@ -544,6 +626,8 @@ __all__ = [
     "gle_langevin_objective",
     "gle_langevin_preconditioned",
     "gle_langevin_preconditioned_objective",
+    "global_optimize",
+    "global_optimize_objective",
     "run",
     "run_device",
     "run_ensemble",
