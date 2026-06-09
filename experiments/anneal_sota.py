@@ -37,6 +37,12 @@ DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK = 2
 DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
 DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
 DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR = DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR
+DEFAULT_TRUST_REGION_QMC_POLL_MIN_DIMENSION = DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION
+DEFAULT_TRUST_REGION_QMC_POLL_MAX_DIMENSION = DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION
+DEFAULT_TRUST_REGION_QMC_POLL_BUDGET_DIVISOR = DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
+DEFAULT_TRUST_REGION_QMC_POLL_RADIUS_FRACTION = 0.0
+DEFAULT_TRUST_REGION_QMC_POLL_LEVELS = DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT + 1
+DEFAULT_TRUST_REGION_QMC_POLL_POINTS_PER_LEVEL = 0
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES = 2
@@ -106,6 +112,23 @@ class AnnealHybridConfig:
     boundary_qmc_polish_min_dimension: int = DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION
     boundary_qmc_polish_max_dimension: int = DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION
     boundary_qmc_polish_budget_divisor: int = DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
+    trust_region_qmc_poll_enabled: bool = True
+    trust_region_qmc_poll_min_dimension: int = (
+        DEFAULT_TRUST_REGION_QMC_POLL_MIN_DIMENSION
+    )
+    trust_region_qmc_poll_max_dimension: int = (
+        DEFAULT_TRUST_REGION_QMC_POLL_MAX_DIMENSION
+    )
+    trust_region_qmc_poll_budget_divisor: int = (
+        DEFAULT_TRUST_REGION_QMC_POLL_BUDGET_DIVISOR
+    )
+    trust_region_qmc_poll_radius_fraction: float = (
+        DEFAULT_TRUST_REGION_QMC_POLL_RADIUS_FRACTION
+    )
+    trust_region_qmc_poll_levels: int = DEFAULT_TRUST_REGION_QMC_POLL_LEVELS
+    trust_region_qmc_poll_points_per_level: int = (
+        DEFAULT_TRUST_REGION_QMC_POLL_POINTS_PER_LEVEL
+    )
     shifted_qmc_polish_enabled: bool = True
     shifted_qmc_polish_min_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
     shifted_qmc_polish_max_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
@@ -286,6 +309,71 @@ def _boundary_qmc_polish(counter, grad_fn, low, high, rng, k_polish, config):
             rng,
             k_polish=k_polish,
             config=config,
+        )
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+        result = None
+    finally:
+        counter.budget = original_budget
+    if not isinstance(result, dict):
+        return None
+    best_val = float(result.get("best_val", float("inf")))
+    if math.isfinite(best_val) and best_val < counter.best:
+        counter.best = best_val
+    return result
+
+
+def _trust_region_qmc_poll_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.trust_region_qmc_poll_enabled:
+        return False
+    if dim < config.trust_region_qmc_poll_min_dimension:
+        return False
+    return (
+        config.trust_region_qmc_poll_max_dimension <= 0
+        or dim <= config.trust_region_qmc_poll_max_dimension
+    )
+
+
+def _trust_region_qmc_poll_budget(
+    remaining: int,
+    config: AnnealHybridConfig,
+) -> int:
+    if remaining <= 0 or config.trust_region_qmc_poll_budget_divisor <= 0:
+        return 0
+    return min(remaining, remaining // config.trust_region_qmc_poll_budget_divisor)
+
+
+def _native_qmc_trust_region_poll(counter, center, low, high, rng, config):
+    if center is None or counter.n >= counter.budget:
+        return None
+    slice_budget = _trust_region_qmc_poll_budget(counter.budget - counter.n, config)
+    if slice_budget <= 0:
+        return None
+    try:
+        anneal = _anneal_module()
+    except ModuleNotFoundError as exc:
+        if exc.name != "anneal":
+            raise
+        return None
+    if not all(
+        hasattr(anneal, name)
+        for name in ("Bounds", "PyObjective", "qmc_trust_region_poll_objective")
+    ):
+        return None
+    original_budget = counter.budget
+    counter.budget = counter.n + slice_budget
+    try:
+        bounds = anneal.Bounds(low, high, config.native_bounds_slack)
+        objective = anneal.PyObjective(counter, bounds)
+        result = anneal.qmc_trust_region_poll_objective(
+            objective,
+            _clipped_anchor(center, low, high),
+            slice_budget,
+            seed=int(rng.integers(1 << 31)),
+            radius_fraction=config.trust_region_qmc_poll_radius_fraction,
+            n_levels=config.trust_region_qmc_poll_levels,
+            points_per_level=config.trust_region_qmc_poll_points_per_level,
         )
     except Exception as exc:  # noqa: BLE001
         if exc.__class__.__name__ != "_Budget":
@@ -859,6 +947,7 @@ def qmc_annealed_hybrid(
     boundary_best_x = None
     boundary_polish_consumed = False
     shifted_best_x = None
+    trust_region_best_x = None
     if _global_anneal_portfolio_active(dim, config):
         portfolio_best = _global_anneal_portfolio(
             counter,
@@ -940,6 +1029,31 @@ def qmc_annealed_hybrid(
                 else float("inf")
             )
             return _best_finite(shifted_best, counter.best)
+    if _trust_region_qmc_poll_active(dim, config):
+        trust_center = (
+            shifted_best_x
+            if shifted_best_x is not None
+            else boundary_best_x
+            if boundary_best_x is not None
+            else anchor_arr
+        )
+        trust_region = _native_qmc_trust_region_poll(
+            counter,
+            trust_center,
+            low,
+            high,
+            rng,
+            config,
+        )
+        if isinstance(trust_region, dict) and "best_pos" in trust_region:
+            trust_region_best_x = _clipped_anchor(trust_region["best_pos"], low, high)
+        if counter.n >= counter.budget:
+            trust_region_best = (
+                float(trust_region.get("best_val", float("inf")))
+                if isinstance(trust_region, dict)
+                else float("inf")
+            )
+            return _best_finite(trust_region_best, counter.best)
     if (
         config.best1bin_enabled
         and config.best1bin_budget_divisor > 0
@@ -988,7 +1102,9 @@ def qmc_annealed_hybrid(
         np.asarray(point, dtype=np.float64).copy()
         for point in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
     ]
-    if boundary_best_x is not None and pop:
+    if trust_region_best_x is not None and pop:
+        pop[0] = trust_region_best_x.copy()
+    elif boundary_best_x is not None and pop:
         pop[0] = boundary_best_x.copy()
     elif shifted_best_x is not None and pop:
         pop[0] = shifted_best_x.copy()
