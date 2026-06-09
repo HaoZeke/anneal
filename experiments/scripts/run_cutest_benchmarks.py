@@ -40,6 +40,7 @@ QMC_DIFFERENTIAL_MUTATION_WEIGHT = 0.5
 QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
 # A moving projected-gradient step needs the start value and one trial value.
 PROJECTED_POLISH_MIN_FEVALS_FOR_STEP = 2
+CUTEST_NATIVE_BOUNDS_SLACK = 1e-9
 
 
 def _low_discrepancy_starts(
@@ -1379,7 +1380,11 @@ def _run_cutest_qmc_polish(
     result = None
     if grad_kind == "native" and has_objective_api:
         try:
-            bounds = anneal_module.Bounds(design_low, design_high, 1e-9)
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
             objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
             result = anneal_module.qmc_polish_objective(
                 objective,
@@ -1914,7 +1919,22 @@ def _run_cutest_gle_langevin(
     n_epochs,
     k_per_epoch,
 ):
-    if not hasattr(anneal_module, "gle_langevin"):
+    has_native_preconditioned = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_preconditioned_objective")
+    )
+    has_native_scalar = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_objective")
+    )
+    has_callable_preconditioned = hasattr(anneal_module, "gle_langevin_preconditioned")
+    has_callable_scalar = hasattr(anneal_module, "gle_langevin")
+    if not (
+        has_native_preconditioned
+        or has_native_scalar
+        or has_callable_preconditioned
+        or has_callable_scalar
+    ):
         return None
     if grad_kind != "native":
         return None
@@ -1925,8 +1945,12 @@ def _run_cutest_gle_langevin(
     kwargs = {
         "seed": int(seed),
         "n_epochs": 1,
+        "x0": 0.5 * (design_low + design_high),
     }
-    if hasattr(anneal_module, "estimate_gle_omega0"):
+    if not has_native_preconditioned and not has_callable_preconditioned and hasattr(
+        anneal_module,
+        "estimate_gle_omega0",
+    ):
         try:
             omega0 = anneal_module.estimate_gle_omega0(
                 prob.fn,
@@ -1939,14 +1963,39 @@ def _run_cutest_gle_langevin(
         except Exception:
             pass
     try:
-        result = anneal_module.gle_langevin(
-            prob.fn,
-            grad_fn,
-            design_low,
-            design_high,
-            int(max_fevals),
-            **kwargs,
-        )
+        if has_native_preconditioned or has_native_scalar:
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            if has_native_preconditioned:
+                result = anneal_module.gle_langevin_preconditioned_objective(
+                    objective,
+                    int(max_fevals),
+                    **kwargs,
+                )
+            else:
+                result = anneal_module.gle_langevin_objective(
+                    objective,
+                    int(max_fevals),
+                    **kwargs,
+                )
+        else:
+            gle_langevin = (
+                anneal_module.gle_langevin_preconditioned
+                if has_callable_preconditioned
+                else anneal_module.gle_langevin
+            )
+            result = gle_langevin(
+                prob.fn,
+                grad_fn,
+                design_low,
+                design_high,
+                int(max_fevals),
+                **kwargs,
+            )
     except Exception:
         return None
     best_val = float(result["best_val"])
@@ -2069,7 +2118,22 @@ def _run_cutest_bayesian_adaptive_gle(
     best_pilot_pos,
     t_hot,
 ):
-    if not hasattr(anneal_module, "gle_langevin"):
+    has_native_preconditioned = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_preconditioned_objective")
+    )
+    has_native_scalar = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "gle_langevin_objective")
+    )
+    has_callable_preconditioned = hasattr(anneal_module, "gle_langevin_preconditioned")
+    has_callable_scalar = hasattr(anneal_module, "gle_langevin")
+    if not (
+        has_native_preconditioned
+        or has_native_scalar
+        or has_callable_preconditioned
+        or has_callable_scalar
+    ):
         return None
     if grad_kind != "native":
         return None
@@ -2098,21 +2162,43 @@ def _run_cutest_bayesian_adaptive_gle(
         "omega0": None,
         "dt": _bayesian_gle_dt(e_map),
         "n_epochs": max(1, min(int(n_epochs), int(max_fevals))),
+        "x0": np.clip(anchor_pos, local_low, local_high),
     }
-    gle_langevin = getattr(
-        anneal_module,
-        "gle_langevin_preconditioned",
-        anneal_module.gle_langevin,
-    )
     try:
-        result = gle_langevin(
-            prob.fn,
-            grad_fn,
-            local_low,
-            local_high,
-            int(gle_fevals),
-            **kwargs,
-        )
+        result = None
+        if has_native_preconditioned or has_native_scalar:
+            bounds = anneal_module.Bounds(
+                local_low,
+                local_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds, grad_fn=grad_fn)
+            if has_native_preconditioned:
+                result = anneal_module.gle_langevin_preconditioned_objective(
+                    objective,
+                    int(gle_fevals),
+                    **kwargs,
+                )
+            else:
+                result = anneal_module.gle_langevin_objective(
+                    objective,
+                    int(gle_fevals),
+                    **kwargs,
+                )
+        if result is None:
+            gle_langevin = (
+                anneal_module.gle_langevin_preconditioned
+                if has_callable_preconditioned
+                else anneal_module.gle_langevin
+            )
+            result = gle_langevin(
+                prob.fn,
+                grad_fn,
+                local_low,
+                local_high,
+                int(gle_fevals),
+                **kwargs,
+            )
     except Exception:
         if np.isfinite(anchor_val):
             return anchor_val, int(anchor_calls)

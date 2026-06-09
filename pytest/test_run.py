@@ -14,6 +14,8 @@ from anneal import (
     PyObjective,
     gle_langevin,
     gle_langevin_objective,
+    gle_langevin_preconditioned,
+    gle_langevin_preconditioned_objective,
     low_discrepancy_points,
     pilot_draws_qmc,
     polish,
@@ -225,6 +227,43 @@ def test_gle_langevin_accepts_native_objective_handle():
     assert result["n_evals"] == 1
     assert result["best_pos"] == pytest.approx(x0)
     assert result["best_val"] == pytest.approx(0.0)
+
+
+def test_preconditioned_gle_langevin_accepts_initial_position():
+    x0 = np.array([0.25, -0.4])
+
+    result = gle_langevin_preconditioned(
+        shifted_quadratic,
+        shifted_quadratic_grad,
+        np.array([-1.0, -1.0]),
+        np.array([1.0, 1.0]),
+        max_fevals=1,
+        seed=7,
+        x0=x0,
+    )
+
+    assert result["n_evals"] == 1
+    assert result["best_pos"] == pytest.approx(x0)
+    assert result["best_val"] == pytest.approx(0.0)
+    assert result["preconditioner_diag"] == pytest.approx([1.0, 1.0])
+
+
+def test_preconditioned_gle_langevin_accepts_native_objective_handle():
+    bounds = Bounds(np.array([-1.0, -1.0]), np.array([1.0, 1.0]), 1e-9)
+    obj = PyObjective(shifted_quadratic, bounds, grad_fn=shifted_quadratic_grad)
+    x0 = np.array([0.25, -0.4])
+
+    result = gle_langevin_preconditioned_objective(
+        obj,
+        max_fevals=1,
+        seed=7,
+        x0=x0,
+    )
+
+    assert result["n_evals"] == 1
+    assert result["best_pos"] == pytest.approx(x0)
+    assert result["best_val"] == pytest.approx(0.0)
+    assert result["preconditioner_diag"] == pytest.approx([1.0, 1.0])
 
 
 def test_qmc_polish_accepts_native_gradient_handle():

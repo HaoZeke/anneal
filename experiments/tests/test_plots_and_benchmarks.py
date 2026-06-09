@@ -5806,9 +5806,10 @@ def test_anneal_sota_qmc_hybrid_routes_surrogate_gle_and_native_polish(monkeypat
 
     def fake_gle(counter, grad, low, high, **k):
         calls["gle"] += 1
-        assert k["omega0"] == 0.2
+        assert k["omega0"] is None
         assert k["dt"] == 0.2
         assert k["n_epochs"] == 40
+        assert np.asarray(k["x0"], dtype=np.float64).shape == (2,)
         assert 2 * int(k["max_fevals"]) <= counter.budget - counter.n
         grad(np.zeros(2))
         for _ in range(5):
