@@ -1914,6 +1914,19 @@ def _gle_langevin_screen_budget(k_per_epoch):
     return 1 + int(k_per_epoch)
 
 
+def _gle_core_budget(work_budget):
+    if work_budget < 1:
+        return 0
+    return max(1, int(work_budget) // 2)
+
+
+def _gle_cutest_work_units(result):
+    gradient_units = max(0, int(result.get("n_evals", 0)))
+    preconditioner_grads = max(0, int(result.get("n_preconditioner_grads", 0)))
+    dynamics_grads = max(0, gradient_units - preconditioner_grads)
+    return int(gradient_units + dynamics_grads)
+
+
 def _run_cutest_gle_langevin(
     anneal_module,
     prob,
@@ -1946,6 +1959,9 @@ def _run_cutest_gle_langevin(
         return None
     design_low, design_high = _design_bounds(prob)
     max_fevals = _gle_langevin_screen_budget(k_per_epoch)
+    gle_fevals = _gle_core_budget(max_fevals)
+    if gle_fevals < 1:
+        return None
     kwargs = {
         "seed": int(seed),
         "n_epochs": 1,
@@ -1977,13 +1993,13 @@ def _run_cutest_gle_langevin(
             if has_native_preconditioned:
                 result = anneal_module.gle_langevin_preconditioned_objective(
                     objective,
-                    int(max_fevals),
+                    int(gle_fevals),
                     **kwargs,
                 )
             else:
                 result = anneal_module.gle_langevin_objective(
                     objective,
-                    int(max_fevals),
+                    int(gle_fevals),
                     **kwargs,
                 )
         else:
@@ -1997,7 +2013,7 @@ def _run_cutest_gle_langevin(
                 grad_fn,
                 design_low,
                 design_high,
-                int(max_fevals),
+                int(gle_fevals),
                 **kwargs,
             )
     except Exception:
@@ -2005,7 +2021,7 @@ def _run_cutest_gle_langevin(
     best_val = float(result["best_val"])
     if not np.isfinite(best_val):
         return None
-    return best_val, int(result.get("n_evals", 0))
+    return best_val, _gle_cutest_work_units(result)
 
 
 def _bayesian_gle_dt(e_map):
@@ -2239,10 +2255,23 @@ def _run_cutest_bayesian_adaptive_gle(
             (int(remaining_fevals) - int(scout_budget))
             // BAYESIAN_GLE_POLISH_BUDGET_DIVISOR,
         )
-        gle_fevals = max(
+        gle_work_budget = max(
             1,
             int(remaining_fevals) - int(scout_budget) - int(polish_budget),
         )
+    else:
+        gle_work_budget = int(gle_fevals)
+    gle_fevals = _gle_core_budget(gle_work_budget)
+    if gle_fevals < 1:
+        candidates = []
+        if np.isfinite(anchor_val):
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
+        return None
     local_low, local_high = _bayesian_gle_local_box(
         prob,
         t_map,
@@ -2321,7 +2350,7 @@ def _run_cutest_bayesian_adaptive_gle(
         if np.isfinite(scout_val) and scout_val < best_val:
             best_val = float(scout_val)
             best_pos = scout_pos
-    work_units += int(result.get("n_evals", 0))
+    work_units += _gle_cutest_work_units(result)
     if best_pos is None:
         try:
             best_pos = np.asarray(
