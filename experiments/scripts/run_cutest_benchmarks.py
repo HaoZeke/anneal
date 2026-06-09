@@ -42,6 +42,9 @@ QMC_DIFFERENTIAL_CROSSOVER_RATE = 0.9
 PROJECTED_POLISH_MIN_FEVALS_FOR_STEP = 2
 CUTEST_NATIVE_BOUNDS_SLACK = 1e-9
 BAYESIAN_GLE_POLISH_BUDGET_DIVISOR = 2
+BAYESIAN_GLE_SCOUT_MAX_DIM = 4
+BAYESIAN_GLE_SCOUT_BUDGET_DIVISOR = 2
+BAYESIAN_GLE_SCOUT_DEFAULT_POPULATION = 30
 
 
 def _low_discrepancy_starts(
@@ -2105,6 +2108,73 @@ def _bayesian_gle_anchor(prob, best_pilot_pos):
     return best_pos, best_val, calls
 
 
+def _run_bayesian_gle_low_dimensional_scout(
+    anneal_module,
+    prob,
+    seed,
+    max_evals,
+):
+    dim = int(getattr(prob, "dim", np.asarray(prob.low).size))
+    if dim < 1 or dim > BAYESIAN_GLE_SCOUT_MAX_DIM or int(max_evals) < 4:
+        return None
+    if not _has_finite_design_box(prob):
+        return None
+    has_native_api = all(
+        hasattr(anneal_module, name)
+        for name in ("Bounds", "PyObjective", "qmc_best1bin_scout_objective")
+    )
+    has_callable_api = hasattr(anneal_module, "qmc_best1bin_scout")
+    if not (has_native_api or has_callable_api):
+        return None
+    design_low, design_high = _design_bounds(prob)
+    population_size = max(
+        4,
+        min(
+            BAYESIAN_GLE_SCOUT_DEFAULT_POPULATION,
+            int(max_evals),
+        ),
+    )
+    try:
+        if has_native_api:
+            bounds = anneal_module.Bounds(
+                design_low,
+                design_high,
+                CUTEST_NATIVE_BOUNDS_SLACK,
+            )
+            objective = anneal_module.PyObjective(prob.fn, bounds)
+            result = anneal_module.qmc_best1bin_scout_objective(
+                objective,
+                int(max_evals),
+                seed=int(seed),
+                population_size=int(population_size),
+            )
+        else:
+            result = anneal_module.qmc_best1bin_scout(
+                prob.fn,
+                design_low,
+                design_high,
+                int(max_evals),
+                seed=int(seed),
+                population_size=int(population_size),
+            )
+    except Exception:
+        return None
+    best_val = float(result.get("best_val", float("nan")))
+    if not np.isfinite(best_val):
+        return None
+    try:
+        best_pos = np.asarray(result.get("best_pos"), dtype=np.float64).reshape(-1)
+    except (TypeError, ValueError):
+        best_pos = None
+    if (
+        best_pos is None
+        or best_pos.shape != design_low.shape
+        or not np.all(np.isfinite(best_pos))
+    ):
+        best_pos = None
+    return best_val, int(result.get("n_evals", 0)), best_pos
+
+
 def _run_cutest_bayesian_adaptive_gle(
     anneal_module,
     prob,
@@ -2146,14 +2216,33 @@ def _run_cutest_bayesian_adaptive_gle(
         if np.isfinite(anchor_val):
             return anchor_val, int(anchor_calls)
         return None
+    scout_budget = 0
+    scout_result = None
+    if int(prob.dim) <= BAYESIAN_GLE_SCOUT_MAX_DIM and remaining_fevals >= 8:
+        scout_budget = max(
+            4,
+            int(remaining_fevals) // BAYESIAN_GLE_SCOUT_BUDGET_DIVISOR,
+        )
+        scout_result = _run_bayesian_gle_low_dimensional_scout(
+            anneal_module,
+            prob,
+            int(seed) + 1,
+            int(scout_budget),
+        )
+        if scout_result is None:
+            scout_budget = 0
     polish_budget = 0
-    gle_fevals = int(remaining_fevals)
+    gle_fevals = max(1, int(remaining_fevals) - int(scout_budget))
     if hasattr(anneal_module, "polish") and remaining_fevals >= 4:
         polish_budget = max(
             1,
-            int(remaining_fevals) // BAYESIAN_GLE_POLISH_BUDGET_DIVISOR,
+            (int(remaining_fevals) - int(scout_budget))
+            // BAYESIAN_GLE_POLISH_BUDGET_DIVISOR,
         )
-        gle_fevals = max(1, int(remaining_fevals) - int(polish_budget))
+        gle_fevals = max(
+            1,
+            int(remaining_fevals) - int(scout_budget) - int(polish_budget),
+        )
     local_low, local_high = _bayesian_gle_local_box(
         prob,
         t_map,
@@ -2204,27 +2293,51 @@ def _run_cutest_bayesian_adaptive_gle(
                 **kwargs,
             )
     except Exception:
+        candidates = []
         if np.isfinite(anchor_val):
-            return anchor_val, int(anchor_calls)
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
         return None
     best_val = float(result["best_val"])
     if not np.isfinite(best_val):
+        candidates = []
         if np.isfinite(anchor_val):
-            return anchor_val, int(anchor_calls)
+            candidates.append((float(anchor_val), int(anchor_calls)))
+        if scout_result is not None:
+            scout_val, scout_work, _scout_pos = scout_result
+            candidates.append((float(scout_val), int(anchor_calls) + int(scout_work)))
+        if candidates:
+            return min(candidates, key=lambda item: item[0])
         return None
-    work_units = int(anchor_calls) + int(result.get("n_evals", 0))
+    work_units = int(anchor_calls)
+    best_pos = None
+    if scout_result is not None:
+        scout_val, scout_work, scout_pos = scout_result
+        work_units += int(scout_work)
+        if np.isfinite(scout_val) and scout_val < best_val:
+            best_val = float(scout_val)
+            best_pos = scout_pos
+    work_units += int(result.get("n_evals", 0))
+    if best_pos is None:
+        try:
+            best_pos = np.asarray(
+                result.get("best_pos", anchor_pos),
+                dtype=np.float64,
+            ).reshape(-1)
+        except (TypeError, ValueError):
+            best_pos = anchor_pos
     if np.isfinite(anchor_val):
-        best_val = min(best_val, anchor_val)
+        if anchor_val < best_val:
+            best_val = float(anchor_val)
+            best_pos = anchor_pos
     if polish_budget > 0:
         available_work = int(max_fevals) - int(work_units)
         if available_work >= 2:
-            try:
-                polish_start = np.asarray(
-                    result.get("best_pos", anchor_pos),
-                    dtype=np.float64,
-                ).reshape(-1)
-            except (TypeError, ValueError):
-                polish_start = anchor_pos
+            polish_start = best_pos if best_pos is not None else anchor_pos
             if polish_start.shape == anchor_pos.shape and np.all(
                 np.isfinite(polish_start)
             ):
