@@ -617,6 +617,17 @@ where
             if n_evals >= max_evals {
                 break;
             }
+            let reflected = bounds.clip((&current_center * 2.0 - &point).view());
+            let reflected_value = obj.eval(reflected.view());
+            n_evals += 1;
+            if reflected_value.is_finite() && reflected_value < best_val {
+                best_val = reflected_value;
+                best_pos = reflected;
+                level_improved = true;
+            }
+            if n_evals >= max_evals {
+                break;
+            }
         }
         if level_improved {
             current_center = best_pos.clone();
