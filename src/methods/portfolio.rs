@@ -380,7 +380,7 @@ fn ladder_temperature(temp0: f64, generation: usize) -> f64 {
 
 fn archive_temp0(ledger: &BudgetLedger) -> f64 {
     let inner = ledger.inner.lock().expect("ledger lock");
-    let finite: Vec<f64> = inner
+    let mut finite: Vec<f64> = inner
         .archive_y
         .iter()
         .copied()
@@ -389,9 +389,18 @@ fn archive_temp0(ledger: &BudgetLedger) -> f64 {
     if finite.len() < 2 {
         return 1.0;
     }
-    let mean = finite.iter().sum::<f64>() / finite.len() as f64;
-    let var = finite.iter().map(|v| (v - mean) * (v - mean)).sum::<f64>() / finite.len() as f64;
-    var.sqrt().max(1e-6)
+    finite.sort_by(|left, right| left.total_cmp(right));
+    // Interquartile range: a robust landscape scale immune to the
+    // divergent tails that unbounded trajectories can archive (a plain
+    // variance overflows to infinity on them).
+    let q25 = finite[finite.len() / 4];
+    let q75 = finite[(3 * finite.len()) / 4];
+    let spread = q75 - q25;
+    if spread.is_finite() && spread > 0.0 {
+        spread.max(1e-6)
+    } else {
+        1.0
+    }
 }
 
 fn mean_width(bounds: &Bounds<f64>) -> f64 {
