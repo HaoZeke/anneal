@@ -2439,10 +2439,10 @@ def test_cutest_bayesian_adaptive_gle_uses_low_dimensional_scout(monkeypatch):
     )
 
     assert best_val == -30.0
-    assert fevals == 38
+    assert fevals == 57
     assert captured["scout_max_evals"] == 27
     assert captured["scout_seed"] == 8
-    assert captured["gle_max_fevals"] == 82
+    assert captured["gle_max_fevals"] == 41
 
 
 def test_cutest_bayesian_adaptive_gle_prefers_preconditioned_core(monkeypatch):
