@@ -27,11 +27,19 @@ use rand_distr::{Beta, Distribution};
 
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective};
 
+use crate::cool::LogCool;
+use crate::exchange::TsallisExchange;
+use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
+use crate::methods::bayesian_pilot::{
+    fit_laplace, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,
+};
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
     qmc_trust_region_poll,
 };
+use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
+use crate::runner::{run_rs, run_rs_variant};
 
 /// Tuning surface for the portfolio driver. The defaults are uniform
 /// across problems; the only per-run input is the budget.
@@ -349,6 +357,9 @@ enum ArmKind {
     Gle,
     De,
     Gsa,
+    Variant,
+    Pt,
+    Hmc,
     Surrogate,
     TrPoll,
 }
@@ -361,6 +372,9 @@ impl ArmKind {
             ArmKind::Gle => "gle",
             ArmKind::De => "de",
             ArmKind::Gsa => "gsa",
+            ArmKind::Variant => "variant",
+            ArmKind::Pt => "pt",
+            ArmKind::Hmc => "hmc",
             ArmKind::Surrogate => "surrogate",
             ArmKind::TrPoll => "tr_poll",
         }
@@ -385,6 +399,7 @@ struct DeState {
 struct ArmStates {
     hop: Option<HopState>,
     de: Option<DeState>,
+    pilot: Option<LaplacePosterior>,
     surrogate_gen: usize,
     seed_counter: u64,
 }
@@ -622,6 +637,177 @@ fn run_arm<O, G>(
                 config.gsa_q_a,
             );
         }
+        ArmKind::Variant => {
+            // Bayesian-pilot tuned classical point: the first slice runs
+            // short Metropolis pilot chains at QMC-drawn hyperparameters
+            // and fits the Laplace posterior over (T_0, sigma, q_v); later
+            // slices run the MAP variant through the typed driver loop.
+            let width_scale = {
+                let mut total = 0.0;
+                for j in 0..dim {
+                    let w = bounds.high[j] - bounds.low[j];
+                    total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
+                }
+                (total / dim as f64) / 10.0
+            };
+            if states.pilot.is_none() {
+                let prior = PilotPrior::default();
+                let n_pilot = 5usize;
+                let draws = pilot_draws_qmc(&prior, n_pilot, seed);
+                let per_chain = (slice / n_pilot.max(1)).max(8);
+                let mut observations = Vec::with_capacity(n_pilot);
+                for (t_init, sigma, q_v) in draws {
+                    if ledger.exhausted() {
+                        break;
+                    }
+                    let mut cur = Array1::from_iter((0..dim).map(|j| {
+                        let w = bounds.high[j] - bounds.low[j];
+                        bounds.low[j] + rng.random::<f64>() * if w > 0.0 { w } else { 0.0 }
+                    }));
+                    let mut cur_val = obj.eval(cur.view());
+                    let mut best_val = cur_val;
+                    let mut accepts = 0usize;
+                    let mut steps = 0usize;
+                    for step in 0..per_chain {
+                        if ledger.exhausted() {
+                            break;
+                        }
+                        let temp = (t_init * std::f64::consts::LN_2
+                            / ((step / 10 + 2) as f64).ln())
+                        .max(1e-12);
+                        let mut prop = cur.clone();
+                        for value in prop.iter_mut() {
+                            let noise: f64 = rand_distr::StandardNormal.sample(rng);
+                            *value += sigma * width_scale * noise;
+                        }
+                        let prop = bounds.clip(prop.view());
+                        let prop_val = obj.eval(prop.view());
+                        steps += 1;
+                        if prop_val.is_finite()
+                            && metropolis(
+                                prop_val - cur_val,
+                                temp,
+                                rng,
+                                config.metropolis_floor,
+                            )
+                        {
+                            cur = prop;
+                            cur_val = prop_val;
+                            accepts += 1;
+                            if prop_val < best_val {
+                                best_val = prop_val;
+                            }
+                        }
+                    }
+                    if steps > 0 && best_val.is_finite() {
+                        observations.push(PilotObservation {
+                            t_init,
+                            sigma,
+                            q_v,
+                            accept_rate: accepts as f64 / steps as f64,
+                            best_val,
+                            final_pos: cur.to_vec(),
+                        });
+                    }
+                }
+                if observations.len() >= 2 {
+                    states.pilot = Some(fit_laplace(&observations, &PilotPrior::default()));
+                }
+                return;
+            }
+            let posterior = states.pilot.as_ref().expect("pilot fitted");
+            let epochs = 16usize;
+            let steps = (slice / epochs).max(4);
+            let fresh_obj = BudgetedObjective {
+                inner: obj.inner,
+                ledger,
+            };
+            if posterior.q_v_map > 1.3 {
+                if let Ok(variant) = crate::variant::gsa(
+                    fresh_obj,
+                    posterior.t_init_map.max(1e-9),
+                    posterior.q_v_map.clamp(1.05, 2.95),
+                    config.gsa_q_a,
+                ) {
+                    run_rs_variant(variant, epochs, steps, seed);
+                }
+            } else if let Ok(variant) = crate::variant::boltzmann(
+                fresh_obj,
+                posterior.t_init_map.max(1e-9),
+                (posterior.sigma_map * width_scale).max(1e-9),
+            ) {
+                run_rs_variant(variant, epochs, steps, seed);
+            }
+        }
+        ArmKind::Pt => {
+            // Parallel-tempering ladder over the GSA point with Tsallis
+            // exchange; chains run at fixed ladder temperatures.
+            let n_chains = 4usize;
+            let k_inner = 8usize;
+            let pt_epochs = (slice / (n_chains * k_inner)).max(1);
+            let t0 = archive_temp0(ledger).max(1e-6);
+            let temps = geometric_ladder(0.05 * t0, 2.0 * t0 + 1e-6, n_chains);
+            let fresh_obj = BudgetedObjective {
+                inner: obj.inner,
+                ledger,
+            };
+            let Ok(variant) =
+                crate::variant::gsa(fresh_obj, t0, config.gsa_q_v, config.gsa_q_a)
+            else {
+                return;
+            };
+            let cool = LogCool::new(t0, 2.0);
+            let pt = ParallelTemperingSampler::with_exchange(
+                variant,
+                TsallisExchange::new(config.gsa_q_a),
+                temps,
+                k_inner,
+                4,
+            );
+            pt.run(&cool, pt_epochs, seed);
+        }
+        ArmKind::Hmc => {
+            // q-Gaussian HMC from the incumbent with the Omelyan
+            // minimum-norm integrator; heavy-tailed momentum helps the
+            // trajectory escape local cups.
+            let Some(grad) = grad else { return };
+            let l_steps = 5usize;
+            let trajectory_cost = 2 * l_steps + 3;
+            let n_trajectories = (slice / trajectory_cost).max(1);
+            let epochs = 8usize.min(n_trajectories).max(1);
+            let steps = (n_trajectories / epochs).max(1);
+            let t0 = archive_temp0(ledger).max(1e-6);
+            let mean_width = {
+                let mut total = 0.0;
+                for j in 0..dim {
+                    let w = bounds.high[j] - bounds.low[j];
+                    total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
+                }
+                total / dim as f64
+            };
+            let epsilon = (0.02 * mean_width / (dim as f64).sqrt()).max(1e-9);
+            let q_max = 1.0 + 2.0 / dim as f64;
+            let q = (1.0 + 1.5 / dim as f64).min(q_max - 1e-6);
+            let cool = LogCool::new(t0, 2.0);
+            let integrator = OmelyanIntegrator::new(epsilon, l_steps, t0);
+            let fresh_obj = BudgetedObjective {
+                inner: obj.inner,
+                ledger,
+            };
+            let fresh_grad = BudgetedGradient {
+                inner: grad.inner,
+                ledger,
+            };
+            let sampler = HmcSaSampler::with_momentum(
+                fresh_obj,
+                fresh_grad,
+                cool.clone(),
+                QGaussianMomentum::new(q),
+                integrator,
+            )
+            .with_initial_pos(ledger.incumbent(&bounds));
+            run_rs(sampler, &cool, epochs, steps, seed);
+        }
         ArmKind::Surrogate => {
             let min_points = config.surrogate_min_archive.max(4 * dim);
             let (xs, ys) = {
@@ -720,6 +906,11 @@ fn enabled_arms(dim: usize, has_grad: bool, config: &PortfolioConfig) -> Vec<Arm
         arms.push(ArmKind::Gle);
     }
     arms.push(ArmKind::Gsa);
+    arms.push(ArmKind::Variant);
+    arms.push(ArmKind::Pt);
+    if has_grad {
+        arms.push(ArmKind::Hmc);
+    }
     arms.push(ArmKind::Surrogate);
     arms.push(ArmKind::TrPoll);
     arms
