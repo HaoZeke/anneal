@@ -4243,6 +4243,47 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
         config.global_anneal_local_hop_iterations
         == anneal_sota.DEFAULT_GLOBAL_ANNEAL_LOCAL_HOP_ITERATIONS
     )
+    assert (
+        config.shifted_qmc_polish_min_dimension
+        == anneal_sota.DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
+    )
+    assert (
+        config.shifted_qmc_polish_max_dimension
+        == anneal_sota.DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
+    )
+    assert (
+        config.shifted_qmc_polish_budget_divisor
+        == anneal_sota.DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR
+    )
+    assert (
+        config.shifted_qmc_polish_chain_count
+        == anneal_sota.DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT
+    )
+    assert (
+        config.shifted_qmc_projected_step_work
+        == anneal_sota.DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK
+    )
+    assert anneal_sota._shifted_qmc_polish_active(
+        config.shifted_qmc_polish_min_dimension,
+        config,
+    )
+    assert not anneal_sota._shifted_qmc_polish_active(
+        config.shifted_qmc_polish_min_dimension - 1,
+        config,
+    )
+    assert not anneal_sota._shifted_qmc_polish_active(
+        config.shifted_qmc_polish_max_dimension + 1,
+        config,
+    )
+    assert anneal_sota._shifted_qmc_start_count(3, config) == (
+        3 * config.shifted_qmc_polish_chain_count**3
+    )
+    assert anneal_sota._shifted_qmc_top_k(config) == (
+        config.shifted_qmc_polish_chain_count**2
+    )
+    assert anneal_sota._shifted_qmc_replicates(config) == (
+        config.shifted_qmc_polish_chain_count
+    )
 
 
 def test_anneal_sota_global_portfolio_slices_shared_counter(monkeypatch):
@@ -4317,6 +4358,12 @@ def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):
     monkeypatch.setattr(anneal_sota, "_annealed_basin_polish", fake_basin)
     monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
     monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
 
     def sphere(x):
         x = np.asarray(x, dtype=np.float64)
@@ -4354,6 +4401,94 @@ def test_anneal_sota_qmc_hybrid_continues_after_basin_slice(monkeypatch):
     assert counter.budget == 16
     assert counter.n == counter.budget
     assert counter.objective_evals > basin_budgets[0]
+
+
+def test_anneal_sota_qmc_hybrid_continues_after_shifted_qmc_slice(monkeypatch):
+    from experiments import anneal_sota
+    from experiments.scripts import sota_cutest
+
+    shifted_calls = []
+
+    def shifted_qmc_polish(
+        obj_fn,
+        grad_fn,
+        low,
+        high,
+        n_starts,
+        max_fevals_per_start,
+        *,
+        seed,
+        n_replicates,
+        step0,
+        grad_tol,
+        top_k,
+    ):
+        del low, high, seed, step0, grad_tol
+        shifted_calls.append(
+            (
+                counter.budget,
+                int(n_starts),
+                int(max_fevals_per_start),
+                int(n_replicates),
+                int(top_k),
+            )
+        )
+        obj_fn(np.zeros(3, dtype=np.float64))
+        grad_fn(np.zeros(3, dtype=np.float64))
+        return {
+            "best_val": -3.0,
+            "best_pos": np.zeros(3, dtype=np.float64),
+            "n_evals": 1,
+            "n_grads": 1,
+        }
+
+    _install_fake_anneal_module(
+        monkeypatch,
+        shifted_qmc_polish=shifted_qmc_polish,
+    )
+    monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
+    monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+
+    def sphere(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.dot(x, x))
+
+    def grad(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 2.0 * x
+
+    config = anneal_sota.AnnealHybridConfig(
+        best1bin_enabled=False,
+        shifted_qmc_polish_min_dimension=3,
+        shifted_qmc_polish_max_dimension=3,
+        shifted_qmc_polish_budget_divisor=2,
+        shifted_qmc_polish_chain_count=1,
+        population_min=4,
+        population_dim_multiplier=1,
+        population_max=4,
+        pilot_budget_divisor=1,
+    )
+    counter = sota_cutest.Counter(sphere, budget=16)
+
+    best = anneal_sota.qmc_annealed_hybrid(
+        counter,
+        np.full(3, -1.0),
+        np.full(3, 1.0),
+        dim=3,
+        grad=grad,
+        rng=np.random.default_rng(31),
+        n_polish=100,
+        use_surrogate=False,
+        use_gle=False,
+        config=config,
+    )
+
+    assert shifted_calls == [(8, 3, 2, 1, 1)]
+    assert counter.budget == 16
+    assert counter.n == counter.budget
+    assert counter.objective_evals > 1
+    assert counter.grad_evals >= 1
+    assert best <= -3.0
 
 
 def test_sota_cutest_streams_rows_as_methods_finish():
@@ -4840,6 +4975,12 @@ def test_anneal_sota_qmc_hybrid_skips_gle_below_configured_dimension(monkeypatch
     monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
     monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", True, raising=False)
     monkeypatch.setattr(anneal_sota, "library_gle_langevin", fake_gle, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
 
     def sphere(x):
         x = np.asarray(x, dtype=np.float64)
@@ -5188,6 +5329,12 @@ def test_anneal_sota_qmc_hybrid_tries_shifted_best1bin_replicas(monkeypatch):
     monkeypatch.setattr(anneal_sota, "_qmc_best1bin_scout", fake_scout)
     monkeypatch.setattr(anneal_sota, "HAS_SURROGATES", False, raising=False)
     monkeypatch.setattr(anneal_sota, "HAS_LIBRARY_GLE", False, raising=False)
+    monkeypatch.setattr(
+        anneal_sota,
+        "low_discrepancy_population",
+        lambda low, high, n, skip=1, rng=None: np.zeros((n, len(low))),
+        raising=False,
+    )
 
     def sphere(x):
         x = np.asarray(x, dtype=np.float64)

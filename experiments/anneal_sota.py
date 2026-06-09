@@ -27,6 +27,13 @@ DEFAULT_BASIN_POLISH_BUDGET_DIVISOR = 4
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION = 20
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP = 0.1
 DEFAULT_BASIN_POLISH_HIGH_DIMENSION_BUDGET_DIVISOR = 1
+DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION = 3
+DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION = DEFAULT_BASIN_POLISH_HIGH_DIMENSION - 1
+DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR = 4
+DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT = 2
+DEFAULT_SHIFTED_QMC_POLISH_STEP = 1.0
+DEFAULT_SHIFTED_QMC_POLISH_GRAD_TOL = 1e-8
+DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK = 2
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MAX_DIMENSION = 5
 DEFAULT_GLOBAL_ANNEAL_DUAL_REPLICATES = 2
@@ -92,6 +99,14 @@ class AnnealHybridConfig:
     best1bin_relative_improvement_scale_floor: float = 1.0
     qmc_min_starts: int = 2
     qmc_starts_per_polish: int = 4
+    shifted_qmc_polish_enabled: bool = True
+    shifted_qmc_polish_min_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MIN_DIMENSION
+    shifted_qmc_polish_max_dimension: int = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMENSION
+    shifted_qmc_polish_budget_divisor: int = DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR
+    shifted_qmc_polish_chain_count: int = DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT
+    shifted_qmc_polish_step: float = DEFAULT_SHIFTED_QMC_POLISH_STEP
+    shifted_qmc_polish_grad_tol: float = DEFAULT_SHIFTED_QMC_POLISH_GRAD_TOL
+    shifted_qmc_projected_step_work: int = DEFAULT_SHIFTED_QMC_PROJECTED_STEP_WORK
     basin_polish_enabled: bool = True
     basin_polish_min_dimension: int = DEFAULT_BASIN_POLISH_MIN_DIMENSION
     basin_polish_max_dimension: int = DEFAULT_BASIN_POLISH_MAX_DIMENSION
@@ -182,6 +197,11 @@ def _native_qmc_polish(
     if grad_fn is None:
         return None
     anneal = _anneal_module()
+    if not all(
+        hasattr(anneal, name)
+        for name in ("Bounds", "PyObjective", "qmc_polish_objective")
+    ):
+        return None
     remaining = counter.budget - counter.n
     if remaining < 3:
         return None
@@ -215,6 +235,107 @@ def _clipped_anchor(anchor, low, high):
     if anchor_arr.shape != low.shape:
         raise ValueError("anchor must have the same shape as bounds")
     return np.clip(anchor_arr, low, high)
+
+
+def _shifted_qmc_polish_active(dim: int, config: AnnealHybridConfig) -> bool:
+    if not config.shifted_qmc_polish_enabled:
+        return False
+    if dim < config.shifted_qmc_polish_min_dimension:
+        return False
+    return (
+        config.shifted_qmc_polish_max_dimension <= 0
+        or dim <= config.shifted_qmc_polish_max_dimension
+    )
+
+
+def _shifted_qmc_replicates(config: AnnealHybridConfig) -> int:
+    return max(1, int(config.shifted_qmc_polish_chain_count))
+
+
+def _shifted_qmc_top_k(config: AnnealHybridConfig) -> int:
+    chains = _shifted_qmc_replicates(config)
+    return chains * chains
+
+
+def _shifted_qmc_start_count(dim: int, config: AnnealHybridConfig) -> int:
+    chains = _shifted_qmc_replicates(config)
+    return max(1, int(dim) * chains * chains * chains)
+
+
+def _shifted_qmc_polish_budget(
+    remaining: int,
+    config: AnnealHybridConfig,
+) -> int:
+    if remaining <= 0 or config.shifted_qmc_polish_budget_divisor <= 0:
+        return 0
+    return min(remaining, remaining // config.shifted_qmc_polish_budget_divisor)
+
+
+def _shifted_qmc_max_fevals_per_start(
+    slice_budget: int,
+    dim: int,
+    config: AnnealHybridConfig,
+) -> int:
+    n_starts = _shifted_qmc_start_count(dim, config)
+    n_replicates = _shifted_qmc_replicates(config)
+    top_k = _shifted_qmc_top_k(config)
+    screening_work = n_starts * n_replicates
+    remaining = slice_budget - screening_work
+    if remaining <= 0:
+        return 0
+    projected_step_work = max(1, int(config.shifted_qmc_projected_step_work))
+    return remaining // max(1, projected_step_work * top_k * n_replicates)
+
+
+def _shifted_qmc_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+    if grad_fn is None or counter.n >= counter.budget:
+        return None
+    jac = _counted_jac(counter, grad_fn)
+    if jac is None:
+        return None
+    slice_budget = _shifted_qmc_polish_budget(counter.budget - counter.n, config)
+    if slice_budget <= 0:
+        return None
+    max_fevals_per_start = _shifted_qmc_max_fevals_per_start(
+        slice_budget,
+        dim,
+        config,
+    )
+    if max_fevals_per_start < 1:
+        return None
+    n_starts = _shifted_qmc_start_count(dim, config)
+    n_replicates = _shifted_qmc_replicates(config)
+    top_k = _shifted_qmc_top_k(config)
+    original_budget = counter.budget
+    counter.budget = counter.n + slice_budget
+    try:
+        result = _anneal_module().shifted_qmc_polish(
+            counter,
+            jac,
+            low,
+            high,
+            n_starts,
+            max_fevals_per_start,
+            seed=int(rng.integers(1 << 31)),
+            n_replicates=n_replicates,
+            step0=config.shifted_qmc_polish_step,
+            grad_tol=config.shifted_qmc_polish_grad_tol,
+            top_k=top_k,
+        )
+    except AttributeError:
+        return None
+    except Exception as exc:  # noqa: BLE001
+        if exc.__class__.__name__ != "_Budget":
+            raise
+        result = None
+    finally:
+        counter.budget = original_budget
+    if not isinstance(result, dict):
+        return None
+    best_val = float(result.get("best_val", float("inf")))
+    if math.isfinite(best_val) and best_val < counter.best:
+        counter.best = best_val
+    return result
 
 
 def _basin_polish_step_size(dim: int, config: AnnealHybridConfig) -> float:
@@ -671,6 +792,7 @@ def qmc_annealed_hybrid(
     anchor_arr = _clipped_anchor(anchor, low, high)
     bounds = list(zip(low, high))
     jac = _counted_jac(counter, grad)
+    shifted_best_x = None
     if _global_anneal_portfolio_active(dim, config):
         portfolio_best = _global_anneal_portfolio(
             counter,
@@ -707,6 +829,28 @@ def qmc_annealed_hybrid(
                 counter.budget = original_budget
         if counter.n >= counter.budget:
             return _best_finite(basin_best, counter.best)
+    if (
+        _shifted_qmc_polish_active(dim, config)
+        and jac is not None
+    ):
+        shifted = _shifted_qmc_polish(
+            counter,
+            grad,
+            low,
+            high,
+            dim,
+            rng,
+            config,
+        )
+        if isinstance(shifted, dict) and "best_pos" in shifted:
+            shifted_best_x = _clipped_anchor(shifted["best_pos"], low, high)
+        if counter.n >= counter.budget:
+            shifted_best = (
+                float(shifted.get("best_val", float("inf")))
+                if isinstance(shifted, dict)
+                else float("inf")
+            )
+            return _best_finite(shifted_best, counter.best)
     if (
         config.best1bin_enabled
         and config.best1bin_budget_divisor > 0
@@ -755,7 +899,9 @@ def qmc_annealed_hybrid(
         np.asarray(point, dtype=np.float64).copy()
         for point in low_discrepancy_population(low, high, pop_size, skip=1, rng=rng)
     ]
-    if anchor_arr is not None and pop:
+    if shifted_best_x is not None and pop:
+        pop[0] = shifted_best_x.copy()
+    elif anchor_arr is not None and pop:
         pop[0] = anchor_arr.copy()
     vals = np.array([counter(p) for p in pop], dtype=np.float64)
     f = np.full(pop_size, config.initial_differential_weight)
