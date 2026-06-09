@@ -27,7 +27,6 @@ from experiments.anneal_sota import (
     DEFAULT_HYBRID_N_POLISH,
     qmc_annealed_hybrid,
 )
-from experiments.portfolio import thompson_portfolio
 from experiments.benchmarks.cutest_runner import configured_pycutest, default_cutest_config, load
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
@@ -180,11 +179,6 @@ def portfolio(counter, low, high, dim, grad, rng, anchor=None):
     except _Budget:
         pass
     return counter.best
-
-
-def portfolio_py(counter, low, high, dim, grad, rng, anchor=None):
-    """Python reference implementation of the portfolio driver."""
-    return thompson_portfolio(counter, low, high, dim, grad, rng, anchor=anchor)
 
 
 def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
