@@ -670,6 +670,89 @@ fn qmc_best1bin_scout_objective(
     qmc_polish_result_to_dict(py, result)
 }
 
+fn validate_qmc_gsa_global_search_args(
+    max_evals: usize,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> PyResult<()> {
+    if max_evals < 1 {
+        return Err(PyValueError::new_err("max_evals must be positive"));
+    }
+    if n_chains < 1 {
+        return Err(PyValueError::new_err("n_chains must be positive"));
+    }
+    if !t_init.is_finite() || t_init <= 0.0 {
+        return Err(PyValueError::new_err("t_init must be finite and positive"));
+    }
+    if !q_v.is_finite() || !(1.0..3.0).contains(&q_v) {
+        return Err(PyValueError::new_err("q_v must lie in (1, 3)"));
+    }
+    if !q_a.is_finite() {
+        return Err(PyValueError::new_err("q_a must be finite"));
+    }
+    Ok(())
+}
+
+/// Runs bounded QMC-initialized generalized simulated annealing.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7))]
+fn qmc_gsa_global_search(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    if low_vec.len() != high_vec.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low_vec.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
+
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = crate::qmc_gsa_global_search(&obj, max_evals, seed, n_chains, t_init, q_v, q_a);
+    qmc_polish_result_to_dict(py, result)
+}
+
+/// Runs bounded QMC-initialized GSA using a native objective handle.
+#[pyfunction]
+#[pyo3(signature = (objective, max_evals, seed = 0, n_chains = 30, t_init = 1.0, q_v = 2.62, q_a = 1.7))]
+fn qmc_gsa_global_search_objective(
+    py: Python<'_>,
+    objective: PyRef<'_, PyObjective>,
+    max_evals: usize,
+    seed: u64,
+    n_chains: usize,
+    t_init: f64,
+    q_v: f64,
+    q_a: f64,
+) -> PyResult<Py<PyDict>> {
+    validate_qmc_gsa_global_search_args(max_evals, n_chains, t_init, q_v, q_a)?;
+
+    let result =
+        crate::qmc_gsa_global_search(&*objective, max_evals, seed, n_chains, t_init, q_v, q_a);
+    qmc_polish_result_to_dict(py, result)
+}
+
 /// Runs a local shifted-QMC trust-region poll.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, center, max_evals, seed = 0, radius_fraction = 0.0, n_levels = 3, points_per_level = 0))]
@@ -1192,6 +1275,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(qmc_polish_objective, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_best1bin_scout, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_best1bin_scout_objective, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_gsa_global_search, m)?)?;
+    m.add_function(wrap_pyfunction!(qmc_gsa_global_search_objective, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_trust_region_poll, m)?)?;
     m.add_function(wrap_pyfunction!(qmc_trust_region_poll_objective, m)?)?;
     m.add_function(wrap_pyfunction!(shifted_qmc_polish, m)?)?;
