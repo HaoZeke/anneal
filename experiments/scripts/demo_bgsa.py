@@ -148,18 +148,29 @@ def _radical_inverse(index, base):
     return value
 
 
+_PRIME_CACHE = list(_SMALL_PRIMES)
+
+
 def _nth_prime(index):
-    if index < len(_SMALL_PRIMES):
-        return _SMALL_PRIMES[index]
-    candidate = _SMALL_PRIMES[-1] + 2
-    primes = len(_SMALL_PRIMES)
-    while True:
-        root = int(np.sqrt(candidate))
-        if all(candidate % div for div in range(3, root + 1, 2)):
-            if primes == index:
-                return candidate
-            primes += 1
+    # Grow a shared prime table on demand so a dim-dimensional Halton design
+    # costs one sieve pass rather than dim independent trial-division searches;
+    # the per-call version is quadratic in the dimension and stalls on the
+    # tens-of-thousands of axes that large CUTEst problems require.
+    if index < len(_PRIME_CACHE):
+        return _PRIME_CACHE[index]
+    candidate = _PRIME_CACHE[-1] + 2
+    while len(_PRIME_CACHE) <= index:
+        is_prime = True
+        for p in _PRIME_CACHE:
+            if p * p > candidate:
+                break
+            if candidate % p == 0:
+                is_prime = False
+                break
+        if is_prime:
+            _PRIME_CACHE.append(candidate)
         candidate += 2
+    return _PRIME_CACHE[index]
 
 
 def _fallback_halton_unit(n_points, dim, skip=1):
