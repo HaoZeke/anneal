@@ -292,7 +292,7 @@ dependencies = [
 [[package]]
 name = "eindir-core"
 version = "0.4.7"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=bf1ea51aa3cb913b31686c47180e5d7e9a73244e#bf1ea51aa3cb913b31686c47180e5d7e9a73244e"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=225ed9028557057b5f18c43b2214617073831ccb#225ed9028557057b5f18c43b2214617073831ccb"
 dependencies = [
  "cbindgen",
  "dlpk",
