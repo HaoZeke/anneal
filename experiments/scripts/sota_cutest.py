@@ -207,9 +207,39 @@ def sci_de(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
+def cma_es(counter, low, high, dim, grad, rng, anchor=None):
+    """CMA-ES restarts (pycma) under the shared budget counter."""
+    import cma
+
+    width = np.where(high > low, high - low, 1.0)
+    try:
+        while counter.n < counter.budget:
+            x0 = (
+                np.asarray(anchor, dtype=np.float64).copy()
+                if anchor is not None and counter.n == 0
+                else rng.uniform(low, high)
+            )
+            es = cma.CMAEvolutionStrategy(
+                x0,
+                0.25 * float(np.mean(width)),
+                {
+                    "bounds": [list(low), list(high)],
+                    "verbose": -9,
+                    "seed": int(rng.integers(1 << 31)),
+                    "maxfevals": counter.budget - counter.n,
+                },
+            )
+            while not es.stop() and counter.n < counter.budget:
+                xs = es.ask()
+                es.tell(xs, [counter(x) for x in xs])
+    except _Budget:
+        pass
+    return counter.best
+
+
 METHODS = {"portfolio": portfolio, "hybrid_de": hybrid_de,
            "basinhopping": sci_basinhopping, "dual_annealing": sci_dual_annealing,
-           "diff_evol": sci_de, "classical": classical}
+           "diff_evol": sci_de, "cma_es": cma_es, "classical": classical}
 FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
 
 
