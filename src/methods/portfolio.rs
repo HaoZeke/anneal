@@ -42,7 +42,7 @@ use crate::methods::bayesian_pilot::{
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
-    qmc_trust_region_poll,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
 use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant};
@@ -122,6 +122,10 @@ const PILOT_CHAINS: usize = 5;
 const BAYESIAN_PILOT_MIN_CHAIN_STEPS: usize = 8;
 /// Work needed before the GLE arm can install a posterior that other arms reuse.
 const BAYESIAN_GLE_MIN_PILOT_WORK: usize = PILOT_CHAINS * (BAYESIAN_PILOT_MIN_CHAIN_STEPS + 1);
+/// Low-dimensional smooth objectives can afford an initial replicated QMC polish.
+const LOW_DIMENSIONAL_POLISH_MAX_DIM: usize = 4;
+/// Final projected-gradient tolerance for the initial low-dimensional polish.
+const LOW_DIMENSIONAL_POLISH_GRAD_TOL: f64 = 1e-12;
 
 /// Per-arm pull statistics reported by the driver.
 #[derive(Clone, Debug)]
@@ -412,6 +416,14 @@ struct PilotState {
     anchor: Option<Array1<f64>>,
 }
 
+struct LowDimensionalPolishPlan {
+    budget: usize,
+    n_starts: usize,
+    max_fevals_per_start: usize,
+    n_replicates: usize,
+    top_k: usize,
+}
+
 #[derive(Default)]
 struct ArmStates {
     hop: Option<HopState>,
@@ -485,6 +497,30 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
 
 fn warmup_arm_index(round: usize, arm_count: usize) -> Option<usize> {
     (round >= 1 && round <= arm_count).then_some(round - 1)
+}
+
+fn low_dimensional_polish_plan(dim: usize, budget: usize) -> Option<LowDimensionalPolishPlan> {
+    if dim == 0 || dim > LOW_DIMENSIONAL_POLISH_MAX_DIM {
+        return None;
+    }
+    let polish_budget = budget / ROUNDS_PER_ARM;
+    let n_starts = (4 * dim).max(8);
+    let n_replicates = if dim <= 2 { 1 } else { 2 };
+    let top_k = if dim <= 2 { 2 } else { 1 };
+    let screening = n_starts * n_replicates;
+    let polished = top_k * n_replicates;
+    let min_work = screening + 2 * polished;
+    if polish_budget < min_work {
+        return None;
+    }
+    let max_fevals_per_start = (polish_budget - screening) / (2 * polished);
+    (max_fevals_per_start > 0).then_some(LowDimensionalPolishPlan {
+        budget: polish_budget,
+        n_starts,
+        max_fevals_per_start,
+        n_replicates,
+        top_k,
+    })
 }
 
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
@@ -1247,6 +1283,25 @@ where
     let mut rng = StdRng::seed_from_u64(seed);
     let k = arms.len();
 
+    if let Some(grad) = budgeted_grad.as_ref() {
+        if let Some(plan) = low_dimensional_polish_plan(dim, budget) {
+            let ceiling = ledger.used_get() + plan.budget;
+            ledger.cap_set(ceiling.min(budget));
+            shifted_qmc_projected_gradient_polish(
+                &budgeted_obj,
+                grad,
+                plan.n_starts,
+                plan.max_fevals_per_start,
+                qmc_skip_from_seed(seed),
+                plan.n_replicates,
+                1.0,
+                LOW_DIMENSIONAL_POLISH_GRAD_TOL,
+                plan.top_k,
+            );
+            ledger.cap_set(budget);
+        }
+    }
+
     let mut round = 0usize;
     loop {
         let remaining = ledger.remaining();
@@ -1410,6 +1465,23 @@ mod tests {
     }
 
     #[test]
+    fn low_dimensional_polish_plan_uses_slice_horizon_budget() {
+        let plan = low_dimensional_polish_plan(2, 1000).expect("low-dimensional plan");
+        assert_eq!(plan.budget, 1000 / ROUNDS_PER_ARM);
+        assert_eq!(plan.n_starts, 8);
+        assert_eq!(plan.n_replicates, 1);
+        assert_eq!(plan.top_k, 2);
+        assert!(plan.max_fevals_per_start >= 24);
+
+        let plan = low_dimensional_polish_plan(3, 1000).expect("low-dimensional plan");
+        assert_eq!(plan.n_starts, 12);
+        assert_eq!(plan.n_replicates, 2);
+        assert_eq!(plan.top_k, 1);
+
+        assert!(low_dimensional_polish_plan(5, 1000).is_none());
+    }
+
+    #[test]
     fn shift_success_uses_benchmark_resolution_threshold() {
         let before = 100.0;
         assert_eq!(
@@ -1496,6 +1568,75 @@ mod tests {
         fn dim(&self) -> usize {
             self.bounds.dims
         }
+    }
+
+    struct BealeObjective {
+        bounds: Bounds<f64>,
+    }
+
+    impl BealeObjective {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_vec(vec![-4.5, -4.5]),
+                    Array1::from_vec(vec![4.5, 4.5]),
+                    1e-12,
+                ),
+            }
+        }
+    }
+
+    impl Objective<f64> for BealeObjective {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            let x0 = x[0];
+            let x1 = x[1];
+            let r1 = 1.5 - x0 + x0 * x1;
+            let r2 = 2.25 - x0 + x0 * x1.powi(2);
+            let r3 = 2.625 - x0 + x0 * x1.powi(3);
+            r1 * r1 + r2 * r2 + r3 * r3
+        }
+    }
+
+    impl Gradient<f64> for BealeObjective {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            let x0 = x[0];
+            let x1 = x[1];
+            let r1 = 1.5 - x0 + x0 * x1;
+            let r2 = 2.25 - x0 + x0 * x1.powi(2);
+            let r3 = 2.625 - x0 + x0 * x1.powi(3);
+            Array1::from_vec(vec![
+                2.0 * r1 * (-1.0 + x1)
+                    + 2.0 * r2 * (-1.0 + x1.powi(2))
+                    + 2.0 * r3 * (-1.0 + x1.powi(3)),
+                2.0 * r1 * x0 + 2.0 * r2 * (2.0 * x0 * x1) + 2.0 * r3 * (3.0 * x0 * x1.powi(2)),
+            ])
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    #[test]
+    fn low_dimensional_polish_reaches_beale_basin() {
+        let obj = BealeObjective::new();
+        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0);
+
+        assert!(result.n_evals + result.n_grads <= 1000);
+        assert!(
+            result.best_val < 1e-8,
+            "expected Beale basin, got {} at {:?}",
+            result.best_val,
+            result.best_pos
+        );
     }
 
     #[test]
