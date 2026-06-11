@@ -63,6 +63,10 @@ const ROUNDS_PER_ARM: usize = 8;
 /// below the Dolan-More convergence resolution `tau = 1e-3`, so
 /// sub-resolution grinding earns no posterior credit.
 const IMPROVEMENT_RTOL: f64 = 1e-4;
+/// Archive-shift spends a local polish trajectory from an already good
+/// point, so it earns posterior credit at the benchmark resolution
+/// rather than for one-decade-finer local grinding.
+const SHIFT_IMPROVEMENT_RTOL: f64 = 1e-3;
 /// Metropolis temperature floor shared by the acceptance helpers.
 const METROPOLIS_FLOOR: f64 = 1e-12;
 
@@ -413,6 +417,19 @@ fn mean_width(bounds: &Bounds<f64>) -> f64 {
         total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
     }
     total / dim as f64
+}
+
+fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
+    let scale = if before.is_finite() {
+        before.abs()
+    } else {
+        1.0
+    };
+    let rtol = match arm {
+        ArmKind::Shift => SHIFT_IMPROVEMENT_RTOL,
+        _ => IMPROVEMENT_RTOL,
+    };
+    rtol * scale.max(1.0)
 }
 
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
@@ -1112,12 +1129,7 @@ where
             budget,
         );
         ledger.cap_set(budget);
-        let scale = if before.is_finite() {
-            before.abs()
-        } else {
-            1.0
-        };
-        let threshold = IMPROVEMENT_RTOL * scale.max(1.0);
+        let threshold = arm_success_threshold(arms[choice], before);
         let after = ledger.best_get();
         posteriors[choice].update(after.is_finite() && after < before - threshold);
     }
@@ -1202,6 +1214,23 @@ mod tests {
         }
         assert!(posterior.alpha <= 1.0 + 1.0 / (1.0 - 0.9) + 1.0);
         assert!(posterior.beta >= 1.0);
+    }
+
+    #[test]
+    fn shift_success_uses_benchmark_resolution_threshold() {
+        let before = 100.0;
+        assert_eq!(
+            arm_success_threshold(ArmKind::Explore, before),
+            IMPROVEMENT_RTOL * before
+        );
+        assert_eq!(
+            arm_success_threshold(ArmKind::Shift, before),
+            SHIFT_IMPROVEMENT_RTOL * before
+        );
+        assert!(
+            arm_success_threshold(ArmKind::Shift, before)
+                > arm_success_threshold(ArmKind::Explore, before)
+        );
     }
 
     #[test]
