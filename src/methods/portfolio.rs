@@ -33,7 +33,8 @@ use rand_distr::{Beta, Distribution};
 
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
-use crate::cool::LogCool;
+use crate::accept::{AcceptRule, TsallisAccept};
+use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
 use crate::methods::bayesian_pilot::{
@@ -45,6 +46,7 @@ use crate::methods::local_polish::{
     qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
+use crate::movekernel::{MoveKernel, TsallisVisit};
 use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant};
 
 // ---------------------------------------------------------------------------
@@ -421,6 +423,13 @@ struct DeState {
     vals: Vec<f64>,
 }
 
+struct GsaState {
+    units: Vec<Array1<f64>>,
+    vals: Vec<f64>,
+    epoch: usize,
+    rng: StdRng,
+}
+
 #[derive(Clone, Debug)]
 struct PilotState {
     posterior: LaplacePosterior,
@@ -439,6 +448,7 @@ struct LowDimensionalPolishPlan {
 struct ArmStates {
     hop: Option<HopState>,
     de: Option<DeState>,
+    gsa: Option<GsaState>,
     pilot: Option<PilotState>,
     surrogate_gen: usize,
     seed_counter: u64,
@@ -491,6 +501,23 @@ fn mean_width(bounds: &Bounds<f64>) -> f64 {
         total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
     }
     total / dim as f64
+}
+
+fn unit_coordinate(pos: f64, low: f64, high: f64) -> f64 {
+    let width = high - low;
+    if width.is_finite() && width > 0.0 {
+        ((pos - low) / width).clamp(0.0, 1.0)
+    } else {
+        0.5
+    }
+}
+
+fn unit_to_box(unit: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> Array1<f64> {
+    Array1::from_iter(
+        unit.iter()
+            .zip(low.iter().zip(high.iter()))
+            .map(|(u, (lo, hi))| lo + u.clamp(0.0, 1.0) * (hi - lo)),
+    )
 }
 
 fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
@@ -598,6 +625,90 @@ fn run_low_dimensional_polish<O, G>(
         plan.top_k,
     );
     ledger.cap_set(budget);
+}
+
+fn initialize_gsa_state<O>(
+    obj: &BudgetedObjective<'_, O>,
+    slice: usize,
+    seed: u64,
+) -> Option<GsaState>
+where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds().clone();
+    let dim = bounds.dims;
+    if dim == 0 || slice < 2 {
+        return None;
+    }
+    let chain_count = (slice / 8).clamp(2, 4 * dim.max(1)).min(slice);
+    let starts = eindir_core::shifted_low_discrepancy_points(
+        &bounds,
+        chain_count,
+        qmc_skip_from_seed(seed),
+        seed,
+    );
+    let mut units = Vec::with_capacity(chain_count);
+    let mut vals = Vec::with_capacity(chain_count);
+
+    for start in starts.outer_iter() {
+        if obj.ledger.exhausted() {
+            break;
+        }
+        let pos = bounds.clip(start);
+        let unit = Array1::from_iter(
+            (0..dim).map(|axis| unit_coordinate(pos[axis], bounds.low[axis], bounds.high[axis])),
+        );
+        let value = obj.eval(pos.view());
+        units.push(unit);
+        vals.push(value);
+    }
+
+    (!units.is_empty()).then(|| GsaState {
+        units,
+        vals,
+        epoch: 0,
+        rng: StdRng::seed_from_u64(seed),
+    })
+}
+
+fn run_persistent_gsa<O>(obj: &BudgetedObjective<'_, O>, state: &mut GsaState, slice: usize)
+where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds().clone();
+    let cooling = TsallisCool::new(1.0, GSA_Q_V);
+    let visit = TsallisVisit::new(GSA_Q_V);
+    let accept = TsallisAccept::new(GSA_Q_A);
+    let start_used = obj.ledger.used_get();
+
+    while obj.ledger.used_get().saturating_sub(start_used) < slice && !obj.ledger.exhausted() {
+        let temp = cooling.temperature(state.epoch);
+        for chain in 0..state.units.len() {
+            if obj.ledger.used_get().saturating_sub(start_used) >= slice || obj.ledger.exhausted() {
+                break;
+            }
+            let proposal_unit = visit
+                .propose(state.units[chain].view(), temp, &mut state.rng)
+                .mapv(|value| value.clamp(0.0, 1.0));
+            let proposal_pos = unit_to_box(&proposal_unit, &bounds.low, &bounds.high);
+            let proposal_val = obj.eval(proposal_pos.view());
+            let accepted = if !proposal_val.is_finite() {
+                false
+            } else if !state.vals[chain].is_finite() {
+                true
+            } else {
+                let probability = accept
+                    .accept_prob(proposal_val - state.vals[chain], temp)
+                    .clamp(0.0, 1.0);
+                state.rng.random::<f64>() < probability
+            };
+            if accepted {
+                state.units[chain] = proposal_unit;
+                state.vals[chain] = proposal_val;
+            }
+        }
+        state.epoch += 1;
+    }
 }
 
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
@@ -1111,8 +1222,12 @@ fn run_arm<O, G>(
             if slice < 8 {
                 return;
             }
-            let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-            qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+            if states.gsa.is_none() {
+                states.gsa = initialize_gsa_state(obj, slice, seed);
+            }
+            if let Some(state) = states.gsa.as_mut() {
+                run_persistent_gsa(obj, state, slice);
+            }
         }
         ArmKind::Variant => {
             // Bayesian-pilot tuned classical point: the first slice runs
@@ -1543,18 +1658,6 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_probe_charges_without_archive_insert() {
-        let ledger = BudgetLedger::new(2, 2);
-
-        assert!(ledger.charge_probe(1, 1));
-        assert_eq!(ledger.used_get(), 2);
-        assert_eq!(ledger.n_evals.load(Ordering::Relaxed), 1);
-        assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
-        assert_eq!(ledger.inner.lock().expect("ledger lock").archive_y.len(), 0);
-        assert!(!ledger.charge_probe(1, 0));
-    }
-
-    #[test]
     fn low_dimensional_polish_plan_uses_slice_horizon_budget() {
         let plan = low_dimensional_polish_plan(2, 1000).expect("low-dimensional plan");
         assert_eq!(plan.budget, 1000 / ROUNDS_PER_ARM);
@@ -1569,6 +1672,18 @@ mod tests {
         assert_eq!(plan.top_k, 1);
 
         assert!(low_dimensional_polish_plan(5, 1000).is_none());
+    }
+
+    #[test]
+    fn scheduler_probe_charges_without_archive_insert() {
+        let ledger = BudgetLedger::new(2, 2);
+
+        assert!(ledger.charge_probe(1, 1));
+        assert_eq!(ledger.used_get(), 2);
+        assert_eq!(ledger.n_evals.load(Ordering::Relaxed), 1);
+        assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
+        assert_eq!(ledger.inner.lock().expect("ledger lock").archive_y.len(), 0);
+        assert!(!ledger.charge_probe(1, 0));
     }
 
     #[test]
@@ -1669,6 +1784,46 @@ mod tests {
         fn dim(&self) -> usize {
             self.bounds.dims
         }
+    }
+
+    #[test]
+    fn gsa_arm_accumulates_state_across_pulls() {
+        let obj = ShiftQuadratic::new();
+        let ledger = BudgetLedger::new(96, Objective::dim(&obj));
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let mut states = ArmStates::default();
+        let mut rng = StdRng::seed_from_u64(99);
+
+        run_arm::<_, ShiftQuadratic>(
+            ArmKind::Gsa,
+            &budgeted_obj,
+            None,
+            &ledger,
+            &mut states,
+            &mut rng,
+            24,
+            96,
+        );
+        let first_epoch = states.gsa.as_ref().expect("gsa state").epoch;
+        let first_chain_count = states.gsa.as_ref().expect("gsa state").units.len();
+
+        run_arm::<_, ShiftQuadratic>(
+            ArmKind::Gsa,
+            &budgeted_obj,
+            None,
+            &ledger,
+            &mut states,
+            &mut rng,
+            24,
+            96,
+        );
+        let state = states.gsa.as_ref().expect("gsa state");
+
+        assert!(state.epoch > first_epoch);
+        assert_eq!(state.units.len(), first_chain_count);
     }
 
     struct BealeObjective {
