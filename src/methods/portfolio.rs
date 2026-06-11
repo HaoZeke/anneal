@@ -118,6 +118,10 @@ const SURROGATE_GRID: usize = 65;
 const REDUCED_K: usize = 4;
 /// Pilot chains drawn for the Bayesian-pilot variant arm.
 const PILOT_CHAINS: usize = 5;
+/// Minimum pilot depth per chain used to resolve acceptance and improvement.
+const BAYESIAN_PILOT_MIN_CHAIN_STEPS: usize = 8;
+/// Work needed before the GLE arm can install a posterior that other arms reuse.
+const BAYESIAN_GLE_MIN_PILOT_WORK: usize = PILOT_CHAINS * (BAYESIAN_PILOT_MIN_CHAIN_STEPS + 1);
 
 /// Per-arm pull statistics reported by the driver.
 #[derive(Clone, Debug)]
@@ -496,12 +500,17 @@ fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<A
         .then(|| bounds.clip(ArrayView1::from(&inner.archive_x[start..end])))
 }
 
+fn bayesian_pilot_steps_per_chain(pilot_budget: usize, min_steps: usize) -> usize {
+    (pilot_budget / PILOT_CHAINS.max(1)).max(min_steps)
+}
+
 fn fit_bayesian_pilot<O>(
     obj: &BudgetedObjective<'_, O>,
     ledger: &BudgetLedger,
     rng: &mut StdRng,
     seed: u64,
     pilot_budget: usize,
+    min_steps_per_chain: usize,
 ) -> Option<PilotState>
 where
     O: Objective<f64>,
@@ -511,7 +520,7 @@ where
     let width_scale = mean_width(&bounds) / 10.0;
     let prior = PilotPrior::default();
     let draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed);
-    let per_chain = (pilot_budget / PILOT_CHAINS.max(1)).max(1);
+    let per_chain = bayesian_pilot_steps_per_chain(pilot_budget, min_steps_per_chain);
     let start_used = ledger.used_get();
     let mut observations = Vec::with_capacity(PILOT_CHAINS);
     let mut best_anchor = None;
@@ -934,8 +943,17 @@ fn run_arm<O, G>(
         ArmKind::Gle => {
             let Some(grad) = grad else { return };
             if states.pilot.is_none() {
-                let pilot_budget = (slice / BAYESIAN_GLE_PILOT_BUDGET_DIVISOR).max(PILOT_CHAINS);
-                states.pilot = fit_bayesian_pilot(obj, ledger, rng, seed, pilot_budget);
+                let pilot_budget = slice / BAYESIAN_GLE_PILOT_BUDGET_DIVISOR;
+                if pilot_budget >= BAYESIAN_GLE_MIN_PILOT_WORK {
+                    states.pilot = fit_bayesian_pilot(
+                        obj,
+                        ledger,
+                        rng,
+                        seed,
+                        pilot_budget,
+                        BAYESIAN_PILOT_MIN_CHAIN_STEPS,
+                    );
+                }
             }
             let maxf = ledger.remaining().min(slice) / 2;
             if maxf < 4 {
@@ -988,7 +1006,14 @@ fn run_arm<O, G>(
             // so sigma scales with the mean box width.
             let width_scale = mean_width(&bounds) / 10.0;
             if states.pilot.is_none() {
-                states.pilot = fit_bayesian_pilot(obj, ledger, rng, seed, slice);
+                states.pilot = fit_bayesian_pilot(
+                    obj,
+                    ledger,
+                    rng,
+                    seed,
+                    slice,
+                    BAYESIAN_PILOT_MIN_CHAIN_STEPS,
+                );
                 return;
             }
             let posterior = &states.pilot.as_ref().expect("pilot fitted").posterior;
@@ -1587,5 +1612,46 @@ mod tests {
             states.pilot.is_some(),
             "GLE should own a Bayesian pilot state"
         );
+    }
+
+    #[test]
+    fn bayesian_pilot_preserves_minimum_chain_depth() {
+        assert_eq!(
+            bayesian_pilot_steps_per_chain(12, BAYESIAN_PILOT_MIN_CHAIN_STEPS),
+            BAYESIAN_PILOT_MIN_CHAIN_STEPS
+        );
+        assert_eq!(
+            bayesian_pilot_steps_per_chain(96, BAYESIAN_PILOT_MIN_CHAIN_STEPS),
+            19
+        );
+    }
+
+    #[test]
+    fn gle_arm_skips_underresolved_bayesian_pilot() {
+        let obj = ShiftQuadratic::new();
+        let ledger = BudgetLedger::new(64, Objective::dim(&obj));
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let budgeted_grad = BudgetedGradient {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let mut states = ArmStates::default();
+        let mut rng = StdRng::seed_from_u64(321);
+
+        run_arm(
+            ArmKind::Gle,
+            &budgeted_obj,
+            Some(&budgeted_grad),
+            &ledger,
+            &mut states,
+            &mut rng,
+            12,
+            64,
+        );
+
+        assert!(states.pilot.is_none());
     }
 }
