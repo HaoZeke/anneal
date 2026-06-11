@@ -218,6 +218,17 @@ impl BudgetLedger {
         self.used_get() >= self.cap_get()
     }
 
+    fn charge_probe(&self, n_evals: usize, n_grads: usize) -> bool {
+        let work = n_evals + n_grads;
+        if self.remaining() < work {
+            return false;
+        }
+        self.used.fetch_add(work, Ordering::Relaxed);
+        self.n_evals.fetch_add(n_evals, Ordering::Relaxed);
+        self.n_grads.fetch_add(n_grads, Ordering::Relaxed);
+        true
+    }
+
     fn record(&self, x: ArrayView1<f64>, value: f64) {
         let mut inner = self.inner.lock().expect("ledger lock");
         if value.is_finite() && value < self.best_get() {
@@ -521,6 +532,72 @@ fn low_dimensional_polish_plan(dim: usize, budget: usize) -> Option<LowDimension
         n_replicates,
         top_k,
     })
+}
+
+fn scaled_center_gradient_ratio<O, G>(
+    obj: &BudgetedObjective<'_, O>,
+    grad: &BudgetedGradient<'_, G>,
+    bounds: &Bounds<f64>,
+) -> Option<f64>
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let center = (&bounds.low + &bounds.high) * 0.5;
+    if !obj.ledger.charge_probe(1, 1) {
+        return None;
+    }
+    let value = obj.inner.eval(center.view());
+    let gradient = grad.inner.grad(center.view());
+    let width_norm = (0..bounds.dims)
+        .map(|idx| {
+            let width = bounds.high[idx] - bounds.low[idx];
+            if width.is_finite() && width > 0.0 {
+                width * width
+            } else {
+                1.0
+            }
+        })
+        .sum::<f64>()
+        .sqrt()
+        .max(1.0);
+    let grad_norm = gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
+    let ratio = grad_norm * width_norm / value.abs().max(1.0);
+    ratio.is_finite().then_some(ratio)
+}
+
+fn low_dimensional_polish_before_warmup(center_gradient_ratio: Option<f64>) -> bool {
+    match center_gradient_ratio {
+        Some(ratio) => ratio <= DOLAN_MORE_CONVERGENCE_TAU,
+        None => false,
+    }
+}
+
+fn run_low_dimensional_polish<O, G>(
+    obj: &BudgetedObjective<'_, O>,
+    grad: &BudgetedGradient<'_, G>,
+    ledger: &BudgetLedger,
+    plan: &LowDimensionalPolishPlan,
+    seed: u64,
+    budget: usize,
+) where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    let ceiling = ledger.used_get() + plan.budget;
+    ledger.cap_set(ceiling.min(budget));
+    shifted_qmc_projected_gradient_polish(
+        obj,
+        grad,
+        plan.n_starts,
+        plan.max_fevals_per_start,
+        qmc_skip_from_seed(seed),
+        plan.n_replicates,
+        1.0,
+        LOW_DIMENSIONAL_POLISH_GRAD_TOL,
+        plan.top_k,
+    );
+    ledger.cap_set(budget);
 }
 
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
@@ -1282,23 +1359,16 @@ where
     let mut states = ArmStates::default();
     let mut rng = StdRng::seed_from_u64(seed);
     let k = arms.len();
+    let mut low_dimensional_polish = grad
+        .is_some()
+        .then(|| low_dimensional_polish_plan(dim, budget))
+        .flatten();
 
-    if let Some(grad) = budgeted_grad.as_ref() {
-        if let Some(plan) = low_dimensional_polish_plan(dim, budget) {
-            let ceiling = ledger.used_get() + plan.budget;
-            ledger.cap_set(ceiling.min(budget));
-            shifted_qmc_projected_gradient_polish(
-                &budgeted_obj,
-                grad,
-                plan.n_starts,
-                plan.max_fevals_per_start,
-                qmc_skip_from_seed(seed),
-                plan.n_replicates,
-                1.0,
-                LOW_DIMENSIONAL_POLISH_GRAD_TOL,
-                plan.top_k,
-            );
-            ledger.cap_set(budget);
+    if let (Some(plan), Some(grad)) = (low_dimensional_polish.as_ref(), budgeted_grad.as_ref()) {
+        let center_ratio = scaled_center_gradient_ratio(&budgeted_obj, grad, &bounds);
+        if low_dimensional_polish_before_warmup(center_ratio) {
+            run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
+            low_dimensional_polish = None;
         }
     }
 
@@ -1307,6 +1377,14 @@ where
         let remaining = ledger.remaining();
         if remaining < 4 {
             break;
+        }
+        if round >= k {
+            if let (Some(plan), Some(grad)) =
+                (low_dimensional_polish.take(), budgeted_grad.as_ref())
+            {
+                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
+                continue;
+            }
         }
         if remaining < slice {
             // Budget tail: drive the incumbent to projected
@@ -1465,6 +1543,18 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_probe_charges_without_archive_insert() {
+        let ledger = BudgetLedger::new(2, 2);
+
+        assert!(ledger.charge_probe(1, 1));
+        assert_eq!(ledger.used_get(), 2);
+        assert_eq!(ledger.n_evals.load(Ordering::Relaxed), 1);
+        assert_eq!(ledger.n_grads.load(Ordering::Relaxed), 1);
+        assert_eq!(ledger.inner.lock().expect("ledger lock").archive_y.len(), 0);
+        assert!(!ledger.charge_probe(1, 0));
+    }
+
+    #[test]
     fn low_dimensional_polish_plan_uses_slice_horizon_budget() {
         let plan = low_dimensional_polish_plan(2, 1000).expect("low-dimensional plan");
         assert_eq!(plan.budget, 1000 / ROUNDS_PER_ARM);
@@ -1479,6 +1569,17 @@ mod tests {
         assert_eq!(plan.top_k, 1);
 
         assert!(low_dimensional_polish_plan(5, 1000).is_none());
+    }
+
+    #[test]
+    fn low_dimensional_polish_prewarms_flat_scaled_centers() {
+        assert!(low_dimensional_polish_before_warmup(Some(
+            DOLAN_MORE_CONVERGENCE_TAU / 10.0
+        )));
+        assert!(!low_dimensional_polish_before_warmup(Some(
+            DOLAN_MORE_CONVERGENCE_TAU * 10.0
+        )));
+        assert!(!low_dimensional_polish_before_warmup(None));
     }
 
     #[test]
