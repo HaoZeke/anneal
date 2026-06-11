@@ -311,6 +311,7 @@ impl ArmPosterior {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ArmKind {
     Explore,
+    Shift,
     Hop,
     Surrogate,
     De,
@@ -327,6 +328,7 @@ impl ArmKind {
     fn name(self) -> &'static str {
         match self {
             ArmKind::Explore => "explore",
+            ArmKind::Shift => "shift",
             ArmKind::Hop => "hop",
             ArmKind::Surrogate => "surrogate",
             ArmKind::De => "de",
@@ -411,6 +413,23 @@ fn mean_width(bounds: &Bounds<f64>) -> f64 {
         total += if w.is_finite() && w > 0.0 { w } else { 1.0 };
     }
     total / dim as f64
+}
+
+fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
+    let inner = ledger.inner.lock().expect("ledger lock");
+    let dim = bounds.dims;
+    let (mut best_idx, mut best_val) = (None, f64::INFINITY);
+    for (idx, value) in inner.archive_y.iter().copied().enumerate() {
+        if value.is_finite() && value < best_val {
+            best_idx = Some(idx);
+            best_val = value;
+        }
+    }
+    let idx = best_idx?;
+    let start = idx.checked_mul(dim)?;
+    let end = start.checked_add(dim)?;
+    (end <= inner.archive_x.len())
+        .then(|| bounds.clip(ArrayView1::from(&inner.archive_x[start..end])))
 }
 
 /// Top-`k` orthonormal basis of the empirical gradient covariance by
@@ -508,6 +527,16 @@ fn run_arm<O, G>(
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
                 qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
             }
+        }
+        ArmKind::Shift => {
+            // Elite-shift arm: reuse the best charged archive point as
+            // the anchor and spend one local trajectory from it.
+            let Some(grad) = grad else { return };
+            let Some(anchor) = elite_archive_anchor(ledger, &bounds) else {
+                return;
+            };
+            let maxf = (slice / 2).max(2);
+            projected_gradient_polish(obj, grad, anchor, maxf, 1.0, 1e-12);
         }
         ArmKind::Hop => {
             let Some(grad) = grad else { return };
@@ -948,13 +977,12 @@ fn run_arm<O, G>(
 fn enabled_arms(dim: usize, has_grad: bool, n_slices: usize) -> Vec<ArmKind> {
     let mut arms = vec![ArmKind::Explore];
     if has_grad {
+        arms.push(ArmKind::Shift);
         arms.push(ArmKind::Hop);
+        arms.push(ArmKind::Gle);
     }
     arms.push(ArmKind::Surrogate);
     arms.push(ArmKind::De);
-    if has_grad {
-        arms.push(ArmKind::Gle);
-    }
     arms.push(ArmKind::TrPoll);
     arms.push(ArmKind::Gsa);
     arms.push(ArmKind::Variant);
@@ -1189,5 +1217,106 @@ mod tests {
         }
         let basis = active_subspace_basis(&grads, dim, 2, 13);
         assert!(basis[[0, 0]].abs() > 0.99, "first column aligns with e0");
+    }
+
+    #[derive(Clone)]
+    struct ShiftQuadratic {
+        bounds: Bounds<f64>,
+        center: Array1<f64>,
+    }
+
+    impl ShiftQuadratic {
+        fn new() -> Self {
+            Self {
+                bounds: Bounds::new(
+                    Array1::from_vec(vec![-5.0, -5.0]),
+                    Array1::from_vec(vec![5.0, 5.0]),
+                    1e-12,
+                ),
+                center: Array1::from_vec(vec![1.25, -1.75]),
+            }
+        }
+    }
+
+    impl Objective<f64> for ShiftQuadratic {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            &self.bounds
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            x.iter()
+                .zip(self.center.iter())
+                .map(|(xi, ci)| {
+                    let diff = xi - ci;
+                    diff * diff
+                })
+                .sum()
+        }
+    }
+
+    impl Gradient<f64> for ShiftQuadratic {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            Array1::from_iter(
+                x.iter()
+                    .zip(self.center.iter())
+                    .map(|(xi, ci)| 2.0 * (xi - ci)),
+            )
+        }
+
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+    }
+
+    #[test]
+    fn gradient_horizon_prioritizes_shift_arm() {
+        let arms = enabled_arms(6, true, 16);
+        assert!(arms.contains(&ArmKind::Shift));
+        assert!(arms.contains(&ArmKind::Gle));
+        assert!(!arms.contains(&ArmKind::De));
+    }
+
+    #[test]
+    fn shift_arm_polishes_elite_archive_anchor() {
+        let obj = ShiftQuadratic::new();
+        let ledger = BudgetLedger::new(96, Objective::dim(&obj));
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let budgeted_grad = BudgetedGradient {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let weak = Array1::from_vec(vec![-4.0, 4.0]);
+        let elite = Array1::from_vec(vec![1.7, -1.1]);
+        let weak_value = budgeted_obj.eval(weak.view());
+        let elite_value = budgeted_obj.eval(elite.view());
+        assert!(elite_value < weak_value);
+
+        let mut states = ArmStates::default();
+        let mut rng = StdRng::seed_from_u64(123);
+        run_arm(
+            ArmKind::Shift,
+            &budgeted_obj,
+            Some(&budgeted_grad),
+            &ledger,
+            &mut states,
+            &mut rng,
+            48,
+            96,
+        );
+
+        assert!(
+            ledger.best_get() < elite_value * 1e-6,
+            "shift arm should polish elite anchor, got {} from elite {}",
+            ledger.best_get(),
+            elite_value
+        );
+        assert!(ledger.used_get() <= 50);
     }
 }
