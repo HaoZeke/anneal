@@ -483,6 +483,10 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
+fn warmup_arm_index(round: usize, arm_count: usize) -> Option<usize> {
+    (round >= 1 && round <= arm_count).then_some(round - 1)
+}
+
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
     let inner = ledger.inner.lock().expect("ledger lock");
     let dim = bounds.dims;
@@ -1275,12 +1279,14 @@ where
             break;
         }
         round += 1;
-        // Decaying uniform floor min(1, 1/m): the Beta(1, 1) priors
-        // already explore, so the floor only certifies that every arm,
-        // including the restart arm, is played infinitely often
-        // (sum 1/(mK) diverges); its cumulative cost is ln(n) slices.
+        // One observation per active arm gives the finite-budget
+        // posterior a real datum before ranking; the decaying uniform
+        // floor then certifies that every arm, including the restart
+        // arm, is played infinitely often (sum 1/(mK) diverges).
         let floor = (1.0 / round as f64).min(1.0);
-        let choice = if rng.random::<f64>() < floor {
+        let choice = if let Some(warmup) = warmup_arm_index(round, k) {
+            warmup
+        } else if rng.random::<f64>() < floor {
             rng.random_range(0..k)
         } else {
             let mut best_idx = 0usize;
@@ -1393,6 +1399,14 @@ mod tests {
         }
         assert!(posterior.alpha <= 1.0 + 1.0 / (1.0 - 0.9) + 1.0);
         assert!(posterior.beta >= 1.0);
+    }
+
+    #[test]
+    fn scheduler_warmup_pulls_each_active_arm_once() {
+        assert_eq!(warmup_arm_index(1, 4), Some(0));
+        assert_eq!(warmup_arm_index(2, 4), Some(1));
+        assert_eq!(warmup_arm_index(4, 4), Some(3));
+        assert_eq!(warmup_arm_index(5, 4), None);
     }
 
     #[test]
