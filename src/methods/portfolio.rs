@@ -42,8 +42,8 @@ use crate::methods::bayesian_pilot::{
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
-    projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
-    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
 use crate::movekernel::{MoveKernel, TsallisVisit};
@@ -561,6 +561,12 @@ fn low_dimensional_polish_plan(dim: usize, budget: usize) -> Option<LowDimension
     })
 }
 
+fn low_dimensional_scout_population(plan: &LowDimensionalPolishPlan) -> Option<usize> {
+    let population = plan.n_starts.checked_mul(plan.n_replicates)?;
+    let remaining = plan.budget.checked_sub(population)?;
+    (plan.n_replicates > 1 && population >= 4 && remaining >= 2).then_some(population)
+}
+
 fn scaled_center_gradient_ratio<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: &BudgetedGradient<'_, G>,
@@ -613,17 +619,42 @@ fn run_low_dimensional_polish<O, G>(
 {
     let ceiling = ledger.used_get() + plan.budget;
     ledger.cap_set(ceiling.min(budget));
-    shifted_qmc_projected_gradient_polish(
-        obj,
-        grad,
-        plan.n_starts,
-        plan.max_fevals_per_start,
-        qmc_skip_from_seed(seed),
-        plan.n_replicates,
-        1.0,
-        LOW_DIMENSIONAL_POLISH_GRAD_TOL,
-        plan.top_k,
-    );
+    if let Some(population) = low_dimensional_scout_population(plan) {
+        let scout = qmc_best1bin_scout(
+            obj,
+            population,
+            seed,
+            population,
+            DE_WEIGHT_MIN,
+            DE_WEIGHT_SPAN,
+            DE_CROSSOVER,
+        );
+        if scout.best_val.is_finite() {
+            let maxf = ledger.remaining() / 2;
+            if maxf > 0 {
+                projected_gradient_polish(
+                    obj,
+                    grad,
+                    scout.best_pos,
+                    maxf,
+                    1.0,
+                    LOW_DIMENSIONAL_POLISH_GRAD_TOL,
+                );
+            }
+        }
+    } else {
+        shifted_qmc_projected_gradient_polish(
+            obj,
+            grad,
+            plan.n_starts,
+            plan.max_fevals_per_start,
+            qmc_skip_from_seed(seed),
+            plan.n_replicates,
+            1.0,
+            LOW_DIMENSIONAL_POLISH_GRAD_TOL,
+            plan.top_k,
+        );
+    }
     ledger.cap_set(budget);
 }
 
@@ -1672,6 +1703,18 @@ mod tests {
         assert_eq!(plan.top_k, 1);
 
         assert!(low_dimensional_polish_plan(5, 1000).is_none());
+    }
+
+    #[test]
+    fn replicated_low_dimensional_plans_use_value_scout() {
+        let plan = low_dimensional_polish_plan(3, 1000).expect("low-dimensional plan");
+        assert_eq!(
+            low_dimensional_scout_population(&plan),
+            Some(plan.n_starts * plan.n_replicates)
+        );
+
+        let plan = low_dimensional_polish_plan(2, 1000).expect("low-dimensional plan");
+        assert_eq!(low_dimensional_scout_population(&plan), None);
     }
 
     #[test]
