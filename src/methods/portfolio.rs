@@ -362,7 +362,13 @@ struct DeState {
 }
 
 #[derive(Default)]
+struct ShiftState {
+    used_units: Vec<Array1<f64>>,
+}
+
+#[derive(Default)]
 struct ArmStates {
+    shift: ShiftState,
     hop: Option<HopState>,
     de: Option<DeState>,
     pilot: Option<LaplacePosterior>,
@@ -432,21 +438,73 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
-fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
+fn unit_box_coordinates(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64> {
+    Array1::from_iter((0..bounds.dims).map(|j| {
+        let width = bounds.high[j] - bounds.low[j];
+        if width.is_finite() && width > 0.0 {
+            ((x[j] - bounds.low[j]) / width).clamp(0.0, 1.0)
+        } else {
+            0.5
+        }
+    }))
+}
+
+fn normalized_rms_distance(left: ArrayView1<f64>, right: ArrayView1<f64>) -> f64 {
+    let dim = left.len().min(right.len()).max(1);
+    ((0..dim)
+        .map(|j| {
+            let delta = left[j] - right[j];
+            delta * delta
+        })
+        .sum::<f64>()
+        / dim as f64)
+        .sqrt()
+}
+
+fn shift_basin_radius(archive_len: usize, dim: usize) -> f64 {
+    if archive_len <= 1 || dim == 0 {
+        return 1.0;
+    }
+    (archive_len as f64).powf(-1.0 / dim as f64)
+}
+
+fn shift_archive_anchor(
+    ledger: &BudgetLedger,
+    bounds: &Bounds<f64>,
+    state: &mut ShiftState,
+) -> Option<Array1<f64>> {
     let inner = ledger.inner.lock().expect("ledger lock");
     let dim = bounds.dims;
-    let (mut best_idx, mut best_val) = (None, f64::INFINITY);
+    let mut candidates = Vec::new();
     for (idx, value) in inner.archive_y.iter().copied().enumerate() {
-        if value.is_finite() && value < best_val {
-            best_idx = Some(idx);
-            best_val = value;
+        if !value.is_finite() {
+            continue;
+        }
+        let start = idx.saturating_mul(dim);
+        let end = start.saturating_add(dim);
+        if end <= inner.archive_x.len() {
+            let pos = bounds.clip(ArrayView1::from(&inner.archive_x[start..end]));
+            let unit = unit_box_coordinates(pos.view(), bounds);
+            candidates.push((value, pos, unit));
         }
     }
-    let idx = best_idx?;
-    let start = idx.checked_mul(dim)?;
-    let end = start.checked_add(dim)?;
-    (end <= inner.archive_x.len())
-        .then(|| bounds.clip(ArrayView1::from(&inner.archive_x[start..end])))
+    drop(inner);
+    candidates.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let radius = shift_basin_radius(candidates.len(), dim);
+    let chosen = candidates
+        .iter()
+        .find(|(_, _, unit)| {
+            state
+                .used_units
+                .iter()
+                .all(|used| normalized_rms_distance(unit.view(), used.view()) > radius)
+        })
+        .or_else(|| {
+            state.used_units.clear();
+            candidates.first()
+        })?;
+    state.used_units.push(chosen.2.clone());
+    Some(chosen.1.clone())
 }
 
 /// Top-`k` orthonormal basis of the empirical gradient covariance by
@@ -549,7 +607,7 @@ fn run_arm<O, G>(
             // Elite-shift arm: reuse the best charged archive point as
             // the anchor and spend one local trajectory from it.
             let Some(grad) = grad else { return };
-            let Some(anchor) = elite_archive_anchor(ledger, &bounds) else {
+            let Some(anchor) = shift_archive_anchor(ledger, &bounds, &mut states.shift) else {
                 return;
             };
             let maxf = (slice / 2).max(2);
@@ -1231,6 +1289,35 @@ mod tests {
             arm_success_threshold(ArmKind::Shift, before)
                 > arm_success_threshold(ArmKind::Explore, before)
         );
+    }
+
+    #[test]
+    fn shift_basin_radius_is_archive_resolution() {
+        let radius = shift_basin_radius(16, 2);
+        assert!((radius - 0.25).abs() < 1e-12);
+        assert_eq!(shift_basin_radius(0, 2), 1.0);
+    }
+
+    #[test]
+    fn shift_anchor_advances_to_distinct_archive_basin() {
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![0.0, 0.0]),
+            Array1::from_vec(vec![1.0, 1.0]),
+            1e-12,
+        );
+        let ledger = BudgetLedger::new(32, bounds.dims);
+        let best = Array1::from_vec(vec![0.10, 0.10]);
+        let near = Array1::from_vec(vec![0.12, 0.12]);
+        let far = Array1::from_vec(vec![0.90, 0.90]);
+        ledger.record(best.view(), 0.0);
+        ledger.record(near.view(), 0.1);
+        ledger.record(far.view(), 0.2);
+
+        let mut state = ShiftState::default();
+        let first = shift_archive_anchor(&ledger, &bounds, &mut state).expect("first anchor");
+        let second = shift_archive_anchor(&ledger, &bounds, &mut state).expect("second anchor");
+        assert_eq!(first, best);
+        assert_eq!(second, far);
     }
 
     #[test]
