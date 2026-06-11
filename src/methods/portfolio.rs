@@ -84,8 +84,16 @@ const GSA_Q_V: f64 = 2.62;
 const GSA_Q_A: f64 = 1.7;
 /// GLE integrator timestep, matching the thermostat band resolution.
 const GLE_DT: f64 = 0.2;
+/// Minimum timestep exposed by the portfolio-level Bayesian GLE policy.
+const GLE_MIN_DT: f64 = 1e-4;
 /// GLE annealing epochs, matching the standalone driver default.
 const GLE_EPOCHS: usize = 40;
+/// The GLE arm spends part of its first slice fitting the shared Bayesian
+/// pilot and leaves the rest for the thermostat trajectory.
+const BAYESIAN_GLE_PILOT_BUDGET_DIVISOR: usize = 2;
+/// Lower and upper radius fractions for the posterior local GLE box.
+const BAYESIAN_GLE_LOCAL_MIN_RADIUS_FRAC: f64 = 0.02;
+const BAYESIAN_GLE_LOCAL_MAX_RADIUS_FRAC: f64 = 0.5;
 /// Storn-Price population sizing: `4 * dim` clamped to a workable range.
 const DE_POP_PER_DIM: usize = 4;
 const DE_POP_MIN: usize = 16;
@@ -249,6 +257,35 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
     }
 }
 
+/// Objective proxy that evaluates the original objective while advertising
+/// a posterior local box to dynamics that clip through `Objective::bounds`.
+struct LocalBoxBudgetedObjective<'a, O: Objective<f64>> {
+    inner: &'a O,
+    ledger: &'a BudgetLedger,
+    bounds: Bounds<f64>,
+}
+
+impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        if self.ledger.exhausted() {
+            return f64::INFINITY;
+        }
+        self.ledger.used.fetch_add(1, Ordering::Relaxed);
+        self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
+        let value = self.inner.eval(x);
+        self.ledger.record(x, value);
+        value
+    }
+}
+
 /// Gradient proxy charging one unit per evaluation.
 struct BudgetedGradient<'a, G: Gradient<f64>> {
     inner: &'a G,
@@ -365,11 +402,17 @@ struct DeState {
     vals: Vec<f64>,
 }
 
+#[derive(Clone, Debug)]
+struct PilotState {
+    posterior: LaplacePosterior,
+    anchor: Option<Array1<f64>>,
+}
+
 #[derive(Default)]
 struct ArmStates {
     hop: Option<HopState>,
     de: Option<DeState>,
-    pilot: Option<LaplacePosterior>,
+    pilot: Option<PilotState>,
     surrogate_gen: usize,
     seed_counter: u64,
 }
@@ -451,6 +494,146 @@ fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<A
     let end = start.checked_add(dim)?;
     (end <= inner.archive_x.len())
         .then(|| bounds.clip(ArrayView1::from(&inner.archive_x[start..end])))
+}
+
+fn fit_bayesian_pilot<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    rng: &mut StdRng,
+    seed: u64,
+    pilot_budget: usize,
+) -> Option<PilotState>
+where
+    O: Objective<f64>,
+{
+    let bounds = obj.bounds().clone();
+    let dim = bounds.dims;
+    let width_scale = mean_width(&bounds) / 10.0;
+    let prior = PilotPrior::default();
+    let draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed);
+    let per_chain = (pilot_budget / PILOT_CHAINS.max(1)).max(1);
+    let start_used = ledger.used_get();
+    let mut observations = Vec::with_capacity(PILOT_CHAINS);
+    let mut best_anchor = None;
+    let mut best_anchor_val = f64::INFINITY;
+
+    for (t_init, sigma, q_v) in draws {
+        if ledger.exhausted() || ledger.used_get().saturating_sub(start_used) >= pilot_budget {
+            break;
+        }
+        let mut cur = Array1::from_iter((0..dim).map(|j| {
+            let w = bounds.high[j] - bounds.low[j];
+            bounds.low[j] + rng.random::<f64>() * if w > 0.0 { w } else { 0.0 }
+        }));
+        let mut cur_val = obj.eval(cur.view());
+        let mut best_val = cur_val;
+        let mut chain_best = cur.clone();
+        let mut accepts = 0usize;
+        let mut steps = 0usize;
+        for step in 0..per_chain {
+            if ledger.exhausted() || ledger.used_get().saturating_sub(start_used) >= pilot_budget {
+                break;
+            }
+            let temp = ladder_temperature(t_init, step / 10);
+            let mut prop = cur.clone();
+            for value in prop.iter_mut() {
+                let noise: f64 = rand_distr::StandardNormal.sample(rng);
+                *value += sigma * width_scale * noise;
+            }
+            let prop = bounds.clip(prop.view());
+            let prop_val = obj.eval(prop.view());
+            steps += 1;
+            if prop_val.is_finite() && metropolis(prop_val - cur_val, temp, rng) {
+                cur = prop;
+                cur_val = prop_val;
+                accepts += 1;
+                if prop_val < best_val {
+                    best_val = prop_val;
+                    chain_best = cur.clone();
+                }
+            }
+        }
+        if steps > 0 && best_val.is_finite() {
+            if best_val < best_anchor_val {
+                best_anchor_val = best_val;
+                best_anchor = Some(chain_best);
+            }
+            observations.push(PilotObservation {
+                t_init,
+                sigma,
+                q_v,
+                accept_rate: accepts as f64 / steps as f64,
+                best_val,
+                final_pos: cur.to_vec(),
+            });
+        }
+    }
+
+    (observations.len() >= 2).then(|| PilotState {
+        posterior: fit_laplace(&observations, &PilotPrior::default()),
+        anchor: best_anchor,
+    })
+}
+
+fn bayesian_gle_timestep(posterior: Option<&LaplacePosterior>, dim: usize) -> f64 {
+    let Some(posterior) = posterior else {
+        return GLE_DT;
+    };
+    let dim_scale = (dim.max(1) as f64).sqrt();
+    let dt = posterior.sigma_map.abs() / dim_scale;
+    if dt.is_finite() && dt > 0.0 {
+        dt.clamp(GLE_MIN_DT, GLE_DT)
+    } else {
+        GLE_DT
+    }
+}
+
+fn bayesian_gle_local_bounds(
+    bounds: &Bounds<f64>,
+    pilot: Option<&PilotState>,
+    fallback_anchor: &Array1<f64>,
+) -> Bounds<f64> {
+    let Some(pilot) = pilot else {
+        return bounds.clone();
+    };
+    let dim = bounds.dims;
+    let anchor = pilot
+        .anchor
+        .as_ref()
+        .filter(|candidate| {
+            candidate.len() == dim && candidate.iter().all(|value| value.is_finite())
+        })
+        .unwrap_or(fallback_anchor);
+    let center = bounds.clip(anchor.view());
+    let width_scale = mean_width(bounds) / 10.0;
+    let thermal_spread = pilot.posterior.log_t_init_sd.exp().max(1.0);
+    let scalar_radius =
+        (pilot.posterior.sigma_map.abs() * width_scale * (dim.max(1) as f64).sqrt())
+            * thermal_spread;
+
+    let mut low = bounds.low.clone();
+    let mut high = bounds.high.clone();
+    for j in 0..dim {
+        let width = bounds.high[j] - bounds.low[j];
+        if !width.is_finite() || width <= 0.0 {
+            continue;
+        }
+        let radius = if scalar_radius.is_finite() && scalar_radius > 0.0 {
+            scalar_radius.clamp(
+                BAYESIAN_GLE_LOCAL_MIN_RADIUS_FRAC * width,
+                BAYESIAN_GLE_LOCAL_MAX_RADIUS_FRAC * width,
+            )
+        } else {
+            BAYESIAN_GLE_LOCAL_MAX_RADIUS_FRAC * width
+        };
+        low[j] = bounds.low[j].max(center[j] - radius);
+        high[j] = bounds.high[j].min(center[j] + radius);
+        if !(low[j].is_finite() && high[j].is_finite() && high[j] > low[j]) {
+            low[j] = bounds.low[j];
+            high[j] = bounds.high[j];
+        }
+    }
+    Bounds::new(low, high, bounds.slack)
 }
 
 /// Top-`k` orthonormal basis of the empirical gradient covariance by
@@ -750,18 +933,36 @@ fn run_arm<O, G>(
         }
         ArmKind::Gle => {
             let Some(grad) = grad else { return };
-            let maxf = slice / 2;
+            if states.pilot.is_none() {
+                let pilot_budget = (slice / BAYESIAN_GLE_PILOT_BUDGET_DIVISOR).max(PILOT_CHAINS);
+                states.pilot = fit_bayesian_pilot(obj, ledger, rng, seed, pilot_budget);
+            }
+            let maxf = ledger.remaining().min(slice) / 2;
             if maxf < 4 {
                 return;
             }
+            let pilot = states.pilot.as_ref();
+            let anchor = pilot
+                .and_then(|state| state.anchor.clone())
+                .unwrap_or_else(|| ledger.incumbent(&bounds));
+            let local_bounds = bayesian_gle_local_bounds(&bounds, pilot, &anchor);
+            let local_obj = LocalBoxBudgetedObjective {
+                inner: obj.inner,
+                ledger,
+                bounds: local_bounds.clone(),
+            };
+            let fresh_grad = BudgetedGradient {
+                inner: grad.inner,
+                ledger,
+            };
             gle_langevin_preconditioned_sa(
-                obj,
-                grad,
+                &local_obj,
+                &fresh_grad,
                 seed,
                 maxf,
-                GLE_DT,
+                bayesian_gle_timestep(pilot.map(|state| &state.posterior), dim),
                 GLE_EPOCHS,
-                Some(ledger.incumbent(&bounds)),
+                Some(local_bounds.clip(anchor.view())),
                 None,
             );
         }
@@ -787,61 +988,10 @@ fn run_arm<O, G>(
             // so sigma scales with the mean box width.
             let width_scale = mean_width(&bounds) / 10.0;
             if states.pilot.is_none() {
-                let prior = PilotPrior::default();
-                let draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed);
-                let per_chain = (slice / PILOT_CHAINS.max(1)).max(8);
-                let mut observations = Vec::with_capacity(PILOT_CHAINS);
-                for (t_init, sigma, q_v) in draws {
-                    if ledger.exhausted() {
-                        break;
-                    }
-                    let mut cur = Array1::from_iter((0..dim).map(|j| {
-                        let w = bounds.high[j] - bounds.low[j];
-                        bounds.low[j] + rng.random::<f64>() * if w > 0.0 { w } else { 0.0 }
-                    }));
-                    let mut cur_val = obj.eval(cur.view());
-                    let mut best_val = cur_val;
-                    let mut accepts = 0usize;
-                    let mut steps = 0usize;
-                    for step in 0..per_chain {
-                        if ledger.exhausted() {
-                            break;
-                        }
-                        let temp = ladder_temperature(t_init, step / 10);
-                        let mut prop = cur.clone();
-                        for value in prop.iter_mut() {
-                            let noise: f64 = rand_distr::StandardNormal.sample(rng);
-                            *value += sigma * width_scale * noise;
-                        }
-                        let prop = bounds.clip(prop.view());
-                        let prop_val = obj.eval(prop.view());
-                        steps += 1;
-                        if prop_val.is_finite() && metropolis(prop_val - cur_val, temp, rng) {
-                            cur = prop;
-                            cur_val = prop_val;
-                            accepts += 1;
-                            if prop_val < best_val {
-                                best_val = prop_val;
-                            }
-                        }
-                    }
-                    if steps > 0 && best_val.is_finite() {
-                        observations.push(PilotObservation {
-                            t_init,
-                            sigma,
-                            q_v,
-                            accept_rate: accepts as f64 / steps as f64,
-                            best_val,
-                            final_pos: cur.to_vec(),
-                        });
-                    }
-                }
-                if observations.len() >= 2 {
-                    states.pilot = Some(fit_laplace(&observations, &PilotPrior::default()));
-                }
+                states.pilot = fit_bayesian_pilot(obj, ledger, rng, seed, slice);
                 return;
             }
-            let posterior = states.pilot.as_ref().expect("pilot fitted");
+            let posterior = &states.pilot.as_ref().expect("pilot fitted").posterior;
             let epochs = 16usize;
             let steps = (slice / epochs).max(4);
             let fresh_obj = BudgetedObjective {
@@ -1355,5 +1505,87 @@ mod tests {
             elite_value
         );
         assert!(ledger.used_get() <= 50);
+    }
+
+    #[test]
+    fn bayesian_gle_timestep_uses_posterior_step_scale() {
+        let posterior = LaplacePosterior {
+            t_init_map: 1.0,
+            sigma_map: 0.04,
+            q_v_map: 2.0,
+            log_t_init_sd: 0.1,
+            log_sigma_sd: 0.1,
+            q_v_sd: 0.1,
+            neg_log_post_map: 0.0,
+        };
+
+        let dt = bayesian_gle_timestep(Some(&posterior), 64);
+
+        assert!(dt < GLE_DT, "posterior scale should reduce dt, got {dt}");
+        assert!(dt >= GLE_MIN_DT);
+        assert_eq!(bayesian_gle_timestep(None, 64), GLE_DT);
+    }
+
+    #[test]
+    fn bayesian_gle_local_box_tracks_pilot_anchor() {
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![-10.0, -20.0]),
+            Array1::from_vec(vec![10.0, 20.0]),
+            1e-12,
+        );
+        let anchor = Array1::from_vec(vec![3.0, -5.0]);
+        let posterior = LaplacePosterior {
+            t_init_map: 0.5,
+            sigma_map: 0.2,
+            q_v_map: 2.0,
+            log_t_init_sd: 0.25,
+            log_sigma_sd: 0.1,
+            q_v_sd: 0.1,
+            neg_log_post_map: 0.0,
+        };
+        let pilot = PilotState {
+            posterior,
+            anchor: Some(anchor.clone()),
+        };
+
+        let local = bayesian_gle_local_bounds(&bounds, Some(&pilot), &anchor);
+
+        assert!(local.contains(anchor.view()));
+        assert!(local.low[0] > bounds.low[0]);
+        assert!(local.high[0] < bounds.high[0]);
+        assert!(local.low[1] > bounds.low[1]);
+        assert!(local.high[1] < bounds.high[1]);
+    }
+
+    #[test]
+    fn gle_arm_fits_bayesian_pilot_when_variant_is_inactive() {
+        let obj = ShiftQuadratic::new();
+        let ledger = BudgetLedger::new(192, Objective::dim(&obj));
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let budgeted_grad = BudgetedGradient {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let mut states = ArmStates::default();
+        let mut rng = StdRng::seed_from_u64(321);
+
+        run_arm(
+            ArmKind::Gle,
+            &budgeted_obj,
+            Some(&budgeted_grad),
+            &ledger,
+            &mut states,
+            &mut rng,
+            96,
+            192,
+        );
+
+        assert!(
+            states.pilot.is_some(),
+            "GLE should own a Bayesian pilot state"
+        );
     }
 }
