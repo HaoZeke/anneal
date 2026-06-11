@@ -483,7 +483,10 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
-fn warmup_arm_index(round: usize, arm_count: usize) -> Option<usize> {
+fn warmup_arm_index(round: usize, arm_count: usize, n_slices: usize) -> Option<usize> {
+    if n_slices > ROUNDS_PER_ARM * arm_count {
+        return None;
+    }
     (round >= 1 && round <= arm_count).then_some(round - 1)
 }
 
@@ -1279,12 +1282,12 @@ where
             break;
         }
         round += 1;
-        // One observation per active arm gives the finite-budget
-        // posterior a real datum before ranking; the decaying uniform
-        // floor then certifies that every arm, including the restart
-        // arm, is played infinitely often (sum 1/(mK) diverges).
+        // Short horizons get one observation per active arm before
+        // ranking; the decaying uniform floor then certifies that every
+        // arm, including the restart arm, is played infinitely often
+        // (sum 1/(mK) diverges).
         let floor = (1.0 / round as f64).min(1.0);
-        let choice = if let Some(warmup) = warmup_arm_index(round, k) {
+        let choice = if let Some(warmup) = warmup_arm_index(round, k, n_slices) {
             warmup
         } else if rng.random::<f64>() < floor {
             rng.random_range(0..k)
@@ -1403,10 +1406,15 @@ mod tests {
 
     #[test]
     fn scheduler_warmup_pulls_each_active_arm_once() {
-        assert_eq!(warmup_arm_index(1, 4), Some(0));
-        assert_eq!(warmup_arm_index(2, 4), Some(1));
-        assert_eq!(warmup_arm_index(4, 4), Some(3));
-        assert_eq!(warmup_arm_index(5, 4), None);
+        assert_eq!(warmup_arm_index(1, 4, 16), Some(0));
+        assert_eq!(warmup_arm_index(2, 4, 16), Some(1));
+        assert_eq!(warmup_arm_index(4, 4, 16), Some(3));
+        assert_eq!(warmup_arm_index(5, 4, 16), None);
+    }
+
+    #[test]
+    fn scheduler_warmup_yields_to_thompson_on_rankable_horizons() {
+        assert_eq!(warmup_arm_index(1, 4, 64), None);
     }
 
     #[test]
