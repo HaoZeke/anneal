@@ -42,8 +42,8 @@ use crate::methods::bayesian_pilot::{
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
-    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
-    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
 use crate::movekernel::{MoveKernel, TsallisVisit};
@@ -128,6 +128,12 @@ const BAYESIAN_GLE_MIN_PILOT_WORK: usize = PILOT_CHAINS * (BAYESIAN_PILOT_MIN_CH
 const LOW_DIMENSIONAL_POLISH_MAX_DIM: usize = 4;
 /// Final projected-gradient tolerance for the initial low-dimensional polish.
 const LOW_DIMENSIONAL_POLISH_GRAD_TOL: f64 = 1e-12;
+/// Ledger cost of a true objective call.
+const OBJECTIVE_WORK_UNIT: usize = 1;
+/// Ledger cost of a native gradient call.
+const GRADIENT_WORK_UNIT: usize = 1;
+/// One projected-gradient step charges one objective and one gradient call.
+const PROJECTED_GRADIENT_STEP_WORK: usize = OBJECTIVE_WORK_UNIT + GRADIENT_WORK_UNIT;
 
 /// Per-arm pull statistics reported by the driver.
 #[derive(Clone, Debug)]
@@ -444,6 +450,11 @@ struct LowDimensionalPolishPlan {
     top_k: usize,
 }
 
+struct ValueScout {
+    best_pos: Array1<f64>,
+    best_val: f64,
+}
+
 #[derive(Default)]
 struct ArmStates {
     hop: Option<HopState>,
@@ -547,11 +558,12 @@ fn low_dimensional_polish_plan(dim: usize, budget: usize) -> Option<LowDimension
     let top_k = if dim <= 2 { 2 } else { 1 };
     let screening = n_starts * n_replicates;
     let polished = top_k * n_replicates;
-    let min_work = screening + 2 * polished;
+    let min_work = screening + PROJECTED_GRADIENT_STEP_WORK * polished;
     if polish_budget < min_work {
         return None;
     }
-    let max_fevals_per_start = (polish_budget - screening) / (2 * polished);
+    let max_fevals_per_start =
+        (polish_budget - screening) / (PROJECTED_GRADIENT_STEP_WORK * polished);
     (max_fevals_per_start > 0).then_some(LowDimensionalPolishPlan {
         budget: polish_budget,
         n_starts,
@@ -564,7 +576,45 @@ fn low_dimensional_polish_plan(dim: usize, budget: usize) -> Option<LowDimension
 fn low_dimensional_scout_population(plan: &LowDimensionalPolishPlan) -> Option<usize> {
     let population = plan.n_starts.checked_mul(plan.n_replicates)?;
     let remaining = plan.budget.checked_sub(population)?;
-    (plan.n_replicates > 1 && population >= 4 && remaining >= 2).then_some(population)
+    (plan.n_replicates > 1 && remaining >= PROJECTED_GRADIENT_STEP_WORK).then_some(population)
+}
+
+fn low_dimensional_refinement_fevals(work_units: usize) -> usize {
+    work_units / PROJECTED_GRADIENT_STEP_WORK
+}
+
+fn low_dimensional_value_scout<O>(
+    obj: &BudgetedObjective<'_, O>,
+    n_points: usize,
+    seed: u64,
+) -> Option<ValueScout>
+where
+    O: Objective<f64>,
+{
+    if n_points == 0 {
+        return None;
+    }
+    let bounds = obj.bounds().clone();
+    let starts = eindir_core::shifted_low_discrepancy_points(
+        &bounds,
+        n_points,
+        qmc_skip_from_seed(seed),
+        seed,
+    );
+    let mut best_pos = None;
+    let mut best_val = f64::INFINITY;
+    for start in starts.outer_iter() {
+        if obj.ledger.exhausted() {
+            break;
+        }
+        let pos = bounds.clip(start);
+        let value = obj.eval(pos.view());
+        if value.is_finite() && value < best_val {
+            best_val = value;
+            best_pos = Some(pos);
+        }
+    }
+    best_pos.map(|best_pos| ValueScout { best_pos, best_val })
 }
 
 fn scaled_center_gradient_ratio<O, G>(
@@ -620,18 +670,9 @@ fn run_low_dimensional_polish<O, G>(
     let ceiling = ledger.used_get() + plan.budget;
     ledger.cap_set(ceiling.min(budget));
     if let Some(population) = low_dimensional_scout_population(plan) {
-        let scout = qmc_best1bin_scout(
-            obj,
-            population,
-            seed,
-            population,
-            DE_WEIGHT_MIN,
-            DE_WEIGHT_SPAN,
-            DE_CROSSOVER,
-        );
-        if scout.best_val.is_finite() {
-            let maxf = ledger.remaining() / 2;
-            if maxf > 0 {
+        if let Some(scout) = low_dimensional_value_scout(obj, population, seed) {
+            let maxf = low_dimensional_refinement_fevals(ledger.remaining());
+            if scout.best_val.is_finite() && maxf > 0 {
                 projected_gradient_polish(
                     obj,
                     grad,
@@ -1708,9 +1749,11 @@ mod tests {
     #[test]
     fn replicated_low_dimensional_plans_use_value_scout() {
         let plan = low_dimensional_polish_plan(3, 1000).expect("low-dimensional plan");
+        let population = plan.n_starts * plan.n_replicates;
+        assert_eq!(low_dimensional_scout_population(&plan), Some(population));
         assert_eq!(
-            low_dimensional_scout_population(&plan),
-            Some(plan.n_starts * plan.n_replicates)
+            low_dimensional_refinement_fevals(plan.budget - population),
+            (plan.budget - population) / (OBJECTIVE_WORK_UNIT + GRADIENT_WORK_UNIT)
         );
 
         let plan = low_dimensional_polish_plan(2, 1000).expect("low-dimensional plan");
