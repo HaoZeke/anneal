@@ -449,7 +449,10 @@ fn active_subspace_basis(grads: &[Array1<f64>], dim: usize, k: usize, seed: u64)
                     y[[row, col]] -= dot * y[[row, prev]];
                 }
             }
-            let norm: f64 = (0..dim).map(|r| y[[r, col]] * y[[r, col]]).sum::<f64>().sqrt();
+            let norm: f64 = (0..dim)
+                .map(|r| y[[r, col]] * y[[r, col]])
+                .sum::<f64>()
+                .sqrt();
             if norm > 1e-300 {
                 for row in 0..dim {
                     y[[row, col]] /= norm;
@@ -573,8 +576,12 @@ fn run_arm<O, G>(
             }
             let x_arr = Array2::from_shape_vec((ys.len(), dim), xs).expect("archive shape");
             let y_arr = Array1::from_vec(ys);
-            let surr =
-                AdditiveSurrogate::fit(x_arr.view(), y_arr.view(), bounds.clone(), SURROGATE_DEGREE);
+            let surr = AdditiveSurrogate::fit(
+                x_arr.view(),
+                y_arr.view(),
+                bounds.clone(),
+                SURROGATE_DEGREE,
+            );
             // The modal point is the T -> 0 limit of the tempered
             // marginals; for separable objectives it is the surrogate's
             // global candidate, tested at the cost of one evaluation.
@@ -584,7 +591,14 @@ fn run_arm<O, G>(
             let modal_val = obj.eval(modal_x.view());
             if let Some(grad) = grad {
                 if modal_val.is_finite() && modal_val < before_modal && ledger.remaining() >= 4 {
-                    projected_gradient_polish(obj, grad, modal_x, ledger.remaining() / 2, 1.0, 1e-8);
+                    projected_gradient_polish(
+                        obj,
+                        grad,
+                        modal_x,
+                        ledger.remaining() / 2,
+                        1.0,
+                        1e-8,
+                    );
                 }
             }
             // Cool with budget progress so the ladder reaches the cold
@@ -892,7 +906,11 @@ fn run_arm<O, G>(
                 * (0..dim)
                     .map(|j| {
                         let w = bounds.high[j] - bounds.low[j];
-                        if w.is_finite() && w > 0.0 { w * w } else { 1.0 }
+                        if w.is_finite() && w > 0.0 {
+                            w * w
+                        } else {
+                            1.0
+                        }
                     })
                     .sum::<f64>()
                     .sqrt();
@@ -905,12 +923,8 @@ fn run_arm<O, G>(
                 inner: obj.inner,
                 ledger,
             };
-            let reduced = ReducedObjective::new(
-                fresh_obj,
-                ledger.incumbent(&bounds),
-                basis,
-                red_bounds,
-            );
+            let reduced =
+                ReducedObjective::new(fresh_obj, ledger.incumbent(&bounds), basis, red_bounds);
             let remaining_slice = slice.saturating_sub(grads.len());
             if remaining_slice >= 8 {
                 let chains = (remaining_slice / 8).clamp(2, 4 * REDUCED_K);
@@ -964,7 +978,12 @@ fn enabled_arms(dim: usize, has_grad: bool, n_slices: usize) -> Vec<ArmKind> {
 /// `budget` bounds combined true-objective and native-gradient
 /// evaluations and is the driver's only required parameter. `grad`
 /// enables the gradient arms and the final polish.
-pub fn portfolio_optimize<O, G>(obj: &O, grad: Option<&G>, budget: usize, seed: u64) -> PortfolioResult
+pub fn portfolio_optimize<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+) -> PortfolioResult
 where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -987,8 +1006,8 @@ where
     // Derived scheduler quantities; see the module constants for the
     // two governing numbers.
     let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX).len();
-    let slice = (SLICE_GRAD_EQUIVALENTS * (dim + 1))
-        .max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
+    let slice =
+        (SLICE_GRAD_EQUIVALENTS * (dim + 1)).max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
     let n_slices = (budget / slice.max(1)).max(1);
     let arms = enabled_arms(dim, grad.is_some(), n_slices);
     debug_assert_eq!(arms[0], RESTART_ARM);
@@ -1065,7 +1084,11 @@ where
             budget,
         );
         ledger.cap_set(budget);
-        let scale = if before.is_finite() { before.abs() } else { 1.0 };
+        let scale = if before.is_finite() {
+            before.abs()
+        } else {
+            1.0
+        };
         let threshold = IMPROVEMENT_RTOL * scale.max(1.0);
         let after = ledger.best_get();
         posteriors[choice].update(after.is_finite() && after < before - threshold);
