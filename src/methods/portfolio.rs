@@ -59,14 +59,18 @@ const SLICE_GRAD_EQUIVALENTS: usize = 4;
 /// Expected rounds per arm the posterior needs before its ranking means
 /// anything; also caps the active arm count by the slice horizon.
 const ROUNDS_PER_ARM: usize = 8;
-/// Slice success threshold: relative incumbent improvement one decade
-/// below the Dolan-More convergence resolution `tau = 1e-3`, so
-/// sub-resolution grinding earns no posterior credit.
-const IMPROVEMENT_RTOL: f64 = 1e-4;
+/// Dolan-More convergence resolution used by the CUTEst summary plots.
+const DOLAN_MORE_CONVERGENCE_TAU: f64 = 1e-3;
+/// General arms earn bandit credit one decimal place below the reporting
+/// resolution so the posterior sees meaningful progress before the cell
+/// flips its solved flag.
+const BANDIT_SUCCESS_REFINEMENT_FACTOR: f64 = 10.0;
+/// Slice success threshold for general arms.
+const IMPROVEMENT_RTOL: f64 = DOLAN_MORE_CONVERGENCE_TAU / BANDIT_SUCCESS_REFINEMENT_FACTOR;
 /// Archive-shift spends a local polish trajectory from an already good
 /// point, so it earns posterior credit at the benchmark resolution
 /// rather than for one-decade-finer local grinding.
-const SHIFT_IMPROVEMENT_RTOL: f64 = 1e-3;
+const SHIFT_IMPROVEMENT_RTOL: f64 = DOLAN_MORE_CONVERGENCE_TAU;
 /// Metropolis temperature floor shared by the acceptance helpers.
 const METROPOLIS_FLOOR: f64 = 1e-12;
 
@@ -1219,6 +1223,10 @@ mod tests {
     #[test]
     fn shift_success_uses_benchmark_resolution_threshold() {
         let before = 100.0;
+        assert_eq!(
+            IMPROVEMENT_RTOL,
+            DOLAN_MORE_CONVERGENCE_TAU / BANDIT_SUCCESS_REFINEMENT_FACTOR
+        );
         assert_eq!(
             arm_success_threshold(ArmKind::Explore, before),
             IMPROVEMENT_RTOL * before
