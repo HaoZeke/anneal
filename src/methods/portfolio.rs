@@ -67,6 +67,10 @@ const IMPROVEMENT_RTOL: f64 = 1e-4;
 /// point, so it earns posterior credit at the benchmark resolution
 /// rather than for one-decade-finer local grinding.
 const SHIFT_IMPROVEMENT_RTOL: f64 = 1e-3;
+/// Shift reuses a charged archive anchor; it is a path-extension probe,
+/// not a full local solve, so failed probes leave most of the slice to
+/// the global arm schedule.
+const SHIFT_POLISH_SLICE_DIVISOR: usize = 4;
 /// Metropolis temperature floor shared by the acceptance helpers.
 const METROPOLIS_FLOOR: f64 = 1e-12;
 
@@ -432,6 +436,10 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
+fn shift_polish_budget(slice: usize) -> usize {
+    (slice / SHIFT_POLISH_SLICE_DIVISOR).max(2)
+}
+
 fn elite_archive_anchor(ledger: &BudgetLedger, bounds: &Bounds<f64>) -> Option<Array1<f64>> {
     let inner = ledger.inner.lock().expect("ledger lock");
     let dim = bounds.dims;
@@ -552,7 +560,7 @@ fn run_arm<O, G>(
             let Some(anchor) = elite_archive_anchor(ledger, &bounds) else {
                 return;
             };
-            let maxf = (slice / 2).max(2);
+            let maxf = shift_polish_budget(slice);
             projected_gradient_polish(obj, grad, anchor, maxf, 1.0, 1e-12);
         }
         ArmKind::Hop => {
@@ -1231,6 +1239,12 @@ mod tests {
             arm_success_threshold(ArmKind::Shift, before)
                 > arm_success_threshold(ArmKind::Explore, before)
         );
+    }
+
+    #[test]
+    fn shift_polish_spends_quarter_slice_probe() {
+        assert_eq!(shift_polish_budget(48), 12);
+        assert_eq!(shift_polish_budget(7), 2);
     }
 
     #[test]
