@@ -4,6 +4,12 @@
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
 #+begin_export rst
+====================
+anneal Documentation
+====================
+
+.. contents::
+
 .. image:: /_static/anneal_logo.png
    :width: 420
    :align: center
@@ -15,22 +21,34 @@
 =anneal= is a library of simulated-annealing drivers built on the five typed components (Obj, Cool, Neigh, Move, Accept) and four composition laws (L1 symmetry of neighbors, L2 support of the proposal, L3 downhill moves accepted with probability 1, L4 monotone cooling) defined in the INFORMS Journal on Computing paper (IISE manuscript).
 Every driver (Boltzmann, Fast, Gsa, GLE-Langevin, additive independence, Bayesian pilot+mixer, parallel tempering, QMC polish, ...) is a different filling of those five slots; a change to any shared implementation (e.g. the noise-aware Accept or the batched device kernel) therefore appears in all of them.
 
+Use =anneal= when the problem is bounded, expensive, derivative-free or partly derivative-aware, and the search policy needs to be swapped without changing the objective wrapper.
+The public API keeps the driver choice explicit: classical schedules, GLE proposals, Bayesian pilot allocation, QMC starts, surrogate independence proposals, and device batches all pass through the same sampler surface.
+
 * Key Features
 
 - *Classical presets (Boltzmann, Fast, Gsa)* :: Logarithmic, reciprocal, and Tsallis families.
 Identical call site via =run=; only the component objects differ.
 - *Bayesian pilot + mixer (bGSA auto)* :: QMC pilot draws for (T0, sigma, q_v), short chains, three-term posterior (prior + 0.234 target + improvement), per-chain Beta(4,1) on "produced new global best", Thompson sampling every step with 0.05 incumbent guard.
-One =max_proposals= knob; auto chain count.
+This spends early evaluations on chains that are both accepting and improving, instead of committing the full budget to one schedule before seeing the landscape.
+One =max_proposals= knob controls the total budget.
 - *GLE colored-noise Langevin* :: Optimal-sampling drift matrix from eindir fits the Move slot; BAB propagator + stationary reseed flattens efficiency across a wide frequency band.
-Requires gradient.
+On objectives with gradients, this gives larger coherent moves than white-noise Langevin without changing the accept law.
 - *Rank-1 additive independence* :: Separable Chebyshev surrogate fitted on values only; O(d) per proposal via product of 1D tempered marginals + Metropolis correction.
-Dimension-free floor on separable problems.
+The surrogate proposes from a cheap approximation and the Metropolis correction keeps the target objective authoritative.
 - *QMC / shifted-QMC polish* :: Projected-gradient Armijo backtracking on low-discrepancy (or shifted-replicate) starts.
-Deterministic last mile after any stochastic driver.
+This turns a stochastic incumbent into a reproducible local finish when the objective exposes enough smoothness.
 - *Device, ensemble, reuse* :: =run_device= (NumPy or CuPy) and =run_ensemble= (batched) execute the identical transition kernel.
 The reuse table (dimension scale, rank-1 independence, GLE drift, batched device, noise-aware Accept, QMC polish) is the concrete payoff of the factoring: one implementation change serves every preset and advanced driver.
 
 See the [[file:architecture.org][architecture]] page for the five signatures and L1-L4, and the [[file:explanation/algebra.org][algebra]] explanation (T4) for the TLA+ invariants they enable.
+
+* What to Read First
+
+- [[file:quickstart.org][Quickstart]] shows the smallest Python workflow.
+- [[file:howto/choose-driver.org][Choose a driver]] maps landscape symptoms to driver families.
+- [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
+- The generated Rust API starts at =api/index= and follows the =anneal-core= crate modules.
+- [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
 
 #+begin_export rst
 .. toctree::
@@ -73,6 +91,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    :caption: Reference
 
    spec
+   api/index
    reference/glossary
    reference/presets-and-advanced
    bindings
@@ -98,4 +117,3 @@ It rests on =eindir= for the Objective trait, Bounds clipping, low-discrepancy g
 All drivers are expressed through the same =Sampler= trait surface; the IISE paper supplies the mechanized proofs and the TLA+ Workflow specification.
 
 The reproducibility package =anneal_repro= regenerates every number, CUTEst profile, and figure from the paper sources (see [[file:used_by.org][used_by]]).
-
