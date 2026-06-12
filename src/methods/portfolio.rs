@@ -455,6 +455,11 @@ struct ValueScout {
     best_val: f64,
 }
 
+struct CenterProbe {
+    value: f64,
+    gradient_ratio: Option<f64>,
+}
+
 #[derive(Default)]
 struct ArmStates {
     hop: Option<HopState>,
@@ -617,11 +622,11 @@ where
     best_pos.map(|best_pos| ValueScout { best_pos, best_val })
 }
 
-fn scaled_center_gradient_ratio<O, G>(
+fn scaled_center_probe<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: &BudgetedGradient<'_, G>,
     bounds: &Bounds<f64>,
-) -> Option<f64>
+) -> Option<CenterProbe>
 where
     O: Objective<f64>,
     G: Gradient<f64>,
@@ -632,6 +637,16 @@ where
     }
     let value = obj.inner.eval(center.view());
     let gradient = grad.inner.grad(center.view());
+    if !value.is_finite() {
+        return None;
+    }
+    let value_scale = value.abs().max(1.0);
+    if gradient.len() != bounds.dims || gradient.iter().any(|v| !v.is_finite()) {
+        return Some(CenterProbe {
+            value,
+            gradient_ratio: None,
+        });
+    }
     let width_norm = (0..bounds.dims)
         .map(|idx| {
             let width = bounds.high[idx] - bounds.low[idx];
@@ -645,8 +660,11 @@ where
         .sqrt()
         .max(1.0);
     let grad_norm = gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
-    let ratio = grad_norm * width_norm / value.abs().max(1.0);
-    ratio.is_finite().then_some(ratio)
+    let ratio = grad_norm * width_norm / value_scale;
+    Some(CenterProbe {
+        value,
+        gradient_ratio: ratio.is_finite().then_some(ratio),
+    })
 }
 
 fn low_dimensional_polish_before_warmup(center_gradient_ratio: Option<f64>) -> bool {
@@ -659,6 +677,14 @@ fn low_dimensional_polish_before_warmup(center_gradient_ratio: Option<f64>) -> b
 fn benchmark_projected_stationary(projected_grad_norm: f64, value: f64) -> bool {
     projected_grad_norm.is_finite()
         && projected_grad_norm <= DOLAN_MORE_CONVERGENCE_TAU * value.abs().max(1.0)
+}
+
+fn benchmark_objective_converged(center_value: f64, best_value: f64) -> bool {
+    if !center_value.is_finite() || !best_value.is_finite() {
+        return false;
+    }
+    let scale = center_value.abs().max(1.0);
+    best_value <= center_value - (1.0 - DOLAN_MORE_CONVERGENCE_TAU) * scale
 }
 
 fn best_polished_stationary(result: &QmcPolishResult) -> bool {
@@ -1589,12 +1615,18 @@ where
         .then(|| low_dimensional_polish_plan(dim, budget))
         .flatten();
     let mut stop_after_low_dimensional_polish = false;
+    let mut center_value = None;
 
     if let (Some(plan), Some(grad)) = (low_dimensional_polish.as_ref(), budgeted_grad.as_ref()) {
-        let center_ratio = scaled_center_gradient_ratio(&budgeted_obj, grad, &bounds);
+        let center_probe = scaled_center_probe(&budgeted_obj, grad, &bounds);
+        center_value = center_probe.as_ref().map(|probe| probe.value);
+        let center_ratio = center_probe.and_then(|probe| probe.gradient_ratio);
         if low_dimensional_polish_before_warmup(center_ratio) {
-            stop_after_low_dimensional_polish =
+            let stationary =
                 run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
+            let objective_converged = center_value
+                .is_some_and(|value| benchmark_objective_converged(value, ledger.best_get()));
+            stop_after_low_dimensional_polish = stationary || objective_converged;
             low_dimensional_polish = None;
         }
     }
@@ -1612,7 +1644,11 @@ where
             if let (Some(plan), Some(grad)) =
                 (low_dimensional_polish.take(), budgeted_grad.as_ref())
             {
-                if run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget) {
+                let stationary =
+                    run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
+                let objective_converged = center_value
+                    .is_some_and(|value| benchmark_objective_converged(value, ledger.best_get()));
+                if stationary || objective_converged {
                     break;
                 }
                 continue;
