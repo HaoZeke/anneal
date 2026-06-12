@@ -1982,6 +1982,24 @@ mod tests {
     }
 
     #[test]
+    fn low_dimensional_polish_stops_after_stationarity() {
+        let obj = BealeObjective::new();
+        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0);
+
+        assert!(
+            result.best_val < 1e-8,
+            "expected Beale basin, got {} at {:?}",
+            result.best_val,
+            result.best_pos
+        );
+        assert!(
+            result.n_evals + result.n_grads < 500,
+            "stationary low-dimensional polish should not spend the full budget; used {}",
+            result.n_evals + result.n_grads
+        );
+    }
+
+    #[test]
     fn gradient_horizon_prioritizes_shift_arm() {
         let arms = enabled_arms(6, true, 16);
         assert!(arms.contains(&ArmKind::Shift));
