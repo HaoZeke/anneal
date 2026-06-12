@@ -43,7 +43,7 @@ use crate::methods::bayesian_pilot::{
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
     projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
-    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
+    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish, QmcPolishResult,
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
 use crate::movekernel::{MoveKernel, TsallisVisit};
@@ -656,6 +656,21 @@ fn low_dimensional_polish_before_warmup(center_gradient_ratio: Option<f64>) -> b
     }
 }
 
+fn best_polished_stationary(result: &QmcPolishResult) -> bool {
+    let mut best_idx = None;
+    let mut best_val = f64::INFINITY;
+    for (idx, value) in result.polished_values.iter().copied().enumerate() {
+        if value.is_finite() && value < best_val {
+            best_val = value;
+            best_idx = Some(idx);
+        }
+    }
+    best_idx
+        .and_then(|idx| result.polished_stationary.get(idx))
+        .copied()
+        .unwrap_or(false)
+}
+
 fn run_low_dimensional_polish<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: &BudgetedGradient<'_, G>,
@@ -663,13 +678,14 @@ fn run_low_dimensional_polish<O, G>(
     plan: &LowDimensionalPolishPlan,
     seed: u64,
     budget: usize,
-) where
+) -> bool
+where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
     let ceiling = ledger.used_get() + plan.budget;
     ledger.cap_set(ceiling.min(budget));
-    if let Some(population) = low_dimensional_scout_population(plan) {
+    let stationary = if let Some(population) = low_dimensional_scout_population(plan) {
         if let Some(scout) = low_dimensional_value_scout(obj, population, seed) {
             let maxf = low_dimensional_refinement_fevals(ledger.remaining());
             if scout.best_val.is_finite() && maxf > 0 {
@@ -680,11 +696,16 @@ fn run_low_dimensional_polish<O, G>(
                     maxf,
                     1.0,
                     LOW_DIMENSIONAL_POLISH_GRAD_TOL,
-                );
+                )
+                .projected_stationary
+            } else {
+                false
             }
+        } else {
+            false
         }
     } else {
-        shifted_qmc_projected_gradient_polish(
+        let result = shifted_qmc_projected_gradient_polish(
             obj,
             grad,
             plan.n_starts,
@@ -695,8 +716,10 @@ fn run_low_dimensional_polish<O, G>(
             LOW_DIMENSIONAL_POLISH_GRAD_TOL,
             plan.top_k,
         );
-    }
+        best_polished_stationary(&result)
+    };
     ledger.cap_set(budget);
+    stationary
 }
 
 fn initialize_gsa_state<O>(
@@ -1550,17 +1573,22 @@ where
         .is_some()
         .then(|| low_dimensional_polish_plan(dim, budget))
         .flatten();
+    let mut stop_after_low_dimensional_polish = false;
 
     if let (Some(plan), Some(grad)) = (low_dimensional_polish.as_ref(), budgeted_grad.as_ref()) {
         let center_ratio = scaled_center_gradient_ratio(&budgeted_obj, grad, &bounds);
         if low_dimensional_polish_before_warmup(center_ratio) {
-            run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
+            stop_after_low_dimensional_polish =
+                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
             low_dimensional_polish = None;
         }
     }
 
     let mut round = 0usize;
     loop {
+        if stop_after_low_dimensional_polish {
+            break;
+        }
         let remaining = ledger.remaining();
         if remaining < 4 {
             break;
@@ -1569,7 +1597,9 @@ where
             if let (Some(plan), Some(grad)) =
                 (low_dimensional_polish.take(), budgeted_grad.as_ref())
             {
-                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
+                if run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget) {
+                    break;
+                }
                 continue;
             }
         }
