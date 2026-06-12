@@ -1791,6 +1791,23 @@ mod tests {
     }
 
     #[test]
+    fn best_polished_stationarity_accepts_benchmark_resolution_gradient() {
+        let result = QmcPolishResult {
+            best_pos: Array1::zeros(1),
+            best_val: 1.0,
+            n_evals: 1,
+            n_grads: 1,
+            n_starts: 1,
+            n_polished: 1,
+            polished_values: vec![1.0],
+            polished_projected_grad_norms: vec![0.5 * DOLAN_MORE_CONVERGENCE_TAU],
+            polished_stationary: vec![false],
+        };
+
+        assert!(best_polished_stationary(&result));
+    }
+
+    #[test]
     fn scheduler_probe_charges_without_archive_insert() {
         let ledger = BudgetLedger::new(2, 2);
 
