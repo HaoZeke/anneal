@@ -1823,6 +1823,15 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_objective_convergence_uses_center_scale() {
+        assert!(benchmark_objective_converged(66_022.0, 0.013));
+        assert!(benchmark_objective_converged(41.68, 0.0083));
+        assert!(!benchmark_objective_converged(14.56, 6.16));
+        assert!(!benchmark_objective_converged(f64::NAN, 0.0));
+        assert!(!benchmark_objective_converged(1.0, f64::NAN));
+    }
+
+    #[test]
     fn scheduler_probe_charges_without_archive_insert() {
         let ledger = BudgetLedger::new(2, 2);
 
