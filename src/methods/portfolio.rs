@@ -656,6 +656,11 @@ fn low_dimensional_polish_before_warmup(center_gradient_ratio: Option<f64>) -> b
     }
 }
 
+fn benchmark_projected_stationary(projected_grad_norm: f64, value: f64) -> bool {
+    projected_grad_norm.is_finite()
+        && projected_grad_norm <= DOLAN_MORE_CONVERGENCE_TAU * value.abs().max(1.0)
+}
+
 fn best_polished_stationary(result: &QmcPolishResult) -> bool {
     let mut best_idx = None;
     let mut best_val = f64::INFINITY;
@@ -665,10 +670,19 @@ fn best_polished_stationary(result: &QmcPolishResult) -> bool {
             best_idx = Some(idx);
         }
     }
-    best_idx
-        .and_then(|idx| result.polished_stationary.get(idx))
+    let Some(idx) = best_idx else {
+        return false;
+    };
+    result
+        .polished_stationary
+        .get(idx)
         .copied()
         .unwrap_or(false)
+        || result
+            .polished_projected_grad_norms
+            .get(idx)
+            .copied()
+            .is_some_and(|norm| benchmark_projected_stationary(norm, best_val))
 }
 
 fn run_low_dimensional_polish<O, G>(
@@ -689,15 +703,16 @@ where
         if let Some(scout) = low_dimensional_value_scout(obj, population, seed) {
             let maxf = low_dimensional_refinement_fevals(ledger.remaining());
             if scout.best_val.is_finite() && maxf > 0 {
-                projected_gradient_polish(
+                let result = projected_gradient_polish(
                     obj,
                     grad,
                     scout.best_pos,
                     maxf,
                     1.0,
                     LOW_DIMENSIONAL_POLISH_GRAD_TOL,
-                )
-                .projected_stationary
+                );
+                result.projected_stationary
+                    || benchmark_projected_stationary(result.projected_grad_norm, result.best_val)
             } else {
                 false
             }
