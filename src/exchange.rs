@@ -4,14 +4,12 @@
 //! acceptance.
 //!
 //! Within the typed algebra:
-//!   - Cool, Neigh, Move, Accept stay per-chain unchanged.
-//!   - Exchange is a new component that takes two chain states + their
-//!     temperatures + their objective values and returns a swap-accept
-//!     probability in [0, 1].
-//!   - The driver `ParallelTemperingSampler` wraps an inner `Sampler<T>`
-//!     and runs M of them in parallel at a temperature ladder, calling
-//!     the Exchange every `swap_period` steps to attempt adjacent-pair
-//!     swaps.
+//!
+//! - Cool, Neigh, Move, Accept stay per-chain unchanged.
+//! - Exchange takes two chain states, temperatures, and objective values, then
+//!   returns a swap-accept probability in [0, 1].
+//! - `ParallelTemperingSampler` wraps an inner `Sampler<T>`, runs M replicas on
+//!   a temperature ladder, and calls Exchange every `swap_period` steps.
 
 use num_traits::Float;
 
@@ -19,8 +17,7 @@ use num_traits::Float;
 ///
 /// At adjacent chains `i` (cooler) and `j` (hotter) with temperatures
 /// `T_i < T_j` and objective values `F_i, F_j`, the probability of
-/// accepting a state swap is
-///   alpha = min(1, exp((1/T_i - 1/T_j) * (F_i - F_j))).
+/// accepting a state swap is min(1, exp((1/T_i - 1/T_j) * (F_i - F_j))).
 /// This satisfies detailed balance with respect to the joint product
 /// distribution `prod_k pi_{T_k}(x_k)`.
 pub trait Exchange<T: Float>: Send + Sync {
@@ -58,8 +55,8 @@ impl<T: Float + Send + Sync> Exchange<T> for MetropolisExchange {
 /// Metropolis swap, matching the GSA acceptance family. At `q = 1`
 /// reduces to `MetropolisExchange`.
 ///
-/// Swap probability:
-///   alpha = max(0, [1 - (q - 1) * (F_i - F_j) * (1/T_i - 1/T_j)]^{1/(q-1)})
+/// Swap probability is the q-deformed expression
+/// max(0, [1 - (q - 1) * (F_i - F_j) * (1/T_i - 1/T_j)]^{1/(q-1)}),
 /// clamped to `[0, 1]`. Reduces to standard PT via the Metropolis
 /// limit Theorem 3 of the IISE manuscript at `q -> 1`.
 #[derive(Clone, Copy, Debug)]

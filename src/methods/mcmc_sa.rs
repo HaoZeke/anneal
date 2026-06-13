@@ -30,13 +30,9 @@ pub struct MultiChainState {
 
 /// Gelman-Rubin convergence diagnostic on a multi-chain trace.
 ///
-/// For `M` chains of length `N`, define
-///   - chain mean `theta_m = mean over draws in chain m`
-///   - chain variance `s2_m = sample variance within chain m`
-///   - between-chain variance `B = N / (M - 1) * sum_m (theta_m - theta_bar)^2`
-///   - within-chain variance `W = (1 / M) * sum_m s2_m`
-///   - pooled estimate `Var = (N - 1)/N * W + B/N`
-///   - Rhat = sqrt(Var / W)
+/// For `M` chains of length `N`, this computes the standard chain means,
+/// within-chain variance, between-chain variance, pooled variance estimate, and
+/// Rhat = sqrt(Var / W).
 ///
 /// `M >= 2` and `N >= 2` required; otherwise returns `f64::INFINITY`.
 /// We track per-coordinate Rhat and return the maximum across coords;
@@ -89,15 +85,9 @@ impl GelmanRubin {
 
 /// MCMC-style multi-chain SA driver.
 ///
-/// At each epoch:
-///   1. Run `k_min` steps per chain (minimum-history requirement for the
-///      Gelman-Rubin computation, which needs `n >= 2` per chain to be
-///      defined).
-///   2. Compute Rhat across chains. If `Rhat < threshold`, advance to
-///      the next epoch.
-///   3. Otherwise run another `k_check` steps and recheck. Bail out at
-///      `k_max` total steps for the epoch even if `Rhat >= threshold`
-///      (avoids non-convergent infinite loops on stiff objectives).
+/// At each epoch, run `k_min` steps per chain, compute Rhat, advance when it
+/// is below the threshold, otherwise run `k_check` more steps and recheck until
+/// `k_max` caps the epoch.
 ///
 /// When `sparse_straggler_only = true`, the additional batches step
 /// only the chains farthest from the pooled mean (the "stragglers")

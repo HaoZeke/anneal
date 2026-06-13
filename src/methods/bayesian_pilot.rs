@@ -2,13 +2,9 @@
 //!
 //! The SA literature picks `(T_0, sigma, q_v)` by hand or grid search.
 //! This module replaces the grid with a principled Bayesian pilot:
-//!   1. Run `n_pilot` chains, each at a hyperparameter draw from the
-//!      prior (T_0 ~ logN, sigma ~ logN, q_v ~ scaled-Beta on (1, 3)).
-//!   2. Observe acceptance rates `r_i` and best-improvement deltas `d_i`.
-//!   3. Fit a Laplace approximation to the joint posterior of
-//!      `(log T_0, log sigma, q_v)` given the observations and the
-//!      Roberts/Rosenthal 2001 target acceptance rate `r* = 0.234`.
-//!   4. Use the MAP estimate for the production SA run.
+//! run `n_pilot` chains at prior draws, observe acceptance and improvement,
+//! fit a Laplace approximation to `(log T_0, log sigma, q_v)`, then use the MAP
+//! estimate for the production SA run.
 //!
 //! The q_v coordinate is the relevant model-selection axis: q_v=1 is
 //! BSA (Boltzmann/Gaussian), q_v=2 is FSA (Cauchy), and the
@@ -144,14 +140,9 @@ fn sample_prior(prior: &PilotPrior, rng: &mut StdRng) -> (f64, f64, f64) {
 /// Negative log-posterior on `(log T_0, log sigma, q_v)` given pilot
 /// observations + best-val improvement signal.
 ///
-/// Three terms:
-///   (1) Prior: log-Normal on T_0 and sigma; truncated normal on q_v.
-///   (2) Acceptance-rate likelihood: Gaussian on logit(a) vs logit(0.234)
-///       (Roberts/Rosenthal target), weighted by inverse-distance to the
-///       observation in (log T_0, log sigma, q_v) space.
-///   (3) Improvement likelihood: Gaussian rewarding pilot chains whose
-///       best_val is far below the worst-pilot best_val. Without (3) the
-///       posterior is blind to which hyperparameters actually optimised.
+/// Three terms: a prior on T_0, sigma, and q_v; an acceptance-rate likelihood
+/// around the Roberts/Rosenthal target; and an improvement likelihood rewarding
+/// pilot chains whose best value is far below the worst pilot best value.
 fn neg_log_posterior(
     log_t_init: f64,
     log_sigma: f64,

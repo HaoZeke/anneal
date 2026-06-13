@@ -23,10 +23,9 @@ fn fermi(x: f64) -> f64 {
 ///
 /// Given samples from two ensembles `A` (at `beta_a = 1/T_a`) and
 /// `B` (at `beta_b = 1/T_b`), and the two cross-energy lists
-/// `du_a = beta_a * U_B(x) - beta_b * U_B(x_b)` for x ~ A (similar
-/// for du_b), the BAR estimate of `Delta F = F_B - F_A` solves
-///   sum_{i in A} f(beta * (U_B(x_i) - U_A(x_i)) - C)
-///     = sum_{j in B} f(beta * (U_A(x_j) - U_B(x_j)) + C)
+/// `du_a = beta_a * U_B(x) - beta_b * U_B(x_b)` for x sampled from A
+/// (similar for du_b), the BAR estimate of `Delta F = F_B - F_A` solves the
+/// equality between the A-side and B-side Fermi-function sums.
 /// where `C = Delta F + log(N_A / N_B)`. Iterate until C is fixed.
 #[derive(Clone, Debug)]
 pub struct BarEstimator {

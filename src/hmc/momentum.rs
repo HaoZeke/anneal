@@ -2,10 +2,9 @@
 //! (Tsallis q in (1, 1+2/dim); doi:10.1007/BF01016429).
 //!
 //! q-Gaussian momentum unifies HMC with the GSA Tsallis hierarchy
-//! (doi:10.1016/S0378-4371(96)00271-3). The kinetic term becomes
-//!   K(p, q) = (1/(q-1)) ln[1 + (q-1) |p|^2 / 2]
-//! whose density is the multivariate q-Gaussian
-//!   rho(p) ~ [1 + (q-1) |p|^2 / 2]^{-1/(q-1)}.
+//! (doi:10.1016/S0378-4371(96)00271-3). The kinetic term is
+//! K(p, q) = (1/(q-1)) ln[1 + (q-1) |p|^2 / 2], whose density is the
+//! multivariate q-Gaussian.
 //!
 //! q -> 1+ recovers Gaussian momentum. q in (1, 1 + 2/dim)
 //! gives heavy-tailed momentum draws, which is exactly what HMC needs
@@ -13,9 +12,9 @@
 //! At q approaching 1 + 2/dim, the q-Gaussian normalisation diverges;
 //! the constructor asserts the valid range.
 //!
-//! Sampling representation (standard for Student-t / q-Gaussian):
-//!   z ~ N(0, I_d), g ~ Gamma(alpha, 1) with alpha = 1/(q-1) - d/2,
-//!   p = z * sqrt(1 / ((q-1) * g)).
+//! Sampling uses the standard Student-t / q-Gaussian representation: draw
+//! z from N(0, I_d), draw g from Gamma(alpha, 1) with
+//! alpha = 1/(q-1) - d/2, then set p = z * sqrt(1 / ((q-1) * g)).
 
 use ndarray::Array1;
 use rand::Rng;

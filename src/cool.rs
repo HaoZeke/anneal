@@ -75,7 +75,7 @@ impl<T: Float + Send + Sync> Cooling<T> for ReciprocalCool<T> {
 
 /// Tsallis (GSA) cooling: `T(k) = T_0 * (2^(q_v-1) - 1) / ((1+k)^(q_v-1) - 1)`.
 ///
-/// The case `q_v == 1` is a `0/0` indeterminate form; an explicit branch
+/// The case q_v == 1 is a zero-over-zero indeterminate form; an explicit branch
 /// returns the L'Hopital limit `T_0 * ln 2 / ln(1+k)` so the schedule remains
 /// continuous and finite. Monotone-decreasing for `q_v in (1, 3)`.
 #[derive(Clone, Debug)]

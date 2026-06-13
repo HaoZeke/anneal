@@ -4,10 +4,11 @@
 //! is open so SGOOP-style or VES bias kernels can implement the same surface.
 //!
 //! Composition with the existing typed algebra:
-//!   - `Bias` augments the cost: `F_eff(x) = F(x) + V(s(x))`.
-//!   - `Sampler` sees `F_eff` via a wrapped objective.
-//!   - The bias is a stateful component: `deposit` mutates internal
-//!     state, `potential` reads it.
+//!
+//! - `Bias` augments the cost as `F_eff(x) = F(x) + V(s(x))`.
+//! - `Sampler` sees `F_eff` via a wrapped objective.
+//! - The bias is a stateful component: `deposit` mutates internal state,
+//!   `potential` reads it.
 //! This keeps biasing in the objective transform instead of folding it into
 //! the sampler implementation.
 
@@ -38,8 +39,7 @@ pub trait Bias: Send + Sync {
 /// Well-tempered metadynamics (Barducci, Bussi, Parrinello 2008).
 ///
 /// State: a 2D grid of bin values storing the deposited bias.
-/// Deposit rule:
-///   `w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))`
+/// The deposit rule is `w_k = w_0 * exp(-V_{k-1}(s_k) / ((gamma - 1) * T))`,
 /// so the asymptotic bias is `V_inf(s) = -((gamma - 1)/gamma) * F(s)`.
 ///
 /// Asymmetric box bounds are supported on each CV axis. The CV map
@@ -68,7 +68,7 @@ pub struct WellTemperedBias {
 
 impl WellTemperedBias {
     /// Constructs with the given linear projector + bias parameters.
-    /// Asserts `gamma > 1`, `sigma > 0`, `grid_n >= 2`.
+    /// Requires gamma > 1, sigma > 0, and grid_n >= 2.
     pub fn new(
         projector: Array2<f64>,
         mu: Array1<f64>,

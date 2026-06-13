@@ -58,7 +58,8 @@ pub enum LawViolation {
         /// Temperature at `k2` (which exceeded `t1`).
         t2: f64,
     },
-    /// L4 (sweep): `accept_prob(delta, t1) > accept_prob(delta, t2)` with `t1 < t2`.
+    /// L4 (sweep): accept_prob(delta, t1) exceeds accept_prob(delta, t2) with
+    /// t1 < t2.
     #[error(
         "L4 violation (sweep): accept_prob({delta_e}, {t1}) = {p1} > accept_prob({delta_e}, {t2}) = {p2}"
     )]
@@ -99,9 +100,8 @@ pub fn sweep_downhill_accepts<A: AcceptRule<f64>>(
     Ok(())
 }
 
-/// Witnesses L4 (`T -> accept_prob` non-decreasing for fixed `delta_e > 0`)
-/// on an `AcceptRule<f64>` by sampling `n_samples` random
-/// `(delta_e > 0, t1, t2)` triples with `t1 < t2`.
+/// Witnesses L4 by sampling uphill moves at paired temperatures and checking
+/// that acceptance probability is non-decreasing in temperature.
 pub fn sweep_accept_monotone_in_temp<A: AcceptRule<f64>>(
     accept: &A,
     n_samples: usize,
