@@ -22,8 +22,8 @@ pub trait Cooling<T: Float>: Send + Sync {
 
 /// Boltzmann (logarithmic) cooling: `T(k) = T_0 * log(k0) / log(k + k0)`.
 ///
-/// Strictly decreasing for any `T_0 > 0` and `k0 > 1` (so that `log(k0) > 0`
-/// and the argument to the outer log strictly grows).
+/// Strictly decreasing for positive T_0 and k0 greater than one because
+/// log(k0) is positive and the argument to the outer log strictly grows.
 #[derive(Clone, Debug)]
 pub struct LogCool<T: Float> {
     /// Initial temperature `T_0`.
@@ -33,7 +33,7 @@ pub struct LogCool<T: Float> {
 }
 
 impl<T: Float> LogCool<T> {
-    /// Constructs a `LogCool` schedule. Asserts `t_init > 0` and `k0 > 1`.
+    /// Constructs a `LogCool` schedule. Requires t_init > 0 and k0 > 1.
     pub fn new(t_init: T, k0: T) -> Self {
         assert!(t_init > T::zero(), "t_init must be positive");
         assert!(k0 > T::one(), "k0 must be > 1");
@@ -51,7 +51,7 @@ impl<T: Float + Send + Sync> Cooling<T> for LogCool<T> {
 /// Reciprocal cooling: `T(k) = T_0 / (k + 1)`.
 ///
 /// The `+1` shift avoids a divide-by-zero at `k = 0` and keeps the schedule
-/// well-defined on `N`. Strictly decreasing for any `T_0 > 0`.
+/// well-defined on N. Strictly decreasing for positive T_0.
 #[derive(Clone, Debug)]
 pub struct ReciprocalCool<T: Float> {
     /// Initial temperature `T_0 = T(0)`.
@@ -59,7 +59,7 @@ pub struct ReciprocalCool<T: Float> {
 }
 
 impl<T: Float> ReciprocalCool<T> {
-    /// Constructs a `ReciprocalCool` schedule. Asserts `t_init > 0`.
+    /// Constructs a `ReciprocalCool` schedule. Requires t_init > 0.
     pub fn new(t_init: T) -> Self {
         assert!(t_init > T::zero(), "t_init must be positive");
         Self { t_init }
@@ -77,7 +77,8 @@ impl<T: Float + Send + Sync> Cooling<T> for ReciprocalCool<T> {
 ///
 /// The case q_v == 1 is a zero-over-zero indeterminate form; an explicit branch
 /// returns the L'Hopital limit `T_0 * ln 2 / ln(1+k)` so the schedule remains
-/// continuous and finite. Monotone-decreasing for `q_v in (1, 3)`.
+/// continuous and finite. Monotone-decreasing for q_v in the open interval
+/// (1, 3).
 #[derive(Clone, Debug)]
 pub struct TsallisCool<T: Float> {
     /// Initial temperature `T_0`.
@@ -87,7 +88,7 @@ pub struct TsallisCool<T: Float> {
 }
 
 impl<T: Float> TsallisCool<T> {
-    /// Constructs a `TsallisCool` schedule. Asserts `t_init > 0`.
+    /// Constructs a `TsallisCool` schedule. Requires t_init > 0.
     pub fn new(t_init: T, q_v: T) -> Self {
         assert!(t_init > T::zero(), "t_init must be positive");
         Self { t_init, q_v }

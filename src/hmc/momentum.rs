@@ -2,9 +2,9 @@
 //! (Tsallis q in (1, 1+2/dim); doi:10.1007/BF01016429).
 //!
 //! q-Gaussian momentum unifies HMC with the GSA Tsallis hierarchy
-//! (doi:10.1016/S0378-4371(96)00271-3). The kinetic term is
-//! K(p, q) = (1/(q-1)) ln[1 + (q-1) |p|^2 / 2], whose density is the
-//! multivariate q-Gaussian.
+//! (doi:10.1016/S0378-4371(96)00271-3). The kinetic term is the logarithmic
+//! Tsallis form over the squared momentum norm, and the density is the
+//! corresponding multivariate q-Gaussian.
 //!
 //! q -> 1+ recovers Gaussian momentum. q in (1, 1 + 2/dim)
 //! gives heavy-tailed momentum draws, which is exactly what HMC needs

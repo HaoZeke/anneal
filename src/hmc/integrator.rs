@@ -68,15 +68,15 @@ pub struct LeapfrogIntegrator {
     /// Reference temperature used to normalise the cooling rescaling
     /// (typically `T_0`, the initial temperature).
     pub temp_ref: f64,
-    /// Divergence threshold; trajectory marked as diverged when
-    /// `|delta_h| > max_delta_h`. Mirrors Stan `base_nuts.hpp:113`
-    /// default of 1000.
+    /// Divergence threshold; trajectory marked as diverged when abs(delta_h)
+    /// exceeds max_delta_h. Mirrors Stan base_nuts.hpp line 113 default of
+    /// 1000.
     pub max_delta_h: f64,
 }
 
 impl LeapfrogIntegrator {
-    /// Constructs a leapfrog integrator. Asserts `epsilon > 0`,
-    /// `l_steps >= 1`, `temp_ref > 0`.
+    /// Constructs a leapfrog integrator. Requires epsilon > 0, l_steps >= 1,
+    /// and temp_ref > 0.
     pub fn new(epsilon: f64, l_steps: usize, temp_ref: f64) -> Self {
         assert!(epsilon > 0.0, "epsilon must be positive");
         assert!(l_steps >= 1, "l_steps must be at least 1");
@@ -154,9 +154,9 @@ impl HmcIntegrator for LeapfrogIntegrator {
 
 /// Omelyan minimum-norm second-order integrator.
 ///
-/// One step applies `P(lambda eps) Q(eps/2) P((1-2lambda) eps)
-/// Q(eps/2) P(lambda eps)`, where `P` is a momentum kick and `Q` is a
-/// position drift. It has the same reversible Metropolis correction as
+/// One step applies the sequence P(lambda eps), Q(eps/2),
+/// P((1 - 2lambda) eps), Q(eps/2), P(lambda eps), where P is a momentum kick
+/// and Q is a position drift. It has the same reversible Metropolis correction as
 /// leapfrog and is the default HMC trajectory map for BGSA-style runs.
 pub struct OmelyanIntegrator {
     /// Base step size; rescaled by `sqrt(temp / temp_ref)` per call.
@@ -165,16 +165,16 @@ pub struct OmelyanIntegrator {
     pub l_steps: usize,
     /// Reference temperature used to normalise the cooling rescaling.
     pub temp_ref: f64,
-    /// Divergence threshold; trajectory marked as diverged when
-    /// `|delta_h| > max_delta_h`.
+    /// Divergence threshold; trajectory marked as diverged when abs(delta_h)
+    /// exceeds max_delta_h.
     pub max_delta_h: f64,
     /// Minimum-norm kick coefficient.
     pub lambda: f64,
 }
 
 impl OmelyanIntegrator {
-    /// Constructs an Omelyan integrator. Asserts `epsilon > 0`,
-    /// `l_steps >= 1`, `temp_ref > 0`.
+    /// Constructs an Omelyan integrator. Requires epsilon > 0, l_steps >= 1,
+    /// and temp_ref > 0.
     pub fn new(epsilon: f64, l_steps: usize, temp_ref: f64) -> Self {
         assert!(epsilon > 0.0, "epsilon must be positive");
         assert!(l_steps >= 1, "l_steps must be at least 1");
