@@ -7,9 +7,9 @@ Ask in order:
 
 1. Do you have a gradient?
    - No -> classical via =run= (Boltzmann/Fast/Gsa) or =additive_independence= (if you suspect separability).
-   - Yes -> consider =gle_langevin= when the spectrum is ill-conditioned (one fitted drift matrix from ==eindir== flattens efficiency from omega0 to 100*omega0).
+   - Yes -> consider =gle_langevin= when the spectrum is ill-conditioned (one fitted drift matrix from =eindir= flattens efficiency from =omega0= to 100*=omega0=).
 
-Full details on supplying native gradients (analytic, from PyTorch/JAX, finite differences, etc.) live in the eindir documentation: :eindir:doc:`howto/gradients`.
+Full details on supplying native gradients (analytic, from PyTorch/JAX, finite differences, etc.) live in the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]].
 The relevant types are re-exported from ``eindir_core`` (``Gradient``, ``DifferentiableObjective``, ``AnalyticGradient``, etc.).
 
 2. Is the objective separable (or well approximated by a rank-1 surrogate)?

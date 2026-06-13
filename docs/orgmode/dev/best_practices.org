@@ -6,17 +6,17 @@
 ** Use the exposed stable surface only
 
 All examples and user code should import from =anneal= (or =anneal._core= for the Rust types when necessary).
-The symbols listed in =python/anneal/__init__.py= are the contract: =Boltzmann=, =Fast=, =Gsa (Tsallis)=, =run=, =run_device=, =run_ensemble=, =pilot_draws_qmc=, the polish family, =additive_independence=, =gle_langevin=, =low_discrepancy_points=, and the history containers.
+The symbols listed in =python/anneal/__init__.py= are the contract: =Boltzmann=, =Fast=, =Gsa=, =run=, =run_device=, =run_ensemble=, =pilot_draws_qmc=, the polish family, =additive_independence=, =gle_langevin=, =low_discrepancy_points=, and the history containers.
 
 ** Prefer the high-level drivers for "no knobs"
 
 =additive_independence= and =gle_langevin= already embed pilot logic when you pass =n_pilot > 0=.
-For fully automatic allocation across classical or generalized =Langevin= equation (GLE) families on a fixed budget, use the orchestration scripts in =experiments/scripts/demo_bgsa.py= (they are the reference implementation of the Bayesian mixer).
+For fully automatic allocation across classical or GLE families on a fixed budget, use the orchestration scripts in =experiments/scripts/demo_bgsa.py= (they are the reference implementation of the Bayesian mixer).
 
 ** Composition rules for the five slots
 
 - Only =Obj= may evaluate the true objective (or its gradient).
-- Only =Move= may know the shape of the proposal at temperature T (Gaussian scale, Cauchy, =Tsallis= visit, generalized =Langevin= equation (GLE) drift matrix, rank-1 product of marginals...).
+- Only =Move= may know the shape of the proposal at temperature T (Gaussian scale, Cauchy, =Tsallis= visit, GLE drift matrix, rank-1 product of marginals...).
 - =Accept= must implement the finite-precision contract when it claims exactness (see precision how-to).
 - A change to any one slot is automatically visible to every driver that uses that slot.
 
@@ -31,8 +31,8 @@ All gradient types, the =Gradient= / =DifferentiableObjective= traits, analytic 
 
 See:
 
-- :eindir:doc:`howto/gradients`
-- :eindir:doc:`explanation/primitives`
+- [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]]
+- [[https://eindir.rgoswami.me/explanation/primitives.html][eindir primitives explanation]]
 - The =eindir.gradient= module in the eindir Rust API (intersphinx cross-reference from this documentation set).
 
 ** Reproducibility

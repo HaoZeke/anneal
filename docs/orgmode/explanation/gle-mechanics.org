@@ -1,14 +1,10 @@
 #+TITLE: GLE Mechanics
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
-#+begin_export rst
-============
-GLE Mechanics
-============
-#+end_export
+* GLE Mechanics
 
 See the dedicated tutorial [[file:../tutorials/gle-colored-noise.org][gle-colored-noise]] for the call site and the "one drift serves all" claim.
 
-The construction (white-noise critically damps one frequency; generalized =Langevin= equation (GLE) uses number of auxiliary (=N_s=) momenta + optimal_sampling_drift matrix A so the spectrum is flat on [omega0, 100*omega0], BAB (B-A-B) propagator, stationary reseed, exact matrix_exp + ldl_sqrt) lives in ==eindir== (GleThermostat) and is consumed verbatim by =src/methods/gle_langevin.rs=.
+The construction (white-noise critically damps one frequency; GLE uses number of auxiliary (=N_s=) momenta + =optimal_sampling_drift= matrix A so the spectrum is flat on [omega0, 100*omega0], BAB propagator, stationary reseed, exact =matrix_exp= + =ldl_sqrt=) lives in =eindir= (=GleThermostat=) and is consumed verbatim by =src/methods/gle_langevin.rs=.
 
-Because the generalized =Langevin= equation (GLE) object is a pure filling of the Move slot, thermostat variants (different canonical form, a-la-carte correctness vs acceleration, new drift fitting) can be reused by gradient drivers without touching the classical presets or the orchestrator.
+Because the GLE object is a pure filling of the Move slot, thermostat variants (different canonical form, a-la-carte correctness vs acceleration, new drift fitting) can be reused by gradient drivers without touching the classical presets or the orchestrator.
