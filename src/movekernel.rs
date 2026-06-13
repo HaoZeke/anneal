@@ -4,7 +4,7 @@ use eindir_core::Bounds;
 use ndarray::{Array1, ArrayView1};
 use num_traits::Float;
 use rand::Rng;
-use rand_distr::{Cauchy as CauchyDist, Distribution, Normal as NormalDist};
+use rand_distr::{Distribution, Normal as NormalDist};
 
 use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
 
@@ -62,11 +62,17 @@ impl MoveKernel<f64> for Gaussian {
     }
 }
 
-/// Isotropic Cauchy proposal: `j = i + gamma * c`, `c_k ~ Cauchy(0, 1)`
-/// component-wise. Symmetric, heavy-tailed kernel (Fast SA).
+/// Isotropic D-dimensional Cauchy proposal (Szu-Hartley Fast SA visiting law):
+/// `g(dx) propto gamma / (gamma^2 + |dx|^2)^{(D+1)/2}`. This is the `q_v = 2`
+/// (`nu = 1`) case of the Tsallis multivariate-t (proofs/thm5), sampled as the
+/// Gaussian scale mixture `x = gamma * z / sqrt(g)` with `z ~ N(0, I_D)` per
+/// coordinate and a *single shared* `g ~ chi^2(1)`. A per-coordinate Cauchy
+/// would give a product of 1-D Cauchys, which is not the isotropic Fast SA law
+/// for `D > 1` and would disagree with the `q_v = 2` GSA reduction (Theorem 2).
+/// Symmetric, heavy-tailed kernel.
 #[derive(Clone, Debug)]
 pub struct Cauchy {
-    /// Per-component scale parameter.
+    /// Isotropic scale parameter (the 1-D marginal is `Cauchy(0, gamma)`).
     pub gamma: f64,
 }
 
@@ -80,21 +86,38 @@ impl Cauchy {
 
 impl MoveKernel<f64> for Cauchy {
     fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
-        Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
+        // Shared chi^2(1) mixing draw makes the joint law the isotropic
+        // multivariate Cauchy, not a product of 1-D Cauchys.
+        let normal = NormalDist::new(0.0, 1.0).expect("std normal");
+        let chi1 = rand_distr::Gamma::new(0.5, 2.0).expect("chi^2(1)");
+        let g: f64 = chi1.sample(rng);
+        let inv_sqrt_g = 1.0 / g.sqrt();
+        Array1::from_iter(i.iter().map(|&xi| {
+            let z: f64 = normal.sample(rng);
+            xi + self.gamma * z * inv_sqrt_g
+        }))
     }
 }
 
 /// Tsallis visiting distribution (GSA; doi:10.1016/S0378-4371(96)00271-3):
 /// a heavy-tailed proposal whose tail index is controlled by `q_v in (1, 3)`.
-/// Implemented as a
-/// Student-t style sample with `dof = (3 - q_v) / (q_v - 1)`, scaled by
-/// `T^(1/(3-q_v))` per the IISE manuscript Eq. (3).
 ///
-/// Special cases:
-///   - `q_v -> 1+`: Gaussian limit (heavy dof).
-///   - `q_v == 2`: Cauchy (`dof = 1`).
-///   - `q_v -> 3-`: very heavy tail.
+/// The displayed visiting density (IISE manuscript Eq. (3)) is the isotropic
+/// `D`-dimensional Tsallis `q`-Gaussian, which is exactly a multivariate
+/// Student-t with `nu = (3 - q_v) / (q_v - 1)` degrees of freedom. It is sampled
+/// as a Gaussian scale mixture: `x = scale * z / sqrt(g)` with `z ~ N(0, I_D)`
+/// per coordinate but a *single shared* `g ~ Gamma(nu/2, 2/nu)` (`E[g] = 1`,
+/// `nu*g ~ chi^2(nu)`) across all coordinates, scaled by `T^(1/(3-q_v))`. The
+/// shared mixing variable couples the coordinates into the isotropic joint law;
+/// drawing `g` per coordinate would instead give a product of 1-D Student-t
+/// marginals, which is *not* the Tsallis visiting density for `D > 1`. The
+/// multivariate-t representation and the `nu` identity are derived and checked
+/// in `proofs/thm5_visit_multivariate.py`.
+///
+/// Special cases (both as marginals and as the isotropic joint):
+///   - `q_v -> 1+`: Gaussian limit (`nu -> infinity`).
+///   - `q_v == 2`: Cauchy (`nu = 1`).
+///   - `q_v -> 3-`: very heavy tail (`nu -> 0`).
 #[derive(Clone, Debug)]
 pub struct TsallisVisit {
     /// Tsallis visiting index. Practical range: `(1, 3)`.
@@ -107,24 +130,23 @@ impl TsallisVisit {
         assert!(q_v > 1.0 && q_v < 3.0, "q_v must lie in (1, 3)");
         Self { q_v }
     }
-
-    /// Sample a single component from the Tsallis visiting density via
-    /// the ratio-of-normals representation:
-    ///   x = z / sqrt(g),  z ~ N(0, 1),  g ~ Gamma(dof/2, 2/dof)
-    /// which yields a Student-t with `dof` degrees of freedom.
-    fn sample_one<R: Rng>(&self, rng: &mut R) -> f64 {
-        let dof = (3.0 - self.q_v) / (self.q_v - 1.0);
-        let z = NormalDist::new(0.0, 1.0).expect("std normal").sample(rng);
-        let gamma = rand_distr::Gamma::new(dof / 2.0, 2.0 / dof).expect("dof > 0");
-        let g: f64 = gamma.sample(rng);
-        z / g.sqrt()
-    }
 }
 
 impl MoveKernel<f64> for TsallisVisit {
     fn propose<R: Rng>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+        let nu = (3.0 - self.q_v) / (self.q_v - 1.0);
         let scale = t.powf(1.0 / (3.0 - self.q_v));
-        Array1::from_iter(i.iter().map(|&xi| xi + scale * self.sample_one(rng)))
+        // One shared mixing draw for the whole proposal vector: this is what
+        // makes the joint law the isotropic multivariate Student-t (Eq. (3)),
+        // not a product of independent 1-D marginals.
+        let gamma = rand_distr::Gamma::new(nu / 2.0, 2.0 / nu).expect("nu > 0");
+        let g: f64 = gamma.sample(rng);
+        let inv_sqrt_g = 1.0 / g.sqrt();
+        let normal = NormalDist::new(0.0, 1.0).expect("std normal");
+        Array1::from_iter(i.iter().map(|&xi| {
+            let z: f64 = normal.sample(rng);
+            xi + scale * z * inv_sqrt_g
+        }))
     }
 }
 

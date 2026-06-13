@@ -54,6 +54,41 @@ fn temperature_scales_the_cauchy_width() {
 }
 
 #[test]
+fn joint_is_coupled_multivariate_not_product() {
+    // The fix: one shared mixing variable g per proposal makes the joint law
+    // the isotropic multivariate Student-t. A shared g couples coordinate
+    // magnitudes -- log|x_1| and log|x_2| share a -0.5*log(g) term, so they are
+    // positively correlated across draws. A product of independent 1-D t's
+    // (one g per coordinate) would give ~zero correlation, so this test fails
+    // if the sampler regresses to per-coordinate mixing. q_v = 1.5 -> nu = 3.
+    let k = TsallisVisit::new(1.5);
+    let x = array![0.0_f64, 0.0];
+    let mut rng = StdRng::seed_from_u64(21);
+    let n = 200_000usize;
+    let (mut sx, mut sy, mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0, 0.0, 0.0);
+    for _ in 0..n {
+        let p = k.propose(x.view(), 1.0, &mut rng);
+        let a = p[0].abs().ln();
+        let b = p[1].abs().ln();
+        sx += a;
+        sy += b;
+        sxy += a * b;
+        sxx += a * a;
+        syy += b * b;
+    }
+    let nn = n as f64;
+    let cov = sxy / nn - (sx / nn) * (sy / nn);
+    let vx = sxx / nn - (sx / nn).powi(2);
+    let vy = syy / nn - (sy / nn).powi(2);
+    let corr = cov / (vx * vy).sqrt();
+    // Expected ~0.16 for nu=3 (shared); ~0 for a product of independent t's.
+    assert!(
+        corr > 0.1,
+        "coordinates not coupled (corr={corr:.3}); sampler may be drawing g per coordinate"
+    );
+}
+
+#[test]
 fn near_one_qv_approaches_gaussian() {
     // q_v = 1.05 -> dof = 39, close to normal: P(|X| <= 1.96) ~ 0.95 and the
     // sample stays light-tailed (finite, ~1.05 variance).
