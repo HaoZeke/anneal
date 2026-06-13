@@ -10,6 +10,7 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
+use rand::SeedableRng;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -1299,7 +1300,7 @@ fn portfolio_result_to_dict(
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1308,6 +1309,7 @@ fn global_optimize(
     budget: usize,
     seed: u64,
     grad_fn: Option<Py<PyAny>>,
+    noise_sigma: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1330,33 +1332,50 @@ fn global_optimize(
         fn_: obj_fn,
         bounds,
     };
+    if let Some(sigma) = noise_sigma {
+        if !(sigma > 0.0 && sigma.is_finite()) {
+            return Err(PyValueError::new_err(
+                "noise_sigma must be positive and finite",
+            ));
+        }
+    }
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::portfolio_optimize(&obj, Some(&grad), budget, seed)
+            crate::portfolio_optimize(&obj, Some(&grad), budget, seed, noise_sigma)
         }
-        None => crate::portfolio_optimize::<_, CallablePyGradient>(&obj, None, budget, seed),
+        None => {
+            crate::portfolio_optimize::<_, CallablePyGradient>(&obj, None, budget, seed, noise_sigma)
+        }
     };
     portfolio_result_to_dict(py, result)
 }
 
 /// Runs the portfolio global optimizer with a native objective handle.
 #[pyfunction]
-#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true))]
+#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None))]
 fn global_optimize_objective(
     py: Python<'_>,
     objective: PyRef<'_, PyObjective>,
     budget: usize,
     seed: u64,
     use_gradient: bool,
+    noise_sigma: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
+    if let Some(sigma) = noise_sigma {
+        if !(sigma > 0.0 && sigma.is_finite()) {
+            return Err(PyValueError::new_err(
+                "noise_sigma must be positive and finite",
+            ));
+        }
+    }
     let result = if use_gradient {
-        crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed)
+        crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed, noise_sigma)
     } else {
-        crate::portfolio_optimize::<_, PyObjective>(&*objective, None, budget, seed)
+        crate::portfolio_optimize::<_, PyObjective>(&*objective, None, budget, seed, noise_sigma)
     };
     portfolio_result_to_dict(py, result)
 }
@@ -1537,6 +1556,32 @@ fn run_qmc(
     Ok(PyHistory::from(history))
 }
 
+/// Empirical OSA (Ball, Branke & Meisel 2018) acceptance rate and mean samples
+/// per decision for a true cost difference `delta` observed through
+/// `Normal(delta, sigma^2)` noise. Exposes the first-class Rust noise-aware
+/// acceptance component (`noise_accept::OsaAccept`) to Python; mirrors the
+/// reference `experiments/osa.py::acceptance_rate`.
+#[pyfunction]
+#[pyo3(signature = (delta, temp, sigma, trials = 20000, c_star = 0.0, seed = 0))]
+fn osa_acceptance_rate(
+    delta: f64,
+    temp: f64,
+    sigma: f64,
+    trials: usize,
+    c_star: f64,
+    seed: u64,
+) -> PyResult<(f64, f64)> {
+    if !(temp > 0.0) {
+        return Err(PyValueError::new_err("temp must be positive"));
+    }
+    if !(sigma > 0.0) {
+        return Err(PyValueError::new_err("sigma must be positive"));
+    }
+    let osa = crate::noise_accept::OsaAccept::with_params(c_star, 100_000);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    Ok(osa.acceptance_rate(delta, temp, sigma, trials, &mut rng))
+}
+
 // ---------------------------------------------------------------------------
 // Module entry point.
 // ---------------------------------------------------------------------------
@@ -1553,6 +1598,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<EindirPyBounds>()?;
     m.add_class::<PyObjective>()?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
+    m.add_function(wrap_pyfunction!(osa_acceptance_rate, m)?)?;
     m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;
     m.add_function(wrap_pyfunction!(run, m)?)?;
     m.add_function(wrap_pyfunction!(run_hmc, m)?)?;

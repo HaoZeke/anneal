@@ -468,6 +468,10 @@ struct ArmStates {
     pilot: Option<PilotState>,
     surrogate_gen: usize,
     seed_counter: u64,
+    /// Known noise scale of the objective estimator, if the caller declared
+    /// the objective stochastic. `None` (the default) selects exact-Metropolis
+    /// acceptance; `Some(sigma)` selects the noise-aware OSA rule.
+    noise_sigma: Option<f64>,
 }
 
 fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
@@ -478,6 +482,33 @@ fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
         return false;
     }
     rng.random::<f64>() < (-delta / temp.max(METROPOLIS_FLOOR)).exp()
+}
+
+/// Accept a proposed move at a stochastic-evaluation site.
+///
+/// When `noise_sigma` is `None` the decision is the exact-objective Metropolis
+/// rule on the single computed `delta_point`. When the caller declared the
+/// objective noisy with known scale `sigma`, the decision is the Ball, Branke &
+/// Meisel (2018) sequential OSA rule: `delta_sampler(rng)` returns one noisy
+/// observation of the cost difference, and OSA draws as many as it needs to
+/// decide while preserving detailed balance. Each OSA sample charges the budget
+/// through the budgeted objective the closure evaluates.
+fn accept_move<F>(
+    noise_sigma: Option<f64>,
+    delta_sampler: F,
+    delta_point: f64,
+    temp: f64,
+    rng: &mut StdRng,
+) -> bool
+where
+    F: FnMut(&mut StdRng) -> f64,
+{
+    match noise_sigma {
+        Some(sigma) if sigma > 0.0 => crate::noise_accept::OsaAccept::new()
+            .decide(delta_sampler, temp.max(METROPOLIS_FLOOR), sigma, rng)
+            .accepted,
+        _ => metropolis(delta_point, temp, rng),
+    }
 }
 
 fn ladder_temperature(temp0: f64, generation: usize) -> f64 {
@@ -868,6 +899,7 @@ fn bayesian_pilot_steps_per_chain(pilot_budget: usize, min_steps: usize) -> usiz
     (pilot_budget / PILOT_CHAINS.max(1)).max(min_steps)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fit_bayesian_pilot<O>(
     obj: &BudgetedObjective<'_, O>,
     ledger: &BudgetLedger,
@@ -875,6 +907,7 @@ fn fit_bayesian_pilot<O>(
     seed: u64,
     pilot_budget: usize,
     min_steps_per_chain: usize,
+    noise_sigma: Option<f64>,
 ) -> Option<PilotState>
 where
     O: Objective<f64>,
@@ -913,10 +946,20 @@ where
                 let noise: f64 = rand_distr::StandardNormal.sample(rng);
                 *value += sigma * width_scale * noise;
             }
-            let prop = bounds.clip(prop.view());
+            // Reflect (not clip) the symmetric Gaussian random-walk proposal
+            // back into the box so the Metropolis test below keeps detailed
+            // balance: clipping piles mass on the boundary and breaks symmetry.
+            let prop = crate::movekernel::reflect_into_box(prop.view(), &bounds);
             let prop_val = obj.eval(prop.view());
             steps += 1;
-            if prop_val.is_finite() && metropolis(prop_val - cur_val, temp, rng) {
+            let accepted = accept_move(
+                noise_sigma,
+                |_r| obj.eval(prop.view()) - obj.eval(cur.view()),
+                prop_val - cur_val,
+                temp,
+                rng,
+            );
+            if prop_val.is_finite() && accepted {
                 cur = prop;
                 cur_val = prop_val;
                 accepts += 1;
@@ -1139,7 +1182,10 @@ fn run_arm<O, G>(
                     let noise: f64 = rand_distr::StandardNormal.sample(rng);
                     trial[j] += state.step * w * noise;
                 }
-                let trial = bounds.clip(trial.view());
+                // Reflect the symmetric basin-hop perturbation into the box
+                // (keeps the hop proposal symmetric for the Metropolis guard
+                // below; clipping would bias hops toward the boundary).
+                let trial = crate::movekernel::reflect_into_box(trial.view(), &bounds);
                 let res = projected_gradient_polish(obj, grad, trial, slice / 2, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
@@ -1214,13 +1260,21 @@ fn run_arm<O, G>(
             let temp = (archive_temp0(ledger) * 0.5_f64.powi(exponent)).max(1e-12);
             let proposals = surr.sample(slice, temp, SURROGATE_GRID, rng);
             let mut f_cur = ledger.best_get();
+            let noise_sigma = states.noise_sigma;
             for i in 0..proposals.nrows() {
                 if ledger.exhausted() {
                     break;
                 }
                 let trial = bounds.clip(proposals.row(i));
                 let ft = obj.eval(trial.view());
-                if ft.is_finite() && metropolis(ft - f_cur, temp, rng) {
+                let accepted = accept_move(
+                    noise_sigma,
+                    |_r| obj.eval(trial.view()) - f_cur,
+                    ft - f_cur,
+                    temp,
+                    rng,
+                );
+                if ft.is_finite() && accepted {
                     f_cur = ft;
                 }
             }
@@ -1309,6 +1363,7 @@ fn run_arm<O, G>(
             if states.pilot.is_none() {
                 let pilot_budget = slice / BAYESIAN_GLE_PILOT_BUDGET_DIVISOR;
                 if pilot_budget >= BAYESIAN_GLE_MIN_PILOT_WORK {
+                    let noise_sigma = states.noise_sigma;
                     states.pilot = fit_bayesian_pilot(
                         obj,
                         ledger,
@@ -1316,6 +1371,7 @@ fn run_arm<O, G>(
                         seed,
                         pilot_budget,
                         BAYESIAN_PILOT_MIN_CHAIN_STEPS,
+                        noise_sigma,
                     );
                 }
             }
@@ -1374,6 +1430,7 @@ fn run_arm<O, G>(
             // so sigma scales with the mean box width.
             let width_scale = mean_width(&bounds) / 10.0;
             if states.pilot.is_none() {
+                let noise_sigma = states.noise_sigma;
                 states.pilot = fit_bayesian_pilot(
                     obj,
                     ledger,
@@ -1381,6 +1438,7 @@ fn run_arm<O, G>(
                     seed,
                     slice,
                     BAYESIAN_PILOT_MIN_CHAIN_STEPS,
+                    noise_sigma,
                 );
                 return;
             }
@@ -1575,12 +1633,19 @@ pub fn portfolio_optimize<O, G>(
     grad: Option<&G>,
     budget: usize,
     seed: u64,
+    noise_sigma: Option<f64>,
 ) -> PortfolioResult
 where
     O: Objective<f64>,
     G: Gradient<f64>,
 {
     assert!(budget > 0, "budget must be positive");
+    if let Some(sigma) = noise_sigma {
+        assert!(
+            sigma > 0.0 && sigma.is_finite(),
+            "noise_sigma must be positive and finite"
+        );
+    }
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
@@ -1607,7 +1672,10 @@ where
     let discount = 1.0 - 1.0 / (n_slices.max(2) as f64);
     let mut posteriors: Vec<ArmPosterior> =
         arms.iter().map(|_| ArmPosterior::new(discount)).collect();
-    let mut states = ArmStates::default();
+    let mut states = ArmStates {
+        noise_sigma,
+        ..ArmStates::default()
+    };
     let mut rng = StdRng::seed_from_u64(seed);
     let k = arms.len();
     let mut low_dimensional_polish = grad
@@ -1746,7 +1814,7 @@ mod tests {
     #[test]
     fn budget_is_never_exceeded() {
         let obj = Rastrigin::<6>::new();
-        let result = portfolio_optimize(&obj, Some(&obj), 600, 7);
+        let result = portfolio_optimize(&obj, Some(&obj), 600, 7, None);
         assert!(result.n_evals + result.n_grads <= 600);
         assert!(result.best_val.is_finite());
     }
@@ -1754,16 +1822,28 @@ mod tests {
     #[test]
     fn budget_respected_without_gradients() {
         let obj = Rastrigin::<4>::new();
-        let result = portfolio_optimize::<_, Rastrigin<4>>(&obj, None, 400, 3);
+        let result = portfolio_optimize::<_, Rastrigin<4>>(&obj, None, 400, 3, None);
         assert!(result.n_evals <= 400);
         assert_eq!(result.n_grads, 0);
         assert!(result.best_val.is_finite());
     }
 
     #[test]
+    fn portfolio_noise_sigma_path_runs() {
+        // Exercise the OSA noise-aware acceptance interface: with a declared
+        // noise scale the portfolio must run without panicking, respect the
+        // budget, and return a finite best. Run on a deterministic objective
+        // (zero actual noise), which is the safe smoke case.
+        let obj = Rastrigin::<4>::new();
+        let result = portfolio_optimize(&obj, Some(&obj), 600, 5, Some(0.5));
+        assert!(result.n_evals + result.n_grads <= 600);
+        assert!(result.best_val.is_finite());
+    }
+
+    #[test]
     fn portfolio_reaches_styblinski_tang_basin() {
         let obj = StybTang2D::new();
-        let result = portfolio_optimize(&obj, Some(&obj), 1200, 11);
+        let result = portfolio_optimize(&obj, Some(&obj), 1200, 11, None);
         // Global minimum is about -78.332 for the 2D Styblinski-Tang form.
         assert!(
             result.best_val < -78.0,
@@ -2077,7 +2157,7 @@ mod tests {
     #[test]
     fn low_dimensional_polish_reaches_beale_basin() {
         let obj = BealeObjective::new();
-        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0);
+        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0, None);
 
         assert!(result.n_evals + result.n_grads <= 1000);
         assert!(
@@ -2091,7 +2171,7 @@ mod tests {
     #[test]
     fn low_dimensional_polish_stops_after_stationarity() {
         let obj = BealeObjective::new();
-        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0);
+        let result = portfolio_optimize(&obj, Some(&obj), 1000, 0, None);
 
         assert!(
             result.best_val < 1e-8,
