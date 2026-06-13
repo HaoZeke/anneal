@@ -35,6 +35,8 @@ pub mod methods;
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
+/// Noise-aware acceptance (Ball, Branke & Meisel 2018 sequential OSA rule).
+pub mod noise_accept;
 /// The pure-Rust SA driver loop.
 pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
@@ -78,8 +80,9 @@ pub use methods::{
     PilotObservation, PilotPrior, PortfolioResult, PtChainState, PtResult,
     QmcPolishResult, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
 };
-pub use movekernel::MoveKernel;
+pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;
+pub use noise_accept::{OsaAccept, OsaResult};
 pub use runner::{qmc_skip_from_seed, run_rs, run_rs_qmc_variant, run_rs_variant};
 pub use sampler::Sampler;
 pub use variant::SaVariant;
