@@ -4,7 +4,7 @@ use eindir_core::Bounds;
 use ndarray::{Array1, ArrayView1};
 use num_traits::Float;
 use rand::Rng;
-use rand_distr::{Distribution, Normal as NormalDist};
+use rand_distr::{Cauchy as CauchyDist, Distribution, Normal as NormalDist};
 
 use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
 
@@ -62,17 +62,14 @@ impl MoveKernel<f64> for Gaussian {
     }
 }
 
-/// Isotropic D-dimensional Cauchy proposal (Szu-Hartley Fast SA visiting law):
-/// `g(dx) propto gamma / (gamma^2 + |dx|^2)^{(D+1)/2}`. This is the `q_v = 2`
-/// (`nu = 1`) case of the Tsallis multivariate-t (proofs/thm5), sampled as the
-/// Gaussian scale mixture `x = gamma * z / sqrt(g)` with `z ~ N(0, I_D)` per
-/// coordinate and a *single shared* `g ~ chi^2(1)`. A per-coordinate Cauchy
-/// would give a product of 1-D Cauchys, which is not the isotropic Fast SA law
-/// for `D > 1` and would disagree with the `q_v = 2` GSA reduction (Theorem 2).
-/// Symmetric, heavy-tailed kernel.
+/// Cauchy proposal: `j = i + gamma * c`, `c_k ~ Cauchy(0, 1)` component-wise.
+/// Symmetric, heavy-tailed kernel (Szu-Hartley Fast SA). This is the `q_v = 2`
+/// case of the generalized visiting sampler [`TsallisVisit`]: at `q_v = 2` the
+/// Schuur transform `x / |y|^{(q_v-1)/(3-q_v)}` reduces to `x / |y|`, a standard
+/// Cauchy drawn independently per coordinate.
 #[derive(Clone, Debug)]
 pub struct Cauchy {
-    /// Isotropic scale parameter (the 1-D marginal is `Cauchy(0, gamma)`).
+    /// Per-component scale parameter.
     pub gamma: f64,
 }
 
@@ -86,43 +83,68 @@ impl Cauchy {
 
 impl MoveKernel<f64> for Cauchy {
     fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
-        // Shared chi^2(1) mixing draw makes the joint law the isotropic
-        // multivariate Cauchy, not a product of 1-D Cauchys.
-        let normal = NormalDist::new(0.0, 1.0).expect("std normal");
-        let chi1 = rand_distr::Gamma::new(0.5, 2.0).expect("chi^2(1)");
-        let g: f64 = chi1.sample(rng);
-        let inv_sqrt_g = 1.0 / g.sqrt();
-        Array1::from_iter(i.iter().map(|&xi| {
-            let z: f64 = normal.sample(rng);
-            xi + self.gamma * z * inv_sqrt_g
-        }))
+        let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
+        Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
     }
 }
 
-/// Tsallis visiting distribution (GSA; doi:10.1016/S0378-4371(96)00271-3):
-/// a heavy-tailed proposal whose tail index is controlled by `q_v in (1, 3)`.
+/// Lanczos approximation (g = 7, n = 9) to the Gamma function for real `x > 0`,
+/// accurate to ~1e-13. Used for the visiting-distribution normalization constant.
+fn gamma_fn(x: f64) -> f64 {
+    const G: f64 = 7.0;
+    const C: [f64; 9] = [
+        0.999_999_999_999_809_93,
+        676.520_368_121_885_1,
+        -1259.139_216_722_402_8,
+        771.323_428_777_653_13,
+        -176.615_029_162_140_6,
+        12.507_343_278_686_905,
+        -0.138_571_095_265_720_12,
+        9.984_369_578_019_572e-6,
+        1.505_632_735_149_311_6e-7,
+    ];
+    if x < 0.5 {
+        std::f64::consts::PI
+            / ((std::f64::consts::PI * x).sin() * gamma_fn(1.0 - x))
+    } else {
+        let x = x - 1.0;
+        let mut a = C[0];
+        let t = x + G + 0.5;
+        for (i, &c) in C.iter().enumerate().skip(1) {
+            a += c / (x + i as f64);
+        }
+        (2.0 * std::f64::consts::PI).sqrt() * t.powf(x + 0.5) * (-t).exp() * a
+    }
+}
+
+/// Generalized (Tsallis) simulated-annealing visiting kernel
+/// (doi:10.1016/S0378-4371(96)00271-3), tail index `q_v in (1, 3)`.
 ///
-/// The displayed visiting density (IISE manuscript Eq. (3)) is the isotropic
-/// `D`-dimensional Tsallis `q`-Gaussian, which is exactly a multivariate
-/// Student-t with `nu = (3 - q_v) / (q_v - 1)` degrees of freedom. It is sampled
-/// as a Gaussian scale mixture: `x = scale * z / sqrt(g)` with `z ~ N(0, I_D)`
-/// per coordinate but a *single shared* `g ~ Gamma(nu/2, 2/nu)` (`E[g] = 1`,
-/// `nu*g ~ chi^2(nu)`) across all coordinates, scaled by `T^(1/(3-q_v))`. The
-/// shared mixing variable couples the coordinates into the isotropic joint law;
-/// drawing `g` per coordinate would instead give a product of 1-D Student-t
-/// marginals, which is *not* the Tsallis visiting density for `D > 1`. The
-/// multivariate-t representation and the `nu` identity are derived and checked
-/// in `proofs/thm5_visit_multivariate.py`.
+/// Sampled by the Schuur/Xiang transform used by the de-facto-standard GenSA and
+/// SciPy `dual_annealing` implementations: per coordinate, with `x_k, y_k ~
+/// N(0, 1)` drawn independently,
+/// ```text
+///   dx_k = sigma(T, q_v) * x_k / |y_k|^{(q_v-1)/(3-q_v)},
+/// ```
+/// where the scale
+/// `sigma = (factor4_p * T^{1/(q_v-1)} / Gamma(1/(q_v-1) - 1/2))^{(q_v-1)/(3-q_v)}`
+/// and `factor4_p = sqrt(pi) (q_v-1)^{4-q_v} / (2^{(2-q_v)/(q_v-1)} (3-q_v))`.
+/// Proposals are tail-clipped at `+/- TAIL_LIMIT` (1e8) to bound the heavy tail,
+/// matching SciPy. The 1-D marginal is a `q`-Gaussian whose `T`-scaling is
+/// `T^{1/(3-q_v)}`.
 ///
-/// Special cases (both as marginals and as the isotropic joint):
-///   - `q_v -> 1+`: Gaussian limit (`nu -> infinity`).
-///   - `q_v == 2`: Cauchy (`nu = 1`).
-///   - `q_v -> 3-`: very heavy tail (`nu -> 0`).
+/// Special cases:
+///   - `q_v == 2`: per-coordinate Cauchy (`x/|y|`), the Fast-SA limit.
+///   - `q_v -> 1+`: light-tailed (Gaussian) limit.
+///   - `q_v -> 3-`: very heavy tail.
 #[derive(Clone, Debug)]
 pub struct TsallisVisit {
     /// Tsallis visiting index. Practical range: `(1, 3)`.
     pub q_v: f64,
 }
+
+/// SciPy `dual_annealing` `TAIL_LIMIT`: visiting steps are clipped to this.
+const VISIT_TAIL_LIMIT: f64 = 1.0e8;
 
 impl TsallisVisit {
     /// Constructs a Tsallis visit kernel. Asserts `1 < q_v < 3`.
@@ -134,18 +156,29 @@ impl TsallisVisit {
 
 impl MoveKernel<f64> for TsallisVisit {
     fn propose<R: Rng>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
-        let nu = (3.0 - self.q_v) / (self.q_v - 1.0);
-        let scale = t.powf(1.0 / (3.0 - self.q_v));
-        // One shared mixing draw for the whole proposal vector: this is what
-        // makes the joint law the isotropic multivariate Student-t (Eq. (3)),
-        // not a product of independent 1-D marginals.
-        let gamma = rand_distr::Gamma::new(nu / 2.0, 2.0 / nu).expect("nu > 0");
-        let g: f64 = gamma.sample(rng);
-        let inv_sqrt_g = 1.0 / g.sqrt();
+        let qv = self.q_v;
+        // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
+        let factor2 = (qv - 1.0).powf(4.0 - qv);
+        let factor3 = 2.0_f64.powf((2.0 - qv) / (qv - 1.0));
+        let factor4_p = std::f64::consts::PI.sqrt() * factor2 / (factor3 * (3.0 - qv));
+        // factor6 = pi (1-f5) / sin(pi(1-f5)) / Gamma(2-f5) = Gamma(f5) by Euler reflection.
+        let factor5 = 1.0 / (qv - 1.0) - 0.5;
+        let factor6 = gamma_fn(factor5);
+        let factor1 = t.powf(1.0 / (qv - 1.0));
+        let factor4 = factor4_p * factor1;
+        let exponent = (qv - 1.0) / (3.0 - qv);
+        let sigma = (factor4 / factor6).powf(exponent);
         let normal = NormalDist::new(0.0, 1.0).expect("std normal");
         Array1::from_iter(i.iter().map(|&xi| {
-            let z: f64 = normal.sample(rng);
-            xi + scale * z * inv_sqrt_g
+            let x: f64 = normal.sample(rng);
+            let y: f64 = normal.sample(rng);
+            let mut v = sigma * x / y.abs().powf(exponent);
+            if v > VISIT_TAIL_LIMIT {
+                v = VISIT_TAIL_LIMIT * rng.random::<f64>();
+            } else if v < -VISIT_TAIL_LIMIT {
+                v = -VISIT_TAIL_LIMIT * rng.random::<f64>();
+            }
+            xi + v
         }))
     }
 }
