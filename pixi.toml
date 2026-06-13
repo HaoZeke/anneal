@@ -58,12 +58,12 @@ sphinx-sitemap             = ">=2.7.0, <3"
 # Keep the rustdoc generator inside the checked-out Pixi docs prefix.
 setup-rustdocgen = "test -x .pixi/envs/docs/bin/sphinx-rustdocgen || cargo install --root .pixi/envs/docs sphinx-rustdocgen"
 orgbld           = "emacs --batch -l docs/export.el"
-docbld           = { cmd = "sphinx-build docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
+docbld           = { cmd = "python -m sphinx docs/source docs/build -b html", depends-on = ["orgbld", "setup-rustdocgen"] }
 
 # rgpycrumbs/rsx-rs aligned named tasks for docs (Task 1 infra).
 # These are the entry points used by the plan verify commands and CI.
 docs-export = "emacs --batch -l docs/export.el"
-docs-build = { cmd = "cd docs && sphinx-build -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
+docs-build = { cmd = "cd docs && python -m sphinx -b html source build -E -q", depends-on = ["docs-export", "setup-rustdocgen"] }
 docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
 
 # verify profile
