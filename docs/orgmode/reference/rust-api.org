@@ -1,0 +1,19 @@
+#+TITLE: Rust API Reference
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+* Rust API Reference
+
+The =anneal-core= crate provides the typed sampler components, preset drivers, Bayesian pilot and mixer machinery, GLE-Langevin moves, surrogate independence proposals, local polish helpers, and the Rust surfaces behind the Python and C bindings.
+
+The API documentation below is generated from the crate source through =sphinxcontrib_rust= and =sphinx-rustdoc-postprocess=, then linked into this site under the same reference tree as the user-facing parameter tables.
+
+#+begin_export rst
+See also:
+
+- :doc:`Presets and Advanced Drivers </reference/presets-and-advanced>` for the
+  stable user-facing driver surface.
+- :doc:`Architecture </architecture>` for the five component signatures and
+  L1-L4 laws.
+- :eindir:doc:`eindir Rust and Python primitives </index>` for the Objective,
+  low-discrepancy, GLE, and surrogate layer used by these drivers.
+#+end_export

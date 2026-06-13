@@ -47,7 +47,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 - [[file:quickstart.org][Quickstart]] shows the smallest Python workflow.
 - [[file:howto/choose-driver.org][Choose a driver]] maps landscape symptoms to driver families.
 - [[file:reference/presets-and-advanced.org][Presets and advanced drivers]] gives the parameter surface.
-- The generated Rust API starts at =api/index= and follows the =anneal-core= crate modules.
+- The generated Rust API starts at [[file:reference/rust-api.org][Rust API Reference]] and follows the =anneal-core= crate modules.
 - [[file:used_by.org][Used by]] links the reproducibility harness that regenerates the CUTEst tables and figures.
 
 #+begin_export rst
@@ -91,7 +91,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    :caption: Reference
 
    spec
-   api/index
+   reference/rust-api
    reference/glossary
    reference/presets-and-advanced
    bindings
