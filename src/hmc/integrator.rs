@@ -1,9 +1,8 @@
 //! Symplectic integrators for HMC dynamics.
 //!
 //! The three-stage update mirrors Stan's `base_leapfrog.hpp:17-22`:
-//!   begin_update_p  (half-kick: p -= 0.5*epsilon * grad U / T)
-//!   update_q        (drift:     x += epsilon * dK/dp)
-//!   end_update_p    (half-kick: p -= 0.5*epsilon * grad U / T)
+//! half-kick momentum update, position drift, then the closing half-kick
+//! momentum update.
 //!
 //! The Omelyan minimum-norm update keeps the same reversible,
 //! volume-preserving HMC map while reducing Hamiltonian error for a

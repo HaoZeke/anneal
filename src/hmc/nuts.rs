@@ -1,16 +1,10 @@
 //! NUTS Phase 3a: No-U-Turn Sampler trajectory builder.
 //!
 //! Mirrors Stan's recursive doubling tree from
-//! `stan/mcmc/hmc/nuts/base_nuts.hpp:122-265`. Each NUTS step:
-//!   1. Draws fresh momentum from the `Momentum` kernel.
-//!   2. Builds a binary tree by random doubling, each leaf one
-//!      leapfrog step in `+/-` direction.
-//!   3. Terminates on U-turn (`Momentum::uturn`) or divergence
-//!      (`|delta_H| > max_delta_h`).
-//!   4. Multinomial-samples a candidate from the visited leaves
-//!      weighted by `exp(-H_i)`.
-//!   5. Accepts the candidate with the standard HMC-Metropolis
-//!      probability `min(1, exp(H_old - H_new))`.
+//! `stan/mcmc/hmc/nuts/base_nuts.hpp:122-265`. Each NUTS step draws fresh
+//! momentum, builds a random-doubling binary tree of leapfrog leaves, stops on
+//! a U-turn or divergence, and multinomial-samples a candidate from the visited
+//! leaves with the standard HMC-Metropolis probability.
 //!
 //! Gaussian and q-Gaussian momentum both use the `Momentum` trait's U-turn
 //! predicate, with divergence guarded by the Hamiltonian threshold.

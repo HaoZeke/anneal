@@ -1,7 +1,7 @@
 //! pyo3 entry point for `anneal._core`. Exposes the three preset variants
 //! (Boltzmann / Fast / Gsa), a `History` wrapper, and a `run` function
-//! that dispatches on the preset type. The Python objective is a callable
-//! `f: ndarray -> float` plus a `Bounds` for sampling and dimensionality.
+//! that dispatches on the preset type. The Python objective is a callable from
+//! an ndarray to a scalar plus `Bounds` for sampling and dimensionality.
 //!
 //! Internally, `run` wraps the Python callable in a thin `Objective<f64>`
 //! adapter that re-acquires the GIL per `eval`. This is acceptable when
