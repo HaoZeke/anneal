@@ -34,7 +34,7 @@ pub struct MultiChainState {
 /// within-chain variance, between-chain variance, pooled variance estimate, and
 /// Rhat = sqrt(Var / W).
 ///
-/// `M >= 2` and `N >= 2` required; otherwise returns `f64::INFINITY`.
+/// M >= 2 and N >= 2 are required; otherwise returns `f64::INFINITY`.
 /// We track per-coordinate Rhat and return the maximum across coords;
 /// SA practice converges on the worst-mixing coordinate.
 pub struct GelmanRubin;
@@ -99,7 +99,7 @@ impl GelmanRubin {
 /// reduces fevals by ~30 percent at unchanged variance reduction.
 pub struct MultiChainSampler<S: Sampler<f64>> {
     /// The per-chain sampler (shared across chains; each chain owns its
-    /// `State` + RNG).
+    /// State and RNG).
     pub sampler: S,
     /// Number of chains.
     pub n_chains: usize,
