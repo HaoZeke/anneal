@@ -100,6 +100,14 @@ impl OsaAccept {
         let mut c = 0.0_f64;
         for n in 1..=self.max_samples {
             c += sample_delta(rng);
+            if !c.is_finite() {
+                // A non-finite cost-difference sample (e.g. an exhausted budget
+                // surfacing as an infinite objective) cannot be accepted.
+                return OsaResult {
+                    accepted: false,
+                    n_samples: n,
+                };
+            }
             let exponent = -2.0 * (c + half) * (c_prev + half) * inv_var;
             let a = if exponent >= 0.0 { 1.0 } else { exponent.exp() };
             if rng.random::<f64>() < a {

@@ -523,6 +523,7 @@ def global_optimize(
     budget: int,
     seed: int = 0,
     grad_fn=None,
+    noise_sigma=None,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -549,6 +550,13 @@ def global_optimize(
         enables the gradient arms and the final polish. Pass
         ``jax.grad(f)``, a torch ``.backward()`` wrapper, or an
         analytic gradient.
+      noise_sigma: optional known noise scale of a stochastic
+        ``obj_fn``. When ``None`` (the default) acceptance is the exact
+        Metropolis rule. When set, the stochastic-evaluation accept
+        sites use the Ball, Branke & Meisel (2018) sequential OSA rule,
+        which draws repeated noisy evaluations to decide while keeping
+        detailed balance under ``Normal(delta, noise_sigma**2)`` cost
+        differences.
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -560,6 +568,7 @@ def global_optimize(
         int(budget),
         int(seed),
         grad_fn,
+        noise_sigma if noise_sigma is None else float(noise_sigma),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

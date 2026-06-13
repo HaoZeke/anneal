@@ -134,9 +134,9 @@ impl MoveKernel<f64> for TsallisVisit {
 /// in it keeps the proposal symmetric: `q(x -> y) = q(y -> x)`. The Metropolis
 /// test therefore still targets the box-restricted Gibbs measure with no
 /// Hastings correction (manuscript law L1 holds for the reflected proposal).
-fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
+pub fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
     let w = hi - lo;
-    if !(w > 0.0) {
+    if w.is_nan() || w <= 0.0 {
         return lo;
     }
     let period = 2.0 * w;
@@ -145,6 +145,19 @@ fn reflect_coord(x: f64, lo: f64, hi: f64) -> f64 {
         y = period - y;
     }
     lo + y
+}
+
+/// Mirror-reflects every coordinate of `x` into `bounds` (see
+/// [`reflect_coord`]). Use this in place of boundary clipping for a symmetric
+/// random-walk proposal: clipping piles mass on the boundary and breaks the
+/// `q(x -> y) = q(y -> x)` symmetry that the Metropolis test relies on, while
+/// reflection keeps it.
+pub fn reflect_into_box(x: ArrayView1<f64>, bounds: &Bounds<f64>) -> Array1<f64> {
+    Array1::from_iter(
+        x.iter()
+            .enumerate()
+            .map(|(k, &xk)| reflect_coord(xk, bounds.low[k], bounds.high[k])),
+    )
 }
 
 /// Box-reflecting adapter: wraps an inner move kernel and mirror-reflects each
