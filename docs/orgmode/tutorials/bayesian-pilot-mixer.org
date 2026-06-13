@@ -8,17 +8,17 @@ Bayesian Pilot and Mixer
 #+end_export
 
 The Bayesian pilot + mixer (bGSA auto-allocation) removes the usual tuning knobs.
-You supply a single budget (==max_proposals==); everything else (chain count, per-chain temperatures, allocation) follows online from a Beta-Bernoulli posterior.
+You supply a single budget (=max_proposals=); everything else (chain count, per-chain temperatures, allocation) follows online from a Beta-Bernoulli posterior.
 
 #+begin_export rst
 .. admonition:: Reference
 
-   The pilot (three-term Laplace posterior on log-T0/log-sigma/==q_v== with
+   The pilot (three-term Laplace posterior on log-T0/log-sigma/q_v with
    Roberts-Rosenthal 0.234 target plus improvement term) and the mixer
    (per-chain Beta(4/1,4) on "produced new global best", Thompson
-   sampling with 0.05 incumbent guard, auto ==n_chains== = min(budget/64,
-   sqrt(dim)) clamped 2..4, quasi-Monte Carlo (quasi-Monte Carlo (QMC)) starts when bounds supplied) are
-   described in src/methods/bayesia=n_pilot=.rs and
+   sampling with 0.05 incumbent guard, auto n_chains = min(budget/64,
+   sqrt(dim)) clamped 2..4, QMC starts when bounds supplied) are
+   described in src/methods/bayesian_pilot.rs and
    src/methods/bayesian_mixing.rs. The same logic appears in the
    Python re-implementations under experiments/scripts/demo_bgsa.py.
 #+end_export
@@ -26,27 +26,28 @@ You supply a single budget (==max_proposals==); everything else (chain count, pe
 * Prerequisites
 
 Values-only objective (no gradient required).
-Bounds recommended for quasi-Monte Carlo (quasi-Monte Carlo (QMC)) seeding.
+Bounds recommended for QMC seeding.
 
 #+begin_src bash
 pip install anneal
 #+end_src
 
-* Step 1: Pilot draws (prior samples for (T0, sigma, ==q_v==))
+* Step 1: Pilot draws (prior samples for (T0, sigma, =q_v=))
 
-The pilot draws from the prior (log-normal on scales, truncated Beta-like on ==q_v== in (1,3)). ==q_v== = 1 recovers Boltzmann simulated annealing (BSA), ==q_v== = 2 recovers fast simulated annealing (FSA); values between them give a continuous model-selection coordinate.
+The pilot draws from the prior (log-normal on scales, truncated Beta-like on =q_v= in (1,3)).
+=q_v= = 1 recovers Boltzmann simulated annealing (BSA), =q_v= = 2 recovers fast simulated annealing (FSA); values between them give a continuous model-selection coordinate.
 
 #+begin_src python
 import numpy as np
-from anneal import =pilot_draws_qmc=
+from anneal import pilot_draws_qmc
 
-draws = =pilot_draws_qmc=(6, seed=0)
-print("Pilot draws (T0, sigma, ==q_v==):\n", draws)
+draws = pilot_draws_qmc(6, seed=0)
+print("Pilot draws (T0, sigma, q_v):\n", draws)
 #+end_src
 
 Typical output (rounded):
 
-Pilot draws (T0, sigma, ==q_v==): [[ 4.82  0.71  1.34] [ 7.15  1.12  2.11] ...
+Pilot draws (T0, sigma, q_v): [[ 4.82  0.71  1.34] [ 7.15  1.12  2.11] ...
 
 Each row is a candidate Hyperparameter triple.
 In a full bGSA run the pilot executes short chains at a subset of these, observes acceptance rates and improvement sizes, then returns the maximum a posteriori (maximum a posteriori (MAP)) triple for the production phase.
@@ -58,7 +59,7 @@ With a small budget we watch the per-chain Beta posteriors evolve.
 
 The mixer starts:
 
-- ==n_chains== = min(=max_proposals=/64, sqrt(5)) clamped -> 2
+- =n_chains= = min(=max_proposals=/64, sqrt(5)) clamped -> 2
 - =improve_alpha= = [4.0, 1.0], =improve_beta= = [1.0, 4.0] (chain 0 receives a head-start Beta prior)
 - Every step: Thompson-sample a chain by drawing from its current Beta(alpha, beta)
 - If the chosen chain produces a new global best: alpha += 1 else beta += 1
@@ -79,11 +80,11 @@ Chain 1 improves again -> alpha[1] = 3
 
 Step 5: Guard prevents thrashing: even if a draw slightly favors chain 0, the +0.05 margin keeps the current incumbent (chain 1) unless a clear winner appears.
 
-The Python surface does not expose the internal mixer directly (the full auto-orchestration lives in the experiments tree), but ==pilot_draws_qmc== plus the exposed advanced drivers let you reproduce the same "one-budget, auto everything" behaviour by hand or via the demo scripts.
+The Python surface does not expose the internal mixer directly (the full auto-orchestration lives in the experiments tree), but =pilot_draws_qmc= plus the exposed advanced drivers let you reproduce the same "one-budget, auto everything" behaviour by hand or via the demo scripts.
 
 #+begin_src python
 # High-level illustration (the real bGSA driver is in experiments)
-print("After pilot, production run uses the maximum a posteriori (MAP) (T0, sigma, ==q_v==)")
+print("After pilot, production run uses the maximum a posteriori (MAP) (T0, sigma, q_v)")
 print("Mixer then allocates the remaining budget across chains via Thompson on the Beta posteriors.")
 #+end_src
 
@@ -93,7 +94,7 @@ In the reproducibility scripts the pattern is:
 
 1. =pilot_draws_qmc= or the internal pilot runner -> (=t_map=, =e_map=, =q_map=)
 2. Short pilot chains at those hyperparameters.
-3. Production: BayesianMixingSampler around a classical or generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) inner sampler, single =max_proposals= budget.
+3. Production: =BayesianMixingSampler= around a classical or GLE inner sampler, single =max_proposals= budget.
 4. Final polish on the winner.
 
 The exposed =additive_independence= and =gle_langevin= already embed pilot logic when =n_pilot= > 0.
@@ -102,9 +103,10 @@ The exposed =additive_independence= and =gle_langevin= already embed pilot logic
 
 The pilot only ever touches =Cool= and =Neigh/Move= parameters (it never changes Obj or Accept).
 The mixer is an orthogonal lift over the Sampler trait: it chooses which inner chain (that is which state + its own Cool/Neigh/Move/Accept tuple) receives the next proposal.
-Because every inner sampler obeys L1-L4, the outer mixer automatically inherits BestMonotone and the other =Temporal Logic of Actions (TLA+)+= invariants (Temporal Logic of Actions).
+Because every inner sampler obeys L1-L4, the outer mixer automatically inherits =BestMonotone= and the other TLA+ invariants.
 The Beta update is exactly the improvement term that appears in the three-term posterior of the pilot; both pieces are instances of the same "count successes, shrink toward target" reasoning.
 
 * Figures
 
-Styblinski-Tang 2-D contours and 5-D/20-D CUTEst performance profiles that compare the Bayesian mixer against fixed classical and generalized ==Langevin== equation (generalized =Langevin= equation (GLE)) drivers are regenerated by =experiments/scripts/render_plots.py= (and the full partitioned CUTEst suite in =experiments/benchmarks/=). See the =anneal_repro= package and [[file:../used_by.org][used-by page]] for the exact commands and the resulting Pareto and data-profile figures.
+Styblinski-Tang 2-D contours and 5-D/20-D CUTEst performance profiles that compare the Bayesian mixer against fixed classical and GLE drivers are regenerated by =experiments/scripts/render_plots.py= (and the full partitioned CUTEst suite in =experiments/benchmarks/=).
+See the =anneal_repro= package and [[file:../used_by.org][used-by page]] for the exact commands and the resulting Pareto and data-profile figures.

@@ -1,11 +1,7 @@
 #+TITLE: Bayesian Pilot and Mixer Details
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
 
-#+begin_export rst
-===========================
-Bayesian Pilot and Mixer Details
-===========================
-#+end_export
+* Bayesian Pilot and Mixer Details
 
 See the dedicated tutorial [[file:../tutorials/bayesian-pilot-mixer.org][bayesian-pilot-mixer]] for the pilot draws, the 6-step Beta trace, the 0.05 guard, the auto chain formula, and the Thompson step.
 

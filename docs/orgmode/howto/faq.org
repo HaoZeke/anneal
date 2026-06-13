@@ -18,10 +18,10 @@ See the dedicated tutorial for the numerical trace.
 
 * Do I need to supply a gradient?
 
-Only for generalized =Langevin= equation (GLE), the polish variants, and Hamiltonian Monte Carlo (HMC)-style methods.
+Only for GLE, the polish variants, and HMC-style methods.
 Classical presets and additive independence are values-only.
 
-See :eindir:doc:`howto/gradients` for how to provide one (including ``grad_fn`` on ``eindir.PyObjective`` for native derivatives from external frameworks). The ``Gradient`` trait and adapters now live in ``eindir_core``.
+See the [[https://eindir.rgoswami.me/howto/gradients.html][eindir gradients guide]] for how to provide one (including ``grad_fn`` on ``eindir.PyObjective`` for native derivatives from external frameworks). The ``Gradient`` trait and adapters live in ``eindir_core``.
 
 * Precision and float16/float32 policy?
 
