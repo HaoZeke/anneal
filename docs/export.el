@@ -25,6 +25,8 @@ while providing explicit per-file messages."
   (let* ((script-dir (file-name-directory (or load-file-name buffer-file-name)))
          (org-dir (expand-file-name "orgmode" script-dir))
          (rst-dir (expand-file-name "source" script-dir)))
+    (dolist (rst-file (directory-files-recursively rst-dir "\\.rst$"))
+      (delete-file rst-file))
     (dolist (org-file (directory-files-recursively org-dir "\\.org$"))
       (let* ((relative (file-relative-name org-file org-dir))
              (rst-file (expand-file-name
