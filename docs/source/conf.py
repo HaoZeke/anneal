@@ -49,6 +49,9 @@ Rust API (``anneal-core``)
 html_theme = "shibuya"
 html_static_path = ["_static"]
 html_favicon = "_static/favicon.png"
+html_js_files = [
+    ("https://antics-api.turtletech.us/antics.js", {"defer": "defer"}),
+]
 
 html_theme_options = {
     "github_url": "https://github.com/HaoZeke/anneal",
