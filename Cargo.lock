@@ -32,6 +32,7 @@ dependencies = [
  "pyo3",
  "rand",
  "rand_distr",
+ "rgpot-core",
  "thiserror",
 ]
 
@@ -292,7 +293,7 @@ dependencies = [
 [[package]]
 name = "eindir-core"
 version = "0.4.7"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=225ed9028557057b5f18c43b2214617073831ccb#225ed9028557057b5f18c43b2214617073831ccb"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=b1f12e4eab28e4f5bed19f8e3e8e12d624408497#b1f12e4eab28e4f5bed19f8e3e8e12d624408497"
 dependencies = [
  "cbindgen",
  "dlpk",
@@ -902,6 +903,14 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
+
+[[package]]
+name = "rgpot-core"
+version = "1.2.0"
+dependencies = [
+ "dlpk",
+ "eindir-core",
+]
 
 [[package]]
 name = "rustc-hash"
