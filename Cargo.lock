@@ -19,7 +19,7 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 
 [[package]]
 name = "anneal-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "cbindgen",
  "criterion",
@@ -906,7 +906,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rgpot-core"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "dlpk",
  "eindir-core",
