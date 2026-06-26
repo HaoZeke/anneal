@@ -22,7 +22,7 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { git = "https://github.com/metatensor/dlpk.git", tag = "v0.1.5", features = ["ndarray", "half"] }
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "225ed9028557057b5f18c43b2214617073831ccb" }
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "b1f12e4eab28e4f5bed19f8e3e8e12d624408497" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
@@ -32,6 +32,9 @@ numpy       = { version = "0.26", optional = true }
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
+# Example/integration demo only: minimize an rgpot potential with anneal. Shares
+# the same eindir-core + dlpk revs, so one eindir-core compilation backs both.
+rgpot-core = { path = "../../OmniPotentRPC/rgpot/rgpot-core" }
 
 [build-dependencies]
 cbindgen = "0.29"
