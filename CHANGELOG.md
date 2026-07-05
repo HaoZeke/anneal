@@ -38,6 +38,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   The ``hybrid_de`` / anneal entry in comparisons now calls the same hybrid path used by the benchmark helpers instead of a separate reimplementation.
 
 
+### Miscellaneous
+
+- Resolve ``dlpk`` (0.1.5), ``eindir-core`` (0.5.0), and the ``rgpot-core``
+  example dependency from crates.io instead of git/path pins, unblocking
+  registry publication of ``anneal-core``.
+
 ## [0.4.0](https://github.com/HaoZeke/anneal/tree/0.4.0) - 2026-04-26
 
 ### Added
