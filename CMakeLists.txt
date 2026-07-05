@@ -7,7 +7,7 @@
 # against. The cargo-c-installed pkg-config file (`anneal-core.pc`) gives
 # system-wide consumers an alternate, install-time entry point.
 cmake_minimum_required(VERSION 3.22)
-project(anneal-core VERSION 0.2.0 LANGUAGES C CXX)
+project(anneal-core VERSION 0.5.0 LANGUAGES C CXX)
 
 # Corrosion builds the Rust crate from Cargo.toml
 include(FetchContent)
