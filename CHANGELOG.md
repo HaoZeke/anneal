@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.5.0](https://github.com/HaoZeke/anneal/tree/0.5.0) - 2026-06-26
+
+### Removed
+
+- The ``anneal_core::grad`` module (and its public re-exports of ``Gradient``, ``AnalyticGradient``, and ``FiniteDiffGradient``) has been removed entirely.
+
+  Gradient support is now provided exclusively by the ``eindir_core`` primitives crate (on which anneal is built):
+
+  - ``eindir_core::Gradient``
+  - ``eindir_core::DifferentiableObjective``
+  - ``eindir_core::AnalyticGradient``
+  - ``eindir_core::FiniteDiffGradient``
+  - The full ``eindir_core::gradient`` module
+
+  All drivers (HMC/NUTS, GLE-Langevin, projected-gradient polish and QMC variants, etc.) continue to work unchanged. Internal code and tests now import directly from ``eindir_core``.
+
+  Python users should supply gradients via ``grad_fn`` when constructing ``eindir.PyObjective`` (or pass plain callables to the anneal wrappers, which continue to work).
+
+  See the eindir documentation (cross-linked via intersphinx) for the full story, including analytic gradients on the surrogates and best practices for supplying native derivatives from Python frameworks.
+
+### Added
+
+- Fixed-budget benchmark drivers (``anneal_sota.qmc_annealed_hybrid`` and ``sota_cutest``) wire the shared ``eindir`` and ``anneal`` primitives through the comparison path:
+
+  - Tensor-train, additive, and Chebyshev surrogates as Move-slot proposal sources.
+  - GLE colored-noise dynamics with native gradients.
+  - Native-gradient L-BFGS-B and QMC polish with objective and gradient evaluations charged through ``Counter``.
+  - QMC seeding through the typed algebra components.
+
+  The ``hybrid_de`` / anneal entry in comparisons now calls the same hybrid path used by the benchmark helpers instead of a separate reimplementation.
+
+
+### Miscellaneous
+
+- Resolve ``dlpk`` (0.1.5), ``eindir-core`` (0.5.0), and the ``rgpot-core``
+  example dependency from crates.io instead of git/path pins, unblocking
+  registry publication of ``anneal-core``.
+
 ## [0.4.0](https://github.com/HaoZeke/anneal/tree/0.4.0) - 2026-04-26
 
 ### Added

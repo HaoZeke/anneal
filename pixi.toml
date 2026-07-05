@@ -1,6 +1,6 @@
 [workspace]
 name      = "anneal"
-version   = "0.4.0"
+version   = "0.5.0"
 description = "Simulated annealing components on the eindir typed primitives."
 channels  = ["conda-forge"]
 platforms = ["linux-64", "osx-arm64", "osx-64"]

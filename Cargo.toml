@@ -1,6 +1,6 @@
 [package]
 name = "anneal-core"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -21,8 +21,8 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 [dependencies]
 thiserror   = "2"
 ndarray     = "0.17"
-dlpk        = { git = "https://github.com/metatensor/dlpk.git", tag = "v0.1.5", features = ["ndarray", "half"] }
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "225ed9028557057b5f18c43b2214617073831ccb" }
+dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
+eindir-core = { version = "0.5.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
@@ -32,6 +32,10 @@ numpy       = { version = "0.26", optional = true }
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
+# Example/integration demo only: minimize an rgpot potential with anneal. Shares
+# the same registry eindir-core + dlpk versions, so one eindir-core compilation
+# backs both.
+rgpot-core = { version = "2.2.0" }
 
 [build-dependencies]
 cbindgen = "0.29"
