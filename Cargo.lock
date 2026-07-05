@@ -283,7 +283,8 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 [[package]]
 name = "dlpk"
 version = "0.1.5"
-source = "git+https://github.com/metatensor/dlpk.git?tag=v0.1.5#cfb6baa733897cc70cef578556fe978eec77f29c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cebd0cf4daf054b82db0150be17f8147c5d35a772da82bab380b0dab7ca08d4"
 dependencies = [
  "half 1.8.3",
  "ndarray 0.17.2",
@@ -292,8 +293,9 @@ dependencies = [
 
 [[package]]
 name = "eindir-core"
-version = "0.4.7"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=b1f12e4eab28e4f5bed19f8e3e8e12d624408497#b1f12e4eab28e4f5bed19f8e3e8e12d624408497"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a950902fe033581de7708bae911ca383896243dd4345bb5b0c44a9db5b3a087e"
 dependencies = [
  "cbindgen",
  "dlpk",
@@ -906,7 +908,9 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "rgpot-core"
-version = "2.0.0"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0679d386a49d50e93294b7b58c1fc8cbd91d7fae597a4bbaa855fb8864a25b65"
 dependencies = [
  "dlpk",
  "eindir-core",
