@@ -62,16 +62,87 @@ const SLICE_GRAD_EQUIVALENTS: usize = 4;
 /// Expected rounds per arm the posterior needs before its ranking means
 /// anything; also caps the active arm count by the slice horizon.
 const ROUNDS_PER_ARM: usize = 8;
-/// Quasi-Newton iterations reserved for the terminal polish phase.
-/// Measured contraction on ill-conditioned least-squares basins
-/// (CERI651*/COOLHANSLS class) is rho ~ 0.965 per iteration, so
-/// converting a near-best incumbent (relative gap ~1e-3) to the 1e-9
-/// win tolerance needs n* = ceil(ln 1e-6 / ln 0.965) ~ 388 iterations;
-/// 500 covers deeper basins (proofs/d5_endgame_switch.py).
-const ENDGAME_QN_ITERS: usize = 500;
 /// Work units per endgame quasi-Newton iteration: one gradient, one
 /// accepted step, and a short Armijo backtrack on average.
 const ENDGAME_WU_PER_ITER: usize = 4;
+/// Decimal orders of relative gap the endgame must close: a near-best
+/// incumbent (Dolan-More tau = 1e-3) converting to the 1e-9 win
+/// tolerance crosses six orders.
+const NEAR_BEST_ORDERS: f64 = 6.0;
+
+/// Abramowitz-Stegun 7.1.26 rational erf approximation (|error| < 1.5e-7).
+fn erf_approx(x: f64) -> f64 {
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = x.abs();
+    let t = 1.0 / (1.0 + 0.327_591_1 * x);
+    let poly = t
+        * (0.254_829_592
+            + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+    sign * (1.0 - poly * (-x * x).exp())
+}
+
+fn normal_cdf(z: f64) -> f64 {
+    0.5 * (1.0 + erf_approx(z / std::f64::consts::SQRT_2))
+}
+
+/// Normal-Inverse-Gamma posterior over the endgame log-contraction.
+///
+/// Observations are log-ratios of consecutive polish improvements,
+/// x_i = ln(delta_{i+1}/delta_i); under geometric gap contraction
+/// x_i = ln rho exactly (proofs/d5_endgame_switch.py, check 2), and
+/// measurement noise makes x_i ~ Normal(ln rho, sigma^2) the natural
+/// likelihood. The prior centers on the contraction measured on
+/// ill-conditioned least-squares cells (rho ~ 0.965) with four
+/// pseudo-observations and a broad scale, so early rounds reproduce
+/// the measured default and data sharpens the switch point.
+struct ContractionPosterior {
+    kappa: f64,
+    mu: f64,
+    alpha: f64,
+    beta: f64,
+}
+
+impl ContractionPosterior {
+    fn new() -> Self {
+        let prior_sd = 0.5 * std::f64::consts::LN_2;
+        Self {
+            kappa: 4.0,
+            mu: 0.965f64.ln(),
+            alpha: 2.0,
+            beta: 2.0 * prior_sd * prior_sd,
+        }
+    }
+
+    fn observe(&mut self, log_ratio: f64) {
+        if !log_ratio.is_finite() {
+            return;
+        }
+        let k1 = self.kappa + 1.0;
+        self.beta += 0.5 * self.kappa * (log_ratio - self.mu).powi(2) / k1;
+        self.mu = (self.kappa * self.mu + log_ratio) / k1;
+        self.kappa = k1;
+        self.alpha += 0.5;
+    }
+
+    /// P[ln rho <= x]: the NIG marginal over the mean is Student-t with
+    /// 2 alpha degrees of freedom and scale^2 = beta/(alpha kappa);
+    /// a moment-matched normal approximates it well past nu = 4.
+    fn prob_log_rho_below(&self, x: f64) -> f64 {
+        let var = self.beta / (self.kappa * (self.alpha - 1.0).max(0.5));
+        normal_cdf((x - self.mu) / var.sqrt().max(1e-12))
+    }
+
+    /// Posterior probability that `wu` work units of polish close
+    /// `orders` decimal orders of relative gap: n(rho) iterations at
+    /// ENDGAME_WU_PER_ITER each fit iff ln rho <= -orders ln10 w / wu.
+    fn conversion_prob(&self, orders: f64, wu: usize) -> f64 {
+        if wu < ENDGAME_WU_PER_ITER {
+            return 0.0;
+        }
+        let x = -(orders * std::f64::consts::LN_10 * ENDGAME_WU_PER_ITER as f64) / wu as f64;
+        self.prob_log_rho_below(x)
+    }
+}
 /// Dolan-More convergence resolution used by the CUTEst summary plots.
 const DOLAN_MORE_CONVERGENCE_TAU: f64 = 1e-3;
 /// General arms earn bandit credit one decimal place below the reporting
@@ -520,6 +591,31 @@ struct ArmStates {
     /// Set by MetaD / TPS when the slice performed useful exploration
     /// (deposit or accepted reactive path) even without an incumbent drop.
     last_exploratory_ok: bool,
+    /// Luby reluctant-doubling state (Knuth's (u, v) pair) for the
+    /// restart arm's descent-depth schedule.
+    luby_u: u64,
+    luby_v: u64,
+}
+
+impl ArmStates {
+    /// Next term of the Luby universal restart sequence
+    /// 1,1,2,1,1,2,4,1,... (Luby, Sinclair, Zuckerman 1993): the expected
+    /// hit time of restarts with these cutoffs is within a logarithmic
+    /// factor of the best fixed cutoff for any run-length distribution.
+    fn luby_next(&mut self) -> u64 {
+        if self.luby_u == 0 {
+            self.luby_u = 1;
+            self.luby_v = 1;
+        }
+        let out = self.luby_v;
+        if self.luby_u & self.luby_u.wrapping_neg() == self.luby_v {
+            self.luby_u += 1;
+            self.luby_v = 1;
+        } else {
+            self.luby_v *= 2;
+        }
+        out
+    }
 }
 
 fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
@@ -1205,15 +1301,34 @@ fn run_arm<O, G>(
             // best ones refined; positive-density restarts carry the
             // global convergence guarantee.
             if let Some(grad) = grad {
-                // One third screening, two thirds descent; the single
-                // polished start gets the full descent depth, which
-                // ill-conditioned valleys need more than breadth.
-                let n_starts = (slice / 3).max(4);
-                let per_start = slice.saturating_sub(n_starts) / 2;
-                if per_start >= 2 {
+                // Luby-scheduled restarts: each QMC restart's descent
+                // depth is quantum * Luby(i). The Luby sequence is within
+                // a logarithmic factor of the best fixed cutoff for any
+                // unknown basin-hit distribution, so the restart arm
+                // carries a distribution-free near-optimality guarantee
+                // on top of the positive-density restart measure.
+                let quantum = 2 * (dim + 1);
+                let mut spent = 0usize;
+                let mut segment = 0u64;
+                while spent + quantum <= slice && ledger.remaining() >= 4 {
+                    let depth =
+                        ((states.luby_next() * quantum as u64) as usize).min(slice - spent);
+                    let n_starts = (depth / 4).clamp(2, 8);
+                    let per_start = depth.saturating_sub(n_starts).max(2);
                     qmc_projected_gradient_polish(
-                        obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
+                        obj,
+                        grad,
+                        n_starts,
+                        per_start,
+                        seed.wrapping_add(segment),
+                        1.0,
+                        1e-8,
+                        1,
                     );
+                    spent += n_starts + per_start;
+                    segment += 1;
+                }
+                if segment > 0 {
                     return;
                 }
             }
@@ -2169,18 +2284,6 @@ where
     let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX, regime, extra).len();
     let slice =
         (SLICE_GRAD_EQUIVALENTS * (dim + 1)).max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
-    // D5 endgame reserve: explore first, then spend the reserved tail as
-    // one uninterrupted polish phase. Exploration keeps at least three
-    // quarters of the budget; gradient-free runs reserve a poll tail.
-    let endgame_reserve = if policy == PortfolioPolicy::Auto {
-        if grad.is_some() {
-            (ENDGAME_QN_ITERS * ENDGAME_WU_PER_ITER).min(budget / 4)
-        } else {
-            (budget / 10).max(2 * SLICE_GRAD_EQUIVALENTS * (dim + 1)).min(budget / 4)
-        }
-    } else {
-        0
-    };
     let n_slices = (budget / slice.max(1)).max(1);
     let arms = enabled_arms(dim, grad.is_some(), n_slices, regime, extra);
     debug_assert_eq!(arms[0], RESTART_ARM);
@@ -2262,11 +2365,63 @@ where
     }
 
     let mut round = 0usize;
+    // Bayesian endgame state: NIG posterior over the polish contraction
+    // (fed by consecutive polish-arm improvement ratios; a basin jump
+    // resets the pairing) plus the exploration-arm Beta posteriors.
+    let mut contraction = ContractionPosterior::new();
+    let mut prev_polish_delta: Option<f64> = None;
     loop {
         let remaining = ledger.remaining();
         if remaining < 4 {
             break;
         }
+        // One-step-lookahead Bayesian stopping rule. The D5 two-basin win
+        // objective for splitting the remaining budget into e exploration
+        // slices followed by p polish work units is
+        //   W(p) = [q0 + (1 - q0)(1 - E[(1-theta)^e])] * P[polish converts | p],
+        // where theta is the per-slice probability an exploration arm finds
+        // a better basin (aggregated Beta posterior, so
+        // E[(1-theta)^e] = prod_{i<e} (beta+i)/(alpha+beta+i) exactly),
+        // q0 = beta/(alpha+beta) is the posterior probability the incumbent
+        // survives another challenge slice, and the conversion factor comes
+        // from the contraction posterior. The endgame starts exactly when
+        // the maximizer p* of W wants the whole remaining budget: for this
+        // monotone stopping problem the one-step-lookahead rule is optimal
+        // (Chow-Robbins monotone case).
+        let endgame_now = if policy == PortfolioPolicy::Auto && round >= k {
+            let mut a_e = 0.0f64;
+            let mut b_e = 0.0f64;
+            for (arm, post) in arms.iter().zip(posteriors.iter()) {
+                if !matches!(arm, ArmKind::Shift | ArmKind::TrPoll | ArmKind::Hop) {
+                    a_e += post.alpha;
+                    b_e += post.beta;
+                }
+            }
+            let q0 = b_e / (a_e + b_e).max(1e-12);
+            let win = |p: usize| -> f64 {
+                let e = remaining.saturating_sub(p) / slice.max(1);
+                let mut pi = 1.0f64;
+                for i in 0..e.min(128) {
+                    pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
+                }
+                (q0 + (1.0 - q0) * (1.0 - pi))
+                    * contraction.conversion_prob(NEAR_BEST_ORDERS, p)
+            };
+            let grid = 12usize;
+            let mut best_p = remaining / grid;
+            let mut best_w = win(best_p);
+            for j in 2..=grid {
+                let p = remaining * j / grid;
+                let w = win(p);
+                if w > best_w {
+                    best_w = w;
+                    best_p = p;
+                }
+            }
+            best_p + slice > remaining
+        } else {
+            false
+        };
         if round >= k {
             if let (Some(plan), Some(grad)) =
                 (low_dimensional_polish.take(), budgeted_grad.as_ref())
@@ -2278,9 +2433,7 @@ where
                 continue;
             }
         }
-        let endgame_now = remaining < slice
-            || (round >= k && remaining <= endgame_reserve);
-        if endgame_now {
+        if endgame_now || remaining < slice {
             // D5 endgame: the tail is pure polish (explore-first is
             // optimal; see proofs/d5_endgame_switch.py). Cycle
             // quasi-Newton polish with shrinking trust-region poll
@@ -2421,6 +2574,25 @@ where
         let threshold = arm_success_threshold(arms[choice], before);
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - threshold;
+        if matches!(
+            arms[choice],
+            ArmKind::Shift | ArmKind::TrPoll | ArmKind::Hop
+        ) && improved
+            && before.is_finite()
+        {
+            let delta = before - after;
+            if delta > 0.1 * before.abs().max(1.0) {
+                // Basin jump: contraction ratios across basins are
+                // meaningless; restart the ratio pairing.
+                prev_polish_delta = None;
+            }
+            if let Some(prev) = prev_polish_delta {
+                if delta < prev && delta > 0.0 {
+                    contraction.observe((delta / prev).ln());
+                }
+            }
+            prev_polish_delta = Some(delta);
+        }
         let exploratory = arms[choice].exploratory_credit() && states.last_exploratory_ok;
         posteriors[choice].update(improved || exploratory);
         // TPE score: true-F improvement magnitude, plus a small bonus when
@@ -2465,6 +2637,35 @@ where
 mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
+
+    #[test]
+    fn luby_sequence_prefix_is_canonical() {
+        let mut s = ArmStates::default();
+        let seq: Vec<u64> = (0..15).map(|_| s.luby_next()).collect();
+        assert_eq!(seq, vec![1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8]);
+    }
+
+    #[test]
+    fn contraction_posterior_recovers_exact_geometric_rate() {
+        let mut post = ContractionPosterior::new();
+        let rho: f64 = 0.5;
+        for _ in 0..64 {
+            post.observe(rho.ln());
+        }
+        // Posterior mean converges to ln rho; the conversion probability
+        // for a budget matching n*(rho) work units approaches one.
+        assert!((post.mu - rho.ln()).abs() < 0.05);
+        let n_star = (NEAR_BEST_ORDERS * std::f64::consts::LN_10 / -rho.ln()).ceil() as usize;
+        assert!(post.conversion_prob(NEAR_BEST_ORDERS, 2 * n_star * ENDGAME_WU_PER_ITER) > 0.95);
+        assert!(post.conversion_prob(NEAR_BEST_ORDERS, n_star / 4) < 0.5);
+    }
+
+    #[test]
+    fn normal_cdf_matches_known_quantiles() {
+        assert!((normal_cdf(0.0) - 0.5).abs() < 1e-7);
+        assert!((normal_cdf(1.959_963_985) - 0.975).abs() < 1e-4);
+        assert!((normal_cdf(-1.959_963_985) - 0.025).abs() < 1e-4);
+    }
 
     #[test]
     fn budget_is_never_exceeded() {
