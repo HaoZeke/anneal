@@ -6,13 +6,13 @@ use anneal_core::cool::LogCool;
 use anneal_core::laws::LawViolation;
 use anneal_core::movekernel::Gaussian;
 use anneal_core::neigh::ContinuousR_n;
-use anneal_core::variant::{SaVariant, SweepBudget};
+use anneal_core::variant::{SaVariant, SweepBudget, ValidationEvidence};
 
 use eindir_core::objectives::StybTang2D;
 
 /// A buggy acceptance rule that violates L3: returns 0 for all uphill
 /// moves, but ALSO returns 0 for downhill moves (delta_e <= 0). The
-/// The certified constructor rejects this type at compile time. The sampled
+/// certified constructor rejects this type at compile time. The sampled
 /// constructor catches the executable L3 violation.
 struct AlwaysReject;
 
@@ -63,7 +63,42 @@ fn checked_with_sweep_passes_legitimate_variants() {
         5.0,
         42,
     );
-    if let Err(e) = result {
-        panic!("Boltzmann preset failed sweep: {e:?}");
-    }
+    let variant = match result {
+        Ok(variant) => variant,
+        Err(e) => panic!("Boltzmann preset failed sweep: {e:?}"),
+    };
+    assert_eq!(
+        variant.validation,
+        ValidationEvidence::Sampled {
+            samples_per_law: 256,
+            dim: 2,
+            bound: 5.0,
+            seed: 42,
+        }
+    );
+}
+
+#[test]
+fn unchecked_constructor_records_uncertified_status() {
+    let variant = SaVariant::unchecked(
+        StybTang2D::new(),
+        LogCool::new(1.0_f64, 2.0),
+        ContinuousR_n::new(2),
+        Gaussian::new(0.5),
+        AlwaysReject,
+    );
+    assert_eq!(variant.validation, ValidationEvidence::Unchecked);
+}
+
+#[test]
+fn certified_constructor_records_structural_status() {
+    let variant = SaVariant::checked(
+        StybTang2D::new(),
+        LogCool::new(1.0_f64, 2.0),
+        ContinuousR_n::new(2),
+        Gaussian::new(0.5),
+        anneal_core::accept::Metropolis,
+    )
+    .expect("shipped tuple is certified");
+    assert_eq!(variant.validation, ValidationEvidence::Certified);
 }
