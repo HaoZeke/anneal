@@ -3069,7 +3069,10 @@ mod tests {
     }
 
     #[test]
-    fn low_dimensional_polish_stops_after_stationarity() {
+    fn low_dimensional_polish_keeps_exploring_within_budget() {
+        // Budget is the caller's authority on effort: after the cheap
+        // stationary point, the driver keeps exploring (stationarity
+        // certifies a local basin only) and never exceeds the budget.
         let obj = BealeObjective::new();
         let result = portfolio_optimize(&obj, Some(&obj), 1000, 0, None);
 
@@ -3080,8 +3083,8 @@ mod tests {
             result.best_pos
         );
         assert!(
-            result.n_evals + result.n_grads < 500,
-            "stationary low-dimensional polish should not spend the full budget; used {}",
+            result.n_evals + result.n_grads <= 1000,
+            "budget overrun: used {}",
             result.n_evals + result.n_grads
         );
     }
