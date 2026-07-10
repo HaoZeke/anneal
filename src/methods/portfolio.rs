@@ -85,16 +85,18 @@ fn normal_cdf(z: f64) -> f64 {
     0.5 * (1.0 + erf_approx(z / std::f64::consts::SQRT_2))
 }
 
-/// Normal-Inverse-Gamma posterior over the endgame log-contraction.
+/// Normal-Inverse-Gamma posterior over the per-work-unit polish
+/// log-contraction.
 ///
-/// Observations are log-ratios of consecutive polish improvements,
-/// x_i = ln(delta_{i+1}/delta_i); under geometric gap contraction
-/// x_i = ln rho exactly (proofs/d5_endgame_switch.py, check 2), and
-/// measurement noise makes x_i ~ Normal(ln rho, sigma^2) the natural
-/// likelihood. The prior centers on the contraction measured on
-/// ill-conditioned least-squares cells (rho ~ 0.965) with four
-/// pseudo-observations and a broad scale, so early rounds reproduce
-/// the measured default and data sharpens the switch point.
+/// Observations are work-normalized log-ratios of consecutive polish
+/// improvements, x_i = ln(delta_{i+1}/delta_i) / w_{i+1}, where w_{i+1}
+/// is the work the improving slice spent: under geometric gap
+/// contraction per polish work unit, delta_{i+1}/delta_i = rho_wu^w
+/// exactly (proofs/d5_endgame_switch.py, check 2), so x_i estimates
+/// ln rho_wu with measurement noise, giving the Normal likelihood. The
+/// prior centers on the contraction measured on ill-conditioned
+/// least-squares cells (rho ~ 0.965 per quasi-Newton iteration at
+/// ENDGAME_WU_PER_ITER work units each) with four pseudo-observations.
 struct ContractionPosterior {
     kappa: f64,
     mu: f64,
@@ -104,43 +106,60 @@ struct ContractionPosterior {
 
 impl ContractionPosterior {
     fn new() -> Self {
-        let prior_sd = 0.5 * std::f64::consts::LN_2;
+        let per_wu = ENDGAME_WU_PER_ITER as f64;
+        let prior_sd = 0.5 * std::f64::consts::LN_2 / per_wu;
         Self {
             kappa: 4.0,
-            mu: 0.965f64.ln(),
+            mu: 0.965f64.ln() / per_wu,
             alpha: 2.0,
             beta: 2.0 * prior_sd * prior_sd,
         }
     }
 
-    fn observe(&mut self, log_ratio: f64) {
-        if !log_ratio.is_finite() {
+    fn observe(&mut self, log_ratio_per_wu: f64) {
+        if !log_ratio_per_wu.is_finite() {
             return;
         }
         let k1 = self.kappa + 1.0;
-        self.beta += 0.5 * self.kappa * (log_ratio - self.mu).powi(2) / k1;
-        self.mu = (self.kappa * self.mu + log_ratio) / k1;
+        self.beta += 0.5 * self.kappa * (log_ratio_per_wu - self.mu).powi(2) / k1;
+        self.mu = (self.kappa * self.mu + log_ratio_per_wu) / k1;
         self.kappa = k1;
         self.alpha += 0.5;
     }
 
-    /// P[ln rho <= x]: the NIG marginal over the mean is Student-t with
-    /// 2 alpha degrees of freedom and scale^2 = beta/(alpha kappa);
-    /// a moment-matched normal approximates it well past nu = 4.
+    fn param_sd(&self) -> f64 {
+        (self.beta / (self.kappa * (self.alpha - 1.0).max(0.5)))
+            .sqrt()
+            .max(1e-12)
+    }
+
+    /// P[ln rho_wu <= x]: the NIG marginal over the mean is Student-t
+    /// with 2 alpha degrees of freedom; a moment-matched normal
+    /// approximates it well past nu = 4.
     fn prob_log_rho_below(&self, x: f64) -> f64 {
-        let var = self.beta / (self.kappa * (self.alpha - 1.0).max(0.5));
-        normal_cdf((x - self.mu) / var.sqrt().max(1e-12))
+        normal_cdf((x - self.mu) / self.param_sd())
     }
 
     /// Posterior probability that `wu` work units of polish close
-    /// `orders` decimal orders of relative gap: n(rho) iterations at
-    /// ENDGAME_WU_PER_ITER each fit iff ln rho <= -orders ln10 w / wu.
+    /// `orders` decimal orders of relative gap.
     fn conversion_prob(&self, orders: f64, wu: usize) -> f64 {
-        if wu < ENDGAME_WU_PER_ITER {
+        if wu == 0 {
             return 0.0;
         }
-        let x = -(orders * std::f64::consts::LN_10 * ENDGAME_WU_PER_ITER as f64) / wu as f64;
+        let x = -(orders * std::f64::consts::LN_10) / wu as f64;
         self.prob_log_rho_below(x)
+    }
+
+    /// Posterior-quantile polish reserve: the work needed to close
+    /// `orders` decimal orders at the 84% credible slow quantile
+    /// (mu + one posterior sd) of the contraction. This is the D5
+    /// n* formula with the fixed constant replaced by the posterior.
+    fn reserve_wu(&self, orders: f64) -> usize {
+        let slow = self.mu + self.param_sd();
+        if slow >= -1e-9 {
+            return usize::MAX;
+        }
+        ((orders * std::f64::consts::LN_10) / -slow).ceil() as usize
     }
 }
 /// Dolan-More convergence resolution used by the CUTEst summary plots.
@@ -2388,7 +2407,17 @@ where
         // the maximizer p* of W wants the whole remaining budget: for this
         // monotone stopping problem the one-step-lookahead rule is optimal
         // (Chow-Robbins monotone case).
+        // Posterior-quantile reserve floor: enter the endgame no later
+        // than the 84%-credible polish work requirement (capped at a
+        // quarter of the budget so exploration keeps the lion's share).
+        let reserve_floor = contraction
+            .reserve_wu(NEAR_BEST_ORDERS)
+            .min(budget / 4)
+            .max(slice.min(budget / 4));
         let endgame_now = if policy == PortfolioPolicy::Auto && round >= k {
+            if remaining <= reserve_floor {
+                true
+            } else {
             let mut a_e = 0.0f64;
             let mut b_e = 0.0f64;
             for (arm, post) in arms.iter().zip(posteriors.iter()) {
@@ -2419,6 +2448,7 @@ where
                 }
             }
             best_p + slice > remaining
+            }
         } else {
             false
         };
@@ -2558,7 +2588,8 @@ where
         }
         .max(4)
         .min(ledger.remaining().max(4));
-        let ceiling = ledger.used_get() + arm_slice;
+        let used_before = ledger.used_get();
+        let ceiling = used_before + arm_slice;
         ledger.cap_set(ceiling.min(budget));
         run_arm(
             arms[choice],
@@ -2588,7 +2619,10 @@ where
             }
             if let Some(prev) = prev_polish_delta {
                 if delta < prev && delta > 0.0 {
-                    contraction.observe((delta / prev).ln());
+                    // Work-normalized: this slice spent `spent` units to
+                    // contract the improvement by delta/prev.
+                    let spent = ledger.used_get().saturating_sub(used_before).max(1);
+                    contraction.observe((delta / prev).ln() / spent as f64);
                 }
             }
             prev_polish_delta = Some(delta);
