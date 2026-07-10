@@ -6,7 +6,7 @@ use anneal_core::history::State;
 use anneal_core::movekernel::MoveKernel;
 use anneal_core::neigh::Neighborhood;
 use anneal_core::sampler::Sampler;
-use anneal_core::variant::{SaVariant, SweepBudget};
+use anneal_core::variant::SaVariant;
 use eindir_core::{Bounds, FPair, Objective};
 use ndarray::{Array1, ArrayView1, array};
 use rand::Rng;
@@ -45,10 +45,7 @@ struct UnitInterval;
 
 impl Neighborhood<f64> for UnitInterval {
     fn contains(&self, i: ArrayView1<f64>, j: ArrayView1<f64>) -> bool {
-        i.len() == 1
-            && j.len() == 1
-            && (0.0..=1.0).contains(&i[0])
-            && (0.0..=1.0).contains(&j[0])
+        i.len() == 1 && j.len() == 1 && (0.0..=1.0).contains(&i[0]) && (0.0..=1.0).contains(&j[0])
     }
 }
 
@@ -63,18 +60,13 @@ impl MoveKernel<f64> for EscapingMove {
 #[test]
 fn proposal_outside_neighborhood_is_rejected_without_evaluation() {
     EVALUATIONS.store(0, Ordering::SeqCst);
-    let sampler = SaVariant::checked_with_sweep(
+    let sampler = SaVariant::unchecked(
         CountingObjective::new(),
         LogCool::new(1.0, 2.0),
         UnitInterval,
         EscapingMove,
         Metropolis,
-        SweepBudget::Off,
-        1,
-        1.0,
-        7,
-    )
-    .expect("sampled-validation constructor accepts the custom tuple");
+    );
     let pair = FPair {
         pos: array![0.5],
         val: 0.25,

@@ -1,6 +1,5 @@
 //! A6 witness: the runtime law sweep in `SaVariant::checked_with_sweep`
-//! catches a deliberately-broken `AcceptRule` that the pre-A6 Boolean
-//! witness (just a trait method) would have admitted as valid.
+//! catches a deliberately broken third-party `AcceptRule`.
 
 use anneal_core::accept::AcceptRule;
 use anneal_core::cool::LogCool;
@@ -13,34 +12,14 @@ use eindir_core::objectives::StybTang2D;
 
 /// A buggy acceptance rule that violates L3: returns 0 for all uphill
 /// moves, but ALSO returns 0 for downhill moves (delta_e <= 0). The
-/// pre-A6 SaVariant::checked has no method that catches this -- there
-/// is no `accept_rule.is_l3_compliant()` Boolean -- so it constructed
-/// cleanly. The A6 sweep catches it on the first downhill sample.
+/// The certified constructor rejects this type at compile time. The sampled
+/// constructor catches the executable L3 violation.
 struct AlwaysReject;
 
 impl AcceptRule<f64> for AlwaysReject {
     fn accept_prob(&self, _delta_e: f64, _temp: f64) -> f64 {
         0.0
     }
-}
-
-#[test]
-fn checked_admits_buggy_accept_pre_a6() {
-    let result = SaVariant::checked(
-        StybTang2D::new(),
-        LogCool::new(1.0_f64, 2.0),
-        ContinuousR_n::new(2),
-        Gaussian::new(0.5),
-        AlwaysReject,
-    );
-    // The pre-A6 cheap path returns Ok: AlwaysReject has no Boolean
-    // witness that catches the L3 violation, and SaVariant::checked
-    // only inspects cool.is_monotone, neigh.is_symmetric, mover.supports_in.
-    assert!(
-        result.is_ok(),
-        "checked() incorrectly rejected (pre-A6 baseline)"
-    );
-    drop(result);
 }
 
 #[test]

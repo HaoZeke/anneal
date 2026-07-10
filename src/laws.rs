@@ -7,18 +7,23 @@
 //! witness methods alone.
 
 use ndarray::Array1;
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use thiserror::Error;
 
 use crate::accept::AcceptRule;
 use crate::cool::Cooling;
+use crate::movekernel::MoveKernel;
+use crate::neigh::Neighborhood;
 
 /// A law-violation diagnostic surfaced by `SaVariant::checked` /
 /// `SaVariant::checked_with_sweep`.
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum LawViolation {
+    /// Sampled validation requires at least one sample per executable law.
+    #[error("sampled validation requires a positive sample count")]
+    EmptySweep,
     /// L1: `is_symmetric()` returned false on the supplied `Neighborhood`.
     #[error("L1 violation: neighborhood is not symmetric")]
     Symmetry,
@@ -33,6 +38,19 @@ pub enum LawViolation {
     /// L2: `MoveKernel::supports_in(neigh)` returned false.
     #[error("L2 violation: move support escapes the neighborhood")]
     SupportEscape,
+    /// L2 (sweep): a sampled proposal escaped the neighborhood.
+    #[error("L2 violation (sweep): proposal from {from:?} at T={temp} produced {to:?}")]
+    SupportEscapeSweep {
+        /// Feasible state from which the proposal was drawn.
+        from: Vec<f64>,
+        /// Proposal outside the declared neighborhood.
+        to: Vec<f64>,
+        /// Positive proposal temperature.
+        temp: f64,
+    },
+    /// The supplied validation cube contained no sampled feasible state.
+    #[error("L2 validation domain contained no sampled feasible state")]
+    NoFeasibleSweepState,
     /// L3 (sweep): `accept_prob(delta, T) != 1` for some `delta <= 0`.
     #[error("L3 violation (sweep): accept_prob({delta_e}, {temp}) = {p}, expected 1.0")]
     DownhillNotAccepted {
@@ -178,4 +196,48 @@ pub fn sweep_neighborhood_symmetric<N: crate::neigh::Neighborhood<f64>>(
         }
     }
     Ok(())
+}
+
+/// Witnesses L2 by drawing proposals from sampled feasible states and
+/// checking membership before any objective evaluation. The bounding cube is
+/// a validation domain supplied by the caller, not a proof over all states.
+pub fn sweep_move_support<M, N>(
+    mover: &M,
+    neigh: &N,
+    dim: usize,
+    bound: f64,
+    n_samples: usize,
+    seed: u64,
+) -> Result<(), LawViolation>
+where
+    M: MoveKernel<f64>,
+    N: Neighborhood<f64>,
+{
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut checked = 0usize;
+    let max_attempts = n_samples.saturating_mul(100).max(100);
+    for _ in 0..max_attempts {
+        let from = Array1::from_iter((0..dim).map(|_| (rng.random::<f64>() * 2.0 - 1.0) * bound));
+        if !neigh.contains(from.view(), from.view()) {
+            continue;
+        }
+        let temp = rng.random::<f64>() * 1e3 + 1e-3;
+        let to = mover.propose(from.view(), temp, &mut rng);
+        if !neigh.contains(from.view(), to.view()) {
+            return Err(LawViolation::SupportEscapeSweep {
+                from: from.to_vec(),
+                to: to.to_vec(),
+                temp,
+            });
+        }
+        checked += 1;
+        if checked == n_samples {
+            break;
+        }
+    }
+    if checked == 0 {
+        Err(LawViolation::NoFeasibleSweepState)
+    } else {
+        Ok(())
+    }
 }

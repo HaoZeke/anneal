@@ -91,6 +91,12 @@ where
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
         let temp = self.cool.temperature(epoch);
         let proposal_pos = self.mover.propose(state.cur.pos.view(), temp, rng);
+        if !self
+            .neigh
+            .contains(state.cur.pos.view(), proposal_pos.view())
+        {
+            return false;
+        }
         let proposal_val = self.obj.eval(proposal_pos.view());
         let delta = proposal_val - state.cur.val;
         let p = self.accept.accept_prob(delta, temp);
