@@ -6,8 +6,11 @@ the STATIONARY chain (0.234 acceptance, 2.38^2/d covariance scale);
 Rechenberg's 1/5 rule and the (1+1)-ES progress-rate theory maximize
 PURE DESCENT (the T = 0 limit). A simulated-annealing chain at
 temperature T > 0 sits strictly between, and its natural objective is
-the expected one-step decrease of the incumbent, not the stationary
-diffusion speed. This module derives the interpolating optimum.
+the expected one-step decrease of the current chain state, not the
+stationary diffusion speed. The best-so-far incumbent cannot increase,
+and its one-step improvement from a symmetric proposal is independent
+of the uphill acceptance rule. This module derives the interpolating
+state-drift optimum.
 
 Model (the same sphere model behind both classical results): current
 point x with f(x) = ||x||^2 / 2 measured from the basin bottom, and an
@@ -44,14 +47,25 @@ Acceptance probability:
     A(c, theta) = Phi(-mu/s) + e^{s^2/(2 theta^2) - mu/theta} Phi(mu'/s).
 
 The module verifies symbolically that the partial-expectation identities
-hold, then maximizes G over c for a grid of theta:
+hold. A global sign proof follows by pairing positive and negative
+increments. For u > 0 the Gaussian increment density satisfies
+
+    p(-u) / p(u) = exp(-u/2),
+
+and therefore
+
+    G(c, theta) = integral_0^infinity u p(u)
+        [exp(-u/2) - exp(-u/theta)] du.
+
+Thus G(c, theta) is positive for every c > 0 iff theta < 2, zero at
+theta = 2, and negative for every c > 0 iff theta > 2. Numerical
+maximization over c inside the positive-drift window gives:
 
   * theta -> 0 recovers the ES descent optimum: c* ~ 1.224 with
     acceptance ~ 0.270 (Rechenberg's sphere constants), and
     G*(0) ~ 0.404 (the classical normalized progress rate).
-  * theta large: the optimal c grows and the optimal acceptance falls
-    toward the sampling regime; uphill moves are cheap, so bigger steps
-    pay until the quadratic drift dominates.
+  * theta increasing toward 2: the optimal c and acceptance rise, while
+    the maximum positive state drift tends to zero.
 
 The resulting alpha*(theta) curve is the acceptance target the AM-SA
 arm tracks by Robbins-Monro on its global proposal scale (the
@@ -214,7 +228,35 @@ def theta_c_exactly_two_symbolic():
     return sp.simplify(lead - (2 - th) / th) == 0
 
 
-# ---- Check 6: anisotropic critical temperature ------------------------------
+# ---- Check 6: global sign certificate by paired increments -----------------
+# The series above locates the small-step boundary but cannot exclude a
+# positive-gain finite step for theta > 2. Pairing increments supplies the
+# global argument. The factorizations below have explicit signs: for u,k > 0,
+# the below-boundary factor is positive; the above-boundary factor is negative
+# when 0 < k < 1 (the range making theta_above > 2).
+def paired_increment_global_sign():
+    u, c, k = sp.symbols("u c k", positive=True)
+    mu = c**2
+    s2 = 4 * c**2
+    log_ratio = sp.simplify(-((-u - mu) ** 2 - (u - mu) ** 2) / (2 * s2))
+    ratio_ok = sp.simplify(log_ratio + u / 2) == 0
+
+    theta_below = 2 / (1 + k)
+    below_gap = sp.exp(-u / 2) - sp.exp(-u / theta_below)
+    below_factor = sp.exp(-u / 2) * (1 - sp.exp(-k * u / 2))
+
+    theta_above = 2 / (1 - k)
+    above_gap = sp.exp(-u / 2) - sp.exp(-u / theta_above)
+    above_factor = sp.exp(-u / 2) * (1 - sp.exp(k * u / 2))
+
+    return (
+        ratio_ok
+        and sp.simplify(below_gap - below_factor) == 0
+        and sp.simplify(above_gap - above_factor) == 0
+    )
+
+
+# ---- Check 7: anisotropic critical temperature ------------------------------
 # On f(x) = x' H x / 2 with an ISOTROPIC proposal x + sigma z, the one-step
 # change is Delta ~ N(mu, s^2) with mu = sigma^2 tr(H)/2 and
 # s^2 = sigma^2 x' H^2 x, so the small-step progress condition
@@ -259,6 +301,7 @@ WITNESS_PARTIALS = partial_expectation_identities()
 WITNESS_DESCENT_LIMIT = descent_limit_matches_rechenberg()
 WITNESS_THETA_C = critical_theta_bracketed()
 WITNESS_THETA_C_EXACT = theta_c_exactly_two_symbolic()
+WITNESS_GLOBAL_SIGN = paired_increment_global_sign()
 WITNESS_ALPHA_MONOTONE = alpha_monotone_increasing_in_window()
 WITNESS_ANISOTROPIC = anisotropic_critical_temperature()
 WITNESS = (
@@ -266,6 +309,7 @@ WITNESS = (
     and WITNESS_DESCENT_LIMIT
     and WITNESS_THETA_C
     and WITNESS_THETA_C_EXACT
+    and WITNESS_GLOBAL_SIGN
     and WITNESS_ALPHA_MONOTONE
     and WITNESS_ANISOTROPIC
 )
@@ -275,6 +319,7 @@ if __name__ == "__main__":
     print("D6 descent limit (Rechenberg):", WITNESS_DESCENT_LIMIT)
     print("D6 critical temperature bracketed:", WITNESS_THETA_C)
     print("D6 theta_c = 2 symbolically:", WITNESS_THETA_C_EXACT)
+    print("D6 global paired-increment sign:", WITNESS_GLOBAL_SIGN)
     print("D6 alpha*(theta) rises in window:", WITNESS_ALPHA_MONOTONE)
     print("D6 anisotropic T_c formula:", WITNESS_ANISOTROPIC)
     print("D6 WITNESS:", WITNESS)

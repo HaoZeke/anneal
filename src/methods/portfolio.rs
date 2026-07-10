@@ -633,9 +633,9 @@ struct ArmStates {
 /// scaling law productized (proofs/d6_annealed_descent_scaling.py).
 ///
 /// Temperature is not a schedule in epoch index. On a locally quadratic
-/// basin, expected one-step descent of Metropolis is positive iff
-/// theta = T d / (f(x) - f*) < 2 exactly (D6, symbolic small-step
-/// expansion), so the chain runs at the gap-proportional law
+/// basin, expected one-step decrease of the current chain-state energy is
+/// positive iff theta = T d / (f(x) - f*) < 2 exactly (D6, symbolic
+/// paired-increment identity), so the chain runs at the gap-proportional law
 ///     T(x) = THETA_TILDE (f(x) - f_best) / d,
 /// with THETA_TILDE = 0.5 keeping ~91% of the maximal descent rate:
 /// cooling happens exactly as fast as measured progress, with no cooling
