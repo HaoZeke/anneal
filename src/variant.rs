@@ -198,13 +198,13 @@ where
         crate::laws::sweep_cooling_monotone(&cool, n.min(1000))?;
         crate::laws::sweep_neighborhood_symmetric(&neigh, dim, bound, n, seed.wrapping_add(2))?;
         crate::laws::sweep_move_support(&mover, &neigh, dim, bound, n, seed.wrapping_add(3))?;
-        if !cool.is_monotone() {
+        if !<C as Cooling<T>>::is_monotone(&cool) {
             return Err(LawViolation::NonMonotoneCooling);
         }
-        if !neigh.is_symmetric() {
+        if !<N as Neighborhood<T>>::is_symmetric(&neigh) {
             return Err(LawViolation::Symmetry);
         }
-        if !mover.supports_in(&neigh) {
+        if !<M as MoveKernel<T>>::supports_in(&mover, &neigh) {
             return Err(LawViolation::SupportEscape);
         }
         Ok(Self {
