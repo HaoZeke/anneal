@@ -2407,13 +2407,17 @@ where
         // the maximizer p* of W wants the whole remaining budget: for this
         // monotone stopping problem the one-step-lookahead rule is optimal
         // (Chow-Robbins monotone case).
-        // Posterior-quantile reserve floor: enter the endgame no later
-        // than the 84%-credible polish work requirement (capped at a
-        // quarter of the budget so exploration keeps the lion's share).
-        let reserve_floor = contraction
-            .reserve_wu(NEAR_BEST_ORDERS)
-            .min(budget / 4)
-            .max(slice.min(budget / 4));
+        // Posterior-quantile reserve floor with asymmetric loss: an
+        // unconverted basin forfeits the cell outright while a slightly
+        // shorter exploration phase rarely loses one (measured near-best
+        // exceeds win rate), so slow-contraction evidence may lengthen
+        // the tail (up to a third of the budget) but never shorten it
+        // below the D5 quarter-budget floor. An uninformative posterior
+        // (84% quantile cannot certify contraction) keeps the floor.
+        let reserve_floor = match contraction.reserve_wu(NEAR_BEST_ORDERS) {
+            usize::MAX => budget / 4,
+            r => r.clamp(budget / 4, budget / 3),
+        };
         let endgame_now = if policy == PortfolioPolicy::Auto && round >= k {
             if remaining <= reserve_floor {
                 true
