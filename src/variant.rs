@@ -13,33 +13,50 @@ use crate::laws::LawViolation;
 use crate::movekernel::{Cauchy, Gaussian, MoveKernel, Reflected, TsallisVisit};
 use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
 
-/// Cooling schedules whose parameter constructors establish L4.
-pub trait CertifiedCooling<T: Float>: Cooling<T> {}
+mod sealed {
+    pub trait Cooling {}
+    pub trait Neighborhood {}
+    pub trait Acceptance {}
+    pub trait MoveFor<N> {}
+}
 
+/// Cooling schedules whose parameter constructors establish L4.
+pub trait CertifiedCooling<T: Float>: Cooling<T> + sealed::Cooling {}
+
+impl<T: Float> sealed::Cooling for LogCool<T> {}
+impl<T: Float> sealed::Cooling for ReciprocalCool<T> {}
+impl<T: Float> sealed::Cooling for TsallisCool<T> {}
 impl<T: Float + Send + Sync> CertifiedCooling<T> for LogCool<T> {}
 impl<T: Float + Send + Sync> CertifiedCooling<T> for ReciprocalCool<T> {}
 impl<T: Float + Send + Sync> CertifiedCooling<T> for TsallisCool<T> {}
 
 /// Neighborhood relations whose implementations establish L1.
-pub trait CertifiedNeighborhood<T: Float>: Neighborhood<T> {}
+pub trait CertifiedNeighborhood<T: Float>: Neighborhood<T> + sealed::Neighborhood {}
 
+impl sealed::Neighborhood for ContinuousR_n {}
+impl sealed::Neighborhood for BoxConstrained<f64> {}
 impl<T: Float + Send + Sync> CertifiedNeighborhood<T> for ContinuousR_n {}
 impl CertifiedNeighborhood<f64> for BoxConstrained<f64> {}
 
 /// Acceptance rules whose implementations establish L3 and L4.
-pub trait CertifiedAcceptance<T: Float>: AcceptRule<T> {}
+pub trait CertifiedAcceptance<T: Float>: AcceptRule<T> + sealed::Acceptance {}
 
+impl sealed::Acceptance for Metropolis {}
+impl<T: Float> sealed::Acceptance for TsallisAccept<T> {}
 impl<T: Float + Send + Sync> CertifiedAcceptance<T> for Metropolis {}
 impl<T: Float + Send + Sync> CertifiedAcceptance<T> for TsallisAccept<T> {}
 
 /// Move/neighborhood pairs whose support compatibility is certified.
-pub trait CertifiedMoveFor<T: Float, N: Neighborhood<T>>: MoveKernel<T> {
+pub trait CertifiedMoveFor<T: Float, N: Neighborhood<T>>:
+    MoveKernel<T> + sealed::MoveFor<N>
+{
     /// Confirms value-level requirements that the type pair cannot encode.
     fn certified_supports(&self, neigh: &N) -> bool;
 }
 
 macro_rules! certify_full_space_move {
     ($move:ty) => {
+        impl sealed::MoveFor<ContinuousR_n> for $move {}
         impl CertifiedMoveFor<f64, ContinuousR_n> for $move {
             fn certified_supports(&self, _neigh: &ContinuousR_n) -> bool {
                 true
@@ -52,12 +69,33 @@ certify_full_space_move!(Gaussian);
 certify_full_space_move!(Cauchy);
 certify_full_space_move!(TsallisVisit);
 
+impl<M: MoveKernel<f64>> sealed::MoveFor<BoxConstrained<f64>> for Reflected<M> {}
 impl<M: MoveKernel<f64>> CertifiedMoveFor<f64, BoxConstrained<f64>> for Reflected<M> {
     fn certified_supports(&self, neigh: &BoxConstrained<f64>) -> bool {
         self.bounds.dims == neigh.bounds.dims
             && self.bounds.low == neigh.bounds.low
             && self.bounds.high == neigh.bounds.high
     }
+}
+
+/// Provenance for the component-law status of a variant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ValidationEvidence {
+    /// Shipped component types and their pairing satisfy structural contracts.
+    Certified,
+    /// Executable laws were sampled over the recorded validation domain.
+    Sampled {
+        /// Number of samples requested per executable law.
+        samples_per_law: usize,
+        /// Dimension of sampled position vectors.
+        dim: usize,
+        /// Half-width of the sampled validation cube.
+        bound: f64,
+        /// Seed controlling all law samples.
+        seed: u64,
+    },
+    /// No component-law validation was performed.
+    Unchecked,
 }
 
 /// A fully-typed SA variant: an `(Obj, Cool, Neigh, Move, Accept)` tuple
@@ -81,6 +119,8 @@ where
     pub mover: M,
     /// The acceptance rule.
     pub accept: A,
+    /// Evidence supporting this tuple's component-law status.
+    pub validation: ValidationEvidence,
     _t: PhantomData<T>,
 }
 
@@ -105,6 +145,7 @@ where
             neigh,
             mover,
             accept,
+            validation: ValidationEvidence::Unchecked,
             _t: PhantomData,
         }
     }
@@ -133,6 +174,7 @@ where
             neigh,
             mover,
             accept,
+            validation: ValidationEvidence::Certified,
             _t: PhantomData,
         })
     }
@@ -213,6 +255,12 @@ where
             neigh,
             mover,
             accept,
+            validation: ValidationEvidence::Sampled {
+                samples_per_law: n,
+                dim,
+                bound,
+                seed,
+            },
             _t: PhantomData,
         })
     }
