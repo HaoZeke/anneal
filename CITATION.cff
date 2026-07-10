@@ -39,7 +39,8 @@ references:
       - family-names: "Goswami"
         given-names: "Debabrata"
     year: 2026
-    journal: "INFORMS Journal on Computing (under review)"
+    journal: "ACM Transactions on Mathematical Software (in preparation)"
+    notes: "Software DOI 10.5281/zenodo.10672746; reproducibility archive 10.5281/zenodo.20672621"
   - type: article
     title: "Unified Software Design Patterns for Simulated Annealing"
     authors:
