@@ -34,6 +34,7 @@ use rand_distr::{Beta, Distribution};
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
 use crate::accept::{AcceptRule, TsallisAccept};
+use crate::bias::Bias;
 use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
@@ -237,9 +238,14 @@ impl BudgetLedger {
         true
     }
 
-    fn record(&self, x: ArrayView1<f64>, value: f64) {
+    /// Archive a candidate only if `value` is finite **and** `x` lies inside
+    /// `bounds` (GJQ-style feasibility choke-point: never promote OOB bests).
+    fn record(&self, x: ArrayView1<f64>, value: f64, bounds: &Bounds<f64>) {
+        if !value.is_finite() || !bounds.contains(x) {
+            return;
+        }
         let mut inner = self.inner.lock().expect("ledger lock");
-        if value.is_finite() && value < self.best_get() {
+        if value < self.best_get() {
             self.best_val.store(value.to_bits(), Ordering::Relaxed);
             inner.best_pos = Some(x.to_owned());
         }
@@ -251,7 +257,8 @@ impl BudgetLedger {
 
     fn incumbent(&self, bounds: &Bounds<f64>) -> Array1<f64> {
         match self.inner.lock().expect("ledger lock").best_pos.as_ref() {
-            Some(pos) => pos.clone(),
+            // Defensive clip: best_pos is only written for in-bounds points.
+            Some(pos) => bounds.clip(pos.view()),
             None => (&bounds.low + &bounds.high) * 0.5,
         }
     }
@@ -278,8 +285,13 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
         }
         self.ledger.used.fetch_add(1, Ordering::Relaxed);
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
-        let value = self.inner.eval(x);
-        self.ledger.record(x, value);
+        // Reflect (not bare-clip) into the box before eval+record: clipping
+        // piles mass on the wall; reflection keeps a feasible point while
+        // preserving more of the proposal structure. Archive is always in-bounds.
+        let bounds = self.inner.bounds();
+        let x_feas = crate::movekernel::reflect_into_box(x, bounds);
+        let value = self.inner.eval(x_feas.view());
+        self.ledger.record(x_feas.view(), value, bounds);
         value
     }
 }
@@ -307,8 +319,11 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
         }
         self.ledger.used.fetch_add(1, Ordering::Relaxed);
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
-        let value = self.inner.eval(x);
-        self.ledger.record(x, value);
+        // Reflect into the local box; archive only if also globally feasible.
+        let x_local = crate::movekernel::reflect_into_box(x, &self.bounds);
+        let value = self.inner.eval(x_local.view());
+        self.ledger
+            .record(x_local.view(), value, self.inner.bounds());
         value
     }
 }
@@ -347,10 +362,16 @@ struct ArmPosterior {
 }
 
 impl ArmPosterior {
+    #[allow(dead_code)]
     fn new(discount: f64) -> Self {
+        Self::with_prior(discount, 1.0, 1.0)
+    }
+
+    /// Prior-biased posterior (regime auto-selection boosts preferred arms).
+    fn with_prior(discount: f64, alpha0: f64, beta0: f64) -> Self {
         Self {
-            alpha: 1.0,
-            beta: 1.0,
+            alpha: alpha0.max(1e-6),
+            beta: beta0.max(1e-6),
             discount,
             pulls: 0,
             successes: 0,
@@ -394,6 +415,10 @@ enum ArmKind {
     Pt,
     Hmc,
     Reduced,
+    /// Well-tempered metadynamics on an Obj-slot bias (true-F ledger).
+    Metad,
+    /// pnastps-inspired transition-path shooting between archive basins.
+    Tps,
 }
 
 impl ArmKind {
@@ -411,7 +436,15 @@ impl ArmKind {
             ArmKind::Pt => "pt",
             ArmKind::Hmc => "hmc",
             ArmKind::Reduced => "reduced",
+            ArmKind::Metad => "metad",
+            ArmKind::Tps => "tps",
         }
+    }
+
+    /// Arms that may earn bandit credit without an incumbent drop
+    /// (enhanced sampling / path ensemble exploration).
+    fn exploratory_credit(self) -> bool {
+        matches!(self, ArmKind::Metad | ArmKind::Tps)
     }
 }
 
@@ -472,6 +505,11 @@ struct ArmStates {
     /// the objective stochastic. `None` (the default) selects exact-Metropolis
     /// acceptance; `Some(sigma)` selects the noise-aware OSA rule.
     noise_sigma: Option<f64>,
+    /// Persistent well-tempered bias for the MetaD arm.
+    bias: Option<crate::bias::WellTemperedBias>,
+    /// Set by MetaD / TPS when the slice performed useful exploration
+    /// (deposit or accepted reactive path) even without an incumbent drop.
+    last_exploratory_ok: bool,
 }
 
 fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
@@ -482,6 +520,12 @@ fn metropolis(delta: f64, temp: f64, rng: &mut StdRng) -> bool {
         return false;
     }
     rng.random::<f64>() < (-delta / temp.max(METROPOLIS_FLOOR)).exp()
+}
+
+/// Compensated ΔE for acceptance (eindir two-sum channel).
+#[inline]
+fn energy_delta(f_new: f64, f_cur: f64) -> f64 {
+    eindir_core::compensated_delta(f_new, f_cur)
 }
 
 /// Accept a proposed move at a stochastic-evaluation site.
@@ -503,11 +547,25 @@ fn accept_move<F>(
 where
     F: FnMut(&mut StdRng) -> f64,
 {
+    // Regime refusal: declared noise => OSA only (exact Metropolis is out of regime).
     match noise_sigma {
-        Some(sigma) if sigma > 0.0 => crate::noise_accept::OsaAccept::new()
-            .decide(delta_sampler, temp.max(METROPOLIS_FLOOR), sigma, rng)
-            .accepted,
-        _ => metropolis(delta_point, temp, rng),
+        Some(sigma) if sigma > 0.0 && sigma.is_finite() => {
+            debug_assert!(
+                crate::methods::regime::require_accept_compatible(Some(sigma), true).is_ok()
+            );
+            crate::noise_accept::OsaAccept::new()
+                .decide(delta_sampler, temp.max(METROPOLIS_FLOOR), sigma, rng)
+                .accepted
+        }
+        Some(_) => {
+            panic!("noise_sigma must be positive and finite for OSA accept");
+        }
+        None => {
+            debug_assert!(
+                crate::methods::regime::require_accept_compatible(None, false).is_ok()
+            );
+            metropolis(delta_point, temp, rng)
+        }
     }
 }
 
@@ -575,6 +633,9 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     };
     let rtol = match arm {
         ArmKind::Shift => SHIFT_IMPROVEMENT_RTOL,
+        // MetaD / TPS: any measurable true-F improvement counts; exploratory
+        // credit may also fire when the slice deposits / accepts a path.
+        ArmKind::Metad | ArmKind::Tps => IMPROVEMENT_RTOL * 0.1,
         _ => IMPROVEMENT_RTOL,
     };
     rtol * scale.max(1.0)
@@ -954,8 +1015,8 @@ where
             steps += 1;
             let accepted = accept_move(
                 noise_sigma,
-                |_r| obj.eval(prop.view()) - obj.eval(cur.view()),
-                prop_val - cur_val,
+                |_r| energy_delta(obj.eval(prop.view()), obj.eval(cur.view())),
+                energy_delta(prop_val, cur_val),
                 temp,
                 rng,
             );
@@ -1189,7 +1250,9 @@ fn run_arm<O, G>(
                 let res = projected_gradient_polish(obj, grad, trial, slice / 2, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
-                } else if res.best_val < f_cur || metropolis(res.best_val - f_cur, temp, rng) {
+                } else if res.best_val < f_cur
+                    || metropolis(energy_delta(res.best_val, f_cur), temp, rng)
+                {
                     x_cur = res.best_pos;
                     f_cur = res.best_val;
                     state.step = (state.step * HOP_GROW).min(1.0);
@@ -1269,8 +1332,8 @@ fn run_arm<O, G>(
                 let ft = obj.eval(trial.view());
                 let accepted = accept_move(
                     noise_sigma,
-                    |_r| obj.eval(trial.view()) - f_cur,
-                    ft - f_cur,
+                    |_r| energy_delta(obj.eval(trial.view()), f_cur),
+                    energy_delta(ft, f_cur),
                     temp,
                     rng,
                 );
@@ -1524,6 +1587,12 @@ fn run_arm<O, G>(
             .with_initial_pos(ledger.incumbent(&bounds));
             run_rs(sampler, &cool, epochs, steps, seed);
         }
+        ArmKind::Metad => {
+            run_metad_arm(obj, ledger, states, rng, slice, &bounds, dim);
+        }
+        ArmKind::Tps => {
+            run_tps_arm(obj, ledger, states, rng, slice, &bounds, dim);
+        }
         ArmKind::Reduced => {
             // Active-subspace collapse: charged pilot gradients estimate
             // the dominant gradient-covariance directions, then GSA
@@ -1593,34 +1662,421 @@ fn run_arm<O, G>(
     }
 }
 
-/// Arms in priority order; the horizon cap truncates from the back, so
-/// the core stays active at small budgets and the full library unlocks
-/// as the slice count grows.
-fn enabled_arms(dim: usize, has_grad: bool, n_slices: usize) -> Vec<ArmKind> {
-    let mut arms = vec![ArmKind::Explore];
+fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
+    Some(match name {
+        "explore" => ArmKind::Explore,
+        "shift" => ArmKind::Shift,
+        "hop" => ArmKind::Hop,
+        "surrogate" => ArmKind::Surrogate,
+        "de" => ArmKind::De,
+        "gle" => ArmKind::Gle,
+        "tr_poll" => ArmKind::TrPoll,
+        "gsa" => ArmKind::Gsa,
+        "variant" => ArmKind::Variant,
+        "pt" => ArmKind::Pt,
+        "hmc" => ArmKind::Hmc,
+        "reduced" => ArmKind::Reduced,
+        "metad" => ArmKind::Metad,
+        "tps" => ArmKind::Tps,
+        _ => return None,
+    })
+}
+
+/// Library of arms available for a problem (before horizon truncation / regime order).
+fn library_arm_names(dim: usize, has_grad: bool) -> Vec<&'static str> {
+    let mut names = vec!["explore"];
     if has_grad {
-        arms.push(ArmKind::Shift);
-        arms.push(ArmKind::Hop);
-        arms.push(ArmKind::Gle);
+        names.extend_from_slice(&["shift", "hop", "gle"]);
     }
-    arms.push(ArmKind::Surrogate);
-    arms.push(ArmKind::De);
-    arms.push(ArmKind::TrPoll);
-    arms.push(ArmKind::Gsa);
-    arms.push(ArmKind::Variant);
-    arms.push(ArmKind::Pt);
+    // MetaD / TPS need at least a 2-D collective-variable space.
+    if dim >= 2 {
+        names.extend_from_slice(&["metad", "tps"]);
+    }
+    names.extend_from_slice(&["surrogate", "de", "tr_poll", "gsa", "variant", "pt"]);
     if has_grad {
-        arms.push(ArmKind::Hmc);
+        names.push("hmc");
         if dim > 2 * REDUCED_K {
-            arms.push(ArmKind::Reduced);
+            names.push("reduced");
         }
     }
+    names
+}
+
+/// Build a 2-D MetaD bias. When the ledger archive has enough diverse
+/// points, fit a sketch-map (Ceriotti–Tribello–Parrinello / cosmo-epfl
+/// sketchmap style) and linearize it to a projector; otherwise fall back
+/// to the first two ambient coordinates.
+fn make_metad_bias(
+    dim: usize,
+    bounds: &Bounds<f64>,
+    ledger: Option<&BudgetLedger>,
+) -> crate::bias::WellTemperedBias {
+    use ndarray::Array2;
+
+    // Try sketch-map CV from archive landmarks.
+    if let Some(ledger) = ledger {
+        if let Some(bias) = try_sketchmap_metad_bias(dim, bounds, ledger) {
+            return bias;
+        }
+    }
+
+    let mut projector = Array2::<f64>::zeros((dim, 2));
+    projector[[0, 0]] = 1.0;
+    if dim > 1 {
+        projector[[1, 1]] = 1.0;
+    } else {
+        projector[[0, 1]] = 1.0;
+    }
+    let mu = Array1::zeros(dim);
+    let lo0 = if bounds.low[0].is_finite() {
+        bounds.low[0]
+    } else {
+        -5.0
+    };
+    let hi0 = if bounds.high[0].is_finite() {
+        bounds.high[0]
+    } else {
+        5.0
+    };
+    let lo1 = if dim > 1 && bounds.low[1].is_finite() {
+        bounds.low[1]
+    } else {
+        lo0
+    };
+    let hi1 = if dim > 1 && bounds.high[1].is_finite() {
+        bounds.high[1]
+    } else {
+        hi0
+    };
+    let width0 = (hi0 - lo0).abs().max(1e-3);
+    let width1 = (hi1 - lo1).abs().max(1e-3);
+    let sigma = 0.15 * width0.min(width1);
+    let w0 = 0.05 * mean_width(bounds).max(1.0);
+    crate::bias::WellTemperedBias::new(
+        projector,
+        mu,
+        [lo0, lo1],
+        [hi0, hi1],
+        sigma,
+        w0,
+        8.0,
+        32,
+    )
+}
+
+/// Sketch-map MetaD bias from archive landmarks, or `None` if under-resolved.
+fn try_sketchmap_metad_bias(
+    dim: usize,
+    bounds: &Bounds<f64>,
+    ledger: &BudgetLedger,
+) -> Option<crate::bias::WellTemperedBias> {
+    use crate::methods::sketchmap::{farthest_point_landmarks, SketchMap2d};
+    use ndarray::Array2;
+
+    let inner = ledger.inner.lock().ok()?;
+    let n = inner.archive_y.len();
+    if n < 6 {
+        return None;
+    }
+    let mut pts: Vec<Array1<f64>> = Vec::with_capacity(n);
+    for i in 0..n {
+        if !inner.archive_y[i].is_finite() {
+            continue;
+        }
+        let x = Array1::from_vec(inner.archive_x[i * dim..(i + 1) * dim].to_vec());
+        if bounds.contains(x.view()) {
+            pts.push(x);
+        }
+    }
+    if pts.len() < 6 {
+        return None;
+    }
+    let idxs = farthest_point_landmarks(&pts, 24.min(pts.len()));
+    if idxs.len() < 4 {
+        return None;
+    }
+    let mut mat = Array2::<f64>::zeros((idxs.len(), dim));
+    for (row, &i) in idxs.iter().enumerate() {
+        for d in 0..dim {
+            mat[[row, d]] = pts[i][d];
+        }
+    }
+    let sm = SketchMap2d::fit(mat.view(), 35, 0.04)?;
+    let (projector, mu, lo, hi) = sm.linearize_projector(1e-3 * mean_width(bounds).max(1e-3));
+    // Guard degenerate Jacobians.
+    let col0: f64 = (0..dim).map(|d| projector[[d, 0]].powi(2)).sum::<f64>().sqrt();
+    let col1: f64 = (0..dim).map(|d| projector[[d, 1]].powi(2)).sum::<f64>().sqrt();
+    if col0 < 1e-12 || col1 < 1e-12 {
+        return None;
+    }
+    let width0 = (hi[0] - lo[0]).abs().max(1e-3);
+    let width1 = (hi[1] - lo[1]).abs().max(1e-3);
+    let sigma = 0.12 * width0.min(width1);
+    let w0 = 0.05 * mean_width(bounds).max(1.0);
+    Some(crate::bias::WellTemperedBias::new(
+        projector, mu, lo, hi, sigma, w0, 8.0, 32,
+    ))
+}
+
+/// MetaD arm: Metropolis random-walk on `F_eff = F + V`, deposits well-tempered
+/// bias, records **true** `F` via the budgeted objective.
+fn run_metad_arm<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    states: &mut ArmStates,
+    rng: &mut StdRng,
+    slice: usize,
+    bounds: &Bounds<f64>,
+    dim: usize,
+) where
+    O: Objective<f64>,
+{
+    states.last_exploratory_ok = false;
+    if dim < 2 || slice < 4 {
+        return;
+    }
+    if states.bias.is_none() {
+        states.bias = Some(make_metad_bias(dim, bounds, Some(ledger)));
+    }
+    let bias = states.bias.as_mut().expect("bias installed");
+    let mut x = ledger.incumbent(bounds);
+    let f0 = obj.eval(x.view());
+    if !f0.is_finite() {
+        return;
+    }
+    let s0 = bias.cv(x.view());
+    let mut f_eff = f0 + bias.potential(s0.view());
+    let temp = ladder_temperature(archive_temp0(ledger), states.surrogate_gen);
+    let width = mean_width(bounds);
+    let step = 0.05 * width;
+    let deposit_period = 8usize.max(1);
+    let mut deposits = 0usize;
+    for t in 0..slice {
+        if ledger.exhausted() {
+            break;
+        }
+        let mut y = x.clone();
+        for j in 0..dim {
+            let z: f64 = rand_distr::StandardNormal.sample(rng);
+            y[j] += step * z;
+        }
+        let y = crate::movekernel::reflect_into_box(y.view(), bounds);
+        let ft = obj.eval(y.view());
+        if !ft.is_finite() {
+            continue;
+        }
+        let s = bias.cv(y.view());
+        let fe = ft + bias.potential(s.view());
+        let delta = energy_delta(fe, f_eff);
+        if metropolis(delta, temp, rng) {
+            x = y;
+            f_eff = fe;
+            if t > 0 && t % deposit_period == 0 {
+                bias.deposit(s.view(), temp.max(1e-9));
+                deposits += 1;
+            }
+        }
+    }
+    if deposits > 0 {
+        states.last_exploratory_ok = true;
+    }
+    states.surrogate_gen = states.surrogate_gen.saturating_add(1);
+}
+
+/// Two archive endpoints for TPS: low-F "product" and a distinct higher-F
+/// "reactant" seed (pnastps basins A/B adapted to true objective).
+fn archive_basin_pair(
+    ledger: &BudgetLedger,
+    bounds: &Bounds<f64>,
+) -> Option<(Array1<f64>, f64, Array1<f64>, f64)> {
+    let inner = ledger.inner.lock().expect("ledger lock");
+    let dim = ledger.dim;
+    let n = inner.archive_y.len();
+    if n < 2 {
+        return None;
+    }
+    let mut best_i = None;
+    let mut best_v = f64::INFINITY;
+    for i in 0..n {
+        let v = inner.archive_y[i];
+        if v.is_finite() && v < best_v {
+            best_v = v;
+            best_i = Some(i);
+        }
+    }
+    let bi = best_i?;
+    let x_b = Array1::from_vec(inner.archive_x[bi * dim..(bi + 1) * dim].to_vec());
+    let min_sep = 0.05 * mean_width(bounds);
+    let mut best_a = None;
+    let mut best_a_v = f64::NEG_INFINITY;
+    for i in 0..n {
+        if i == bi {
+            continue;
+        }
+        let v = inner.archive_y[i];
+        if !v.is_finite() {
+            continue;
+        }
+        let xi = Array1::from_vec(inner.archive_x[i * dim..(i + 1) * dim].to_vec());
+        let dist = xi
+            .iter()
+            .zip(x_b.iter())
+            .map(|(u, w)| (u - w).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        if dist < min_sep {
+            continue;
+        }
+        // Prefer a distinctly worse (higher) finite point as the reactant.
+        if v >= best_v && v > best_a_v {
+            best_a_v = v;
+            best_a = Some((xi, v));
+        }
+    }
+    let (x_a, f_a) = best_a?;
+    if !bounds.contains(x_a.view()) || !bounds.contains(x_b.view()) {
+        return None;
+    }
+    Some((x_a, f_a, x_b, best_v))
+}
+
+/// TPS-inspired shooting arm (pnastps forward/backward shoot analogue).
+fn run_tps_arm<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    states: &mut ArmStates,
+    rng: &mut StdRng,
+    slice: usize,
+    bounds: &Bounds<f64>,
+    dim: usize,
+) where
+    O: Objective<f64>,
+{
+    use crate::methods::tps_shoot::{
+        accept_reactive_shoot, apply_shoot, linear_path, path_reactive_geometric,
+        path_reactive_objective, pick_shoot_direction, pick_shoot_index, ShootDirection,
+    };
+    states.last_exploratory_ok = false;
+    if dim < 2 || slice < 8 {
+        return;
+    }
+    let Some((x_a, f_a, x_b, f_b)) = archive_basin_pair(ledger, bounds) else {
+        // Fall back: short QMC GSA scout to populate the archive for later TPS.
+        if slice >= 8 {
+            qmc_gsa_global_search(obj, slice / 2, rng.random(), 2, 1.0, GSA_Q_V, GSA_Q_A);
+        }
+        return;
+    };
+    let n_frames = ((slice / 4).clamp(5, 17) | 1).max(5); // odd, >=5
+    let mut path = linear_path(x_a.view(), x_b.view(), n_frames);
+    let mut ops: Vec<f64> = Vec::with_capacity(n_frames);
+    for frame in &path {
+        if ledger.exhausted() {
+            return;
+        }
+        let x = crate::movekernel::reflect_into_box(frame.view(), bounds);
+        ops.push(obj.eval(x.view()));
+    }
+    // Objective-as-OP thresholds: reactant high, product low (pnastps a/b flipped).
+    let high = 0.5 * (f_a + f_b) + 0.25 * (f_a - f_b).abs().max(1e-9);
+    let low = f_b + 0.25 * (f_a - f_b).abs().max(1e-9);
+    let tol = 0.25 * mean_width(bounds);
+    let noise = 0.08 * mean_width(bounds);
+    let n_shoots = (slice / n_frames).max(1);
+    let mut accepts = 0usize;
+    for _ in 0..n_shoots {
+        if ledger.remaining() < n_frames || n_frames < 3 {
+            break;
+        }
+        let shoot = pick_shoot_index(n_frames, rng);
+        let dir = pick_shoot_direction(rng);
+        let reflect = |x: Array1<f64>| crate::movekernel::reflect_into_box(x.view(), bounds);
+        let trial = apply_shoot(
+            &path,
+            shoot,
+            dir,
+            x_a.view(),
+            x_b.view(),
+            noise,
+            rng,
+            reflect,
+        );
+        let mut trial_ops = Vec::with_capacity(n_frames);
+        for frame in &trial {
+            if ledger.exhausted() {
+                break;
+            }
+            let x = crate::movekernel::reflect_into_box(frame.view(), bounds);
+            trial_ops.push(obj.eval(x.view()));
+        }
+        if trial_ops.len() != n_frames {
+            break;
+        }
+        let reactive = path_reactive_objective(&trial_ops, high, low)
+            || path_reactive_geometric(&trial, x_a.view(), x_b.view(), tol);
+        if accept_reactive_shoot(reactive) {
+            path = trial;
+            ops = trial_ops;
+            accepts += 1;
+        }
+    }
+    if accepts > 0 {
+        states.last_exploratory_ok = true;
+    }
+    let _ = (ops, ShootDirection::Forward);
+}
+
+/// Arms in regime-preferred order; the horizon cap truncates from the back, so
+/// the core stays active at small budgets and the full library unlocks
+/// as the slice count grows. Restart arm `explore` is always first.
+///
+/// `extra_slots` (Auto only) unlocks additional specialized arms when the
+/// horizon would otherwise starve them (e.g. GLE+reduced under high dim).
+fn enabled_arms(
+    dim: usize,
+    has_grad: bool,
+    n_slices: usize,
+    regime: crate::methods::regime::OptimizationRegime,
+    extra_slots: usize,
+) -> Vec<ArmKind> {
+    let available = library_arm_names(dim, has_grad);
     // The posterior needs ROUNDS_PER_ARM pulls per arm to rank them;
     // activate only as many arms as the horizon can rank (the D4 regret
     // grows with K, and a starved arm is worse than an absent one).
-    let k_active = (n_slices / ROUNDS_PER_ARM).clamp(4, arms.len());
-    arms.truncate(k_active);
-    arms
+    let k_active = (n_slices / ROUNDS_PER_ARM)
+        .saturating_add(extra_slots)
+        .clamp(4, available.len());
+    let ordered = crate::methods::regime::order_arms(&available, regime, k_active);
+    ordered
+        .iter()
+        .filter_map(|n| arm_kind_from_name(n))
+        .collect()
+}
+
+/// Portfolio scheduling policy (GJQ-style: auto vs flat legacy for A/B).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PortfolioPolicy {
+    /// Feature-based regime selection + prior boosts (default shipped path).
+    #[default]
+    Auto,
+    /// Pre-regime behaviour: fixed Default arm order, uninformative Beta(1,1).
+    /// Used only for same-protocol regression / A-B measurement.
+    Legacy,
+}
+
+/// Runs the portfolio under the default auto policy.
+pub fn portfolio_optimize<O, G>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    noise_sigma: Option<f64>,
+) -> PortfolioResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    portfolio_optimize_with_policy(obj, grad, budget, seed, noise_sigma, PortfolioPolicy::Auto)
 }
 
 /// Runs the portfolio driver under a shared work-unit budget.
@@ -1628,12 +2084,14 @@ fn enabled_arms(dim: usize, has_grad: bool, n_slices: usize) -> Vec<ArmKind> {
 /// `budget` bounds combined true-objective and native-gradient
 /// evaluations and is the driver's only required parameter. `grad`
 /// enables the gradient arms and the final polish.
-pub fn portfolio_optimize<O, G>(
+/// `policy` selects regime auto-routing (`Auto`) or flat legacy order.
+pub fn portfolio_optimize_with_policy<O, G>(
     obj: &O,
     grad: Option<&G>,
     budget: usize,
     seed: u64,
     noise_sigma: Option<f64>,
+    policy: PortfolioPolicy,
 ) -> PortfolioResult
 where
     O: Objective<f64>,
@@ -1650,6 +2108,26 @@ where
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
 
+    // GJQ-style regime refusal on the shipped accept path: declared noise
+    // forbids exact-only Metropolis. The portfolio always uses OSA when
+    // noise_sigma is Some (see accept_move); this gate fails loudly if that
+    // invariant is ever broken by a caller API that passes use_noise_aware=false.
+    let use_noise_aware = noise_sigma.is_some();
+    crate::methods::regime::require_accept_compatible(noise_sigma, use_noise_aware)
+        .expect("shipped portfolio always pairs declared noise with OSA accept");
+
+    // GJQ-style regime auto-selection from measurable features.
+    let features = crate::methods::regime::ProblemFeatures::from_bounds(
+        &bounds,
+        grad.is_some(),
+        noise_sigma,
+        budget,
+    );
+    let regime = match policy {
+        PortfolioPolicy::Auto => crate::methods::regime::select_regime(&features),
+        PortfolioPolicy::Legacy => crate::methods::regime::OptimizationRegime::Default,
+    };
+
     let ledger = BudgetLedger::new(budget, dim);
     let budgeted_obj = BudgetedObjective {
         inner: obj,
@@ -1661,17 +2139,42 @@ where
     });
 
     // Derived scheduler quantities; see the module constants for the
-    // two governing numbers.
-    let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX).len();
+    // two governing numbers. Auto unlocks extra specialized arms so the
+    // regime order can actually include GLE/reduced/DE under tight horizons.
+    // Unlock MetaD + TPS (+ one more specialized arm) under Auto so the
+    // horizon does not starve the new enhanced-sampling machinery.
+    let extra = match (policy, regime) {
+        (
+            PortfolioPolicy::Auto,
+            crate::methods::regime::OptimizationRegime::HighDimIllConditioned
+            | crate::methods::regime::OptimizationRegime::MultimodalNoGrad
+            | crate::methods::regime::OptimizationRegime::LowDimSmooth,
+        ) => 4,
+        (PortfolioPolicy::Auto, _) => 2,
+        _ => 0,
+    };
+    let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX, regime, extra).len();
     let slice =
         (SLICE_GRAD_EQUIVALENTS * (dim + 1)).max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
     let n_slices = (budget / slice.max(1)).max(1);
-    let arms = enabled_arms(dim, grad.is_some(), n_slices);
+    let arms = enabled_arms(dim, grad.is_some(), n_slices, regime, extra);
     debug_assert_eq!(arms[0], RESTART_ARM);
-    // Posterior memory matches the slice horizon.
+    // Posterior memory matches the slice horizon; Auto boosts preferred arms.
     let discount = 1.0 - 1.0 / (n_slices.max(2) as f64);
-    let mut posteriors: Vec<ArmPosterior> =
-        arms.iter().map(|_| ArmPosterior::new(discount)).collect();
+    let mut posteriors: Vec<ArmPosterior> = arms
+        .iter()
+        .map(|arm| {
+            let (a0, b0) = match policy {
+                PortfolioPolicy::Auto => {
+                    crate::methods::regime::arm_prior_boost(regime, arm.name())
+                }
+                PortfolioPolicy::Legacy => (1.0, 1.0),
+            };
+            ArmPosterior::with_prior(discount, a0, b0)
+        })
+        .collect();
+    // TPE dual-density history over arm indices (Auto policy).
+    let mut tpe = crate::methods::tpe::TpeCategorical::new(arms.len());
     let mut states = ArmStates {
         noise_sigma,
         ..ArmStates::default()
@@ -1696,6 +2199,46 @@ where
                 .is_some_and(|value| benchmark_objective_converged(value, ledger.best_get()));
             stop_after_low_dimensional_polish = stationary || objective_converged;
             low_dimensional_polish = None;
+        }
+    }
+
+    // Auto MultimodalNoGrad: short DE/GSA front-load (values-only problems
+    // need global structure before Thompson). Kept small so restarts still fire.
+    if policy == PortfolioPolicy::Auto
+        && matches!(
+            regime,
+            crate::methods::regime::OptimizationRegime::MultimodalNoGrad
+        )
+        && !stop_after_low_dimensional_polish
+    {
+        // 28% front-load: DE needs population-scale budget on rugged boxes.
+        let front_budget = ((budget as f64) * 0.28).round() as usize;
+        let preferred = [ArmKind::De, ArmKind::Gsa, ArmKind::Surrogate, ArmKind::Explore];
+        let per = (front_budget / preferred.len()).max(slice);
+        let mut seed_f = seed ^ 0xBEEF_u64;
+        for arm in preferred {
+            if !arms.contains(&arm) || ledger.remaining() < 8 {
+                continue;
+            }
+            let slice_use = per.min(ledger.remaining());
+            if slice_use < 4 {
+                break;
+            }
+            let ceiling = ledger.used_get() + slice_use;
+            ledger.cap_set(ceiling.min(budget));
+            seed_f = seed_f.wrapping_add(1);
+            let mut front_rng = StdRng::seed_from_u64(seed_f);
+            run_arm(
+                arm,
+                &budgeted_obj,
+                budgeted_grad.as_ref(),
+                &ledger,
+                &mut states,
+                &mut front_rng,
+                slice_use,
+                budget,
+            );
+            ledger.cap_set(budget);
         }
     }
 
@@ -1752,11 +2295,53 @@ where
         // posterior a real datum before ranking; the decaying uniform
         // floor then certifies that every arm, including the restart
         // arm, is played infinitely often (sum 1/(mK) diverges).
+        // Auto policy: after warmup, with probability regime_exploit_prob,
+        // pick among the regime's preferred active arms (GJQ-style
+        // feature routing that actually changes finite-budget allocation).
         let floor = (1.0 / round as f64).min(1.0);
+        // Allocation stack (Auto): warmup → uniform floor → TPE dual-density
+        // (once enough history) → regime exploit → floored Thompson.
+        // Legacy keeps Thompson-only after warmup/floor (A/B baseline).
         let choice = if let Some(warmup) = warmup_arm_index(round, k) {
             warmup
         } else if rng.random::<f64>() < floor {
             rng.random_range(0..k)
+        } else if policy == PortfolioPolicy::Auto
+            && tpe.len() >= (2 * k).max(8)
+            && rng.random::<f64>() < 0.60
+        {
+            tpe.pick(&mut rng)
+        } else if policy == PortfolioPolicy::Auto
+            && rng.random::<f64>() < crate::methods::regime::regime_exploit_prob(regime)
+        {
+            let width = crate::methods::regime::regime_exploit_width(regime);
+            let preferred = crate::methods::regime::preferred_arm_tail(regime);
+            let mut idxs: Vec<usize> = arms
+                .iter()
+                .enumerate()
+                .filter(|(_, arm)| {
+                    preferred
+                        .iter()
+                        .take(width)
+                        .any(|&name| name == arm.name())
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if idxs.is_empty() {
+                let mut best_idx = 0usize;
+                let mut best_draw = f64::NEG_INFINITY;
+                for (idx, posterior) in posteriors.iter().enumerate() {
+                    let draw = posterior.draw(&mut rng);
+                    if draw > best_draw {
+                        best_draw = draw;
+                        best_idx = idx;
+                    }
+                }
+                best_idx
+            } else {
+                idxs.sort_unstable();
+                idxs[rng.random_range(0..idxs.len())]
+            }
         } else {
             let mut best_idx = 0usize;
             let mut best_draw = f64::NEG_INFINITY;
@@ -1770,7 +2355,16 @@ where
             best_idx
         };
         let before = ledger.best_get();
-        let ceiling = ledger.used_get() + slice;
+        // Auto: preferred arms get larger slices under the same total budget.
+        let arm_slice = if policy == PortfolioPolicy::Auto {
+            let mult = crate::methods::regime::arm_slice_multiplier(regime, arms[choice].name());
+            ((slice as f64) * mult).round() as usize
+        } else {
+            slice
+        }
+        .max(4)
+        .min(ledger.remaining().max(4));
+        let ceiling = ledger.used_get() + arm_slice;
         ledger.cap_set(ceiling.min(budget));
         run_arm(
             arms[choice],
@@ -1779,16 +2373,36 @@ where
             &ledger,
             &mut states,
             &mut rng,
-            slice,
+            arm_slice,
             budget,
         );
         ledger.cap_set(budget);
         let threshold = arm_success_threshold(arms[choice], before);
         let after = ledger.best_get();
-        posteriors[choice].update(after.is_finite() && after < before - threshold);
+        let improved = after.is_finite() && after < before - threshold;
+        let exploratory = arms[choice].exploratory_credit() && states.last_exploratory_ok;
+        posteriors[choice].update(improved || exploratory);
+        // TPE score: true-F improvement magnitude, plus a small bonus when
+        // enhanced-sampling arms explore without an immediate incumbent drop.
+        let mut score = if after.is_finite() && before.is_finite() && after < before {
+            before - after
+        } else {
+            0.0
+        };
+        if exploratory {
+            score += threshold.max(1e-12);
+        }
+        tpe.record(choice, score);
+        states.last_exploratory_ok = false;
     }
 
-    let best_pos = ledger.incumbent(&bounds).to_vec();
+    let best_pos_arr = ledger.incumbent(&bounds);
+    // Final safety: never return OOB coordinates from the public API.
+    let best_pos = bounds.clip(best_pos_arr.view()).to_vec();
+    debug_assert!(
+        bounds.contains(ArrayView1::from(&best_pos)),
+        "portfolio best_pos must be in bounds"
+    );
     PortfolioResult {
         best_pos,
         best_val: ledger.best_get(),
@@ -1854,20 +2468,64 @@ mod tests {
 
     #[test]
     fn restart_arm_is_always_first() {
-        let arms = enabled_arms(5, false, usize::MAX);
+        use crate::methods::regime::OptimizationRegime;
+        let arms = enabled_arms(5, false, usize::MAX, OptimizationRegime::Default, 0);
         assert_eq!(arms[0], RESTART_ARM);
-        let arms = enabled_arms(30, true, usize::MAX);
+        let arms = enabled_arms(
+            30,
+            true,
+            usize::MAX,
+            OptimizationRegime::HighDimIllConditioned,
+            0,
+        );
         assert_eq!(arms[0], RESTART_ARM);
         // The full library is active at a generous horizon.
         assert!(arms.contains(&ArmKind::Reduced));
         assert!(arms.contains(&ArmKind::Hmc));
         assert!(arms.contains(&ArmKind::Pt));
+        assert!(arms.contains(&ArmKind::Metad));
+        assert!(arms.contains(&ArmKind::Tps));
+    }
+
+    #[test]
+    fn library_exposes_metad_and_tps_for_dim_ge_2() {
+        let names = library_arm_names(2, true);
+        assert!(names.contains(&"metad"));
+        assert!(names.contains(&"tps"));
+        let names1 = library_arm_names(1, true);
+        assert!(!names1.contains(&"metad"));
+        assert!(!names1.contains(&"tps"));
+    }
+
+    #[test]
+    fn portfolio_metad_tps_arms_are_callable_on_real_path() {
+        // Drive the shipped portfolio entry so MetaD / TPS appear in arm_stats
+        // when the horizon unlocks them (not dead library code).
+        let obj = StybTang2D::new();
+        let result = portfolio_optimize(&obj, Some(&obj), 2500, 17, None);
+        assert!(result.best_val.is_finite());
+        assert!(result.best_pos.iter().all(|v| v.is_finite()));
+        assert!(
+            result.best_pos[0] >= -5.0 - 1e-9 && result.best_pos[0] <= 5.0 + 1e-9,
+            "best must stay in bounds"
+        );
+        let names: Vec<&str> = result.arm_stats.iter().map(|s| s.name).collect();
+        assert!(
+            names.contains(&"metad") || names.contains(&"tps") || names.contains(&"explore"),
+            "expected enhanced-sampling or restart arms in stats, got {names:?}"
+        );
+        // With Auto + extra slots on 2-D Styblinski, metad and tps should unlock.
+        assert!(
+            names.contains(&"metad") && names.contains(&"tps"),
+            "MetaD and TPS must be active portfolio arms, got {names:?}"
+        );
     }
 
     #[test]
     fn horizon_caps_active_arms() {
-        let few = enabled_arms(30, true, 16);
-        let many = enabled_arms(30, true, usize::MAX);
+        use crate::methods::regime::OptimizationRegime;
+        let few = enabled_arms(30, true, 16, OptimizationRegime::Default, 0);
+        let many = enabled_arms(30, true, usize::MAX, OptimizationRegime::Default, 0);
         assert!(few.len() < many.len());
         assert!(few.len() >= 4);
     }
@@ -2188,10 +2846,25 @@ mod tests {
 
     #[test]
     fn gradient_horizon_prioritizes_shift_arm() {
-        let arms = enabled_arms(6, true, 16);
+        use crate::methods::regime::OptimizationRegime;
+        // Default mid-dim gradient order under a tight horizon: explore then
+        // regime-preferred shift/hop/metad before DE.
+        let arms = enabled_arms(6, true, 16, OptimizationRegime::Default, 0);
         assert!(arms.contains(&ArmKind::Shift));
-        assert!(arms.contains(&ArmKind::Gle));
+        assert!(arms.contains(&ArmKind::Hop) || arms.contains(&ArmKind::Metad));
         assert!(!arms.contains(&ArmKind::De));
+        // With more horizon (+ extra slots) GLE and MetaD both unlock.
+        let arms_wide = enabled_arms(6, true, 64, OptimizationRegime::Default, 2);
+        assert!(arms_wide.contains(&ArmKind::Gle) || arms_wide.contains(&ArmKind::Metad));
+    }
+
+    #[test]
+    fn high_dim_regime_prefers_gle_over_de() {
+        use crate::methods::regime::OptimizationRegime;
+        let arms = enabled_arms(40, true, 64, OptimizationRegime::HighDimIllConditioned, 0);
+        let gle = arms.iter().position(|a| *a == ArmKind::Gle).expect("gle");
+        let de = arms.iter().position(|a| *a == ArmKind::De);
+        assert!(de.is_none_or(|d| gle < d));
     }
 
     #[test]

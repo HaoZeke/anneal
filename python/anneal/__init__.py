@@ -524,6 +524,7 @@ def global_optimize(
     seed: int = 0,
     grad_fn=None,
     noise_sigma=None,
+    policy: str = "auto",
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -556,7 +557,10 @@ def global_optimize(
         sites use the Ball, Branke & Meisel (2018) sequential OSA rule,
         which draws repeated noisy evaluations to decide while keeping
         detailed balance under ``Normal(delta, noise_sigma**2)`` cost
-        differences.
+        differences. Exact Metropolis under declared noise is refused
+        (out of regime).
+      policy: ``"auto"`` (default; feature-based regime routing) or
+        ``"legacy"`` (flat arm order, uninformative priors; A/B only).
 
     Returns a dict with ``best_pos``, ``best_val``, ``n_evals``,
     ``n_grads``, ``arm_pulls``, and ``arm_successes``.
@@ -569,6 +573,7 @@ def global_optimize(
         int(seed),
         grad_fn,
         noise_sigma if noise_sigma is None else float(noise_sigma),
+        str(policy),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
