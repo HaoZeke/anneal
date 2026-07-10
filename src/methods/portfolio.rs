@@ -621,6 +621,7 @@ impl ArmStates {
     /// 1,1,2,1,1,2,4,1,... (Luby, Sinclair, Zuckerman 1993): the expected
     /// hit time of restarts with these cutoffs is within a logarithmic
     /// factor of the best fixed cutoff for any run-length distribution.
+    #[allow(dead_code)] // retained for a depth-schedule A/B; see explore arm note
     fn luby_next(&mut self) -> u64 {
         if self.luby_u == 0 {
             self.luby_u = 1;
@@ -1320,34 +1321,18 @@ fn run_arm<O, G>(
             // best ones refined; positive-density restarts carry the
             // global convergence guarantee.
             if let Some(grad) = grad {
-                // Luby-scheduled restarts: each QMC restart's descent
-                // depth is quantum * Luby(i). The Luby sequence is within
-                // a logarithmic factor of the best fixed cutoff for any
-                // unknown basin-hit distribution, so the restart arm
-                // carries a distribution-free near-optimality guarantee
-                // on top of the positive-density restart measure.
-                let quantum = 2 * (dim + 1);
-                let mut spent = 0usize;
-                let mut segment = 0u64;
-                while spent + quantum <= slice && ledger.remaining() >= 4 {
-                    let depth =
-                        ((states.luby_next() * quantum as u64) as usize).min(slice - spent);
-                    let n_starts = (depth / 4).clamp(2, 8);
-                    let per_start = depth.saturating_sub(n_starts).max(2);
+                // One third screening, two thirds descent; the single
+                // polished start gets the full descent depth, which
+                // ill-conditioned valleys need more than breadth.
+                // (A Luby-scheduled depth variant measurably lost basins
+                // on DEVGLA1-class cells at 2(D+1) quanta; revisit only
+                // with per-cell A/B evidence.)
+                let n_starts = (slice / 3).max(4);
+                let per_start = slice.saturating_sub(n_starts) / 2;
+                if per_start >= 2 {
                     qmc_projected_gradient_polish(
-                        obj,
-                        grad,
-                        n_starts,
-                        per_start,
-                        seed.wrapping_add(segment),
-                        1.0,
-                        1e-8,
-                        1,
+                        obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
                     );
-                    spent += n_starts + per_start;
-                    segment += 1;
-                }
-                if segment > 0 {
                     return;
                 }
             }
