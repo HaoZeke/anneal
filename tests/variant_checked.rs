@@ -8,7 +8,7 @@ use anneal_core::cool::LogCool;
 use anneal_core::laws::LawViolation;
 use anneal_core::movekernel::Gaussian;
 use anneal_core::neigh::Neighborhood;
-use anneal_core::variant::{SaVariant, boltzmann, fast, gsa};
+use anneal_core::variant::{SaVariant, SweepBudget, boltzmann, fast, gsa};
 
 use eindir_core::Objective;
 use eindir_core::objectives::StybTang2D;
@@ -32,8 +32,8 @@ fn gsa_preset_constructs() {
     assert_eq!(v.obj.dim(), 2);
 }
 
-/// Mock neighborhood that lies about symmetry to exercise the
-/// `LawViolation::Symmetry` arm of `SaVariant::checked`.
+/// Mock neighborhood that lies about symmetry to exercise the runtime
+/// validation path for third-party components.
 struct BadNeigh;
 
 impl Neighborhood<f64> for BadNeigh {
@@ -47,12 +47,16 @@ impl Neighborhood<f64> for BadNeigh {
 
 #[test]
 fn checked_rejects_non_symmetric_neighborhood() {
-    let result = SaVariant::checked(
+    let result = SaVariant::checked_with_sweep(
         StybTang2D::new(),
         LogCool::new(1.0_f64, 2.0),
         BadNeigh,
         Gaussian::new(0.5),
         Metropolis,
+        SweepBudget::Default,
+        2,
+        5.0,
+        0,
     );
     match result {
         Err(LawViolation::Symmetry) => {}

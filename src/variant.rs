@@ -10,8 +10,55 @@ use num_traits::Float;
 use crate::accept::{AcceptRule, Metropolis, TsallisAccept};
 use crate::cool::{Cooling, LogCool, ReciprocalCool, TsallisCool};
 use crate::laws::LawViolation;
-use crate::movekernel::{Cauchy, Gaussian, MoveKernel, TsallisVisit};
-use crate::neigh::{ContinuousR_n, Neighborhood};
+use crate::movekernel::{Cauchy, Gaussian, MoveKernel, Reflected, TsallisVisit};
+use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
+
+/// Cooling schedules whose parameter constructors establish L4.
+pub trait CertifiedCooling<T: Float>: Cooling<T> {}
+
+impl<T: Float + Send + Sync> CertifiedCooling<T> for LogCool<T> {}
+impl<T: Float + Send + Sync> CertifiedCooling<T> for ReciprocalCool<T> {}
+impl<T: Float + Send + Sync> CertifiedCooling<T> for TsallisCool<T> {}
+
+/// Neighborhood relations whose implementations establish L1.
+pub trait CertifiedNeighborhood<T: Float>: Neighborhood<T> {}
+
+impl<T: Float + Send + Sync> CertifiedNeighborhood<T> for ContinuousR_n {}
+impl CertifiedNeighborhood<f64> for BoxConstrained<f64> {}
+
+/// Acceptance rules whose implementations establish L3 and L4.
+pub trait CertifiedAcceptance<T: Float>: AcceptRule<T> {}
+
+impl<T: Float + Send + Sync> CertifiedAcceptance<T> for Metropolis {}
+impl<T: Float + Send + Sync> CertifiedAcceptance<T> for TsallisAccept<T> {}
+
+/// Move/neighborhood pairs whose support compatibility is certified.
+pub trait CertifiedMoveFor<T: Float, N: Neighborhood<T>>: MoveKernel<T> {
+    /// Confirms value-level requirements that the type pair cannot encode.
+    fn certified_supports(&self, neigh: &N) -> bool;
+}
+
+macro_rules! certify_full_space_move {
+    ($move:ty) => {
+        impl CertifiedMoveFor<f64, ContinuousR_n> for $move {
+            fn certified_supports(&self, _neigh: &ContinuousR_n) -> bool {
+                true
+            }
+        }
+    };
+}
+
+certify_full_space_move!(Gaussian);
+certify_full_space_move!(Cauchy);
+certify_full_space_move!(TsallisVisit);
+
+impl<M: MoveKernel<f64>> CertifiedMoveFor<f64, BoxConstrained<f64>> for Reflected<M> {
+    fn certified_supports(&self, neigh: &BoxConstrained<f64>) -> bool {
+        self.bounds.dims == neigh.bounds.dims
+            && self.bounds.low == neigh.bounds.low
+            && self.bounds.high == neigh.bounds.high
+    }
+}
 
 /// A fully-typed SA variant: an `(Obj, Cool, Neigh, Move, Accept)` tuple
 /// satisfying the IISE-manuscript composition laws L1-L4.
@@ -46,19 +93,38 @@ where
     M: MoveKernel<T>,
     A: AcceptRule<T>,
 {
-    /// Constructs a variant after asserting laws L1, L2, L4 via the
-    /// runtime witness methods on the supplied components.
-    /// L3 (downhill always accepts) is left to the per-impl proptest sweep
-    /// since it is a property of the `AcceptRule::accept_prob` function
-    /// shape and cannot be captured by a single Boolean witness.
-    pub fn checked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Result<Self, LawViolation> {
+    /// Constructs a tuple without validating L1-L4.
+    ///
+    /// This is intended for negative tests and research prototypes. Results
+    /// produced through this constructor are excluded from certified-component
+    /// claims.
+    pub fn unchecked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Self {
+        Self {
+            obj,
+            cool,
+            neigh,
+            mover,
+            accept,
+            _t: PhantomData,
+        }
+    }
+
+    /// Constructs a variant from component types certified for L1-L4.
+    /// Third-party components use [`Self::checked_with_sweep`] instead.
+    pub fn checked(obj: O, cool: C, neigh: N, mover: M, accept: A) -> Result<Self, LawViolation>
+    where
+        C: CertifiedCooling<T>,
+        N: CertifiedNeighborhood<T>,
+        M: CertifiedMoveFor<T, N>,
+        A: CertifiedAcceptance<T>,
+    {
         if !cool.is_monotone() {
             return Err(LawViolation::NonMonotoneCooling);
         }
         if !neigh.is_symmetric() {
             return Err(LawViolation::Symmetry);
         }
-        if !mover.supports_in(&neigh) {
+        if !mover.certified_supports(&neigh) {
             return Err(LawViolation::SupportEscape);
         }
         Ok(Self {
@@ -72,13 +138,10 @@ where
     }
 }
 
-/// Sweep budget for `checked_with_sweep`. `Off` skips the random
-/// property sweeps; `Default` runs 256 samples per law (matches the
-/// proptest default per-test budget); `Strict` runs 4096.
+/// Sweep budget for `checked_with_sweep`. `Default` runs 256 samples per law;
+/// `Strict` runs 4096.
 #[derive(Clone, Copy, Debug)]
 pub enum SweepBudget {
-    /// No randomised law sweep; behaves identically to `checked`.
-    Off,
     /// 256 samples per law sweep (default proptest budget).
     Default,
     /// 4096 samples per law sweep, for strict correctness checks.
@@ -90,7 +153,6 @@ pub enum SweepBudget {
 impl SweepBudget {
     fn n_samples(self) -> usize {
         match self {
-            SweepBudget::Off => 0,
             SweepBudget::Default => 256,
             SweepBudget::Strict => 4096,
             SweepBudget::Custom(n) => n,
@@ -104,7 +166,7 @@ where
     O: Objective<T>,
     C: Cooling<T> + Cooling<f64>,
     N: Neighborhood<T> + Neighborhood<f64>,
-    M: MoveKernel<T>,
+    M: MoveKernel<T> + MoveKernel<f64>,
     A: AcceptRule<T> + AcceptRule<f64>,
 {
     /// Like `checked`, but additionally runs randomised property sweeps
@@ -128,13 +190,31 @@ where
         seed: u64,
     ) -> Result<Self, LawViolation> {
         let n = budget.n_samples();
-        if n > 0 {
-            crate::laws::sweep_downhill_accepts(&accept, n, seed)?;
-            crate::laws::sweep_accept_monotone_in_temp(&accept, n, seed.wrapping_add(1))?;
-            crate::laws::sweep_cooling_monotone(&cool, n.min(1000))?;
-            crate::laws::sweep_neighborhood_symmetric(&neigh, dim, bound, n, seed.wrapping_add(2))?;
+        if n == 0 {
+            return Err(LawViolation::EmptySweep);
         }
-        Self::checked(obj, cool, neigh, mover, accept)
+        crate::laws::sweep_downhill_accepts(&accept, n, seed)?;
+        crate::laws::sweep_accept_monotone_in_temp(&accept, n, seed.wrapping_add(1))?;
+        crate::laws::sweep_cooling_monotone(&cool, n.min(1000))?;
+        crate::laws::sweep_neighborhood_symmetric(&neigh, dim, bound, n, seed.wrapping_add(2))?;
+        crate::laws::sweep_move_support(&mover, &neigh, dim, bound, n, seed.wrapping_add(3))?;
+        if !cool.is_monotone() {
+            return Err(LawViolation::NonMonotoneCooling);
+        }
+        if !neigh.is_symmetric() {
+            return Err(LawViolation::Symmetry);
+        }
+        if !mover.supports_in(&neigh) {
+            return Err(LawViolation::SupportEscape);
+        }
+        Ok(Self {
+            obj,
+            cool,
+            neigh,
+            mover,
+            accept,
+            _t: PhantomData,
+        })
     }
 }
 

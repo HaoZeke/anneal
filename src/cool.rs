@@ -6,9 +6,8 @@ use num_traits::Float;
 /// A cooling schedule: maps an epoch index to a positive temperature.
 ///
 /// The IISE manuscript law L4 requires the schedule to be non-increasing in
-/// the epoch counter. Implementors should override `is_monotone` to
-/// advertise this property; the default is `true` because every shipped
-/// schedule satisfies L4 by construction.
+/// the epoch counter. Implementors override `is_monotone` to advertise this
+/// property; the conservative default is `false`.
 pub trait Cooling<T: Float>: Send + Sync {
     /// Returns the temperature at the given epoch.
     fn temperature(&self, epoch: usize) -> T;
@@ -16,7 +15,7 @@ pub trait Cooling<T: Float>: Send + Sync {
     /// Witnesses L4: returns `true` iff `temperature` is non-increasing in
     /// `epoch`. Default `true`.
     fn is_monotone(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -46,6 +45,10 @@ impl<T: Float + Send + Sync> Cooling<T> for LogCool<T> {
         let k = T::from(epoch).unwrap_or(T::zero());
         self.t_init * self.k0.ln() / (k + self.k0).ln()
     }
+
+    fn is_monotone(&self) -> bool {
+        true
+    }
 }
 
 /// Reciprocal cooling: `T(k) = T_0 / (k + 1)`.
@@ -70,6 +73,10 @@ impl<T: Float + Send + Sync> Cooling<T> for ReciprocalCool<T> {
     fn temperature(&self, epoch: usize) -> T {
         let k = T::from(epoch).unwrap_or(T::zero());
         self.t_init / (k + T::one())
+    }
+
+    fn is_monotone(&self) -> bool {
+        true
     }
 }
 

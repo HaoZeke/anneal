@@ -11,17 +11,17 @@ use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
 /// A temperature-indexed proposal kernel.
 ///
 /// IISE manuscript law L2 requires `supp(Move(i, T)) subseteq Neigh(i)`.
-/// Implementors override `supports_in` to advertise this constraint per
-/// neighborhood. Default `true` because every shipped move kernel
-/// (Gaussian, Cauchy, Tsallis-q_v) has full-R^n support, which subsumes
-/// every shipped neighborhood.
+/// Implementors override `supports_in` to advertise this constraint for the
+/// sampled-validation constructor. The conservative default is `false`.
 pub trait MoveKernel<T: Float>: Send + Sync {
     /// Draws a proposal point from the kernel at temperature `t`.
     fn propose<R: Rng>(&self, i: ArrayView1<T>, t: T, rng: &mut R) -> Array1<T>;
 
-    /// Witnesses L2: returns `true` iff `supp(propose) subseteq n`. Default `true`.
+    /// Witnesses L2: returns `true` iff `supp(propose) subseteq n` over the
+    /// implementor's declared domain. Sampled validation also exercises the
+    /// proposal behavior. Default `false`.
     fn supports_in<N: Neighborhood<T>>(&self, _n: &N) -> bool {
-        true
+        false
     }
 }
 
@@ -49,15 +49,8 @@ impl MoveKernel<f64> for Gaussian {
     }
 
     fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
-        // Gaussian has full-R^n support; subsumes ContinuousR_n. For
-        // BoxConstrained the proposal can escape the box, so callers must
-        // either use ContinuousR_n or wrap the kernel in a clipping
-        // adapter (not provided here). The witness reflects this: only
-        // safe to claim support inclusion when paired with R^n kernels.
-        // We intentionally keep the default `true` when the neighborhood
-        // is unconstrained; callers using BoxConstrained are responsible
-        // for clipping. The proptest enforces the structural witness on
-        // `ContinuousR_n` and `BoxConstrained` separately.
+        // The sampled-validation path verifies proposals against the supplied
+        // neighborhood. Certified construction uses CertifiedMoveFor instead.
         true
     }
 }
@@ -86,6 +79,10 @@ impl MoveKernel<f64> for Cauchy {
         let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
         Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
     }
+
+    fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
+        true
+    }
 }
 
 /// Lanczos approximation (g = 7, n = 9) to the Gamma function for real `x > 0`,
@@ -104,8 +101,7 @@ fn gamma_fn(x: f64) -> f64 {
         1.505_632_735_149_311_6e-7,
     ];
     if x < 0.5 {
-        std::f64::consts::PI
-            / ((std::f64::consts::PI * x).sin() * gamma_fn(1.0 - x))
+        std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * gamma_fn(1.0 - x))
     } else {
         let x = x - 1.0;
         let mut a = C[0];
@@ -180,6 +176,10 @@ impl MoveKernel<f64> for TsallisVisit {
             }
             xi + v
         }))
+    }
+
+    fn supports_in<N: Neighborhood<f64>>(&self, _n: &N) -> bool {
+        true
     }
 }
 
@@ -281,8 +281,8 @@ mod tests {
     use super::*;
     use eindir_core::Bounds;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn reflect_coord_exact_unit_interval() {
