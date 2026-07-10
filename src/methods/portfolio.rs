@@ -2969,6 +2969,46 @@ mod tests {
     use eindir_core::{Rastrigin, StybTang2D};
 
     #[test]
+    fn metad_bias_uses_sketchmap_cv_on_rich_archive() {
+        // A diverse feasible archive must route MetaD through the
+        // sketch-map collective variables, not the leading-coordinate
+        // fallback: try_sketchmap_metad_bias returns a bias whose
+        // projector columns are non-degenerate.
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![-5.0, -5.0, -5.0]),
+            Array1::from_vec(vec![5.0, 5.0, 5.0]),
+            1e-12,
+        );
+        let ledger = BudgetLedger::new(10_000, 3);
+        let pts = [
+            (1.0, 1.0, 0.5),
+            (1.2, 0.8, 0.6),
+            (0.8, 1.2, 0.4),
+            (-2.0, -2.0, -1.0),
+            (-2.2, -1.8, -1.1),
+            (-1.8, -2.2, -0.9),
+            (3.0, -3.0, 2.0),
+            (-3.0, 3.0, -2.0),
+            (0.0, 4.0, 1.5),
+            (4.0, 0.0, -1.5),
+            (-4.0, -0.5, 2.5),
+            (0.5, -4.0, -2.5),
+        ];
+        for (i, (x, y, z)) in pts.iter().enumerate() {
+            ledger.record(
+                Array1::from_vec(vec![*x, *y, *z]).view(),
+                1.0 + i as f64,
+                &bounds,
+            );
+        }
+        let bias = try_sketchmap_metad_bias(3, &bounds, &ledger);
+        assert!(
+            bias.is_some(),
+            "rich archive must produce a sketch-map CV bias"
+        );
+    }
+
+    #[test]
     fn basin_registry_good_turing_record_gate() {
         let bounds = Bounds::new(
             Array1::from_vec(vec![-5.0, -5.0]),
