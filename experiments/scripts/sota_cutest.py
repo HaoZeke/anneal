@@ -251,19 +251,29 @@ def cma_es(counter, low, high, dim, grad, rng, anchor=None):
 
 
 def ngopt(counter, low, high, dim, grad, rng, anchor=None):
-    """Nevergrad NGOpt algorithm-selection wizard under the shared counter."""
+    """Nevergrad NGOpt wizard, restarted until the shared budget is spent.
+
+    NGOpt can terminate before its declared budget; restart-until-budget
+    matches the other baselines. Wall-clock warning: NGOpt's per-ask
+    overhead dwarfs cheap CUTEst objectives, so full-matrix runs are
+    disclosed with their wall cost in the campaign notes.
+    """
     import nevergrad as ng
 
     del grad, anchor
-    param = ng.p.Array(
-        init=np.asarray(0.5 * (low + high), dtype=np.float64)
-    ).set_bounds(list(low), list(high))
-    param.random_state = np.random.RandomState(int(rng.integers(1 << 31)))
-    opt = ng.optimizers.NGOpt(
-        parametrization=param, budget=counter.budget - counter.n
-    )
     try:
-        opt.minimize(lambda x: counter(np.asarray(x, dtype=np.float64)))
+        while counter.n < counter.budget:
+            before = counter.n
+            param = ng.p.Array(
+                init=rng.uniform(low, high).astype(np.float64)
+            ).set_bounds(list(low), list(high))
+            param.random_state = np.random.RandomState(int(rng.integers(1 << 31)))
+            opt = ng.optimizers.NGOpt(
+                parametrization=param, budget=counter.budget - counter.n
+            )
+            opt.minimize(lambda x: counter(np.asarray(x, dtype=np.float64)))
+            if counter.n == before:
+                break
     except _Budget:
         pass
     return counter.best
