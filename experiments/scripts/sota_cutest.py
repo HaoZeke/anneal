@@ -250,6 +250,54 @@ def cma_es(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
+def ngopt(counter, low, high, dim, grad, rng, anchor=None):
+    """Nevergrad NGOpt algorithm-selection wizard under the shared counter."""
+    import nevergrad as ng
+
+    del grad, anchor
+    param = ng.p.Array(
+        init=np.asarray(0.5 * (low + high), dtype=np.float64)
+    ).set_bounds(list(low), list(high))
+    param.random_state = np.random.RandomState(int(rng.integers(1 << 31)))
+    opt = ng.optimizers.NGOpt(
+        parametrization=param, budget=counter.budget - counter.n
+    )
+    try:
+        opt.minimize(lambda x: counter(np.asarray(x, dtype=np.float64)))
+    except _Budget:
+        pass
+    return counter.best
+
+
+def bobyqa(counter, low, high, dim, grad, rng, anchor=None):
+    """Py-BOBYQA multistart-restarts under the shared budget counter."""
+    import pybobyqa
+
+    del grad
+    try:
+        while counter.n < counter.budget:
+            x0 = (
+                np.asarray(anchor, dtype=np.float64).copy()
+                if anchor is not None and counter.n == 0
+                else rng.uniform(low, high)
+            )
+            remaining = counter.budget - counter.n
+            if remaining < 2 * dim + 2:
+                break
+            pybobyqa.solve(
+                counter,
+                x0,
+                bounds=(np.asarray(low), np.asarray(high)),
+                maxfun=remaining,
+                seek_global_minimum=True,
+                scaling_within_bounds=True,
+                do_logging=False,
+            )
+    except _Budget:
+        pass
+    return counter.best
+
+
 def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
     """IPOP-style CMA-ES: restart with growing population (stronger baseline)."""
     import cma
@@ -296,6 +344,8 @@ METHODS = {
     "diff_evol": sci_de,
     "cma_es": cma_es,
     "cma_es_ipop": cma_es_ipop,
+    "ngopt": ngopt,
+    "bobyqa": bobyqa,
     "classical": classical,
 }
 FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
