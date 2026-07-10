@@ -6,13 +6,13 @@
 use anneal_core::accept::Metropolis;
 use anneal_core::cool::LogCool;
 use anneal_core::laws::LawViolation;
-use anneal_core::movekernel::Gaussian;
-use anneal_core::neigh::Neighborhood;
-use anneal_core::variant::{SaVariant, SweepBudget, boltzmann, fast, gsa};
+use anneal_core::movekernel::{Gaussian, Reflected};
+use anneal_core::neigh::{BoxConstrained, Neighborhood};
+use anneal_core::variant::{SaVariant, SweepBudget, ValidationEvidence, boltzmann, fast, gsa};
 
-use eindir_core::Objective;
 use eindir_core::objectives::StybTang2D;
-use ndarray::ArrayView1;
+use eindir_core::{Bounds, Objective};
+use ndarray::{ArrayView1, array};
 
 #[test]
 fn boltzmann_preset_constructs() {
@@ -30,6 +30,39 @@ fn fast_preset_constructs() {
 fn gsa_preset_constructs() {
     let v = gsa(StybTang2D::new(), 1.0, 2.62, 1.7).expect("GSA should pass L1-L4");
     assert_eq!(v.obj.dim(), 2);
+}
+
+#[test]
+fn matching_reflected_box_pair_is_certified() {
+    let objective = StybTang2D::new();
+    let bounds = objective.bounds().clone();
+    let neighborhood = BoxConstrained::new(bounds.clone());
+    let mover = Reflected::new(Gaussian::new(0.5), bounds);
+    let variant = SaVariant::checked(
+        objective,
+        LogCool::new(1.0_f64, 2.0),
+        neighborhood,
+        mover,
+        Metropolis,
+    )
+    .expect("matching reflected move and box are certified");
+    assert_eq!(variant.validation, ValidationEvidence::Certified);
+}
+
+#[test]
+fn mismatched_reflected_box_pair_is_rejected() {
+    let objective = StybTang2D::new();
+    let neighborhood = BoxConstrained::new(objective.bounds().clone());
+    let other_bounds = Bounds::new(array![-4.0, -4.0], array![4.0, 4.0], 0.0);
+    let mover = Reflected::new(Gaussian::new(0.5), other_bounds);
+    let result = SaVariant::checked(
+        objective,
+        LogCool::new(1.0_f64, 2.0),
+        neighborhood,
+        mover,
+        Metropolis,
+    );
+    assert!(matches!(result, Err(LawViolation::SupportEscape)));
 }
 
 /// Mock neighborhood that lies about symmetry to exercise the runtime
