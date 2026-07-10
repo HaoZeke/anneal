@@ -1300,7 +1300,7 @@ fn portfolio_result_to_dict(
 ///   grad_fn: optional gradient callable; enables the gradient arms
 ///            and the final polish.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto"))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1310,6 +1310,7 @@ fn global_optimize(
     seed: u64,
     grad_fn: Option<Py<PyAny>>,
     noise_sigma: Option<f64>,
+    policy: &str,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1339,14 +1340,35 @@ fn global_optimize(
             ));
         }
     }
+    let pol = match policy {
+        "auto" | "Auto" | "" => crate::PortfolioPolicy::Auto,
+        "legacy" | "Legacy" => crate::PortfolioPolicy::Legacy,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "policy must be 'auto' or 'legacy', got {other:?}"
+            )));
+        }
+    };
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::portfolio_optimize(&obj, Some(&grad), budget, seed, noise_sigma)
+            crate::portfolio_optimize_with_policy(
+                &obj,
+                Some(&grad),
+                budget,
+                seed,
+                noise_sigma,
+                pol,
+            )
         }
-        None => {
-            crate::portfolio_optimize::<_, CallablePyGradient>(&obj, None, budget, seed, noise_sigma)
-        }
+        None => crate::portfolio_optimize_with_policy::<_, CallablePyGradient>(
+            &obj,
+            None,
+            budget,
+            seed,
+            noise_sigma,
+            pol,
+        ),
     };
     portfolio_result_to_dict(py, result)
 }

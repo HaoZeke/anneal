@@ -22,7 +22,7 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-eindir-core = { version = "0.5.0" }
+eindir-core = { path = "../eindir", version = "0.5.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"

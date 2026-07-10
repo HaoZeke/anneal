@@ -19,6 +19,10 @@ pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 pub mod portfolio;
+pub mod regime;
+pub mod sketchmap;
+pub mod tpe;
+pub mod tps_shoot;
 
 pub use additive_independence::{additive_independence_sa, AdditiveIndependenceResult};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
@@ -37,4 +41,21 @@ pub use local_polish::{
 };
 pub use mcmc_sa::{GelmanRubin, MultiChainResult, MultiChainSampler, MultiChainState};
 pub use parallel_tempering::{geometric_ladder, ParallelTemperingSampler, PtChainState, PtResult};
-pub use portfolio::{portfolio_optimize, ArmStat, PortfolioResult};
+pub use portfolio::{
+    portfolio_optimize, portfolio_optimize_with_policy, ArmStat, PortfolioPolicy, PortfolioResult,
+};
+pub use regime::{
+    arm_prior_boost, arm_slice_multiplier, check_accept_path, exact_accept_allowed, order_arms,
+    preferred_arm_tail, regime_exploit_prob, regime_exploit_width, require_accept_compatible,
+    select_regime, OptimizationRegime, ProblemFeatures, RegimeError,
+};
+pub use sketchmap::{
+    farthest_point_landmarks, pairwise_l2, row_l2, sigmoid_switch, SketchMap2d, DEFAULT_A,
+    DEFAULT_A_LOW, DEFAULT_B, DEFAULT_B_LOW,
+};
+pub use tpe::{TpeCategorical, TpeContinuous1d, DEFAULT_ALPHA, DEFAULT_GAMMA};
+pub use tps_shoot::{
+    accept_reactive_shoot, apply_shoot, best_frame_index, linear_path, path_is_reactive,
+    path_reactive_geometric, path_reactive_objective, pick_shoot_direction, pick_shoot_index,
+    ShootDirection,
+};
