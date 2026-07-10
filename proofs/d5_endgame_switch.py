@@ -89,43 +89,43 @@ def estimator_exactness_symbolic():
 
 
 # ---- Check 3: explore-first schedule optimality (exact enumeration) ---------
-def _win_probability(schedule, theta, g, tau, rho):
+def _win_probability(schedule, theta, n_star):
     """Exact symbolic win probability of a schedule over {E, P} slots.
 
-    State: distribution over (basin fresh-gap, polish steps applied since the
-    basin was last replaced). Exploration success resets polish progress; the
-    final gap must be <= tau. Fresh basins are conservatively assigned the
-    same initial gap g (a better basin can only help; the bound is what the
-    reserve rule needs)."""
-    # Enumerate outcomes of the E slots: each E succeeds w.p. theta.
+    Two-basin model: the run starts in a bad basin whose bottom sits above
+    the cell-best tolerance, so winning the cell requires (a) at least one
+    successful exploration (each E slot finds the good basin independently
+    with probability theta) and (b) at least n_star polish steps after the
+    last successful exploration (a basin switch discards polish progress;
+    n_star polish steps convert the fresh gap g to below tau)."""
     e_slots = [i for i, s in enumerate(schedule) if s == "E"]
     win = sp.Integer(0)
     for outcome in itertools.product([0, 1], repeat=len(e_slots)):
+        if not any(outcome):
+            continue  # never left the bad basin: loss
         prob = sp.Integer(1)
-        last_success = -1  # index into schedule of the last successful E
+        last_success = -1
         for j, bit in enumerate(outcome):
             prob *= theta if bit else (1 - theta)
             if bit:
                 last_success = e_slots[j]
-        # polish steps applied after the last basin replacement
         p_after = sum(1 for i, s in enumerate(schedule)
                       if s == "P" and i > last_success)
-        final_gap = g * rho**p_after
-        win += prob * sp.Piecewise((1, final_gap <= tau), (0, True))
+        if p_after >= n_star:
+            win += prob
     return sp.simplify(win)
 
 
 def explore_first_optimal_enumeration():
     theta = sp.Rational(1, 3)
-    g, rho = sp.Integer(1), sp.Rational(1, 10)
     ok = True
     for e, p in [(2, 2), (3, 2), (2, 3)]:
-        tau = g * rho**p  # p polish steps exactly convert the basin
+        n_star = p  # the polish tail exactly converts the fresh gap
         slots = ["E"] * e + ["P"] * p
         best = None
         wins = {}
         for perm in set(itertools.permutations(slots)):
-            w = _win_probability(perm, theta, g, tau, rho)
+            w = _win_probability(perm, theta, n_star)
             wins[perm] = w
             if best is None or sp.simplify(w - best) > 0:
                 best = w
@@ -137,24 +137,21 @@ def explore_first_optimal_enumeration():
 # ---- Check 4: reserve-threshold optimality over p ----------------------------
 def reserve_threshold_optimal_enumeration():
     theta = sp.Rational(1, 3)
-    g, rho = sp.Integer(1), sp.Rational(1, 10)
     n = 5
     ok = True
     for n_star in (2, 3):
-        tau = g * rho**n_star  # requirement: exactly n_star polish steps
         win_at = {}
         for p in range(n + 1):
             schedule = tuple(["E"] * (n - p) + ["P"] * p)
-            win_at[p] = _win_probability(schedule, theta, g, tau, rho)
+            win_at[p] = _win_probability(schedule, theta, n_star)
         target = win_at[n_star]
+        # p = n_star maximizes: fewer polish steps cannot convert the
+        # incumbent; each extra polish step forgoes one exploration slot
+        # at zero marginal polish value.
         for p, w in win_at.items():
             ok &= bool(sp.simplify(target - w) >= 0)
-        # strictly worse to under-polish (p = n_star - 1 cannot convert the
-        # incumbent; only a lucky late exploration followed by nothing wins,
-        # which the fresh-gap model scores as a loss) and to fully forgo
-        # exploration when n > n_star.
         ok &= bool(sp.simplify(target - win_at[n_star - 1]) > 0)
-        ok &= bool(sp.simplify(target - win_at[n]) > 0)
+        ok &= bool(sp.simplify(target - win_at[min(n_star + 1, n)]) > 0)
     return ok
 
 
