@@ -698,6 +698,18 @@ impl AmSaState {
     fn proposal_chol(&self, bounds: &Bounds<f64>) -> Array2<f64> {
         let d = self.x.len();
         let mut cov = Array2::zeros((d, d));
+        // Haario burn-in: until the chain has 2d accepted observations
+        // the scatter is uninformative, so propose from a box-scaled
+        // identity ((0.1 width_i)^2) rather than the near-zero scatter;
+        // a frozen initial chain wastes its whole slice inside one basin.
+        if self.n_obs < 2 * d {
+            let mut l = Array2::zeros((d, d));
+            for i in 0..d {
+                let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
+                l[(i, i)] = 0.1 * w;
+            }
+            return l;
+        }
         let denom = (self.n_obs as f64 - 1.0).max(1.0);
         for i in 0..d {
             for j in 0..d {
@@ -2442,9 +2454,16 @@ fn enabled_arms(
     // The posterior needs ROUNDS_PER_ARM pulls per arm to rank them;
     // activate only as many arms as the horizon can rank (the D4 regret
     // grows with K, and a starved arm is worse than an absent one).
+    // Gradient-free multimodal boxes are capped harder: ranking ten arms
+    // leaves no arm the contiguous budget its chain or population needs,
+    // which is how the flagship no-grad path lost to its own preset.
+    let regime_cap = match regime {
+        crate::methods::regime::OptimizationRegime::MultimodalNoGrad => 6,
+        _ => available.len(),
+    };
     let k_active = (n_slices / ROUNDS_PER_ARM)
         .saturating_add(extra_slots)
-        .clamp(4, available.len());
+        .clamp(4, regime_cap.min(available.len()).max(4));
     let ordered = crate::methods::regime::order_arms(&available, regime, k_active);
     ordered
         .iter()
@@ -2766,6 +2785,27 @@ where
                         ledger.remaining(),
                         1.0,
                         1e-12,
+                    );
+                }
+                if budgeted_grad.is_none() && ledger.remaining() >= 8 {
+                    // Gradient-free polish: the D6 chain at gap ~ 0 is
+                    // anisotropic greedy descent with a learned
+                    // covariance - poll steps are isotropic and stall on
+                    // ill-conditioned basin bottoms.
+                    if let Some(st) = states.am.as_mut() {
+                        st.x = ledger.incumbent(&bounds);
+                        st.f_x = ledger.best_get();
+                    }
+                    let am_share = (ledger.remaining() / 2).max(8);
+                    run_arm(
+                        ArmKind::AmSa,
+                        &budgeted_obj,
+                        budgeted_grad.as_ref(),
+                        &ledger,
+                        &mut states,
+                        &mut rng,
+                        am_share,
+                        budget,
                     );
                 }
                 let rem = ledger.remaining();

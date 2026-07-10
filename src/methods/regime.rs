@@ -127,7 +127,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "hmc", "reduced",
         ],
         OptimizationRegime::MultimodalNoGrad => &[
-            "de", "gsa", "am_sa", "metad", "tps", "surrogate", "tr_poll", "variant", "pt",
+            "de", "gsa", "am_sa", "variant", "metad", "tps", "surrogate", "tr_poll", "pt",
         ],
         OptimizationRegime::Default => &[
             "shift", "hop", "am_sa", "metad", "tps", "gle", "surrogate", "de", "tr_poll", "gsa",
