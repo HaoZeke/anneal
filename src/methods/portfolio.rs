@@ -62,6 +62,14 @@ const SLICE_GRAD_EQUIVALENTS: usize = 4;
 /// Expected rounds per arm the posterior needs before its ranking means
 /// anything; also caps the active arm count by the slice horizon.
 const ROUNDS_PER_ARM: usize = 8;
+/// Quasi-Newton iterations reserved for the terminal polish phase.
+/// Sized to convert a near-best incumbent (relative gap ~1e-3) to the
+/// 1e-9 win tolerance under a conservative per-iteration contraction
+/// rho = 0.9: n* = ceil(ln 1e-6 / ln 0.9) = 131 (proofs/d5_endgame_switch.py).
+const ENDGAME_QN_ITERS: usize = 131;
+/// Work units per endgame quasi-Newton iteration: one gradient, one
+/// accepted step, and a short Armijo backtrack on average.
+const ENDGAME_WU_PER_ITER: usize = 4;
 /// Dolan-More convergence resolution used by the CUTEst summary plots.
 const DOLAN_MORE_CONVERGENCE_TAU: f64 = 1e-3;
 /// General arms earn bandit credit one decimal place below the reporting
@@ -2156,6 +2164,18 @@ where
     let arm_count_all = enabled_arms(dim, grad.is_some(), usize::MAX, regime, extra).len();
     let slice =
         (SLICE_GRAD_EQUIVALENTS * (dim + 1)).max(budget / (ROUNDS_PER_ARM * arm_count_all).max(1));
+    // D5 endgame reserve: explore first, then spend the reserved tail as
+    // one uninterrupted polish phase. Exploration keeps at least three
+    // quarters of the budget; gradient-free runs reserve a poll tail.
+    let endgame_reserve = if policy == PortfolioPolicy::Auto {
+        if grad.is_some() {
+            (ENDGAME_QN_ITERS * ENDGAME_WU_PER_ITER).min(budget / 4)
+        } else {
+            (budget / 10).max(2 * SLICE_GRAD_EQUIVALENTS * (dim + 1)).min(budget / 4)
+        }
+    } else {
+        0
+    };
     let n_slices = (budget / slice.max(1)).max(1);
     let arms = enabled_arms(dim, grad.is_some(), n_slices, regime, extra);
     debug_assert_eq!(arms[0], RESTART_ARM);
@@ -2265,28 +2285,45 @@ where
                 continue;
             }
         }
-        if remaining < slice {
-            // Budget tail: drive the incumbent to projected
-            // stationarity at the measurement resolution.
-            if let Some(grad) = budgeted_grad.as_ref() {
-                projected_gradient_polish(
-                    &budgeted_obj,
-                    grad,
-                    ledger.incumbent(&bounds),
-                    (remaining / 2).max(2),
-                    1.0,
-                    1e-12,
-                );
-            } else if remaining >= 8 {
-                qmc_trust_region_poll(
-                    &budgeted_obj,
-                    ledger.incumbent(&bounds),
-                    remaining,
-                    rng.random::<u64>(),
-                    0.0,
-                    3,
-                    0,
-                );
+        let endgame_now = remaining < slice
+            || (round >= k && remaining <= endgame_reserve);
+        if endgame_now {
+            // D5 endgame: the tail is pure polish (explore-first is
+            // optimal; see proofs/d5_endgame_switch.py). Cycle
+            // quasi-Newton polish with shrinking trust-region poll
+            // restarts until the budget is gone or two cycles go dry.
+            ledger.cap_set(budget);
+            let mut dry = 0usize;
+            while ledger.remaining() >= 4 && dry < 2 {
+                let before = ledger.best_get();
+                if let Some(grad) = budgeted_grad.as_ref() {
+                    projected_gradient_polish(
+                        &budgeted_obj,
+                        grad,
+                        ledger.incumbent(&bounds),
+                        ledger.remaining(),
+                        1.0,
+                        1e-12,
+                    );
+                }
+                let rem = ledger.remaining();
+                if rem >= 8 {
+                    qmc_trust_region_poll(
+                        &budgeted_obj,
+                        ledger.incumbent(&bounds),
+                        (rem / 2).max(8).min(rem),
+                        rng.random::<u64>(),
+                        0.0,
+                        3,
+                        0,
+                    );
+                }
+                let after = ledger.best_get();
+                if after < before {
+                    dry = 0;
+                } else {
+                    dry += 1;
+                }
             }
             break;
         }
