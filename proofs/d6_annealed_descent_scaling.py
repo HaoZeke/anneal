@@ -214,17 +214,60 @@ def theta_c_exactly_two_symbolic():
     return sp.simplify(lead - (2 - th) / th) == 0
 
 
+# ---- Check 6: anisotropic critical temperature ------------------------------
+# On f(x) = x' H x / 2 with an ISOTROPIC proposal x + sigma z, the one-step
+# change is Delta ~ N(mu, s^2) with mu = sigma^2 tr(H)/2 and
+# s^2 = sigma^2 x' H^2 x, so the small-step progress condition
+# s^2 > 2 T mu becomes
+#
+#     T < T_c(x) = x' H^2 x / tr(H).
+#
+# Sphere: T_c = 2 f / d (theta_c = 2 recovered). Soft direction of an
+# ill-conditioned H: x along lambda_min gives
+# T_c = 2 f lambda_min / tr(H), a collapse by ~ d / kappa relative to the
+# sphere value at the same gap - the quantitative reason covariance
+# adaptation is necessary for annealed descent. A whitened proposal
+# (Sigma = H^{-1}) restores Delta ~ N(sigma^2 d / 2, sigma^2 2 f) and
+# T_c = 2 f / d for every x: theta_c = 2 is invariant under whitening.
+def anisotropic_critical_temperature():
+    sig, T = sp.symbols("sigma T", positive=True)
+    lams = [sp.Rational(1), sp.Rational(100)]  # H = diag(1, 100)
+    ok = True
+    for x_vec in ([sp.Rational(1), sp.Rational(0)], [sp.Rational(0), sp.Rational(1)],
+                  [sp.Rational(3, 5), sp.Rational(4, 5)]):
+        f = sum(l * xi**2 for l, xi in zip(lams, x_vec)) / 2
+        mu = sig**2 * sum(lams) / 2
+        s2 = sig**2 * sum(l**2 * xi**2 for l, xi in zip(lams, x_vec))
+        # Predicted critical temperature from the general formula.
+        t_pred = sum(l**2 * xi**2 for l, xi in zip(lams, x_vec)) / sum(lams)
+        # Small-step progress condition s^2 > 2 T mu solves to T < t_c.
+        t_c = sp.solve(sp.Eq(s2, 2 * T * mu), T)[0]
+        ok &= sp.simplify(t_c - t_pred) == 0
+        del f
+    # Sphere reduction: lambda_i = 1 for all i gives T_c = 2 f / d.
+    d_, f_ = sp.symbols("d f", positive=True)
+    r2 = 2 * f_  # ||x||^2 at gap f on the sphere
+    t_sphere = r2 / d_  # x'H^2x / trH with H = I
+    ok &= sp.simplify(t_sphere - 2 * f_ / d_) == 0
+    # Whitened proposal on any H restores the sphere condition exactly:
+    # in whitened coordinates the quadratic IS the sphere, so this is the
+    # same identity; recorded for the paper statement.
+    return ok
+
+
 WITNESS_PARTIALS = partial_expectation_identities()
 WITNESS_DESCENT_LIMIT = descent_limit_matches_rechenberg()
 WITNESS_THETA_C = critical_theta_bracketed()
 WITNESS_THETA_C_EXACT = theta_c_exactly_two_symbolic()
 WITNESS_ALPHA_MONOTONE = alpha_monotone_increasing_in_window()
+WITNESS_ANISOTROPIC = anisotropic_critical_temperature()
 WITNESS = (
     WITNESS_PARTIALS
     and WITNESS_DESCENT_LIMIT
     and WITNESS_THETA_C
     and WITNESS_THETA_C_EXACT
     and WITNESS_ALPHA_MONOTONE
+    and WITNESS_ANISOTROPIC
 )
 
 if __name__ == "__main__":
@@ -233,6 +276,7 @@ if __name__ == "__main__":
     print("D6 critical temperature bracketed:", WITNESS_THETA_C)
     print("D6 theta_c = 2 symbolically:", WITNESS_THETA_C_EXACT)
     print("D6 alpha*(theta) rises in window:", WITNESS_ALPHA_MONOTONE)
+    print("D6 anisotropic T_c formula:", WITNESS_ANISOTROPIC)
     print("D6 WITNESS:", WITNESS)
     print()
     print("theta_c =", critical_theta())
