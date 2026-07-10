@@ -1,0 +1,176 @@
+* D6: Annealed Metropolis state-drift scaling
+:PROPERTIES:
+:CUSTOM_ID: d6-annealed-metropolis-state-drift-scaling
+:END:
+** Scope and quantity being optimized
+:PROPERTIES:
+:CUSTOM_ID: scope-and-quantity-being-optimized
+:END:
+Let (f(x)=|x|^2/2) and propose
+(y=x+sigma z), where (zsim N(0,I_d)). Metropolis accepts a
+change (Delta=f(y)-f(x)) with probability
+
+\[
+a_T(\Delta)=\min\{1,\exp(-\Delta/T)\}.
+\]
+
+This derivation concerns the expected decrease of the *current chain
+state*,
+
+\[
+G=-\mathbb{E}[\Delta a_T(\Delta)].
+\tag{D6.1}
+\]
+
+It does not describe the one-step improvement of the best-so-far
+incumbent. An incumbent accepts every improving proposal into its record
+and ignores every worsening proposal, so its one-step expected improvement
+is (-\mathbb{E}[\Delta;\Delta<0]), independent of (T). Temperature
+matters to optimization through the location of the evolving chain and
+its ability to leave a basin, not through the record update itself.
+
+** High-dimensional sphere limit
+:PROPERTIES:
+:CUSTOM_ID: high-dimensional-sphere-limit
+:END:
+Use the evolution-strategy scaling
+(sigma=c|x|/d). Since
+
+\[
+\Delta=\sigma x^\top z+\frac{\sigma^2}{2}\|z\|^2,
+\]
+
+normalizing energy changes by (f(x)/d), applying
+(|z|^2/d\to 1), and using the Gaussian law of
+(x^\top z/|x|) gives the limiting increment
+
+\[
+D:=\frac{d\Delta}{f(x)}\ \Longrightarrow\
+N(c^2,4c^2).
+\tag{D6.2}
+\]
+
+Define the dimensionless temperature
+(	heta=Td/f(x)). The normalized state gain is
+
+\[
+G(c,\theta)=-\mathbb{E}[D\min\{1,e^{-D/\theta}\}].
+\tag{D6.3}
+\]
+
+Equation (D6.2) is an asymptotic model, not a finite-dimensional identity.
+Claims below are exact within that limiting model.
+
+** Closed form
+:PROPERTIES:
+:CUSTOM_ID: closed-form
+:END:
+Let (mu=c^2), (s=2c), and
+(mu'=\mu-s^2/\theta). Standard truncated-normal identities give
+
+\[
+\begin{aligned}
+\mathbb{E}[D;D\le0]
+  &=\mu\Phi(-\mu/s)-s\phi(\mu/s),\\
+\mathbb{E}[De^{-D/\theta};D>0]
+  &=e^{s^2/(2\theta^2)-\mu/\theta}
+    \{\mu'\Phi(\mu'/s)+s\phi(\mu'/s)\}.
+\end{aligned}
+\tag{D6.4}
+\]
+
+Substitution in (D6.3) yields the objective used by
+=proofs/d6_annealed_descent_scaling.py=. The same exponential tilt gives
+the acceptance probability
+
+\[
+A(c,\theta)=\Phi(-\mu/s)+
+e^{s^2/(2\theta^2)-\mu/\theta}\Phi(\mu'/s).
+\tag{D6.5}
+\]
+
+** Exact critical temperature in the limiting model
+:PROPERTIES:
+:CUSTOM_ID: exact-critical-temperature-in-the-limiting-model
+:END:
+*** Proposition D6.1
+:PROPERTIES:
+:CUSTOM_ID: proposition-d6.1
+:END:
+For every (c>0), the gain in (D6.3) is positive when
+(0<\theta<2), zero when (	heta=2), and negative when
+(	heta>2).
+
+*Proof.* Let (p_c) be the density of (N(c^2,4c^2)). For (u>0),
+
+\[
+\log\frac{p_c(-u)}{p_c(u)}
+=-\frac{(-u-c^2)^2-(u-c^2)^2}{8c^2}
+=-\frac{u}{2}.
+\tag{D6.6}
+\]
+
+Pairing the (+u) and (-u) contributions in (D6.3) therefore gives
+
+\[
+G(c,\theta)=\int_0^\infty u p_c(u)
+\{e^{-u/2}-e^{-u/\theta}\}\,du.
+\tag{D6.7}
+\]
+
+The weight (u p_c(u)) is strictly positive. If (	heta<2), then
+(e^{-u/2}>e^{-u/\theta}) for every (u>0); equality holds at
+(	heta=2); and the inequality reverses for (	heta>2).
+(qquad\blacksquare)
+
+The proof is global in (c). The series
+
+\[
+G(c,\theta)=c^2\frac{2-\theta}{\theta}+O(c^3)
+\tag{D6.8}
+\]
+
+is retained as an independent symbolic check, but is not used to infer
+the global sign.
+
+** Anisotropic local quadratic
+:PROPERTIES:
+:CUSTOM_ID: anisotropic-local-quadratic
+:END:
+For (f(x)=x^\top Hx/2), (H\succ0), and an isotropic small proposal
+(y=x+\sigma z), the leading Gaussian increment has
+
+\[
+\mu=\frac{\sigma^2}{2}\operatorname{tr}H,
+\qquad
+s^2=\sigma^2x^\top H^2x.
+\]
+
+The small-step expansion changes sign at
+
+\[
+T_c(x)=\frac{x^\top H^2x}{\operatorname{tr}H}.
+\tag{D6.9}
+\]
+
+Unlike Proposition D6.1, (D6.9) is a local small-step result. A proposal
+with covariance proportional to (H^{-1}) whitens the quadratic and
+restores (T_c=2f(x)/d). This is the mathematical reason to adapt
+proposal shape separately from proposal size.
+
+** Executable witnesses and software implication
+:PROPERTIES:
+:CUSTOM_ID: executable-witnesses-and-software-implication
+:END:
+The SymPy witness verifies the truncated-normal identities, the series
+coefficient, the density ratio and paired-integrand factorizations, and
+the anisotropic reduction. Numerical quadrature and one-dimensional
+optimization evaluate the constants. At (	heta=0.5), the limiting
+sphere model gives (c^*\simeq1.326), (G^*\simeq0.368), and
+(A^*\simeq0.320).
+
+The portfolio's adaptive-Metropolis arm uses (	heta=0.5) as a
+model-derived local operating point and tracks the associated acceptance
+rate. This is a conditional design rule for locally quadratic basins. It
+is not a universal cooling theorem and does not replace the logarithmic
+global-convergence conditions for classical simulated annealing.
