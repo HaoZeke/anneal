@@ -63,10 +63,12 @@ const SLICE_GRAD_EQUIVALENTS: usize = 4;
 /// anything; also caps the active arm count by the slice horizon.
 const ROUNDS_PER_ARM: usize = 8;
 /// Quasi-Newton iterations reserved for the terminal polish phase.
-/// Sized to convert a near-best incumbent (relative gap ~1e-3) to the
-/// 1e-9 win tolerance under a conservative per-iteration contraction
-/// rho = 0.9: n* = ceil(ln 1e-6 / ln 0.9) = 131 (proofs/d5_endgame_switch.py).
-const ENDGAME_QN_ITERS: usize = 131;
+/// Measured contraction on ill-conditioned least-squares basins
+/// (CERI651*/COOLHANSLS class) is rho ~ 0.965 per iteration, so
+/// converting a near-best incumbent (relative gap ~1e-3) to the 1e-9
+/// win tolerance needs n* = ceil(ln 1e-6 / ln 0.965) ~ 388 iterations;
+/// 500 covers deeper basins (proofs/d5_endgame_switch.py).
+const ENDGAME_QN_ITERS: usize = 500;
 /// Work units per endgame quasi-Newton iteration: one gradient, one
 /// accepted step, and a short Armijo backtrack on average.
 const ENDGAME_WU_PER_ITER: usize = 4;
@@ -779,6 +781,9 @@ fn benchmark_projected_stationary(projected_grad_norm: f64, value: f64) -> bool 
         && projected_grad_norm <= DOLAN_MORE_CONVERGENCE_TAU * value.abs().max(1.0)
 }
 
+// Retained for the convergence-threshold unit tests; the driver no longer
+// stops early on this criterion (budget is the caller's authority).
+#[allow(dead_code)]
 fn benchmark_objective_converged(center_value: f64, best_value: f64) -> bool {
     if !center_value.is_finite() || !best_value.is_finite() {
         return false;
@@ -2205,19 +2210,14 @@ where
         .is_some()
         .then(|| low_dimensional_polish_plan(dim, budget))
         .flatten();
-    let mut stop_after_low_dimensional_polish = false;
-    let mut center_value = None;
-
     if let (Some(plan), Some(grad)) = (low_dimensional_polish.as_ref(), budgeted_grad.as_ref()) {
         let center_probe = scaled_center_probe(&budgeted_obj, grad, &bounds);
-        center_value = center_probe.as_ref().map(|probe| probe.value);
         let center_ratio = center_probe.and_then(|probe| probe.gradient_ratio);
         if low_dimensional_polish_before_warmup(center_ratio) {
-            let stationary =
-                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
-            let objective_converged = center_value
-                .is_some_and(|value| benchmark_objective_converged(value, ledger.best_get()));
-            stop_after_low_dimensional_polish = stationary || objective_converged;
+            // Grab the cheap stationary point, then keep exploring:
+            // stationarity certifies a local basin, not the global one,
+            // and the budget is the caller's authority on effort.
+            run_low_dimensional_polish(&budgeted_obj, grad, &ledger, plan, seed, budget);
             low_dimensional_polish = None;
         }
     }
@@ -2229,7 +2229,6 @@ where
             regime,
             crate::methods::regime::OptimizationRegime::MultimodalNoGrad
         )
-        && !stop_after_low_dimensional_polish
     {
         // 28% front-load: DE needs population-scale budget on rugged boxes.
         let front_budget = ((budget as f64) * 0.28).round() as usize;
@@ -2264,9 +2263,6 @@ where
 
     let mut round = 0usize;
     loop {
-        if stop_after_low_dimensional_polish {
-            break;
-        }
         let remaining = ledger.remaining();
         if remaining < 4 {
             break;
@@ -2275,13 +2271,10 @@ where
             if let (Some(plan), Some(grad)) =
                 (low_dimensional_polish.take(), budgeted_grad.as_ref())
             {
-                let stationary =
-                    run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
-                let objective_converged = center_value
-                    .is_some_and(|value| benchmark_objective_converged(value, ledger.best_get()));
-                if stationary || objective_converged {
-                    break;
-                }
+                // Stationarity here certifies a local basin only; the
+                // bandit keeps exploring with the remaining budget and
+                // the endgame re-polishes the final incumbent.
+                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
                 continue;
             }
         }
@@ -2294,13 +2287,24 @@ where
             // restarts until the budget is gone or two cycles go dry.
             ledger.cap_set(budget);
             let mut dry = 0usize;
-            while ledger.remaining() >= 4 && dry < 2 {
+            while ledger.remaining() >= 4 && dry < 3 {
                 let before = ledger.best_get();
                 if let Some(grad) = budgeted_grad.as_ref() {
+                    let mut start = ledger.incumbent(&bounds);
+                    if dry > 0 {
+                        // Jittered quasi-Newton restart: a relative-scale
+                        // perturbation escapes line-search stall points
+                        // while staying inside the incumbent basin.
+                        for v in start.iter_mut() {
+                            let u = 2.0 * rng.random::<f64>() - 1.0;
+                            *v += 1e-7 * (1.0 + v.abs()) * u;
+                        }
+                        start = bounds.clip(start.view());
+                    }
                     projected_gradient_polish(
                         &budgeted_obj,
                         grad,
-                        ledger.incumbent(&bounds),
+                        start,
                         ledger.remaining(),
                         1.0,
                         1e-12,
