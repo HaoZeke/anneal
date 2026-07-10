@@ -101,6 +101,62 @@ where
     run_rs(variant, &cooling, n_epochs, steps_per_epoch, seed)
 }
 
+/// Resumable variant driver: runs epochs `[start_epoch, start_epoch + n_epochs)`
+/// of the variant's own cooling schedule, continuing from a prior chain
+/// position when one is supplied, and returns the history together with the
+/// final chain state so a caller can extend the same annealing trajectory
+/// across allocation slices. Slice-restarted SA never anneals; a persistent
+/// chain recovers the long-schedule behaviour of the classical presets.
+pub fn run_rs_variant_resumed<O, C, N, M, A>(
+    variant: SaVariant<f64, O, C, N, M, A>,
+    start_epoch: usize,
+    n_epochs: usize,
+    steps_per_epoch: usize,
+    seed: u64,
+    resume: Option<eindir_core::FPair<f64>>,
+) -> (History, eindir_core::FPair<f64>)
+where
+    O: eindir_core::Objective<f64> + Send + Sync,
+    C: Cooling<f64> + Clone,
+    N: crate::neigh::Neighborhood<f64>,
+    M: crate::movekernel::MoveKernel<f64>,
+    A: crate::accept::AcceptRule<f64>,
+{
+    let mut rng = StdRng::seed_from_u64(
+        seed ^ (start_epoch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+    );
+    let mut state = match resume {
+        Some(cur) => State {
+            best: cur.clone(),
+            cur,
+        },
+        None => variant.initial_state(&mut rng),
+    };
+    let init_pair = state.best.clone();
+    let mut history = History::with_capacity(n_epochs, init_pair);
+    for epoch in start_epoch..start_epoch.saturating_add(n_epochs) {
+        let temp = variant.cool.temperature(epoch);
+        let mut accepted: usize = 0;
+        let mut rejected: usize = 0;
+        for _ in 0..steps_per_epoch {
+            if variant.step(&mut state, epoch, &mut rng) {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+        history.epochs.push(EpochLine {
+            epoch,
+            temp,
+            accepted,
+            rejected,
+            best_val: state.best.val,
+        });
+    }
+    history.best = state.best.clone();
+    (history, state.cur)
+}
+
 /// Runs the same `SaVariant` from a bounded low-discrepancy start set and
 /// returns the best history across starts.
 pub fn run_rs_qmc_variant<O, C, N, M, A>(

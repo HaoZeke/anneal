@@ -48,7 +48,7 @@ use crate::methods::local_polish::{
 };
 use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
 use crate::movekernel::{MoveKernel, TsallisVisit};
-use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant};
+use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant_resumed};
 
 // ---------------------------------------------------------------------------
 // Scheduler constants. Two numbers govern the allocation; everything
@@ -614,6 +614,10 @@ struct ArmStates {
     /// restart arm's descent-depth schedule.
     luby_u: u64,
     luby_v: u64,
+    /// Persistent annealing chain for the Variant arm: slices extend one
+    /// trajectory instead of restarting a short schedule every slice.
+    variant_chain: Option<eindir_core::FPair<f64>>,
+    variant_epoch: usize,
 }
 
 impl ArmStates {
@@ -1638,27 +1642,44 @@ fn run_arm<O, G>(
                 return;
             }
             let posterior = &states.pilot.as_ref().expect("pilot fitted").posterior;
-            let epochs = 16usize;
-            let steps = (slice / epochs).max(4);
+            // Persistent chain: each slice extends the same annealing
+            // trajectory (cooling epoch continues where the last slice
+            // stopped). Slice-restarted SA re-heats every slice and never
+            // anneals, which is why the classical presets used to beat
+            // this arm on multimodal boxes.
+            let steps = (4 * (dim + 1)).clamp(16, 64);
+            let epochs = (slice / steps).max(2);
             let fresh_obj = BudgetedObjective {
                 inner: obj.inner,
                 ledger,
             };
-            if posterior.q_v_map > 1.3 {
-                if let Ok(variant) = crate::variant::gsa(
+            let start_epoch = states.variant_epoch;
+            let resume = states.variant_chain.clone();
+            let chain = if posterior.q_v_map > 1.3 {
+                crate::variant::gsa(
                     fresh_obj,
                     posterior.t_init_map.max(1e-9),
                     posterior.q_v_map.clamp(1.05, 2.95),
                     GSA_Q_A,
-                ) {
-                    run_rs_variant(variant, epochs, steps, seed);
-                }
-            } else if let Ok(variant) = crate::variant::boltzmann(
-                fresh_obj,
-                posterior.t_init_map.max(1e-9),
-                (posterior.sigma_map * width_scale).max(1e-9),
-            ) {
-                run_rs_variant(variant, epochs, steps, seed);
+                )
+                .ok()
+                .map(|variant| {
+                    run_rs_variant_resumed(variant, start_epoch, epochs, steps, seed, resume).1
+                })
+            } else {
+                crate::variant::boltzmann(
+                    fresh_obj,
+                    posterior.t_init_map.max(1e-9),
+                    (posterior.sigma_map * width_scale).max(1e-9),
+                )
+                .ok()
+                .map(|variant| {
+                    run_rs_variant_resumed(variant, start_epoch, epochs, steps, seed, resume).1
+                })
+            };
+            if let Some(cur) = chain {
+                states.variant_chain = Some(cur);
+                states.variant_epoch = start_epoch + epochs;
             }
         }
         ArmKind::Pt => {
@@ -2374,6 +2395,9 @@ where
     // resets the pairing) plus the exploration-arm Beta posteriors.
     let mut contraction = ContractionPosterior::new();
     let mut prev_polish_delta: Option<f64> = None;
+    // Exploratory (MetaD/TPS) slices awaiting conversion: (arm, round).
+    const CREDIT_WINDOW: usize = ROUNDS_PER_ARM;
+    let mut pending_credit: Vec<(usize, usize)> = Vec::new();
     loop {
         let remaining = ledger.remaining();
         if remaining < 4 {
@@ -2594,6 +2618,25 @@ where
         let threshold = arm_success_threshold(arms[choice], before);
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - threshold;
+        // Deferred exploratory credit: a MetaD deposit or an accepted
+        // reactive path earns a bandit success only if the incumbent
+        // improves within the next CREDIT_WINDOW slices (any arm), so
+        // exploration that never converts cannot freeload allocation.
+        if improved {
+            for (c, _) in pending_credit.drain(..) {
+                posteriors[c].update(true);
+                tpe.record(c, threshold.max(1e-12));
+            }
+        } else {
+            pending_credit.retain(|&(c, r)| {
+                if round.saturating_sub(r) > CREDIT_WINDOW {
+                    posteriors[c].update(false);
+                    false
+                } else {
+                    true
+                }
+            });
+        }
         if matches!(
             arms[choice],
             ArmKind::Shift | ArmKind::TrPoll | ArmKind::Hop
@@ -2617,17 +2660,19 @@ where
             prev_polish_delta = Some(delta);
         }
         let exploratory = arms[choice].exploratory_credit() && states.last_exploratory_ok;
-        posteriors[choice].update(improved || exploratory);
-        // TPE score: true-F improvement magnitude, plus a small bonus when
-        // enhanced-sampling arms explore without an immediate incumbent drop.
-        let mut score = if after.is_finite() && before.is_finite() && after < before {
+        if exploratory && !improved {
+            // Posterior and TPE updates wait in the credit window.
+            pending_credit.push((choice, round));
+        } else {
+            posteriors[choice].update(improved);
+        }
+        // TPE score: true-F improvement magnitude only; exploratory
+        // bonuses arrive through the deferred-credit path.
+        let score = if after.is_finite() && before.is_finite() && after < before {
             before - after
         } else {
             0.0
         };
-        if exploratory {
-            score += threshold.max(1e-12);
-        }
         tpe.record(choice, score);
         states.last_exploratory_ok = false;
     }
