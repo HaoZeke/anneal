@@ -7,7 +7,7 @@ Publications and reproducibility packages that use ~anneal~.
 
 * Publications
 
-- *Typed Component Algebras for Simulated Annealing: Mechanized Equivalences, a Safety-Liveness Specification, and Finite-Precision Effects* (INFORMS Journal on Computing, under review).
+- *anneal: A Typed Component Algebra for Simulated Annealing and MCMC with a Budget-Only Portfolio Optimizer* (ACM Transactions on Mathematical Software, in preparation).
 The reference publication: it factors SA into five typed components and four composition laws, proves the four Generalized-SA limit reductions as mechanized symbolic identities, specifies the workflow class in TLA+, audits the finite-precision acceptance path, and benchmarks the component families on the CUTEst set.
 The implementation contributions -- shifted-QMC replicated polish, the tensor/additive independence sampler, the GLE-Langevin colored-noise move, the dimension-collapse surrogate, the GPU-resident device backend, and the noise-aware acceptance rule -- each enter a typed component slot rather than a one-off driver.
 

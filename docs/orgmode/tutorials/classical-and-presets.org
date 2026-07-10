@@ -14,10 +14,9 @@ All three occupy the same five component slots; only the concrete =Cool=, =Neigh
 .. admonition:: Reference
 
    The typed component algebra and the reduction of the three
-   Generalized-SA families to the five slots are the core of the IISE (Institute of Industrial and Systems Engineers)
-   manuscript (INFORMS Journal on Computing, under review). See
-   [[file:../used_by.org][used_by]] and the reproducibility package for the
-   mechanized SymPy witnesses of the four limit cases.
+   Generalized-SA families to the five slots are documented in the reference
+   paper (see [[file:../used_by.org][used_by]]) and in the reproducibility package
+   (SymPy witnesses of the four limit cases).
 #+end_export
 
 * Prerequisites

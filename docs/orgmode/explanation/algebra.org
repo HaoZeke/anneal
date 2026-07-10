@@ -4,12 +4,12 @@
 #+begin_export rst
 .. admonition:: Reference
 
-   The five signatures, L1-L4, the Temporal Logic of Actions (TLA+)+ invariants (TypeOK,
-   BestMonotone, SymmetricNeighbors, MonotoneCooling), and the
-   liveness properties are the subject of the IISE manuscript
-   (INFORMS Journal on Computing, under review). The Temporal Logic of Actions (TLA+)+
-   sources live in =tla/=; the SymPy witnesses that the four
-   classical families are limit cases live in =proofs/=.
+   The five signatures, L1-L4, the Temporal Logic of Actions (TLA+) invariants
+   (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling), and the
+   liveness properties are specified in the reference paper
+   (see [[file:../used_by.org][used_by]]). TLA+ sources live in =tla/=; the
+   SymPy witnesses that the four classical families are limit cases live in
+   =proofs/=.
 #+end_export
 
 * The five components (signatures)
