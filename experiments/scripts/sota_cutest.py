@@ -155,7 +155,7 @@ def sci_basinhopping(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
-def portfolio(counter, low, high, dim, grad, rng, anchor=None):
+def portfolio(counter, low, high, dim, grad, rng, anchor=None, policy="auto"):
     """Native Thompson-allocated portfolio over anneal building blocks."""
     del anchor
     import anneal
@@ -172,13 +172,26 @@ def portfolio(counter, low, high, dim, grad, rng, anchor=None):
             budget=remaining,
             seed=int(rng.integers(1 << 31)),
             grad_fn=jac,
+            policy=policy,
         )
         best = float(out.get("best_val", float("inf")))
+        pos = np.asarray(out.get("best_pos", []), dtype=float).reshape(-1)
+        # Feasibility gate: OOB bests are non-solutions (score as +inf).
+        if pos.size == low.size:
+            if np.any(pos < low - 1e-8) or np.any(pos > high + 1e-8):
+                best = float("inf")
         if math.isfinite(best) and best < counter.best:
             counter.best = best
     except _Budget:
         pass
     return counter.best
+
+
+def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
+    """Pre-regime portfolio (flat order, Beta(1,1)) for same-protocol A/B."""
+    return portfolio(
+        counter, low, high, dim, grad, rng, anchor=anchor, policy="legacy"
+    )
 
 
 def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
@@ -237,9 +250,54 @@ def cma_es(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
-METHODS = {"portfolio": portfolio, "hybrid_de": hybrid_de,
-           "basinhopping": sci_basinhopping, "dual_annealing": sci_dual_annealing,
-           "diff_evol": sci_de, "cma_es": cma_es, "classical": classical}
+def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
+    """IPOP-style CMA-ES: restart with growing population (stronger baseline)."""
+    import cma
+
+    del grad
+    width = np.where(high > low, high - low, 1.0)
+    mean_w = float(np.mean(width))
+    pop0 = int(np.clip(4 + 3 * np.log(max(dim, 1)), 8, 40))
+    pop = pop0
+    try:
+        while counter.n < counter.budget:
+            x0 = (
+                np.asarray(anchor, dtype=np.float64).copy()
+                if anchor is not None and counter.n == 0
+                else rng.uniform(low, high)
+            )
+            remaining = counter.budget - counter.n
+            es = cma.CMAEvolutionStrategy(
+                x0,
+                0.3 * mean_w,
+                {
+                    "bounds": [list(low), list(high)],
+                    "verbose": -9,
+                    "seed": int(rng.integers(1 << 31)),
+                    "maxfevals": remaining,
+                    "popsize": pop,
+                },
+            )
+            while not es.stop() and counter.n < counter.budget:
+                xs = es.ask()
+                es.tell(xs, [counter(x) for x in xs])
+            # IPOP: grow population after each restart until budget ends.
+            pop = min(pop * 2, 200)
+    except _Budget:
+        pass
+    return counter.best
+
+
+METHODS = {
+    "portfolio": portfolio,
+    "hybrid_de": hybrid_de,
+    "basinhopping": sci_basinhopping,
+    "dual_annealing": sci_dual_annealing,
+    "diff_evol": sci_de,
+    "cma_es": cma_es,
+    "cma_es_ipop": cma_es_ipop,
+    "classical": classical,
+}
 FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
 
 
@@ -277,6 +335,12 @@ def main():
                    help="Number of stable shards in the distributed CUTEst sweep.")
     p.add_argument("--methods", default=None,
                    help="Comma-separated subset of methods to run.")
+    p.add_argument(
+        "--problems-file",
+        default=None,
+        help="Optional newline-separated problem names (paper list). "
+        "When set, only these names are run (still filtered by dim-cap).",
+    )
     args = p.parse_args()
     if args.methods:
         requested = [m.strip() for m in args.methods.split(",") if m.strip()]
@@ -289,7 +353,24 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     config = default_cutest_config(args.bench_root, cache_dir=args.pycutest_cache)
 
-    all_targets = list_target_problems(args.dim_cap, config=config)[: args.max_problems]
+    if args.problems_file:
+        from experiments.scripts.run_cutest_full_suite import TargetProblem
+
+        names = [
+            line.strip()
+            for line in open(args.problems_file, encoding="utf-8")
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        # Prefer paper order; load will skip failures later.
+        # kind/dim filled after load; placeholder for listing only.
+        all_targets = [
+            TargetProblem(name=n, kind="unconstrained", dim=0) for n in names
+        ]
+        all_targets = all_targets[: args.max_problems]
+    else:
+        all_targets = list_target_problems(args.dim_cap, config=config)[
+            : args.max_problems
+        ]
     targets = _shard_targets(all_targets, args.shard_index, args.shard_count)
     print(
         f"{len(targets)} CUTEst problems, dim <= {args.dim_cap}, "
