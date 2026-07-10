@@ -293,9 +293,8 @@ dependencies = [
 
 [[package]]
 name = "eindir-core"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a950902fe033581de7708bae911ca383896243dd4345bb5b0c44a9db5b3a087e"
+version = "0.5.1"
+source = "git+https://github.com/HaoZeke/eindir?rev=5c962fa#5c962fa3513518bbb22293f151f6a6354e2fe519"
 dependencies = [
  "cbindgen",
  "dlpk",

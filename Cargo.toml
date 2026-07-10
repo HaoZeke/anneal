@@ -22,7 +22,7 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-eindir-core = { path = "../eindir", version = "0.5.0" }
+eindir-core = { version = "0.5.1" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
@@ -67,3 +67,8 @@ lto      = "thin"
 [[bench]]
 name    = "sa_bench"
 harness = false
+
+# Until eindir-core 0.5.1 reaches crates.io (tag v0.5.1 releases it), patch every
+# consumer (anneal, rgpot-core) to the same git revision so one compilation backs both.
+[patch.crates-io]
+eindir-core = { git = "https://github.com/HaoZeke/eindir", rev = "5c962fa" }
