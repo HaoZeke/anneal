@@ -114,12 +114,12 @@ pub fn select_regime(f: &ProblemFeatures) -> OptimizationRegime {
 pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str] {
     match regime {
         OptimizationRegime::LowDimSmooth => &[
-            "shift", "hop", "metad", "tps", "gle", "tr_poll", "surrogate", "de", "gsa", "variant",
-            "pt", "hmc",
+            "shift", "am_sa", "hop", "metad", "tps", "gle", "tr_poll", "surrogate", "de", "gsa",
+            "variant", "pt", "hmc",
         ],
         OptimizationRegime::HighDimIllConditioned => &[
-            "gle", "hop", "reduced", "shift", "metad", "tps", "hmc", "surrogate", "de", "gsa",
-            "tr_poll", "variant", "pt",
+            "am_sa", "gle", "hop", "reduced", "shift", "metad", "tps", "hmc", "surrogate", "de",
+            "gsa", "tr_poll", "variant", "pt",
         ],
         OptimizationRegime::StochasticNoise => &[
             "explore", // note: still de-duplicated when building full list
@@ -127,11 +127,11 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "hmc", "reduced",
         ],
         OptimizationRegime::MultimodalNoGrad => &[
-            "de", "gsa", "metad", "tps", "surrogate", "tr_poll", "variant", "pt",
+            "de", "gsa", "am_sa", "metad", "tps", "surrogate", "tr_poll", "variant", "pt",
         ],
         OptimizationRegime::Default => &[
-            "shift", "hop", "metad", "tps", "gle", "surrogate", "de", "tr_poll", "gsa", "variant",
-            "pt", "hmc", "reduced",
+            "shift", "hop", "am_sa", "metad", "tps", "gle", "surrogate", "de", "tr_poll", "gsa",
+            "variant", "pt", "hmc", "reduced",
         ],
     }
 }

@@ -519,6 +519,9 @@ enum ArmKind {
     Metad,
     /// pnastps-inspired transition-path shooting between archive basins.
     Tps,
+    /// D6 adaptive-Metropolis descent chain (gap-proportional temperature,
+    /// covariance-shaped proposal, Robbins-Monro alpha* targeting).
+    AmSa,
 }
 
 impl ArmKind {
@@ -538,6 +541,7 @@ impl ArmKind {
             ArmKind::Reduced => "reduced",
             ArmKind::Metad => "metad",
             ArmKind::Tps => "tps",
+            ArmKind::AmSa => "am_sa",
         }
     }
 
@@ -621,6 +625,120 @@ struct ArmStates {
     /// Basin registry fed by restart-arm polish endpoints: the discovery
     /// side of the Good-Turing / record-statistics budget-conversion gate.
     basins: BasinRegistry,
+    /// Persistent D6 adaptive-Metropolis descent chain.
+    am: Option<AmSaState>,
+}
+
+/// Persistent adaptive-Metropolis descent chain: the D6 annealed-descent
+/// scaling law productized (proofs/d6_annealed_descent_scaling.py).
+///
+/// Temperature is not a schedule in epoch index. On a locally quadratic
+/// basin, expected one-step descent of Metropolis is positive iff
+/// theta = T d / (f(x) - f*) < 2 exactly (D6, symbolic small-step
+/// expansion), so the chain runs at the gap-proportional law
+///     T(x) = THETA_TILDE (f(x) - f_best) / d,
+/// with THETA_TILDE = 0.5 keeping ~91% of the maximal descent rate:
+/// cooling happens exactly as fast as measured progress, with no cooling
+/// constant. The proposal SHAPE is the chain's running covariance
+/// (Haario, Saksman, and Tamminen 2001; ergodic under diminishing
+/// adaptation, Roberts and Rosenthal 2007); the proposal SIZE tracks the
+/// D6 optimal acceptance alpha*(0.5) ~ 0.32 by Robbins-Monro - the
+/// descent-side analogue of the 0.234 sampling rule, recovering
+/// Rechenberg's 0.270 at theta -> 0. Reflection into the box keeps the
+/// proposal symmetric (law L1), so Metropolis acceptance stays valid.
+struct AmSaState {
+    x: Array1<f64>,
+    f_x: f64,
+    mean: Array1<f64>,
+    /// Unnormalized scatter matrix sum (x - mean) outer products.
+    scatter: Array2<f64>,
+    n_obs: usize,
+    /// Robbins-Monro log proposal-scale multiplier.
+    log_scale: f64,
+    /// Robbins-Monro step counter (diminishing adaptation).
+    rm_n: usize,
+}
+
+/// D6 operating temperature theta = T d / gap (91% of maximal descent).
+const AM_THETA_TILDE: f64 = 0.5;
+/// D6 optimal acceptance at AM_THETA_TILDE.
+const AM_ALPHA_TARGET: f64 = 0.32;
+
+impl AmSaState {
+    fn new(x: Array1<f64>, f_x: f64) -> Self {
+        let d = x.len();
+        Self {
+            mean: x.clone(),
+            scatter: Array2::zeros((d, d)),
+            n_obs: 1,
+            x,
+            f_x,
+            log_scale: 0.0,
+            rm_n: 0,
+        }
+    }
+
+    /// Welford-style running mean/scatter update over chain states.
+    fn observe(&mut self, x: ArrayView1<f64>) {
+        self.n_obs += 1;
+        let n = self.n_obs as f64;
+        let delta = &x.to_owned() - &self.mean;
+        self.mean = &self.mean + &delta.mapv(|v| v / n);
+        let delta2 = &x.to_owned() - &self.mean;
+        for i in 0..delta.len() {
+            for j in 0..delta.len() {
+                self.scatter[(i, j)] += delta[i] * delta2[j];
+            }
+        }
+    }
+
+    /// Covariance Cholesky factor with Haario-style regularization:
+    /// Sigma_hat + eps diag(width^2). Falls back to the diagonal on
+    /// factorization failure.
+    fn proposal_chol(&self, bounds: &Bounds<f64>) -> Array2<f64> {
+        let d = self.x.len();
+        let mut cov = Array2::zeros((d, d));
+        let denom = (self.n_obs as f64 - 1.0).max(1.0);
+        for i in 0..d {
+            for j in 0..d {
+                cov[(i, j)] = self.scatter[(i, j)] / denom;
+            }
+        }
+        for i in 0..d {
+            let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
+            cov[(i, i)] += 1e-6 * w * w + 1e-12;
+        }
+        cholesky_lower(&cov).unwrap_or_else(|| {
+            let mut l = Array2::zeros((d, d));
+            for i in 0..d {
+                l[(i, i)] = cov[(i, i)].sqrt();
+            }
+            l
+        })
+    }
+}
+
+/// Dense lower Cholesky for the small proposal covariances (d <= ~64).
+fn cholesky_lower(a: &Array2<f64>) -> Option<Array2<f64>> {
+    let d = a.nrows();
+    let mut l: Array2<f64> = Array2::zeros((d, d));
+    for i in 0..d {
+        for j in 0..=i {
+            let mut s = a[(i, j)];
+            for k in 0..j {
+                s -= l[(i, k)] * l[(j, k)];
+            }
+            if i == j {
+                if s <= 0.0 || !s.is_finite() {
+                    return None;
+                }
+                l[(i, j)] = s.sqrt();
+            } else {
+                l[(i, j)] = s / l[(j, j)];
+            }
+        }
+    }
+    Some(l)
 }
 
 /// Distinct-basin bookkeeping over restart endpoints. Restart slices draw
@@ -1686,6 +1804,67 @@ fn run_arm<O, G>(
                 run_persistent_gsa(obj, state, slice);
             }
         }
+        ArmKind::AmSa => {
+            // D6 annealed-descent chain: gap-proportional temperature
+            // T = 0.5 gap / d (progress requires theta < 2; see
+            // proofs/d6_annealed_descent_scaling.py), Haario covariance
+            // shape, Robbins-Monro size targeting alpha* ~ 0.32.
+            // Exact Metropolis only: declared evaluation noise routes to
+            // the OSA-capable arms instead.
+            if states.noise_sigma.is_some() {
+                return;
+            }
+            let d = dim.max(1);
+            if states.am.is_none() {
+                let x = ledger.incumbent(&bounds);
+                let f_x = obj.eval(x.view());
+                if !f_x.is_finite() {
+                    return;
+                }
+                states.am = Some(AmSaState::new(x, f_x));
+            }
+            let st = states.am.as_mut().expect("am chain installed");
+            let l = st.proposal_chol(&bounds);
+            let base = 2.38 / (d as f64).sqrt();
+            for _ in 0..slice {
+                if ledger.remaining() < 1 {
+                    break;
+                }
+                let gap = (st.f_x - ledger.best_get()).max(0.0);
+                let temp = AM_THETA_TILDE * gap / d as f64;
+                let z: Vec<f64> = (0..d)
+                    .map(|_| rand_distr::StandardNormal.sample(rng))
+                    .collect();
+                let scale = st.log_scale.exp() * base;
+                let mut y = st.x.clone();
+                for i in 0..d {
+                    let mut acc = 0.0;
+                    for j in 0..=i {
+                        acc += l[(i, j)] * z[j];
+                    }
+                    y[i] += scale * acc;
+                }
+                let y = crate::movekernel::reflect_into_box(y.view(), &bounds);
+                let f_y = obj.eval(y.view());
+                if !f_y.is_finite() {
+                    continue;
+                }
+                let delta = f_y - st.f_x;
+                let accepted = delta <= 0.0
+                    || (temp > 0.0 && rng.random::<f64>() < (-delta / temp).exp());
+                st.rm_n += 1;
+                let a = if accepted { 1.0 } else { 0.0 };
+                // Diminishing adaptation keeps the chain ergodic.
+                st.log_scale += (a - AM_ALPHA_TARGET) / (st.rm_n as f64).sqrt();
+                st.log_scale = st.log_scale.clamp(-12.0, 6.0);
+                if accepted {
+                    st.x = y.to_owned();
+                    st.f_x = f_y;
+                    let x_obs = st.x.clone();
+                    st.observe(x_obs.view());
+                }
+            }
+        }
         ArmKind::Variant => {
             // Bayesian-pilot tuned classical point: the first slice runs
             // short Metropolis pilot chains at QMC-drawn hyperparameters
@@ -1897,6 +2076,7 @@ fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
         "reduced" => ArmKind::Reduced,
         "metad" => ArmKind::Metad,
         "tps" => ArmKind::Tps,
+        "am_sa" => ArmKind::AmSa,
         _ => return None,
     })
 }
@@ -1911,7 +2091,7 @@ fn library_arm_names(dim: usize, has_grad: bool) -> Vec<&'static str> {
     if dim >= 2 {
         names.extend_from_slice(&["metad", "tps"]);
     }
-    names.extend_from_slice(&["surrogate", "de", "tr_poll", "gsa", "variant", "pt"]);
+    names.extend_from_slice(&["am_sa", "surrogate", "de", "tr_poll", "gsa", "variant", "pt"]);
     if has_grad {
         names.push("hmc");
         if dim > 2 * REDUCED_K {
