@@ -618,6 +618,69 @@ struct ArmStates {
     /// trajectory instead of restarting a short schedule every slice.
     variant_chain: Option<eindir_core::FPair<f64>>,
     variant_epoch: usize,
+    /// Basin registry fed by restart-arm polish endpoints: the discovery
+    /// side of the Good-Turing / record-statistics budget-conversion gate.
+    basins: BasinRegistry,
+}
+
+/// Distinct-basin bookkeeping over restart endpoints. Restart slices draw
+/// basins (approximately) i.i.d. from the basin-of-attraction measure, so
+/// the Good-Turing singleton fraction n1/n estimates the missing basin
+/// mass (Good 1953; the concentration bound is McAllester-Schapire), and
+/// under exchangeability of basin depths a newly discovered basin beats
+/// the w seen so far with probability 1/(w+1) (record statistics). The
+/// product is a distribution-free per-slice probability that further
+/// exploration still improves the final answer; it uses basin identities
+/// that a Beta success posterior over improvement bits throws away.
+#[derive(Default)]
+struct BasinRegistry {
+    /// (representative position, basin value, times sampled)
+    entries: Vec<(Array1<f64>, f64, usize)>,
+    /// Restart endpoints registered.
+    n_samples: usize,
+}
+
+/// Two endpoints share a basin below this normalized distance (per-axis
+/// widths scale each coordinate; 5% of the box diagonal).
+const BASIN_MERGE_RADIUS: f64 = 0.05;
+
+impl BasinRegistry {
+    fn register(&mut self, x: ArrayView1<f64>, val: f64, bounds: &Bounds<f64>) {
+        if !val.is_finite() {
+            return;
+        }
+        self.n_samples += 1;
+        let dim = x.len().max(1) as f64;
+        for (rep, rep_val, hits) in self.entries.iter_mut() {
+            let mut d2 = 0.0f64;
+            for j in 0..x.len() {
+                let w = (bounds.high[j] - bounds.low[j]).abs().max(1e-12);
+                let dj = (x[j] - rep[j]) / w;
+                d2 += dj * dj;
+            }
+            if (d2 / dim).sqrt() <= BASIN_MERGE_RADIUS {
+                *hits += 1;
+                if val < *rep_val {
+                    *rep_val = val;
+                    rep.assign(&x);
+                }
+                return;
+            }
+        }
+        self.entries.push((x.to_owned(), val, 1));
+    }
+
+    /// Per-slice probability that one more restart both discovers an
+    /// unseen basin (Good-Turing missing mass n1/n) and that the new
+    /// basin beats every seen one (record probability 1/(w+1)).
+    fn record_discovery_prob(&self) -> Option<f64> {
+        if self.n_samples < 5 {
+            return None;
+        }
+        let n1 = self.entries.iter().filter(|(_, _, h)| *h == 1).count();
+        let w = self.entries.len();
+        Some((n1 as f64 / self.n_samples as f64) / (w as f64 + 1.0))
+    }
 }
 
 impl ArmStates {
@@ -1334,15 +1397,18 @@ fn run_arm<O, G>(
                 let n_starts = (slice / 3).max(4);
                 let per_start = slice.saturating_sub(n_starts) / 2;
                 if per_start >= 2 {
-                    qmc_projected_gradient_polish(
+                    let res = qmc_projected_gradient_polish(
                         obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
                     );
+                    states.basins.register(res.best_pos.view(), res.best_val, &bounds);
                     return;
                 }
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+                let res =
+                    qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+                states.basins.register(res.best_pos.view(), res.best_val, &bounds);
             }
         }
         ArmKind::Shift => {
@@ -2431,6 +2497,13 @@ where
             if remaining <= reserve_floor {
                 true
             } else {
+            // Exploration term. Preferred: the distribution-free
+            // Good-Turing x record gate from the basin registry - the
+            // per-slice probability that a restart finds an unseen basin
+            // (missing mass n1/n) that also beats the incumbent (record
+            // probability 1/(w+1)). Fallback while the registry is thin:
+            // the aggregated Beta posteriors over improvement bits.
+            let gt = states.basins.record_discovery_prob();
             let mut a_e = 0.0f64;
             let mut b_e = 0.0f64;
             for (arm, post) in arms.iter().zip(posteriors.iter()) {
@@ -2439,13 +2512,22 @@ where
                     b_e += post.beta;
                 }
             }
-            let q0 = b_e / (a_e + b_e).max(1e-12);
+            let q0 = match gt {
+                Some(theta) => 1.0 - theta.min(1.0),
+                None => b_e / (a_e + b_e).max(1e-12),
+            };
             let win = |p: usize| -> f64 {
                 let e = remaining.saturating_sub(p) / slice.max(1);
-                let mut pi = 1.0f64;
-                for i in 0..e.min(128) {
-                    pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
-                }
+                let pi = match gt {
+                    Some(theta) => (1.0 - theta.min(1.0)).powi(e.min(128) as i32),
+                    None => {
+                        let mut pi = 1.0f64;
+                        for i in 0..e.min(128) {
+                            pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
+                        }
+                        pi
+                    }
+                };
                 (q0 + (1.0 - q0) * (1.0 - pi))
                     * contraction.conversion_prob(NEAR_BEST_ORDERS, p)
             };
@@ -2705,6 +2787,39 @@ where
 mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
+
+    #[test]
+    fn basin_registry_good_turing_record_gate() {
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![-5.0, -5.0]),
+            Array1::from_vec(vec![5.0, 5.0]),
+            1e-12,
+        );
+        let mut reg = BasinRegistry::default();
+        // Three hits in basin A (within the merge radius), two in B, one
+        // singleton C: n = 6, w = 3, n1 = 1.
+        for (x, y, v) in [
+            (1.0, 1.0, 3.0),
+            (1.05, 0.95, 2.9),
+            (0.95, 1.05, 3.1),
+            (-2.0, -2.0, 1.0),
+            (-2.05, -1.95, 0.9),
+            (4.0, -4.0, 5.0),
+        ] {
+            reg.register(Array1::from_vec(vec![x, y]).view(), v, &bounds);
+        }
+        assert_eq!(reg.n_samples, 6);
+        assert_eq!(reg.entries.len(), 3);
+        let theta = reg.record_discovery_prob().expect("enough samples");
+        // (n1/n) / (w+1) = (1/6) / 4
+        assert!((theta - (1.0 / 6.0) / 4.0).abs() < 1e-12);
+        // Basin representatives keep the deepest value seen.
+        assert!((reg.entries[1].1 - 0.9).abs() < 1e-12);
+        // Under five samples the gate abstains (Beta fallback).
+        let mut thin = BasinRegistry::default();
+        thin.register(Array1::from_vec(vec![0.0, 0.0]).view(), 1.0, &bounds);
+        assert!(thin.record_discovery_prob().is_none());
+    }
 
     #[test]
     fn luby_sequence_prefix_is_canonical() {
