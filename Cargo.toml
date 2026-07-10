@@ -32,6 +32,7 @@ numpy       = { version = "0.26", optional = true }
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
+trybuild  = "1.0"
 # Example/integration demo only: minimize an rgpot potential with anneal. Shares
 # the same registry eindir-core + dlpk versions, so one eindir-core compilation
 # backs both.
