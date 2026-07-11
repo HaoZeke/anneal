@@ -5699,6 +5699,7 @@ def test_sota_cutest_streams_rows_as_methods_finish():
         "dim": 3,
         "method": "hybrid_de",
         "seed": 0,
+        "initial": 6.5,
         "best": -1.25,
         "evals": 80,
         "objective_evals": 72,
@@ -5711,7 +5712,7 @@ def test_sota_cutest_streams_rows_as_methods_finish():
     assert stream.flush_count == 1
     lines = stream.getvalue().splitlines()
     assert lines[0] == ",".join(sota_cutest.FIELDNAMES)
-    assert lines[1] == "BOX3,3,hybrid_de,0,-1.25,80,72,8,budget_exhausted"
+    assert lines[1] == "BOX3,3,hybrid_de,0,6.5,-1.25,80,72,8,budget_exhausted"
 
 
 def test_sota_cutest_shards_targets_by_stable_index():
