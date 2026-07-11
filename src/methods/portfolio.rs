@@ -3624,13 +3624,30 @@ mod tests {
             inner: ShiftQuadratic::new(),
             offset: 1.0e4,
         };
+        let prewarms = |objective: &OffsetQuadratic| {
+            let ledger = BudgetLedger::new(4_000, Objective::dim(objective));
+            let objective = BudgetedObjective {
+                inner: objective,
+                ledger: &ledger,
+            };
+            let gradient = BudgetedGradient {
+                inner: objective.inner,
+                ledger: &ledger,
+            };
+            let probe = scaled_center_probe(&objective, &gradient, objective.bounds());
+            low_dimensional_polish_before_warmup(probe.and_then(|item| item.gradient_ratio))
+        };
+        assert_eq!(prewarms(&base), prewarms(&shifted));
         let a = portfolio_optimize(&base, Some(&base), 4_000, 73, None);
         let b = portfolio_optimize(&shifted, Some(&shifted), 4_000, 73, None);
 
         assert_eq!(a.arm_stats.len(), b.arm_stats.len());
         for (left, right) in a.arm_stats.iter().zip(b.arm_stats.iter()) {
             assert_eq!(left.name, right.name);
-            assert_eq!(left.pulls, right.pulls, "pull mismatch for {}", left.name);
+            assert_eq!(
+                left.pulls, right.pulls,
+                "pull mismatch for {}; base={:?}; shifted={:?}", left.name, a.arm_stats, b.arm_stats
+            );
             assert_eq!(
                 left.successes, right.successes,
                 "success mismatch for {}",
