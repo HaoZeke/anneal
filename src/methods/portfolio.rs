@@ -330,12 +330,37 @@ impl BudgetLedger {
         self.used_get() >= self.cap_get()
     }
 
+    /// Atomically reserve `work` units without overshooting the cap.
+    ///
+    /// Uses compare-exchange so concurrent chargers cannot pass the check
+    /// then both `fetch_add` past `cap` (TOCTOU on the naive remaining/add path).
+    fn try_charge(&self, work: usize) -> bool {
+        if work == 0 {
+            return true;
+        }
+        loop {
+            let used = self.used.load(Ordering::Relaxed);
+            let cap = self.cap.load(Ordering::Relaxed);
+            if used >= cap || cap - used < work {
+                return false;
+            }
+            match self.used.compare_exchange_weak(
+                used,
+                used + work,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return true,
+                Err(_) => continue,
+            }
+        }
+    }
+
     fn charge_probe(&self, n_evals: usize, n_grads: usize) -> bool {
         let work = n_evals + n_grads;
-        if self.remaining() < work {
+        if !self.try_charge(work) {
             return false;
         }
-        self.used.fetch_add(work, Ordering::Relaxed);
         self.n_evals.fetch_add(n_evals, Ordering::Relaxed);
         self.n_grads.fetch_add(n_grads, Ordering::Relaxed);
         true
@@ -348,7 +373,11 @@ impl BudgetLedger {
             return;
         }
         let mut inner = self.inner.lock().expect("ledger lock");
-        if value < self.best_get() {
+        // Re-read under the lock so two sequential records cannot promote a
+        // worse best_val after a better one (relaxed atomic alone is racy
+        // with the mutex-held position write).
+        let current = f64::from_bits(self.best_val.load(Ordering::Relaxed));
+        if value < current {
             self.best_val.store(value.to_bits(), Ordering::Relaxed);
             inner.best_pos = Some(x.to_owned());
         }
@@ -383,10 +412,9 @@ impl<O: Objective<f64>> Objective<f64> for BudgetedObjective<'_, O> {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
-        if self.ledger.exhausted() {
+        if !self.ledger.try_charge(OBJECTIVE_WORK_UNIT) {
             return f64::INFINITY;
         }
-        self.ledger.used.fetch_add(1, Ordering::Relaxed);
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
         // Reflect (not bare-clip) into the box before eval+record: clipping
         // piles mass on the wall; reflection keeps a feasible point while
@@ -417,10 +445,9 @@ impl<O: Objective<f64>> Objective<f64> for LocalBoxBudgetedObjective<'_, O> {
     }
 
     fn eval(&self, x: ArrayView1<f64>) -> f64 {
-        if self.ledger.exhausted() {
+        if !self.ledger.try_charge(OBJECTIVE_WORK_UNIT) {
             return f64::INFINITY;
         }
-        self.ledger.used.fetch_add(1, Ordering::Relaxed);
         self.ledger.n_evals.fetch_add(1, Ordering::Relaxed);
         // Reflect into the local box; archive only if also globally feasible.
         let x_local = crate::movekernel::reflect_into_box(x, &self.bounds);
@@ -443,10 +470,9 @@ impl<G: Gradient<f64>> Gradient<f64> for BudgetedGradient<'_, G> {
     }
 
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        if self.ledger.exhausted() {
+        if !self.ledger.try_charge(GRADIENT_WORK_UNIT) {
             return Array1::zeros(self.ledger.dim);
         }
-        self.ledger.used.fetch_add(1, Ordering::Relaxed);
         self.ledger.n_grads.fetch_add(1, Ordering::Relaxed);
         self.inner.grad(x)
     }
@@ -2557,6 +2583,16 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     assert!(dim > 0, "objective dimension must be positive");
+    for i in 0..dim {
+        assert!(
+            bounds.low[i].is_finite() && bounds.high[i].is_finite(),
+            "bounds must be finite at dimension {i}"
+        );
+        assert!(
+            bounds.low[i] < bounds.high[i],
+            "low[{i}] must be strictly less than high[{i}]"
+        );
+    }
 
     // GJQ-style regime refusal on the shipped accept path: declared noise
     // forbids exact-only Metropolis. The portfolio always uses OSA when
@@ -3149,6 +3185,61 @@ mod tests {
         let result = portfolio_optimize(&obj, Some(&obj), 600, 7, None);
         assert!(result.n_evals + result.n_grads <= 600);
         assert!(result.best_val.is_finite());
+    }
+
+    #[test]
+    fn try_charge_never_overshoots_cap() {
+        let ledger = BudgetLedger::new(5, 2);
+        assert!(ledger.try_charge(3));
+        assert!(!ledger.try_charge(3)); // only 2 remain
+        assert!(ledger.try_charge(2));
+        assert!(!ledger.try_charge(1));
+        assert_eq!(ledger.used_get(), 5);
+        assert!(ledger.exhausted());
+    }
+
+    #[test]
+    fn budgeted_objective_stops_charging_at_cap() {
+        let obj = Rastrigin::<2>::new();
+        let ledger = BudgetLedger::new(3, 2);
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let x = Array1::zeros(2);
+        assert!(budgeted.eval(x.view()).is_finite());
+        assert!(budgeted.eval(x.view()).is_finite());
+        assert!(budgeted.eval(x.view()).is_finite());
+        assert!(budgeted.eval(x.view()).is_infinite());
+        assert_eq!(ledger.used_get(), 3);
+        assert_eq!(ledger.n_evals.load(Ordering::Relaxed), 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "low[0] must be strictly less than high[0]")]
+    fn portfolio_rejects_inverted_bounds() {
+        struct BadBox {
+            bounds: Bounds<f64>,
+        }
+        impl Objective<f64> for BadBox {
+            fn dim(&self) -> usize {
+                1
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, _x: ArrayView1<f64>) -> f64 {
+                0.0
+            }
+        }
+        let obj = BadBox {
+            bounds: Bounds::new(
+                Array1::from_vec(vec![1.0]),
+                Array1::from_vec(vec![0.0]),
+                1e-9,
+            ),
+        };
+        let _ = portfolio_optimize::<_, BadBox>(&obj, None, 10, 0, None);
     }
 
     #[test]
