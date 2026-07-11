@@ -6,12 +6,11 @@
 # or pass an explicit project root:
 #   pixi run -e verify bash experiments/benchmarks/bootstrap_cutest.sh /path/to/project
 #
-# First-run cost: ~5-10 min (compiles 100+ Fortran objects). Subsequent
-# runs are no-ops.
-
 set -euo pipefail
 
 PROJECT_ROOT="${1:-$(pwd)}"
+mkdir -p "$PROJECT_ROOT"
+PROJECT_ROOT="$(cd "$PROJECT_ROOT" && pwd -P)"
 BENCH_DIR="$PROJECT_ROOT/.bench"
 mkdir -p "$BENCH_DIR"
 
