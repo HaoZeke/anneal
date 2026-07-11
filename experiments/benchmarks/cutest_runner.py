@@ -214,14 +214,19 @@ def configured_pycutest(config: CutestConfig | None = None):
     """Return PyCUTEst configured from explicit paths instead of process state."""
 
     existing = sys.modules.get("pycutest")
-    if existing is not None and all(
-        hasattr(existing, name)
-        for name in (
-            "import_problem",
-            "clear_cache",
-            "problem_properties",
-            "find_problems",
+    existing_config = getattr(existing, "_anneal_cutest_config", None)
+    if (
+        existing is not None
+        and all(
+            hasattr(existing, name)
+            for name in (
+                "import_problem",
+                "clear_cache",
+                "problem_properties",
+                "find_problems",
+            )
         )
+        and (config is None or existing_config == config)
     ):
         return existing
 
@@ -233,6 +238,7 @@ def configured_pycutest(config: CutestConfig | None = None):
     package.__package__ = "pycutest"
     package.__version__ = _pycutest_version(package_dir / "__init__.py")
     package.__all__ = []
+    package._anneal_cutest_config = config
     sys.modules["pycutest"] = package
 
     system_paths = _load_pycutest_submodule(package_dir, "system_paths")
@@ -361,9 +367,11 @@ def load(
         f_star: known global optimum if available (used by the bench
             "solved" predicate). None means "use a tolerance from x0".
     """
-    config = default_cutest_config() if config is None else config.validate()
-    quarantine_incomplete_cache_entry(config.pycutest_cache_holder, name)
     pycutest = configured_pycutest(config)
+    active_config = config or getattr(pycutest, "_anneal_cutest_config", None)
+    if active_config is not None:
+        active_config.validate()
+        quarantine_incomplete_cache_entry(active_config.pycutest_cache_holder, name)
     p = pycutest.import_problem(name, sifParams=sif_params)
     try:
         properties = pycutest.problem_properties(name)
