@@ -25,7 +25,6 @@ import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from queue import Empty
 
 import numpy as np
@@ -40,6 +39,9 @@ from experiments.scripts.run_cutest_benchmarks import (
     DRIVERS as MANIFEST_DRIVERS,
     SCIPY_DRIVERS,
     _bgsa_run,
+    _cutest_gradient,
+    _run_cutest_additive_independence,
+    _run_cutest_gle_langevin,
     bayesian_mixing_sa,
     classical_sa,
     mcmc_sa,
@@ -105,7 +107,9 @@ def _property_dim(props: dict) -> int | None:
     return dim if dim > 0 else None
 
 
-def _collect_kind(pycutest, kind: str, dim_cap: int, exclude_names: set[str]) -> list[TargetProblem]:
+def _collect_kind(
+    pycutest, kind: str, dim_cap: int, exclude_names: set[str]
+) -> list[TargetProblem]:
     selected: list[TargetProblem] = []
     for name in pycutest.find_problems(constraints=kind):
         if name in exclude_names:
@@ -156,9 +160,7 @@ def shard_targets(
     if shard_index < 0 or shard_index >= shard_count:
         raise ValueError("shard_index must satisfy 0 <= shard_index < shard_count")
     return [
-        target
-        for idx, target in enumerate(targets)
-        if idx % shard_count == shard_index
+        target for idx, target in enumerate(targets) if idx % shard_count == shard_index
     ]
 
 
@@ -173,7 +175,9 @@ def parse_drivers(raw: str | None) -> tuple[str, ...]:
 
 
 def evict_pycutest_cache(config: CutestConfig | None = None) -> None:
-    cache_root = (default_cutest_config() if config is None else config.validate()).cache_dir
+    cache_root = (
+        default_cutest_config() if config is None else config.validate()
+    ).cache_dir
     cache_root.mkdir(parents=True, exist_ok=True)
     for child in cache_root.iterdir():
         if child.is_dir():
@@ -184,10 +188,7 @@ def evict_pycutest_cache(config: CutestConfig | None = None) -> None:
 
 
 def resume_keys(rows: Iterable[dict]) -> set[tuple[str, str, str]]:
-    return {
-        (str(row["problem"]), str(row["driver"]), str(row["seed"]))
-        for row in rows
-    }
+    return {(str(row["problem"]), str(row["driver"]), str(row["seed"])) for row in rows}
 
 
 def load_existing_rows(path: str, resume: bool) -> list[dict]:
@@ -219,19 +220,21 @@ def append_target_timeout_rows(
         key = (target.name, driver, str(seed))
         if key in seen:
             continue
-        rows.append({
-            "problem": target.name,
-            "kind": target.kind,
-            "dim": target.dim,
-            "driver": driver,
-            "seed": seed,
-            "fevals": 0,
-            "best_val": float("nan"),
-            "wall_time_s": "0.000",
-            "f_x0": f0,
-            "solved": 0,
-            "status": "target-timeout",
-        })
+        rows.append(
+            {
+                "problem": target.name,
+                "kind": target.kind,
+                "dim": target.dim,
+                "driver": driver,
+                "seed": seed,
+                "fevals": 0,
+                "best_val": float("nan"),
+                "wall_time_s": "0.000",
+                "f_x0": f0,
+                "solved": 0,
+                "status": "target-timeout",
+            }
+        )
         seen.add(key)
         appended += 1
     return appended
@@ -250,19 +253,21 @@ def append_target_error_rows(
         key = (target.name, driver, str(seed))
         if key in seen:
             continue
-        rows.append({
-            "problem": target.name,
-            "kind": target.kind,
-            "dim": target.dim,
-            "driver": driver,
-            "seed": seed,
-            "fevals": 0,
-            "best_val": float("nan"),
-            "wall_time_s": "0.000",
-            "f_x0": f0,
-            "solved": 0,
-            "status": status,
-        })
+        rows.append(
+            {
+                "problem": target.name,
+                "kind": target.kind,
+                "dim": target.dim,
+                "driver": driver,
+                "seed": seed,
+                "fevals": 0,
+                "best_val": float("nan"),
+                "wall_time_s": "0.000",
+                "f_x0": f0,
+                "solved": 0,
+                "status": status,
+            }
+        )
         seen.add(key)
         appended += 1
     return appended
@@ -296,9 +301,15 @@ def maybe_reduce(prob, args):
     from experiments.surrogate import fit_reduced_surrogate
 
     fit = fit_reduced_surrogate(
-        prob.fn, prob.grad, prob.low, prob.high, prob.dim,
-        k=int(args.surrogate_k), degree=int(args.surrogate_degree),
-        n_pilot=getattr(args, "surrogate_pilot", None), rng=12345,
+        prob.fn,
+        prob.grad,
+        prob.low,
+        prob.high,
+        prob.dim,
+        k=int(args.surrogate_k),
+        degree=int(args.surrogate_degree),
+        n_pilot=getattr(args, "surrogate_pilot", None),
+        rng=12345,
     )
     decode = fit.encoder.decode
     true_fn = prob.fn
@@ -455,6 +466,31 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
             seed,
             1 + args.n_epochs * args.k_fixed,
         )
+    if driver == "additive_indep":
+        result = _run_cutest_additive_independence(
+            _anneal_module(),
+            prob,
+            seed,
+            args.n_epochs,
+            args.k_fixed,
+        )
+        if result is None:
+            raise RuntimeError("additive independence driver returned no result")
+        return result
+    if driver == "gle_langevin":
+        grad_fn, grad_kind = _cutest_gradient(prob)
+        result = _run_cutest_gle_langevin(
+            _anneal_module(),
+            prob,
+            grad_fn,
+            grad_kind,
+            seed,
+            args.n_epochs,
+            args.k_fixed,
+        )
+        if result is None:
+            raise RuntimeError("GLE Langevin driver returned no result")
+        return result
     if driver in SCIPY_DRIVERS:
         return SCIPY_DRIVERS[driver](
             prob,
@@ -462,6 +498,12 @@ def run_driver(prob, driver: str, seed: int, args) -> tuple[float, int]:
             1 + args.n_epochs * args.k_fixed,
         )
     return _bgsa_run(prob, seed, args.n_epochs, args.k_fixed, args.n_chains, driver)
+
+
+def _anneal_module():
+    import anneal
+
+    return anneal
 
 
 def _load_cell_problem(problem_ref, args=None):
@@ -491,7 +533,9 @@ def _fork_context():
         return None
 
 
-def run_driver_cell(problem_ref, driver: str, seed: int, args) -> tuple[float, int, float, str]:
+def run_driver_cell(
+    problem_ref, driver: str, seed: int, args
+) -> tuple[float, int, float, str]:
     """Load and run one driver cell with a timeout that can stop compiled code."""
     ctx = _fork_context()
     if ctx is None:
@@ -507,7 +551,9 @@ def run_driver_cell(problem_ref, driver: str, seed: int, args) -> tuple[float, i
             return float("nan"), 0, float("nan"), f"err:{type(exc).__name__}"
 
     queue = ctx.Queue(maxsize=1)
-    proc = ctx.Process(target=_driver_worker, args=(queue, problem_ref, driver, seed, args))
+    proc = ctx.Process(
+        target=_driver_worker, args=(queue, problem_ref, driver, seed, args)
+    )
     proc.start()
     proc.join(args.per_problem_timeout)
     if proc.is_alive():
@@ -557,13 +603,17 @@ def run_suite(args) -> list[dict]:
     t0_global = time.perf_counter()
     completed_targets = 0
     for target in targets:
-        cells = tuple((seed, driver) for seed in range(args.seeds) for driver in drivers)
+        cells = tuple(
+            (seed, driver) for seed in range(args.seeds) for driver in drivers
+        )
         all_done = all(
             (target.name, driver, str(seed)) in seen for seed, driver in cells
         )
         if all_done:
             continue
-        existing_target_rows = [row for row in rows if row.get("problem") == target.name]
+        existing_target_rows = [
+            row for row in rows if row.get("problem") == target.name
+        ]
         target_timeouts = sum(
             1 for row in existing_target_rows if is_timeout_status(row.get("status"))
         )
@@ -576,7 +626,10 @@ def run_suite(args) -> list[dict]:
             if np.isfinite(candidate_f0):
                 target_f0 = candidate_f0
                 break
-        if args.max_timeouts_per_target > 0 and target_timeouts >= args.max_timeouts_per_target:
+        if (
+            args.max_timeouts_per_target > 0
+            and target_timeouts >= args.max_timeouts_per_target
+        ):
             appended = append_target_timeout_rows(rows, seen, target, cells, target_f0)
             if appended:
                 write_rows(args.out, rows)
@@ -609,7 +662,9 @@ def run_suite(args) -> list[dict]:
                 continue
 
             start = time.perf_counter()
-            best_val, fevals, f0, status = run_driver_cell(target_problem, driver, seed, args)
+            best_val, fevals, f0, status = run_driver_cell(
+                target_problem, driver, seed, args
+            )
             if np.isfinite(float(f0)):
                 target_f0 = float(f0)
 
@@ -630,8 +685,13 @@ def run_suite(args) -> list[dict]:
             seen.add(key)
             if is_timeout_status(status):
                 target_timeouts += 1
-            if args.max_timeouts_per_target > 0 and target_timeouts >= args.max_timeouts_per_target:
-                append_target_timeout_rows(rows, seen, target, cells[idx + 1:], target_f0)
+            if (
+                args.max_timeouts_per_target > 0
+                and target_timeouts >= args.max_timeouts_per_target
+            ):
+                append_target_timeout_rows(
+                    rows, seen, target, cells[idx + 1 :], target_f0
+                )
                 write_rows(args.out, rows)
                 break
             write_rows(args.out, rows)
@@ -654,27 +714,55 @@ def run_suite(args) -> list[dict]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default="data/cutest_full.csv")
-    parser.add_argument("--bench-root", default=None,
-                        help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.")
-    parser.add_argument("--pycutest-cache", default=None,
-                        help="Explicit PyCUTEst cache directory; defaults to .bench/cache.")
+    parser.add_argument(
+        "--bench-root",
+        default=None,
+        help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.",
+    )
+    parser.add_argument(
+        "--pycutest-cache",
+        default=None,
+        help="Explicit PyCUTEst cache directory; defaults to .bench/cache.",
+    )
     parser.add_argument("--seeds", type=int, default=3)
     parser.add_argument("--dim-cap", type=int, default=50)
-    parser.add_argument("--reduce", action="store_true",
-                        help="Collapse problems above the dimension threshold onto an "
-                             "active subspace with a Chebyshev surrogate gradient.")
-    parser.add_argument("--surrogate-dim-threshold", type=int, default=0,
-                        help="Wrap problems with dim above this (0 disables).")
-    parser.add_argument("--surrogate-k", type=int, default=4,
-                        help="Reduced (active-subspace) dimension.")
-    parser.add_argument("--surrogate-degree", type=int, default=6,
-                        help="Total-degree of the Chebyshev surrogate.")
-    parser.add_argument("--surrogate-pilot", type=int, default=None,
-                        help="Pilot sample size (default scales with the basis size).")
-    parser.add_argument("--evict-cache", action="store_true",
-                        help="Stream the suite: drop each problem's compiled pycutest "
-                             "cache once its cells finish, bounding peak disk to one "
-                             "problem (one per shard) instead of the whole catalogue.")
+    parser.add_argument(
+        "--reduce",
+        action="store_true",
+        help="Collapse problems above the dimension threshold onto an "
+        "active subspace with a Chebyshev surrogate gradient.",
+    )
+    parser.add_argument(
+        "--surrogate-dim-threshold",
+        type=int,
+        default=0,
+        help="Wrap problems with dim above this (0 disables).",
+    )
+    parser.add_argument(
+        "--surrogate-k",
+        type=int,
+        default=4,
+        help="Reduced (active-subspace) dimension.",
+    )
+    parser.add_argument(
+        "--surrogate-degree",
+        type=int,
+        default=6,
+        help="Total-degree of the Chebyshev surrogate.",
+    )
+    parser.add_argument(
+        "--surrogate-pilot",
+        type=int,
+        default=None,
+        help="Pilot sample size (default scales with the basis size).",
+    )
+    parser.add_argument(
+        "--evict-cache",
+        action="store_true",
+        help="Stream the suite: drop each problem's compiled pycutest "
+        "cache once its cells finish, bounding peak disk to one "
+        "problem (one per shard) instead of the whole catalogue.",
+    )
     parser.add_argument(
         "--load-timeout",
         type=int,
@@ -706,7 +794,8 @@ def print_tally(rows: list[dict]) -> None:
     for driver in sorted({row["driver"] for row in rows}):
         sub = [row for row in rows if row["driver"] == driver]
         ok = [
-            row for row in sub
+            row
+            for row in sub
             if row.get("status", "ok") == "ok" and np.isfinite(float(row["best_val"]))
         ]
         solved = sum(int(row["solved"]) for row in sub)
