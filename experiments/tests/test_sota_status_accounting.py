@@ -60,6 +60,48 @@ def test_summary_excludes_failed_rows_and_uses_average_tie_ranks():
     assert "failed" not in summary
 
 
+def test_summary_uses_more_wild_reduction_and_complete_cell_denominator():
+    rows = [
+        {
+            "problem": "p",
+            "seed": "0",
+            "method": "a",
+            "initial": "100",
+            "best": "0",
+            "status": "ok",
+        },
+        {
+            "problem": "p",
+            "seed": "0",
+            "method": "b",
+            "initial": "100",
+            "best": "0.05",
+            "status": "ok",
+        },
+        {
+            "problem": "q",
+            "seed": "0",
+            "method": "a",
+            "initial": "10",
+            "best": "1",
+            "status": "ok",
+        },
+        {
+            "problem": "q",
+            "seed": "0",
+            "method": "b",
+            "initial": "10",
+            "best": "inf",
+            "status": "error:RuntimeError",
+        },
+    ]
+
+    summary = summarize_rows(rows)
+
+    assert summary["b"]["near_best"] == 1
+    assert summary["b"]["eligible_cells"] == 2
+
+
 def test_failure_aware_ranks_place_unsuccessful_methods_last_with_ties():
     rows = [
         {"problem": "p", "seed": "0", "method": "a", "best": "1", "status": "ok"},
