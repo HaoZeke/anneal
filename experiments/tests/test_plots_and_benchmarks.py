@@ -532,6 +532,20 @@ def test_cutest_config_accepts_explicit_pycutest_cache(tmp_path):
     assert (cache / "pycutest_cache_holder").is_dir()
 
 
+def test_cutest_config_canonicalizes_relative_paths(tmp_path, monkeypatch):
+    from experiments.benchmarks.cutest_runner import CutestConfig
+
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    config = CutestConfig.from_root("project", cache_dir="cache-shard")
+    monkeypatch.chdir(project)
+
+    assert config.bench_dir == tmp_path / "project" / ".bench"
+    assert config.cache_dir == tmp_path / "cache-shard"
+
+
 def test_cutest_sota_configuration_stays_explicit():
     root = Path(__file__).resolve().parents[2]
     experiments = root / "experiments"
