@@ -36,7 +36,10 @@ from experiments.benchmarks.cutest_runner import (
     default_cutest_config,
     load,
 )
-from experiments.scripts.run_cutest_full_suite import list_target_problems
+from experiments.scripts.run_cutest_full_suite import (
+    TargetProblem,
+    list_target_problems,
+)
 
 
 class _Budget(Exception):
@@ -449,6 +452,31 @@ def _shard_targets(targets, shard_index: int, shard_count: int):
     ]
 
 
+def load_problem_manifest(path):
+    """Load the committed CSV population used by a benchmark campaign."""
+    with open(path, newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    required = {"problem", "kind", "dim"}
+    if not rows:
+        raise ValueError("problem manifest is empty")
+    missing = required - set(rows[0])
+    if missing:
+        raise ValueError(f"problem manifest missing columns: {sorted(missing)}")
+    targets = []
+    seen = set()
+    for row in rows:
+        name = row["problem"].strip()
+        kind = row["kind"].strip()
+        dim = int(row["dim"])
+        if not name or kind not in {"unconstrained", "bound"} or dim <= 0:
+            raise ValueError(f"invalid problem manifest row: {row}")
+        if name in seen:
+            raise ValueError(f"duplicate problem in manifest: {name}")
+        seen.add(name)
+        targets.append(TargetProblem(name=name, kind=kind, dim=dim))
+    return targets
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", default="results/sota_cutest.csv")
@@ -487,7 +515,14 @@ def main():
         help="Optional newline-separated problem names (paper list). "
         "When set, only these names are run (still filtered by dim-cap).",
     )
+    p.add_argument(
+        "--problem-manifest",
+        default=None,
+        help="Committed CSV with problem, kind, and dimension columns.",
+    )
     args = p.parse_args()
+    if args.problem_manifest and args.problems_file:
+        p.error("use only one of --problem-manifest and --problems-file")
     if args.methods:
         requested = [m.strip() for m in args.methods.split(",") if m.strip()]
         unknown = sorted(set(requested) - set(METHODS))
@@ -499,9 +534,13 @@ def main():
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     config = default_cutest_config(args.bench_root, cache_dir=args.pycutest_cache)
 
-    if args.problems_file:
-        from experiments.scripts.run_cutest_full_suite import TargetProblem
-
+    if args.problem_manifest:
+        all_targets = [
+            target
+            for target in load_problem_manifest(args.problem_manifest)
+            if target.dim <= args.dim_cap
+        ][: args.max_problems]
+    elif args.problems_file:
         names = [
             line.strip()
             for line in open(args.problems_file, encoding="utf-8")
