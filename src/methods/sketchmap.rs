@@ -197,9 +197,9 @@ impl SketchMap2d {
         let mut best_i = 0usize;
         let mut best_d = f64::INFINITY;
         let mut f_to_l = vec![0.0; n];
-        for i in 0..n {
+        for (i, mapped_distance) in f_to_l.iter_mut().enumerate() {
             let d = row_l2(x, self.landmarks.row(i));
-            f_to_l[i] = sigmoid_switch(d, self.sigma_high, self.a_high, self.b_high);
+            *mapped_distance = sigmoid_switch(d, self.sigma_high, self.a_high, self.b_high);
             if d < best_d {
                 best_d = d;
                 best_i = i;
@@ -211,12 +211,11 @@ impl SketchMap2d {
         for _ in 0..n_iters.max(1) {
             let mut g0 = 0.0;
             let mut g1 = 0.0;
-            for i in 0..n {
+            for (i, f) in f_to_l.iter().copied().enumerate() {
                 let dx = y0 - self.embedded[[i, 0]];
                 let dy = y1 - self.embedded[[i, 1]];
                 let dij = (dx * dx + dy * dy).sqrt().max(1e-12);
                 let g = sigmoid_switch(dij, self.sigma_low, self.a_low, self.b_low);
-                let f = f_to_l[i];
                 let diff = g - f;
                 let c = (2.0_f64).powf(self.a_low / self.b_low) - 1.0;
                 let u = dij / self.sigma_low;
@@ -391,20 +390,20 @@ pub fn farthest_point_landmarks(xs: &[Array1<f64>], max_landmarks: usize) -> Vec
     let mut min_dist = vec![f64::INFINITY; n];
     for _ in 1..m {
         let last = chosen[chosen.len() - 1];
-        for i in 0..n {
+        for (i, nearest) in min_dist.iter_mut().enumerate() {
             let d = row_l2(xs[i].view(), xs[last].view());
-            if d < min_dist[i] {
-                min_dist[i] = d;
+            if d < *nearest {
+                *nearest = d;
             }
         }
         let mut best_i = 0;
         let mut best_d = -1.0;
-        for i in 0..n {
+        for (i, &nearest) in min_dist.iter().enumerate() {
             if chosen.contains(&i) {
                 continue;
             }
-            if min_dist[i] > best_d {
-                best_d = min_dist[i];
+            if nearest > best_d {
+                best_d = nearest;
                 best_i = i;
             }
         }
