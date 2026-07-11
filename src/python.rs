@@ -490,10 +490,7 @@ fn qmc_polish_result_to_dict(
     result: crate::QmcPolishResult,
 ) -> PyResult<Py<PyDict>> {
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -913,10 +910,7 @@ fn shifted_qmc_polish(
     );
 
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -983,10 +977,7 @@ fn additive_independence(
         &obj, seed, max_fevals, degree, grid_m, local_frac, n_epochs, pilot,
     );
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     Ok(out.into())
@@ -1051,10 +1042,7 @@ fn gle_langevin_result_to_dict(
     result: crate::methods::GleLangevinResult,
 ) -> PyResult<Py<PyDict>> {
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("omega0", result.omega0)?;
