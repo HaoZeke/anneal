@@ -133,6 +133,16 @@ def test_turbo_model_fit_failure_requests_a_restart():
     )
 
 
+def test_turbo_targets_replace_nonfinite_values_with_pessimistic_finite_score():
+    targets = sota_cutest._finite_turbo_targets(
+        np.array([[-2.0], [np.nan], [np.inf], [-np.inf]]),
+        reference=np.array([[-1.0], [-4.0]]),
+    )
+
+    assert np.all(np.isfinite(targets))
+    assert targets[:, 0].tolist() == [-2.0, -7.0, -7.0, -7.0]
+
+
 def test_cma_one_dimensional_scaling_error_is_restartable():
     error = ValueError("not yet initialized (dimension needed)")
     assert sota_cutest._is_restartable_cma_error(error)
