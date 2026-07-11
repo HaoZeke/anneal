@@ -20,6 +20,7 @@ from collections import defaultdict
 DM_TAU = 1e-3
 WIN_ATOL = 1e-9
 WIN_RTOL = 1e-9
+VALID_STATUSES = {"ok", "budget_exhausted"}
 
 
 def load_rows(paths):
@@ -30,18 +31,19 @@ def load_rows(paths):
     return rows
 
 
-def main(paths):
-    rows = load_rows(paths)
-    if not rows:
-        print("no rows")
-        return 1
+def _valid_finite(row):
+    return row.get("status", "ok") in VALID_STATUSES and math.isfinite(
+        float(row["best"])
+    )
+
+
+def summarize_rows(rows):
+    """Return tie-aware metrics from successful, finite solver cells."""
     cells = defaultdict(dict)
-    dims = {}
     for row in rows:
         key = (row["problem"], row["seed"])
-        value = float(row["best"])
-        cells[key][row["method"]] = value
-        dims[row["problem"]] = int(row["dim"])
+        if _valid_finite(row):
+            cells[key][row["method"]] = float(row["best"])
 
     methods = sorted({m for cell in cells.values() for m in cell})
     wins = defaultdict(int)
@@ -49,54 +51,77 @@ def main(paths):
     rank_n = defaultdict(int)
     solved = defaultdict(int)
     solved_n = defaultdict(int)
-    head_to_head = defaultdict(lambda: [0, 0, 0])  # better, tied, worse
 
     for cell in cells.values():
-        finite = {m: v for m, v in cell.items() if math.isfinite(v)}
-        if not finite:
+        if not cell:
             continue
-        best = min(finite.values())
-        worst = max(finite.values())
+        best = min(cell.values())
+        worst = max(cell.values())
         spread = max(worst - best, 1.0)
-        for m, v in finite.items():
+        for m, v in cell.items():
             if v <= best + WIN_ATOL + WIN_RTOL * abs(best):
                 wins[m] += 1
             solved_n[m] += 1
             if v <= best + DM_TAU * spread:
                 solved[m] += 1
-        order = sorted(finite, key=finite.get)
-        for rank, m in enumerate(order, start=1):
-            rank_sum[m] += rank
-            rank_n[m] += 1
-        for ours in ("portfolio", "hybrid_de"):
-            if ours not in finite:
-                continue
-            for baseline in ("basinhopping", "dual_annealing", "diff_evol", "classical"):
-                if baseline not in finite:
-                    continue
-                pair = head_to_head[(ours, baseline)]
-                margin = WIN_ATOL + WIN_RTOL * abs(finite[baseline])
-                if finite[ours] < finite[baseline] - margin:
-                    pair[0] += 1
-                elif finite[ours] > finite[baseline] + margin:
-                    pair[2] += 1
-                else:
-                    pair[1] += 1
+        ordered = sorted(cell.items(), key=lambda item: item[1])
+        i = 0
+        while i < len(ordered):
+            j = i + 1
+            plateau = ordered[i][1]
+            tolerance = WIN_ATOL + WIN_RTOL * abs(plateau)
+            while j < len(ordered) and abs(ordered[j][1] - plateau) <= tolerance:
+                j += 1
+            average_rank = 0.5 * ((i + 1) + j)
+            for method, _ in ordered[i:j]:
+                rank_sum[method] += average_rank
+                rank_n[method] += 1
+            i = j
 
-    n_cells = len(cells)
+    return {
+        method: {
+            "wins": wins[method],
+            "mean_rank": rank_sum[method] / rank_n[method],
+            "near_best": solved[method],
+            "eligible_cells": solved_n[method],
+        }
+        for method in methods
+        if rank_n[method]
+    }
+
+
+def main(paths):
+    rows = load_rows(paths)
+    if not rows:
+        print("no rows")
+        return 1
+    summary = summarize_rows(rows)
+    all_cells = {(row["problem"], row["seed"]) for row in rows}
+    n_cells = len(all_cells)
+    methods = sorted({row["method"] for row in rows})
+    failures = defaultdict(int)
+    for row in rows:
+        if not _valid_finite(row):
+            failures[row["method"]] += 1
+
     print(f"{n_cells} cells, {len(methods)} methods\n")
-    print(f"{'method':>16} {'wins':>6} {'win%':>6} {'meanrank':>9} {'near-best%':>10}")
-    for m in sorted(methods, key=lambda k: -wins[k]):
-        mean_rank = rank_sum[m] / max(rank_n[m], 1)
-        near = 100.0 * solved[m] / max(solved_n[m], 1)
+    print(
+        f"{'method':>16} {'wins':>6} {'win%':>6} {'meanrank':>9} "
+        f"{'near-best%':>10} {'fail':>6}"
+    )
+    for m in sorted(methods, key=lambda k: -summary.get(k, {}).get("wins", 0)):
+        metrics = summary.get(m)
+        if metrics is None:
+            print(
+                f"{m:>16} {0:>6} {0.0:>5.1f}% {'nan':>9} {0.0:>9.1f}% {failures[m]:>6}"
+            )
+            continue
+        near = 100.0 * metrics["near_best"] / metrics["eligible_cells"]
         print(
-            f"{m:>16} {wins[m]:>6} {100.0 * wins[m] / n_cells:>5.1f}% "
-            f"{mean_rank:>9.2f} {near:>9.1f}%"
+            f"{m:>16} {metrics['wins']:>6} "
+            f"{100.0 * metrics['wins'] / n_cells:>5.1f}% "
+            f"{metrics['mean_rank']:>9.2f} {near:>9.1f}% {failures[m]:>6}"
         )
-    print("\nhead-to-head (better / tied / worse):")
-    for (ours, baseline), (b, t, w) in sorted(head_to_head.items()):
-        verdict = "DOMINATES" if w == 0 and b > 0 else ""
-        print(f"  {ours:>10} vs {baseline:<14} {b:>4} / {t:>4} / {w:>4}  {verdict}")
     return 0
 
 
