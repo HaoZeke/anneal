@@ -5701,14 +5701,17 @@ def test_sota_cutest_streams_rows_as_methods_finish():
         "seed": 0,
         "best": -1.25,
         "evals": 80,
+        "objective_evals": 72,
+        "grad_evals": 8,
+        "status": "budget_exhausted",
     }
 
     sota_cutest._write_sota_row(writer, stream, row)
 
     assert stream.flush_count == 1
     lines = stream.getvalue().splitlines()
-    assert lines[0] == "problem,dim,method,seed,best,evals"
-    assert lines[1] == "BOX3,3,hybrid_de,0,-1.25,80"
+    assert lines[0] == ",".join(sota_cutest.FIELDNAMES)
+    assert lines[1] == "BOX3,3,hybrid_de,0,-1.25,80,72,8,budget_exhausted"
 
 
 def test_sota_cutest_shards_targets_by_stable_index():
