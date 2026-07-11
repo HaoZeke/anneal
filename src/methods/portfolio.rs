@@ -4,10 +4,10 @@
 //! building block is an arm of a Bernoulli bandit; a discounted
 //! Beta-Bernoulli posterior tracks the probability that one budget
 //! slice of an arm improves the incumbent, and Thompson sampling
-//! allocates the next slice. A decaying uniform floor `min(1, K/m)` on
-//! round `m` keeps every arm scheduled infinitely often, which
-//! preserves the QMC restart arm's global convergence guarantee and is
-//! the order-optimal floor for the allocation regret.
+//! allocates the next slice. A decaying uniform-selection probability
+//! `min(1, 1/m)` on round `m` gives each of `K` arms probability at
+//! least `1/(Km)`. The divergent harmonic mass keeps every arm scheduled
+//! infinitely often and preserves the randomized restart guarantee.
 //!
 //! Scheduler quantities derive from the problem and the budget rather
 //! than from tuning knobs: the slice size affords a few gradient-
@@ -1548,8 +1548,8 @@ fn run_arm<O, G>(
     match arm {
         ArmKind::Explore => {
             // QMC restart arm: screened Cranley-Patterson Halton starts,
-            // best ones refined; positive-density restarts carry the
-            // global convergence guarantee.
+            // best ones refined; the independently randomized shifts give
+            // the restart points positive density over the bounded box.
             if let Some(grad) = grad {
                 // One third screening, two thirds descent; the single
                 // polished start gets the full descent depth, which
