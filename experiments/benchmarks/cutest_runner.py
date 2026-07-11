@@ -14,6 +14,7 @@ runs that do not provide a manifest.
 from __future__ import annotations
 
 import ctypes.util
+import importlib.machinery
 import importlib.util
 import re
 import sys
@@ -271,6 +272,30 @@ def configured_pycutest(config: CutestConfig | None = None):
     return package
 
 
+def quarantine_incomplete_cache_entry(cache_holder: Path, name: str) -> Path | None:
+    """Move an incomplete PyCUTEst extension aside before importing a problem."""
+
+    entry = Path(cache_holder) / name
+    if not entry.is_dir():
+        return None
+    extensions = tuple(importlib.machinery.EXTENSION_SUFFIXES)
+    if any(
+        child.name.startswith("_pycutestitf")
+        and child.name.endswith(extensions)
+        for child in entry.iterdir()
+    ):
+        return None
+
+    destination = entry.with_name(f"{name}.incomplete")
+    suffix = 1
+    while destination.exists():
+        destination = entry.with_name(f"{name}.incomplete.{suffix}")
+        suffix += 1
+    sys.modules.pop(f"pycutest_cache_holder.{name}", None)
+    entry.rename(destination)
+    return destination
+
+
 @dataclass(frozen=True)
 class CutestProblem:
     """CUTEst problem wrapped to match the shared-runner Problem shape."""
@@ -337,6 +362,8 @@ def load(
         f_star: known global optimum if available (used by the bench
             "solved" predicate). None means "use a tolerance from x0".
     """
+    config = default_cutest_config() if config is None else config.validate()
+    quarantine_incomplete_cache_entry(config.pycutest_cache_holder, name)
     pycutest = configured_pycutest(config)
     p = pycutest.import_problem(name, sifParams=sif_params)
     try:

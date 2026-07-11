@@ -34,7 +34,6 @@ from experiments.anneal_sota import (
     qmc_annealed_hybrid,
 )
 from experiments.benchmarks.cutest_runner import (
-    configured_pycutest,
     default_cutest_config,
     load,
 )
@@ -789,11 +788,6 @@ def main():
                     )
                     rows.append(row)
                     _write_sota_row(w, f, row)
-            try:
-                pycutest = configured_pycutest(config)
-                pycutest.clear_cache(t.name)
-            except Exception:
-                pass
             print(f"  {t.name} (dim {dim}) done", flush=True)
 
     # win-rate summary: per (problem, seed), which method reached the lowest best
