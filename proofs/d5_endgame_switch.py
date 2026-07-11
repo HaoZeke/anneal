@@ -19,7 +19,8 @@ This module verifies, by symbolic algebra and exact enumeration:
 
   1. Closed-form polish requirement: the continuous switch point
      n_c = log(tau/g)/log(rho) satisfies g * rho**n_c = tau identically,
-     and n* = ceil(n_c) is the minimal integer k with g * rho**k <= tau.
+     and n* = max(0, ceil(n_c)) is the minimal nonnegative integer k with
+     g * rho**k <= tau.
   2. Contraction estimator exactness: for any exactly geometric gap
      sequence g_k = c * rho**k, the estimator
      rho_hat = exp(mean_k log(g_{k+1}/g_k)) recovers rho exactly,
@@ -47,26 +48,39 @@ src/methods/portfolio.rs (endgame reserve and terminal polish phase).
 """
 
 import itertools
+import math
 
 import sympy as sp
 
 
 # ---- Check 1: closed-form polish requirement --------------------------------
+def polish_steps_required(gap, tolerance, contraction):
+    """Return the minimal nonnegative geometric-contraction step count."""
+
+    if gap <= 0.0 or tolerance <= 0.0:
+        raise ValueError("gap and tolerance must be positive")
+    if not 0.0 < contraction < 1.0:
+        raise ValueError("contraction must lie strictly between zero and one")
+    if gap <= tolerance:
+        return 0
+    return math.ceil(math.log(tolerance / gap) / math.log(contraction))
+
+
 def polish_requirement_symbolic():
     g, tau, rho = sp.symbols("g tau rho", positive=True)
     n_c = sp.log(tau / g) / sp.log(rho)
     # Continuous switch point hits tau exactly: g * rho**n_c == tau.
     reaches = sp.simplify(g * rho**n_c - tau)
     ok_exact = reaches == 0
-    # Minimality of the integer requirement on a numeric grid: n* = ceil(n_c)
-    # is the least k with g rho^k <= tau (strictly above tau at k = n* - 1).
+    # Minimality on a numeric grid, including an already-solved gap.
     ok_min = True
     for g0, t0, r0 in [
         (1, sp.Rational(1, 10**9), sp.Rational(1, 2)),
         (100, sp.Rational(1, 10**6), sp.Rational(9, 10)),
         (sp.Rational(3, 7), sp.Rational(1, 10**4), sp.Rational(1, 5)),
+        (sp.Rational(1, 10**4), sp.Rational(1, 10**3), sp.Rational(1, 2)),
     ]:
-        n_star = sp.ceiling(sp.log(t0 / g0) / sp.log(r0))
+        n_star = polish_steps_required(float(g0), float(t0), float(r0))
         ok_min &= bool(g0 * r0**n_star <= t0)
         if n_star >= 1:
             ok_min &= bool(g0 * r0 ** (n_star - 1) > t0)
