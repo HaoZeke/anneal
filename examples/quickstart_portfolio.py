@@ -4,6 +4,7 @@
 Run after: pip install anneal
   python examples/quickstart_portfolio.py
 """
+
 from __future__ import annotations
 
 import numpy as np
