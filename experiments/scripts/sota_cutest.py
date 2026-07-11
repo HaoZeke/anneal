@@ -497,6 +497,7 @@ def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
 
 METHODS = {
     "portfolio": portfolio,
+    "portfolio_legacy": portfolio_legacy,
     "hybrid_de": hybrid_de,
     "basinhopping": sci_basinhopping,
     "dual_annealing": sci_dual_annealing,
