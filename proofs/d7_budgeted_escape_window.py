@@ -5,9 +5,9 @@ locally quadratic basin requires theta = T d / gap < 2. Escape theory
 bounds it from below: leaving a well of depth b under Metropolis
 dynamics takes ~ exp(b/T) proposals (Kramers scaling; Hajek 1988 gives
 the matching cooling-schedule condition), so escape within a budget of
-B steps requires roughly T >= b / ln B. A single annealing chain can
-therefore both escape the barrier and keep making expected progress
-only inside the window
+B steps requires roughly T >= b / ln B. A single fixed-temperature operating
+point can therefore both escape the barrier within the budget and have positive
+local expected drift only inside the window
 
     b / ln B  <~  T  <  2 (f(x) - f*) / d,
 
@@ -15,15 +15,14 @@ which is nonempty iff
 
     b  <~  2 (f(x) - f*) ln(B) / d.
 
-Barriers deeper than that are uncrossable-while-progressing by ANY
-temperature schedule within the budget: the chain must either give up
-descent (run hot) or give up escape (run cold). This derives the
-portfolio architecture from first principles - restarts (positive
-density over the box) and Obj-slot biasing exist precisely for the
-barriers outside the window, and well-tempered metadynamics widens the
-window by reducing the effective b (a filled well contributes
-V ~ (1 - 1/gamma) b, leaving effective depth b / gamma for bias factor
-gamma).
+For a barrier deeper than that, no constant temperature simultaneously
+satisfies both model inequalities. A nonstationary schedule may separate a hot
+escape phase from a cold descent phase, so the window is not an impossibility
+theorem for arbitrary schedules or landscapes. The incompatibility motivates
+separate portfolio mechanisms: restarts provide positive density over the box,
+Obj-slot biasing lowers effective barriers, and well-tempered metadynamics
+reduces the effective depth toward b / gamma (a filled well contributes
+V ~ (1 - 1/gamma) b for bias factor gamma).
 
 This module verifies the two load-bearing scaling facts on an exact
 finite double-well birth-death chain (no simulation error; expected
