@@ -392,6 +392,7 @@ where
 }
 
 /// Refine low-discrepancy starts with bounded quasi-Newton polish.
+#[allow(clippy::too_many_arguments)]
 pub fn qmc_projected_gradient_polish<O, G>(
     obj: &O,
     gradient: &G,
@@ -830,7 +831,7 @@ where
                 if n_evals >= max_evals {
                     break;
                 }
-                let reflected = bounds.clip((&current_center * 2.0 - &point).view());
+                let reflected = bounds.clip((&current_center * 2.0 - point).view());
                 let reflected_value = obj.eval(reflected.view());
                 n_evals += 1;
                 if reflected_value.is_finite() && reflected_value < best_val {
@@ -862,6 +863,7 @@ where
 }
 
 /// Refine replicated shifted low-discrepancy starts with bounded polish.
+#[allow(clippy::too_many_arguments)]
 pub fn shifted_qmc_projected_gradient_polish<O, G>(
     obj: &O,
     gradient: &G,

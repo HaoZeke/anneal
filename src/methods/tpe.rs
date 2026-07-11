@@ -49,6 +49,11 @@ impl TpeCategorical {
         self.history.len()
     }
 
+    /// Returns `true` when no observations have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+
     /// True when no observations have been recorded.
     pub fn is_empty(&self) -> bool {
         self.history.is_empty()

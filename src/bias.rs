@@ -67,6 +67,7 @@ pub struct WellTemperedBias {
 impl WellTemperedBias {
     /// Constructs with the given linear projector + bias parameters.
     /// Requires gamma > 1, sigma > 0, and grid_n >= 2.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         projector: Array2<f64>,
         mu: Array1<f64>,

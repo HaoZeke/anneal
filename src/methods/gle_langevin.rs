@@ -280,6 +280,7 @@ where
 /// `dt` the timestep (clamped so the fastest band frequency is resolved), and
 /// `n_epochs` the number of geometric temperature levels. Returns the best
 /// objective value at budget parity.
+#[allow(clippy::too_many_arguments)]
 pub fn gle_langevin_sa<O, G>(
     obj: &O,
     grad: &G,
@@ -429,6 +430,7 @@ where
 }
 
 /// Run GLE-Langevin annealing with a diagonal adaptive coordinate transform.
+#[allow(clippy::too_many_arguments)]
 pub fn gle_langevin_preconditioned_sa<O, G>(
     obj: &O,
     grad: &G,
