@@ -10,10 +10,10 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use rand::SeedableRng;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use rand::SeedableRng;
 
 use eindir_core::py_objective::{PyBounds as EindirPyBounds, PyObjective};
 use eindir_core::{Bounds, Objective};
@@ -1352,14 +1352,7 @@ fn global_optimize(
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::portfolio_optimize_with_policy(
-                &obj,
-                Some(&grad),
-                budget,
-                seed,
-                noise_sigma,
-                pol,
-            )
+            crate::portfolio_optimize_with_policy(&obj, Some(&grad), budget, seed, noise_sigma, pol)
         }
         None => crate::portfolio_optimize_with_policy::<_, CallablePyGradient>(
             &obj,

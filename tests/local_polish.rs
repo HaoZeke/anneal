@@ -1,10 +1,9 @@
 use anneal_core::{
-    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    AnalyticGradient, projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
     qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
-    AnalyticGradient,
 };
 use eindir_core::{Bounds, Objective};
-use ndarray::{array, Array1, ArrayView1};
+use ndarray::{Array1, ArrayView1, array};
 
 struct ShiftedQuadratic {
     bounds: Bounds<f64>,
@@ -216,10 +215,12 @@ fn qmc_polish_reports_projected_stationarity() {
         result.n_polished
     );
     assert_eq!(result.polished_projected_grad_norms.len(), 3);
-    assert!(result
-        .polished_projected_grad_norms
-        .iter()
-        .all(|norm| norm.is_finite() && *norm <= 1e-8));
+    assert!(
+        result
+            .polished_projected_grad_norms
+            .iter()
+            .all(|norm| norm.is_finite() && *norm <= 1e-8)
+    );
 }
 
 #[test]
@@ -246,10 +247,12 @@ fn qmc_gsa_global_search_uses_bounded_visiting_distribution() {
     assert_eq!(result.n_grads, 0);
     assert_eq!(result.n_starts, 30);
     assert_eq!(result.n_polished, 0);
-    assert!(result
-        .best_pos
-        .iter()
-        .all(|value| (-1.0..=1.0).contains(value)));
+    assert!(
+        result
+            .best_pos
+            .iter()
+            .all(|value| (-1.0..=1.0).contains(value))
+    );
 }
 
 #[test]

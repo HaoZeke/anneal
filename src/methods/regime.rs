@@ -9,7 +9,7 @@
 //! kernels/arms, feature-based routing, and explicit refusal where a path is
 //! invalid (exact Metropolis under declared objective noise).
 
-use eindir_core::{box_geometry, Bounds, BoxGeometry};
+use eindir_core::{Bounds, BoxGeometry, box_geometry};
 
 /// Measurable inputs for regime selection.
 #[derive(Clone, Debug)]
@@ -114,24 +114,77 @@ pub fn select_regime(f: &ProblemFeatures) -> OptimizationRegime {
 pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str] {
     match regime {
         OptimizationRegime::LowDimSmooth => &[
-            "shift", "am_sa", "hop", "metad", "tps", "gle", "tr_poll", "surrogate", "de", "gsa",
-            "variant", "pt", "hmc",
+            "shift",
+            "am_sa",
+            "hop",
+            "metad",
+            "tps",
+            "gle",
+            "tr_poll",
+            "surrogate",
+            "de",
+            "gsa",
+            "variant",
+            "pt",
+            "hmc",
         ],
         OptimizationRegime::HighDimIllConditioned => &[
-            "am_sa", "gle", "hop", "reduced", "shift", "metad", "tps", "hmc", "surrogate", "de",
-            "gsa", "tr_poll", "variant", "pt",
+            "am_sa",
+            "gle",
+            "hop",
+            "reduced",
+            "shift",
+            "metad",
+            "tps",
+            "hmc",
+            "surrogate",
+            "de",
+            "gsa",
+            "tr_poll",
+            "variant",
+            "pt",
         ],
         OptimizationRegime::StochasticNoise => &[
             "explore", // note: still de-duplicated when building full list
-            "gsa", "de", "surrogate", "metad", "tps", "variant", "pt", "hop", "gle", "tr_poll",
-            "hmc", "reduced",
+            "gsa",
+            "de",
+            "surrogate",
+            "metad",
+            "tps",
+            "variant",
+            "pt",
+            "hop",
+            "gle",
+            "tr_poll",
+            "hmc",
+            "reduced",
         ],
         OptimizationRegime::MultimodalNoGrad => &[
-            "de", "gsa", "am_sa", "variant", "metad", "tps", "surrogate", "tr_poll", "pt",
+            "de",
+            "gsa",
+            "am_sa",
+            "variant",
+            "metad",
+            "tps",
+            "surrogate",
+            "tr_poll",
+            "pt",
         ],
         OptimizationRegime::Default => &[
-            "shift", "hop", "am_sa", "metad", "tps", "gle", "surrogate", "de", "tr_poll", "gsa",
-            "variant", "pt", "hmc", "reduced",
+            "shift",
+            "hop",
+            "am_sa",
+            "metad",
+            "tps",
+            "gle",
+            "surrogate",
+            "de",
+            "tr_poll",
+            "gsa",
+            "variant",
+            "pt",
+            "hmc",
+            "reduced",
         ],
     }
 }
@@ -219,10 +272,7 @@ pub fn require_accept_compatible(
 /// Check whether an accept path is legal under `regime`.
 ///
 /// Exact Metropolis under [`OptimizationRegime::StochasticNoise`] is refused.
-pub fn check_accept_path(
-    regime: OptimizationRegime,
-    noise_aware: bool,
-) -> Result<(), RegimeError> {
+pub fn check_accept_path(regime: OptimizationRegime, noise_aware: bool) -> Result<(), RegimeError> {
     if matches!(regime, OptimizationRegime::StochasticNoise) && !noise_aware {
         return Err(RegimeError::ExactAcceptUnderNoise);
     }
@@ -231,11 +281,7 @@ pub fn check_accept_path(
 
 /// Build the ordered arm list: `explore` first, then regime preference,
 /// then remaining library arms, truncated by horizon capacity.
-pub fn order_arms(
-    available: &[&str],
-    regime: OptimizationRegime,
-    k_active: usize,
-) -> Vec<String> {
+pub fn order_arms(available: &[&str], regime: OptimizationRegime, k_active: usize) -> Vec<String> {
     let k_active = k_active.max(1);
     let mut out: Vec<String> = Vec::new();
     // Restart floor: explore first when available.
@@ -263,12 +309,7 @@ pub fn order_arms(
 mod tests {
     use super::*;
 
-    fn feats(
-        dim: usize,
-        has_grad: bool,
-        noise: Option<f64>,
-        aspect: f64,
-    ) -> ProblemFeatures {
+    fn feats(dim: usize, has_grad: bool, noise: Option<f64>, aspect: f64) -> ProblemFeatures {
         ProblemFeatures {
             dim,
             has_grad,
@@ -334,4 +375,3 @@ mod tests {
         assert!(require_accept_compatible(None, false).is_ok());
     }
 }
-

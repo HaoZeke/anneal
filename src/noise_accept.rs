@@ -72,7 +72,10 @@ impl OsaAccept {
     /// Constructs an OSA component with an explicit threshold and sample cap.
     pub fn with_params(c_star: f64, max_samples: usize) -> Self {
         assert!(max_samples >= 1, "max_samples must be at least 1");
-        Self { c_star, max_samples }
+        Self {
+            c_star,
+            max_samples,
+        }
     }
 
     /// Decides accept/reject for one move from noisy cost-difference samples.
@@ -80,13 +83,7 @@ impl OsaAccept {
     /// `sample_delta(rng)` returns one observation
     /// `delta_i ~ Normal(Delta, sigma^2)`; `temp` and `sigma` must be positive.
     /// Returns the decision and the number of samples drawn.
-    pub fn decide<F, R>(
-        &self,
-        mut sample_delta: F,
-        temp: f64,
-        sigma: f64,
-        rng: &mut R,
-    ) -> OsaResult
+    pub fn decide<F, R>(&self, mut sample_delta: F, temp: f64, sigma: f64, rng: &mut R) -> OsaResult
     where
         F: FnMut(&mut R) -> f64,
         R: Rng,

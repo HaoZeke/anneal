@@ -2,8 +2,8 @@
 //! and returns a `History`. The `Sampler` trait keeps the driver loop
 //! independent of the concrete proposal and acceptance machinery.
 
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::cool::Cooling;
 use crate::history::{EpochLine, History, State};
@@ -122,9 +122,8 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
-    let mut rng = StdRng::seed_from_u64(
-        seed ^ (start_epoch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
-    );
+    let mut rng =
+        StdRng::seed_from_u64(seed ^ (start_epoch as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     let mut state = match resume {
         Some(cur) => State {
             best: cur.clone(),

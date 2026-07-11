@@ -2,7 +2,7 @@
 //!
 //! Regression for OOB Schwefel archives (best_val ≪ domain min on the box).
 
-use anneal_core::methods::{portfolio_optimize, PortfolioPolicy, portfolio_optimize_with_policy};
+use anneal_core::methods::{PortfolioPolicy, portfolio_optimize, portfolio_optimize_with_policy};
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
 
@@ -76,14 +76,8 @@ fn portfolio_best_stays_in_bounds_schwefel() {
 #[test]
 fn portfolio_legacy_best_stays_in_bounds_schwefel() {
     let obj = Schwefel::new(5);
-    let result = portfolio_optimize_with_policy(
-        &obj,
-        Some(&obj),
-        1500,
-        11,
-        None,
-        PortfolioPolicy::Legacy,
-    );
+    let result =
+        portfolio_optimize_with_policy(&obj, Some(&obj), 1500, 11, None, PortfolioPolicy::Legacy);
     assert_feasible(&result.best_pos, result.best_val, -500.0, 500.0);
 }
 

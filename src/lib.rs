@@ -66,23 +66,24 @@ pub use grad::{AnalyticGradient, DifferentiableObjective, FiniteDiffGradient, Gr
 pub use history::{EpochLine, History, State};
 pub use hmc::{
     HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
-    OmelyanIntegrator, OMELYAN_LAMBDA,
+    OMELYAN_LAMBDA, OmelyanIntegrator,
 };
 pub use laws::LawViolation;
 pub use methods::{
-    arm_prior_boost, arm_slice_multiplier, check_accept_path, estimate_gle_omega0,
-    estimate_gle_preconditioner, exact_accept_allowed, fit_laplace, geometric_ladder,
-    gle_langevin_adaptive_sa, gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms,
-    preferred_arm_tail, pilot_draws, regime_exploit_prob, regime_exploit_width,
-    pilot_draws_qmc, portfolio_optimize, portfolio_optimize_with_policy, projected_gradient_polish,
-    qmc_best1bin_scout, qmc_gsa_global_search, qmc_projected_gradient_polish, qmc_trust_region_poll,
-    require_accept_compatible, select_regime, shifted_qmc_projected_gradient_polish, ArmStat,
-    BayesianMixingResult, BayesianMixingSampler, GelmanRubin, GleLangevinResult, GlePreconditioner,
-    LaplacePosterior, LocalPolishResult, MultiChainResult, MultiChainSampler, MultiChainState,
-    OptimizationRegime, ParallelTemperingSampler, PilotObservation, PilotPrior, PortfolioPolicy,
-    PortfolioResult, ProblemFeatures, PtChainState, PtResult, QmcPolishResult, RegimeError,
-    TpeCategorical, TpeContinuous1d, ShootDirection, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
-    DEFAULT_ALPHA, DEFAULT_GAMMA,
+    ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_GAMMA,
+    GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,
+    MultiChainResult, MultiChainSampler, MultiChainState, OptimizationRegime,
+    ParallelTemperingSampler, PilotObservation, PilotPrior, PortfolioPolicy, PortfolioResult,
+    ProblemFeatures, PtChainState, PtResult, Q_V_MAX, Q_V_MIN, QmcPolishResult, RegimeError,
+    ShootDirection, TARGET_ACCEPT_RATE, TpeCategorical, TpeContinuous1d, arm_prior_boost,
+    arm_slice_multiplier, check_accept_path, estimate_gle_omega0, estimate_gle_preconditioner,
+    exact_accept_allowed, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa,
+    gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms, pilot_draws, pilot_draws_qmc,
+    portfolio_optimize, portfolio_optimize_with_policy, preferred_arm_tail,
+    projected_gradient_polish, qmc_best1bin_scout, qmc_gsa_global_search,
+    qmc_projected_gradient_polish, qmc_trust_region_poll, regime_exploit_prob,
+    regime_exploit_width, require_accept_compatible, select_regime,
+    shifted_qmc_projected_gradient_polish,
 };
 pub use movekernel::{MoveKernel, Reflected};
 pub use neigh::Neighborhood;

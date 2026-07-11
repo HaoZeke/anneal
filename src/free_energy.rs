@@ -108,8 +108,8 @@ impl BarEstimator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
     use rand_distr::{Distribution, Normal};
 
     /// Toy: two zero-mean Gaussians with different variances.

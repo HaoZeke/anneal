@@ -12,10 +12,10 @@
 //! is handled by the noise spectrum exactly as the `1/sqrt(D)` proposal scale
 //! handles dimension; both are Move-slot transforms every driver could read.
 
-use eindir_core::{optimal_sampling_drift, GleThermostat, Objective};
+use eindir_core::{GleThermostat, Objective, optimal_sampling_drift};
 use ndarray::{Array1, Array2};
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use eindir_core::Gradient;
 
@@ -693,10 +693,11 @@ mod tests {
         assert_eq!(res.preconditioner_diag.len(), dim);
         assert!(res.n_preconditioner_grads > 0);
         assert!(res.n_evals <= 300);
-        assert!(res
-            .preconditioner_diag
-            .iter()
-            .all(|value| value.is_finite() && *value > 0.0));
+        assert!(
+            res.preconditioner_diag
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.0)
+        );
     }
 
     #[test]
