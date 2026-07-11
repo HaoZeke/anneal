@@ -34,8 +34,12 @@ import numpy as np
 def rosenbrock(x, dtype):
     """Rosenbrock with all arithmetic at dtype."""
     x = np.asarray(x, dtype=dtype)
-    a = (np.dtype(dtype).type(1.0) - x[0]) ** 2
-    b = np.dtype(dtype).type(100.0) * (x[1] - x[0] ** 2) ** 2
+    scalar = np.dtype(dtype).type
+    dx = scalar(1.0) - x[0]
+    x0_sq = x[0] * x[0]
+    residual = x[1] - x0_sq
+    a = dx * dx
+    b = scalar(100.0) * residual * residual
     return a + b
 
 
