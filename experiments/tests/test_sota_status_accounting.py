@@ -83,3 +83,11 @@ def test_problem_manifest_preserves_declared_order_kind_and_dimension(tmp_path):
         ("ROSENBR", "unconstrained", 2),
         ("BOX3", "bound", 3),
     ]
+
+
+def test_turbo_baseline_is_registered_and_updates_trust_region():
+    assert sota_cutest.METHODS["turbo"] is sota_cutest.turbo
+    state = sota_cutest._TurboState(dim=4, batch_size=1, best_value=1.0)
+    state.failure_tolerance = 1
+    updated = sota_cutest._turbo_update(state, np.array([[0.0]]))
+    assert updated.length == 0.4
