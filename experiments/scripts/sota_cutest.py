@@ -472,8 +472,10 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
             candidate_set[mask] = candidates[mask]
             batch_size = min(state.batch_size, counter.budget - counter.n)
             sampler = MaxPosteriorSampling(model=model, replacement=False)
-            with torch.no_grad():
-                x_next = sampler(candidate_set, num_samples=batch_size)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                with torch.no_grad():
+                    x_next = sampler(candidate_set, num_samples=batch_size)
             y_next = evaluate(x_next)
             state = _turbo_update(state, y_next)
             x_data = torch.cat((x_data, x_next), dim=0)
