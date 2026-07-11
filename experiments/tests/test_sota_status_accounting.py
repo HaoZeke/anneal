@@ -96,6 +96,13 @@ def test_sota_csv_schema_keeps_status_and_split_work_counts(tmp_path):
     )
 
 
+def test_sota_campaign_exit_code_rejects_any_unsuccessful_cell():
+    assert sota_cutest._campaign_exit_code([{"status": "ok"}]) == 0
+    assert sota_cutest._campaign_exit_code([{"status": "nonfinite"}]) == 1
+    assert sota_cutest._campaign_exit_code([{"status": "error:InputDataError"}]) == 1
+    assert sota_cutest._campaign_exit_code([{"status": "load_error:AttributeError"}]) == 1
+
+
 def test_problem_manifest_preserves_declared_order_kind_and_dimension(tmp_path):
     path = tmp_path / "problems.csv"
     path.write_text(
