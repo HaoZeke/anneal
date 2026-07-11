@@ -198,7 +198,7 @@ fn qmc_polish_reports_polished_values() {
     assert_eq!(result.polished_values.len(), result.n_polished);
     assert_eq!(result.polished_values.len(), 3);
     assert!(result.polished_values.iter().all(|v| v.is_finite()));
-    assert!(result.polished_values.iter().any(|v| *v == result.best_val));
+    assert!(result.polished_values.contains(&result.best_val));
 }
 
 #[test]
