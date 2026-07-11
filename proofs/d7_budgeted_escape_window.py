@@ -24,9 +24,10 @@ Obj-slot biasing lowers effective barriers, and well-tempered metadynamics
 reduces the effective depth toward b / gamma (a filled well contributes
 V ~ (1 - 1/gamma) b for bias factor gamma).
 
-This module verifies the two load-bearing scaling facts on an exact
-finite double-well birth-death chain (no simulation error; expected
-hitting times solve a linear system):
+This module verifies the two load-bearing scaling facts on a finite
+double-well birth-death chain without Monte Carlo error. Expected hitting
+times solve a linear system, and finite-horizon escape probabilities use the
+transient transition matrix:
 
   1. Kramers scaling: the expected escape time from the shallow well
      grows as exp(b/T): the slope of ln E[tau] against 1/T equals the
@@ -42,6 +43,8 @@ criterion above.
 """
 
 import math
+
+import numpy as np
 
 
 def double_well_chain(m, b, drop, temp):
@@ -94,6 +97,24 @@ def expected_escape_time(m, b, drop, temp):
     return tau[0]
 
 
+def escape_probability(m, b, drop, temp, budget):
+    """Return P(tau <= budget) from the transient transition matrix."""
+
+    if budget < 0:
+        raise ValueError("budget must be nonnegative")
+    trans = double_well_chain(m, b, drop, temp)
+    n = 2 * m
+    q = np.zeros((n, n), dtype=np.float64)
+    for i, (left, stay, right) in enumerate(trans[:n]):
+        if i > 0:
+            q[i, i - 1] = left
+        q[i, i] = stay
+        if i + 1 < n:
+            q[i, i + 1] = right
+    survival = float(np.linalg.matrix_power(q, int(budget))[0].sum())
+    return float(np.clip(1.0 - survival, 0.0, 1.0))
+
+
 # ---- Check 1: Kramers scaling ln E[tau] ~ b / T ------------------------------
 def kramers_scaling():
     # ln tau = b/T + ln-prefactor(T), so the Arrhenius slope carries a
@@ -124,10 +145,7 @@ def kramers_scaling():
 
 # ---- Check 2: window boundary b_c(B) grows linearly in ln B ------------------
 def _escapes_within(m, b, drop, temp, budget):
-    # Markov inequality is too weak; use the exponential-tail heuristic
-    # P(tau <= B) ~ 1 - exp(-B/E[tau]) exact for the dominant mode of a
-    # metastable escape; success = expected time within budget.
-    return expected_escape_time(m, b, drop, temp) <= budget
+    return escape_probability(m, b, drop, temp, budget) >= 0.5
 
 
 def critical_barrier(budget, temp, m=24, drop=2.0):
