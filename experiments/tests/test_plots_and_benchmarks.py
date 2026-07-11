@@ -81,7 +81,9 @@ def _install_worse_bgsa_auto_portfolio(monkeypatch, cutest, fake_anneal, value=9
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (value + 4.0, 3))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (value + 4.0, 3)
+    )
     return fake_demo
 
 
@@ -378,9 +380,7 @@ def test_cutest_profile_matrix_keeps_problem_seed_failures():
         },
     ]
 
-    cell_keys, fevals, dims = profile_matrix_by_cell(
-        rows, ["classical", "bgsa_auto"]
-    )
+    cell_keys, fevals, dims = profile_matrix_by_cell(rows, ["classical", "bgsa_auto"])
 
     assert cell_keys == [("P", "0"), ("P", "1")]
     assert dims.tolist() == [2, 2]
@@ -416,7 +416,9 @@ def test_cutest_full_suite_enumeration_filters_and_deduplicates(monkeypatch):
     )
 
     monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
-    monkeypatch.setattr(suite, "configured_pycutest", lambda _config=None: fake_pycutest)
+    monkeypatch.setattr(
+        suite, "configured_pycutest", lambda _config=None: fake_pycutest
+    )
 
     assert suite.list_target_problems(dim_cap=10) == [
         suite.TargetProblem("BOX3", "bound", 3),
@@ -436,7 +438,11 @@ def test_cutest_full_suite_shards_targets_by_stable_index():
         suite.TargetProblem("E", "bound", 1),
     ]
 
-    assert [target.name for target in suite.shard_targets(targets, 0, 2)] == ["A", "C", "E"]
+    assert [target.name for target in suite.shard_targets(targets, 0, 2)] == [
+        "A",
+        "C",
+        "E",
+    ]
     assert [target.name for target in suite.shard_targets(targets, 1, 2)] == ["B", "D"]
     with pytest.raises(ValueError, match="shard_index"):
         suite.shard_targets(targets, 2, 2)
@@ -445,7 +451,9 @@ def test_cutest_full_suite_shards_targets_by_stable_index():
 def test_cutest_shard_combiner_deduplicates_identical_cells(tmp_path):
     from experiments.scripts import combine_cutest_shards as combine
 
-    header = "problem,kind,dim,driver,seed,fevals,best_val,wall_time_s,f_x0,solved,status\n"
+    header = (
+        "problem,kind,dim,driver,seed,fevals,best_val,wall_time_s,f_x0,solved,status\n"
+    )
     row_a = "P1,bound,2,classical,0,10,1.0,0.1,2.0,1,ok\n"
     row_b = "P2,bound,3,bgsa,0,20,0.5,0.2,2.0,1,ok\n"
     shard_a = tmp_path / "a.csv"
@@ -700,9 +708,7 @@ def test_cutest_full_suite_accepts_budgeted_pt_driver():
 def test_cutest_full_suite_accepts_bayesian_adaptive_gle_driver():
     from experiments.scripts import run_cutest_full_suite as suite
 
-    assert suite.parse_drivers("bayesian_adaptive_gle") == (
-        "bayesian_adaptive_gle",
-    )
+    assert suite.parse_drivers("bayesian_adaptive_gle") == ("bayesian_adaptive_gle",)
 
 
 def test_cutest_full_suite_accepts_evict_cache_option():
@@ -1058,6 +1064,7 @@ def test_cutest_bgsa_single_chain_uses_rust_hmc_binding(monkeypatch):
         return FakeHistory()
 
     fake_anneal = types.SimpleNamespace(run_hmc=run_hmc)
+
     def run_pilot(*args, **kwargs):
         captured["pilot_args"] = args
         captured["pilot_kwargs"] = kwargs
@@ -1135,7 +1142,9 @@ def test_cutest_loader_preserves_native_gradient(monkeypatch):
         import_problem=lambda *_args, **_kwargs: NativeProblem()
     )
     monkeypatch.setitem(sys.modules, "pycutest", fake_pycutest)
-    monkeypatch.setattr(cutest_runner, "configured_pycutest", lambda _config=None: fake_pycutest)
+    monkeypatch.setattr(
+        cutest_runner, "configured_pycutest", lambda _config=None: fake_pycutest
+    )
 
     prob = cutest_runner.load("NATIVEGRAD")
 
@@ -1196,12 +1205,15 @@ def test_cutest_bgsa_uses_native_gradient_and_native_work_units(monkeypatch):
 
     assert best_val == -2.0
     assert captured["grad_at_probe"] == pytest.approx([10.5, -3.25])
-    assert cutest._rust_hmc_steps_per_epoch_budget(
-        epoch_budget=14,
-        dim=2,
-        l_steps=2,
-        grad_kind="native",
-    ) == 2
+    assert (
+        cutest._rust_hmc_steps_per_epoch_budget(
+            epoch_budget=14,
+            dim=2,
+            l_steps=2,
+            grad_kind="native",
+        )
+        == 2
+    )
     assert fevals == 11 + cutest._rust_hmc_native_grad_work_units(
         n_trajectories=3,
         l_steps=2,
@@ -1372,12 +1384,15 @@ def test_cutest_bgsa_metad_falls_back_when_cv_is_undefined(monkeypatch):
 def test_cutest_bgsa_hmc_steps_shrink_when_pilot_selects_long_trajectory():
     from experiments.scripts import run_cutest_benchmarks as cutest
 
-    assert cutest._rust_hmc_steps_per_epoch_budget(
-        epoch_budget=200,
-        dim=6,
-        l_steps=32,
-        grad_kind="native",
-    ) == 2
+    assert (
+        cutest._rust_hmc_steps_per_epoch_budget(
+            epoch_budget=200,
+            dim=6,
+            l_steps=32,
+            grad_kind="native",
+        )
+        == 2
+    )
 
 
 def test_cutest_bgsa_auto_uses_standalone_branch_budgets(monkeypatch):
@@ -1538,9 +1553,7 @@ def test_cutest_bgsa_auto_includes_bayesian_mixing_candidate(monkeypatch):
     expected_mix = [
         (7, 81, False),
         (11, 81, False),
-    ] + [
-        (seed, 81, False) for seed in range(7, 23) if seed not in {7, 11}
-    ]
+    ] + [(seed, 81, False) for seed in range(7, 23) if seed not in {7, 11}]
     assert [call[1:] for call in captured["mix"]] == expected_mix
     assert all(isinstance(call[0], GradientCutestProblem) for call in captured["mix"])
     assert (
@@ -1705,7 +1718,9 @@ def test_cutest_bgsa_auto_replicates_metad_when_it_wins(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -1806,7 +1821,9 @@ def test_cutest_bgsa_auto_includes_tensor_and_gle_candidates(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -1894,7 +1911,9 @@ def test_cutest_bgsa_auto_replicates_gle_when_it_wins(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -1906,7 +1925,9 @@ def test_cutest_bgsa_auto_replicates_gle_when_it_wins(monkeypatch):
     )
 
     assert best_val == -30.0
-    assert captured["gle"] == [7, 11] + [seed for seed in range(7, 23) if seed not in {7, 11}]
+    assert captured["gle"] == [7, 11] + [
+        seed for seed in range(7, 23) if seed not in {7, 11}
+    ]
 
 
 def test_cutest_bgsa_auto_stops_gle_family_after_nonfinite_screen(monkeypatch):
@@ -1972,7 +1993,9 @@ def test_cutest_bgsa_auto_stops_gle_family_after_nonfinite_screen(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -2128,7 +2151,9 @@ def test_cutest_bayesian_adaptive_gle_uses_native_objective_anchor(monkeypatch):
         captured["max_fevals"] = int(max_fevals)
         captured["x0"] = np.asarray(kwargs["x0"], dtype=np.float64)
         captured["has_grad"] = callable(objective.grad_fn)
-        captured["grad"] = np.asarray(objective.grad_fn(captured["x0"]), dtype=np.float64)
+        captured["grad"] = np.asarray(
+            objective.grad_fn(captured["x0"]), dtype=np.float64
+        )
         return {
             "best_val": -12.0,
             "best_pos": captured["x0"],
@@ -2531,7 +2556,9 @@ def test_cutest_bayesian_adaptive_gle_routes_native_qmc_polish_arm(monkeypatch):
             "n_evals": 12,
         }
 
-    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+    def qmc_polish(
+        _obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
         captured["qmc_polish"] = {
             "n_starts": int(n_starts),
             "max_fevals_per_start": int(max_fevals_per_start),
@@ -2786,7 +2813,9 @@ def test_cutest_bgsa_auto_skips_tensor_gle_when_dimension_is_not_covered(monkeyp
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         HighDimProblem(),
@@ -2985,15 +3014,19 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_dimension(monkeypatch
         def grad(self, x):
             return np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "low": np.asarray(low, dtype=np.float64),
-            "high": np.asarray(high, dtype=np.float64),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -11.0,
             "best_pos": np.zeros(2),
@@ -3043,7 +3076,9 @@ def test_cutest_bgsa_auto_combines_differential_search_for_small_finite_box(
         def grad(self, x):
             return np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
+    def qmc_polish(
+        _obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
         captured["qmc"].append((n_starts, kwargs["top_k"], max_fevals_per_start))
         return {
             "best_val": 3.0,
@@ -3185,7 +3220,9 @@ def test_cutest_bgsa_auto_ignores_nonfinite_qmc_candidate(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (3.0, 13)
+    )
     monkeypatch.setattr(
         cutest,
         "_run_cutest_shifted_qmc_polish",
@@ -3350,7 +3387,9 @@ def test_cutest_bgsa_auto_keeps_portfolio_after_qmc_candidate(monkeypatch):
         "_run_cutest_qmc_differential_search",
         lambda *_args, **_kwargs: None,
     )
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (9.0, 3))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (9.0, 3)
+    )
 
     best_val, _fevals = cutest._bgsa_run(
         GradientCutestProblem(),
@@ -3632,15 +3671,19 @@ def test_cutest_bgsa_auto_uses_core_qmc_polish_for_covered_bounds(monkeypatch):
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "low": np.asarray(low, dtype=np.float64),
-            "high": np.asarray(high, dtype=np.float64),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, _grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -5.0,
             "best_pos": np.zeros(9),
@@ -3775,16 +3818,20 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_dense_bounds(monkeypatch):
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
-            "low": np.asarray(low, dtype=np.float64),
-            "high": np.asarray(high, dtype=np.float64),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -7.0,
             "best_pos": np.zeros(8),
@@ -3848,12 +3895,16 @@ def test_cutest_native_qmc_schedule_skips_full_lanes_after_polish_consensus():
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "top_k": kwargs["top_k"],
+            }
+        )
         top_k = int(kwargs["top_k"])
         n_polished = n_starts if top_k == 0 else min(top_k, n_starts)
         return {
@@ -3911,12 +3962,16 @@ def test_cutest_native_qmc_schedule_uses_replicated_best_certificate():
         [-100.0, -30.0, -15.0, -2.0],
     ]
 
-    def qmc_polish(_obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, _grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "top_k": kwargs["top_k"],
+            }
+        )
         values = stage_values[min(len(captured["qmc"]) - 1, len(stage_values) - 1)]
         return {
             "best_val": min(values),
@@ -3967,14 +4022,18 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(4, dtype=np.float64)),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(4, dtype=np.float64)),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -23.0,
             "best_pos": np.zeros(4),
@@ -4009,7 +4068,9 @@ def test_cutest_bgsa_auto_routes_small_declared_bounds_to_native_qmc(monkeypatch
     assert captured["qmc"][0]["grad_at_zero"].tolist() == pytest.approx(np.zeros(4))
 
 
-def test_cutest_bgsa_auto_uses_native_qmc_for_middle_bounds_without_degree_hint(monkeypatch):
+def test_cutest_bgsa_auto_uses_native_qmc_for_middle_bounds_without_degree_hint(
+    monkeypatch,
+):
     from experiments.scripts import run_cutest_benchmarks as cutest
 
     captured = {"qmc": []}
@@ -4028,14 +4089,18 @@ def test_cutest_bgsa_auto_uses_native_qmc_for_middle_bounds_without_degree_hint(
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -29.0,
             "best_pos": np.zeros(9),
@@ -4090,14 +4155,18 @@ def test_cutest_bgsa_auto_ignores_degree_metadata_without_stationarity(monkeypat
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, _low, _high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(9, dtype=np.float64)),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         stage = len(captured["qmc"])
         best_val = -31.0 if stage == 1 else -31.0 + float(stage)
         return {
@@ -4166,7 +4235,9 @@ def test_cutest_bgsa_auto_ignores_degree_metadata_without_stationarity(monkeypat
     )
     monkeypatch.setitem(sys.modules, "anneal", fake_anneal)
     monkeypatch.setitem(sys.modules, "demo_bgsa", fake_demo)
-    monkeypatch.setattr(cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (15.0, 3))
+    monkeypatch.setattr(
+        cutest, "bayesian_mixing_sa", lambda *_args, **_kwargs: (15.0, 3)
+    )
 
     best_val, fevals = cutest._bgsa_run(
         MisleadingDegreeBoundProblem(),
@@ -4212,16 +4283,20 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_beyond_fd_window(monkeypatch):
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(25, dtype=np.float64)),
-            "low": np.asarray(low, dtype=np.float64),
-            "high": np.asarray(high, dtype=np.float64),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(25, dtype=np.float64)),
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -13.0,
             "best_pos": np.zeros(25),
@@ -4272,16 +4347,20 @@ def test_cutest_bgsa_auto_uses_native_qmc_polish_for_finite_design_box(monkeypat
         def grad(self, x):
             return 2.0 * np.asarray(x, dtype=np.float64)
 
-    def qmc_polish(_obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs):
-        captured["qmc"].append({
-            "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
-            "low": np.asarray(low, dtype=np.float64),
-            "high": np.asarray(high, dtype=np.float64),
-            "n_starts": n_starts,
-            "max_fevals_per_start": max_fevals_per_start,
-            "seed": kwargs["seed"],
-            "top_k": kwargs["top_k"],
-        })
+    def qmc_polish(
+        _obj_fn, grad_fn, low, high, n_starts, max_fevals_per_start, **kwargs
+    ):
+        captured["qmc"].append(
+            {
+                "grad_at_zero": grad_fn(np.zeros(8, dtype=np.float64)),
+                "low": np.asarray(low, dtype=np.float64),
+                "high": np.asarray(high, dtype=np.float64),
+                "n_starts": n_starts,
+                "max_fevals_per_start": max_fevals_per_start,
+                "seed": kwargs["seed"],
+                "top_k": kwargs["top_k"],
+            }
+        )
         return {
             "best_val": -17.0,
             "best_pos": np.zeros(8),
@@ -4345,12 +4424,15 @@ def test_cutest_bgsa_auto_keeps_portfolio_for_uncovered_bounds(monkeypatch):
     def bayesian_mixing_sa(*_args, **_kwargs):
         return 9.0, 13
 
-    fake_anneal = types.SimpleNamespace(run_hmc=run_hmc, polish=lambda *_args, **_kwargs: {
-        "best_val": 8.0,
-        "best_pos": np.zeros(30),
-        "n_evals": 1,
-        "n_grads": 1,
-    })
+    fake_anneal = types.SimpleNamespace(
+        run_hmc=run_hmc,
+        polish=lambda *_args, **_kwargs: {
+            "best_val": 8.0,
+            "best_pos": np.zeros(30),
+            "n_evals": 1,
+            "n_grads": 1,
+        },
+    )
     fake_demo = types.SimpleNamespace(
         OBJ_FN=None,
         OBJ_GRAD=None,
@@ -4855,8 +4937,12 @@ def test_sota_cutest_hybrid_defaults_match_core_hybrid_signature():
 
     signature = inspect.signature(anneal_sota.qmc_annealed_hybrid)
 
-    assert sota_cutest.DEFAULT_HYBRID_N_POLISH == signature.parameters["n_polish"].default
-    assert sota_cutest.DEFAULT_HYBRID_K_POLISH == signature.parameters["k_polish"].default
+    assert (
+        sota_cutest.DEFAULT_HYBRID_N_POLISH == signature.parameters["n_polish"].default
+    )
+    assert (
+        sota_cutest.DEFAULT_HYBRID_K_POLISH == signature.parameters["k_polish"].default
+    )
     assert (
         anneal_sota.AnnealHybridConfig().elite_differential_probability
         == anneal_sota.DEFAULT_ELITE_DIFFERENTIAL_PROBABILITY
@@ -4869,11 +4955,23 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
 
     config = anneal_sota.AnnealHybridConfig()
 
-    assert config.basin_polish_min_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MIN_DIMENSION
-    assert config.basin_polish_max_dimension == anneal_sota.DEFAULT_BASIN_POLISH_MAX_DIMENSION
+    assert (
+        config.basin_polish_min_dimension
+        == anneal_sota.DEFAULT_BASIN_POLISH_MIN_DIMENSION
+    )
+    assert (
+        config.basin_polish_max_dimension
+        == anneal_sota.DEFAULT_BASIN_POLISH_MAX_DIMENSION
+    )
     assert config.basin_polish_step == anneal_sota.DEFAULT_BASIN_POLISH_STEP
-    assert config.basin_polish_budget_divisor == anneal_sota.DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
-    assert config.basin_polish_high_dimension == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION
+    assert (
+        config.basin_polish_budget_divisor
+        == anneal_sota.DEFAULT_BASIN_POLISH_BUDGET_DIVISOR
+    )
+    assert (
+        config.basin_polish_high_dimension
+        == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION
+    )
     assert (
         config.basin_polish_high_dimension_step
         == anneal_sota.DEFAULT_BASIN_POLISH_HIGH_DIMENSION_STEP
@@ -4898,16 +4996,22 @@ def test_anneal_sota_basin_polish_defaults_are_dimension_configured():
     )
     assert anneal_sota._basin_polish_active(config.basin_polish_high_dimension, config)
     budget = config.basin_polish_budget_divisor * config.basin_polish_local_budget
-    assert anneal_sota._basin_polish_budget(
-        budget,
-        config.basin_polish_min_dimension,
-        config,
-    ) == config.basin_polish_local_budget
-    assert anneal_sota._basin_polish_budget(
-        budget,
-        config.basin_polish_high_dimension,
-        config,
-    ) == budget
+    assert (
+        anneal_sota._basin_polish_budget(
+            budget,
+            config.basin_polish_min_dimension,
+            config,
+        )
+        == config.basin_polish_local_budget
+    )
+    assert (
+        anneal_sota._basin_polish_budget(
+            budget,
+            config.basin_polish_high_dimension,
+            config,
+        )
+        == budget
+    )
     assert (
         config.global_anneal_portfolio_min_dimension
         == anneal_sota.DEFAULT_GLOBAL_ANNEAL_PORTFOLIO_MIN_DIMENSION
