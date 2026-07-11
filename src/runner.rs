@@ -200,7 +200,7 @@ where
         );
         if best_history
             .as_ref()
-            .map_or(true, |best: &History| history.best.val < best.best.val)
+            .is_none_or(|best: &History| history.best.val < best.best.val)
         {
             best_history = Some(history);
         }

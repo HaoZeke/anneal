@@ -27,6 +27,8 @@
 //! Pure functions below have no I/O and are unit-tested without CUTEst.
 
 use ndarray::{Array1, ArrayView1};
+use std::cmp::Ordering;
+
 use rand::Rng;
 
 /// Linear path of `n_frames` points from `x_a` to `x_b` (inclusive).
@@ -55,7 +57,7 @@ pub fn linear_path(
 /// (`op[last] >= b`) with `a < b`. For objective-as-OP where lower is better,
 /// pass negated values or use [`path_reactive_objective`].
 pub fn path_is_reactive(ops: &[f64], basin_a_max: f64, basin_b_min: f64) -> bool {
-    if ops.len() < 2 || !(basin_a_max < basin_b_min) {
+    if ops.len() < 2 || basin_a_max.partial_cmp(&basin_b_min) != Some(Ordering::Less) {
         return false;
     }
     let first = ops[0];
@@ -68,7 +70,7 @@ pub fn path_is_reactive(ops: &[f64], basin_a_max: f64, basin_b_min: f64) -> bool
 /// Path starts "bad" (`ops[0] >= a`) and ends "good" (`ops[last] <= b`)
 /// with `a > b` (high-to-low).
 pub fn path_reactive_objective(ops: &[f64], high_threshold: f64, low_threshold: f64) -> bool {
-    if ops.len() < 2 || !(high_threshold > low_threshold) {
+    if ops.len() < 2 || high_threshold.partial_cmp(&low_threshold) != Some(Ordering::Greater) {
         return false;
     }
     let first = ops[0];
@@ -83,7 +85,7 @@ pub fn path_reactive_geometric(
     x_b: ArrayView1<f64>,
     tol: f64,
 ) -> bool {
-    if path.len() < 2 || !(tol > 0.0) {
+    if path.len() < 2 || tol.partial_cmp(&0.0) != Some(Ordering::Greater) {
         return false;
     }
     let d0 = l2_dist(path[0].view(), x_a);
@@ -131,6 +133,7 @@ pub fn pick_shoot_direction<R: Rng + ?Sized>(rng: &mut R) -> ShootDirection {
 ///
 /// `noise_scale` is absolute coordinate noise at the shoot point. `reflect`
 /// maps a point into the feasible box (caller supplies reflection).
+#[allow(clippy::too_many_arguments)]
 pub fn apply_shoot<R, F>(
     path: &[Array1<f64>],
     shoot: usize,

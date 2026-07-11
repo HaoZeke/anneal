@@ -35,6 +35,7 @@ pub struct LeapfrogResult {
 pub trait HmcIntegrator: Send + Sync {
     /// Evolves `(x, p)` for the configured number of steps at temperature
     /// `temp`. Returns the final state plus the integrator energy error.
+    #[allow(clippy::too_many_arguments)]
     fn evolve<G, M, Obj>(
         &self,
         x0: Array1<f64>,

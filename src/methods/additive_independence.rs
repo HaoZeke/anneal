@@ -198,7 +198,7 @@ mod tests {
         let mut hits = 0;
         for seed in 0..5 {
             let res = additive_independence_sa(&obj, seed, 4000, 8, 65, 0.2, 40, 320);
-            assert_eq!(res.n_evals <= 4000, true);
+            assert!(res.n_evals <= 4000);
             if res.best_val <= opt + 0.01 * opt.abs() {
                 hits += 1;
             }
