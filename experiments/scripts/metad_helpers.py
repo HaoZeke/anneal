@@ -27,8 +27,9 @@ class WellTemperedBiasOnFeaturizer:
     to supply them.
     """
 
-    def __init__(self, featurizer, cv_low, cv_high, sigma=0.3, w0=0.05,
-                 gamma=8.0, grid_n=64):
+    def __init__(
+        self, featurizer, cv_low, cv_high, sigma=0.3, w0=0.05, gamma=8.0, grid_n=64
+    ):
         self.featurizer = featurizer
         self.low_cv = np.asarray(cv_low, dtype=np.float64)
         self.high_cv = np.asarray(cv_high, dtype=np.float64)
@@ -47,8 +48,16 @@ class WellTemperedBiasOnFeaturizer:
     def potential(self, s):
         sx = np.clip(s[0], self.low_cv[0], self.high_cv[0])
         sy = np.clip(s[1], self.low_cv[1], self.high_cv[1])
-        i_f = (sx - self.low_cv[0]) / (self.high_cv[0] - self.low_cv[0]) * (self.grid_n - 1)
-        j_f = (sy - self.low_cv[1]) / (self.high_cv[1] - self.low_cv[1]) * (self.grid_n - 1)
+        i_f = (
+            (sx - self.low_cv[0])
+            / (self.high_cv[0] - self.low_cv[0])
+            * (self.grid_n - 1)
+        )
+        j_f = (
+            (sy - self.low_cv[1])
+            / (self.high_cv[1] - self.low_cv[1])
+            * (self.grid_n - 1)
+        )
         i0 = int(np.clip(np.floor(i_f), 0, self.grid_n - 2))
         j0 = int(np.clip(np.floor(j_f), 0, self.grid_n - 2))
         di = i_f - i0
@@ -68,7 +77,7 @@ class WellTemperedBiasOnFeaturizer:
         v_at_s = self.potential(s)
         w = self.w0 * np.exp(-v_at_s / ((self.gamma - 1.0) * T))
         dx2 = (self._gx - s[0]) ** 2 + (self._gy - s[1]) ** 2
-        self.V += w * np.exp(-dx2 / (2.0 * self.sigma ** 2))
+        self.V += w * np.exp(-dx2 / (2.0 * self.sigma**2))
 
 
 class WellTemperedBias:
@@ -113,8 +122,16 @@ class WellTemperedBias:
         sx = np.clip(s[0], self.low_cv[0], self.high_cv[0])
         sy = np.clip(s[1], self.low_cv[1], self.high_cv[1])
         # Linear index in the grid.
-        i_f = (sx - self.low_cv[0]) / (self.high_cv[0] - self.low_cv[0]) * (self.grid_n - 1)
-        j_f = (sy - self.low_cv[1]) / (self.high_cv[1] - self.low_cv[1]) * (self.grid_n - 1)
+        i_f = (
+            (sx - self.low_cv[0])
+            / (self.high_cv[0] - self.low_cv[0])
+            * (self.grid_n - 1)
+        )
+        j_f = (
+            (sy - self.low_cv[1])
+            / (self.high_cv[1] - self.low_cv[1])
+            * (self.grid_n - 1)
+        )
         i0 = int(np.clip(np.floor(i_f), 0, self.grid_n - 2))
         j0 = int(np.clip(np.floor(j_f), 0, self.grid_n - 2))
         di = i_f - i0
@@ -137,7 +154,7 @@ class WellTemperedBias:
         w = self.w0 * np.exp(-v_at_s / ((self.gamma - 1.0) * T))
         # Add Gaussian to the grid.
         dx2 = (self._gx - s[0]) ** 2 + (self._gy - s[1]) ** 2
-        self.V += w * np.exp(-dx2 / (2.0 * self.sigma ** 2))
+        self.V += w * np.exp(-dx2 / (2.0 * self.sigma**2))
 
     def reweight(self, s: np.ndarray, T: float) -> float:
         """Returns exp(+V(s) / T) for post-hoc unbiasing of an observable."""

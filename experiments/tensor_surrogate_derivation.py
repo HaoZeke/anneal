@@ -68,8 +68,10 @@ def link1_term_counts() -> bool:
     full_v = int(full.subs({p: pp, d: dd}))
     td_v = int(total_degree.subs({p: pp, d: dd}))
     tt_v = int(tt.subs({p: pp, r: rr, d: dd}))
-    print(f"[1] d=50,p=6,r=4  full=10^{len(str(full_v))-1}  "
-          f"total_degree={td_v:,}  TT={tt_v:,}  (TT/total_degree={tt_v/td_v:.3g})")
+    print(
+        f"[1] d=50,p=6,r=4  full=10^{len(str(full_v)) - 1}  "
+        f"total_degree={td_v:,}  TT={tt_v:,}  (TT/total_degree={tt_v / td_v:.3g})"
+    )
     return ok_closed and ok_scaling and tt_v < td_v
 
 
@@ -117,14 +119,15 @@ def link3_rosenblatt() -> bool:
     Z = sp.integrate(sp.integrate(rho, (x1, 0, 1)), (x2, 0, 1))
     rho = rho / Z
 
-    rho1 = sp.integrate(rho, (x2, 0, 1))            # marginal of x1
-    cond2 = rho / rho1                              # rho(x2 | x1)
+    rho1 = sp.integrate(rho, (x2, 0, 1))  # marginal of x1
+    cond2 = rho / rho1  # rho(x2 | x1)
     # transport identity: product of marginal and conditional == joint
     ok_joint = sp.simplify(rho1 * cond2 - rho) == 0
     # conditional integrates to 1 in x2 for every x1 (proper density)
     ok_norm = sp.simplify(sp.integrate(cond2, (x2, 0, 1)) - 1) == 0
-    print(f"[3] Rosenblatt: rho1*cond==joint -> {ok_joint}; "
-          f"cond normalised -> {ok_norm}")
+    print(
+        f"[3] Rosenblatt: rho1*cond==joint -> {ok_joint}; cond normalised -> {ok_norm}"
+    )
     return bool(ok_joint and ok_norm)
 
 
@@ -157,9 +160,11 @@ def link4_acceptance_bound() -> bool:
     ok_contractive = sp.limit(tv_bound.subs(n, 1), delta, 0) == 0  # delta->0 => TV->0
     # quantitative: delta = 0.1 nat => acceptance floor and one-step TV gap
     a_floor = float(sp.exp(-2 * sp.Rational(1, 10)))
-    print(f"[4] independence sampler: alpha >= exp(-2*delta); "
-          f"delta=0.1 => acceptance floor {a_floor:.4f}, "
-          f"one-step TV <= {1 - a_floor:.4f} (d-free)")
+    print(
+        f"[4] independence sampler: alpha >= exp(-2*delta); "
+        f"delta=0.1 => acceptance floor {a_floor:.4f}, "
+        f"one-step TV <= {1 - a_floor:.4f} (d-free)"
+    )
     return bool(ok_alpha and ok_contractive)
 
 
@@ -175,6 +180,7 @@ def link4_acceptance_bound() -> bool:
 # ---------------------------------------------------------------------------
 def link5_tempering_rank() -> bool:
     import sympy as sp
+
     T = sp.symbols("T", positive=True)
     # rank-2 coefficient matrix (2D "TT": C = sum_l u_l v_l^T, rank = 2)
     u1 = sp.Matrix([1, 2, 0])
@@ -188,9 +194,13 @@ def link5_tempering_rank() -> bool:
     # scaling by 1/T preserves rank exactly (T != 0); cores rescale, shapes fixed
     ok_rank = rank_C == rank_T == 2
     # the tempered tensor is literally (1/T) * C, same TT factors u_l, (v_l/T)
-    ok_factor = sp.simplify(C_tempered - (u1 * (v1 / T).T + u2 * (v2 / T).T)) == sp.zeros(3, 3)
-    print(f"[5] tempering: rank(C)=rank(C/T)={rank_C} (rank-preserving) -> "
-          f"{ok_rank and ok_factor}")
+    ok_factor = sp.simplify(
+        C_tempered - (u1 * (v1 / T).T + u2 * (v2 / T).T)
+    ) == sp.zeros(3, 3)
+    print(
+        f"[5] tempering: rank(C)=rank(C/T)={rank_C} (rank-preserving) -> "
+        f"{ok_rank and ok_factor}"
+    )
     return bool(ok_rank and ok_factor)
 
 

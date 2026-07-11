@@ -76,19 +76,30 @@ def osa_accept(
     return OsaResult(False, max_samples)
 
 
-def gaussian_delta_sampler(delta: float, sigma: float, rng: np.random.Generator) -> Callable[[], float]:
+def gaussian_delta_sampler(
+    delta: float, sigma: float, rng: np.random.Generator
+) -> Callable[[], float]:
     """A sampler drawing ``Normal(delta, sigma^2)`` observations of a fixed Delta."""
     return lambda: float(rng.normal(delta, sigma))
 
 
-def acceptance_rate(delta: float, temp: float, sigma: float, *, trials: int = 20_000,
-                    c_star: float = 0.0, seed: int = 0) -> tuple[float, float]:
+def acceptance_rate(
+    delta: float,
+    temp: float,
+    sigma: float,
+    *,
+    trials: int = 20_000,
+    c_star: float = 0.0,
+    seed: int = 0,
+) -> tuple[float, float]:
     """Empirical OSA acceptance rate and mean samples per decision for fixed Delta."""
     rng = np.random.default_rng(seed)
     accepts = 0
     total_samples = 0
     for _ in range(trials):
-        res = osa_accept(gaussian_delta_sampler(delta, sigma, rng), temp, sigma, rng, c_star=c_star)
+        res = osa_accept(
+            gaussian_delta_sampler(delta, sigma, rng), temp, sigma, rng, c_star=c_star
+        )
         accepts += int(res.accepted)
         total_samples += res.n_samples
     return accepts / trials, total_samples / trials
@@ -99,7 +110,9 @@ def _self_test():
     temp, sigma = 1.0, 0.5
     beta = 1.0 / temp
     # Detailed balance: PA(Delta) / PA(-Delta) should equal exp(-beta Delta).
-    print(f"{'Delta':>6} {'PA(+)':>8} {'PA(-)':>8} {'ratio':>8} {'exp(-bD)':>9} {'<n>':>6}")
+    print(
+        f"{'Delta':>6} {'PA(+)':>8} {'PA(-)':>8} {'ratio':>8} {'exp(-bD)':>9} {'<n>':>6}"
+    )
     worst = 0.0
     for delta in (0.25, 0.5, 1.0):
         pa_pos, n_pos = acceptance_rate(delta, temp, sigma, seed=1)
@@ -108,12 +121,16 @@ def _self_test():
         target = math.exp(-beta * delta)
         rel = abs(ratio - target) / target
         worst = max(worst, rel)
-        print(f"{delta:6.2f} {pa_pos:8.4f} {pa_neg:8.4f} {ratio:8.4f} {target:9.4f} {n_pos:6.2f}")
+        print(
+            f"{delta:6.2f} {pa_pos:8.4f} {pa_neg:8.4f} {ratio:8.4f} {target:9.4f} {n_pos:6.2f}"
+        )
     print(f"worst detailed-balance relative error: {worst:.3f}")
     # Noise-free limit (tiny sigma): the n=1 rule is min(1, exp(-beta*Delta)),
     # i.e. Metropolis, since c_star=0 accepts/rejects on the first sample.
     pa_uphill, _ = acceptance_rate(1.0, 1.0, 1e-3, trials=5000, seed=3)
-    print(f"near-noise-free PA(Delta=1) = {pa_uphill:.4f} (Metropolis exp(-1) = {math.exp(-1):.4f})")
+    print(
+        f"near-noise-free PA(Delta=1) = {pa_uphill:.4f} (Metropolis exp(-1) = {math.exp(-1):.4f})"
+    )
     assert worst < 0.10, f"detailed balance violated: {worst}"
     assert abs(pa_uphill - math.exp(-1.0)) < 0.05, f"Metropolis limit off: {pa_uphill}"
     print("OSA self-test OK")

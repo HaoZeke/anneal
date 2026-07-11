@@ -41,8 +41,14 @@ def _tolerance(p: Problem, atol: float = 1e-6, rtol: float = 0.01) -> float:
     return max(atol, rtol * abs(p.f_star))
 
 
-def _run_anneal(p: Problem, variant: str, seed: int, n_epochs: int,
-                steps_per_epoch: int, dtype: str = "float64") -> RunResult:
+def _run_anneal(
+    p: Problem,
+    variant: str,
+    seed: int,
+    n_epochs: int,
+    steps_per_epoch: int,
+    dtype: str = "float64",
+) -> RunResult:
     t0 = time.perf_counter()
     # Use a problem-specific objective registration is not the path here;
     # we drive sa_run via direct callable rather than its registry so the
@@ -130,14 +136,25 @@ def run_benchmarks(
         p = CATALOG[name]
         for solver in solvers:
             for seed in range(seeds):
-                rows.append(_run_anneal(p, solver, seed, n_epochs, steps_per_epoch, dtype))
+                rows.append(
+                    _run_anneal(p, solver, seed, n_epochs, steps_per_epoch, dtype)
+                )
     if out_path:
         os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
         with open(out_path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=[
-                "problem", "dim", "solver", "seed",
-                "fevals", "best_val", "wall_time_s", "solved",
-            ])
+            w = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "problem",
+                    "dim",
+                    "solver",
+                    "seed",
+                    "fevals",
+                    "best_val",
+                    "wall_time_s",
+                    "solved",
+                ],
+            )
             w.writeheader()
             for r in rows:
                 w.writerow(r.__dict__)

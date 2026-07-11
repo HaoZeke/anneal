@@ -37,21 +37,39 @@ def main():
     rows = []
     for seed in range(args.seeds):
         for dtype in ("float64", "float16"):
-            r = sa_run(objective=args.objective, variant=args.variant,
-                       dtype=dtype, seed=seed,
-                       n_epochs=args.n_epochs,
-                       steps_per_epoch=args.steps_per_epoch,
-                       compensated_delta_e=False,
-                       log_domain_accept=False)
-            rows.append(dict(seed=seed, dtype=dtype,
-                             mean_pos_x=float(r.best_pos[0]),
-                             mean_pos_y=float(r.best_pos[1]),
-                             best_val=r.best_val,
-                             n_calls=r.n_calls))
+            r = sa_run(
+                objective=args.objective,
+                variant=args.variant,
+                dtype=dtype,
+                seed=seed,
+                n_epochs=args.n_epochs,
+                steps_per_epoch=args.steps_per_epoch,
+                compensated_delta_e=False,
+                log_domain_accept=False,
+            )
+            rows.append(
+                dict(
+                    seed=seed,
+                    dtype=dtype,
+                    mean_pos_x=float(r.best_pos[0]),
+                    mean_pos_y=float(r.best_pos[1]),
+                    best_val=r.best_val,
+                    n_calls=r.n_calls,
+                )
+            )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["seed", "dtype", "mean_pos_x",
-                                          "mean_pos_y", "best_val", "n_calls"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "seed",
+                "dtype",
+                "mean_pos_x",
+                "mean_pos_y",
+                "best_val",
+                "n_calls",
+            ],
+        )
         w.writeheader()
         w.writerows(rows)
     print(f"Wrote {len(rows)} rows to {args.out}")

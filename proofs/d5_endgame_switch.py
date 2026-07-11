@@ -61,9 +61,11 @@ def polish_requirement_symbolic():
     # Minimality of the integer requirement on a numeric grid: n* = ceil(n_c)
     # is the least k with g rho^k <= tau (strictly above tau at k = n* - 1).
     ok_min = True
-    for g0, t0, r0 in [(1, sp.Rational(1, 10**9), sp.Rational(1, 2)),
-                       (100, sp.Rational(1, 10**6), sp.Rational(9, 10)),
-                       (sp.Rational(3, 7), sp.Rational(1, 10**4), sp.Rational(1, 5))]:
+    for g0, t0, r0 in [
+        (1, sp.Rational(1, 10**9), sp.Rational(1, 2)),
+        (100, sp.Rational(1, 10**6), sp.Rational(9, 10)),
+        (sp.Rational(3, 7), sp.Rational(1, 10**4), sp.Rational(1, 5)),
+    ]:
         n_star = sp.ceiling(sp.log(t0 / g0) / sp.log(r0))
         ok_min &= bool(g0 * r0**n_star <= t0)
         if n_star >= 1:
@@ -75,6 +77,7 @@ def polish_requirement_symbolic():
 def estimator_exactness_symbolic():
     c, rho = sp.symbols("c rho", positive=True)
     k, m = sp.symbols("k m", positive=True, integer=True)
+
     def g(i):
         return c * rho**i
 
@@ -111,8 +114,9 @@ def _win_probability(schedule, theta, n_star):
             prob *= theta if bit else (1 - theta)
             if bit:
                 last_success = e_slots[j]
-        p_after = sum(1 for i, s in enumerate(schedule)
-                      if s == "P" and i > last_success)
+        p_after = sum(
+            1 for i, s in enumerate(schedule) if s == "P" and i > last_success
+        )
         if p_after >= n_star:
             win += prob
     return sp.simplify(win)

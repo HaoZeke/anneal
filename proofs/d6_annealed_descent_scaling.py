@@ -167,7 +167,9 @@ def descent_limit_matches_rechenberg():
     c0, g0, a0 = optimize_c(0.0)
     # Classical (1+1)-ES sphere constants: c* ~ 1.224, progress ~ 0.404,
     # success probability ~ 0.270 (Rechenberg 1973; Beyer 2001).
-    return abs(c0 - 1.224) < 0.01 and abs(g0 - 0.404) < 0.005 and abs(a0 - 0.270) < 0.005
+    return (
+        abs(c0 - 1.224) < 0.01 and abs(g0 - 0.404) < 0.005 and abs(a0 - 0.270) < 0.005
+    )
 
 
 # ---- Check 3: critical temperature ------------------------------------------
@@ -216,6 +218,7 @@ def theta_c_exactly_two_symbolic():
     th = sp.Symbol("theta", positive=True)
     mu = c**2
     s = 2 * c
+
     def Phi(z):
         return sp.Rational(1, 2) * sp.erfc(-z / sp.sqrt(2))
 
@@ -279,8 +282,11 @@ def anisotropic_critical_temperature():
     sig, T = sp.symbols("sigma T", positive=True)
     lams = [sp.Rational(1), sp.Rational(100)]  # H = diag(1, 100)
     ok = True
-    for x_vec in ([sp.Rational(1), sp.Rational(0)], [sp.Rational(0), sp.Rational(1)],
-                  [sp.Rational(3, 5), sp.Rational(4, 5)]):
+    for x_vec in (
+        [sp.Rational(1), sp.Rational(0)],
+        [sp.Rational(0), sp.Rational(1)],
+        [sp.Rational(3, 5), sp.Rational(4, 5)],
+    ):
         f = sum(lam * xi**2 for lam, xi in zip(lams, x_vec)) / 2
         mu = sig**2 * sum(lams) / 2
         s2 = sig**2 * sum(lam**2 * xi**2 for lam, xi in zip(lams, x_vec))

@@ -39,7 +39,9 @@ def _white_noise_drift(gamma: float) -> np.ndarray:
     return np.array([[gamma]])
 
 
-def optimal_sampling_drift(omega_min: float, omega_max: float, n_pairs: int) -> np.ndarray:
+def optimal_sampling_drift(
+    omega_min: float, omega_max: float, n_pairs: int
+) -> np.ndarray:
     """Optimal-sampling drift from log-spaced oscillatory baths -- the reference
     for eindir's gle.rs. Total auxiliary DOFs ns = 2 * n_pairs.
 
@@ -110,8 +112,8 @@ def fit_optimal_drift(omega_min, omega_max, n_pairs, seed=0, maxiter=160):
 
     def unpack(params):
         log_omega = params[0:n_pairs]
-        log_gamma = params[n_pairs:2 * n_pairs]
-        log_c = params[2 * n_pairs:3 * n_pairs]
+        log_gamma = params[n_pairs : 2 * n_pairs]
+        log_c = params[2 * n_pairs : 3 * n_pairs]
         return log_omega, log_gamma, log_c
 
     def neg_worst(params):
@@ -120,13 +122,18 @@ def fit_optimal_drift(omega_min, omega_max, n_pairs, seed=0, maxiter=160):
         return -eff.min()
 
     bounds = (
-        [(lo - 0.5, hi + 0.5)] * n_pairs           # bath frequencies (a bit past the band)
-        + [(lo - 0.5, hi + 2.0)] * n_pairs         # dampings
-        + [(lo - 1.0, hi + 2.0)] * n_pairs         # couplings (log)
+        [(lo - 0.5, hi + 0.5)] * n_pairs  # bath frequencies (a bit past the band)
+        + [(lo - 0.5, hi + 2.0)] * n_pairs  # dampings
+        + [(lo - 1.0, hi + 2.0)] * n_pairs  # couplings (log)
     )
     res = differential_evolution(
-        neg_worst, bounds, seed=seed, maxiter=maxiter, tol=1e-5,
-        popsize=20, polish=True,
+        neg_worst,
+        bounds,
+        seed=seed,
+        maxiter=maxiter,
+        tol=1e-5,
+        popsize=20,
+        polish=True,
     )
     return _drift_from_params(n_pairs, *unpack(res.x)), res
 
@@ -134,9 +141,9 @@ def fit_optimal_drift(omega_min, omega_max, n_pairs, seed=0, maxiter=160):
 def _augmented_drift(omega: float, a_thermo: np.ndarray) -> np.ndarray:
     """Drift M of (q, p, s_1..s_ns) for a harmonic mode coupled to thermostat A."""
     n = a_thermo.shape[0]  # ns + 1 (momentum + aux)
-    dim = n + 1            # + position
+    dim = n + 1  # + position
     M = np.zeros((dim, dim))
-    M[0, 1] = 1.0          # q_dot = p
+    M[0, 1] = 1.0  # q_dot = p
     M[1, 0] = -(omega**2)  # p_dot gets -omega^2 q
     M[1:, 1:] = -a_thermo  # momentum+aux evolve under -A
     return M
@@ -155,11 +162,11 @@ def C1_white_critical_damping() -> bool:
     char = lam**2 + gamma * lam + omega**2
     roots = sp.solve(char, lam)
     # underdamped slowest rate is gamma/2; maximised over gamma at gamma=2 omega
-    rate_at_critical = float(
-        (-sp.re(roots[0].subs(gamma, 2 * omega))).subs(omega, 1.0)
+    rate_at_critical = float((-sp.re(roots[0].subs(gamma, 2 * omega))).subs(omega, 1.0))
+    print(
+        f"[C1] white noise: critical gamma=2 omega gives kappa=omega "
+        f"(kappa@omega=1 -> {rate_at_critical:.3f})"
     )
-    print(f"[C1] white noise: critical gamma=2 omega gives kappa=omega "
-          f"(kappa@omega=1 -> {rate_at_critical:.3f})")
     return abs(rate_at_critical - 1.0) < 1e-9
 
 
@@ -176,8 +183,10 @@ def C2_white_band_mismatch() -> bool:
             best = (worst, gamma, norm_eff)
     worst, gamma, norm_eff = best
     spread = norm_eff.max() / norm_eff.min()
-    print(f"[C2] white noise band [{w_lo},{w_hi}] best gamma={gamma:.2f}: "
-          f"kappa/omega spread {spread:.1f}x -- one friction cannot damp the band")
+    print(
+        f"[C2] white noise band [{w_lo},{w_hi}] best gamma={gamma:.2f}: "
+        f"kappa/omega spread {spread:.1f}x -- one friction cannot damp the band"
+    )
     # a single gamma leaves a large efficiency spread across the band
     return spread > 5.0
 
@@ -199,10 +208,12 @@ def C3_gle_flattens_band() -> bool:
     gle_worst = gle_eff.min()
     wn_spread = wn_eff.max() / wn_eff.min()
     gle_spread = gle_eff.max() / gle_eff.min()
-    print(f"[C3] worst normalised efficiency: white {wn_worst:.3f} "
-          f"(spread {wn_spread:.0f}x) vs GLE {gle_worst:.3f} "
-          f"(spread {gle_spread:.0f}x); worst-mode speedup "
-          f"{gle_worst/wn_worst:.1f}x")
+    print(
+        f"[C3] worst normalised efficiency: white {wn_worst:.3f} "
+        f"(spread {wn_spread:.0f}x) vs GLE {gle_worst:.3f} "
+        f"(spread {gle_spread:.0f}x); worst-mode speedup "
+        f"{gle_worst / wn_worst:.1f}x"
+    )
     # the GLE lifts the worst-sampled mode and flattens the band
     return gle_worst > wn_worst and gle_spread < wn_spread
 
@@ -211,7 +222,7 @@ def C4_fluctuation_dissipation() -> bool:
     a = optimal_sampling_drift(1.0, 100.0, 4)
     n = a.shape[0]
     C = np.eye(n)
-    BBt = a @ C + C @ a.T            # = A + A^T for C = I
+    BBt = a @ C + C @ a.T  # = A + A^T for C = I
     # B B^T must be PSD (valid diffusion) and symmetric
     eigs = np.linalg.eigvalsh(0.5 * (BBt + BBt.T))
     psd = eigs.min() > -1e-10
@@ -219,9 +230,11 @@ def C4_fluctuation_dissipation() -> bool:
     # covariance solves A C + C A^T = B B^T; with B B^T = A + A^T it is C = I.
     a2 = optimal_sampling_drift(0.5, 50.0, 4)
     resid = np.linalg.norm((a2 @ np.eye(n) + np.eye(n) @ a2.T) - (a2 + a2.T))
-    print(f"[C4] FDT: B B^T = A + A^T PSD (min eig {eigs.min():.2e}); "
-          f"C=I stationary for any drift (resid {resid:.1e}) -- correctness "
-          f"decoupled from the A tuning")
+    print(
+        f"[C4] FDT: B B^T = A + A^T PSD (min eig {eigs.min():.2e}); "
+        f"C=I stationary for any drift (resid {resid:.1e}) -- correctness "
+        f"decoupled from the A tuning"
+    )
     return bool(psd and resid < 1e-10)
 
 

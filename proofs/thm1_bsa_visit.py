@@ -20,9 +20,9 @@ T, dx, q_v, D = sp.symbols("T dx q_v D", positive=True)
 def g_qv_denominator(dx, T, q_v, D):
     """The correct Tsallis-bracket form (denominator-of-the-fraction)."""
     pref = T ** (-D / (3 - q_v))
-    base = 1 + (q_v - 1) * dx ** 2 / T ** (2 / (3 - q_v))
+    base = 1 + (q_v - 1) * dx**2 / T ** (2 / (3 - q_v))
     expo = -(1 / (q_v - 1) + (D - 1) / 2)
-    return pref * base ** expo
+    return pref * base**expo
 
 
 def g_qv_numerator(dx, T, q_v, D):
@@ -32,12 +32,12 @@ def g_qv_numerator(dx, T, q_v, D):
     limit this gives exp(+dx^2/T), a non-density.
     """
     pref = T ** (-D / (3 - q_v))
-    base = 1 + (q_v - 1) * dx ** 2 / T ** (2 / (3 - q_v))
-    expo = (1 / (q_v - 1) + (D - 1) / 2)
-    return pref * base ** expo
+    base = 1 + (q_v - 1) * dx**2 / T ** (2 / (3 - q_v))
+    expo = 1 / (q_v - 1) + (D - 1) / 2
+    return pref * base**expo
 
 
-target = sp.exp(-dx ** 2 / T) * T ** (-D / 2)
+target = sp.exp(-(dx**2) / T) * T ** (-D / 2)
 
 
 def witness_for(form: str) -> bool:

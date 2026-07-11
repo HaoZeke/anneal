@@ -37,8 +37,8 @@ import numpy as np
 fx, fy, sx, sy, T, delta = sp.symbols("f_x f_y s_x s_y T delta", real=True)
 T = sp.symbols("T", positive=True)
 
-pi_ratio = sp.exp(-(fy - fx) / T)          # pi(y)/pi(x)
-q_ratio_inv = sp.exp((sy - sx) / T)        # q(x)/q(y)
+pi_ratio = sp.exp(-(fy - fx) / T)  # pi(y)/pi(x)
+q_ratio_inv = sp.exp((sy - sx) / T)  # q(x)/q(y)
 R = sp.simplify(pi_ratio * q_ratio_inv)
 
 rx = (fx - sx) / T
@@ -121,7 +121,7 @@ def check_uniform_ergodicity(delta_val=0.4, nstates=5, nsteps=6, seed=1):
         for n in range(1, nsteps + 1):
             dist = dist @ P
             tv = 0.5 * np.abs(dist - pi).sum()
-            if tv > rho ** n + 1e-9:
+            if tv > rho**n + 1e-9:
                 ok = False
     return stat_ok and ok, rho
 
@@ -132,8 +132,7 @@ def derive():
     print("  Check 1 (MH ratio = exp(r_x - r_y), r=(f-s)/T):", WITNESS)
     print("    R simplified            =", R)
     print("    exp(r_x - r_y)          =", sp.simplify(R_in_terms_of_r))
-    print("  Check 2 (worst exponent = -2 delta, tight constant=2):",
-          check_tightness())
+    print("  Check 2 (worst exponent = -2 delta, tight constant=2):", check_tightness())
     print("    min_{r in [-d,d]^2}(r_x-r_y) =", _worst_case_exponent())
     ok3, worst, floor = check_numeric_bound()
     print(f"  Check 3 (numeric bound, delta=0.37): {ok3}")

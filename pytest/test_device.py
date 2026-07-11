@@ -119,7 +119,9 @@ def test_run_ensemble_numpy_shapes_and_global_min():
     # ensemble best should be at that basin.
     assert float(history.global_best_val) < -78.0
     # The reported global best is the minimum over the per-chain bests.
-    assert float(history.global_best_val) == pytest.approx(float(history.best_val.min()))
+    assert float(history.global_best_val) == pytest.approx(
+        float(history.best_val.min())
+    )
     total = float(history.accepted) + float(history.rejected)
     assert total == n_chains * 30 * 120
 

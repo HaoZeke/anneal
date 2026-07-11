@@ -71,8 +71,9 @@ def monotone_best_preserved(seed=1, n_arms=3, slice_len=7, n_rounds=20):
             if v < incumbent:
                 incumbent = v
             history.append(incumbent)
-    nonincreasing = all(history[i + 1] <= history[i] + 1e-15
-                        for i in range(len(history) - 1))
+    nonincreasing = all(
+        history[i + 1] <= history[i] + 1e-15 for i in range(len(history) - 1)
+    )
     equals_global_min = abs(incumbent - min(all_samples)) < 1e-12
     return nonincreasing and equals_global_min
 
@@ -149,15 +150,19 @@ WITNESS = (
 def derive():
     sp.init_printing(use_unicode=False)
     print("D3: Portfolio convergence preservation")
-    print("  Check 1a (geometric tail identity 1-(1-p)^n):",
-          geometric_tail_symbolic())
+    print("  Check 1a (geometric tail identity 1-(1-p)^n):", geometric_tail_symbolic())
     ok1b, emp, th = geometric_tail_monte_carlo()
-    print(f"  Check 1b (Monte Carlo tail, p=0.05,n=40): {ok1b}  emp={emp:.4f} theory={th:.4f}")
-    print("  Check 2 (monotone best = global min of samples):",
-          monotone_best_preserved())
+    print(
+        f"  Check 1b (Monte Carlo tail, p=0.05,n=40): {ok1b}  emp={emp:.4f} theory={th:.4f}"
+    )
+    print(
+        "  Check 2 (monotone best = global min of samples):", monotone_best_preserved()
+    )
     ok3, dstar, lb, actual = discrepancy_covering()
     print(f"  Check 3 (QMC star-discrepancy covering): {ok3}")
-    print(f"    D_n^* ~ {dstar:.4f}, Niederreiter lower bound n*mu - n*D* = {lb:.2f}, actual box hits = {actual}")
+    print(
+        f"    D_n^* ~ {dstar:.4f}, Niederreiter lower bound n*mu - n*D* = {lb:.2f}, actual box hits = {actual}"
+    )
     all_ok = WITNESS
     print("  ALL CHECKS PASS:", all_ok)
     return all_ok

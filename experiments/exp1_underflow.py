@@ -62,8 +62,11 @@ def main():
     p.add_argument("--out", required=True, help="Output CSV path.")
     p.add_argument("--samples", type=int, default=200_000)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--check", action="store_true",
-                   help=f"Assert the manuscript's |bias|<={MAX_F16_F64_BIAS:g} bound.")
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help=f"Assert the manuscript's |bias|<={MAX_F16_F64_BIAS:g} bound.",
+    )
     args = p.parse_args()
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
@@ -82,9 +85,16 @@ def main():
         cell = {}
         for dtype in DTYPES:
             rate, se = empirical_accept_rate(delta_e, temp, dtype, u_base)
-            rows.append(dict(delta_e=delta_e, temp=temp, dtype=dtype,
-                             n_samples=args.samples,
-                             accept_rate=rate, std_err=se))
+            rows.append(
+                dict(
+                    delta_e=delta_e,
+                    temp=temp,
+                    dtype=dtype,
+                    n_samples=args.samples,
+                    accept_rate=rate,
+                    std_err=se,
+                )
+            )
             cell[dtype] = rate
 
         if cell["float64"] >= 1e-3:
@@ -97,12 +107,23 @@ def main():
                     f"at delta_e={delta_e} T={temp}"
                 )
 
-    print(f"Max float16-vs-float64 bias {max_bias:.3e} at "
-          f"(delta_e, T) = {max_bias_at} over cells with f64 rate >= 1e-3")
+    print(
+        f"Max float16-vs-float64 bias {max_bias:.3e} at "
+        f"(delta_e, T) = {max_bias_at} over cells with f64 rate >= 1e-3"
+    )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["delta_e", "temp", "dtype",
-                                          "n_samples", "accept_rate", "std_err"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "delta_e",
+                "temp",
+                "dtype",
+                "n_samples",
+                "accept_rate",
+                "std_err",
+            ],
+        )
         w.writeheader()
         w.writerows(rows)
 

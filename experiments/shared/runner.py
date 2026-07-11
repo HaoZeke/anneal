@@ -26,10 +26,16 @@ import numpy as np
 # caller is expected to cast to the runner's working dtype.
 # ---------------------------------------------------------------------------
 
+
 def styb_tang(x: np.ndarray) -> float:
-    return float(0.5 * np.sum(x.astype(np.float64) ** 4
-                              - 16 * x.astype(np.float64) ** 2
-                              + 5 * x.astype(np.float64)))
+    return float(
+        0.5
+        * np.sum(
+            x.astype(np.float64) ** 4
+            - 16 * x.astype(np.float64) ** 2
+            + 5 * x.astype(np.float64)
+        )
+    )
 
 
 def rosenbrock(x: np.ndarray) -> float:
@@ -39,16 +45,15 @@ def rosenbrock(x: np.ndarray) -> float:
 
 def rastrigin(x: np.ndarray) -> float:
     x64 = x.astype(np.float64)
-    return float(10.0 * len(x64) + np.sum(x64 ** 2 - 10.0 * np.cos(2.0 * np.pi * x64)))
+    return float(10.0 * len(x64) + np.sum(x64**2 - 10.0 * np.cos(2.0 * np.pi * x64)))
 
 
 def ackley(x: np.ndarray) -> float:
     x64 = x.astype(np.float64)
     n = len(x64)
-    s1 = np.sum(x64 ** 2)
+    s1 = np.sum(x64**2)
     s2 = np.sum(np.cos(2.0 * np.pi * x64))
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(s1 / n))
-                 - np.exp(s2 / n) + 20.0 + np.e)
+    return float(-20.0 * np.exp(-0.2 * np.sqrt(s1 / n)) - np.exp(s2 / n) + 20.0 + np.e)
 
 
 OBJECTIVES = {
@@ -62,6 +67,7 @@ OBJECTIVES = {
 # ---------------------------------------------------------------------------
 # Cooling schedules and proposal kernels (dtype-aware).
 # ---------------------------------------------------------------------------
+
 
 def log_cool(t_init, k0, epoch, dtype):
     return dtype(t_init * np.log(k0) / np.log(epoch + k0))
@@ -77,7 +83,7 @@ def tsallis_cool(t_init, q_v, epoch, dtype):
     if abs(q_v - 1.0) < 1e-12:
         return dtype(t_init * np.log(2.0) / np.log(epoch + 1.0))
     exp = q_v - 1.0
-    num = (2.0 ** exp) - 1.0
+    num = (2.0**exp) - 1.0
     den = ((epoch + 1.0) ** exp) - 1.0
     return dtype(t_init * num / den)
 
@@ -106,6 +112,7 @@ def tsallis_visit_propose(rng, x, q_v, t, dtype):
 # Metropolis acceptance with optional Kahan compensation on delta_e.
 # ---------------------------------------------------------------------------
 
+
 def metropolis_accept_prob(delta_e, temp, dtype):
     if delta_e <= dtype(0):
         return dtype(1)
@@ -123,14 +130,13 @@ def gelman_rubin_max(traces):
     dim = traces[0][0].shape[0]
     max_rhat = 0.0
     for d in range(dim):
-        values = [np.asarray([x[d] for x in chain], dtype=np.float64)
-                  for chain in traces]
-        if any(vals.shape != (n,) or not np.all(np.isfinite(vals))
-               for vals in values):
+        values = [
+            np.asarray([x[d] for x in chain], dtype=np.float64) for chain in traces
+        ]
+        if any(vals.shape != (n,) or not np.all(np.isfinite(vals)) for vals in values):
             return float("inf")
         means = np.array([np.mean(vals) for vals in values], dtype=np.float64)
-        vars_ = np.array([np.var(vals, ddof=1) for vals in values],
-                         dtype=np.float64)
+        vars_ = np.array([np.var(vals, ddof=1) for vals in values], dtype=np.float64)
         if not np.all(np.isfinite(vars_)) or np.any(vars_ <= 0):
             continue
         theta_bar = means.mean()
@@ -188,6 +194,7 @@ def kahan_step(running_sum, running_compensation, addend, dtype):
 # Runner.
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SaResult:
     best_pos: np.ndarray
@@ -228,7 +235,7 @@ def sa_run(
     """
     np_dtype = np.dtype(dtype)
     if log_domain_accept is None:
-        log_domain_accept = (np_dtype == np.float16)
+        log_domain_accept = np_dtype == np.float16
     obj_fn, low, high = OBJECTIVES[objective]
     rng = np.random.default_rng(seed)
 

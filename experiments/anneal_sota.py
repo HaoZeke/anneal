@@ -39,7 +39,9 @@ DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION = DEFAULT_SHIFTED_QMC_POLISH_MAX_DIMEN
 DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR = DEFAULT_SHIFTED_QMC_POLISH_BUDGET_DIVISOR
 DEFAULT_TRUST_REGION_QMC_POLL_MIN_DIMENSION = DEFAULT_BOUNDARY_QMC_POLISH_MIN_DIMENSION
 DEFAULT_TRUST_REGION_QMC_POLL_MAX_DIMENSION = DEFAULT_BOUNDARY_QMC_POLISH_MAX_DIMENSION
-DEFAULT_TRUST_REGION_QMC_POLL_BUDGET_DIVISOR = DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
+DEFAULT_TRUST_REGION_QMC_POLL_BUDGET_DIVISOR = (
+    DEFAULT_BOUNDARY_QMC_POLISH_BUDGET_DIVISOR
+)
 DEFAULT_TRUST_REGION_QMC_POLL_RADIUS_FRACTION = 0.0
 DEFAULT_TRUST_REGION_QMC_POLL_LEVELS = DEFAULT_SHIFTED_QMC_POLISH_CHAIN_COUNT + 1
 DEFAULT_TRUST_REGION_QMC_POLL_POINTS_PER_LEVEL = 0
@@ -210,7 +212,9 @@ def low_discrepancy_population(
     if low.ndim != 1 or low.size == 0:
         raise ValueError("bounds must be one-dimensional and non-empty")
     if np.any(high < low):
-        raise ValueError("each upper bound must be greater than or equal to the lower bound")
+        raise ValueError(
+            "each upper bound must be greater than or equal to the lower bound"
+        )
     if n <= 0:
         return np.empty((0, low.size), dtype=np.float64)
     points = np.asarray(
@@ -531,7 +535,9 @@ def _shifted_qmc_max_fevals_per_start(
     return remaining // max(1, projected_step_work * top_k * n_replicates)
 
 
-def _shifted_qmc_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+def _shifted_qmc_polish(
+    counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig
+):
     if grad_fn is None or counter.n >= counter.budget:
         return None
     jac = _counted_jac(counter, grad_fn)
@@ -697,7 +703,9 @@ def _global_anneal_portfolio(
     return _best_finite(counter.best)
 
 
-def _annealed_basin_polish(counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig):
+def _annealed_basin_polish(
+    counter, grad_fn, low, high, dim, rng, config: AnnealHybridConfig
+):
     if grad_fn is None or counter.n >= counter.budget:
         return None
     jac = _counted_jac(counter, grad_fn)
@@ -784,7 +792,9 @@ def _copy_generator(rng: np.random.Generator) -> np.random.Generator:
     return np.random.Generator(bit_generator)
 
 
-def _differential_trial(pop, best_x, i, fi, cri, rng, low, high, config: AnnealHybridConfig):
+def _differential_trial(
+    pop, best_x, i, fi, cri, rng, low, high, config: AnnealHybridConfig
+):
     dim = len(low)
     idx = [j for j in range(len(pop)) if j != i]
     r1, r2, r3 = rng.choice(idx, 3, replace=False)
@@ -840,7 +850,7 @@ def _elite_qmc_zoom(counter, pop, vals, low, high, rng, config: AnnealHybridConf
     skip = int(rng.integers(1, 1 << 31))
 
     for level in range(config.elite_zoom_levels):
-        radius = base_radius * (config.elite_zoom_radius_shrink ** level)
+        radius = base_radius * (config.elite_zoom_radius_shrink**level)
         if not np.any(radius > 0.0):
             break
         for idx in elite_order:
@@ -972,8 +982,7 @@ def _qmc_best1bin_scout(
     try:
         while counter.n - start_n < max_evals:
             weight = (
-                config.best1bin_weight_min
-                + config.best1bin_weight_span * rng.random()
+                config.best1bin_weight_min + config.best1bin_weight_span * rng.random()
             )
             for i in range(len(pop)):
                 if counter.n - start_n >= max_evals:
@@ -1054,10 +1063,7 @@ def qmc_annealed_hybrid(
         )
         if counter.n >= counter.budget:
             return _best_finite(portfolio_best, counter.best)
-    if (
-        _basin_polish_active(dim, config)
-        and jac is not None
-    ):
+    if _basin_polish_active(dim, config) and jac is not None:
         basin_best = None
         original_budget = counter.budget
         basin_budget = _basin_polish_budget(original_budget - counter.n, dim, config)
@@ -1077,10 +1083,7 @@ def qmc_annealed_hybrid(
                 counter.budget = original_budget
         if counter.n >= counter.budget:
             return _best_finite(basin_best, counter.best)
-    if (
-        _boundary_qmc_polish_active(dim, config)
-        and jac is not None
-    ):
+    if _boundary_qmc_polish_active(dim, config) and jac is not None:
         boundary = _boundary_qmc_polish(
             counter,
             jac,
@@ -1100,10 +1103,7 @@ def qmc_annealed_hybrid(
                 else float("inf")
             )
             return _best_finite(boundary_best, counter.best)
-    if (
-        _shifted_qmc_polish_active(dim, config)
-        and jac is not None
-    ):
+    if _shifted_qmc_polish_active(dim, config) and jac is not None:
         shifted = _shifted_qmc_polish(
             counter,
             grad,
@@ -1302,15 +1302,22 @@ def qmc_annealed_hybrid(
             for i in range(pop_size):
                 fi = f[i]
                 cri = cr[i]
-                if surr is not None and rng.random() < config.surrogate_proposal_probability:
+                if (
+                    surr is not None
+                    and rng.random() < config.surrogate_proposal_probability
+                ):
                     T = max(temp, config.surrogate_temperature_floor)
                     trial = surr.sample(1, T, rng)[0]
                     trial = np.clip(trial, low, high)
                 else:
                     fi = (
-                        config.differential_weight_min
-                        + config.differential_weight_span * rng.random()
-                    ) if rng.random() < config.adaptation_probability else f[i]
+                        (
+                            config.differential_weight_min
+                            + config.differential_weight_span * rng.random()
+                        )
+                        if rng.random() < config.adaptation_probability
+                        else f[i]
+                    )
                     cri = (
                         rng.random()
                         if rng.random() < config.adaptation_probability
@@ -1435,12 +1442,13 @@ def qmc_annealed_hybrid(
                         if math.isfinite(native_best) and native_best < best_v:
                             best_v = native_best
                             if "best_pos" in native:
-                                best_x = np.asarray(native["best_pos"], dtype=np.float64)
+                                best_x = np.asarray(
+                                    native["best_pos"], dtype=np.float64
+                                )
                 if not used_native_polish:
                     maxfun = max(
                         config.local_polish_min_fevals,
-                        counter.budget
-                        // (2 * max(n_polish, 1) * max(k_polish, 1)),
+                        counter.budget // (2 * max(n_polish, 1) * max(k_polish, 1)),
                     )
                     for idx in np.argsort(vals)[: max(1, k_polish)]:
                         res = minimize(
@@ -1461,7 +1469,10 @@ def qmc_annealed_hybrid(
                         if math.isfinite(res_fun) and res_fun < best_v:
                             best_v = res_fun
                             best_x = np.asarray(res.x, dtype=np.float64)
-                if _trust_region_qmc_poll_active(dim, config) and counter.n < counter.budget:
+                if (
+                    _trust_region_qmc_poll_active(dim, config)
+                    and counter.n < counter.budget
+                ):
                     trust_region = _native_qmc_trust_region_poll(
                         counter,
                         best_x,

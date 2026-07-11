@@ -37,22 +37,21 @@ PRESETS = {
 
 def styb_tang(x):
     xp = array_api_compat.array_namespace(x)
-    return 0.5 * xp.sum(x ** 4 - 16.0 * x ** 2 + 5.0 * x, axis=-1)
+    return 0.5 * xp.sum(x**4 - 16.0 * x**2 + 5.0 * x, axis=-1)
 
 
 def rastrigin(x):
     xp = array_api_compat.array_namespace(x)
     n = x.shape[-1]
-    return 10.0 * n + xp.sum(x ** 2 - 10.0 * xp.cos(2.0 * np.pi * x), axis=-1)
+    return 10.0 * n + xp.sum(x**2 - 10.0 * xp.cos(2.0 * np.pi * x), axis=-1)
 
 
 def ackley(x):
     xp = array_api_compat.array_namespace(x)
     n = x.shape[-1]
-    s1 = xp.sum(x ** 2, axis=-1)
+    s1 = xp.sum(x**2, axis=-1)
     s2 = xp.sum(xp.cos(2.0 * np.pi * x), axis=-1)
-    return (-20.0 * xp.exp(-0.2 * xp.sqrt(s1 / n))
-            - xp.exp(s2 / n) + 20.0 + np.e)
+    return -20.0 * xp.exp(-0.2 * xp.sqrt(s1 / n)) - xp.exp(s2 / n) + 20.0 + np.e
 
 
 OBJECTIVES = {
@@ -66,6 +65,7 @@ def _backends(requested):
     backends = {"numpy": np}
     try:
         import cupy
+
         cupy.zeros(1)  # force a context; raises if no usable GPU
         backends["cupy"] = cupy
     except Exception as exc:  # noqa: BLE001
@@ -113,26 +113,47 @@ def main():
                     high = xp.asarray(np.full(dim, hi), dtype=xp.float64)
                     _sync(xp)
                     t0 = time.perf_counter()
-                    h = run_ensemble(obj_fn, low, high, preset,
-                                     n_chains=n_chains, n_epochs=args.n_epochs,
-                                     steps_per_epoch=args.steps_per_epoch, seed=args.seed)
+                    h = run_ensemble(
+                        obj_fn,
+                        low,
+                        high,
+                        preset,
+                        n_chains=n_chains,
+                        n_epochs=args.n_epochs,
+                        steps_per_epoch=args.steps_per_epoch,
+                        seed=args.seed,
+                    )
                     best = float(h.global_best_val)
                     _sync(xp)
                     wall = time.perf_counter() - t0
                     timing[(preset_name, dim, n_chains, name)] = wall
-                    rows.append(dict(preset=preset_name, backend=name,
-                                     objective=args.objective, dim=dim,
-                                     n_chains=n_chains, n_epochs=args.n_epochs,
-                                     steps_per_epoch=args.steps_per_epoch,
-                                     wall_time_s=f"{wall:.4f}", global_best=f"{best:.6f}",
-                                     known_min=f"{known(dim):.6f}"))
-                    print(f"  {preset_name} {name:6s} obj={args.objective} dim={dim:3d} "
-                          f"chains={n_chains:6d} wall={wall:8.3f}s best={best:.4f}")
+                    rows.append(
+                        dict(
+                            preset=preset_name,
+                            backend=name,
+                            objective=args.objective,
+                            dim=dim,
+                            n_chains=n_chains,
+                            n_epochs=args.n_epochs,
+                            steps_per_epoch=args.steps_per_epoch,
+                            wall_time_s=f"{wall:.4f}",
+                            global_best=f"{best:.6f}",
+                            known_min=f"{known(dim):.6f}",
+                        )
+                    )
+                    print(
+                        f"  {preset_name} {name:6s} obj={args.objective} dim={dim:3d} "
+                        f"chains={n_chains:6d} wall={wall:8.3f}s best={best:.4f}"
+                    )
                 if "numpy" in backends and "cupy" in backends:
-                    sp = (timing[(preset_name, dim, n_chains, "numpy")]
-                          / timing[(preset_name, dim, n_chains, "cupy")])
-                    print(f"    -> {preset_name} GPU speedup x{sp:.1f} "
-                          f"at dim={dim} chains={n_chains}")
+                    sp = (
+                        timing[(preset_name, dim, n_chains, "numpy")]
+                        / timing[(preset_name, dim, n_chains, "cupy")]
+                    )
+                    print(
+                        f"    -> {preset_name} GPU speedup x{sp:.1f} "
+                        f"at dim={dim} chains={n_chains}"
+                    )
 
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

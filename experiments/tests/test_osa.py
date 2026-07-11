@@ -4,7 +4,12 @@ import math
 
 import numpy as np
 
-from experiments.osa import OsaResult, acceptance_rate, gaussian_delta_sampler, osa_accept
+from experiments.osa import (
+    OsaResult,
+    acceptance_rate,
+    gaussian_delta_sampler,
+    osa_accept,
+)
 
 
 def test_osa_preserves_detailed_balance():
@@ -31,7 +36,9 @@ def test_osa_recovers_metropolis_in_the_noise_free_limit():
 
 def test_osa_returns_sample_count():
     rng = np.random.default_rng(0)
-    res = osa_accept(gaussian_delta_sampler(0.5, 0.5, rng), temp=1.0, sigma=0.5, rng=rng)
+    res = osa_accept(
+        gaussian_delta_sampler(0.5, 0.5, rng), temp=1.0, sigma=0.5, rng=rng
+    )
     assert isinstance(res, OsaResult)
     assert res.n_samples >= 1
 

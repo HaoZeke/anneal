@@ -12,10 +12,10 @@ from experiments.tensor_surrogate import AdditiveSurrogate  # noqa: E402
 
 def _styblinski_tang(dim):
     def fn(x):
-        return 0.5 * float(np.sum(x ** 4 - 16.0 * x ** 2 + 5.0 * x))
+        return 0.5 * float(np.sum(x**4 - 16.0 * x**2 + 5.0 * x))
 
     def grad(x):
-        return 0.5 * (4.0 * x ** 3 - 32.0 * x + 5.0)
+        return 0.5 * (4.0 * x**3 - 32.0 * x + 5.0)
 
     low = np.full(dim, -5.0)
     high = np.full(dim, 5.0)
@@ -24,7 +24,7 @@ def _styblinski_tang(dim):
 
 def _rastrigin(dim):
     def fn(x):
-        return 10.0 * dim + float(np.sum(x ** 2 - 10.0 * np.cos(2.0 * np.pi * x)))
+        return 10.0 * dim + float(np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x)))
 
     def grad(x):
         return 2.0 * x + 20.0 * np.pi * np.sin(2.0 * np.pi * x)
@@ -89,7 +89,7 @@ def test_additive_surrogate_from_points_recovers_separable():
     low = np.full(dim, -2.0)
     high = np.full(dim, 2.0)
     X = rng.uniform(low, high, size=(400, dim))
-    y = np.sum(X ** 2, axis=1)
+    y = np.sum(X**2, axis=1)
     surr = AdditiveSurrogate.from_points(X, y, low, high, degree=6)
     samples = surr.sample(64, 0.05, rng)
     # Low-temperature draws concentrate near the separable minimum at 0.

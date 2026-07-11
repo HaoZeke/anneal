@@ -20,11 +20,13 @@ from anneal import run_hmc
 
 # ---- The objective: Rosenbrock 5D ----------------------------------------
 
+
 def rosenbrock(x):
     return float(np.sum(100.0 * (x[1:] - x[:-1] ** 2) ** 2 + (1.0 - x[:-1]) ** 2))
 
 
 # ---- (1) Analytic gradient -----------------------------------------------
+
 
 def rosenbrock_grad_analytic(x):
     n = len(x)
@@ -36,6 +38,7 @@ def rosenbrock_grad_analytic(x):
 
 
 # ---- (2) JAX wrapper -- import jax only if available ----------------------
+
 
 def make_jax_gradient():
     try:
@@ -54,6 +57,7 @@ def make_jax_gradient():
 
 # ---- (3) torch wrapper -- import torch only if available ------------------
 
+
 def make_torch_gradient():
     try:
         import torch
@@ -71,24 +75,30 @@ def make_torch_gradient():
 
 # ---- Run all three through run_hmc ----------------------------------------
 
+
 def main():
     low = np.full(5, -2.048)
     high = np.full(5, 2.048)
-    options = dict(t_init=5.0, epsilon=0.05, l_steps=5,
-                   n_epochs=30, steps_per_epoch=50, seed=42)
+    options = dict(
+        t_init=5.0, epsilon=0.05, l_steps=5, n_epochs=30, steps_per_epoch=50, seed=42
+    )
 
     print("Rosenbrock 5D, three gradient providers, anneal.run_hmc driver")
     print()
 
     # (1) analytic
     h = run_hmc(rosenbrock, rosenbrock_grad_analytic, low, high, **options)
-    print(f"  analytic gradient: best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}")
+    print(
+        f"  analytic gradient: best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}"
+    )
 
     # (2) jax
     jax_grad = make_jax_gradient()
     if jax_grad is not None:
         h = run_hmc(rosenbrock, jax_grad, low, high, **options)
-        print(f"  jax.grad:          best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}")
+        print(
+            f"  jax.grad:          best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}"
+        )
     else:
         print("  jax.grad:          (jax not installed; skipped)")
 
@@ -96,7 +106,9 @@ def main():
     torch_grad = make_torch_gradient()
     if torch_grad is not None:
         h = run_hmc(rosenbrock, torch_grad, low, high, **options)
-        print(f"  torch.autograd:    best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}")
+        print(
+            f"  torch.autograd:    best_val = {h.best_val:.6f}  pos[0] = {h.best_pos[0]:.4f}"
+        )
     else:
         print("  torch.autograd:    (torch not installed; skipped)")
 

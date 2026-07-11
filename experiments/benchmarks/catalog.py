@@ -33,7 +33,7 @@ class Problem:
 
 def _styb_tang(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    return float(0.5 * np.sum(x ** 4 - 16 * x ** 2 + 5 * x))
+    return float(0.5 * np.sum(x**4 - 16 * x**2 + 5 * x))
 
 
 def _rosenbrock(x: np.ndarray) -> float:
@@ -43,16 +43,15 @@ def _rosenbrock(x: np.ndarray) -> float:
 
 def _rastrigin(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    return float(10.0 * len(x) + np.sum(x ** 2 - 10.0 * np.cos(2.0 * np.pi * x)))
+    return float(10.0 * len(x) + np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x)))
 
 
 def _ackley(x: np.ndarray) -> float:
     x = x.astype(np.float64)
     n = len(x)
-    s1 = np.sum(x ** 2)
+    s1 = np.sum(x**2)
     s2 = np.sum(np.cos(2.0 * np.pi * x))
-    return float(-20.0 * np.exp(-0.2 * np.sqrt(s1 / n))
-                 - np.exp(s2 / n) + 20.0 + np.e)
+    return float(-20.0 * np.exp(-0.2 * np.sqrt(s1 / n)) - np.exp(s2 / n) + 20.0 + np.e)
 
 
 def _schwefel(x: np.ndarray) -> float:
@@ -65,13 +64,15 @@ def _levy(x: np.ndarray) -> float:
     w = 1.0 + (x - 1.0) / 4.0
     term1 = np.sin(np.pi * w[0]) ** 2
     term3 = (w[-1] - 1.0) ** 2 * (1.0 + np.sin(2.0 * np.pi * w[-1]) ** 2)
-    middle = np.sum((w[:-1] - 1.0) ** 2 * (1.0 + 10.0 * np.sin(np.pi * w[:-1] + 1.0) ** 2))
+    middle = np.sum(
+        (w[:-1] - 1.0) ** 2 * (1.0 + 10.0 * np.sin(np.pi * w[:-1] + 1.0) ** 2)
+    )
     return float(term1 + middle + term3)
 
 
 def _griewank(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    s = np.sum(x ** 2) / 4000.0
+    s = np.sum(x**2) / 4000.0
     p = np.prod(np.cos(x / np.sqrt(np.arange(1, len(x) + 1))))
     return float(1.0 + s - p)
 
