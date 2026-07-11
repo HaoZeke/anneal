@@ -20,9 +20,12 @@ enumeration on a small horizon:
      bound; we verify the reduction is exact: improvement events are i.i.d.
      Bernoulli under the stationary approximation.)
   3. Floor-perturbed allocation: on round m the implementation chooses a
-     uniformly random arm with probability epsilon_m = 1/m. The extra expected
-     regret is at most Delta_max sum_{m<=n} 1/m = Delta_max H_n. Exact short-
-     horizon enumeration checks the bound for the reference bandit.
+     uniformly random arm with probability epsilon_m = 1/m. Conditional on a
+     fixed history, the direct regret from overriding the base choice is at
+     most epsilon_m Delta_max, whose cumulative direct cost is at most
+     Delta_max H_n. This does not equate the posterior paths of the floored and
+     unfloored policies. Exact short-horizon enumeration separately checks the
+     total-regret inequality for the finite reference instance.
   4. D3 guarantee preserved: with K arms, the restart arm has probability at
      least 1/(Km) on round m. The harmonic sum diverges, so independent floor
      draws schedule it infinitely often almost surely.
@@ -93,7 +96,7 @@ def floored_regret_decomposition(thetas=(0.7, 0.3), horizon=8):
     (mean-)greedy arm with probability 1 - 1/m and a uniformly random arm with
     probability 1/m. Reward of arm k is Bernoulli(theta_k). We compute the
     expected regret of the floored and unfloored policies by exact recursion
-    over posterior states, and verify
+    over posterior states, and check on this finite instance that
 
         E[regret_floored] - E[regret_unfloored] <= H_horizon * Delta_max.
     """
