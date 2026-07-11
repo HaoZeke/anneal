@@ -3476,6 +3476,31 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_success_threshold_is_objective_translation_invariant() {
+        let bounds = Bounds::new(
+            Array1::from_vec(vec![-1.0]),
+            Array1::from_vec(vec![1.0]),
+            1e-12,
+        );
+        let point = Array1::from_vec(vec![0.0]);
+        let base = BudgetLedger::new(4, 1);
+        let shifted = BudgetLedger::new(4, 1);
+        for value in [10.0, 12.0, 14.0, 16.0] {
+            base.record(point.view(), value, &bounds);
+            shifted.record(point.view(), value + 1.0e9, &bounds);
+        }
+
+        assert_eq!(
+            scheduler_success_threshold(ArmKind::Explore, &base),
+            scheduler_success_threshold(ArmKind::Explore, &shifted),
+        );
+        assert_eq!(
+            scheduler_success_threshold(ArmKind::Shift, &base),
+            scheduler_success_threshold(ArmKind::Shift, &shifted),
+        );
+    }
+
+    #[test]
     fn active_subspace_recovers_dominant_direction() {
         // Gradients aligned with e0 dominate the covariance.
         let dim = 10;
