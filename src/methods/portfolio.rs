@@ -3627,8 +3627,6 @@ mod tests {
         let a = portfolio_optimize(&base, Some(&base), 4_000, 73, None);
         let b = portfolio_optimize(&shifted, Some(&shifted), 4_000, 73, None);
 
-        assert_eq!(a.n_evals, b.n_evals);
-        assert_eq!(a.n_grads, b.n_grads);
         assert_eq!(a.arm_stats.len(), b.arm_stats.len());
         for (left, right) in a.arm_stats.iter().zip(b.arm_stats.iter()) {
             assert_eq!(left.name, right.name);
@@ -3639,6 +3637,8 @@ mod tests {
                 left.name
             );
         }
+        assert_eq!(a.n_evals, b.n_evals);
+        assert_eq!(a.n_grads, b.n_grads);
         for (left, right) in a.best_pos.iter().zip(b.best_pos.iter()) {
             assert!((left - right).abs() <= 1e-12);
         }
