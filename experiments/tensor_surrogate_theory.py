@@ -50,6 +50,7 @@ import sympy as sp
 # PART A -- the novel contributions
 # ===========================================================================
 
+
 def _independence_kernel(pi, q):
     """Independence Metropolis transition matrix for target pi, proposal q."""
     n = len(pi)
@@ -73,8 +74,8 @@ def A1_surrogate_agnostic_stationarity() -> bool:
     Move-slot surrogate is safe: the Accept slot debiases it exactly.
     """
     pi = np.array([0.15, 0.55, 0.30])
-    q_good = np.array([0.2, 0.5, 0.3])          # a decent surrogate
-    q_bad = np.array([0.6, 0.1, 0.3])           # an adversarial surrogate
+    q_good = np.array([0.2, 0.5, 0.3])  # a decent surrogate
+    q_bad = np.array([0.6, 0.1, 0.3])  # an adversarial surrogate
     P_good = _independence_kernel(pi, q_good)
     P_bad = _independence_kernel(pi, q_bad)
     stat_good = np.allclose(pi @ P_good, pi, atol=1e-12)
@@ -82,9 +83,11 @@ def A1_surrogate_agnostic_stationarity() -> bool:
     # the gap differs (mixing speed), the target does not (correctness)
     gap_good = 1 - np.sort(np.abs(np.linalg.eigvals(P_good)))[::-1][1]
     gap_bad = 1 - np.sort(np.abs(np.linalg.eigvals(P_bad)))[::-1][1]
-    print(f"[A1] both proposals leave pi invariant: good={stat_good}, "
-          f"bad={stat_bad}; gaps differ {gap_good:.3f} vs {gap_bad:.3f} "
-          f"(surrogate sets speed, not target)")
+    print(
+        f"[A1] both proposals leave pi invariant: good={stat_good}, "
+        f"bad={stat_bad}; gaps differ {gap_good:.3f} vs {gap_bad:.3f} "
+        f"(surrogate sets speed, not target)"
+    )
     return bool(stat_good and stat_bad and abs(gap_good - gap_bad) > 1e-3)
 
 
@@ -99,7 +102,7 @@ def A2_bandit_dominates_uniform() -> bool:
     Lai-Robbins log reference the Thompson regret tracks.
     """
     rng = np.random.default_rng(0)
-    p = np.array([0.6, 0.4, 0.25, 0.15])       # arm 0 is best
+    p = np.array([0.6, 0.4, 0.25, 0.15])  # arm 0 is best
     K, n = len(p), 6000
     best = p.max()
     # uniform allocation regret
@@ -117,11 +120,14 @@ def A2_bandit_dominates_uniform() -> bool:
         reward = 1.0 if rng.random() < p[a] else 0.0
         alpha[a] += reward
         beta[a] += 1 - reward
-    lai_robbins = sum(np.log(n) * (best - p[k]) / _kl(p[k], best)
-                      for k in range(K) if p[k] < best)
-    print(f"[A2] regret over n={n}: Thompson {reg_ts:.0f}  uniform "
-          f"{reg_uniform:.0f}  (best-arm pull share {pulls[0]/n:.2%}); "
-          f"Lai-Robbins log-bound ~ {lai_robbins:.0f}")
+    lai_robbins = sum(
+        np.log(n) * (best - p[k]) / _kl(p[k], best) for k in range(K) if p[k] < best
+    )
+    print(
+        f"[A2] regret over n={n}: Thompson {reg_ts:.0f}  uniform "
+        f"{reg_uniform:.0f}  (best-arm pull share {pulls[0] / n:.2%}); "
+        f"Lai-Robbins log-bound ~ {lai_robbins:.0f}"
+    )
     # Thompson must beat uniform by a wide margin and stay near the log bound
     return bool(reg_ts < 0.25 * reg_uniform and pulls[0] > 0.8 * n)
 
@@ -159,10 +165,14 @@ def A3_separable_exact_one_shot() -> bool:
     ok_var = sp.simplify(var - T / (2 * a)) == 0
 
     # one-shot vs random walk: accepted moves to argmin are O(1) vs Omega(D)
-    print(f"[A3] separable delta=0 => acceptance == 1 (i.i.d. exact Gibbs): "
-          f"{ok_accept}; convex-quadratic per-coord variance = T/(2a): {ok_var}")
-    print("     => one sampler exact on convex separable f and solving "
-          "non-convex separable f, in O(1) accepted moves vs RWM's Omega(D)")
+    print(
+        f"[A3] separable delta=0 => acceptance == 1 (i.i.d. exact Gibbs): "
+        f"{ok_accept}; convex-quadratic per-coord variance = T/(2a): {ok_var}"
+    )
+    print(
+        "     => one sampler exact on convex separable f and solving "
+        "non-convex separable f, in O(1) accepted moves vs RWM's Omega(D)"
+    )
     return bool(ok_accept and ok_var)
 
 
@@ -170,17 +180,21 @@ def A3_separable_exact_one_shot() -> bool:
 # PART B -- foundations we rely on (cited, verified, not claimed novel)
 # ===========================================================================
 
+
 def B1_optimal_scaling() -> bool:
     """Roberts-Gelman-Gilks (1997): optimal RWM scaling and the 0.234 rule."""
     ell = sp.symbols("ell", positive=True)
+
     def Phi(z):
         return (1 + sp.erf(z / sp.sqrt(2))) / 2
 
     speed = 2 * ell**2 * Phi(-ell / 2)
     ell_star = sp.nsolve(sp.diff(speed, ell), ell, 2.4)
     accept = float(2 * Phi(-ell_star / 2))
-    print(f"[B1] RGG97: ell*={float(ell_star):.4f}, acceptance={accept:.4f} "
-          f"(0.234); sigma=ell*/sqrt(D)")
+    print(
+        f"[B1] RGG97: ell*={float(ell_star):.4f}, acceptance={accept:.4f} "
+        f"(0.234); sigma=ell*/sqrt(D)"
+    )
     return abs(float(ell_star) - 2.38) < 0.05 and abs(accept - 0.234) < 0.005
 
 
@@ -192,8 +206,10 @@ def B2_backfitting_rate() -> bool:
     cycle = (v * v.T) * (u * u.T)
     nonzero = [e for e in cycle.eigenvals() if e != 0]
     ok = any(sp.simplify(e - c**2) == 0 for e in nonzero)
-    print(f"[B2] BHT89: backfitting eigenvalue = cos^2(theta) = {float(c**2):.3f}"
-          f"; 12 passes -> error x{float(c**2)**12:.1e}")
+    print(
+        f"[B2] BHT89: backfitting eigenvalue = cos^2(theta) = {float(c**2):.3f}"
+        f"; 12 passes -> error x{float(c**2) ** 12:.1e}"
+    )
     return bool(ok and float(c**2) < 1.0)
 
 
@@ -215,8 +231,10 @@ def B3_chebyshev_geometric() -> bool:
     coeffs = np.array([(2.0 / N) * np.sum(fx * np.cos(k * theta)) for k in range(1, 8)])
     ratios = np.abs(coeffs[1:] / coeffs[:-1])
     target = 1.0 / rho
-    print(f"[B3] ATAP: Chebyshev coeff ratio 1/rho={target:.4f}; "
-          f"measured {[round(float(r), 4) for r in ratios[:4]]}")
+    print(
+        f"[B3] ATAP: Chebyshev coeff ratio 1/rho={target:.4f}; "
+        f"measured {[round(float(r), 4) for r in ratios[:4]]}"
+    )
     return bool(np.all(np.abs(ratios - target) < 1e-6))
 
 
@@ -238,8 +256,12 @@ def B5_gibbs_argmin() -> bool:
     Z = sum(sp.exp(-e / T) for e in energy)
     limit = [sp.limit(sp.exp(-e / T) / Z, T, 0, dir="+") for e in energy]
     expected = [sp.Rational(1, 2), 0, sp.Rational(1, 2), 0]
-    ok = all(sp.simplify(limit_value - x) == 0 for limit_value, x in zip(limit, expected))
-    print(f"[B5] Varadhan/Hajek: lim pi_T = {[str(limit_value) for limit_value in limit]} on argmin")
+    ok = all(
+        sp.simplify(limit_value - x) == 0 for limit_value, x in zip(limit, expected)
+    )
+    print(
+        f"[B5] Varadhan/Hajek: lim pi_T = {[str(limit_value) for limit_value in limit]} on argmin"
+    )
     return bool(ok)
 
 
@@ -247,12 +269,9 @@ def main() -> int:
     print("Novelty and foundations of the typed-algebra SA+MCMC core\n")
     print("PART A -- novel contributions")
     a = {
-        "A1 surrogate-agnostic stationarity (safe in the loop)":
-            A1_surrogate_agnostic_stationarity(),
-        "A2 bandit allocation dominates uniform (the arms)":
-            A2_bandit_dominates_uniform(),
-        "A3 separable exactness: one-shot + convex-exact":
-            A3_separable_exact_one_shot(),
+        "A1 surrogate-agnostic stationarity (safe in the loop)": A1_surrogate_agnostic_stationarity(),
+        "A2 bandit allocation dominates uniform (the arms)": A2_bandit_dominates_uniform(),
+        "A3 separable exactness: one-shot + convex-exact": A3_separable_exact_one_shot(),
     }
     print("\nPART B -- foundations (cited, not claimed novel)")
     b = {

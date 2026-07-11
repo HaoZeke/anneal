@@ -2885,7 +2885,9 @@ def bgsa_smc_ensemble(
     ]
     n_particles = len(drivers)
 
-    state_design = low_discrepancy_init(np.random.default_rng(seed), n_particles, LOW, HIGH)
+    state_design = low_discrepancy_init(
+        np.random.default_rng(seed), n_particles, LOW, HIGH
+    )
     states = [
         best_pilot_pos.copy() if best_pilot_pos is not None else state_design[i].copy()
         for i in range(n_particles)

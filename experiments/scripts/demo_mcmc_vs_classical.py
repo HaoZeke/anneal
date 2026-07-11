@@ -33,7 +33,7 @@ from experiments.shared.runner import (
 
 def rastrigin_5d(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    return float(10.0 * len(x) + np.sum(x ** 2 - 10.0 * np.cos(2.0 * np.pi * x)))
+    return float(10.0 * len(x) + np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x)))
 
 
 LOW = np.full(5, -5.12)
@@ -73,9 +73,19 @@ def _straggler_indices(chain_pos, top_k):
     return [i for i, _ in dists[:top_k]]
 
 
-def mcmc_sa(seed, n_epochs, n_chains, k_min, k_check, k_max,
-            rhat_threshold, t_init=5.0, sigma=0.5,
-            sparse_straggler_only=False, straggler_top_k=0):
+def mcmc_sa(
+    seed,
+    n_epochs,
+    n_chains,
+    k_min,
+    k_check,
+    k_max,
+    rhat_threshold,
+    t_init=5.0,
+    sigma=0.5,
+    sparse_straggler_only=False,
+    straggler_top_k=0,
+):
     rngs = [np.random.default_rng(seed + c) for c in range(n_chains)]
     chain_pos = [r.uniform(LOW, HIGH).astype(np.float64) for r in rngs]
     chain_val = [rastrigin_5d(p) for p in chain_pos]
@@ -110,7 +120,9 @@ def mcmc_sa(seed, n_epochs, n_chains, k_min, k_check, k_max,
                 active = list(range(n_chains))
             for _ in range(k_check):
                 for c in active:
-                    proposal = gaussian_propose(rngs[c], chain_pos[c], sigma, np.float64)
+                    proposal = gaussian_propose(
+                        rngs[c], chain_pos[c], sigma, np.float64
+                    )
                     proposal_val = rastrigin_5d(proposal)
                     n_calls += 1
                     delta = proposal_val - chain_val[c]
@@ -137,8 +149,9 @@ def main():
     p.add_argument("--out", default="data/mcmc_demo.csv")
     p.add_argument("--seeds", type=int, default=10)
     p.add_argument("--n-epochs", type=int, default=50)
-    p.add_argument("--k-fixed", type=int, default=200,
-                   help="Classical SA inner-loop K.")
+    p.add_argument(
+        "--k-fixed", type=int, default=200, help="Classical SA inner-loop K."
+    )
     p.add_argument("--n-chains", type=int, default=4)
     p.add_argument("--k-min", type=int, default=30)
     p.add_argument("--k-check", type=int, default=20)
@@ -150,57 +163,105 @@ def main():
     rows = []
     print(f"Rastrigin 5D, F* = {F_STAR}, {args.seeds} seeds, {args.n_epochs} epochs:\n")
     print(f"  Classical SA: K = {args.k_fixed} per epoch (fixed)")
-    print(f"  MCMC-SA:      {args.n_chains} chains, k_min/check/max = "
-          f"{args.k_min}/{args.k_check}/{args.k_max}, Rhat <= {args.rhat_threshold}\n")
+    print(
+        f"  MCMC-SA:      {args.n_chains} chains, k_min/check/max = "
+        f"{args.k_min}/{args.k_check}/{args.k_max}, Rhat <= {args.rhat_threshold}\n"
+    )
 
     for seed in range(args.seeds):
         t0 = time.perf_counter()
         bv_c, ncalls_c = classical_sa(seed, args.n_epochs, args.k_fixed)
         wt_c = time.perf_counter() - t0
-        rows.append(dict(driver="classical", seed=seed, best_val=bv_c,
-                         fevals=ncalls_c, wall_time_s=wt_c, mean_steps_per_epoch=args.k_fixed))
+        rows.append(
+            dict(
+                driver="classical",
+                seed=seed,
+                best_val=bv_c,
+                fevals=ncalls_c,
+                wall_time_s=wt_c,
+                mean_steps_per_epoch=args.k_fixed,
+            )
+        )
 
         t0 = time.perf_counter()
         bv_m, ncalls_m, steps_m = mcmc_sa(
-            seed, args.n_epochs, args.n_chains,
-            args.k_min, args.k_check, args.k_max, args.rhat_threshold,
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            args.k_min,
+            args.k_check,
+            args.k_max,
+            args.rhat_threshold,
         )
         wt_m = time.perf_counter() - t0
-        rows.append(dict(driver="mcmc_sa", seed=seed, best_val=bv_m,
-                         fevals=ncalls_m, wall_time_s=wt_m,
-                         mean_steps_per_epoch=float(np.mean(steps_m))))
+        rows.append(
+            dict(
+                driver="mcmc_sa",
+                seed=seed,
+                best_val=bv_m,
+                fevals=ncalls_m,
+                wall_time_s=wt_m,
+                mean_steps_per_epoch=float(np.mean(steps_m)),
+            )
+        )
 
         t0 = time.perf_counter()
         bv_s, ncalls_s, steps_s = mcmc_sa(
-            seed, args.n_epochs, args.n_chains,
-            args.k_min, args.k_check, args.k_max, args.rhat_threshold,
-            sparse_straggler_only=True, straggler_top_k=2,
+            seed,
+            args.n_epochs,
+            args.n_chains,
+            args.k_min,
+            args.k_check,
+            args.k_max,
+            args.rhat_threshold,
+            sparse_straggler_only=True,
+            straggler_top_k=2,
         )
         wt_s = time.perf_counter() - t0
-        rows.append(dict(driver="mcmc_sa_sparse", seed=seed, best_val=bv_s,
-                         fevals=ncalls_s, wall_time_s=wt_s,
-                         mean_steps_per_epoch=float(np.mean(steps_s))))
+        rows.append(
+            dict(
+                driver="mcmc_sa_sparse",
+                seed=seed,
+                best_val=bv_s,
+                fevals=ncalls_s,
+                wall_time_s=wt_s,
+                mean_steps_per_epoch=float(np.mean(steps_s)),
+            )
+        )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["driver", "seed", "best_val",
-                                          "fevals", "wall_time_s",
-                                          "mean_steps_per_epoch"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "driver",
+                "seed",
+                "best_val",
+                "fevals",
+                "wall_time_s",
+                "mean_steps_per_epoch",
+            ],
+        )
         w.writeheader()
         w.writerows(rows)
 
     classical = [r for r in rows if r["driver"] == "classical"]
     mcmc = [r for r in rows if r["driver"] == "mcmc_sa"]
     sparse = [r for r in rows if r["driver"] == "mcmc_sa_sparse"]
-    for label, group in (("Classical (fixed K)    ", classical),
-                         ("MCMC-SA (dense Rhat)   ", mcmc),
-                         ("MCMC-SA (sparse skip)  ", sparse)):
-        print(f"  {label}: best_val mean = {np.mean([r['best_val'] for r in group]):7.3f}  "
-              f"std = {np.std([r['best_val'] for r in group]):6.3f}  "
-              f"fevals = {np.mean([r['fevals'] for r in group]):7.0f}  "
-              f"steps/epoch = {np.mean([r['mean_steps_per_epoch'] for r in group]):6.1f}")
+    for label, group in (
+        ("Classical (fixed K)    ", classical),
+        ("MCMC-SA (dense Rhat)   ", mcmc),
+        ("MCMC-SA (sparse skip)  ", sparse),
+    ):
+        print(
+            f"  {label}: best_val mean = {np.mean([r['best_val'] for r in group]):7.3f}  "
+            f"std = {np.std([r['best_val'] for r in group]):6.3f}  "
+            f"fevals = {np.mean([r['fevals'] for r in group]):7.0f}  "
+            f"steps/epoch = {np.mean([r['mean_steps_per_epoch'] for r in group]):6.1f}"
+        )
     print()
     feval_savings = (
-        1.0 - np.mean([r["fevals"] for r in sparse]) / np.mean([r["fevals"] for r in mcmc])
+        1.0
+        - np.mean([r["fevals"] for r in sparse]) / np.mean([r["fevals"] for r in mcmc])
     ) * 100
     print(f"Sparse-skip fevals saving vs dense MCMC-SA: {feval_savings:+.1f}%")
 

@@ -110,30 +110,43 @@ def render_panel(ax, rows: dict, title: str, ylabel_units: str = "") -> None:
     x = np.arange(n)
     colors = [_driver_color(d) for d in drivers]
     # Bar = mean, error bar = std, marker = 95%-upper.
-    ax.bar(x, means, yerr=stds, color=colors, alpha=0.85, capsize=4,
-           edgecolor="white", linewidth=0.5)
-    ax.scatter(x, q95s, marker="v", color="black", s=40,
-               zorder=10, label="95%-upper")
+    ax.bar(
+        x,
+        means,
+        yerr=stds,
+        color=colors,
+        alpha=0.85,
+        capsize=4,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    ax.scatter(x, q95s, marker="v", color="black", s=40, zorder=10, label="95%-upper")
     ax.set_xticks(x)
-    ax.set_xticklabels([DRIVER_LABELS.get(d, d) for d in drivers],
-                       rotation=30, ha="right", fontsize=9)
+    ax.set_xticklabels(
+        [DRIVER_LABELS.get(d, d) for d in drivers], rotation=30, ha="right", fontsize=9
+    )
     ax.set_ylabel(f"best objective {ylabel_units}".strip())
     ax.set_title(title, fontsize=11)
     apply_axis_theme(ax, get_theme("ruhi"))
     # Annotate fevals above the highest bar.
     for xi, fv in zip(x, fevals):
-        ax.annotate(f"{int(fv/1000)}k", xy=(xi, ax.get_ylim()[1] * 0.96),
-                    ha="center", va="top", fontsize=7, alpha=0.6)
+        ax.annotate(
+            f"{int(fv / 1000)}k",
+            xy=(xi, ax.get_ylim()[1] * 0.96),
+            ha="center",
+            va="top",
+            fontsize=7,
+            alpha=0.6,
+        )
 
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--rastrigin", required=True,
-                   help="bGSA demo CSV for Rastrigin 5D")
-    p.add_argument("--rosenbrock", required=True,
-                   help="bGSA demo CSV for Rosenbrock 5D")
-    p.add_argument("--schwefel", required=True,
-                   help="bGSA demo CSV for Schwefel 20D")
+    p.add_argument("--rastrigin", required=True, help="bGSA demo CSV for Rastrigin 5D")
+    p.add_argument(
+        "--rosenbrock", required=True, help="bGSA demo CSV for Rosenbrock 5D"
+    )
+    p.add_argument("--schwefel", required=True, help="bGSA demo CSV for Schwefel 20D")
     p.add_argument("--out-dir", default="data/figs")
     args = p.parse_args()
 
@@ -148,9 +161,11 @@ def main() -> int:
     render_panel(axes[0], rast, "Rastrigin 5D (regular cups)")
     render_panel(axes[1], rosen, "Rosenbrock 5D (narrow valley)")
     render_panel(axes[2], schwef, "Schwefel 20D (deceptive)")
-    fig.suptitle("Cross-landscape: bGSA vs classical SA "
-                 "(8 seeds, mean ± std, 95%-upper triangles)",
-                 fontsize=12)
+    fig.suptitle(
+        "Cross-landscape: bGSA vs classical SA "
+        "(8 seeds, mean ± std, 95%-upper triangles)",
+        fontsize=12,
+    )
     fig.tight_layout()
     fig.subplots_adjust(top=0.86)
 
@@ -163,9 +178,11 @@ def main() -> int:
 
     # Print headline numbers for the manuscript.
     print("\nHeadline summary:")
-    for label, rows in [("Rastrigin 5D", rast),
-                         ("Rosenbrock 5D", rosen),
-                         ("Schwefel 20D", schwef)]:
+    for label, rows in [
+        ("Rastrigin 5D", rast),
+        ("Rosenbrock 5D", rosen),
+        ("Schwefel 20D", schwef),
+    ]:
         print(f"  {label}:")
         best_classical = summarise(rows, "classical_sa")
         for d in DRIVER_ORDER:
@@ -173,9 +190,11 @@ def main() -> int:
                 m, s, q95, fv = summarise(rows, d)
                 rel = (m - best_classical[0]) / max(abs(best_classical[0]), 1e-12)
                 marker = "*" if d.startswith("bgsa") and m < best_classical[0] else " "
-                print(f"    {marker} {DRIVER_LABELS[d]:<18} "
-                      f"mean={m:8.3f}  std={s:6.3f}  "
-                      f"95-upper={q95:8.3f}  rel={rel:+6.1%}")
+                print(
+                    f"    {marker} {DRIVER_LABELS[d]:<18} "
+                    f"mean={m:8.3f}  std={s:6.3f}  "
+                    f"95-upper={q95:8.3f}  rel={rel:+6.1%}"
+                )
     return 0
 
 

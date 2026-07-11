@@ -96,14 +96,18 @@ class ChebyshevSurrogate:
         return design, vals, ders
 
     @classmethod
-    def fit(cls, x: np.ndarray, y: np.ndarray, low, high, degree: int) -> "ChebyshevSurrogate":
+    def fit(
+        cls, x: np.ndarray, y: np.ndarray, low, high, degree: int
+    ) -> "ChebyshevSurrogate":
         """Least-squares fit on reduced samples `x` (N, k) and values `y` (N,)."""
         low = np.asarray(low, dtype=float).reshape(-1)
         high = np.asarray(high, dtype=float).reshape(-1)
         terms = total_degree_terms(low.shape[0], degree)
         self = cls(low=low, high=high, terms=terms, coeffs=np.zeros(len(terms)))
         design, _, _ = self._design(np.atleast_2d(x))
-        coeffs, *_ = np.linalg.lstsq(design, np.asarray(y, dtype=float).reshape(-1), rcond=None)
+        coeffs, *_ = np.linalg.lstsq(
+            design, np.asarray(y, dtype=float).reshape(-1), rcond=None
+        )
         self.coeffs = coeffs
         return self
 
@@ -186,8 +190,12 @@ class ActiveSubspaceEncoder:
             raise ValueError("active-subspace gradient covariance is not finite")
         evals, evecs = np.linalg.eigh(cov)
         basis = evecs[:, ::-1][:, :k]
-        return cls(np.asarray(origin, float), basis,
-                   np.asarray(low, float), np.asarray(high, float))
+        return cls(
+            np.asarray(origin, float),
+            basis,
+            np.asarray(low, float),
+            np.asarray(high, float),
+        )
 
     @classmethod
     def from_samples(cls, samples, low, high, k):
@@ -212,8 +220,9 @@ class ReducedFit:
     pilot_work_units: float
 
 
-def fit_reduced_surrogate(fn, grad, low, high, dim, *, k=3, degree=6,
-                          n_pilot=None, pad=0.1, rng=None) -> ReducedFit:
+def fit_reduced_surrogate(
+    fn, grad, low, high, dim, *, k=3, degree=6, n_pilot=None, pad=0.1, rng=None
+) -> ReducedFit:
     """Collapse `(fn, grad, low, high)` onto `k` dims and fit a degree-`degree`
     Chebyshev surrogate from a uniform pilot sample.
 
@@ -234,7 +243,9 @@ def fit_reduced_surrogate(fn, grad, low, high, dim, *, k=3, degree=6,
 
     finite_values = np.isfinite(values)
     if not np.any(finite_values):
-        raise ValueError("surrogate pilot must produce at least one finite objective value")
+        raise ValueError(
+            "surrogate pilot must produce at least one finite objective value"
+        )
     fit_samples = samples[finite_values]
     fit_values = values[finite_values]
 
@@ -285,8 +296,9 @@ def _self_test():
 
     low = np.full(dim, -2.0)
     high = np.full(dim, 2.0)
-    fit = fit_reduced_surrogate(ridge, ridge_grad, low, high, dim,
-                                k=2, degree=4, n_pilot=800, rng=0)
+    fit = fit_reduced_surrogate(
+        ridge, ridge_grad, low, high, dim, k=2, degree=4, n_pilot=800, rng=0
+    )
     rng = np.random.default_rng(1)
     # Held-out fit quality on the active subspace (unclipped lift; the clip in
     # decode() is a feasibility safeguard for the driver, tested separately).
@@ -305,8 +317,10 @@ def _self_test():
         rm[j] -= h
         fd[j] = (fit.surrogate.eval(rp) - fit.surrogate.eval(rm)) / (2.0 * h)
     gerr = np.linalg.norm(g - fd) / (np.linalg.norm(fd) + 1e-12)
-    print(f"reduced k={fit.surrogate.k} terms={len(fit.surrogate.terms)} "
-          f"pilot_work={fit.pilot_work_units:.0f}")
+    print(
+        f"reduced k={fit.surrogate.k} terms={len(fit.surrogate.terms)} "
+        f"pilot_work={fit.pilot_work_units:.0f}"
+    )
     print(f"held-out relative surrogate error = {rel:.4f}")
     print(f"gradient relative error vs FD     = {gerr:.2e}")
     assert rel < 0.02, f"surrogate fit too poor on a ridge: {rel}"

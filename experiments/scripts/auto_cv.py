@@ -51,14 +51,13 @@ class TICAFeaturizer:
         traj = np.asarray(traj, dtype=np.float64)
         N, D = traj.shape
         if N <= self.tau + 1:
-            raise ValueError(
-                f"trajectory too short ({N} <= tau + 1 = {self.tau + 1})"
-            )
+            raise ValueError(f"trajectory too short ({N} <= tau + 1 = {self.tau + 1})")
         self.mu = traj.mean(axis=0)
         y = traj - self.mu
         # Symmetrised time-lagged covariance.
-        C_tau = (y[: -self.tau].T @ y[self.tau:] + y[self.tau:].T @ y[: -self.tau]) \
-                / (2.0 * (N - self.tau))
+        C_tau = (
+            y[: -self.tau].T @ y[self.tau :] + y[self.tau :].T @ y[: -self.tau]
+        ) / (2.0 * (N - self.tau))
         # Regularised instantaneous covariance.
         C_0 = (y.T @ y) / max(N - 1, 1)
         C_0 = C_0 + 1e-6 * np.eye(D)  # Tikhonov

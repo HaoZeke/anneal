@@ -15,8 +15,11 @@ def main():
     p.add_argument("--seeds", type=int, default=5)
     p.add_argument("--n-epochs", type=int, default=100)
     p.add_argument("--steps-per-epoch", type=int, default=200)
-    p.add_argument("--problems", default=None,
-                   help="Comma-separated subset of problem ids; default is all.")
+    p.add_argument(
+        "--problems",
+        default=None,
+        help="Comma-separated subset of problem ids; default is all.",
+    )
     args = p.parse_args()
     problems = args.problems.split(",") if args.problems else None
     rows = run_benchmarks(

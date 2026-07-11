@@ -52,10 +52,7 @@ def double_well_chain(m, b, drop, temp):
     starts at 0 (shallow-well bottom); escape = reaching 2m.
     Returns per-state transition probabilities (left, stay, right).
     """
-    energy = [
-        b * i / m if i <= m else b - drop * (i - m) / m
-        for i in range(2 * m + 1)
-    ]
+    energy = [b * i / m if i <= m else b - drop * (i - m) / m for i in range(2 * m + 1)]
     trans = []
     for i in range(2 * m + 1):
         left = right = 0.0

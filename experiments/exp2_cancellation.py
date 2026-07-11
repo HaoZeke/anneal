@@ -77,14 +77,24 @@ def main():
         x_plus_q = list(x0_q)
         x_plus_q[h_dim] = x0_q[h_dim] + Fraction(h)
         delta_e_ref = float(rosenbrock_exact(x_plus_q) - rosenbrock_exact(x0_q))
-        rel_err = abs(delta_e - delta_e_ref) / abs(delta_e_ref) if delta_e_ref != 0 else 0.0
+        rel_err = (
+            abs(delta_e - delta_e_ref) / abs(delta_e_ref) if delta_e_ref != 0 else 0.0
+        )
         rel_errs[dtype_name] = rel_err
-        rows.append(dict(dtype=dtype_name, h=h, delta_e_dtype=delta_e,
-                         delta_e_ref=delta_e_ref, rel_err=rel_err))
+        rows.append(
+            dict(
+                dtype=dtype_name,
+                h=h,
+                delta_e_dtype=delta_e,
+                delta_e_ref=delta_e_ref,
+                rel_err=rel_err,
+            )
+        )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["dtype", "h", "delta_e_dtype",
-                                          "delta_e_ref", "rel_err"])
+        w = csv.DictWriter(
+            f, fieldnames=["dtype", "h", "delta_e_dtype", "delta_e_ref", "rel_err"]
+        )
         w.writeheader()
         w.writerows(rows)
     print(f"Wrote {len(rows)} rows to {args.out}")
@@ -96,9 +106,15 @@ def main():
         # scale-invariant cancellation constant eps * |f| / |delta_e| (the eps
         # cancels because h scales with eps); f16 carries an extra input- and
         # eval-rounding contribution at its larger step.
-        assert 0.0035 <= rel_errs["float64"] <= 0.0045, f"f64 rel_err {rel_errs['float64']}"
-        assert 0.0035 <= rel_errs["float32"] <= 0.0045, f"f32 rel_err {rel_errs['float32']}"
-        assert 0.008 <= rel_errs["float16"] <= 0.011, f"f16 rel_err {rel_errs['float16']}"
+        assert 0.0035 <= rel_errs["float64"] <= 0.0045, (
+            f"f64 rel_err {rel_errs['float64']}"
+        )
+        assert 0.0035 <= rel_errs["float32"] <= 0.0045, (
+            f"f32 rel_err {rel_errs['float32']}"
+        )
+        assert 0.008 <= rel_errs["float16"] <= 0.011, (
+            f"f16 rel_err {rel_errs['float16']}"
+        )
 
 
 if __name__ == "__main__":

@@ -64,21 +64,27 @@ def fit_q_canonical_beta(samples_f, q_v, f_min=None, f_max=None):
     u = np.exp((q_v - 1.0) * y) - 1.0
     # beta_per_bin = u / ((q_v - 1) f)
     beta_per_bin = u / ((q_v - 1.0) * f_use)
-    return float(np.median(beta_per_bin)), \
-           float(np.std(beta_per_bin) / max(np.sqrt(len(beta_per_bin)), 1))
+    return float(np.median(beta_per_bin)), float(
+        np.std(beta_per_bin) / max(np.sqrt(len(beta_per_bin)), 1)
+    )
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--objective", default="rastrigin_5d")
-    p.add_argument("--T", type=float, default=2.0,
-                   help="Fixed temperature (no cooling)")
+    p.add_argument(
+        "--T", type=float, default=2.0, help="Fixed temperature (no cooling)"
+    )
     p.add_argument("--qv-list", default="1.05,1.10,1.20")
     p.add_argument("--n-steps", type=int, default=50000)
     p.add_argument("--burn-in", type=int, default=5000)
     p.add_argument("--seeds", type=int, default=4)
-    p.add_argument("--w0-frac", type=float, default=0.05,
-                   help="metad_w0 = w0_frac * T (default 0.05)")
+    p.add_argument(
+        "--w0-frac",
+        type=float,
+        default=0.05,
+        help="metad_w0 = w0_frac * T (default 0.05)",
+    )
     p.add_argument("--out", default=None)
     args = p.parse_args()
 
@@ -118,8 +124,9 @@ def main():
             sigma_rw = 0.4
             metad_sigma = sigma_rw
             metad_w0 = args.w0_frac * T
-            bias = WellTemperedBias(d.LOW, d.HIGH, sigma=metad_sigma,
-                                    w0=metad_w0, gamma=gamma_q)
+            bias = WellTemperedBias(
+                d.LOW, d.HIGH, sigma=metad_sigma, w0=metad_w0, gamma=gamma_q
+            )
             cur = rng.uniform(d.LOW, d.HIGH).astype(np.float64)
             cur_v = d.OBJ_FN(cur)
             f_samples = []
@@ -129,13 +136,11 @@ def main():
                 # q_a annealed-to-Metropolis schedule isn't applicable
                 # at fixed T (we pick q_a = q_v throughout).
                 q_a = q_v
-                prop = np.clip(d.gaussian_propose(rng, cur, sigma_rw),
-                               d.LOW, d.HIGH)
+                prop = np.clip(d.gaussian_propose(rng, cur, sigma_rw), d.LOW, d.HIGH)
                 pv = d.OBJ_FN(prop)
                 cur_aug = cur_v + bias.potential(bias.cv(cur))
                 prop_aug = pv + bias.potential(bias.cv(prop))
-                if rng.random() < d.tsallis_accept_prob(
-                        prop_aug - cur_aug, T, q_a):
+                if rng.random() < d.tsallis_accept_prob(prop_aug - cur_aug, T, q_a):
                     cur, cur_v = prop, pv
                     accept_count += 1
                     if accept_count % deposit_period == 0:
@@ -146,24 +151,29 @@ def main():
             beta_emp, beta_se = fit_q_canonical_beta(f_arr, q_v)
             mean_f = float(np.mean(f_arr))
             all_betas.append(beta_emp)
-            rows.append({
-                "q_v": q_v,
-                "seed": seed,
-                "T": T,
-                "beta_pred": beta_pred,
-                "beta_emp": beta_emp,
-                "beta_emp_se": beta_se,
-                "ratio_emp_to_pred": beta_emp / beta_pred if beta_pred > 0 else float("nan"),
-                "mean_F": mean_f,
-                "mean_F_times_qm1": mean_f * (q_v - 1.0),
-                "n_accepts": accept_count,
-            })
-        mean_f_avg = np.nanmean([r["mean_F"] for r in rows
-                                  if r["q_v"] == q_v])
+            rows.append(
+                {
+                    "q_v": q_v,
+                    "seed": seed,
+                    "T": T,
+                    "beta_pred": beta_pred,
+                    "beta_emp": beta_emp,
+                    "beta_emp_se": beta_se,
+                    "ratio_emp_to_pred": beta_emp / beta_pred
+                    if beta_pred > 0
+                    else float("nan"),
+                    "mean_F": mean_f,
+                    "mean_F_times_qm1": mean_f * (q_v - 1.0),
+                    "n_accepts": accept_count,
+                }
+            )
+        mean_f_avg = np.nanmean([r["mean_F"] for r in rows if r["q_v"] == q_v])
         f_pred = T / (q_v - 1.0)
         ratio = mean_f_avg / f_pred
-        print(f"{q_v:>6.3f} {gamma_q:>7.2f} {f_pred:>11.3f} "
-              f"{mean_f_avg:>9.3f} {ratio:>10.3f}")
+        print(
+            f"{q_v:>6.3f} {gamma_q:>7.2f} {f_pred:>11.3f} "
+            f"{mean_f_avg:>9.3f} {ratio:>10.3f}"
+        )
 
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))

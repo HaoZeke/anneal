@@ -24,6 +24,7 @@ from scipy import stats
 
 def load_paired_biases(uncomp_path, comp_path):
     """Load both CSVs and return per-seed (uncomp_bias, comp_bias) pairs."""
+
     def _by_seed(path):
         rows = {}
         with open(path) as f:
@@ -42,14 +43,22 @@ def load_paired_biases(uncomp_path, comp_path):
             continue
         if "float16" not in comp[seed] or "float64" not in comp[seed]:
             continue
-        uc = np.linalg.norm([
-            float(uncomp[seed]["float16"]["mean_pos_x"]) - float(uncomp[seed]["float64"]["mean_pos_x"]),
-            float(uncomp[seed]["float16"]["mean_pos_y"]) - float(uncomp[seed]["float64"]["mean_pos_y"]),
-        ])
-        c = np.linalg.norm([
-            float(comp[seed]["float16"]["mean_pos_x"]) - float(comp[seed]["float64"]["mean_pos_x"]),
-            float(comp[seed]["float16"]["mean_pos_y"]) - float(comp[seed]["float64"]["mean_pos_y"]),
-        ])
+        uc = np.linalg.norm(
+            [
+                float(uncomp[seed]["float16"]["mean_pos_x"])
+                - float(uncomp[seed]["float64"]["mean_pos_x"]),
+                float(uncomp[seed]["float16"]["mean_pos_y"])
+                - float(uncomp[seed]["float64"]["mean_pos_y"]),
+            ]
+        )
+        c = np.linalg.norm(
+            [
+                float(comp[seed]["float16"]["mean_pos_x"])
+                - float(comp[seed]["float64"]["mean_pos_x"]),
+                float(comp[seed]["float16"]["mean_pos_y"])
+                - float(comp[seed]["float64"]["mean_pos_y"]),
+            ]
+        )
         pairs.append((uc, c))
     return np.asarray(pairs)
 
@@ -57,8 +66,12 @@ def load_paired_biases(uncomp_path, comp_path):
 def bootstrap_ci(values, n_boot=10_000, alpha=0.05, rng=None):
     if rng is None:
         rng = np.random.default_rng(0)
-    means = np.array([rng.choice(values, size=len(values), replace=True).mean()
-                      for _ in range(n_boot)])
+    means = np.array(
+        [
+            rng.choice(values, size=len(values), replace=True).mean()
+            for _ in range(n_boot)
+        ]
+    )
     lo, hi = np.quantile(means, [alpha / 2, 1.0 - alpha / 2])
     return float(values.mean()), float(lo), float(hi)
 
@@ -67,8 +80,12 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--uncomp", default="data/exp3_trajectory.csv")
     p.add_argument("--comp", default="data/exp4_compensated.csv")
-    p.add_argument("--halving-tolerance", type=float, default=0.05,
-                   help="Allow mean(comp) up to (0.5 + tol) * mean(uncomp).")
+    p.add_argument(
+        "--halving-tolerance",
+        type=float,
+        default=0.05,
+        help="Allow mean(comp) up to (0.5 + tol) * mean(uncomp).",
+    )
     p.add_argument("--check", action="store_true")
     args = p.parse_args()
 
@@ -96,14 +113,18 @@ def main():
         # Rank-biserial effect size for paired Wilcoxon.
         n = len(deltas)
         rb = 1.0 - 2.0 * w_stat / (n * (n + 1) / 2.0)
-        print(f"  Wilcoxon W = {w_stat:.2f}  p (one-sided, comp < uncomp) = {p_val:.4g}")
+        print(
+            f"  Wilcoxon W = {w_stat:.2f}  p (one-sided, comp < uncomp) = {p_val:.4g}"
+        )
         print(f"  rank-biserial effect size = {rb:.3f}")
         ratio = m_c / m_uc if m_uc != 0 else float("nan")
 
     print(f"  ratio mean(comp) / mean(uncomp) = {ratio:.3f}")
     halving_target = 0.5 + args.halving_tolerance
     halved = ratio <= halving_target
-    print(f"  legacy halving check (ratio <= {halving_target}): {'PASS' if halved else 'FAIL'}")
+    print(
+        f"  legacy halving check (ratio <= {halving_target}): {'PASS' if halved else 'FAIL'}"
+    )
 
     if args.check:
         assert halved, (

@@ -38,7 +38,7 @@ def expm(M, n_taylor=20, n_square=12):
     """Matrix exponential by Taylor scaling-and-squaring, mirroring i-PI's
     matrix_exp used in eindir/src/gle.rs. Avoids a scipy dependency."""
     n = M.shape[0]
-    scale = 2.0 ** n_square
+    scale = 2.0**n_square
     sm = M / scale
     tc = np.empty(n_taylor + 1)
     tc[0] = 1.0
@@ -59,10 +59,12 @@ def expm(M, n_taylor=20, n_square=12):
 gamma, omega, c, T = sp.symbols("gamma omega c T", positive=True)
 app = sp.symbols("a_pp", positive=True)  # physical-momentum self-damping
 
-A = sp.Matrix([
-    [app, c],
-    [-c, gamma],
-])
+A = sp.Matrix(
+    [
+        [app, c],
+        [-c, gamma],
+    ]
+)
 # the off-diagonal omega term lives in larger blocks; for ns=1 the skew part is
 # the coupling c. Keep an explicit omega variant for the 3x3 oscillator block
 # below.
@@ -91,7 +93,7 @@ def check_fdt_symmetric_psd():
 def check_lyapunov_solution():
     """C = T I solves the steady-state Lyapunov equation A C + C A^T = B B^T
     with B B^T = T (A + A^T): substituting back is an identity."""
-    M = bbt()                      # this IS B B^T by construction
+    M = bbt()  # this IS B B^T by construction
     lhs = sp.simplify(A * C + C * A.T - M)
     return lhs == sp.zeros(2, 2)
 
@@ -103,8 +105,8 @@ def check_discrete_step_preserves_C():
     identity holds for ANY Tprop)."""
     Tprop = sp.MatrixSymbol("Tp", 2, 2)
     Tp = sp.Matrix(Tprop)
-    sst = C - Tp * C * Tp.T           # noise covariance S S^T
-    cov_next = Tp * C * Tp.T + sst    # propagated covariance
+    sst = C - Tp * C * Tp.T  # noise covariance S S^T
+    cov_next = Tp * C * Tp.T + sst  # propagated covariance
     return sp.simplify(cov_next - C) == sp.zeros(2, 2)
 
 
@@ -169,19 +171,22 @@ def check_numeric_discrete_step(dt=0.01, Tval=1.0):
 def derive():
     sp.init_printing(use_unicode=False)
     print("D2: GLE move-kernel stationarity at fixed temperature")
-    print("  Check 1 (FDT: A C + C A^T symmetric, diagonal, = T(A+A^T)):",
-          check_fdt_symmetric_psd())
-    print("    B B^T =", bbt().tolist())
-    print("  Check 2 (Lyapunov: C = T I solves A C + C A^T = B B^T):",
-          check_lyapunov_solution())
-    print("  Check 3 (exact OU step preserves Cov = C, any Tprop):",
-          check_discrete_step_preserves_C())
-    print("  Check 4a (numeric FDT, fitted ns=12 drift):", check_numeric_fdt())
-    print("  Check 4b (numeric exact step preserves C):",
-          check_numeric_discrete_step())
-    all_ok = (
-        WITNESS and check_numeric_fdt() and check_numeric_discrete_step()
+    print(
+        "  Check 1 (FDT: A C + C A^T symmetric, diagonal, = T(A+A^T)):",
+        check_fdt_symmetric_psd(),
     )
+    print("    B B^T =", bbt().tolist())
+    print(
+        "  Check 2 (Lyapunov: C = T I solves A C + C A^T = B B^T):",
+        check_lyapunov_solution(),
+    )
+    print(
+        "  Check 3 (exact OU step preserves Cov = C, any Tprop):",
+        check_discrete_step_preserves_C(),
+    )
+    print("  Check 4a (numeric FDT, fitted ns=12 drift):", check_numeric_fdt())
+    print("  Check 4b (numeric exact step preserves C):", check_numeric_discrete_step())
+    all_ok = WITNESS and check_numeric_fdt() and check_numeric_discrete_step()
     print("  ALL CHECKS PASS:", all_ok)
     return all_ok
 

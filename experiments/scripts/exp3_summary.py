@@ -29,10 +29,18 @@ def paired_bias(rows_by_seed):
     for seed, by_dtype in sorted(rows_by_seed.items()):
         if "float16" not in by_dtype or "float64" not in by_dtype:
             continue
-        x16 = np.array([float(by_dtype["float16"]["mean_pos_x"]),
-                        float(by_dtype["float16"]["mean_pos_y"])])
-        x64 = np.array([float(by_dtype["float64"]["mean_pos_x"]),
-                        float(by_dtype["float64"]["mean_pos_y"])])
+        x16 = np.array(
+            [
+                float(by_dtype["float16"]["mean_pos_x"]),
+                float(by_dtype["float16"]["mean_pos_y"]),
+            ]
+        )
+        x64 = np.array(
+            [
+                float(by_dtype["float64"]["mean_pos_x"]),
+                float(by_dtype["float64"]["mean_pos_y"]),
+            ]
+        )
         diffs.append(np.linalg.norm(x16 - x64))
     return np.array(diffs)
 
@@ -40,8 +48,12 @@ def paired_bias(rows_by_seed):
 def bootstrap_ci(samples, n_boot=10_000, alpha=0.05, rng=None):
     if rng is None:
         rng = np.random.default_rng(0)
-    means = np.array([rng.choice(samples, size=len(samples), replace=True).mean()
-                      for _ in range(n_boot)])
+    means = np.array(
+        [
+            rng.choice(samples, size=len(samples), replace=True).mean()
+            for _ in range(n_boot)
+        ]
+    )
     lo, hi = np.quantile(means, [alpha / 2, 1.0 - alpha / 2])
     return float(samples.mean()), float(lo), float(hi)
 
@@ -49,10 +61,18 @@ def bootstrap_ci(samples, n_boot=10_000, alpha=0.05, rng=None):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("csv_path")
-    p.add_argument("--manuscript-bias", type=float, default=2.0582e-1,
-                   help="Reference value from the manuscript.")
-    p.add_argument("--tolerance-pct", type=float, default=10.0,
-                   help="Pass if measured bias is within +/- this percent.")
+    p.add_argument(
+        "--manuscript-bias",
+        type=float,
+        default=2.0582e-1,
+        help="Reference value from the manuscript.",
+    )
+    p.add_argument(
+        "--tolerance-pct",
+        type=float,
+        default=10.0,
+        help="Pass if measured bias is within +/- this percent.",
+    )
     p.add_argument("--check", action="store_true")
     args = p.parse_args()
 
@@ -64,7 +84,9 @@ def main():
     mean, lo, hi = bootstrap_ci(diffs)
 
     print(f"Loaded {len(diffs)} paired seeds from {args.csv_path}")
-    print(f"  paired f16-vs-f64 best-position shift: {mean:.4e}  (95% CI: [{lo:.4e}, {hi:.4e}])")
+    print(
+        f"  paired f16-vs-f64 best-position shift: {mean:.4e}  (95% CI: [{lo:.4e}, {hi:.4e}])"
+    )
     print(f"  manuscript reference:                {args.manuscript_bias:.4e}")
     if args.manuscript_bias != 0:
         rel = abs(mean - args.manuscript_bias) / args.manuscript_bias * 100

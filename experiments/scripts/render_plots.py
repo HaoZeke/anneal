@@ -105,7 +105,9 @@ def ordered_solvers(rows: list[dict], requested: list[str] | None = None) -> lis
     if requested is not None:
         missing = [driver for driver in requested if driver not in present]
         if missing:
-            raise ValueError(f"requested driver(s) absent from CSV: {', '.join(missing)}")
+            raise ValueError(
+                f"requested driver(s) absent from CSV: {', '.join(missing)}"
+            )
         return list(dict.fromkeys(requested))
     known = [driver for driver in DRIVER_ORDER if driver in present]
     unknown = sorted(present.difference(DRIVER_ORDER))
@@ -223,8 +225,12 @@ def main():
         default=",".join(DEFAULT_FIGURE_DRIVERS),
         help="Comma-separated driver subset for manuscript figures; use all for every CSV driver.",
     )
-    p.add_argument("--tau", type=float, default=DEFAULT_TAU,
-                   help="Moré-Wild convergence tolerance for the profiles.")
+    p.add_argument(
+        "--tau",
+        type=float,
+        default=DEFAULT_TAU,
+        help="Moré-Wild convergence tolerance for the profiles.",
+    )
     args = p.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
 

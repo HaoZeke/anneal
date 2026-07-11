@@ -35,8 +35,11 @@ import numpy as np
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--objective", default="rosenbrock_5d",
-                   choices=["rastrigin_5d", "rosenbrock_5d", "schwefel_20d"])
+    p.add_argument(
+        "--objective",
+        default="rosenbrock_5d",
+        choices=["rastrigin_5d", "rosenbrock_5d", "schwefel_20d"],
+    )
     p.add_argument("--seeds", type=int, default=8)
     p.add_argument("--n-epochs", type=int, default=200)
     p.add_argument("--k-per-epoch", type=int, default=100)
@@ -69,8 +72,13 @@ def main():
         # Use sane t_init / eps / L from pilot; vary q_v across sweep.
         for q_v in qv_list:
             # Run the chain in 10 segments, recording best_val at each.
-            cur = bp.copy() if bp is not None else \
-                  np.random.default_rng(seed).uniform(d.LOW, d.HIGH).astype(np.float64)
+            cur = (
+                bp.copy()
+                if bp is not None
+                else np.random.default_rng(seed)
+                .uniform(d.LOW, d.HIGH)
+                .astype(np.float64)
+            )
             cur_v = d.OBJ_FN(cur)
             best = cur_v
             n_calls = 1
@@ -78,20 +86,29 @@ def main():
             seg_epochs = max(1, args.n_epochs // n_segments)
             for seg in range(n_segments):
                 bv_seg, nc_seg, cur_new = d.hmc_sa(
-                    seed * 9001 + seg, seg_epochs, args.k_per_epoch,
-                    t_map, e_map, L_map, x0=cur, q=q_v)
+                    seed * 9001 + seg,
+                    seg_epochs,
+                    args.k_per_epoch,
+                    t_map,
+                    e_map,
+                    L_map,
+                    x0=cur,
+                    q=q_v,
+                )
                 cur = cur_new
                 cur_v = d.OBJ_FN(cur)
                 n_calls += nc_seg
                 if bv_seg < best:
                     best = bv_seg
-                rows.append({
-                    "seed": seed,
-                    "q_v": q_v,
-                    "segment": seg + 1,
-                    "fevals": n_calls,
-                    "best_val": best,
-                })
+                rows.append(
+                    {
+                        "seed": seed,
+                        "q_v": q_v,
+                        "segment": seg + 1,
+                        "fevals": n_calls,
+                        "best_val": best,
+                    }
+                )
         # Also record classical SA baseline (q_v -> 1 fibre + log cooling).
         cur = np.random.default_rng(seed).uniform(d.LOW, d.HIGH).astype(np.float64)
         cur_v = d.OBJ_FN(cur)
@@ -101,22 +118,30 @@ def main():
         seg_epochs = max(1, args.n_epochs // n_segments)
         for seg in range(n_segments):
             bv_seg, nc_seg, _ = d.classical_sa(
-                seed * 9001 + seg, seg_epochs, args.k_per_epoch,
-                t_map, sigma=sigma_map, x0=cur)
+                seed * 9001 + seg,
+                seg_epochs,
+                args.k_per_epoch,
+                t_map,
+                sigma=sigma_map,
+                x0=cur,
+            )
             n_calls += nc_seg
             if bv_seg < best:
                 best = bv_seg
-            rows.append({
-                "seed": seed,
-                "q_v": -1.0,  # sentinel for classical
-                "segment": seg + 1,
-                "fevals": n_calls,
-                "best_val": best,
-            })
+            rows.append(
+                {
+                    "seed": seed,
+                    "q_v": -1.0,  # sentinel for classical
+                    "segment": seg + 1,
+                    "fevals": n_calls,
+                    "best_val": best,
+                }
+            )
 
     with open(out_csv, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["seed", "q_v", "segment",
-                                          "fevals", "best_val"])
+        w = csv.DictWriter(
+            f, fieldnames=["seed", "q_v", "segment", "fevals", "best_val"]
+        )
         w.writeheader()
         w.writerows(rows)
     print(f"Wrote {len(rows)} rows to {out_csv}")
@@ -125,16 +150,25 @@ def main():
     try:
         import matplotlib.pyplot as plt
         from chemparseplot.plot.theme import (
-            RUHI_COLORS, apply_axis_theme, get_theme, setup_publication_theme,
+            RUHI_COLORS,
+            apply_axis_theme,
+            get_theme,
+            setup_publication_theme,
         )
+
         setup_publication_theme(get_theme("ruhi"))
     except ImportError:
         print("matplotlib/chemparseplot unavailable; skipping figure")
         return 0
 
     fig, ax = plt.subplots(figsize=(7, 5))
-    palette = [RUHI_COLORS["teal"], RUHI_COLORS["coral"], RUHI_COLORS["sunshine"],
-               RUHI_COLORS["sky"], RUHI_COLORS["magenta"]]
+    palette = [
+        RUHI_COLORS["teal"],
+        RUHI_COLORS["coral"],
+        RUHI_COLORS["sunshine"],
+        RUHI_COLORS["sky"],
+        RUHI_COLORS["magenta"],
+    ]
     qv_groups = sorted({r["q_v"] for r in rows})
     for i, q_v in enumerate(qv_groups):
         sub = [r for r in rows if r["q_v"] == q_v]

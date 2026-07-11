@@ -42,7 +42,7 @@ from experiments.shared.runner import (
 
 def rastrigin_5d(x: np.ndarray) -> float:
     x = x.astype(np.float64)
-    return float(10.0 * len(x) + np.sum(x ** 2 - 10.0 * np.cos(2.0 * np.pi * x)))
+    return float(10.0 * len(x) + np.sum(x**2 - 10.0 * np.cos(2.0 * np.pi * x)))
 
 
 LOW = np.full(5, -5.12)
@@ -209,16 +209,16 @@ def fit_inla_marginals_skew(obs, n_quad=21):
     var_log_s = float(np.sum(weights * (log_s_mesh - e_log_s) ** 2))
     # Third central moment for the skew correction.
     skew_log_t = float(np.sum(weights * (log_t_mesh - e_log_t) ** 3)) / max(
-        var_log_t ** 1.5, 1e-12
+        var_log_t**1.5, 1e-12
     )
     skew_log_s = float(np.sum(weights * (log_s_mesh - e_log_s) ** 3)) / max(
-        var_log_s ** 1.5, 1e-12
+        var_log_s**1.5, 1e-12
     )
     return (
         float(np.exp(e_log_t)),
         float(np.exp(e_log_s)),
-        float(var_log_t ** 0.5),
-        float(var_log_s ** 0.5),
+        float(var_log_t**0.5),
+        float(var_log_s**0.5),
         skew_log_t,
         skew_log_s,
     )
@@ -257,8 +257,12 @@ def fit_inla_marginals(obs, n_quad=21):
     e_log_s = float(np.sum(weights * log_s_mesh))
     var_log_t = float(np.sum(weights * (log_t_mesh - e_log_t) ** 2))
     var_log_s = float(np.sum(weights * (log_s_mesh - e_log_s) ** 2))
-    return float(np.exp(e_log_t)), float(np.exp(e_log_s)), \
-           float(var_log_t ** 0.5), float(var_log_s ** 0.5)
+    return (
+        float(np.exp(e_log_t)),
+        float(np.exp(e_log_s)),
+        float(var_log_t**0.5),
+        float(var_log_s**0.5),
+    )
 
 
 def main():
@@ -291,8 +295,15 @@ def main():
             t = sample_log_normal(0.0, 1.0, rng)
             s = sample_log_normal(-0.693, 0.7, rng)
             bv, ar, fpos, nc = short_chain(seed * 1000 + k, t, s, args.pilot_steps)
-            pilot_obs.append({"t_init": t, "sigma": s, "accept_rate": ar,
-                              "best_val": bv, "final_pos": fpos})
+            pilot_obs.append(
+                {
+                    "t_init": t,
+                    "sigma": s,
+                    "accept_rate": ar,
+                    "best_val": bv,
+                    "final_pos": fpos,
+                }
+            )
             pilot_calls += nc
             if bv < best_pilot_val:
                 best_pilot_val = bv
@@ -300,28 +311,44 @@ def main():
         t_map, s_map, _ = fit_laplace_grid(pilot_obs)
 
         t0 = time.perf_counter()
-        bv_bayes, prod_calls, _ = production_run(seed, t_map, s_map,
-                                                 args.n_epochs, args.k_per_epoch,
-                                                 x0=best_pilot_pos)
+        bv_bayes, prod_calls, _ = production_run(
+            seed, t_map, s_map, args.n_epochs, args.k_per_epoch, x0=best_pilot_pos
+        )
         wt_bayes = time.perf_counter() - t0
-        rows.append(dict(seed=seed, method="bayesian_pilot",
-                         t_init=t_map, sigma=s_map,
-                         pilot_calls=pilot_calls, prod_calls=prod_calls,
-                         total_calls=pilot_calls + prod_calls,
-                         best_val=bv_bayes, wall_time_s=wt_bayes))
+        rows.append(
+            dict(
+                seed=seed,
+                method="bayesian_pilot",
+                t_init=t_map,
+                sigma=s_map,
+                pilot_calls=pilot_calls,
+                prod_calls=prod_calls,
+                total_calls=pilot_calls + prod_calls,
+                best_val=bv_bayes,
+                wall_time_s=wt_bayes,
+            )
+        )
 
         # ---- INLA-style marginalised pilot (same data, different point estimate) ----
         t_inla, s_inla, sd_log_t, sd_log_s = fit_inla_marginals(pilot_obs)
         t0 = time.perf_counter()
         bv_inla, prod_calls_i, _ = production_run(
-            seed, t_inla, s_inla, args.n_epochs, args.k_per_epoch,
-            x0=best_pilot_pos)
+            seed, t_inla, s_inla, args.n_epochs, args.k_per_epoch, x0=best_pilot_pos
+        )
         wt_inla = time.perf_counter() - t0
-        rows.append(dict(seed=seed, method="inla_pilot",
-                         t_init=t_inla, sigma=s_inla,
-                         pilot_calls=pilot_calls, prod_calls=prod_calls_i,
-                         total_calls=pilot_calls + prod_calls_i,
-                         best_val=bv_inla, wall_time_s=wt_inla))
+        rows.append(
+            dict(
+                seed=seed,
+                method="inla_pilot",
+                t_init=t_inla,
+                sigma=s_inla,
+                pilot_calls=pilot_calls,
+                prod_calls=prod_calls_i,
+                total_calls=pilot_calls + prod_calls_i,
+                best_val=bv_inla,
+                wall_time_s=wt_inla,
+            )
+        )
 
         # ---- Hand-tuned grid baseline ----
         k_per_cell = max(1, (args.n_pilot * args.pilot_steps) // 25)
@@ -331,8 +358,9 @@ def main():
         best_grid_pos = None
         for tg in grid_t:
             for sg in grid_s:
-                bv, ar, fpos, nc = short_chain(seed * 2000 + hash((tg, sg)) % 1000,
-                                               tg, sg, k_per_cell)
+                bv, ar, fpos, nc = short_chain(
+                    seed * 2000 + hash((tg, sg)) % 1000, tg, sg, k_per_cell
+                )
                 grid_calls += nc
                 if bv < best_grid_bv:
                     best_grid_bv = bv
@@ -340,20 +368,44 @@ def main():
                     best_grid_pos = fpos
 
         t0 = time.perf_counter()
-        bv_grid, prod_calls_grid, _ = production_run(seed, best_grid_t, best_grid_s,
-                                                     args.n_epochs, args.k_per_epoch,
-                                                     x0=best_grid_pos)
+        bv_grid, prod_calls_grid, _ = production_run(
+            seed,
+            best_grid_t,
+            best_grid_s,
+            args.n_epochs,
+            args.k_per_epoch,
+            x0=best_grid_pos,
+        )
         wt_grid = time.perf_counter() - t0
-        rows.append(dict(seed=seed, method="grid_search",
-                         t_init=best_grid_t, sigma=best_grid_s,
-                         pilot_calls=grid_calls, prod_calls=prod_calls_grid,
-                         total_calls=grid_calls + prod_calls_grid,
-                         best_val=bv_grid, wall_time_s=wt_grid))
+        rows.append(
+            dict(
+                seed=seed,
+                method="grid_search",
+                t_init=best_grid_t,
+                sigma=best_grid_s,
+                pilot_calls=grid_calls,
+                prod_calls=prod_calls_grid,
+                total_calls=grid_calls + prod_calls_grid,
+                best_val=bv_grid,
+                wall_time_s=wt_grid,
+            )
+        )
 
     with open(args.out, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["seed", "method", "t_init", "sigma",
-                                          "pilot_calls", "prod_calls",
-                                          "total_calls", "best_val", "wall_time_s"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "seed",
+                "method",
+                "t_init",
+                "sigma",
+                "pilot_calls",
+                "prod_calls",
+                "total_calls",
+                "best_val",
+                "wall_time_s",
+            ],
+        )
         w.writeheader()
         w.writerows(rows)
     print(f"Wrote {len(rows)} rows to {args.out}\n")
@@ -361,21 +413,29 @@ def main():
     bayes = [r for r in rows if r["method"] == "bayesian_pilot"]
     inla = [r for r in rows if r["method"] == "inla_pilot"]
     grid = [r for r in rows if r["method"] == "grid_search"]
-    for label, group in (("Laplace MAP pilot ", bayes),
-                         ("INLA marginalised ", inla),
-                         ("Grid search       ", grid)):
+    for label, group in (
+        ("Laplace MAP pilot ", bayes),
+        ("INLA marginalised ", inla),
+        ("Grid search       ", grid),
+    ):
         if not group:
             continue
-        print(f"  {label}: best_val mean = {np.mean([r['best_val'] for r in group]):7.3f}  "
-              f"std = {np.std([r['best_val'] for r in group]):6.3f}  "
-              f"total_calls = {np.mean([r['total_calls'] for r in group]):7.0f}  "
-              f"avg t_init = {np.mean([r['t_init'] for r in group]):.2f}  "
-              f"avg sigma = {np.mean([r['sigma'] for r in group]):.3f}")
+        print(
+            f"  {label}: best_val mean = {np.mean([r['best_val'] for r in group]):7.3f}  "
+            f"std = {np.std([r['best_val'] for r in group]):6.3f}  "
+            f"total_calls = {np.mean([r['total_calls'] for r in group]):7.0f}  "
+            f"avg t_init = {np.mean([r['t_init'] for r in group]):.2f}  "
+            f"avg sigma = {np.mean([r['sigma'] for r in group]):.3f}"
+        )
     if bayes and inla:
-        paired_li = [bayes[i]["best_val"] - inla[i]["best_val"]
-                     for i in range(min(len(bayes), len(inla)))]
-        print(f"\nPaired (Laplace - INLA) best_val: mean = {np.mean(paired_li):.3f}  "
-              "(< 0 means Laplace better; > 0 means INLA's marginalised mean wins)")
+        paired_li = [
+            bayes[i]["best_val"] - inla[i]["best_val"]
+            for i in range(min(len(bayes), len(inla)))
+        ]
+        print(
+            f"\nPaired (Laplace - INLA) best_val: mean = {np.mean(paired_li):.3f}  "
+            "(< 0 means Laplace better; > 0 means INLA's marginalised mean wins)"
+        )
 
 
 if __name__ == "__main__":

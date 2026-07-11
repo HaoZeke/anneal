@@ -73,7 +73,9 @@ def _best_cells(rows: list[dict]) -> dict[str, int]:
         best_val = _float_or_nan(row.get("best_val"))
         if status != "ok" or not math.isfinite(best_val):
             continue
-        cells[(str(row["problem"]), str(row["seed"]))].append((str(row["driver"]), best_val))
+        cells[(str(row["problem"]), str(row["seed"]))].append(
+            (str(row["driver"]), best_val)
+        )
 
     wins: dict[str, int] = defaultdict(int)
     for entries in cells.values():
@@ -113,13 +115,16 @@ def summarize_rows(rows: list[dict], tau: float = DEFAULT_TAU) -> Summary:
     summaries: dict[str, DriverSummary] = {}
     for driver, sub in sorted(by_driver_rows.items()):
         ok_rows = [
-            row for row in sub
-            if row.get("status", "ok") == "ok" and math.isfinite(_float_or_nan(row.get("best_val")))
+            row
+            for row in sub
+            if row.get("status", "ok") == "ok"
+            and math.isfinite(_float_or_nan(row.get("best_val")))
         ]
         timeout = sum(1 for row in sub if _is_timeout_status(row.get("status")))
         error = sum(1 for row in sub if str(row.get("status", "")).startswith("err:"))
         solved = sum(
-            1 for row in sub
+            1
+            for row in sub
             if converged.get((str(row["problem"]), str(row["seed"]), driver), False)
         )
         fevals = [_float_or_nan(row.get("fevals")) for row in ok_rows]
@@ -230,7 +235,10 @@ def main() -> int:
         )
         return 1
     if ok_rate < args.min_ok_rate:
-        print(f"Expected ok-rate >= {args.min_ok_rate:g}; found {ok_rate:g}", file=sys.stderr)
+        print(
+            f"Expected ok-rate >= {args.min_ok_rate:g}; found {ok_rate:g}",
+            file=sys.stderr,
+        )
         return 1
     return 0
 

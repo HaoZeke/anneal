@@ -44,9 +44,9 @@ def posterior_update_symbolic():
     # Beta(a,b) density up to its Beta-function constant
     prior = theta ** (a - 1) * (1 - theta) ** (b - 1)
     lik_success = theta
-    lik_fail = (1 - theta)
-    post_success = sp.simplify(prior * lik_success)   # propto theta^a (1-theta)^(b-1)
-    post_fail = sp.simplify(prior * lik_fail)         # propto theta^(a-1)(1-theta)^b
+    lik_fail = 1 - theta
+    post_success = sp.simplify(prior * lik_success)  # propto theta^a (1-theta)^(b-1)
+    post_fail = sp.simplify(prior * lik_fail)  # propto theta^(a-1)(1-theta)^b
     beta_a1_b = theta ** ((a + 1) - 1) * (1 - theta) ** (b - 1)
     beta_a_b1 = theta ** (a - 1) * (1 - theta) ** ((b + 1) - 1)
     ok_success = sp.simplify(post_success - beta_a1_b) == 0
@@ -120,7 +120,7 @@ def floored_regret_decomposition(thetas=(0.7, 0.3), eps0=0.1, horizon=8):
             total = 0.0
             # build per-arm play probabilities: floor mixes uniform
             play_prob = [eps / K] * K
-            play_prob[greedy] += (1.0 - eps)
+            play_prob[greedy] += 1.0 - eps
             for k in range(K):
                 if play_prob[k] == 0.0:
                     continue
@@ -133,9 +133,8 @@ def floored_regret_decomposition(thetas=(0.7, 0.3), eps0=0.1, horizon=8):
                 s_state[2 * k] += 1
                 f_state = list(state)
                 f_state[2 * k + 1] += 1
-                future = (
-                    tk * rec(round_idx + 1, tuple(s_state))
-                    + (1 - tk) * rec(round_idx + 1, tuple(f_state))
+                future = tk * rec(round_idx + 1, tuple(s_state)) + (1 - tk) * rec(
+                    round_idx + 1, tuple(f_state)
                 )
                 total += play_prob[k] * (inst + future)
             return total
@@ -169,15 +168,23 @@ WITNESS = (
 def derive():
     sp.init_printing(use_unicode=False)
     print("D4: Thompson allocation over algebra points")
-    print("  Check 1 (Beta-Bernoulli conjugate update + means):",
-          posterior_update_symbolic())
+    print(
+        "  Check 1 (Beta-Bernoulli conjugate update + means):",
+        posterior_update_symbolic(),
+    )
     ok2, emp, th = bernoulli_reduction()
-    print(f"  Check 2 (slice reward = Bernoulli(theta), reduction exact): {ok2}  emp={emp:.4f} theta={th}")
+    print(
+        f"  Check 2 (slice reward = Bernoulli(theta), reduction exact): {ok2}  emp={emp:.4f} theta={th}"
+    )
     ok3, extra, bound = floored_regret_decomposition()
     print(f"  Check 3 (floored regret <= unfloored + eps0*n*Delta_max): {ok3}")
-    print(f"    extra regret from floor = {extra:.6f}  <=  eps0*n*Delta_max = {bound:.6f}")
+    print(
+        f"    extra regret from floor = {extra:.6f}  <=  eps0*n*Delta_max = {bound:.6f}"
+    )
     ok4, pmin = floor_keeps_restart_arm()
-    print(f"  Check 4 (floor keeps restart arm: per-round play prob >= {pmin:.4f} > 0): {ok4}")
+    print(
+        f"  Check 4 (floor keeps restart arm: per-round play prob >= {pmin:.4f} > 0): {ok4}"
+    )
     all_ok = WITNESS
     print("  ALL CHECKS PASS:", all_ok)
     return all_ok

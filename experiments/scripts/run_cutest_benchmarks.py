@@ -73,8 +73,15 @@ def _design_bounds(prob):
 
 
 _CUTEST_FIELDNAMES = [
-    "problem", "dim", "driver", "seed", "fevals",
-    "best_val", "wall_time_s", "f_x0", "solved",
+    "problem",
+    "dim",
+    "driver",
+    "seed",
+    "fevals",
+    "best_val",
+    "wall_time_s",
+    "f_x0",
+    "solved",
 ]
 
 
@@ -1005,7 +1012,9 @@ def _rust_hmc_steps_per_epoch_budget(epoch_budget, dim, l_steps, grad_kind):
     return max(1, int(epoch_budget) // per_trajectory)
 
 
-def _pt_hmc_inner_steps_per_epoch_budget(epoch_budget, n_chains, dim, l_steps, grad_kind):
+def _pt_hmc_inner_steps_per_epoch_budget(
+    epoch_budget, n_chains, dim, l_steps, grad_kind
+):
     if epoch_budget <= 0:
         raise ValueError("epoch_budget must be positive")
     per_inner = max(1, int(n_chains)) * _rust_hmc_max_work_units_per_trajectory(
@@ -1779,8 +1788,7 @@ def _run_cutest_qmc_differential_search(
                 ]
                 a, b, c = rng.choice(choices, 3, replace=False)
                 mutant = np.clip(
-                    pop[a]
-                    + QMC_DIFFERENTIAL_MUTATION_WEIGHT * (pop[b] - pop[c]),
+                    pop[a] + QMC_DIFFERENTIAL_MUTATION_WEIGHT * (pop[b] - pop[c]),
                     design_low,
                     design_high,
                 )
@@ -2013,9 +2021,13 @@ def _run_cutest_gle_langevin(
             gle_fevals,
         ),
     }
-    if not has_native_preconditioned and not has_callable_preconditioned and hasattr(
-        anneal_module,
-        "estimate_gle_omega0",
+    if (
+        not has_native_preconditioned
+        and not has_callable_preconditioned
+        and hasattr(
+            anneal_module,
+            "estimate_gle_omega0",
+        )
     ):
         try:
             omega0 = anneal_module.estimate_gle_omega0(
@@ -2286,8 +2298,7 @@ def _run_bayesian_gle_qmc_polish_arm(
     per_step_work = _polish_work_units(dim, grad_kind, 1, 1)
     max_fevals_per_start = max(
         1,
-        (int(available_work) - screening_work)
-        // max(1, per_step_work * polish_count),
+        (int(available_work) - screening_work) // max(1, per_step_work * polish_count),
     )
     return _run_cutest_qmc_polish(
         anneal_module,
@@ -2489,11 +2500,7 @@ def _run_cutest_bayesian_adaptive_gle(
             gle_fevals,
             available_work,
         )
-        if (
-            followup_budget > 0
-            and np.isfinite(scout_val)
-            and scout_val <= best_val
-        ):
+        if followup_budget > 0 and np.isfinite(scout_val) and scout_val <= best_val:
             followup_scout = _run_bayesian_gle_low_dimensional_scout(
                 anneal_module,
                 prob,
@@ -2579,9 +2586,7 @@ def _finite_best_value(candidates):
 
 def _candidate_family_matches_best(results, best_value):
     finite = [
-        float(value)
-        for _seed, value, _calls in results
-        if np.isfinite(float(value))
+        float(value) for _seed, value, _calls in results if np.isfinite(float(value))
     ]
     return bool(finite) and min(finite) == float(best_value)
 
@@ -2627,9 +2632,12 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
             import anneal
 
             core_qmc_available = hasattr(anneal, "qmc_polish")
-            if core_qmc_available and grad_kind == "native" and _has_finite_design_box(
-                prob
-            ) and not _has_declared_cutest_bounds(prob):
+            if (
+                core_qmc_available
+                and grad_kind == "native"
+                and _has_finite_design_box(prob)
+                and not _has_declared_cutest_bounds(prob)
+            ):
                 auto_best_start_polish = _run_cutest_native_qmc_box_schedule(
                     anneal,
                     prob,
@@ -3069,8 +3077,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     outcomes.append((mix_bv, mix_calls))
             if _candidate_family_matches_best(tensor_results, initial_best):
                 seen_tensor_seeds = {
-                    tensor_seed
-                    for tensor_seed, _value, _calls in tensor_results
+                    tensor_seed for tensor_seed, _value, _calls in tensor_results
                 }
                 for tensor_seed in _auto_portfolio_seed_offsets(seed, n_chains):
                     if tensor_seed in seen_tensor_seeds:
@@ -3085,9 +3092,7 @@ def _bgsa_run(prob, seed, n_epochs, k_per_epoch, n_chains, driver):
                     if tensor_result is not None:
                         outcomes.append(tensor_result)
             if _candidate_family_matches_best(gle_results, initial_best):
-                seen_gle_seeds = {
-                    gle_seed for gle_seed, _value, _calls in gle_results
-                }
+                seen_gle_seeds = {gle_seed for gle_seed, _value, _calls in gle_results}
                 for gle_seed in _auto_portfolio_seed_offsets(seed, n_chains):
                     if gle_seed in seen_gle_seeds:
                         continue
@@ -3477,8 +3482,7 @@ def main():
                         wall_time_s=wt,
                         f_x0=f0,
                         solved=int(
-                            field_ok
-                            and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
+                            field_ok and (bv < 0.95 * f0 if f0 > 0 else bv < 1.05 * f0)
                         ),
                     )
                 )
