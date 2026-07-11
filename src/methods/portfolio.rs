@@ -593,7 +593,6 @@ struct ValueScout {
 }
 
 struct CenterProbe {
-    value: f64,
     gradient_ratio: Option<f64>,
 }
 
@@ -1058,7 +1057,6 @@ where
     let value_scale = value.abs().max(1.0);
     if gradient.len() != bounds.dims || gradient.iter().any(|v| !v.is_finite()) {
         return Some(CenterProbe {
-            value,
             gradient_ratio: None,
         });
     }
@@ -1077,7 +1075,6 @@ where
     let grad_norm = gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
     let ratio = grad_norm * width_norm / value_scale;
     Some(CenterProbe {
-        value,
         gradient_ratio: ratio.is_finite().then_some(ratio),
     })
 }
