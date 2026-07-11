@@ -6,10 +6,9 @@ Bootstrap: run `bash experiments/benchmarks/bootstrap_cutest.sh` once
 to clone+build CUTEst into .bench/. Pass the resulting paths through
 `CutestConfig` when using a non-default location.
 
-Selected manifest: 12 unconstrained or bound-constrained CUTEst
-problems with `n in [2, 30]`, hand-picked to span the standard
-test-set difficulty spectrum (Rosenbrock-like ravines, Powell
-singularity, trigonometric multi-modality, etc.).
+The paper protocol supplies a frozen problem manifest to the campaign driver.
+This module also retains a 12-problem diagnostic fallback for direct smoke
+runs that do not provide a manifest.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ from types import ModuleType
 import numpy as np
 
 
-# Hand-picked manifest. All are unconstrained (constraints='U') with
-# n in [2, 30]. Chosen for diversity of landscape shapes -- ravines
+# Diagnostic fallback for direct smoke runs. All are unconstrained
+# (constraints='U') with n in [2, 30]. Chosen for diversity -- ravines
 # (ROSENBR), separable polynomials (CUBE), trigonometric multimodality
 # (BOX3, MEYER3), singular Hessians (POWELLSG, BROWNDEN), etc.
 DEFAULT_MANIFEST = [
