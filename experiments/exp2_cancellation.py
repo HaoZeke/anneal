@@ -39,7 +39,8 @@ def rosenbrock(x, dtype):
     x0_sq = x[0] * x[0]
     residual = x[1] - x0_sq
     a = dx * dx
-    b = scalar(100.0) * residual * residual
+    residual_sq = residual * residual
+    b = scalar(100.0) * residual_sq
     return a + b
 
 
