@@ -14,6 +14,7 @@ singularity, trigonometric multi-modality, etc.).
 
 from __future__ import annotations
 
+import ctypes.util
 import importlib.util
 import re
 import sys
@@ -187,6 +188,24 @@ def _install_pycutest_path_providers(system_paths, config: CutestConfig) -> None
     system_paths.get_cache_path = lambda: str(config.cache_dir)
 
 
+def _configure_pycutest_linux_link_libraries(
+    install_scripts,
+    *,
+    platform: str = sys.platform,
+    find_library=ctypes.util.find_library,
+) -> None:
+    """Link glibc vector math when gfortran emits libmvec symbols."""
+
+    if platform != "linux" or find_library("mvec") is None:
+        return
+    needle = "libraries=['gfortran']"
+    replacement = "libraries=['gfortran','mvec']"
+    if replacement not in install_scripts.setupScriptLinux:
+        install_scripts.setupScriptLinux = install_scripts.setupScriptLinux.replace(
+            needle, replacement, 1
+        )
+
+
 def configured_pycutest(config: CutestConfig | None = None):
     """Return PyCUTEst configured from explicit paths instead of process state."""
 
@@ -212,6 +231,8 @@ def configured_pycutest(config: CutestConfig | None = None):
     for stale in ("pycutest.install_scripts", "pycutest.build_interface", "pycutest.sifdecode_extras"):
         sys.modules.pop(stale, None)
 
+    install_scripts = _load_pycutest_submodule(package_dir, "install_scripts")
+    _configure_pycutest_linux_link_libraries(install_scripts)
     build_interface = _load_pycutest_submodule(package_dir, "build_interface")
     sifdecode_extras = _load_pycutest_submodule(package_dir, "sifdecode_extras")
     problem_class = _load_pycutest_submodule(package_dir, "problem_class")
