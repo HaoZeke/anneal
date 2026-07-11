@@ -283,7 +283,9 @@ def run_device(
         for _ in range(steps_per_epoch):
             candidate = _proposal(current, temp, preset, random, xp)
             candidate = xp.minimum(xp.maximum(candidate, low_array), high_array)
-            candidate_val = _objective_value(obj_fn(candidate), xp=xp, device=device, dtype=dtype)
+            candidate_val = _objective_value(
+                obj_fn(candidate), xp=xp, device=device, dtype=dtype
+            )
             delta = candidate_val - current_val
             probability = _acceptance_probability(
                 delta,
@@ -295,7 +297,9 @@ def run_device(
             )
             accepted = _asarray(random.uniform(()) < probability, xp=xp, device=device)
             accepted_count = _count_from_bool(accepted, xp=xp, device=device)
-            rejected_count = _count_from_bool(xp.logical_not(accepted), xp=xp, device=device)
+            rejected_count = _count_from_bool(
+                xp.logical_not(accepted), xp=xp, device=device
+            )
             accepted_epoch = accepted_epoch + accepted_count
             rejected_epoch = rejected_epoch + rejected_count
             current = xp.where(accepted, candidate, current)
@@ -345,11 +349,16 @@ class EnsembleHistory:
     device: Any
 
 
-def _ensemble_objective_value(value: Any, n_chains: int, *, xp: Any, device: Any, dtype: Any) -> Any:
+def _ensemble_objective_value(
+    value: Any, n_chains: int, *, xp: Any, device: Any, dtype: Any
+) -> Any:
     if isinstance(value, bool | int | float | complex):
         raise ValueError("device objectives must return an Array API array")
-    if not (_array_api_compat.is_array_api_obj(value) or hasattr(value, "__dlpack__")
-            or isinstance(value, np.ndarray)):
+    if not (
+        _array_api_compat.is_array_api_obj(value)
+        or hasattr(value, "__dlpack__")
+        or isinstance(value, np.ndarray)
+    ):
         raise ValueError("device objectives must return an Array API array")
     array = _asarray(value, xp=xp, device=device, dtype=dtype)
     if array.shape != (n_chains,):
@@ -398,7 +407,9 @@ def run_ensemble(
     span = high_array - low_array
     current = low_array + random.uniform(shape) * span
     current = xp.minimum(xp.maximum(current, low_array), high_array)
-    current_val = _ensemble_objective_value(obj_fn(current), n_chains, xp=xp, device=device, dtype=dtype)
+    current_val = _ensemble_objective_value(
+        obj_fn(current), n_chains, xp=xp, device=device, dtype=dtype
+    )
     best_pos = current + _asarray(0.0, xp=xp, device=device, dtype=dtype)
     best_val = current_val + _asarray(0.0, xp=xp, device=device, dtype=dtype)
 
@@ -418,10 +429,14 @@ def run_ensemble(
             probability = _acceptance_probability(
                 delta, temp=temp, preset=preset, xp=xp, device=device, dtype=dtype
             )
-            accepted = _asarray(random.uniform((n_chains,)) < probability, xp=xp, device=device)
+            accepted = _asarray(
+                random.uniform((n_chains,)) < probability, xp=xp, device=device
+            )
             accepted_col = accepted[:, None]
             accepted_total = accepted_total + xp.sum(_to_dtype(accepted, int_dtype))
-            rejected_total = rejected_total + xp.sum(_to_dtype(xp.logical_not(accepted), int_dtype))
+            rejected_total = rejected_total + xp.sum(
+                _to_dtype(xp.logical_not(accepted), int_dtype)
+            )
             current = xp.where(accepted_col, candidate, current)
             current_val = xp.where(accepted, candidate_val, current_val)
             improved = current_val < best_val

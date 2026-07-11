@@ -8,6 +8,7 @@ To be wired into pixi [feature.docs.tasks] and CI once tutorials land.
 Extracts #+begin_src python ... #+end_src (skipping :eval no or SKIP-DOCTEST),
 runs in shared namespace for basic smoke of stable API examples.
 """
+
 import re
 import sys
 from pathlib import Path
