@@ -252,27 +252,38 @@ def cma_es(counter, low, high, dim, grad, rng, anchor=None):
     width = np.where(high > low, high - low, 1.0)
     try:
         while counter.n < counter.budget:
+            before = counter.n
             x0 = (
                 np.asarray(anchor, dtype=np.float64).copy()
                 if anchor is not None and counter.n == 0
                 else rng.uniform(low, high)
             )
-            es = cma.CMAEvolutionStrategy(
-                x0,
-                0.25 * float(np.mean(width)),
-                {
-                    "bounds": [list(low), list(high)],
-                    "verbose": -9,
-                    "seed": int(rng.integers(1 << 31)),
-                    "maxfevals": counter.budget - counter.n,
-                },
-            )
-            while not es.stop() and counter.n < counter.budget:
-                xs = es.ask()
-                es.tell(xs, [counter(x) for x in xs])
+            try:
+                es = cma.CMAEvolutionStrategy(
+                    x0,
+                    0.25 * float(np.mean(width)),
+                    {
+                        "bounds": [list(low), list(high)],
+                        "verbose": -9,
+                        "seed": int(rng.integers(1 << 31)),
+                        "maxfevals": counter.budget - counter.n,
+                    },
+                )
+                while not es.stop() and counter.n < counter.budget:
+                    xs = es.ask()
+                    es.tell(xs, [counter(x) for x in xs])
+            except ValueError as exc:
+                if not _is_restartable_cma_error(exc) or counter.n == before:
+                    raise
     except _Budget:
         pass
     return counter.best
+
+
+def _is_restartable_cma_error(exc):
+    return isinstance(exc, ValueError) and str(exc) == (
+        "not yet initialized (dimension needed)"
+    )
 
 
 def ngopt(counter, low, high, dim, grad, rng, anchor=None):
@@ -373,11 +384,20 @@ def _turbo_update(state, y_next):
     return state
 
 
+def _fit_turbo_or_restart(mll, fitter, model_fitting_error):
+    try:
+        fitter(mll)
+    except model_fitting_error:
+        return False
+    return True
+
+
 def turbo(counter, low, high, dim, grad, rng, anchor=None):
     """BoTorch TuRBO-1 with Thompson batches under the shared work cap."""
     del grad, anchor
     import torch
     from botorch.fit import fit_gpytorch_mll
+    from botorch.exceptions.errors import ModelFittingError
     from botorch.generation import MaxPosteriorSampling
     from botorch.models import SingleTaskGP
     from gpytorch.constraints import Interval
@@ -428,7 +448,11 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
             mll = ExactMarginalLogLikelihood(model.likelihood, model)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                fit_gpytorch_mll(mll, max_attempts=1)
+                if not _fit_turbo_or_restart(
+                    mll, fit_gpytorch_mll, ModelFittingError
+                ):
+                    state.restart_triggered = True
+                    break
 
             center = x_data[train_y.argmax(), :].clone()
             weights = model.covar_module.base_kernel.lengthscale.squeeze().detach()
@@ -468,26 +492,31 @@ def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
     pop = pop0
     try:
         while counter.n < counter.budget:
+            before = counter.n
             x0 = (
                 np.asarray(anchor, dtype=np.float64).copy()
                 if anchor is not None and counter.n == 0
                 else rng.uniform(low, high)
             )
             remaining = counter.budget - counter.n
-            es = cma.CMAEvolutionStrategy(
-                x0,
-                0.3 * mean_w,
-                {
-                    "bounds": [list(low), list(high)],
-                    "verbose": -9,
-                    "seed": int(rng.integers(1 << 31)),
-                    "maxfevals": remaining,
-                    "popsize": pop,
-                },
-            )
-            while not es.stop() and counter.n < counter.budget:
-                xs = es.ask()
-                es.tell(xs, [counter(x) for x in xs])
+            try:
+                es = cma.CMAEvolutionStrategy(
+                    x0,
+                    0.3 * mean_w,
+                    {
+                        "bounds": [list(low), list(high)],
+                        "verbose": -9,
+                        "seed": int(rng.integers(1 << 31)),
+                        "maxfevals": remaining,
+                        "popsize": pop,
+                    },
+                )
+                while not es.stop() and counter.n < counter.budget:
+                    xs = es.ask()
+                    es.tell(xs, [counter(x) for x in xs])
+            except ValueError as exc:
+                if not _is_restartable_cma_error(exc) or counter.n == before:
+                    raise
             # IPOP: grow population after each restart until budget ends.
             pop = min(pop * 2, 200)
     except _Budget:
