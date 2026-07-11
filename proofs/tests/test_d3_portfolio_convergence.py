@@ -2,11 +2,14 @@
 
 from proofs.d3_portfolio_convergence import (
     WITNESS,
+    _star_discrepancy_1d,
     geometric_tail_symbolic,
     geometric_tail_monte_carlo,
     monotone_best_preserved,
     discrepancy_covering,
 )
+
+import numpy as np
 
 
 def test_witness():
@@ -32,3 +35,7 @@ def test_qmc_discrepancy_covering():
     assert ok
     assert lb > 0
     assert actual >= 1
+
+
+def test_one_dimensional_star_discrepancy_is_exact():
+    assert _star_discrepancy_1d(np.array([0.25, 0.5, 0.75])) == 0.25
