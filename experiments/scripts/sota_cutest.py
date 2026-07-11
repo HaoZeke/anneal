@@ -20,14 +20,22 @@ import os
 import sys
 
 import numpy as np
-from scipy.optimize import basinhopping, differential_evolution, dual_annealing, minimize
+from scipy.optimize import (
+    basinhopping,
+    differential_evolution,
+    dual_annealing,
+)
 
 from experiments.anneal_sota import (
     DEFAULT_HYBRID_K_POLISH,
     DEFAULT_HYBRID_N_POLISH,
     qmc_annealed_hybrid,
 )
-from experiments.benchmarks.cutest_runner import configured_pycutest, default_cutest_config, load
+from experiments.benchmarks.cutest_runner import (
+    configured_pycutest,
+    default_cutest_config,
+    load,
+)
 from experiments.scripts.run_cutest_full_suite import list_target_problems
 
 
@@ -94,7 +102,8 @@ def classical(counter, low, high, dim, grad, rng, anchor=None):
         if anchor is not None
         else rng.uniform(low, high)
     )
-    fx = counter(x); epoch = 0
+    fx = counter(x)
+    epoch = 0
     try:
         while True:
             temp = 5.0 * np.log(2.0) / np.log(epoch + 2.0)
@@ -148,8 +157,13 @@ def sci_basinhopping(counter, low, high, dim, grad, rng, anchor=None):
     if jac is not None:
         mk["jac"] = jac
     try:
-        basinhopping(counter, x0, niter=10 ** 6, minimizer_kwargs=mk,
-                     seed=int(rng.integers(1 << 31)))
+        basinhopping(
+            counter,
+            x0,
+            niter=10**6,
+            minimizer_kwargs=mk,
+            seed=int(rng.integers(1 << 31)),
+        )
     except _Budget:
         pass
     return counter.best
@@ -189,21 +203,21 @@ def portfolio(counter, low, high, dim, grad, rng, anchor=None, policy="auto"):
 
 def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
     """Pre-regime portfolio (flat order, Beta(1,1)) for same-protocol A/B."""
-    return portfolio(
-        counter, low, high, dim, grad, rng, anchor=anchor, policy="legacy"
-    )
+    return portfolio(counter, low, high, dim, grad, rng, anchor=anchor, policy="legacy")
 
 
 def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
     bounds = list(zip(low, high))
-    x0 = (
-        np.asarray(anchor, dtype=np.float64).copy()
-        if anchor is not None
-        else None
-    )
+    x0 = np.asarray(anchor, dtype=np.float64).copy() if anchor is not None else None
     try:
-        dual_annealing(counter, bounds, maxfun=10 ** 9, maxiter=10 ** 9,
-                       seed=int(rng.integers(1 << 31)), x0=x0)
+        dual_annealing(
+            counter,
+            bounds,
+            maxfun=10**9,
+            maxiter=10**9,
+            seed=int(rng.integers(1 << 31)),
+            x0=x0,
+        )
     except _Budget:
         pass
     return counter.best
@@ -213,8 +227,14 @@ def sci_de(counter, low, high, dim, grad, rng, anchor=None):
     del anchor
     bounds = list(zip(low, high))
     try:
-        differential_evolution(counter, bounds, maxiter=10 ** 6, polish=True,
-                               seed=int(rng.integers(1 << 31)), tol=0)
+        differential_evolution(
+            counter,
+            bounds,
+            maxiter=10**6,
+            polish=True,
+            seed=int(rng.integers(1 << 31)),
+            tol=0,
+        )
     except _Budget:
         pass
     return counter.best
@@ -358,12 +378,63 @@ METHODS = {
     "bobyqa": bobyqa,
     "classical": classical,
 }
-FIELDNAMES = ["problem", "dim", "method", "seed", "best", "evals"]
+FIELDNAMES = [
+    "problem",
+    "dim",
+    "method",
+    "seed",
+    "best",
+    "evals",
+    "objective_evals",
+    "grad_evals",
+    "status",
+]
 
 
 def _write_sota_row(writer, stream, row):
     writer.writerow(row)
     stream.flush()
+
+
+def run_method_cell(
+    *,
+    method_name,
+    method,
+    problem,
+    dim,
+    seed,
+    counter,
+    low,
+    high,
+    grad,
+    anchor,
+):
+    """Run one solver cell and return a status-bearing accounting row."""
+    rng = np.random.default_rng(seed)
+    status = "ok"
+    try:
+        best = method(counter, low, high, dim, grad, rng, anchor=anchor)
+    except _Budget:
+        best = counter.best
+        status = "budget_exhausted"
+    except Exception as exc:  # noqa: BLE001
+        best = float("inf")
+        status = f"error:{type(exc).__name__}"
+    if not math.isfinite(float(best)) and status == "ok":
+        status = "nonfinite"
+    if status.startswith("error:") or status == "nonfinite":
+        best = float("inf")
+    return {
+        "problem": problem,
+        "dim": dim,
+        "method": method_name,
+        "seed": seed,
+        "best": best,
+        "evals": counter.n,
+        "objective_evals": counter.objective_evals,
+        "grad_evals": counter.grad_evals,
+        "status": status,
+    }
 
 
 def _shard_targets(targets, shard_index: int, shard_count: int):
@@ -385,16 +456,31 @@ def main():
     p.add_argument("--max-problems", type=int, default=60)
     p.add_argument("--budget", type=int, default=8000)
     p.add_argument("--seeds", type=int, default=3)
-    p.add_argument("--bench-root", default=None,
-                   help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.")
-    p.add_argument("--pycutest-cache", default=None,
-                   help="Explicit PyCUTEst cache directory; defaults to .bench/cache.")
-    p.add_argument("--shard-index", type=int, default=0,
-                   help="Stable shard index for distributed CUTEst sweeps.")
-    p.add_argument("--shard-count", type=int, default=1,
-                   help="Number of stable shards in the distributed CUTEst sweep.")
-    p.add_argument("--methods", default=None,
-                   help="Comma-separated subset of methods to run.")
+    p.add_argument(
+        "--bench-root",
+        default=None,
+        help="Project root containing .bench/ with CUTEst, SIFDecode, and sif.",
+    )
+    p.add_argument(
+        "--pycutest-cache",
+        default=None,
+        help="Explicit PyCUTEst cache directory; defaults to .bench/cache.",
+    )
+    p.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="Stable shard index for distributed CUTEst sweeps.",
+    )
+    p.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Number of stable shards in the distributed CUTEst sweep.",
+    )
+    p.add_argument(
+        "--methods", default=None, help="Comma-separated subset of methods to run."
+    )
     p.add_argument(
         "--problems-file",
         default=None,
@@ -446,20 +532,43 @@ def main():
             try:
                 prob = load(t.name, sif_params=None, config=config)
             except Exception as exc:  # noqa: BLE001
-                print(f"  skip {t.name}: {type(exc).__name__}", flush=True)
+                status = f"load_error:{type(exc).__name__}"
+                for s in range(args.seeds):
+                    for name in methods:
+                        _write_sota_row(
+                            w,
+                            f,
+                            {
+                                "problem": t.name,
+                                "dim": t.dim,
+                                "method": name,
+                                "seed": s,
+                                "best": float("inf"),
+                                "evals": 0,
+                                "objective_evals": 0,
+                                "grad_evals": 0,
+                                "status": status,
+                            },
+                        )
+                print(f"  {t.name}: {status}", flush=True)
                 continue
             low, high, anchor = _comparison_box(prob)
             dim = prob.dim
             for s in range(args.seeds):
                 for name, fnc in methods.items():
-                    rng = np.random.default_rng(s)
                     c = Counter(prob.fn, args.budget)
-                    try:
-                        best = fnc(c, low, high, dim, prob.grad, rng, anchor=anchor)
-                    except (_Budget, Exception):  # noqa: BLE001
-                        best = c.best
-                    row = dict(problem=t.name, dim=dim, method=name, seed=s,
-                               best=best, evals=c.n)
+                    row = run_method_cell(
+                        method_name=name,
+                        method=fnc,
+                        problem=t.name,
+                        dim=dim,
+                        seed=s,
+                        counter=c,
+                        low=low,
+                        high=high,
+                        grad=prob.grad,
+                        anchor=anchor,
+                    )
                     rows.append(row)
                     _write_sota_row(w, f, row)
             try:
