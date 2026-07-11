@@ -216,8 +216,12 @@ def theta_c_exactly_two_symbolic():
     th = sp.Symbol("theta", positive=True)
     mu = c**2
     s = 2 * c
-    Phi = lambda z: sp.Rational(1, 2) * sp.erfc(-z / sp.sqrt(2))
-    phi = lambda z: sp.exp(-(z**2) / 2) / sp.sqrt(2 * sp.pi)
+    def Phi(z):
+        return sp.Rational(1, 2) * sp.erfc(-z / sp.sqrt(2))
+
+    def phi(z):
+        return sp.exp(-(z**2) / 2) / sp.sqrt(2 * sp.pi)
+
     mup = mu - s**2 / th
     gain_expr = -(
         mu * Phi(-mu / s)
@@ -277,11 +281,11 @@ def anisotropic_critical_temperature():
     ok = True
     for x_vec in ([sp.Rational(1), sp.Rational(0)], [sp.Rational(0), sp.Rational(1)],
                   [sp.Rational(3, 5), sp.Rational(4, 5)]):
-        f = sum(l * xi**2 for l, xi in zip(lams, x_vec)) / 2
+        f = sum(lam * xi**2 for lam, xi in zip(lams, x_vec)) / 2
         mu = sig**2 * sum(lams) / 2
-        s2 = sig**2 * sum(l**2 * xi**2 for l, xi in zip(lams, x_vec))
+        s2 = sig**2 * sum(lam**2 * xi**2 for lam, xi in zip(lams, x_vec))
         # Predicted critical temperature from the general formula.
-        t_pred = sum(l**2 * xi**2 for l, xi in zip(lams, x_vec)) / sum(lams)
+        t_pred = sum(lam**2 * xi**2 for lam, xi in zip(lams, x_vec)) / sum(lams)
         # Small-step progress condition s^2 > 2 T mu solves to T < t_c.
         t_c = sp.solve(sp.Eq(s2, 2 * T * mu), T)[0]
         ok &= sp.simplify(t_c - t_pred) == 0

@@ -75,7 +75,9 @@ def polish_requirement_symbolic():
 def estimator_exactness_symbolic():
     c, rho = sp.symbols("c rho", positive=True)
     k, m = sp.symbols("k m", positive=True, integer=True)
-    g = lambda i: c * rho**i
+    def g(i):
+        return c * rho**i
+
     # log-ratio estimator over m consecutive polish steps
     log_ratio = sp.log(g(k + 1) / g(k))
     rho_hat = sp.exp(sp.summation(log_ratio, (k, 0, m - 1)) / m)
