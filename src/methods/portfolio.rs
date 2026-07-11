@@ -3149,6 +3149,23 @@ mod tests {
     }
 
     #[test]
+    fn coordinate_opposition_scout_flips_improving_box_coordinates() {
+        let obj = StybTang2D::new();
+        let ledger = BudgetLedger::new(16, 2);
+        let local = Array1::from_vec(vec![2.7468, 2.7468]);
+        ledger.record(local.view(), obj.eval(local.view()), obj.bounds());
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+
+        coordinate_opposition_scout(&budgeted, &ledger, obj.bounds());
+
+        assert!(ledger.best_get() < -78.0);
+        assert!(ledger.used_get() <= 2);
+    }
+
+    #[test]
     fn restart_arm_is_always_first() {
         use crate::methods::regime::OptimizationRegime;
         let arms = enabled_arms(5, false, usize::MAX, OptimizationRegime::Default, 0);
