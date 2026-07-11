@@ -30,7 +30,11 @@ use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 
 /// Linear path of `n_frames` points from `x_a` to `x_b` (inclusive).
-pub fn linear_path(x_a: ArrayView1<f64>, x_b: ArrayView1<f64>, n_frames: usize) -> Vec<Array1<f64>> {
+pub fn linear_path(
+    x_a: ArrayView1<f64>,
+    x_b: ArrayView1<f64>,
+    n_frames: usize,
+) -> Vec<Array1<f64>> {
     assert!(n_frames >= 2, "path needs at least two frames");
     assert_eq!(x_a.len(), x_b.len());
     let mut path = Vec::with_capacity(n_frames);
@@ -56,10 +60,7 @@ pub fn path_is_reactive(ops: &[f64], basin_a_max: f64, basin_b_min: f64) -> bool
     }
     let first = ops[0];
     let last = ops[ops.len() - 1];
-    first.is_finite()
-        && last.is_finite()
-        && first <= basin_a_max
-        && last >= basin_b_min
+    first.is_finite() && last.is_finite() && first <= basin_a_max && last >= basin_b_min
 }
 
 /// Reactivity when the order parameter is the objective (lower is better).
@@ -72,10 +73,7 @@ pub fn path_reactive_objective(ops: &[f64], high_threshold: f64, low_threshold: 
     }
     let first = ops[0];
     let last = ops[ops.len() - 1];
-    first.is_finite()
-        && last.is_finite()
-        && first >= high_threshold
-        && last <= low_threshold
+    first.is_finite() && last.is_finite() && first >= high_threshold && last <= low_threshold
 }
 
 /// Geometric reactivity: endpoints stay near the archived seeds.
@@ -209,8 +207,8 @@ pub fn best_frame_index(ops: &[f64]) -> Option<usize> {
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn linear_path_endpoints_match_seeds() {
@@ -252,9 +250,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(42);
         let shoot = pick_shoot_index(path.len(), &mut rng);
         let dir = ShootDirection::Forward;
-        let reflect = |x: Array1<f64>| {
-            Array1::from_iter(x.iter().map(|v| v.clamp(-5.0, 5.0)))
-        };
+        let reflect = |x: Array1<f64>| Array1::from_iter(x.iter().map(|v| v.clamp(-5.0, 5.0)));
         let trial = apply_shoot(
             &path,
             shoot,
@@ -267,12 +263,7 @@ mod tests {
         );
         assert_eq!(trial.len(), path.len());
         // Geometric reactivity with generous tol: endpoints near seeds.
-        assert!(path_reactive_geometric(
-            &trial,
-            a.view(),
-            b.view(),
-            1.0
-        ));
+        assert!(path_reactive_geometric(&trial, a.view(), b.view(), 1.0));
     }
 
     #[test]

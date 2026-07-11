@@ -22,8 +22,8 @@ use std::os::raw::c_void;
 
 use anneal_core::run_rs_qmc_variant;
 use anneal_core::variant::boltzmann;
-use eindir_core::ffi::{eindir_objective_t, EindirObjectiveWrapper};
 use eindir_core::Objective;
+use eindir_core::ffi::{EindirObjectiveWrapper, eindir_objective_t};
 
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
 use rgpot_core::status::rgpot_status_t;

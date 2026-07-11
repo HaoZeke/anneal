@@ -11,8 +11,8 @@
 
 use anneal_core::movekernel::{MoveKernel, TsallisVisit};
 use ndarray::array;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 /// Single-coordinate increments from `propose` at the origin (dim 1).
 fn increments(q_v: f64, temp: f64, n: usize, seed: u64) -> Vec<f64> {
@@ -40,7 +40,10 @@ fn qv_two_is_standard_cauchy() {
     // at T = 1. P(|X| <= 1) = 0.5 for Cauchy(0, 1).
     let s = increments(2.0, 1.0, 200_000, 11);
     let f = fraction_within(&s, 1.0);
-    assert!((f - 0.5).abs() < 0.02, "q_v=2 not Cauchy: P(|X|<=1) = {f:.4}");
+    assert!(
+        (f - 0.5).abs() < 0.02,
+        "q_v=2 not Cauchy: P(|X|<=1) = {f:.4}"
+    );
 }
 
 #[test]
@@ -52,7 +55,10 @@ fn temperature_scales_qv2() {
         (fraction_within(&s, 4.0) - 0.5).abs() < 0.02,
         "T-scaling broken at q_v=2"
     );
-    assert!(fraction_within(&s, 1.0) < 0.30, "width did not scale with T");
+    assert!(
+        fraction_within(&s, 1.0) < 0.30,
+        "width did not scale with T"
+    );
 }
 
 #[test]

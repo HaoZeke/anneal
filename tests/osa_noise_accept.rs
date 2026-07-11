@@ -11,8 +11,8 @@
 //!    sample decides, so `PA(Delta) -> min(1, exp(-beta Delta))`.
 
 use anneal_core::noise_accept::OsaAccept;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 #[test]
 fn osa_detailed_balance_matches_metropolis_factor() {
@@ -61,5 +61,8 @@ fn osa_downhill_accepts_readily() {
     let mut rng = StdRng::seed_from_u64(4);
     let (pa, mean_n) = osa.acceptance_rate(-2.0, 1.0, 0.5, 20_000, &mut rng);
     assert!(pa > 0.9, "downhill acceptance too low: {pa:.4}");
-    assert!(mean_n < 5.0, "downhill decision too slow: <n> = {mean_n:.2}");
+    assert!(
+        mean_n < 5.0,
+        "downhill decision too slow: <n> = {mean_n:.2}"
+    );
 }

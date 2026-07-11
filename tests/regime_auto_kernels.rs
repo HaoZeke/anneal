@@ -5,15 +5,15 @@
 
 use anneal_core::accept::{AcceptRule, Metropolis, TsallisAccept};
 use anneal_core::methods::{
-    check_accept_path, order_arms, require_accept_compatible, select_regime, OptimizationRegime,
-    ProblemFeatures,
+    OptimizationRegime, ProblemFeatures, check_accept_path, order_arms, require_accept_compatible,
+    select_regime,
 };
 use anneal_core::movekernel::{MoveKernel, TsallisVisit};
 use eindir_core::{
-    box_geometry, compensated_delta, isotropic_proposal_scale, optimal_sampling_drift, Bounds,
-    GleThermostat,
+    Bounds, GleThermostat, box_geometry, compensated_delta, isotropic_proposal_scale,
+    optimal_sampling_drift,
 };
-use ndarray::{array, Array1, Array2};
+use ndarray::{Array1, Array2, array};
 use rand::SeedableRng;
 
 #[test]
@@ -62,7 +62,14 @@ fn out_of_regime_exact_accept_fails_cleanly() {
 #[test]
 fn explore_first_under_all_regimes() {
     let avail = [
-        "explore", "gle", "de", "gsa", "surrogate", "hop", "shift", "hmc",
+        "explore",
+        "gle",
+        "de",
+        "gsa",
+        "surrogate",
+        "hop",
+        "shift",
+        "hmc",
     ];
     for regime in [
         OptimizationRegime::Default,
@@ -127,11 +134,7 @@ fn gle_fdt_and_stationarity_shipped_path() {
     }
     // Diagonal of A+A^T should be positive (friction).
     for i in 0..n {
-        assert!(
-            sym[[i, i]] >= -1e-10,
-            "sym diagonal {i} = {}",
-            sym[[i, i]]
-        );
+        assert!(sym[[i, i]] >= -1e-10, "sym diagonal {i} = {}", sym[[i, i]]);
     }
     // Propagator exists and is finite.
     let gle = GleThermostat::canonical(&a, 0.1, 1.0, 1.0);

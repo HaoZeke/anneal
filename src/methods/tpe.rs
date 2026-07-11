@@ -34,10 +34,7 @@ impl TpeCategorical {
     /// Full constructor.
     pub fn with_params(n_categories: usize, gamma: f64, alpha: f64) -> Self {
         assert!(n_categories >= 1, "n_categories must be >= 1");
-        assert!(
-            (0.0..1.0).contains(&gamma),
-            "gamma must be in (0, 1)"
-        );
+        assert!((0.0..1.0).contains(&gamma), "gamma must be in (0, 1)");
         assert!(alpha > 0.0 && alpha.is_finite(), "alpha must be positive");
         Self {
             n_categories,
@@ -270,8 +267,8 @@ impl TpeContinuous1d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     #[test]
     fn density_ratio_ranks_good_category_higher() {

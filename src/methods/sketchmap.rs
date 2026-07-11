@@ -157,10 +157,8 @@ impl SketchMap2d {
                     let c = (2.0_f64).powf(a_l / b_l) - 1.0;
                     let u = dij / sigma_low;
                     let term = 1.0 + c * u.powf(a_l);
-                    let dg_dd = (b_l / sigma_low)
-                        * c
-                        * u.powf(a_l - 1.0)
-                        * term.powf(-b_l / a_l - 1.0);
+                    let dg_dd =
+                        (b_l / sigma_low) * c * u.powf(a_l - 1.0) * term.powf(-b_l / a_l - 1.0);
                     // d stress / d pos_i ∝ 2 (G-F) dG/dd * (x_i - x_j)/d
                     let coef = 2.0 * diff * dg_dd / dij;
                     grad[[i, 0]] += coef * dx;
@@ -242,12 +240,12 @@ impl SketchMap2d {
     /// [`crate::bias::WellTemperedBias`].
     ///
     /// Returns `(projector dim×2, mu, cv_low, cv_high)`.
-    pub fn linearize_projector(
-        &self,
-        eps: f64,
-    ) -> (Array2<f64>, Array1<f64>, [f64; 2], [f64; 2]) {
+    pub fn linearize_projector(&self, eps: f64) -> (Array2<f64>, Array1<f64>, [f64; 2], [f64; 2]) {
         let dim = self.landmarks.ncols();
-        let mu = self.landmarks.mean_axis(ndarray::Axis(0)).unwrap_or(Array1::zeros(dim));
+        let mu = self
+            .landmarks
+            .mean_axis(ndarray::Axis(0))
+            .unwrap_or(Array1::zeros(dim));
         let s0 = self.project(mu.view(), 20);
         let eps = eps.max(1e-8);
         let mut projector = Array2::<f64>::zeros((dim, 2));
@@ -382,10 +380,7 @@ fn classical_mds_2d(dist: ArrayView2<f64>) -> Option<Array2<f64>> {
 }
 
 /// Select up to `max_landmarks` diverse archive points (farthest-point).
-pub fn farthest_point_landmarks(
-    xs: &[Array1<f64>],
-    max_landmarks: usize,
-) -> Vec<usize> {
+pub fn farthest_point_landmarks(xs: &[Array1<f64>], max_landmarks: usize) -> Vec<usize> {
     if xs.is_empty() || max_landmarks == 0 {
         return Vec::new();
     }
