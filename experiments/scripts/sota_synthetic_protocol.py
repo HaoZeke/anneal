@@ -201,6 +201,8 @@ def main():
                 pname, dim, fn, grad, low, high, use_grad = row
             if not use_grad:
                 grad = None
+            anchor = 0.5 * (low + high)
+            initial = float(fn(anchor))
             for s in range(args.seeds):
                 for m in method_names:
                     c = Counter(fn, args.budget)
@@ -210,11 +212,12 @@ def main():
                         problem=pname,
                         dim=dim,
                         seed=s,
+                        initial=initial,
                         counter=c,
                         low=low,
                         high=high,
                         grad=grad,
-                        anchor=None,
+                        anchor=anchor,
                     )
                     rows.append(out_row)
                     w.writerow(out_row)

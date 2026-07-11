@@ -31,8 +31,8 @@ def test_unexpected_method_error_is_not_scored_as_partial_success():
     assert row["status"] == "error:RuntimeError"
     assert row["initial"] == 1.0
     assert row["best"] == float("inf")
-    assert row["evals"] == 1
-    assert row["objective_evals"] == 1
+    assert row["evals"] == 2
+    assert row["objective_evals"] == 2
     assert row["grad_evals"] == 0
 
 

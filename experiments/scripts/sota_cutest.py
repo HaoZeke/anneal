@@ -70,6 +70,14 @@ class Counter:
             self.best = v
         return v
 
+    def record_initial(self, value):
+        """Charge and retain the protocol's common starting objective."""
+        self._consume()
+        self.objective_evals += 1
+        value = float(value)
+        if math.isfinite(value) and value < self.best:
+            self.best = value
+
     def counted_grad(self, grad):
         def jac(x):
             self._consume()
@@ -548,6 +556,7 @@ FIELDNAMES = [
     "dim",
     "method",
     "seed",
+    "initial",
     "best",
     "evals",
     "objective_evals",
@@ -568,6 +577,7 @@ def run_method_cell(
     problem,
     dim,
     seed,
+    initial,
     counter,
     low,
     high,
@@ -578,6 +588,7 @@ def run_method_cell(
     rng = np.random.default_rng(seed)
     status = "ok"
     try:
+        counter.record_initial(initial)
         best = method(counter, low, high, dim, grad, rng, anchor=anchor)
     except _Budget:
         best = counter.best
@@ -594,6 +605,7 @@ def run_method_cell(
         "dim": dim,
         "method": method_name,
         "seed": seed,
+        "initial": initial,
         "best": best,
         "evals": counter.n,
         "objective_evals": counter.objective_evals,
@@ -744,6 +756,7 @@ def main():
                                 "dim": t.dim,
                                 "method": name,
                                 "seed": s,
+                                "initial": float("inf"),
                                 "best": float("inf"),
                                 "evals": 0,
                                 "objective_evals": 0,
@@ -755,6 +768,9 @@ def main():
                 continue
             low, high, anchor = _comparison_box(prob)
             dim = prob.dim
+            initial = float(prob.fn(anchor))
+            if not math.isfinite(initial):
+                raise ValueError(f"non-finite starting objective for {t.name}")
             for s in range(args.seeds):
                 for name, fnc in methods.items():
                     c = Counter(prob.fn, args.budget)
@@ -764,6 +780,7 @@ def main():
                         problem=t.name,
                         dim=dim,
                         seed=s,
+                        initial=initial,
                         counter=c,
                         low=low,
                         high=high,
