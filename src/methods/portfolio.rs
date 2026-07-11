@@ -1672,17 +1672,12 @@ fn run_arm<O, G>(
             let before_modal = ledger.best_get();
             let modal_x = bounds.clip(modal.row(0));
             let modal_val = obj.eval(modal_x.view());
-            if let Some(grad) = grad {
-                if modal_val.is_finite() && modal_val < before_modal && ledger.remaining() >= 4 {
-                    projected_gradient_polish(
-                        obj,
-                        grad,
-                        modal_x,
-                        ledger.remaining() / 2,
-                        1.0,
-                        1e-8,
-                    );
-                }
+            if let Some(grad) = grad
+                && modal_val.is_finite()
+                && modal_val < before_modal
+                && ledger.remaining() >= 4
+            {
+                projected_gradient_polish(obj, grad, modal_x, ledger.remaining() / 2, 1.0, 1e-8);
             }
             // Cool with budget progress so the ladder reaches the cold
             // regime regardless of how often the arm is pulled.
@@ -2165,10 +2160,10 @@ fn make_metad_bias(
     use ndarray::Array2;
 
     // Try sketch-map CV from archive landmarks.
-    if let Some(ledger) = ledger {
-        if let Some(bias) = try_sketchmap_metad_bias(dim, bounds, ledger) {
-            return bias;
-        }
+    if let Some(ledger) = ledger
+        && let Some(bias) = try_sketchmap_metad_bias(dim, bounds, ledger)
+    {
+        return bias;
     }
 
     let mut projector = Array2::<f64>::zeros((dim, 2));
@@ -2297,7 +2292,7 @@ fn run_metad_arm<O>(
     let temp = ladder_temperature(archive_temp0(ledger), states.surrogate_gen);
     let width = mean_width(bounds);
     let step = 0.05 * width;
-    let deposit_period = 8usize.max(1);
+    let deposit_period = 8usize;
     let mut deposits = 0usize;
     for t in 0..slice {
         if ledger.exhausted() {
@@ -2788,16 +2783,15 @@ where
         } else {
             false
         };
-        if round >= k {
-            if let (Some(plan), Some(grad)) =
+        if round >= k
+            && let (Some(plan), Some(grad)) =
                 (low_dimensional_polish.take(), budgeted_grad.as_ref())
-            {
-                // Stationarity here certifies a local basin only; the
-                // bandit keeps exploring with the remaining budget and
-                // the endgame re-polishes the final incumbent.
-                run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
-                continue;
-            }
+        {
+            // Stationarity here certifies a local basin only; the
+            // bandit keeps exploring with the remaining budget and
+            // the endgame re-polishes the final incumbent.
+            run_low_dimensional_polish(&budgeted_obj, grad, &ledger, &plan, seed, budget);
+            continue;
         }
         if endgame_now || remaining < slice {
             // D5 endgame: the tail is pure polish (explore-first is
@@ -2989,13 +2983,14 @@ where
                 // meaningless; restart the ratio pairing.
                 prev_polish_delta = None;
             }
-            if let Some(prev) = prev_polish_delta {
-                if delta < prev && delta > 0.0 {
-                    // Work-normalized: this slice spent `spent` units to
-                    // contract the improvement by delta/prev.
-                    let spent = ledger.used_get().saturating_sub(used_before).max(1);
-                    contraction.observe((delta / prev).ln() / spent as f64);
-                }
+            if let Some(prev) = prev_polish_delta
+                && delta < prev
+                && delta > 0.0
+            {
+                // Work-normalized: this slice spent `spent` units to
+                // contract the improvement by delta/prev.
+                let spent = ledger.used_get().saturating_sub(used_before).max(1);
+                contraction.observe((delta / prev).ln() / spent as f64);
             }
             prev_polish_delta = Some(delta);
         }
