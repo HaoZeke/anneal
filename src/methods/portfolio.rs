@@ -3056,8 +3056,8 @@ where
         }
         // TPE score: true-F improvement magnitude only; exploratory
         // bonuses arrive through the deferred-credit path.
-        let score = if after.is_finite() && before.is_finite() && after < before {
-            before - after
+        let score = if improved {
+            (before - after) / reward_scale.max(1.0)
         } else {
             0.0
         };
