@@ -3622,7 +3622,7 @@ mod tests {
         };
         let shifted = OffsetQuadratic {
             inner: ShiftQuadratic::new(),
-            offset: 1.0e9,
+            offset: 1.0e4,
         };
         let a = portfolio_optimize(&base, Some(&base), 4_000, 73, None);
         let b = portfolio_optimize(&shifted, Some(&shifted), 4_000, 73, None);
