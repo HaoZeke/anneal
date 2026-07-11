@@ -42,6 +42,20 @@ def test_budget_is_never_exceeded():
     assert math.isfinite(out["best_val"])
 
 
+def test_global_optimize_rejects_inverted_bounds():
+    fn, _, low, high = _rastrigin(2)
+    with pytest.raises(ValueError, match="strictly less"):
+        anneal.global_optimize(fn, high, low, budget=50, seed=0)
+
+
+def test_global_optimize_rejects_nonfinite_bounds():
+    fn, _, low, high = _rastrigin(2)
+    bad = low.copy()
+    bad[0] = float("nan")
+    with pytest.raises(ValueError, match="finite"):
+        anneal.global_optimize(fn, bad, high, budget=50, seed=0)
+
+
 def test_budget_respected_without_gradients():
     dim = 4
     fn, _, low, high = _rastrigin(dim)

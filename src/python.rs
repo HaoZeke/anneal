@@ -24,6 +24,36 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann, fast, gsa};
 
+/// Reject empty, non-finite, or inverted box bounds before `Bounds::new`.
+///
+/// `eindir::Bounds::new` only checks equal length; `mkpoint` panics when
+/// `low[i] >= high[i]`. Surface a clear `ValueError` at the Python boundary.
+fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
+    if low.len() != high.len() {
+        return Err(PyValueError::new_err(
+            "low and high must have the same length",
+        ));
+    }
+    if low.is_empty() {
+        return Err(PyValueError::new_err(
+            "bounds must have at least one dimension",
+        ));
+    }
+    for (i, (&lo, &hi)) in low.iter().zip(high.iter()).enumerate() {
+        if !lo.is_finite() || !hi.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "bounds must be finite at dimension {i}"
+            )));
+        }
+        if !(lo < hi) {
+            return Err(PyValueError::new_err(format!(
+                "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
+            )));
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
@@ -296,11 +326,7 @@ fn run_hmc(
 
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(pyo3::exceptions::PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
     let dim = low_vec.len();
     let q_max = 1.0 + 2.0 / dim as f64;
     if q > 1.0 && q >= q_max {
@@ -1299,16 +1325,7 @@ fn global_optimize(
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
-    if low_vec.len() != high_vec.len() {
-        return Err(PyValueError::new_err(
-            "low and high must have the same length",
-        ));
-    }
-    if low_vec.is_empty() {
-        return Err(PyValueError::new_err(
-            "bounds must have at least one dimension",
-        ));
-    }
+    validate_box_bounds(&low_vec, &high_vec)?;
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
