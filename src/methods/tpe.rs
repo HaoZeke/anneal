@@ -54,11 +54,6 @@ impl TpeCategorical {
         self.history.is_empty()
     }
 
-    /// True when no observations have been recorded.
-    pub fn is_empty(&self) -> bool {
-        self.history.is_empty()
-    }
-
     /// Record one (category, score) observation. Higher score = better.
     pub fn record(&mut self, category: usize, score: f64) {
         assert!(
