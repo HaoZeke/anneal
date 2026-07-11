@@ -3646,7 +3646,8 @@ mod tests {
             assert_eq!(left.name, right.name);
             assert_eq!(
                 left.pulls, right.pulls,
-                "pull mismatch for {}; base={:?}; shifted={:?}", left.name, a.arm_stats, b.arm_stats
+                "pull mismatch for {}; base={:?}; shifted={:?}",
+                left.name, a.arm_stats, b.arm_stats
             );
             assert_eq!(
                 left.successes, right.successes,
