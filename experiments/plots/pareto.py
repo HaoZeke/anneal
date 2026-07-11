@@ -16,13 +16,12 @@ Rastrigin/Ackley benchmarks.
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from chemparseplot.plot.theme import (
-    RUHI_COLORS,
     apply_axis_theme,
     get_theme,
     setup_publication_theme,

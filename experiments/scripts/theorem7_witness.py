@@ -107,7 +107,7 @@ def main():
     # the empirical <F> should match this scaling at moderate q_v where
     # the bias has converged to V_inf (large enough q_v that
     # gamma = 1/(q_v-1) is small enough for V to equilibrate).
-    print(f"\nMean-F diagnostic (Theorem 7: typical F ~ T/(q_v-1)):")
+    print("\nMean-F diagnostic (Theorem 7: typical F ~ T/(q_v-1)):")
     print(f"{'q_v':>6} {'gamma':>7} {'F_typ_pred':>11} {'<F>':>9} {'F/F_pred':>10}")
     for q_v in qv_list:
         gamma_q = d.metad_gamma_from_qv(q_v)

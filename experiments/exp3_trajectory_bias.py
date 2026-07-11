@@ -13,7 +13,6 @@ import csv
 import os
 import sys
 
-import numpy as np
 
 from experiments.shared.runner import sa_run
 

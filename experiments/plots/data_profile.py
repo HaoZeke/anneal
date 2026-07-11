@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from chemparseplot.plot.theme import (
-    RUHI_COLORS,
     apply_axis_theme,
     get_theme,
     setup_publication_theme,

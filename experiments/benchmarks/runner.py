@@ -23,7 +23,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from experiments.benchmarks.catalog import CATALOG, Problem, list_problems
-from experiments.shared.runner import sa_run
 
 
 @dataclass
@@ -48,7 +47,6 @@ def _run_anneal(p: Problem, variant: str, seed: int, n_epochs: int,
     # Use a problem-specific objective registration is not the path here;
     # we drive sa_run via direct callable rather than its registry so the
     # benchmarks stay self-contained.
-    from experiments.shared.runner import sa_run as _sa_run
     rng = np.random.default_rng(seed)
 
     # Mirror sa_run inline so we can use any catalog problem.
