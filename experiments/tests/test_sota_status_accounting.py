@@ -20,6 +20,7 @@ def test_unexpected_method_error_is_not_scored_as_partial_success():
         problem="sphere",
         dim=1,
         seed=3,
+        initial=1.0,
         counter=counter,
         low=np.array([-1.0]),
         high=np.array([1.0]),
@@ -28,6 +29,7 @@ def test_unexpected_method_error_is_not_scored_as_partial_success():
     )
 
     assert row["status"] == "error:RuntimeError"
+    assert row["initial"] == 1.0
     assert row["best"] == float("inf")
     assert row["evals"] == 1
     assert row["objective_evals"] == 1
@@ -89,7 +91,7 @@ def test_sota_csv_schema_keeps_status_and_split_work_counts(tmp_path):
         writer = csv.DictWriter(stream, fieldnames=sota_cutest.FIELDNAMES)
         writer.writeheader()
     assert path.read_text().splitlines()[0].split(",") == sota_cutest.FIELDNAMES
-    assert {"status", "objective_evals", "grad_evals", "evals"} <= set(
+    assert {"status", "initial", "objective_evals", "grad_evals", "evals"} <= set(
         sota_cutest.FIELDNAMES
     )
 
