@@ -125,10 +125,10 @@ def test_turbo_model_fit_failure_requests_a_restart():
     def fail(_mll):
         raise ModelFittingError("degenerate observations")
 
-    assert not sota_cutest._fit_turbo_or_restart(
-        object(), fail, ModelFittingError
+    assert not sota_cutest._fit_turbo_or_restart(object(), fail, ModelFittingError)
+    assert sota_cutest._fit_turbo_or_restart(
+        object(), lambda _mll: None, ModelFittingError
     )
-    assert sota_cutest._fit_turbo_or_restart(object(), lambda _mll: None, ModelFittingError)
 
 
 def test_cma_one_dimensional_scaling_error_is_restartable():

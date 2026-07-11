@@ -448,9 +448,7 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
             mll = ExactMarginalLogLikelihood(model.likelihood, model)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                if not _fit_turbo_or_restart(
-                    mll, fit_gpytorch_mll, ModelFittingError
-                ):
+                if not _fit_turbo_or_restart(mll, fit_gpytorch_mll, ModelFittingError):
                     state.restart_triggered = True
                     break
 

@@ -31,18 +31,18 @@ import numpy as np
 # (BOX3, MEYER3), singular Hessians (POWELLSG, BROWNDEN), etc.
 DEFAULT_MANIFEST = [
     # (name, sif_params dict for problem-size capping)
-    ("ROSENBR",  None),                # n=2  Rosenbrock ravine
-    ("BEALE",    None),                # n=2  Beale: f* at (3, 0.5)
-    ("BRKMCC",   None),                # n=2  Brkmcc
-    ("CUBE",     None),                # n=2  Cubic ravine
-    ("POWELLSG", {"N": 4}),            # n=4  Powell singular (cap from default 5000)
-    ("BROWNDEN", None),                # n=4  Brown-Dennis nonlinear LSQ
-    ("BOX3",     None),                # n=3  Box 3D
-    ("BIGGS6",   None),                # n=6  Biggs EXP6
-    ("WATSON",   {"N": 12}),           # n=12 Watson nonlinear LSQ
-    ("EXTROSNB", {"N": 10}),           # n=10 Extended Rosenbrock (cap from default 1000)
-    ("GULF",     None),                # n=3  Gulf research and development
-    ("OSBORNEA", None),                # n=5  Osborne A nonlinear LSQ
+    ("ROSENBR", None),  # n=2  Rosenbrock ravine
+    ("BEALE", None),  # n=2  Beale: f* at (3, 0.5)
+    ("BRKMCC", None),  # n=2  Brkmcc
+    ("CUBE", None),  # n=2  Cubic ravine
+    ("POWELLSG", {"N": 4}),  # n=4  Powell singular (cap from default 5000)
+    ("BROWNDEN", None),  # n=4  Brown-Dennis nonlinear LSQ
+    ("BOX3", None),  # n=3  Box 3D
+    ("BIGGS6", None),  # n=6  Biggs EXP6
+    ("WATSON", {"N": 12}),  # n=12 Watson nonlinear LSQ
+    ("EXTROSNB", {"N": 10}),  # n=10 Extended Rosenbrock (cap from default 1000)
+    ("GULF", None),  # n=3  Gulf research and development
+    ("OSBORNEA", None),  # n=5  Osborne A nonlinear LSQ
 ]
 
 
@@ -212,7 +212,12 @@ def configured_pycutest(config: CutestConfig | None = None):
     existing = sys.modules.get("pycutest")
     if existing is not None and all(
         hasattr(existing, name)
-        for name in ("import_problem", "clear_cache", "problem_properties", "find_problems")
+        for name in (
+            "import_problem",
+            "clear_cache",
+            "problem_properties",
+            "find_problems",
+        )
     ):
         return existing
 
@@ -228,7 +233,11 @@ def configured_pycutest(config: CutestConfig | None = None):
 
     system_paths = _load_pycutest_submodule(package_dir, "system_paths")
     _install_pycutest_path_providers(system_paths, config)
-    for stale in ("pycutest.install_scripts", "pycutest.build_interface", "pycutest.sifdecode_extras"):
+    for stale in (
+        "pycutest.install_scripts",
+        "pycutest.build_interface",
+        "pycutest.sifdecode_extras",
+    ):
         sys.modules.pop(stale, None)
 
     install_scripts = _load_pycutest_submodule(package_dir, "install_scripts")
@@ -381,7 +390,10 @@ def list_default_manifest() -> list[tuple[str, dict | None]]:
 
 def load_default_manifest(config: CutestConfig | None = None) -> list[CutestProblem]:
     """Load every (name, sif_params) pair from the default manifest."""
-    return [load(name, sif_params=params, config=config) for name, params in DEFAULT_MANIFEST]
+    return [
+        load(name, sif_params=params, config=config)
+        for name, params in DEFAULT_MANIFEST
+    ]
 
 
 # Scalable unconstrained problems at higher dimension, to test the
@@ -391,21 +403,21 @@ def load_default_manifest(config: CutestConfig | None = None) -> list[CutestProb
 # separable (SROSENBR, QUARTC, ARWHEAD), ill-conditioned (VARDIM, PENALTY1,
 # NONDIA), and general coupled (EXTROSNB, WOODS, BROYDN7D) landscapes.
 HIGHDIM_MANIFEST = [
-    ("SROSENBR",  {"N": 100}),         # separable Rosenbrock
-    ("EXTROSNB",  {"N": 100}),         # extended Rosenbrock (coupled, ill-cond)
-    ("ARWHEAD",   {"N": 100}),         # almost-separable
-    ("NONDIA",    {"N": 100}),         # Shanno, ill-conditioned
-    ("WOODS",     {"N": 100}),         # coupled quartic
-    ("POWELLSG",  {"N": 100}),         # group-separable singular
-    ("ENGVAL1",   {"N": 100}),         # sum of squares
-    ("VARDIM",    {"N": 100}),         # ill-conditioned
-    ("PENALTY1",  {"N": 100}),         # ill-conditioned penalty
-    ("QUARTC",    {"N": 100}),         # separable quartic
-    ("TOINTGSS",  {"N": 100}),         # Toint Gaussian
-    ("BROYDN7D",  {"N": 100}),         # Broyden tridiagonal
-    ("FREUROTH",  {"N": 100}),         # Freudenstein-Roth
-    ("COSINE",    {"N": 100}),         # trigonometric
-    ("DIXMAANA",  {"M": 30}),          # n = 3M = 90
+    ("SROSENBR", {"N": 100}),  # separable Rosenbrock
+    ("EXTROSNB", {"N": 100}),  # extended Rosenbrock (coupled, ill-cond)
+    ("ARWHEAD", {"N": 100}),  # almost-separable
+    ("NONDIA", {"N": 100}),  # Shanno, ill-conditioned
+    ("WOODS", {"N": 100}),  # coupled quartic
+    ("POWELLSG", {"N": 100}),  # group-separable singular
+    ("ENGVAL1", {"N": 100}),  # sum of squares
+    ("VARDIM", {"N": 100}),  # ill-conditioned
+    ("PENALTY1", {"N": 100}),  # ill-conditioned penalty
+    ("QUARTC", {"N": 100}),  # separable quartic
+    ("TOINTGSS", {"N": 100}),  # Toint Gaussian
+    ("BROYDN7D", {"N": 100}),  # Broyden tridiagonal
+    ("FREUROTH", {"N": 100}),  # Freudenstein-Roth
+    ("COSINE", {"N": 100}),  # trigonometric
+    ("DIXMAANA", {"M": 30}),  # n = 3M = 90
 ]
 
 
@@ -434,7 +446,9 @@ def main():
             prob = load(name, sif_params=params, config=config)
             mid = (prob.low + prob.high) / 2
             fval = prob.fn(mid)
-            print(f"{name:<10} {prob.dim:>4} {fval:>16.4g} {prob.low.min():>10.2g} {prob.high.max():>10.2g}")
+            print(
+                f"{name:<10} {prob.dim:>4} {fval:>16.4g} {prob.low.min():>10.2g} {prob.high.max():>10.2g}"
+            )
         except Exception as e:
             print(f"{name:<10} FAIL: {type(e).__name__}: {e}")
             bad.append(name)
