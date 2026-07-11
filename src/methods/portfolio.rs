@@ -1112,7 +1112,7 @@ where
     G: Gradient<f64>,
 {
     let center = (&bounds.low + &bounds.high) * 0.5;
-    if !obj.ledger.charge_probe(1, 1) {
+    if !obj.ledger.charge_probe(2, 1) {
         return None;
     }
     let value = obj.inner.eval(center.view());
@@ -1120,26 +1120,34 @@ where
     if !value.is_finite() {
         return None;
     }
-    let value_scale = value.abs().max(1.0);
     if gradient.len() != bounds.dims || gradient.iter().any(|v| !v.is_finite()) {
         return Some(CenterProbe {
             gradient_ratio: None,
         });
     }
-    let width_norm = (0..bounds.dims)
-        .map(|idx| {
-            let width = bounds.high[idx] - bounds.low[idx];
-            if width.is_finite() && width > 0.0 {
-                width * width
-            } else {
-                1.0
-            }
-        })
-        .sum::<f64>()
-        .sqrt()
-        .max(1.0);
-    let grad_norm = gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
-    let ratio = grad_norm * width_norm / value_scale;
+    let scaled_gradient = Array1::from_iter((0..bounds.dims).map(|idx| {
+        let width = bounds.high[idx] - bounds.low[idx];
+        gradient[idx] * width
+    }));
+    let scaled_grad_norm = scaled_gradient.iter().map(|g| g * g).sum::<f64>().sqrt();
+    if scaled_grad_norm == 0.0 {
+        return Some(CenterProbe {
+            gradient_ratio: Some(0.0),
+        });
+    }
+    let mut probe = center.clone();
+    for idx in 0..bounds.dims {
+        let width = bounds.high[idx] - bounds.low[idx];
+        probe[idx] -= 0.25 * width * scaled_gradient[idx] / scaled_grad_norm;
+    }
+    let probe = bounds.clip(probe.view());
+    let probe_value = obj.inner.eval(probe.view());
+    let value_scale = energy_delta(probe_value, value).abs();
+    let ratio = if value_scale > 0.0 && value_scale.is_finite() {
+        scaled_grad_norm / value_scale
+    } else {
+        f64::INFINITY
+    };
     Some(CenterProbe {
         gradient_ratio: ratio.is_finite().then_some(ratio),
     })
