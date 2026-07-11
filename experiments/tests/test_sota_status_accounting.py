@@ -118,5 +118,24 @@ def test_turbo_baseline_is_registered_and_updates_trust_region():
     assert updated.length == 0.4
 
 
+def test_turbo_model_fit_failure_requests_a_restart():
+    class ModelFittingError(Exception):
+        pass
+
+    def fail(_mll):
+        raise ModelFittingError("degenerate observations")
+
+    assert not sota_cutest._fit_turbo_or_restart(
+        object(), fail, ModelFittingError
+    )
+    assert sota_cutest._fit_turbo_or_restart(object(), lambda _mll: None, ModelFittingError)
+
+
+def test_cma_one_dimensional_scaling_error_is_restartable():
+    error = ValueError("not yet initialized (dimension needed)")
+    assert sota_cutest._is_restartable_cma_error(error)
+    assert not sota_cutest._is_restartable_cma_error(ValueError("bad bounds"))
+
+
 def test_legacy_portfolio_control_is_registered():
     assert sota_cutest.METHODS["portfolio_legacy"] is sota_cutest.portfolio_legacy
