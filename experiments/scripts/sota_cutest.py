@@ -18,6 +18,8 @@ import csv
 import math
 import os
 import sys
+import warnings
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import (
@@ -331,6 +333,130 @@ def bobyqa(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
+@dataclass
+class _TurboState:
+    dim: int
+    batch_size: int
+    length: float = 0.8
+    length_min: float = 0.5**7
+    length_max: float = 1.6
+    failure_counter: int = 0
+    failure_tolerance: int = 0
+    success_counter: int = 0
+    success_tolerance: int = 10
+    best_value: float = -float("inf")
+    restart_triggered: bool = False
+
+    def __post_init__(self):
+        self.failure_tolerance = math.ceil(
+            max(4.0 / self.batch_size, self.dim / self.batch_size)
+        )
+
+
+def _turbo_update(state, y_next):
+    candidate = float(y_next.max())
+    threshold = 1e-3 * max(1.0, abs(state.best_value))
+    if candidate > state.best_value + threshold:
+        state.success_counter += 1
+        state.failure_counter = 0
+    else:
+        state.success_counter = 0
+        state.failure_counter += 1
+    if state.success_counter >= state.success_tolerance:
+        state.length = min(2.0 * state.length, state.length_max)
+        state.success_counter = 0
+    elif state.failure_counter >= state.failure_tolerance:
+        state.length /= 2.0
+        state.failure_counter = 0
+    state.best_value = max(state.best_value, candidate)
+    state.restart_triggered = state.length < state.length_min
+    return state
+
+
+def turbo(counter, low, high, dim, grad, rng, anchor=None):
+    """BoTorch TuRBO-1 with Thompson batches under the shared work cap."""
+    del grad, anchor
+    import torch
+    from botorch.fit import fit_gpytorch_mll
+    from botorch.generation import MaxPosteriorSampling
+    from botorch.models import SingleTaskGP
+    from gpytorch.constraints import Interval
+    from gpytorch.kernels import MaternKernel, ScaleKernel
+    from gpytorch.likelihoods import GaussianLikelihood
+    from gpytorch.mlls import ExactMarginalLogLikelihood
+
+    dtype = torch.double
+    torch.manual_seed(int(rng.integers(1 << 31)))
+    width = np.asarray(high - low, dtype=np.float64)
+
+    def evaluate(unit_points):
+        values = []
+        for point in unit_points.detach().cpu().numpy():
+            values.append(-counter(low + width * point))
+        return torch.tensor(values, dtype=dtype).unsqueeze(-1)
+
+    while counter.n < counter.budget:
+        remaining = counter.budget - counter.n
+        n_init = min(remaining, max(8, 2 * dim + 1))
+        sobol = torch.quasirandom.SobolEngine(
+            dim, scramble=True, seed=int(rng.integers(1 << 31))
+        )
+        x_data = sobol.draw(n_init).to(dtype=dtype)
+        y_data = evaluate(x_data)
+        state = _TurboState(
+            dim=dim,
+            batch_size=min(4, max(1, counter.budget - counter.n)),
+            best_value=float(y_data.max()),
+        )
+        while counter.n < counter.budget and not state.restart_triggered:
+            y_std = y_data.std().clamp_min(1e-12)
+            train_y = (y_data - y_data.mean()) / y_std
+            likelihood = GaussianLikelihood(noise_constraint=Interval(1e-8, 1e-3))
+            covariance = ScaleKernel(
+                MaternKernel(
+                    nu=2.5,
+                    ard_num_dims=dim,
+                    lengthscale_constraint=Interval(0.005, 4.0),
+                )
+            )
+            model = SingleTaskGP(
+                x_data,
+                train_y,
+                covar_module=covariance,
+                likelihood=likelihood,
+            )
+            mll = ExactMarginalLogLikelihood(model.likelihood, model)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                fit_gpytorch_mll(mll, max_attempts=1)
+
+            center = x_data[train_y.argmax(), :].clone()
+            weights = model.covar_module.base_kernel.lengthscale.squeeze().detach()
+            weights = weights / weights.mean()
+            weights = weights / torch.prod(weights.pow(1.0 / dim))
+            lower = torch.clamp(center - weights * state.length / 2.0, 0.0, 1.0)
+            upper = torch.clamp(center + weights * state.length / 2.0, 0.0, 1.0)
+            n_candidates = min(5000, max(512, 100 * dim))
+            candidates = sobol.draw(n_candidates).to(dtype=dtype)
+            candidates = lower + (upper - lower) * candidates
+            probability = min(20.0 / dim, 1.0)
+            mask = torch.rand(n_candidates, dim, dtype=dtype) <= probability
+            empty = torch.where(mask.sum(dim=1) == 0)[0]
+            if len(empty):
+                mask[empty, torch.randint(dim, size=(len(empty),))] = True
+            candidate_set = center.expand(n_candidates, dim).clone()
+            candidate_set[mask] = candidates[mask]
+            batch_size = min(state.batch_size, counter.budget - counter.n)
+            sampler = MaxPosteriorSampling(model=model, replacement=False)
+            with torch.no_grad():
+                x_next = sampler(candidate_set, num_samples=batch_size)
+            y_next = evaluate(x_next)
+            state = _turbo_update(state, y_next)
+            x_data = torch.cat((x_data, x_next), dim=0)
+            y_data = torch.cat((y_data, y_next), dim=0)
+    return counter.best
+
+
 def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
     """IPOP-style CMA-ES: restart with growing population (stronger baseline)."""
     import cma
@@ -379,6 +505,7 @@ METHODS = {
     "cma_es_ipop": cma_es_ipop,
     "ngopt": ngopt,
     "bobyqa": bobyqa,
+    "turbo": turbo,
     "classical": classical,
 }
 FIELDNAMES = [
