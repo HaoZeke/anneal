@@ -990,6 +990,10 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     rtol * scale.max(1.0)
 }
 
+fn scheduler_success_threshold(arm: ArmKind, ledger: &BudgetLedger) -> f64 {
+    arm_success_threshold(arm, archive_temp0(ledger))
+}
+
 fn warmup_arm_index(round: usize, arm_count: usize) -> Option<usize> {
     (round >= 1 && round <= arm_count).then_some(round - 1)
 }
@@ -2962,6 +2966,7 @@ where
             best_idx
         };
         let before = ledger.best_get();
+        let threshold = scheduler_success_threshold(arms[choice], &ledger);
         // Auto: preferred arms get larger slices under the same total budget.
         let arm_slice = if policy == PortfolioPolicy::Auto {
             let mult = crate::methods::regime::arm_slice_multiplier(regime, arms[choice].name());
@@ -2985,7 +2990,6 @@ where
             budget,
         );
         ledger.cap_set(budget);
-        let threshold = arm_success_threshold(arms[choice], before);
         let after = ledger.best_get();
         let improved = after.is_finite() && after < before - threshold;
         // Deferred exploratory credit: a MetaD deposit or an accepted
