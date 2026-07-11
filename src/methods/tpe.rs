@@ -182,6 +182,11 @@ impl TpeContinuous1d {
         self.history.len()
     }
 
+    /// Returns `true` when no observations have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+
     fn split(&self) -> (Vec<f64>, Vec<f64>) {
         if self.history.is_empty() {
             return (Vec::new(), Vec::new());
