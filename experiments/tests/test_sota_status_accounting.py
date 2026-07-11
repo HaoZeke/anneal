@@ -116,3 +116,7 @@ def test_turbo_baseline_is_registered_and_updates_trust_region():
     state.failure_tolerance = 1
     updated = sota_cutest._turbo_update(state, np.array([[0.0]]))
     assert updated.length == 0.4
+
+
+def test_legacy_portfolio_control_is_registered():
+    assert sota_cutest.METHODS["portfolio_legacy"] is sota_cutest.portfolio_legacy
