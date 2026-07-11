@@ -280,8 +280,7 @@ def quarantine_incomplete_cache_entry(cache_holder: Path, name: str) -> Path | N
         return None
     extensions = tuple(importlib.machinery.EXTENSION_SUFFIXES)
     if any(
-        child.name.startswith("_pycutestitf")
-        and child.name.endswith(extensions)
+        child.name.startswith("_pycutestitf") and child.name.endswith(extensions)
         for child in entry.iterdir()
     ):
         return None
