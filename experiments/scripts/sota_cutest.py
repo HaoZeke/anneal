@@ -609,6 +609,11 @@ def _write_sota_row(writer, stream, row):
     stream.flush()
 
 
+def _campaign_exit_code(rows):
+    successful = {"ok", "budget_exhausted"}
+    return int(any(row["status"] not in successful for row in rows))
+
+
 def run_method_cell(
     *,
     method_name,
@@ -787,21 +792,23 @@ def main():
                 status = f"load_error:{type(exc).__name__}"
                 for s in range(args.seeds):
                     for name in methods:
+                        row = {
+                            "problem": t.name,
+                            "dim": t.dim,
+                            "method": name,
+                            "seed": s,
+                            "initial": float("inf"),
+                            "best": float("inf"),
+                            "evals": 0,
+                            "objective_evals": 0,
+                            "grad_evals": 0,
+                            "status": status,
+                        }
+                        rows.append(row)
                         _write_sota_row(
                             w,
                             f,
-                            {
-                                "problem": t.name,
-                                "dim": t.dim,
-                                "method": name,
-                                "seed": s,
-                                "initial": float("inf"),
-                                "best": float("inf"),
-                                "evals": 0,
-                                "objective_evals": 0,
-                                "grad_evals": 0,
-                                "status": status,
-                            },
+                            row,
                         )
                 print(f"  {t.name}: {status}", flush=True)
                 continue
@@ -846,6 +853,11 @@ def main():
     for m in sorted(methods, key=lambda k: -wins[k]):
         print(f"  {m:>14} {wins[m]:5d}")
     print(f"Wrote {len(rows)} rows to {args.out}")
+    exit_code = _campaign_exit_code(rows)
+    if exit_code:
+        failures = sum(row["status"] not in {"ok", "budget_exhausted"} for row in rows)
+        print(f"Campaign contains {failures} unsuccessful cells", file=sys.stderr)
+    return exit_code
 
 
 if __name__ == "__main__":
