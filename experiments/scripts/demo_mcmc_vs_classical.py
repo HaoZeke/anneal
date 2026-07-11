@@ -24,14 +24,10 @@ import time
 import numpy as np
 
 from experiments.shared.runner import (
-    cauchy_propose,
     gelman_rubin_max,
     gaussian_propose,
     log_cool,
     metropolis_accept_prob,
-    reciprocal_cool,
-    tsallis_cool,
-    tsallis_visit_propose,
 )
 
 

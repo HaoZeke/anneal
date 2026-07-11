@@ -34,7 +34,6 @@ enumeration on a small horizon:
 Style follows proofs/thmN_*.py.
 """
 
-import itertools
 import sympy as sp
 import numpy as np
 
