@@ -2,20 +2,20 @@
 
 A portfolio driver interleaves slices of member arms. At least one arm performs
 restarts drawn from a fixed everywhere-positive-density restart measure mu on
-the bounded box (uniform, or QMC/Halton with a Cranley-Patterson shift). The
+the bounded box. A uniformly randomized Cranley--Patterson shift gives every
+fixed Halton point that marginal law. The
 incumbent best is monotone (law-respecting best-update). Then:
 
   (a) the portfolio best converges a.s. to ess inf f provided the restart arm
       is scheduled infinitely often;
   (b) after n restarts,
         P(best within {f <= f* + eps}) >= 1 - (1 - mu(L_eps))^n,
-      and a QMC star-discrepancy covering argument gives a DETERMINISTIC
-      coverage guarantee once n exceeds a box-counting threshold.
+      A deterministic QMC design also hits every axis-aligned box B once
+      vol(B) exceeds its box discrepancy.
 
 This module verifies (b)'s geometric tail by exact enumeration / Monte Carlo
-agreement, and the discrepancy covering by a deterministic box-hit computation
-on a low-discrepancy (van der Corput / Halton) sequence with a
-Cranley-Patterson shift.
+agreement, and the discrepancy implication using the exact one-dimensional
+star discrepancy of a van der Corput design.
 
 Checks:
   1. Geometric tail identity: P(at least one of n iid restarts lands in L_eps)
@@ -24,10 +24,11 @@ Checks:
   2. Monotone-best preservation: the running minimum of mixed arm outputs is
      non-increasing and equals the min over all arms' samples (law L3-style
      best update). Verified by construction on random streams.
-  3. Star-discrepancy covering: for a Halton+CP-shift sequence, once n exceeds
-     1/mu(B) up to the discrepancy term, every axis-aligned box B of measure
-     mu(B) is hit. Verified by a deterministic box-hit count vs the
-     Niederreiter bound n*mu(B) - n*D_n^*(P) > 0.
+  3. Star-discrepancy covering: an anchored interval B with volume v is hit
+     whenever v > D_n^*, since N(B)/n >= v-D_n^* > 0. For a d-dimensional
+     axis-aligned box the same implication uses extreme discrepancy, bounded
+     by 2^d D_n^* through inclusion--exclusion. The executable check evaluates
+     the exact 1-D star discrepancy and the resulting integer count bound.
 """
 
 import sympy as sp
@@ -91,52 +92,30 @@ def _van_der_corput(n, base=2):
     return out
 
 
-def _halton_2d(n, shift=(0.0, 0.0)):
-    x = _van_der_corput(n, 2)
-    y = _van_der_corput(n, 3)
-    # Cranley-Patterson shift modulo 1 (randomized QMC, preserves discrepancy)
-    x = (x + shift[0]) % 1.0
-    y = (y + shift[1]) % 1.0
-    return np.column_stack([x, y])
+def _star_discrepancy_1d(points):
+    """Return the exact star discrepancy of a finite one-dimensional design."""
 
-
-def _star_discrepancy_grid(points, grid=64):
-    """Upper estimate of the L-infinity star discrepancy D_n^* over a grid of
-    anchored boxes [0, a) x [0, b). For a low-discrepancy set this is O(log^2 n
-    / n); we just need a finite numeric value to plug into the covering bound."""
-    n = len(points)
-    xs = np.linspace(1.0 / grid, 1.0, grid)
-    ys = np.linspace(1.0 / grid, 1.0, grid)
-    worst = 0.0
-    for a in xs:
-        in_x = points[:, 0] < a
-        for b in ys:
-            count = np.count_nonzero(in_x & (points[:, 1] < b))
-            disc = abs(count / n - a * b)
-            if disc > worst:
-                worst = disc
-    return worst
+    ordered = np.sort(np.asarray(points, dtype=np.float64).reshape(-1))
+    if ordered.size == 0 or ordered[0] < 0.0 or ordered[-1] > 1.0:
+        raise ValueError("points must be a nonempty subset of the unit interval")
+    n = ordered.size
+    indices = np.arange(1, n + 1, dtype=np.float64)
+    closed_gap = indices / n - ordered
+    open_gap = ordered - (indices - 1.0) / n
+    return float(max(np.max(closed_gap), np.max(open_gap)))
 
 
 def discrepancy_covering(n=512, box_measure=0.05, seed=3):
-    """Deterministic covering: for a Halton+CP-shift set of size n and any
-    anchored box B of measure mu(B), the number of points in B is at least
-    n*mu(B) - n*D_n^* > 0 once n > D_n^*/mu(B). Verify by direct box-hit count
-    against the Niederreiter lower bound."""
-    rng = np.random.default_rng(seed)
-    shift = (rng.random(), rng.random())
-    pts = _halton_2d(n, shift)
-    dstar = _star_discrepancy_grid(pts, grid=48)
-    # Niederreiter lower bound on points in an anchored box of measure mu(B)
+    """Check the exact anchored-box count implied by star discrepancy."""
+
+    del seed
+    pts = _van_der_corput(n, 2)
+    dstar = _star_discrepancy_1d(pts)
     lower_bound = n * box_measure - n * dstar
-    # actual hit count for a worst-ish anchored box of the target measure:
-    # a = box_measure, b = 1 -> measure = box_measure
-    a = box_measure
-    actual = np.count_nonzero((pts[:, 0] < a) & (pts[:, 1] < 1.0))
-    covered = actual >= max(1, int(np.floor(lower_bound)))
-    # the threshold n > D*/mu(B) makes lower_bound positive
-    threshold_ok = n > dstar / box_measure
-    return covered and threshold_ok and lower_bound > 0, dstar, lower_bound, actual
+    actual = np.count_nonzero(pts < box_measure)
+    count_bound = actual / n >= box_measure - dstar - 1e-15
+    threshold_ok = box_measure > dstar
+    return count_bound and threshold_ok and actual >= 1, dstar, lower_bound, actual
 
 
 WITNESS = (
@@ -161,7 +140,7 @@ def derive():
     ok3, dstar, lb, actual = discrepancy_covering()
     print(f"  Check 3 (QMC star-discrepancy covering): {ok3}")
     print(
-        f"    D_n^* ~ {dstar:.4f}, Niederreiter lower bound n*mu - n*D* = {lb:.2f}, actual box hits = {actual}"
+        f"    exact D_n^* = {dstar:.4f}, count bound n*mu - n*D* = {lb:.2f}, actual interval hits = {actual}"
     )
     all_ok = WITNESS
     print("  ALL CHECKS PASS:", all_ok)
