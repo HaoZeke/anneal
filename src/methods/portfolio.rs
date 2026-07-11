@@ -23,8 +23,8 @@
 //! charged evaluations, so its proposals cost only their acceptance
 //! tests.
 
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::rngs::StdRng;
@@ -39,14 +39,14 @@ use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
 use crate::methods::bayesian_pilot::{
-    fit_laplace, pilot_draws_qmc, LaplacePosterior, PilotObservation, PilotPrior,
+    LaplacePosterior, PilotObservation, PilotPrior, fit_laplace, pilot_draws_qmc,
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
-    projected_gradient_polish, qmc_gsa_global_search, qmc_projected_gradient_polish,
-    qmc_trust_region_poll, shifted_qmc_projected_gradient_polish, QmcPolishResult,
+    QmcPolishResult, projected_gradient_polish, qmc_gsa_global_search,
+    qmc_projected_gradient_polish, qmc_trust_region_poll, shifted_qmc_projected_gradient_polish,
 };
-use crate::methods::parallel_tempering::{geometric_ladder, ParallelTemperingSampler};
+use crate::methods::parallel_tempering::{ParallelTemperingSampler, geometric_ladder};
 use crate::movekernel::{MoveKernel, TsallisVisit};
 use crate::runner::{qmc_skip_from_seed, run_rs, run_rs_variant_resumed};
 
@@ -77,7 +77,8 @@ fn erf_approx(x: f64) -> f64 {
     let t = 1.0 / (1.0 + 0.327_591_1 * x);
     let poly = t
         * (0.254_829_592
-            + t * (-0.284_496_736 + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+            + t * (-0.284_496_736
+                + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
     sign * (1.0 - poly * (-x * x).exp())
 }
 
@@ -227,6 +228,7 @@ const BAYESIAN_PILOT_MIN_CHAIN_STEPS: usize = 8;
 const BAYESIAN_GLE_MIN_PILOT_WORK: usize = PILOT_CHAINS * (BAYESIAN_PILOT_MIN_CHAIN_STEPS + 1);
 /// Low-dimensional smooth objectives can afford an initial replicated QMC polish.
 const LOW_DIMENSIONAL_POLISH_MAX_DIM: usize = 4;
+const COORDINATE_OPPOSITION_MAX_DIM: usize = 16;
 /// Final projected-gradient tolerance for the initial low-dimensional polish.
 const LOW_DIMENSIONAL_POLISH_GRAD_TOL: f64 = 1e-12;
 /// Ledger cost of a true objective call.
@@ -883,9 +885,7 @@ where
             panic!("noise_sigma must be positive and finite for OSA accept");
         }
         None => {
-            debug_assert!(
-                crate::methods::regime::require_accept_compatible(None, false).is_ok()
-            );
+            debug_assert!(crate::methods::regime::require_accept_compatible(None, false).is_ok());
             metropolis(delta_point, temp, rng)
         }
     }
@@ -1034,6 +1034,39 @@ where
         }
     }
     best_pos.map(|best_pos| ValueScout { best_pos, best_val })
+}
+
+fn coordinate_opposition_scout<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    bounds: &Bounds<f64>,
+) where
+    O: Objective<f64>,
+{
+    if bounds.dims == 0
+        || bounds.dims > COORDINATE_OPPOSITION_MAX_DIM
+        || ledger.remaining() < bounds.dims
+    {
+        return;
+    }
+    let mut incumbent = ledger.incumbent(bounds);
+    let mut incumbent_value = ledger.best_get();
+    for coordinate in 0..bounds.dims {
+        if ledger.exhausted() {
+            break;
+        }
+        let opposite = bounds.low[coordinate] + bounds.high[coordinate] - incumbent[coordinate];
+        if !opposite.is_finite() {
+            continue;
+        }
+        let mut candidate = incumbent.clone();
+        candidate[coordinate] = opposite;
+        let value = obj.eval(candidate.view());
+        if value.is_finite() && value < incumbent_value {
+            incumbent = candidate;
+            incumbent_value = value;
+        }
+    }
 }
 
 fn scaled_center_probe<O, G>(
@@ -1527,15 +1560,18 @@ fn run_arm<O, G>(
                     let res = qmc_projected_gradient_polish(
                         obj, grad, n_starts, per_start, seed, 1.0, 1e-8, 1,
                     );
-                    states.basins.register(res.best_pos.view(), res.best_val, &bounds);
+                    states
+                        .basins
+                        .register(res.best_pos.view(), res.best_val, &bounds);
                     return;
                 }
             }
             if slice >= 8 {
                 let chains = (slice / 8).clamp(2, 4 * dim.max(1));
-                let res =
-                    qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
-                states.basins.register(res.best_pos.view(), res.best_val, &bounds);
+                let res = qmc_gsa_global_search(obj, slice, seed, chains, 1.0, GSA_Q_V, GSA_Q_A);
+                states
+                    .basins
+                    .register(res.best_pos.view(), res.best_val, &bounds);
             }
         }
         ArmKind::Shift => {
@@ -1859,8 +1895,8 @@ fn run_arm<O, G>(
                     continue;
                 }
                 let delta = f_y - st.f_x;
-                let accepted = delta <= 0.0
-                    || (temp > 0.0 && rng.random::<f64>() < (-delta / temp).exp());
+                let accepted =
+                    delta <= 0.0 || (temp > 0.0 && rng.random::<f64>() < (-delta / temp).exp());
                 st.rm_n += 1;
                 let a = if accepted { 1.0 } else { 0.0 };
                 // Diminishing adaptation keeps the chain ergodic.
@@ -2033,11 +2069,7 @@ fn run_arm<O, G>(
                 * (0..dim)
                     .map(|j| {
                         let w = bounds.high[j] - bounds.low[j];
-                        if w.is_finite() && w > 0.0 {
-                            w * w
-                        } else {
-                            1.0
-                        }
+                        if w.is_finite() && w > 0.0 { w * w } else { 1.0 }
                     })
                     .sum::<f64>()
                     .sqrt();
@@ -2100,7 +2132,15 @@ fn library_arm_names(dim: usize, has_grad: bool) -> Vec<&'static str> {
     if dim >= 2 {
         names.extend_from_slice(&["metad", "tps"]);
     }
-    names.extend_from_slice(&["am_sa", "surrogate", "de", "tr_poll", "gsa", "variant", "pt"]);
+    names.extend_from_slice(&[
+        "am_sa",
+        "surrogate",
+        "de",
+        "tr_poll",
+        "gsa",
+        "variant",
+        "pt",
+    ]);
     if has_grad {
         names.push("hmc");
         if dim > 2 * REDUCED_K {
@@ -2160,16 +2200,7 @@ fn make_metad_bias(
     let width1 = (hi1 - lo1).abs().max(1e-3);
     let sigma = 0.15 * width0.min(width1);
     let w0 = 0.05 * mean_width(bounds).max(1.0);
-    crate::bias::WellTemperedBias::new(
-        projector,
-        mu,
-        [lo0, lo1],
-        [hi0, hi1],
-        sigma,
-        w0,
-        8.0,
-        32,
-    )
+    crate::bias::WellTemperedBias::new(projector, mu, [lo0, lo1], [hi0, hi1], sigma, w0, 8.0, 32)
 }
 
 /// Sketch-map MetaD bias from archive landmarks, or `None` if under-resolved.
@@ -2178,7 +2209,7 @@ fn try_sketchmap_metad_bias(
     bounds: &Bounds<f64>,
     ledger: &BudgetLedger,
 ) -> Option<crate::bias::WellTemperedBias> {
-    use crate::methods::sketchmap::{farthest_point_landmarks, SketchMap2d};
+    use crate::methods::sketchmap::{SketchMap2d, farthest_point_landmarks};
     use ndarray::Array2;
 
     let inner = ledger.inner.lock().ok()?;
@@ -2212,8 +2243,14 @@ fn try_sketchmap_metad_bias(
     let sm = SketchMap2d::fit(mat.view(), 35, 0.04)?;
     let (projector, mu, lo, hi) = sm.linearize_projector(1e-3 * mean_width(bounds).max(1e-3));
     // Guard degenerate Jacobians.
-    let col0: f64 = (0..dim).map(|d| projector[[d, 0]].powi(2)).sum::<f64>().sqrt();
-    let col1: f64 = (0..dim).map(|d| projector[[d, 1]].powi(2)).sum::<f64>().sqrt();
+    let col0: f64 = (0..dim)
+        .map(|d| projector[[d, 0]].powi(2))
+        .sum::<f64>()
+        .sqrt();
+    let col1: f64 = (0..dim)
+        .map(|d| projector[[d, 1]].powi(2))
+        .sum::<f64>()
+        .sqrt();
     if col0 < 1e-12 || col1 < 1e-12 {
         return None;
     }
@@ -2361,8 +2398,8 @@ fn run_tps_arm<O>(
     O: Objective<f64>,
 {
     use crate::methods::tps_shoot::{
-        accept_reactive_shoot, apply_shoot, linear_path, path_reactive_geometric,
-        path_reactive_objective, pick_shoot_direction, pick_shoot_index, ShootDirection,
+        ShootDirection, accept_reactive_shoot, apply_shoot, linear_path, path_reactive_geometric,
+        path_reactive_objective, pick_shoot_direction, pick_shoot_index,
     };
     states.last_exploratory_ok = false;
     if dim < 2 || slice < 8 {
@@ -2622,7 +2659,12 @@ where
     {
         // 28% front-load: DE needs population-scale budget on rugged boxes.
         let front_budget = ((budget as f64) * 0.28).round() as usize;
-        let preferred = [ArmKind::De, ArmKind::Gsa, ArmKind::Surrogate, ArmKind::Explore];
+        let preferred = [
+            ArmKind::De,
+            ArmKind::Gsa,
+            ArmKind::Surrogate,
+            ArmKind::Explore,
+        ];
         let per = (front_budget / preferred.len()).max(slice);
         let mut seed_f = seed ^ 0xBEEF_u64;
         for arm in preferred {
@@ -2693,52 +2735,52 @@ where
             if remaining <= reserve_floor {
                 true
             } else {
-            // Exploration term. Preferred: the distribution-free
-            // Good-Turing x record gate from the basin registry - the
-            // per-slice probability that a restart finds an unseen basin
-            // (missing mass n1/n) that also beats the incumbent (record
-            // probability 1/(w+1)). Fallback while the registry is thin:
-            // the aggregated Beta posteriors over improvement bits.
-            let gt = states.basins.record_discovery_prob();
-            let mut a_e = 0.0f64;
-            let mut b_e = 0.0f64;
-            for (arm, post) in arms.iter().zip(posteriors.iter()) {
-                if !matches!(arm, ArmKind::Shift | ArmKind::TrPoll | ArmKind::Hop) {
-                    a_e += post.alpha;
-                    b_e += post.beta;
-                }
-            }
-            let q0 = match gt {
-                Some(theta) => 1.0 - theta.min(1.0),
-                None => b_e / (a_e + b_e).max(1e-12),
-            };
-            let win = |p: usize| -> f64 {
-                let e = remaining.saturating_sub(p) / slice.max(1);
-                let pi = match gt {
-                    Some(theta) => (1.0 - theta.min(1.0)).powi(e.min(128) as i32),
-                    None => {
-                        let mut pi = 1.0f64;
-                        for i in 0..e.min(128) {
-                            pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
-                        }
-                        pi
+                // Exploration term. Preferred: the distribution-free
+                // Good-Turing x record gate from the basin registry - the
+                // per-slice probability that a restart finds an unseen basin
+                // (missing mass n1/n) that also beats the incumbent (record
+                // probability 1/(w+1)). Fallback while the registry is thin:
+                // the aggregated Beta posteriors over improvement bits.
+                let gt = states.basins.record_discovery_prob();
+                let mut a_e = 0.0f64;
+                let mut b_e = 0.0f64;
+                for (arm, post) in arms.iter().zip(posteriors.iter()) {
+                    if !matches!(arm, ArmKind::Shift | ArmKind::TrPoll | ArmKind::Hop) {
+                        a_e += post.alpha;
+                        b_e += post.beta;
                     }
-                };
-                (q0 + (1.0 - q0) * (1.0 - pi))
-                    * contraction.conversion_prob(NEAR_BEST_ORDERS, p)
-            };
-            let grid = 12usize;
-            let mut best_p = remaining / grid;
-            let mut best_w = win(best_p);
-            for j in 2..=grid {
-                let p = remaining * j / grid;
-                let w = win(p);
-                if w > best_w {
-                    best_w = w;
-                    best_p = p;
                 }
-            }
-            best_p + slice > remaining
+                let q0 = match gt {
+                    Some(theta) => 1.0 - theta.min(1.0),
+                    None => b_e / (a_e + b_e).max(1e-12),
+                };
+                let win = |p: usize| -> f64 {
+                    let e = remaining.saturating_sub(p) / slice.max(1);
+                    let pi = match gt {
+                        Some(theta) => (1.0 - theta.min(1.0)).powi(e.min(128) as i32),
+                        None => {
+                            let mut pi = 1.0f64;
+                            for i in 0..e.min(128) {
+                                pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
+                            }
+                            pi
+                        }
+                    };
+                    (q0 + (1.0 - q0) * (1.0 - pi))
+                        * contraction.conversion_prob(NEAR_BEST_ORDERS, p)
+                };
+                let grid = 12usize;
+                let mut best_p = remaining / grid;
+                let mut best_w = win(best_p);
+                for j in 2..=grid {
+                    let p = remaining * j / grid;
+                    let w = win(p);
+                    if w > best_w {
+                        best_w = w;
+                        best_p = p;
+                    }
+                }
+                best_p + slice > remaining
             }
         } else {
             false
@@ -2760,6 +2802,7 @@ where
             // quasi-Newton polish with shrinking trust-region poll
             // restarts until the budget is gone or two cycles go dry.
             ledger.cap_set(budget);
+            coordinate_opposition_scout(&budgeted_obj, &ledger, &bounds);
             let mut dry = 0usize;
             while ledger.remaining() >= 4 && dry < 3 {
                 let before = ledger.best_get();
@@ -2855,12 +2898,7 @@ where
             let mut idxs: Vec<usize> = arms
                 .iter()
                 .enumerate()
-                .filter(|(_, arm)| {
-                    preferred
-                        .iter()
-                        .take(width)
-                        .any(|&name| name == arm.name())
-                })
+                .filter(|(_, arm)| preferred.iter().take(width).any(|&name| name == arm.name()))
                 .map(|(i, _)| i)
                 .collect();
             if idxs.is_empty() {
