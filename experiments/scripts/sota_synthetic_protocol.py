@@ -20,18 +20,17 @@ import os
 import sys
 
 import numpy as np
-from scipy.optimize import basinhopping, differential_evolution, dual_annealing
 
 # Reuse counters / method wrappers from sota_cutest
 from experiments.scripts.sota_cutest import (
-    METHODS,
+    FIELDNAMES,
     Counter,
-    _Budget,
     classical,
     cma_es,
     cma_es_ipop,
     portfolio,
     portfolio_legacy,
+    run_method_cell,
     sci_basinhopping,
     sci_de,
     sci_dual_annealing,
@@ -102,7 +101,6 @@ def _rosenbrock(d):
     return f, g, np.full(d, -2.0), np.full(d, 2.0)
 
 
-
 def _schwefel(d):
     def f(x):
         x = np.asarray(x, float).reshape(-1)
@@ -112,7 +110,9 @@ def _schwefel(d):
         x = np.asarray(x, float).reshape(-1)
         # subgradient-like analytic form (approx)
         ax = np.abs(x) + 1e-12
-        return -(np.sin(np.sqrt(ax)) + 0.5 * np.sqrt(ax) * np.cos(np.sqrt(ax)) * np.sign(x))
+        return -(
+            np.sin(np.sqrt(ax)) + 0.5 * np.sqrt(ax) * np.cos(np.sqrt(ax)) * np.sign(x)
+        )
 
     return f, g, np.full(d, -500.0), np.full(d, 500.0)
 
@@ -139,6 +139,7 @@ def _griewank(d):
         return g
 
     return f, g, np.full(d, -600.0), np.full(d, 600.0)
+
 
 def problem_catalog():
     out = []
@@ -190,7 +191,7 @@ def main():
     rows = []
     oob_counts = {m: 0 for m in method_names}
     with open(args.out, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["problem", "dim", "method", "seed", "best", "evals"])
+        w = csv.DictWriter(fh, fieldnames=FIELDNAMES)
         w.writeheader()
         for row in problems:
             if len(row) == 6:
@@ -202,25 +203,23 @@ def main():
                 grad = None
             for s in range(args.seeds):
                 for m in method_names:
-                    rng = np.random.default_rng(s)
                     c = Counter(fn, args.budget)
-                    try:
-                        best = runners[m](c, low, high, dim, grad, rng, anchor=None)
-                    except (_Budget, Exception):  # noqa: BLE001
-                        best = c.best
-                    out_row = dict(
+                    out_row = run_method_cell(
+                        method_name=m,
+                        method=runners[m],
                         problem=pname,
                         dim=dim,
-                        method=m,
                         seed=s,
-                        best=best,
-                        evals=c.n,
+                        counter=c,
+                        low=low,
+                        high=high,
+                        grad=grad,
+                        anchor=None,
                     )
                     rows.append(out_row)
                     w.writerow(out_row)
                     fh.flush()
             print(f"  {pname} done", flush=True)
-
 
     # Domain-feasibility sanitize for known analytic boxes (Schwefel min ~0 on box).
     for r in rows:
@@ -229,8 +228,12 @@ def main():
                 oob_counts[r["method"]] = oob_counts.get(r["method"], 0) + 1
                 r["best"] = float("inf")
     oob_total = sum(oob_counts.values())
-    print(f"OOB/domain-impossible bests (sanitized to +inf): {oob_counts} total={oob_total}")
-    if any(m.startswith("portfolio") and oob_counts.get(m, 0) > 0 for m in method_names):
+    print(
+        f"OOB/domain-impossible bests (sanitized to +inf): {oob_counts} total={oob_total}"
+    )
+    if any(
+        m.startswith("portfolio") and oob_counts.get(m, 0) > 0 for m in method_names
+    ):
         raise SystemExit(
             f"FAIL: portfolio methods produced domain-impossible bests: {oob_counts}"
         )
@@ -253,7 +256,9 @@ def main():
         while i < len(ordered):
             j = i
             v = float(ordered[i]["best"])
-            while j < len(ordered) and abs(float(ordered[j]["best"]) - v) <= 1e-15 * max(1.0, abs(v)):
+            while j < len(ordered) and abs(
+                float(ordered[j]["best"]) - v
+            ) <= 1e-15 * max(1.0, abs(v)):
                 j += 1
             # ranks i+1 .. j inclusive -> average
             avg_rank = 0.5 * ((i + 1) + j)
@@ -273,14 +278,18 @@ def main():
     for m in method_names:
         mr = sum(ranks[m]) / len(ranks[m]) if ranks[m] else float("nan")
         print(
-            f"{m:16s} {wins[m]:5d} {100*wins[m]/n:7.1f} "
-            f"{100*near[m]/n:7.1f} {mr:10.2f}"
+            f"{m:16s} {wins[m]:5d} {100 * wins[m] / n:7.1f} "
+            f"{100 * near[m] / n:7.1f} {mr:10.2f}"
         )
     # Pairwise Auto vs Legacy if both present (strict best, not ties)
     if "portfolio" in method_names and "portfolio_legacy" in method_names:
         a_win = l_win = ties = 0
         for group in cells.values():
-            by_m = {r["method"]: float(r["best"]) for r in group if math.isfinite(float(r["best"]))}
+            by_m = {
+                r["method"]: float(r["best"])
+                for r in group
+                if math.isfinite(float(r["best"]))
+            }
             if "portfolio" not in by_m or "portfolio_legacy" not in by_m:
                 continue
             pa, pl = by_m["portfolio"], by_m["portfolio_legacy"]
