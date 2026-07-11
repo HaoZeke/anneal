@@ -6,6 +6,7 @@ from proofs.d4_thompson_allocation import (
     bernoulli_reduction,
     floored_regret_decomposition,
     floor_keeps_restart_arm,
+    harmonic_floor_diverges_symbolically,
 )
 
 
@@ -31,6 +32,7 @@ def test_floored_regret_within_bound():
 
 
 def test_floor_keeps_restart_arm_positive():
-    ok, pmin = floor_keeps_restart_arm()
+    ok, pmin = floor_keeps_restart_arm(horizon=8, K=3)
     assert ok
-    assert pmin > 0.0
+    assert pmin == 1.0 / 24.0
+    assert harmonic_floor_diverges_symbolically()
