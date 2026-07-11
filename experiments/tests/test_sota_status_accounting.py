@@ -3,7 +3,7 @@ import csv
 import numpy as np
 
 from experiments.scripts import sota_cutest
-from experiments.scripts.summarize_sota import summarize_rows
+from experiments.scripts.summarize_sota import failure_aware_mean_ranks, summarize_rows
 
 
 def test_unexpected_method_error_is_not_scored_as_partial_success():
@@ -56,6 +56,31 @@ def test_summary_excludes_failed_rows_and_uses_average_tie_ranks():
     assert summary["a"]["wins"] == 1
     assert summary["b"]["wins"] == 1
     assert "failed" not in summary
+
+
+def test_failure_aware_ranks_place_unsuccessful_methods_last_with_ties():
+    rows = [
+        {"problem": "p", "seed": "0", "method": "a", "best": "1", "status": "ok"},
+        {"problem": "p", "seed": "0", "method": "b", "best": "2", "status": "ok"},
+        {
+            "problem": "p",
+            "seed": "0",
+            "method": "c",
+            "best": "inf",
+            "status": "error:RuntimeError",
+        },
+        {
+            "problem": "p",
+            "seed": "0",
+            "method": "d",
+            "best": "inf",
+            "status": "nonfinite",
+        },
+    ]
+
+    ranks = failure_aware_mean_ranks(rows)
+
+    assert ranks == {"a": 1.0, "b": 2.0, "c": 3.5, "d": 3.5}
 
 
 def test_sota_csv_schema_keeps_status_and_split_work_counts(tmp_path):
