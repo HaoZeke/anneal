@@ -991,7 +991,11 @@ fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
 }
 
 fn scheduler_success_threshold(arm: ArmKind, ledger: &BudgetLedger) -> f64 {
-    arm_success_threshold(arm, archive_temp0(ledger))
+    arm_success_threshold(arm, scheduler_reward_scale(ledger))
+}
+
+fn scheduler_reward_scale(ledger: &BudgetLedger) -> f64 {
+    archive_temp0(ledger)
 }
 
 fn warmup_arm_index(round: usize, arm_count: usize) -> Option<usize> {
@@ -2974,6 +2978,7 @@ where
             best_idx
         };
         let before = ledger.best_get();
+        let reward_scale = scheduler_reward_scale(&ledger);
         let threshold = scheduler_success_threshold(arms[choice], &ledger);
         // Auto: preferred arms get larger slices under the same total budget.
         let arm_slice = if policy == PortfolioPolicy::Auto {
@@ -3026,7 +3031,7 @@ where
             && before.is_finite()
         {
             let delta = before - after;
-            if delta > 0.1 * before.abs().max(1.0) {
+            if delta > 0.1 * reward_scale.max(1.0) {
                 // Basin jump: contraction ratios across basins are
                 // meaningless; restart the ratio pairing.
                 prev_polish_delta = None;
