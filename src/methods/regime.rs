@@ -198,12 +198,12 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
 pub fn arm_prior_boost(regime: OptimizationRegime, arm: &str) -> (f64, f64) {
     let preferred = preferred_arm_tail(regime);
     // Top-3 preferred get a moderate success bias (rank 0 strongest).
-    if let Some(rank) = preferred.iter().position(|&a| a == arm) {
-        if rank < 3 {
-            // alpha: 5, 3.5, 2.5 for ranks 0..2
-            let alpha = 5.0 - 1.25 * rank as f64;
-            return (alpha.max(2.0), 1.0);
-        }
+    if let Some(rank) = preferred.iter().position(|&a| a == arm)
+        && rank < 3
+    {
+        // alpha: 5, 3.5, 2.5 for ranks 0..2
+        let alpha = 5.0 - 1.25 * rank as f64;
+        return (alpha.max(2.0), 1.0);
     }
     if arm == "explore" {
         return (2.0, 1.0);
@@ -236,10 +236,10 @@ pub fn regime_exploit_width(regime: OptimizationRegime) -> usize {
 /// Slice-size multiplier for preferred arms (1.0 = baseline).
 pub fn arm_slice_multiplier(regime: OptimizationRegime, arm: &str) -> f64 {
     let preferred = preferred_arm_tail(regime);
-    if let Some(rank) = preferred.iter().position(|&a| a == arm) {
-        if rank < 3 {
-            return 1.0 + 0.35 * (3 - rank) as f64; // 2.05, 1.70, 1.35
-        }
+    if let Some(rank) = preferred.iter().position(|&a| a == arm)
+        && rank < 3
+    {
+        return 1.0 + 0.35 * (3 - rank) as f64; // 2.05, 1.70, 1.35
     }
     1.0
 }
@@ -248,8 +248,6 @@ pub fn arm_slice_multiplier(regime: OptimizationRegime, arm: &str) -> f64 {
 pub fn exact_accept_allowed(regime: OptimizationRegime) -> bool {
     !matches!(regime, OptimizationRegime::StochasticNoise)
 }
-
-/// Refuse exact Metropolis under noise (out-of-regime path).
 
 /// Shipped gate for accept-path choice (GJQ-style regime refusal).
 ///
@@ -285,14 +283,14 @@ pub fn order_arms(available: &[&str], regime: OptimizationRegime, k_active: usiz
     let k_active = k_active.max(1);
     let mut out: Vec<String> = Vec::new();
     // Restart floor: explore first when available.
-    if available.iter().any(|&a| a == "explore") {
+    if available.contains(&"explore") {
         out.push("explore".into());
     }
     for &name in preferred_arm_tail(regime) {
         if name == "explore" {
             continue;
         }
-        if available.iter().any(|&a| a == name) && !out.iter().any(|x| x == name) {
+        if available.contains(&name) && !out.iter().any(|x| x == name) {
             out.push(name.into());
         }
     }
