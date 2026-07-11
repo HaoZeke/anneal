@@ -393,7 +393,12 @@ def _fit_turbo_or_restart(mll, fitter, model_fitting_error):
 
 
 def turbo(counter, low, high, dim, grad, rng, anchor=None):
-    """BoTorch TuRBO-1 with Thompson batches under the shared work cap."""
+    """BoTorch TuRBO-1 with Thompson batches under the shared work cap.
+
+    BoTorch's default fit retries handle unstable hyperparameter fits. An
+    exhausted fit retry starts a fresh trust region while preserving the
+    incumbent and charging every initial-design evaluation.
+    """
     del grad, anchor
     import torch
     from botorch.fit import fit_gpytorch_mll
