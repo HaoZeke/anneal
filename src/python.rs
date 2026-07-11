@@ -8,6 +8,9 @@
 //! evaluation cost dominates the per-call GIL overhead (~hundreds of ns),
 //! which is true for any non-toy objective.
 
+// Python-callable signatures mirror stable keyword APIs.
+#![allow(clippy::too_many_arguments)]
+
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::PyValueError;
@@ -401,10 +404,7 @@ fn polish(
     );
 
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -470,10 +470,7 @@ fn qmc_polish(
     );
 
     let out = PyDict::new(py);
-    out.set_item(
-        "best_pos",
-        PyArray1::from_vec(py, result.best_pos.iter().copied().collect()),
-    )?;
+    out.set_item("best_pos", PyArray1::from_vec(py, result.best_pos.to_vec()))?;
     out.set_item("best_val", result.best_val)?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
@@ -1064,7 +1061,7 @@ fn gle_langevin_result_to_dict(
     out.set_item("dt", result.dt)?;
     out.set_item(
         "preconditioner_diag",
-        PyArray1::from_vec(py, result.preconditioner_diag.iter().copied().collect()),
+        PyArray1::from_vec(py, result.preconditioner_diag.to_vec()),
     )?;
     out.set_item("n_preconditioner_grads", result.n_preconditioner_grads)?;
     Ok(out.into())
@@ -1333,12 +1330,12 @@ fn global_optimize(
         fn_: obj_fn,
         bounds,
     };
-    if let Some(sigma) = noise_sigma {
-        if !(sigma > 0.0 && sigma.is_finite()) {
-            return Err(PyValueError::new_err(
-                "noise_sigma must be positive and finite",
-            ));
-        }
+    if let Some(sigma) = noise_sigma
+        && (sigma <= 0.0 || !sigma.is_finite())
+    {
+        return Err(PyValueError::new_err(
+            "noise_sigma must be positive and finite",
+        ));
     }
     let pol = match policy {
         "auto" | "Auto" | "" => crate::PortfolioPolicy::Auto,
@@ -1380,12 +1377,12 @@ fn global_optimize_objective(
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    if let Some(sigma) = noise_sigma {
-        if !(sigma > 0.0 && sigma.is_finite()) {
-            return Err(PyValueError::new_err(
-                "noise_sigma must be positive and finite",
-            ));
-        }
+    if let Some(sigma) = noise_sigma
+        && (sigma <= 0.0 || !sigma.is_finite())
+    {
+        return Err(PyValueError::new_err(
+            "noise_sigma must be positive and finite",
+        ));
     }
     let result = if use_gradient {
         crate::portfolio_optimize(&*objective, Some(&*objective), budget, seed, noise_sigma)
@@ -1586,10 +1583,10 @@ fn osa_acceptance_rate(
     c_star: f64,
     seed: u64,
 ) -> PyResult<(f64, f64)> {
-    if !(temp > 0.0) {
+    if temp.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return Err(PyValueError::new_err("temp must be positive"));
     }
-    if !(sigma > 0.0) {
+    if sigma.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
         return Err(PyValueError::new_err("sigma must be positive"));
     }
     let osa = crate::noise_accept::OsaAccept::with_params(c_star, 100_000);
