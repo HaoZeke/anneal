@@ -63,8 +63,8 @@ class CutestConfig:
     myarch: str = "pc64.lnx.gfo"
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "bench_dir", Path(self.bench_dir))
-        object.__setattr__(self, "cache_dir", Path(self.cache_dir))
+        object.__setattr__(self, "bench_dir", Path(self.bench_dir).expanduser().resolve())
+        object.__setattr__(self, "cache_dir", Path(self.cache_dir).expanduser().resolve())
 
     @classmethod
     def from_root(
