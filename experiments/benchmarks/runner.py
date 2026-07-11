@@ -53,14 +53,13 @@ def _run_anneal(p: Problem, variant: str, seed: int, n_epochs: int,
     np_dtype = np.dtype(dtype)
     cur_pos = rng.uniform(p.low, p.high, size=p.low.shape).astype(np_dtype)
     cur_val = np_dtype.type(p.fn(cur_pos))
-    best_pos = cur_pos.copy()
     best_val = cur_val
     n_calls = 1
 
     sigma = max(0.05, 0.1 * float(np.linalg.norm(p.high - p.low)) / np.sqrt(p.dim))
     gamma = sigma
     t_init = max(1.0, abs(p.f_star) / 10.0) if p.f_star != 0 else 1.0
-    q_v, q_a = 2.62, 1.7
+    q_v = 2.62
 
     from experiments.shared.runner import (
         cauchy_propose,
@@ -98,7 +97,6 @@ def _run_anneal(p: Problem, variant: str, seed: int, n_epochs: int,
                 cur_val = proposal_val
                 if proposal_val < best_val:
                     best_val = proposal_val
-                    best_pos = proposal.copy()
 
     wall = time.perf_counter() - t0
     tol = _tolerance(p)

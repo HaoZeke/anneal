@@ -207,7 +207,6 @@ class AdditiveSurrogate:
         """Independent per-coordinate draws from exp(-g_j/T)/Z_j (1D Rosenblatt)."""
         dim = self.coeffs.shape[0]
         out = np.empty((n, dim))
-        width = None
         for j in range(dim):
             xs, g = self._coord_grid_energy(j, grid_m)
             z = np.clip((g - g.min()) / max(T, 1e-12), 0.0, 700.0)
@@ -506,11 +505,14 @@ def _self_test() -> int:
         thresh = fstar + max(0.01 * abs(fstar), 1.0)
         for seed in range(20):
             bf0, _ = additive_independence_sa(toy, seed, budget, degree=8)
-            mf_best.append(bf0); mf_hits += int(bf0 <= thresh)
+            mf_best.append(bf0)
+            mf_hits += int(bf0 <= thresh)
             bf1, _ = tt_independence_sa(toy, seed, budget, k=3, degree=6, grid_m=17)
-            tt_best.append(bf1); tt_hits += int(bf1 <= thresh)
+            tt_best.append(bf1)
+            tt_hits += int(bf1 <= thresh)
             bf2, _ = _rwm_sa(toy, seed, budget)
-            rwm_best.append(bf2); rwm_hits += int(bf2 <= thresh)
+            rwm_best.append(bf2)
+            rwm_hits += int(bf2 <= thresh)
         print(f"    {name:14s} {budget:6d} {mf_hits:4d}/20 {tt_hits:4d}/20 "
               f"{rwm_hits:3d}/20   "
               f"{np.median(mf_best):.2f} / {np.median(tt_best):.2f} / "

@@ -101,7 +101,6 @@ def check_discrete_step_preserves_C():
     preserves Cov = C:  Tprop C Tprop^T + (C - Tprop C Tprop^T) = C.
     Verified symbolically without evaluating the matrix exponential (the
     identity holds for ANY Tprop)."""
-    dt = sp.symbols("dt", positive=True)
     Tprop = sp.MatrixSymbol("Tp", 2, 2)
     Tp = sp.Matrix(Tprop)
     sst = C - Tp * C * Tp.T           # noise covariance S S^T

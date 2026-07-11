@@ -119,7 +119,6 @@ def fit_optimal_drift(omega_min, omega_max, n_pairs, seed=0, maxiter=160):
         eff = np.array([_relax_rate(w, a) / w for w in grid])
         return -eff.min()
 
-    span = hi - lo
     bounds = (
         [(lo - 0.5, hi + 0.5)] * n_pairs           # bath frequencies (a bit past the band)
         + [(lo - 0.5, hi + 2.0)] * n_pairs         # dampings

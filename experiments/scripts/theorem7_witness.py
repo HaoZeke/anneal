@@ -158,10 +158,6 @@ def main():
                 "mean_F_times_qm1": mean_f * (q_v - 1.0),
                 "n_accepts": accept_count,
             })
-        mean_ratio = np.nanmean([r["ratio_emp_to_pred"] for r in rows
-                                  if r["q_v"] == q_v])
-        std_ratio = np.nanstd([r["ratio_emp_to_pred"] for r in rows
-                                if r["q_v"] == q_v])
         mean_f_avg = np.nanmean([r["mean_F"] for r in rows
                                   if r["q_v"] == q_v])
         f_pred = T / (q_v - 1.0)

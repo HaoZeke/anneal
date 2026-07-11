@@ -59,8 +59,10 @@ def hybrid_bmsa(counter, low, high, dim, rng, n_chains=4, sa_block=150, n_polish
     bounds = list(zip(low, high))
     chains = [rng.uniform(low, high) for _ in range(n_chains)]
     vals = [counter(c) for c in chains]
-    a = np.ones(n_chains); b = np.ones(n_chains)
-    best_x = chains[int(np.argmin(vals))].copy(); best_v = min(vals)
+    a = np.ones(n_chains)
+    b = np.ones(n_chains)
+    best_x = chains[int(np.argmin(vals))].copy()
+    best_v = min(vals)
     sigma = _auto_sigma(low, high, dim)
     polish_every = max(1, counter.budget // n_polish)
     last_polish = 0
@@ -77,7 +79,8 @@ def hybrid_bmsa(counter, low, high, dim, rng, n_chains=4, sa_block=150, n_polish
                     chains[i], vals[i] = y, fy
                     if fy < best_v:
                         best_v, best_x, improved = fy, y.copy(), True
-            a[i] += improved; b[i] += (not improved)
+            a[i] += improved
+            b[i] += not improved
             epoch += 1
             if counter.n - last_polish >= polish_every:     # local refinement
                 res = minimize(counter, best_x, method="L-BFGS-B", bounds=bounds,
@@ -131,7 +134,10 @@ def plain_sa(counter, low, high, dim, rng):
 
 def _plain(counter, low, high, dim, rng):
     sigma = _auto_sigma(low, high, dim)
-    x = rng.uniform(low, high); fx = counter(x); best = fx; epoch = 0
+    x = rng.uniform(low, high)
+    fx = counter(x)
+    best = fx
+    epoch = 0
     try:
         while True:
             temp = 5.0 * np.log(2.0) / np.log(epoch + 2.0)

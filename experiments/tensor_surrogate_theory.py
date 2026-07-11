@@ -173,7 +173,9 @@ def A3_separable_exact_one_shot() -> bool:
 def B1_optimal_scaling() -> bool:
     """Roberts-Gelman-Gilks (1997): optimal RWM scaling and the 0.234 rule."""
     ell = sp.symbols("ell", positive=True)
-    Phi = lambda z: (1 + sp.erf(z / sp.sqrt(2))) / 2
+    def Phi(z):
+        return (1 + sp.erf(z / sp.sqrt(2))) / 2
+
     speed = 2 * ell**2 * Phi(-ell / 2)
     ell_star = sp.nsolve(sp.diff(speed, ell), ell, 2.4)
     accept = float(2 * Phi(-ell_star / 2))
@@ -236,8 +238,8 @@ def B5_gibbs_argmin() -> bool:
     Z = sum(sp.exp(-e / T) for e in energy)
     limit = [sp.limit(sp.exp(-e / T) / Z, T, 0, dir="+") for e in energy]
     expected = [sp.Rational(1, 2), 0, sp.Rational(1, 2), 0]
-    ok = all(sp.simplify(l - x) == 0 for l, x in zip(limit, expected))
-    print(f"[B5] Varadhan/Hajek: lim pi_T = {[str(l) for l in limit]} on argmin")
+    ok = all(sp.simplify(limit_value - x) == 0 for limit_value, x in zip(limit, expected))
+    print(f"[B5] Varadhan/Hajek: lim pi_T = {[str(limit_value) for limit_value in limit]} on argmin")
     return bool(ok)
 
 

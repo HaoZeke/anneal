@@ -46,7 +46,6 @@ def classical_sa(seed, n_epochs, k_fixed, t_init=5.0, sigma=0.5):
     cur_pos = rng.uniform(LOW, HIGH).astype(np.float64)
     cur_val = rastrigin_5d(cur_pos)
     best_val = cur_val
-    best_pos = cur_pos.copy()
     n_calls = 1
     for epoch in range(n_epochs):
         temp = log_cool(t_init, 2.0, epoch, np.float64)
@@ -62,7 +61,6 @@ def classical_sa(seed, n_epochs, k_fixed, t_init=5.0, sigma=0.5):
                 cur_val = proposal_val
                 if proposal_val < best_val:
                     best_val = proposal_val
-                    best_pos = proposal.copy()
     return best_val, n_calls
 
 
