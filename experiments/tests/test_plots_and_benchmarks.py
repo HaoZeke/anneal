@@ -546,6 +546,24 @@ def test_cutest_config_canonicalizes_relative_paths(tmp_path, monkeypatch):
     assert config.cache_dir == tmp_path / "cache-shard"
 
 
+def test_cutest_loader_quarantines_incomplete_cache_entry(tmp_path, monkeypatch):
+    from experiments.benchmarks import cutest_runner
+
+    holder = tmp_path / "cache" / "pycutest_cache_holder"
+    incomplete = holder / "AKIVA"
+    incomplete.mkdir(parents=True)
+    (incomplete / "__init__.py").write_text("")
+    stale = types.ModuleType("pycutest_cache_holder.AKIVA")
+    monkeypatch.setitem(sys.modules, "pycutest_cache_holder.AKIVA", stale)
+
+    quarantined = cutest_runner.quarantine_incomplete_cache_entry(holder, "AKIVA")
+
+    assert quarantined == holder / "AKIVA.incomplete"
+    assert quarantined.is_dir()
+    assert not incomplete.exists()
+    assert "pycutest_cache_holder.AKIVA" not in sys.modules
+
+
 def test_cutest_sota_configuration_stays_explicit():
     root = Path(__file__).resolve().parents[2]
     experiments = root / "experiments"
