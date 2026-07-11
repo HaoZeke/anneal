@@ -19,17 +19,13 @@ enumeration on a small horizon:
      Delta_k = theta* - theta_k. (We cite, not reprove, the O(sum (log T)/Delta)
      bound; we verify the reduction is exact: improvement events are i.i.d.
      Bernoulli under the stationary approximation.)
-  3. Floor-perturbed allocation: a probability floor epsilon_0 forces each arm
-     to be played with probability >= epsilon_0 every round (so D3's restart arm
-     runs infinitely often). The floor inflates regret by at most
-     epsilon_0 * n * Delta_max in expectation (each forced exploration of a
-     suboptimal arm costs at most Delta_max). Verified by EXACT enumeration of
-     the floored-Thompson process on a short horizon: expected regret of the
-     floored policy minus the unfloored policy is <= epsilon_0 * n * Delta_max.
-  4. D3 guarantee preserved: under the floor, the per-round play probability of
-     the restart arm is >= epsilon_0 > 0, so sum_n P(play restart at n) = inf,
-     and Borel-Cantelli (D3 Theorem D3.1) still fires. Verified as a positivity
-     check on the floored selection probability.
+  3. Floor-perturbed allocation: on round m the implementation chooses a
+     uniformly random arm with probability epsilon_m = 1/m. The extra expected
+     regret is at most Delta_max sum_{m<=n} 1/m = Delta_max H_n. Exact short-
+     horizon enumeration checks the bound for the reference bandit.
+  4. D3 guarantee preserved: with K arms, the restart arm has probability at
+     least 1/(Km) on round m. The harmonic sum diverges, so independent floor
+     draws schedule it infinitely often almost surely.
 
 Style follows proofs/thmN_*.py.
 """
@@ -91,22 +87,22 @@ def _greedy_thompson_means(alpha, beta):
     return int(np.argmax(means))
 
 
-def floored_regret_decomposition(thetas=(0.7, 0.3), eps0=0.1, horizon=8):
+def floored_regret_decomposition(thetas=(0.7, 0.3), horizon=8):
     """Exact enumeration of the floored allocation over `horizon` rounds with K
-    = len(thetas) arms. At each round the policy plays the (mean-)greedy arm
-    with prob (1 - eps0) and a uniformly random arm with prob eps0 (the floor).
-    Reward of arm k is Bernoulli(theta_k). We compute the expected regret of the
-    floored policy and the unfloored (eps0 = 0) policy by exact recursion over
-    posterior states, and verify
+    = len(thetas) arms. On one-indexed round m the policy plays the
+    (mean-)greedy arm with probability 1 - 1/m and a uniformly random arm with
+    probability 1/m. Reward of arm k is Bernoulli(theta_k). We compute the
+    expected regret of the floored and unfloored policies by exact recursion
+    over posterior states, and verify
 
-        E[regret_floored] - E[regret_unfloored] <= eps0 * horizon * Delta_max.
+        E[regret_floored] - E[regret_unfloored] <= H_horizon * Delta_max.
     """
     K = len(thetas)
     theta_star = max(thetas)
     deltas = [theta_star - t for t in thetas]
     delta_max = max(deltas)
 
-    def expected_regret(eps):
+    def expected_regret(use_floor):
         # state: tuple of (alpha_k, beta_k); start Beta(1,1) each
         from functools import lru_cache
 
@@ -118,7 +114,7 @@ def floored_regret_decomposition(thetas=(0.7, 0.3), eps0=0.1, horizon=8):
             beta = [state[2 * k + 1] for k in range(K)]
             greedy = _greedy_thompson_means(alpha, beta)
             total = 0.0
-            # build per-arm play probabilities: floor mixes uniform
+            eps = 1.0 / (round_idx + 1.0) if use_floor else 0.0
             play_prob = [eps / K] * K
             play_prob[greedy] += 1.0 - eps
             for k in range(K):
@@ -142,19 +138,23 @@ def floored_regret_decomposition(thetas=(0.7, 0.3), eps0=0.1, horizon=8):
         start = tuple([1, 1] * K)
         return rec(0, start)
 
-    r_floored = expected_regret(eps0)
-    r_unfloored = expected_regret(0.0)
+    r_floored = expected_regret(True)
+    r_unfloored = expected_regret(False)
     extra = r_floored - r_unfloored
-    bound = eps0 * horizon * delta_max
+    bound = sum(1.0 / m for m in range(1, horizon + 1)) * delta_max
     return extra <= bound + 1e-9, extra, bound
 
 
-def floor_keeps_restart_arm(eps0=0.1, K=3):
-    """Under the floor, every arm (including D3's restart arm) is played each
-    round with probability >= eps0 / K > 0, so sum over rounds diverges and
-    Borel-Cantelli (D3 Theorem D3.1) still fires. Positivity check."""
-    per_round_min = eps0 / K
-    return per_round_min > 0.0, per_round_min
+def harmonic_floor_diverges_symbolically():
+    n = sp.symbols("n", integer=True, positive=True)
+    return sp.limit(sp.harmonic(n), n, sp.oo) == sp.oo
+
+
+def floor_keeps_restart_arm(horizon=8, K=3):
+    """Return the final-round floor and certify its divergent cumulative mass."""
+
+    per_round_min = 1.0 / (K * horizon)
+    return harmonic_floor_diverges_symbolically() and per_round_min > 0.0, per_round_min
 
 
 WITNESS = (
@@ -162,6 +162,7 @@ WITNESS = (
     and bernoulli_reduction()[0]
     and floored_regret_decomposition()[0]
     and floor_keeps_restart_arm()[0]
+    and harmonic_floor_diverges_symbolically()
 )
 
 
@@ -177,13 +178,11 @@ def derive():
         f"  Check 2 (slice reward = Bernoulli(theta), reduction exact): {ok2}  emp={emp:.4f} theta={th}"
     )
     ok3, extra, bound = floored_regret_decomposition()
-    print(f"  Check 3 (floored regret <= unfloored + eps0*n*Delta_max): {ok3}")
-    print(
-        f"    extra regret from floor = {extra:.6f}  <=  eps0*n*Delta_max = {bound:.6f}"
-    )
+    print(f"  Check 3 (floored regret <= unfloored + H_n*Delta_max): {ok3}")
+    print(f"    extra regret from floor = {extra:.6f}  <=  H_n*Delta_max = {bound:.6f}")
     ok4, pmin = floor_keeps_restart_arm()
     print(
-        f"  Check 4 (floor keeps restart arm: per-round play prob >= {pmin:.4f} > 0): {ok4}"
+        f"  Check 4 (harmonic floor diverges; final-round arm probability {pmin:.4f}): {ok4}"
     )
     all_ok = WITNESS
     print("  ALL CHECKS PASS:", all_ok)
