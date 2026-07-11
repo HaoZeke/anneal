@@ -67,3 +67,19 @@ def test_sota_csv_schema_keeps_status_and_split_work_counts(tmp_path):
     assert {"status", "objective_evals", "grad_evals", "evals"} <= set(
         sota_cutest.FIELDNAMES
     )
+
+
+def test_problem_manifest_preserves_declared_order_kind_and_dimension(tmp_path):
+    path = tmp_path / "problems.csv"
+    path.write_text(
+        "problem,kind,dim,stratum,selection_key\n"
+        "ROSENBR,unconstrained,2,u_1_3,001\n"
+        "BOX3,bound,3,b_1_3,002\n"
+    )
+
+    targets = sota_cutest.load_problem_manifest(path)
+
+    assert [(t.name, t.kind, t.dim) for t in targets] == [
+        ("ROSENBR", "unconstrained", 2),
+        ("BOX3", "bound", 3),
+    ]
