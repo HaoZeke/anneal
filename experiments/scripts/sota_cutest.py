@@ -399,6 +399,26 @@ def _fit_turbo_or_restart(mll, fitter, model_fitting_error):
     return True
 
 
+def _finite_turbo_targets(values, *, reference):
+    """Replace invalid maximization targets with a finite pessimistic value."""
+
+    targets = np.asarray(values, dtype=np.float64).copy()
+    reference = np.asarray(reference, dtype=np.float64)
+    finite = np.concatenate(
+        (targets[np.isfinite(targets)], reference[np.isfinite(reference)])
+    )
+    if finite.size == 0:
+        raise ValueError("TuRBO requires at least one finite objective observation")
+    scale = max(1.0, float(np.max(np.abs(finite))))
+    scaled = finite / scale
+    penalty = max(1.0 / scale, float(np.max(scaled) - np.min(scaled)))
+    fallback = (float(np.min(scaled)) - penalty) * scale
+    if not math.isfinite(fallback):
+        fallback = -np.finfo(np.float64).max
+    targets[~np.isfinite(targets)] = fallback
+    return targets
+
+
 def turbo(counter, low, high, dim, grad, rng, anchor=None):
     """BoTorch TuRBO-1 with Thompson batches under the shared work cap.
 
@@ -406,10 +426,10 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
     exhausted fit retry starts a fresh trust region while preserving the
     incumbent and charging every initial-design evaluation.
     """
-    del grad, anchor
+    del grad
     import torch
     from botorch.fit import fit_gpytorch_mll
-    from botorch.exceptions.errors import ModelFittingError
+    from botorch.exceptions.errors import InputDataError, ModelFittingError
     from botorch.generation import MaxPosteriorSampling
     from botorch.models import SingleTaskGP
     from gpytorch.constraints import Interval
@@ -420,29 +440,45 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
     dtype = torch.double
     torch.manual_seed(int(rng.integers(1 << 31)))
     width = np.asarray(high - low, dtype=np.float64)
+    anchor = (
+        np.asarray(anchor, dtype=np.float64).reshape(-1)
+        if anchor is not None
+        else 0.5 * (low + high)
+    )
+    anchor_unit = np.clip((anchor - low) / width, 0.0, 1.0)
+    x_anchor = torch.tensor(anchor_unit, dtype=dtype).unsqueeze(0)
+    y_anchor = torch.tensor([[-counter.best]], dtype=dtype)
 
-    def evaluate(unit_points):
+    def evaluate(unit_points, reference):
         values = []
         for point in unit_points.detach().cpu().numpy():
             values.append(-counter(low + width * point))
-        return torch.tensor(values, dtype=dtype).unsqueeze(-1)
+        finite = _finite_turbo_targets(
+            np.asarray(values, dtype=np.float64).reshape(-1, 1),
+            reference=reference.detach().cpu().numpy(),
+        )
+        return torch.tensor(finite, dtype=dtype)
 
     while counter.n < counter.budget:
         remaining = counter.budget - counter.n
-        n_init = min(remaining, max(8, 2 * dim + 1))
+        n_init = min(remaining, max(7, 2 * dim))
         sobol = torch.quasirandom.SobolEngine(
             dim, scramble=True, seed=int(rng.integers(1 << 31))
         )
-        x_data = sobol.draw(n_init).to(dtype=dtype)
-        y_data = evaluate(x_data)
+        x_initial = sobol.draw(n_init).to(dtype=dtype)
+        y_initial = evaluate(x_initial, y_anchor)
+        x_data = torch.cat((x_anchor, x_initial), dim=0)
+        y_data = torch.cat((y_anchor, y_initial), dim=0)
         state = _TurboState(
             dim=dim,
             batch_size=min(4, max(1, counter.budget - counter.n)),
             best_value=float(y_data.max()),
         )
         while counter.n < counter.budget and not state.restart_triggered:
-            y_std = y_data.std().clamp_min(1e-12)
-            train_y = (y_data - y_data.mean()) / y_std
+            y_scale = y_data.abs().max().clamp_min(1.0)
+            scaled_y = y_data / y_scale
+            y_std = scaled_y.std(unbiased=False).clamp_min(1e-12)
+            train_y = (scaled_y - scaled_y.mean()) / y_std
             likelihood = GaussianLikelihood(noise_constraint=Interval(1e-8, 1e-3))
             covariance = ScaleKernel(
                 MaternKernel(
@@ -451,12 +487,16 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
                     lengthscale_constraint=Interval(0.005, 4.0),
                 )
             )
-            model = SingleTaskGP(
-                x_data,
-                train_y,
-                covar_module=covariance,
-                likelihood=likelihood,
-            )
+            try:
+                model = SingleTaskGP(
+                    x_data,
+                    train_y,
+                    covar_module=covariance,
+                    likelihood=likelihood,
+                )
+            except InputDataError:
+                state.restart_triggered = True
+                break
             mll = ExactMarginalLogLikelihood(model.likelihood, model)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -486,7 +526,7 @@ def turbo(counter, low, high, dim, grad, rng, anchor=None):
                 warnings.simplefilter("ignore")
                 with torch.no_grad():
                     x_next = sampler(candidate_set, num_samples=batch_size)
-            y_next = evaluate(x_next)
+            y_next = evaluate(x_next, y_data)
             state = _turbo_update(state, y_next)
             x_data = torch.cat((x_data, x_next), dim=0)
             y_data = torch.cat((y_data, y_next), dim=0)
