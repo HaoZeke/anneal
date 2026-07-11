@@ -90,12 +90,64 @@ def summarize_rows(rows):
     }
 
 
+def failure_aware_mean_ranks(rows):
+    """Rank every reported method, tying unsuccessful cells at the bottom."""
+    cells = defaultdict(dict)
+    methods = sorted({row["method"] for row in rows})
+    for row in rows:
+        cells[(row["problem"], row["seed"])][row["method"]] = row
+
+    rank_sum = defaultdict(float)
+    rank_n = defaultdict(int)
+    for cell in cells.values():
+        successful = sorted(
+            (
+                (method, float(row["best"]))
+                for method, row in cell.items()
+                if _valid_finite(row)
+            ),
+            key=lambda item: item[1],
+        )
+        i = 0
+        while i < len(successful):
+            j = i + 1
+            plateau = successful[i][1]
+            tolerance = WIN_ATOL + WIN_RTOL * abs(plateau)
+            while j < len(successful) and abs(successful[j][1] - plateau) <= tolerance:
+                j += 1
+            average_rank = 0.5 * ((i + 1) + j)
+            for method, _ in successful[i:j]:
+                rank_sum[method] += average_rank
+                rank_n[method] += 1
+            i = j
+
+        unsuccessful = [
+            method
+            for method in methods
+            if method not in cell or not _valid_finite(cell[method])
+        ]
+        if unsuccessful:
+            first = len(successful) + 1
+            last = len(successful) + len(unsuccessful)
+            average_rank = 0.5 * (first + last)
+            for method in unsuccessful:
+                rank_sum[method] += average_rank
+                rank_n[method] += 1
+
+    return {
+        method: rank_sum[method] / rank_n[method]
+        for method in methods
+        if rank_n[method]
+    }
+
+
 def main(paths):
     rows = load_rows(paths)
     if not rows:
         print("no rows")
         return 1
     summary = summarize_rows(rows)
+    penalized_ranks = failure_aware_mean_ranks(rows)
     all_cells = {(row["problem"], row["seed"]) for row in rows}
     n_cells = len(all_cells)
     methods = sorted({row["method"] for row in rows})
@@ -113,14 +165,15 @@ def main(paths):
         metrics = summary.get(m)
         if metrics is None:
             print(
-                f"{m:>16} {0:>6} {0.0:>5.1f}% {'nan':>9} {0.0:>9.1f}% {failures[m]:>6}"
+                f"{m:>16} {0:>6} {0.0:>5.1f}% "
+                f"{penalized_ranks[m]:>9.2f} {0.0:>9.1f}% {failures[m]:>6}"
             )
             continue
         near = 100.0 * metrics["near_best"] / metrics["eligible_cells"]
         print(
             f"{m:>16} {metrics['wins']:>6} "
             f"{100.0 * metrics['wins'] / n_cells:>5.1f}% "
-            f"{metrics['mean_rank']:>9.2f} {near:>9.1f}% {failures[m]:>6}"
+            f"{penalized_ranks[m]:>9.2f} {near:>9.1f}% {failures[m]:>6}"
         )
     return 0
 
