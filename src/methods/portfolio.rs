@@ -229,6 +229,7 @@ const BAYESIAN_GLE_MIN_PILOT_WORK: usize = PILOT_CHAINS * (BAYESIAN_PILOT_MIN_CH
 /// Low-dimensional smooth objectives can afford an initial replicated QMC polish.
 const LOW_DIMENSIONAL_POLISH_MAX_DIM: usize = 4;
 const COORDINATE_OPPOSITION_MAX_DIM: usize = 16;
+const COORDINATE_OPPOSITION_WEIGHT: f64 = 1.05;
 /// Final projected-gradient tolerance for the initial low-dimensional polish.
 const LOW_DIMENSIONAL_POLISH_GRAD_TOL: f64 = 1e-12;
 /// Ledger cost of a true objective call.
@@ -1055,7 +1056,9 @@ fn coordinate_opposition_scout<O>(
         if ledger.exhausted() {
             break;
         }
-        let opposite = bounds.low[coordinate] + bounds.high[coordinate] - incumbent[coordinate];
+        let center = 0.5 * (bounds.low[coordinate] + bounds.high[coordinate]);
+        let opposite = (center - COORDINATE_OPPOSITION_WEIGHT * (incumbent[coordinate] - center))
+            .clamp(bounds.low[coordinate], bounds.high[coordinate]);
         if !opposite.is_finite() {
             continue;
         }
