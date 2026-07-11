@@ -3239,7 +3239,7 @@ mod tests {
                 1e-9,
             ),
         };
-        let _ = portfolio_optimize::<_, BadBox>(&obj, None, 10, 0, None);
+        let _ = portfolio_optimize::<_, Rastrigin<1>>(&obj, None, 10, 0, None);
     }
 
     #[test]

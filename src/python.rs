@@ -45,7 +45,7 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
                 "bounds must be finite at dimension {i}"
             )));
         }
-        if !(lo < hi) {
+        if lo.partial_cmp(&hi) != Some(std::cmp::Ordering::Less) {
             return Err(PyValueError::new_err(format!(
                 "low[{i}] must be strictly less than high[{i}] (got {lo} >= {hi})"
             )));
