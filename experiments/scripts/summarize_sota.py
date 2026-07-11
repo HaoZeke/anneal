@@ -42,27 +42,48 @@ def summarize_rows(rows):
     cells = defaultdict(dict)
     for row in rows:
         key = (row["problem"], row["seed"])
-        if _valid_finite(row):
-            cells[key][row["method"]] = float(row["best"])
+        cells[key][row["method"]] = row
 
-    methods = sorted({m for cell in cells.values() for m in cell})
+    methods = sorted({row["method"] for row in rows})
     wins = defaultdict(int)
     rank_sum = defaultdict(float)
     rank_n = defaultdict(int)
     solved = defaultdict(int)
     solved_n = defaultdict(int)
 
-    for cell in cells.values():
+    for reported in cells.values():
+        cell = {
+            method: float(row["best"])
+            for method, row in reported.items()
+            if _valid_finite(row)
+        }
         if not cell:
+            for method in methods:
+                solved_n[method] += 1
             continue
         best = min(cell.values())
-        worst = max(cell.values())
-        spread = max(worst - best, 1.0)
+        starts = {
+            float(row["initial"])
+            for row in reported.values()
+            if "initial" in row and math.isfinite(float(row["initial"]))
+        }
+        if len(starts) > 1:
+            raise ValueError(
+                f"problem-seed cell has inconsistent starting objectives: {starts}"
+            )
+        if starts:
+            initial = starts.pop()
+            if best > initial + WIN_ATOL + WIN_RTOL * abs(initial):
+                raise ValueError("best observed value is worse than the retained start")
+            target = best + DM_TAU * (initial - best)
+        else:
+            target = best + DM_TAU * max(max(cell.values()) - best, 1.0)
+        for method in methods:
+            solved_n[method] += 1
         for m, v in cell.items():
             if v <= best + WIN_ATOL + WIN_RTOL * abs(best):
                 wins[m] += 1
-            solved_n[m] += 1
-            if v <= best + DM_TAU * spread:
+            if v <= target:
                 solved[m] += 1
         ordered = sorted(cell.items(), key=lambda item: item[1])
         i = 0
