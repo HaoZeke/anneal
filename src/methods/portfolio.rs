@@ -3572,6 +3572,65 @@ mod tests {
         }
     }
 
+    struct OffsetQuadratic {
+        inner: ShiftQuadratic,
+        offset: f64,
+    }
+
+    impl Objective<f64> for OffsetQuadratic {
+        fn dim(&self) -> usize {
+            Objective::dim(&self.inner)
+        }
+
+        fn bounds(&self) -> &Bounds<f64> {
+            Objective::bounds(&self.inner)
+        }
+
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.inner.eval(x) + self.offset
+        }
+    }
+
+    impl Gradient<f64> for OffsetQuadratic {
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.inner.grad(x)
+        }
+
+        fn dim(&self) -> usize {
+            Gradient::dim(&self.inner)
+        }
+    }
+
+    #[test]
+    fn portfolio_allocation_is_objective_translation_invariant() {
+        let base = OffsetQuadratic {
+            inner: ShiftQuadratic::new(),
+            offset: 0.0,
+        };
+        let shifted = OffsetQuadratic {
+            inner: ShiftQuadratic::new(),
+            offset: 1.0e9,
+        };
+        let a = portfolio_optimize(&base, Some(&base), 4_000, 73, None);
+        let b = portfolio_optimize(&shifted, Some(&shifted), 4_000, 73, None);
+
+        assert_eq!(a.n_evals, b.n_evals);
+        assert_eq!(a.n_grads, b.n_grads);
+        assert_eq!(a.arm_stats.len(), b.arm_stats.len());
+        for (left, right) in a.arm_stats.iter().zip(b.arm_stats.iter()) {
+            assert_eq!(left.name, right.name);
+            assert_eq!(left.pulls, right.pulls, "pull mismatch for {}", left.name);
+            assert_eq!(
+                left.successes, right.successes,
+                "success mismatch for {}",
+                left.name
+            );
+        }
+        for (left, right) in a.best_pos.iter().zip(b.best_pos.iter()) {
+            assert!((left - right).abs() <= 1e-12);
+        }
+    }
+
     #[test]
     fn gsa_arm_accumulates_state_across_pulls() {
         let obj = ShiftQuadratic::new();
