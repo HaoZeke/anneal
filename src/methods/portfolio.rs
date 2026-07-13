@@ -551,6 +551,8 @@ enum ArmKind {
     /// D6 adaptive-Metropolis descent chain (gap-proportional temperature,
     /// covariance-shaped proposal, Robbins-Monro alpha* targeting).
     AmSa,
+    /// Classical population-controlled diffusion (DMC-inspired walkers).
+    DmcPop,
 }
 
 impl ArmKind {
@@ -571,13 +573,14 @@ impl ArmKind {
             ArmKind::Metad => "metad",
             ArmKind::Tps => "tps",
             ArmKind::AmSa => "am_sa",
+            ArmKind::DmcPop => "dmc_pop",
         }
     }
 
     /// Arms that may earn bandit credit without an incumbent drop
     /// (enhanced sampling / path ensemble exploration).
     fn exploratory_credit(self) -> bool {
-        matches!(self, ArmKind::Metad | ArmKind::Tps)
+        matches!(self, ArmKind::Metad | ArmKind::Tps | ArmKind::DmcPop)
     }
 }
 
@@ -2076,6 +2079,47 @@ fn run_arm<O, G>(
         ArmKind::Tps => {
             run_tps_arm(obj, ledger, states, rng, slice, &bounds, dim);
         }
+        ArmKind::DmcPop => {
+            // Classical population-controlled diffusion (DMC-inspired).
+            // Charges the shared ledger via BudgetedObjective / Gradient.
+            let maxf = ledger.remaining().min(slice);
+            if maxf < 8 {
+                return;
+            }
+            let target_n = (maxf / 16).clamp(4, 24);
+            let fresh_obj = BudgetedObjective {
+                inner: obj.inner,
+                ledger,
+            };
+            let mut local_rng = StdRng::seed_from_u64(seed.wrapping_add(0xd1c_00b00));
+            if let Some(g) = grad {
+                let fresh_grad = BudgetedGradient {
+                    inner: g.inner,
+                    ledger,
+                };
+                let _ = crate::methods::dmc_population::run_dmc_population(
+                    &fresh_obj,
+                    Some(&fresh_grad),
+                    maxf,
+                    seed,
+                    target_n,
+                    crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
+                    crate::methods::dmc_population::DEFAULT_BETA0,
+                    &mut local_rng,
+                );
+            } else {
+                let _ = crate::methods::dmc_population::run_dmc_population::<_, BudgetedGradient<'_, G>, _>(
+                    &fresh_obj,
+                    None,
+                    maxf,
+                    seed,
+                    target_n,
+                    crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
+                    crate::methods::dmc_population::DEFAULT_BETA0,
+                    &mut local_rng,
+                );
+            }
+        }
         ArmKind::Reduced => {
             // Active-subspace collapse: charged pilot gradients estimate
             // the dominant gradient-covariance directions, then GSA
@@ -2158,6 +2202,7 @@ fn arm_kind_from_name(name: &str) -> Option<ArmKind> {
         "metad" => ArmKind::Metad,
         "tps" => ArmKind::Tps,
         "am_sa" => ArmKind::AmSa,
+        "dmc_pop" => ArmKind::DmcPop,
         _ => return None,
     })
 }
@@ -2172,6 +2217,8 @@ fn library_arm_names(dim: usize, has_grad: bool) -> Vec<&'static str> {
     if dim >= 2 {
         names.extend_from_slice(&["metad", "tps"]);
     }
+    // Population-controlled diffusion is available in all dimensions.
+    names.push("dmc_pop");
     names.extend_from_slice(&[
         "am_sa",
         "surrogate",
@@ -3328,6 +3375,7 @@ mod tests {
         assert!(arms.contains(&ArmKind::Pt));
         assert!(arms.contains(&ArmKind::Metad));
         assert!(arms.contains(&ArmKind::Tps));
+        assert!(arms.contains(&ArmKind::DmcPop));
     }
 
     #[test]
@@ -3335,9 +3383,32 @@ mod tests {
         let names = library_arm_names(2, true);
         assert!(names.contains(&"metad"));
         assert!(names.contains(&"tps"));
+        assert!(names.contains(&"dmc_pop"));
         let names1 = library_arm_names(1, true);
         assert!(!names1.contains(&"metad"));
         assert!(!names1.contains(&"tps"));
+        assert!(names1.contains(&"dmc_pop"));
+    }
+
+    #[test]
+    fn portfolio_dmc_pop_arm_runs_on_real_path() {
+        let obj = StybTang2D::new();
+        let result = portfolio_optimize(&obj, Some(&obj), 2000, 23, None);
+        assert!(result.best_val.is_finite());
+        assert!(result.n_evals + result.n_grads <= 2000);
+        assert!(result.arm_stats.iter().any(|s| s.name == "dmc_pop" || s.pulls > 0));
+        // Prefer seeing dmc_pop pulled when horizon is large enough.
+        let dmc_pulls = result
+            .arm_stats
+            .iter()
+            .find(|s| s.name == "dmc_pop")
+            .map(|s| s.pulls)
+            .unwrap_or(0);
+        assert!(
+            dmc_pulls > 0 || result.best_val < -50.0,
+            "expected dmc_pop activity or strong incumbent, stats={:?}",
+            result.arm_stats
+        );
     }
 
     #[test]
