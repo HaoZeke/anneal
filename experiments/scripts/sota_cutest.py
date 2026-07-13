@@ -738,6 +738,13 @@ def main():
         default=None,
         help="Committed CSV with problem, kind, and dimension columns.",
     )
+    p.add_argument(
+        "--strict-exit",
+        action="store_true",
+        help="Exit non-zero if any cell status is not ok/budget_exhausted. "
+        "Default is to exit 0 after writing the status-bearing matrix so "
+        "campaign harnesses keep failed cells as non-wins.",
+    )
     args = p.parse_args()
     if args.problem_manifest and args.problems_file:
         p.error("use only one of --problem-manifest and --problems-file")
