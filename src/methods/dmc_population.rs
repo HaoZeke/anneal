@@ -449,6 +449,14 @@ mod tests {
             x.iter().map(|v| v * v).sum()
         }
     }
+    impl Gradient<f64> for Sphere {
+        fn dim(&self) -> usize {
+            self.bounds.dims
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            x.mapv(|v| 2.0 * v)
+        }
+    }
 
     #[test]
     fn walker_weight_prefers_lower_energy() {
