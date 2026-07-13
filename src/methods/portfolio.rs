@@ -2082,11 +2082,13 @@ fn run_arm<O, G>(
         ArmKind::DmcPop => {
             // Classical population-controlled diffusion (DMC-inspired).
             // Charges the shared ledger via BudgetedObjective / Gradient.
+            // Walker 0 starts at the incumbent so slices exploit the archive.
             let maxf = ledger.remaining().min(slice);
             if maxf < 8 {
                 return;
             }
             let target_n = (maxf / 16).clamp(4, 24);
+            let seed_pos = ledger.incumbent(&bounds);
             let fresh_obj = BudgetedObjective {
                 inner: obj.inner,
                 ledger,
@@ -2097,7 +2099,7 @@ fn run_arm<O, G>(
                     inner: g.inner,
                     ledger,
                 };
-                let _ = crate::methods::dmc_population::run_dmc_population(
+                let _ = crate::methods::dmc_population::run_dmc_population_seeded(
                     &fresh_obj,
                     Some(&fresh_grad),
                     maxf,
@@ -2105,10 +2107,15 @@ fn run_arm<O, G>(
                     target_n,
                     crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
                     crate::methods::dmc_population::DEFAULT_BETA0,
+                    Some(seed_pos.view()),
                     &mut local_rng,
                 );
             } else {
-                let _ = crate::methods::dmc_population::run_dmc_population::<_, BudgetedGradient<'_, G>, _>(
+                let _ = crate::methods::dmc_population::run_dmc_population_seeded::<
+                    _,
+                    BudgetedGradient<'_, G>,
+                    _,
+                >(
                     &fresh_obj,
                     None,
                     maxf,
@@ -2116,6 +2123,7 @@ fn run_arm<O, G>(
                     target_n,
                     crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
                     crate::methods::dmc_population::DEFAULT_BETA0,
+                    Some(seed_pos.view()),
                     &mut local_rng,
                 );
             }

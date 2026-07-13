@@ -29,14 +29,18 @@ pub const DEFAULT_BETA0: f64 = 1.0;
 /// One walker: position and last evaluated energy.
 #[derive(Clone, Debug)]
 pub struct Walker {
+    /// Box-feasible coordinates.
     pub pos: Array1<f64>,
+    /// Last evaluated objective value at `pos`.
     pub energy: f64,
 }
 
 /// Population of walkers with a target size for control.
 #[derive(Clone, Debug)]
 pub struct Population {
+    /// Live walkers (length may transiently differ from `target_n`).
     pub walkers: Vec<Walker>,
+    /// Population size restored after each control step.
     pub target_n: usize,
 }
 
@@ -94,10 +98,12 @@ impl Population {
         best_x.unwrap_or_else(|| (&bounds.low + &bounds.high) * 0.5)
     }
 
+    /// Current number of walkers.
     pub fn len(&self) -> usize {
         self.walkers.len()
     }
 
+    /// Whether the population has no walkers.
     pub fn is_empty(&self) -> bool {
         self.walkers.is_empty()
     }
@@ -227,11 +233,17 @@ pub fn default_sigma(bounds: &Bounds<f64>) -> f64 {
 /// Result of a budgeted population-controlled diffusion run.
 #[derive(Clone, Debug)]
 pub struct DmcPopulationResult {
+    /// Best feasible point found under the budget.
     pub best_pos: Array1<f64>,
+    /// Objective value at `best_pos`.
     pub best_val: f64,
+    /// Objective evaluations charged.
     pub n_evals: usize,
+    /// Gradient evaluations charged (Langevin drift).
     pub n_grads: usize,
+    /// Walker count at exit.
     pub final_population: usize,
+    /// Number of population-control (branch/kill) events.
     pub controls: usize,
 }
 
@@ -240,6 +252,9 @@ pub struct DmcPopulationResult {
 /// Each objective evaluation increments `n_evals`. Optional gradients for
 /// Langevin drift increment `n_grads`. Population control (branch/kill to
 /// `target_n`) runs every `steps_per_control` diffusion rounds.
+///
+/// When `seed_x` is `Some`, the first walker is placed at that point (clipped
+/// into the box) so portfolio slices can continue from the incumbent.
 pub fn run_dmc_population<O, G, R>(
     obj: &O,
     grad: Option<&G>,
@@ -248,6 +263,36 @@ pub fn run_dmc_population<O, G, R>(
     target_n: usize,
     steps_per_control: usize,
     beta0: f64,
+    rng: &mut R,
+) -> DmcPopulationResult
+where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+    R: Rng,
+{
+    run_dmc_population_seeded(
+        obj,
+        grad,
+        budget,
+        seed,
+        target_n,
+        steps_per_control,
+        beta0,
+        None,
+        rng,
+    )
+}
+
+/// Same as [`run_dmc_population`] with an optional seed position for walker 0.
+pub fn run_dmc_population_seeded<O, G, R>(
+    obj: &O,
+    grad: Option<&G>,
+    budget: usize,
+    seed: u64,
+    target_n: usize,
+    steps_per_control: usize,
+    beta0: f64,
+    seed_x: Option<ArrayView1<f64>>,
     rng: &mut R,
 ) -> DmcPopulationResult
 where
@@ -280,19 +325,35 @@ where
             if n_evals >= budget {
                 break;
             }
-            let mut x = Array1::zeros(dim);
-            for i in 0..dim {
-                let lo = bounds.low[i];
-                let hi = bounds.high[i];
-                x[i] = if hi > lo {
-                    lo + rng_seed.random::<f64>() * (hi - lo)
+            let x = if k == 0 {
+                if let Some(sx) = seed_x {
+                    reflect_into_box(sx, &bounds)
                 } else {
-                    lo
-                };
-            }
-            // Mild diversification from seed stream.
-            let _ = k;
-            let x = reflect_into_box(x.view(), &bounds);
+                    let mut x = Array1::zeros(dim);
+                    for i in 0..dim {
+                        let lo = bounds.low[i];
+                        let hi = bounds.high[i];
+                        x[i] = if hi > lo {
+                            lo + rng_seed.random::<f64>() * (hi - lo)
+                        } else {
+                            lo
+                        };
+                    }
+                    reflect_into_box(x.view(), &bounds)
+                }
+            } else {
+                let mut x = Array1::zeros(dim);
+                for i in 0..dim {
+                    let lo = bounds.low[i];
+                    let hi = bounds.high[i];
+                    x[i] = if hi > lo {
+                        lo + rng_seed.random::<f64>() * (hi - lo)
+                    } else {
+                        lo
+                    };
+                }
+                reflect_into_box(x.view(), &bounds)
+            };
             let e = match charge_obj(x.view(), &mut n_evals, n_grads) {
                 Some(v) => v,
                 None => break,
@@ -316,66 +377,190 @@ where
         }
     };
 
-    let mut sigma = default_sigma(&bounds);
-    let mut beta = beta0.max(1e-6);
+    // Diffusion scale ~15% of mean half-width, mildly inflated for exploration.
+    let base_sigma = default_sigma(&bounds) * 2.0;
+    let mut sigma = base_sigma;
+    let mut beta = (beta0 * 0.15).max(1e-6); // start exploratory
     let mut step = 0usize;
     let mut best_val = pop.best_energy();
     let mut best_pos = pop.best_pos(&bounds);
+    // Reserve more of the budget for single-walker elite polish.
+    let polish_start = (budget as f64 * 0.72) as usize;
+    // Shrink target population over time so later controls deepen good basins.
+    let target_n0 = pop.target_n;
 
     while work(n_evals, n_grads) < budget && !pop.walkers.is_empty() {
+        let progress = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
+        // Late budget: concentrate on polishing the elite (optional Langevin).
+        let polishing = work(n_evals, n_grads) >= polish_start;
+        if polishing {
+            let mut x = best_pos.clone();
+            let mut fx = best_val;
+            let local_sigma = (base_sigma * 0.08 * (1.0 - 0.7 * progress)).max(1e-6);
+            while work(n_evals, n_grads) < budget {
+                let use_grad = grad.is_some() && rng.random::<f64>() < 0.35;
+                let g = if use_grad {
+                    if let Some(gr) = grad {
+                        if work(n_evals, n_grads) + 1 > budget {
+                            None
+                        } else {
+                            n_grads += 1;
+                            Some(gr.grad(x.view()))
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let y = diffusion_displace(
+                    x.view(),
+                    &bounds,
+                    local_sigma,
+                    g.as_ref().map(|a| a.view()),
+                    rng,
+                );
+                let e = match charge_obj(y.view(), &mut n_evals, n_grads) {
+                    Some(v) => v,
+                    None => break,
+                };
+                if e <= fx {
+                    x = y;
+                    fx = e;
+                    if e < best_val {
+                        best_val = e;
+                        best_pos = x.clone();
+                    }
+                }
+            }
+            break;
+        }
+
         // One diffusion round over the whole population.
-        for w in &mut pop.walkers {
+        // Gradients are reserved for polish: early diffusion is pure isotropic
+        // (cheap proposals; multimodal basins benefit more from population
+        // control than from local drift that burns work units).
+        let n_walkers = pop.walkers.len();
+        for (wi, w) in pop.walkers.iter_mut().enumerate() {
             if work(n_evals, n_grads) >= budget {
                 break;
             }
-            let g = if let Some(gr) = grad {
-                if work(n_evals, n_grads) + 1 > budget {
-                    None
-                } else {
-                    n_grads += 1;
-                    Some(gr.grad(w.pos.view()))
+            // Occasional long jump on weaker walkers (re-seed basin search).
+            let long_jump = wi * 2 >= n_walkers && rng.random::<f64>() < 0.12;
+            let y = if long_jump {
+                let mut z = Array1::zeros(dim);
+                for i in 0..dim {
+                    let lo = bounds.low[i];
+                    let hi = bounds.high[i];
+                    z[i] = if hi > lo {
+                        lo + rng.random::<f64>() * (hi - lo)
+                    } else {
+                        lo
+                    };
                 }
+                reflect_into_box(z.view(), &bounds)
             } else {
-                None
+                diffusion_displace(w.pos.view(), &bounds, sigma, None, rng)
             };
-            let y = diffusion_displace(
-                w.pos.view(),
-                &bounds,
-                sigma,
-                g.as_ref().map(|a| a.view()),
-                rng,
-            );
             let e = match charge_obj(y.view(), &mut n_evals, n_grads) {
                 Some(v) => v,
                 None => break,
             };
-            // Metropolis filter at current beta (keeps diffusion from pure random walk).
             let accept = if e <= w.energy {
                 true
+            } else if long_jump {
+                // Rarely accept uphill long jumps for diversity.
+                rng.random::<f64>() < (-beta * (e - w.energy)).exp() * 0.35
             } else {
                 let de = e - w.energy;
                 rng.random::<f64>() < (-beta * de).exp()
             };
+            // Track global best from any proposal.
+            if e.is_finite() && e < best_val {
+                best_val = e;
+                best_pos = y.clone();
+            }
             if accept {
                 w.pos = y;
                 w.energy = e;
             }
-            if e.is_finite() && e < best_val {
-                best_val = e;
-                best_pos = w.pos.clone();
-            }
         }
         step += 1;
-        // Cool beta gently; shrink sigma slowly (annealed diffusion).
-        beta = beta0 * (1.0 + 0.15 * step as f64);
-        sigma = (default_sigma(&bounds) / (1.0 + 0.05 * step as f64)).max(1e-6);
+
+        // Gap-proportional inverse temperature and shrinking diffusion scale.
+        let mut energies: Vec<f64> = pop
+            .walkers
+            .iter()
+            .map(|w| w.energy)
+            .filter(|e| e.is_finite())
+            .collect();
+        energies.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let med = if energies.is_empty() {
+            best_val
+        } else {
+            energies[energies.len() / 2]
+        };
+        let gap = (med - best_val).abs().max(1e-3);
+        let progress = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
+        beta = (beta0 * (0.4 + 6.0 * progress) / gap).max(1e-6);
+        sigma = (base_sigma * (1.0 - 0.9 * progress)).max(1e-6);
+        // Shrink population target as budget is spent (intensify survivors).
+        pop.target_n = ((target_n0 as f64) * (1.0 - 0.5 * progress))
+            .round()
+            .max(4.0) as usize;
 
         if step % steps_per_control == 0 {
             pop.walkers = population_control(&pop.walkers, pop.target_n, beta, rng);
             controls += 1;
-            // Re-evaluate after branch only if needed: cloned walkers keep energy.
-            // Compact: drop non-finite.
-            pop.walkers.retain(|w| w.energy.is_finite() || w.pos.iter().all(|x| x.is_finite()));
+            pop.walkers
+                .retain(|w| w.energy.is_finite() && w.pos.iter().all(|x| x.is_finite()));
+            // Elitism: keep the global best in the population after branch/kill.
+            if best_val.is_finite() && !pop.walkers.is_empty() {
+                if let Some((wi, _)) = pop
+                    .walkers
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, a), (_, b)| {
+                        a.energy
+                            .partial_cmp(&b.energy)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                {
+                    pop.walkers[wi] = Walker {
+                        pos: best_pos.clone(),
+                        energy: best_val,
+                    };
+                }
+            }
+            // Short greedy refine of the elite every control (cheap intensification).
+            if best_val.is_finite() {
+                let mut x = best_pos.clone();
+                let mut fx = best_val;
+                let refine_sigma = (sigma * 0.25).max(1e-6);
+                for _ in 0..4 {
+                    if work(n_evals, n_grads) >= budget {
+                        break;
+                    }
+                    let y = diffusion_displace(x.view(), &bounds, refine_sigma, None, rng);
+                    let e = match charge_obj(y.view(), &mut n_evals, n_grads) {
+                        Some(v) => v,
+                        None => break,
+                    };
+                    if e <= fx {
+                        x = y;
+                        fx = e;
+                    }
+                }
+                if fx < best_val {
+                    best_val = fx;
+                    best_pos = x.clone();
+                }
+                // Inject refined elite into a random walker slot.
+                if let Some(w) = pop.walkers.first_mut() {
+                    w.pos = best_pos.clone();
+                    w.energy = best_val;
+                }
+            }
             if pop.walkers.is_empty() {
                 break;
             }
@@ -608,4 +793,75 @@ mod tests {
             "DMC population mean best {mean_dmc} should beat uniform multi-start {mean_uni}"
         );
     }
+
+    /// Head-to-head vs classical logarithmic Boltzmann SA (same obj budget).
+    #[test]
+    fn dmc_beats_classical_boltzmann_on_rastrigin() {
+        use crate::runner::run_rs_variant;
+        use crate::variant;
+
+        struct Rastrigin5 {
+            bounds: Bounds<f64>,
+        }
+        impl Rastrigin5 {
+            fn new() -> Self {
+                Self {
+                    bounds: Bounds::new(
+                        Array1::from_elem(5, -5.12),
+                        Array1::from_elem(5, 5.12),
+                        1e-12,
+                    ),
+                }
+            }
+        }
+        impl Objective<f64> for Rastrigin5 {
+            fn dim(&self) -> usize { 5 }
+            fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+            fn eval(&self, x: ArrayView1<f64>) -> f64 {
+                let d = x.len() as f64;
+                10.0 * d
+                    + x.iter()
+                        .map(|&xi| xi * xi - 10.0 * (2.0 * std::f64::consts::PI * xi).cos())
+                        .sum::<f64>()
+            }
+        }
+        impl Gradient<f64> for Rastrigin5 {
+            fn dim(&self) -> usize { 5 }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                x.mapv(|xi| 2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin())
+            }
+        }
+        // Fair protocol: both methods spend objective-only work units (no
+        // gradient charge on the classical SA side, so DMC also omits grads).
+        let budget = 1200usize;
+        let seeds: [u64; 5] = [0, 1, 2, 3, 4];
+        let mut dmc_bests = Vec::new();
+        let mut sa_bests = Vec::new();
+        for &seed in &seeds {
+            let obj = Rastrigin5::new();
+            let mut rng = StdRng::seed_from_u64(seed);
+            let dmc = run_dmc_population::<_, Rastrigin5, _>(
+                &obj, None, budget, seed, 16, 3, 1.0, &mut rng,
+            );
+            dmc_bests.push(dmc.best_val);
+
+            // Classical SA: epochs * steps ≈ budget objective evals.
+            let steps = 30usize;
+            let epochs = (budget / steps).max(5);
+            let obj2 = Rastrigin5::new();
+            let variant = variant::boltzmann(obj2, 8.0, 0.5).expect("boltzmann");
+            let hist = run_rs_variant(variant, epochs, steps, seed);
+            sa_bests.push(hist.best.val);
+        }
+        let mean_dmc = dmc_bests.iter().sum::<f64>() / dmc_bests.len() as f64;
+        let mean_sa = sa_bests.iter().sum::<f64>() / sa_bests.len() as f64;
+        eprintln!(
+            "vs_classical_boltzmann budget={budget} mean_dmc={mean_dmc:.4} mean_sa={mean_sa:.4} dmc={dmc_bests:?} sa={sa_bests:?}"
+        );
+        assert!(
+            mean_dmc < mean_sa,
+            "DMC mean {mean_dmc} should beat classical SA mean {mean_sa}"
+        );
+    }
+
 }

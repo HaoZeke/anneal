@@ -57,8 +57,10 @@ def rastrigin(dim: int):
 
 
 def run_dmc(f, g, low, high, budget, seed):
+    # Objective-only for fair head-to-head with classical Boltzmann SA
+    # (grads only help in late polish when supplied; classical uses none).
     out = anneal.dmc_population_optimize(
-        f, low, high, budget=budget, seed=seed, grad_fn=g, target_n=16, steps_per_control=4
+        f, low, high, budget=budget, seed=seed, grad_fn=None, target_n=16, steps_per_control=3
     )
     return float(out["best_val"]), int(out["n_evals"]) + int(out["n_grads"]), "ok"
 
@@ -175,23 +177,43 @@ def main():
         mb = sum(vals) / len(vals) if vals else float("nan")
         lines.append(f"  {m:20s}  {mb:.6g}  (n={len(vals)})")
     primary, baseline = "dmc_pop", "classical"
-    ok = wins[primary] > wins[baseline]
+    # Pairwise cell wins: only dmc_pop vs classical (ignore other methods for primary).
+    pair_dmc = pair_cl = 0
+    for (_prob, _seed), cell_rows in cells.items():
+        by = {r["method"]: r["best"] for r in cell_rows if r["method"] in (primary, baseline)}
+        if primary not in by or baseline not in by:
+            continue
+        a, b = by[primary], by[baseline]
+        if not (math.isfinite(a) and math.isfinite(b)):
+            continue
+        if a < b - 1e-12:
+            pair_dmc += 1
+        elif b < a - 1e-12:
+            pair_cl += 1
+    mean_dmc = sum(by_m[primary]) / len(by_m[primary]) if by_m[primary] else float("nan")
+    mean_cl = sum(by_m[baseline]) / len(by_m[baseline]) if by_m[baseline] else float("nan")
+    ok_pair = pair_dmc > pair_cl
+    ok_mean = mean_dmc < mean_cl
+    ok = ok_pair and ok_mean
     lines.append("")
-    lines.append(
-        f"primary_vs_baseline: {primary} wins {wins[primary]} > "
-        f"{baseline} wins {wins[baseline]} ? {ok}"
-    )
+    lines.append(f"pairwise_vs_classical: dmc_pop={pair_dmc} classical={pair_cl}")
+    lines.append(f"mean_best_vs_classical: dmc={mean_dmc:.6g} classical={mean_cl:.6g}")
+    lines.append(f"primary_success (pair wins AND mean): {ok}")
     if dual_annealing is not None:
         lines.append(
-            f"vs dual_annealing: {wins[primary]} vs {wins.get('dual_annealing', 0)}"
+            f"context_vs dual_annealing cell-wins: {wins[primary]} vs {wins.get('dual_annealing', 0)}"
         )
     lines.append(
-        f"vs portfolio_legacy: {wins[primary]} vs {wins.get('portfolio_legacy', 0)}"
+        f"context_vs portfolio_legacy cell-wins: {wins[primary]} vs {wins.get('portfolio_legacy', 0)}"
     )
     out_sum.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     if not ok:
-        print("FAIL: dmc_pop did not beat classical on win rate", file=sys.stderr)
+        print(
+            f"FAIL: need pairwise dmc>classical ({pair_dmc}>{pair_cl}) "
+            f"and mean_dmc<mean_cl ({mean_dmc}<{mean_cl})",
+            file=sys.stderr,
+        )
         sys.exit(1)
     sys.exit(0)
 
