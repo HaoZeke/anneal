@@ -218,6 +218,38 @@ def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
     return portfolio(counter, low, high, dim, grad, rng, anchor=anchor, policy="legacy")
 
 
+def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
+    """Population-controlled diffusion arm under the shared work-unit budget."""
+    del dim, anchor
+    import anneal
+
+    remaining = counter.budget - counter.n
+    if remaining <= 0:
+        return counter.best
+    jac = counter.counted_grad(grad) if grad is not None else None
+    try:
+        out = anneal.dmc_population_optimize(
+            counter,
+            low,
+            high,
+            budget=remaining,
+            seed=int(rng.integers(1 << 31)),
+            grad_fn=jac,
+            target_n=min(24, max(4, remaining // 16)),
+            steps_per_control=4,
+        )
+        best = float(out.get("best_val", float("inf")))
+        pos = np.asarray(out.get("best_pos", []), dtype=float).reshape(-1)
+        if pos.size == low.size:
+            if np.any(pos < low - 1e-8) or np.any(pos > high + 1e-8):
+                best = float("inf")
+        if math.isfinite(best) and best < counter.best:
+            counter.best = best
+    except _Budget:
+        pass
+    return counter.best
+
+
 def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
     bounds = list(zip(low, high))
     x0 = np.asarray(anchor, dtype=np.float64).copy() if anchor is not None else None
@@ -579,6 +611,7 @@ def cma_es_ipop(counter, low, high, dim, grad, rng, anchor=None):
 METHODS = {
     "portfolio": portfolio,
     "portfolio_legacy": portfolio_legacy,
+    "dmc_pop": dmc_pop,
     "hybrid_de": hybrid_de,
     "basinhopping": sci_basinhopping,
     "dual_annealing": sci_dual_annealing,
@@ -864,6 +897,15 @@ def main():
     if exit_code:
         failures = sum(row["status"] not in {"ok", "budget_exhausted"} for row in rows)
         print(f"Campaign contains {failures} unsuccessful cells", file=sys.stderr)
+        if not args.strict_exit:
+            # Protocol: unsuccessful cells are ranked as non-wins, not harness
+            # aborts. Snakemake deletes outputs on non-zero exit, which would
+            # discard a complete status-bearing shard.
+            print(
+                "Non-strict exit: keeping status-bearing CSV (pass --strict-exit to fail)",
+                file=sys.stderr,
+            )
+            return 0
     return exit_code
 
 
