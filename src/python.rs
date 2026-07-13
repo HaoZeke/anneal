@@ -1288,6 +1288,74 @@ fn portfolio_result_to_dict(
     Ok(out.into())
 }
 
+/// Classical population-controlled diffusion search (DMC-inspired arm).
+///
+/// Walkers, diffusion proposals, weight-based branch/kill, and population
+/// control to a target size. Not quantum DMC.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, target_n = 16, steps_per_control = 4))]
+fn dmc_population_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    grad_fn: Option<Py<PyAny>>,
+    target_n: usize,
+    steps_per_control: usize,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xd1c_00b0);
+    let result = match grad_fn {
+        Some(grad_fn) => {
+            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            crate::methods::dmc_population::run_dmc_population(
+                &obj,
+                Some(&grad),
+                budget,
+                seed,
+                target_n,
+                steps_per_control,
+                crate::methods::dmc_population::DEFAULT_BETA0,
+                &mut rng,
+            )
+        }
+        None => crate::methods::dmc_population::run_dmc_population::<_, CallablePyGradient, _>(
+            &obj,
+            None,
+            budget,
+            seed,
+            target_n,
+            steps_per_control,
+            crate::methods::dmc_population::DEFAULT_BETA0,
+            &mut rng,
+        ),
+    };
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item(
+        "best_pos",
+        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+    )?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("final_population", result.final_population)?;
+    out.set_item("controls", result.controls)?;
+    Ok(out.into())
+}
+
 /// Runs the Thompson-allocated portfolio global optimizer.
 ///
 /// One generic driver with a single budget knob: a discounted
@@ -1636,6 +1704,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(gle_langevin_preconditioned, m)?)?;
     m.add_function(wrap_pyfunction!(gle_langevin_preconditioned_objective, m)?)?;
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
+    m.add_function(wrap_pyfunction!(dmc_population_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
     Ok(())

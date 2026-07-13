@@ -1,8 +1,8 @@
-//! Classical population-controlled diffusion search (DMC-inspired).
+//! Classical population-controlled diffusion search.
 //!
-//! Engineering inspiration from projector Monte Carlo / DMC walkers in codes
-//! such as QMCPACK: a **population of walkers**, **diffusion proposals**,
-//! **weight-based branch/kill**, and **population control** to a target size.
+//! Pattern from the diffusion Monte Carlo literature: a **population of
+//! walkers**, **diffusion proposals**, **weight-based branch/kill**, and
+//! **population control** to a target size (classical objective only).
 //!
 //! This module is **not** quantum DMC. Energies are a classical objective
 //! `f(x)`. There is no trial wavefunction, fixed-node constraint, or

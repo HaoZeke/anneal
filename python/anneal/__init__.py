@@ -42,6 +42,7 @@ from anneal._core import (
     gle_langevin_preconditioned_objective as _core_gle_langevin_preconditioned_objective,
     global_optimize as _core_global_optimize,
     global_optimize_objective as _core_global_optimize_objective,
+    dmc_population_optimize as _core_dmc_population_optimize,
     run,
     run_hmc,
     run_qmc,
@@ -516,6 +517,31 @@ def gle_langevin_preconditioned_objective(
     return out
 
 
+def dmc_population_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    target_n: int = 16,
+    steps_per_control: int = 4,
+):
+    """Population-controlled diffusion search (DMC-inspired; classical objective)."""
+    out = _core_dmc_population_optimize(
+        obj_fn,
+        np.asarray(low, dtype=np.float64),
+        np.asarray(high, dtype=np.float64),
+        int(budget),
+        int(seed),
+        grad_fn,
+        int(target_n),
+        int(steps_per_control),
+    )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
 def global_optimize(
     obj_fn,
     low,
@@ -626,6 +652,7 @@ __all__ = [
     "gle_langevin_objective",
     "gle_langevin_preconditioned",
     "gle_langevin_preconditioned_objective",
+    "dmc_population_optimize",
     "global_optimize",
     "global_optimize_objective",
     "run",

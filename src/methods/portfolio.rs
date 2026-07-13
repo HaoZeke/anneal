@@ -3392,12 +3392,12 @@ mod tests {
 
     #[test]
     fn portfolio_dmc_pop_arm_runs_on_real_path() {
-        let obj = StybTang2D::new();
-        let result = portfolio_optimize(&obj, Some(&obj), 2000, 23, None);
+        // Multimodal no-grad + large horizon so dmc_pop is preferred and pulled.
+        let obj = Rastrigin::<8>::new();
+        let result = portfolio_optimize::<_, Rastrigin<8>>(&obj, None, 4000, 23, None);
         assert!(result.best_val.is_finite());
-        assert!(result.n_evals + result.n_grads <= 2000);
-        assert!(result.arm_stats.iter().any(|s| s.name == "dmc_pop" || s.pulls > 0));
-        // Prefer seeing dmc_pop pulled when horizon is large enough.
+        assert!(result.n_evals + result.n_grads <= 4000);
+        eprintln!("portfolio arm_stats={:?}", result.arm_stats);
         let dmc_pulls = result
             .arm_stats
             .iter()
@@ -3405,8 +3405,8 @@ mod tests {
             .map(|s| s.pulls)
             .unwrap_or(0);
         assert!(
-            dmc_pulls > 0 || result.best_val < -50.0,
-            "expected dmc_pop activity or strong incumbent, stats={:?}",
+            dmc_pulls > 0,
+            "dmc_pop must be pulled on portfolio path, arm_stats={:?}",
             result.arm_stats
         );
     }
