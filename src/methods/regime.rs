@@ -117,6 +117,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "shift",
             "am_sa",
             "hop",
+            "dmc_pop",
             "metad",
             "tps",
             "gle",
@@ -132,6 +133,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "am_sa",
             "gle",
             "hop",
+            "dmc_pop",
             "reduced",
             "shift",
             "metad",
@@ -146,6 +148,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
         ],
         OptimizationRegime::StochasticNoise => &[
             "explore", // note: still de-duplicated when building full list
+            "dmc_pop",
             "gsa",
             "de",
             "surrogate",
@@ -160,6 +163,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "reduced",
         ],
         OptimizationRegime::MultimodalNoGrad => &[
+            "dmc_pop",
             "de",
             "gsa",
             "am_sa",
@@ -174,6 +178,7 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "shift",
             "hop",
             "am_sa",
+            "dmc_pop",
             "metad",
             "tps",
             "gle",
