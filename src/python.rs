@@ -1292,8 +1292,11 @@ fn portfolio_result_to_dict(
 ///
 /// Walkers, diffusion proposals, weight-based branch/kill, and population
 /// control to a target size. Not quantum DMC.
+///
+/// When `x0` is provided, walker 0 is seeded at that point (clipped into the
+/// box), matching the protocol anchor used by classical SA and dual annealing.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, target_n = 16, steps_per_control = 4))]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, target_n = 16, steps_per_control = 4, x0 = None))]
 fn dmc_population_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1304,6 +1307,7 @@ fn dmc_population_optimize(
     grad_fn: Option<Py<PyAny>>,
     target_n: usize,
     steps_per_control: usize,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -1313,6 +1317,20 @@ fn dmc_population_optimize(
     }
     let dim = low_vec.len();
     let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let seed_arr = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective {
         fn_: obj_fn,
         bounds,
@@ -1321,7 +1339,7 @@ fn dmc_population_optimize(
     let result = match grad_fn {
         Some(grad_fn) => {
             let grad = CallablePyGradient { fn_: grad_fn, dim };
-            crate::methods::dmc_population::run_dmc_population(
+            crate::methods::dmc_population::run_dmc_population_seeded(
                 &obj,
                 Some(&grad),
                 budget,
@@ -1329,10 +1347,15 @@ fn dmc_population_optimize(
                 target_n,
                 steps_per_control,
                 crate::methods::dmc_population::DEFAULT_BETA0,
+                seed_view,
                 &mut rng,
             )
         }
-        None => crate::methods::dmc_population::run_dmc_population::<_, CallablePyGradient, _>(
+        None => crate::methods::dmc_population::run_dmc_population_seeded::<
+            _,
+            CallablePyGradient,
+            _,
+        >(
             &obj,
             None,
             budget,
@@ -1340,6 +1363,7 @@ fn dmc_population_optimize(
             target_n,
             steps_per_control,
             crate::methods::dmc_population::DEFAULT_BETA0,
+            seed_view,
             &mut rng,
         ),
     };

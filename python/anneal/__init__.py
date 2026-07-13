@@ -526,8 +526,15 @@ def dmc_population_optimize(
     grad_fn=None,
     target_n: int = 16,
     steps_per_control: int = 4,
+    x0=None,
 ):
-    """Population-controlled diffusion search (DMC-inspired; classical objective)."""
+    """Population-controlled diffusion search (DMC-inspired; classical objective).
+
+    Parameters
+    ----------
+    x0 :
+        Optional starting point for walker 0 (protocol anchor / incumbent).
+    """
     out = _core_dmc_population_optimize(
         obj_fn,
         np.asarray(low, dtype=np.float64),
@@ -537,6 +544,7 @@ def dmc_population_optimize(
         grad_fn,
         int(target_n),
         int(steps_per_control),
+        None if x0 is None else np.asarray(x0, dtype=np.float64),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out

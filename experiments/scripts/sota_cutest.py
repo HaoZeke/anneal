@@ -220,7 +220,7 @@ def portfolio_legacy(counter, low, high, dim, grad, rng, anchor=None):
 
 def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
     """Population-controlled diffusion arm under the shared work-unit budget."""
-    del dim, anchor
+    del dim
     import anneal
 
     remaining = counter.budget - counter.n
@@ -236,7 +236,8 @@ def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
             seed=int(rng.integers(1 << 31)),
             grad_fn=jac,
             target_n=min(24, max(4, remaining // 16)),
-            steps_per_control=4,
+            steps_per_control=3,
+            x0=anchor,
         )
         best = float(out.get("best_val", float("inf")))
         pos = np.asarray(out.get("best_pos", []), dtype=float).reshape(-1)
