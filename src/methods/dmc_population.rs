@@ -264,7 +264,7 @@ where
     let mut controls = 0usize;
 
     let work = |ne: usize, ng: usize| ne + ng;
-    let mut charge_obj = |x: ArrayView1<f64>, ne: &mut usize, ng: usize| -> Option<f64> {
+    let charge_obj = |x: ArrayView1<f64>, ne: &mut usize, ng: usize| -> Option<f64> {
         if work(*ne, ng) >= budget {
             return None;
         }
@@ -419,7 +419,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eindir_core::{Bounds, Objective};
+    use eindir_core::{Bounds, Gradient, Objective};
     use ndarray::{Array1, ArrayView1};
 
     struct Sphere {
@@ -560,6 +560,14 @@ mod tests {
                     + x.iter()
                         .map(|&xi| xi * xi - 10.0 * (2.0 * std::f64::consts::PI * xi).cos())
                         .sum::<f64>()
+            }
+        }
+        impl Gradient<f64> for Rastrigin5 {
+            fn dim(&self) -> usize {
+                5
+            }
+            fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                x.mapv(|xi| 2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin())
             }
         }
         let obj = Rastrigin5::new();
