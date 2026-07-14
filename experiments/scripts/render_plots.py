@@ -45,6 +45,18 @@ DRIVER_ORDER = [
     "bgsa_auto",
     "bgsa_metad",
     "bgsa_pt_metad",
+    # TOMS / sota_cutest method names
+    "portfolio",
+    "portfolio_legacy",
+    "hybrid_de",
+    "dmc_pop",
+    "basinhopping",
+    "dual_annealing",
+    "diff_evol",
+    "cma_es_ipop",
+    "bobyqa",
+    "turbo",
+    "ngopt",
 ]
 
 DRIVER_LABELS = {
@@ -68,6 +80,17 @@ DRIVER_LABELS = {
     "bgsa_auto": "Automatic BGSA",
     "bgsa_metad": "MetaD BGSA",
     "bgsa_pt_metad": "PT-MetaD BGSA",
+    "portfolio": "Portfolio (auto)",
+    "portfolio_legacy": "Portfolio (legacy)",
+    "hybrid_de": "Hybrid DE",
+    "dmc_pop": "dmc_pop",
+    "basinhopping": "Basin hopping",
+    "dual_annealing": "Dual annealing",
+    "diff_evol": "Differential evolution",
+    "cma_es_ipop": "CMA-ES (IPOP)",
+    "bobyqa": "Py-BOBYQA",
+    "turbo": "TuRBO-1",
+    "ngopt": "Nevergrad NGOpt",
 }
 
 
