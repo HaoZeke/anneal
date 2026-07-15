@@ -189,34 +189,74 @@ fn branch_reference(energies: &[f64]) -> f64 {
 // docs/derivations/d8_entropy_calibrated_beta.org
 // ---------------------------------------------------------------------------
 
-/// Shannon entropy \(H(\beta)=-\sum p_i\log p_i\) of the exponential family
-/// \(p_i\propto e^{-\beta E_i}\) (D8.3). Energies are shifted by their min
-/// for numerical stability; the shift does not change \(H\).
-pub fn softmax_entropy(energies: &[f64], beta: f64) -> f64 {
-    let finite: Vec<f64> = energies.iter().copied().filter(|e| e.is_finite()).collect();
-    let n = finite.len();
+/// Pure D8.2 softmax probabilities \(p_i\propto e^{-\beta E_i}\) (normalized).
+///
+/// Non-finite energies get mass 0; if every energy is non-finite, returns a
+/// uniform distribution over the length of `energies`. Shift by \(\min E\)
+/// is for numerical stability only.
+pub fn softmax_probs(energies: &[f64], beta: f64) -> Vec<f64> {
+    let n = energies.len();
     if n == 0 {
-        return 0.0;
+        return Vec::new();
     }
-    if n == 1 {
-        return 0.0;
+    let mut e_min = f64::INFINITY;
+    for &e in energies {
+        if e.is_finite() && e < e_min {
+            e_min = e;
+        }
     }
-    let e_min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    if !e_min.is_finite() {
+        return vec![1.0 / n as f64; n];
+    }
     let beta = beta.max(0.0);
-    let mut z = 0.0;
     let mut weights = Vec::with_capacity(n);
-    for &e in &finite {
-        let w = (-beta * (e - e_min)).exp().max(1e-300);
+    let mut z = 0.0;
+    for &e in energies {
+        let w = if e.is_finite() {
+            (-beta * (e - e_min)).exp().max(1e-300)
+        } else {
+            0.0
+        };
         weights.push(w);
         z += w;
     }
     if !(z.is_finite() && z > 0.0) {
-        return (n as f64).ln();
+        return vec![1.0 / n as f64; n];
+    }
+    for w in &mut weights {
+        *w /= z;
+    }
+    weights
+}
+
+/// Shannon entropy \(H(\beta)=-\sum p_i\log p_i\) of the exponential family
+/// \(p_i\propto e^{-\beta E_i}\) (D8.3). Energies are shifted by their min
+/// for numerical stability; the shift does not change \(H\).
+pub fn softmax_entropy(energies: &[f64], beta: f64) -> f64 {
+    let p = softmax_probs(energies, beta);
+    if p.is_empty() {
+        return 0.0;
     }
     let mut h = 0.0;
-    for w in weights {
-        let p = w / z;
-        if p > 0.0 {
+    for &pi in &p {
+        if pi > 0.0 {
+            h -= pi * pi.ln();
+        }
+    }
+    h
+}
+
+/// Shannon entropy of an arbitrary positive mass vector (normalized in-place
+/// for the sum). Used to audit residual weight laws against \(H_\star\).
+pub fn mass_entropy(weights: &[f64]) -> f64 {
+    let total: f64 = weights.iter().copied().filter(|w| w.is_finite() && *w > 0.0).sum();
+    if !(total.is_finite() && total > 0.0) {
+        return 0.0;
+    }
+    let mut h = 0.0;
+    for &w in weights {
+        if w.is_finite() && w > 0.0 {
+            let p = w / total;
             h -= p * p.ln();
         }
     }
@@ -303,41 +343,46 @@ pub fn calibrate_beta(energies: &[f64], h_star: f64) -> f64 {
     0.5 * (lo + hi)
 }
 
-/// Residual + multinomial branch/kill (population control).
+/// Expected residual offspring counts \(m_i = N_{\mathrm{tgt}}\,w_i/\sum w\)
+/// from a positive weight vector (length must match the walker count).
+pub fn residual_expected_counts(weights: &[f64], target_n: usize) -> Vec<f64> {
+    let target_n = target_n.max(1) as f64;
+    let total: f64 = weights.iter().copied().filter(|w| w.is_finite() && *w > 0.0).sum();
+    if !(total.is_finite() && total > 0.0) {
+        return vec![0.0; weights.len()];
+    }
+    weights
+        .iter()
+        .map(|&w| {
+            if w.is_finite() && w > 0.0 {
+                (w / total) * target_n
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+/// Residual + multinomial branch/kill given explicit positive weights.
 ///
-/// Residual resampling (standard sequential Monte Carlo / particle filtering)
-/// first takes the integer part of each weight, then multinomial-fills the
-/// remainder. This has lower variance than pure multinomial branching while
-/// preserving the DMC engineering pattern of population control to a fixed
-/// target size (Liu, *Monte Carlo Strategies in Scientific Computing*).
-///
-/// When `beta` is supplied by [`calibrate_beta`] (D8), weights realize the
-/// free-energy minimizer at the entropy-matched inverse temperature.
-pub fn population_control<R: Rng>(
+/// Residual resampling (Liu): place \(\lfloor m_i\rfloor\) copies, then
+/// multinomial-fill fractional remainders. Weight law is caller-supplied so
+/// D8 pure-softmax and legacy soft-ref weights share one residual core.
+pub fn population_control_weighted<R: Rng>(
     walkers: &[Walker],
     target_n: usize,
-    beta: f64,
+    weights: &[f64],
     rng: &mut R,
 ) -> Vec<Walker> {
     let target_n = target_n.max(1);
     if walkers.is_empty() {
         return Vec::new();
     }
-    let energies: Vec<f64> = walkers.iter().map(|w| w.energy).collect();
-    let e_ref = branch_reference(&energies);
-    let weights: Vec<f64> = walkers
-        .iter()
-        .map(|w| walker_weight(w.energy, e_ref, beta))
-        .collect();
-    let total: f64 = weights.iter().sum();
-    if !(total.is_finite() && total > 0.0) {
+    debug_assert_eq!(walkers.len(), weights.len());
+    let expected = residual_expected_counts(weights, target_n);
+    if expected.iter().all(|&e| e <= 0.0) {
         return vec![walkers[0].clone(); target_n];
     }
-    // Expected copies under target_n.
-    let expected: Vec<f64> = weights
-        .iter()
-        .map(|w| (*w / total) * target_n as f64)
-        .collect();
     let mut out = Vec::with_capacity(target_n);
     let mut residual = Vec::with_capacity(walkers.len());
     let mut residual_w = Vec::with_capacity(walkers.len());
@@ -354,7 +399,6 @@ pub fn population_control<R: Rng>(
             residual_w.push(r);
         }
     }
-    // Multinomial fill for residual mass.
     let need = target_n.saturating_sub(out.len());
     if need > 0 && !residual.is_empty() {
         let rtot: f64 = residual_w.iter().sum();
@@ -375,7 +419,6 @@ pub fn population_control<R: Rng>(
             }
         }
     }
-    // Safety pad if residual under-filled.
     while out.len() < target_n {
         let i = rng.random_range(0..walkers.len());
         out.push(walkers[i].clone());
@@ -384,8 +427,48 @@ pub fn population_control<R: Rng>(
     out
 }
 
-/// D8 ECIT residual control: calibrate \(\beta^\star\) to \(H_\star(\rho)\), then
-/// residual-resample. Returns `(offspring, beta_star)`.
+/// Residual population control with **legacy soft-reference** weights
+/// \(w_i=\exp(-\beta(E_i-E_{\mathrm{ref}})_+)\) where \(E_{\mathrm{ref}}\) is
+/// the min/median blend from [`branch_reference`]. Prefer
+/// [`population_control_ecit`] for the D8 pure-softmax residual law.
+pub fn population_control<R: Rng>(
+    walkers: &[Walker],
+    target_n: usize,
+    beta: f64,
+    rng: &mut R,
+) -> Vec<Walker> {
+    if walkers.is_empty() {
+        return Vec::new();
+    }
+    let energies: Vec<f64> = walkers.iter().map(|w| w.energy).collect();
+    let e_ref = branch_reference(&energies);
+    let weights: Vec<f64> = walkers
+        .iter()
+        .map(|w| walker_weight(w.energy, e_ref, beta))
+        .collect();
+    population_control_weighted(walkers, target_n, &weights, rng)
+}
+
+/// D8 ECIT residual masses: pure softmax \(p_i^\star(\beta^\star)\) (D8.2) at the
+/// entropy-calibrated \(\beta^\star=H^{-1}(H_\star(\rho))\).
+///
+/// Returns `(normalized_probs, beta_star, h_star)`. These are the **exact**
+/// residual weight law used by [`population_control_ecit`] (not the soft-ref
+/// legacy path in [`population_control`]).
+pub fn ecit_residual_probs(
+    energies: &[f64],
+    progress: f64,
+    elite_floor: f64,
+) -> (Vec<f64>, f64, f64) {
+    let n = energies.iter().filter(|e| e.is_finite()).count().max(1);
+    let h_star = target_entropy(n, progress, elite_floor);
+    let beta_star = calibrate_beta(energies, h_star);
+    let probs = softmax_probs(energies, beta_star);
+    (probs, beta_star, h_star)
+}
+
+/// D8 ECIT residual control: calibrate \(\beta^\star\) to \(H_\star(\rho)\), form
+/// pure D8.2 softmax masses, residual-resample. Returns `(offspring, beta_star)`.
 pub fn population_control_ecit<R: Rng>(
     walkers: &[Walker],
     target_n: usize,
@@ -394,10 +477,8 @@ pub fn population_control_ecit<R: Rng>(
     rng: &mut R,
 ) -> (Vec<Walker>, f64) {
     let energies: Vec<f64> = walkers.iter().map(|w| w.energy).collect();
-    let n = energies.iter().filter(|e| e.is_finite()).count().max(1);
-    let h_star = target_entropy(n, progress, elite_floor);
-    let beta_star = calibrate_beta(&energies, h_star);
-    let out = population_control(walkers, target_n, beta_star, rng);
+    let (probs, beta_star, _h_star) = ecit_residual_probs(&energies, progress, elite_floor);
+    let out = population_control_weighted(walkers, target_n, &probs, rng);
     (out, beta_star)
 }
 
@@ -1605,6 +1686,104 @@ mod tests {
         assert_eq!(out.len(), 16);
         assert!(beta_star.is_finite() && beta_star >= 0.0);
         assert!(out.iter().all(|w| w.energy.is_finite()));
+    }
+
+    /// Residual masses used by ECIT are pure D8.2 softmax and realize H*.
+    ///
+    /// Regression guard: legacy soft-ref walker_weight (min/median blend) must
+    /// NOT be the residual law for population_control_ecit — that path was
+    /// calibrating H* on pure softmax then resampling with a different law.
+    #[test]
+    fn d8_ecit_residual_weights_realize_h_star() {
+        let energies = [0.0_f64, 0.5, 1.0, 2.0, 5.0];
+        let n = energies.len();
+        for progress in [0.0, 0.35, 0.7, 1.0] {
+            let (probs, beta_star, h_star) = ecit_residual_probs(&energies, progress, 2.0);
+            // Pure softmax entropy matches the target.
+            let h_probs = mass_entropy(&probs);
+            assert!(
+                (h_probs - h_star).abs() < 1e-5 * (1.0 + h_star.abs()),
+                "rho={progress}: mass_entropy(probs)={h_probs} H*={h_star} beta={beta_star}"
+            );
+            // probs == softmax_probs(energies, beta_star) elementwise (D8.2).
+            let p_ref = softmax_probs(&energies, beta_star);
+            assert_eq!(probs.len(), p_ref.len());
+            for (a, b) in probs.iter().zip(p_ref.iter()) {
+                assert!((a - b).abs() < 1e-12, "prob mismatch {a} vs {b}");
+            }
+            // Expected residual counts proportional to pure softmax, not soft-ref.
+            let expected = residual_expected_counts(&probs, 16);
+            assert!((expected.iter().sum::<f64>() - 16.0).abs() < 1e-9);
+            let e_ref = branch_reference(&energies);
+            let soft_ref: Vec<f64> = energies
+                .iter()
+                .map(|&e| walker_weight(e, e_ref, beta_star))
+                .collect();
+            let h_soft = mass_entropy(&soft_ref);
+            // Soft-ref entropy must differ from H* when progress forces concentration
+            // (except near rho=0 where both are near log N).
+            if progress >= 0.7 {
+                assert!(
+                    (h_soft - h_star).abs() > 0.05,
+                    "soft-ref accidentally matches H* (test would be weak): h_soft={h_soft} H*={h_star}"
+                );
+            }
+            // Shannon entropy of the residual *counts* equals H* (same as probs).
+            let h_counts = mass_entropy(&expected);
+            assert!(
+                (h_counts - h_star).abs() < 1e-5 * (1.0 + h_star.abs()),
+                "rho={progress}: residual count entropy {h_counts} != H* {h_star}"
+            );
+            let _ = n;
+        }
+    }
+
+    /// population_control_ecit uses the same residual mass law as ecit_residual_probs.
+    #[test]
+    fn d8_population_control_ecit_uses_pure_softmax_masses() {
+        let mut rng = StdRng::seed_from_u64(11);
+        let energies = [0.0, 0.4, 0.8, 1.5, 3.0, 6.0];
+        let walkers: Vec<Walker> = energies
+            .iter()
+            .enumerate()
+            .map(|(i, &e)| Walker {
+                pos: Array1::from_elem(2, i as f64),
+                energy: e,
+            })
+            .collect();
+        let progress = 1.0;
+        let (probs, beta_star, h_star) = ecit_residual_probs(&energies, progress, 2.0);
+        let (out, beta_out) = population_control_ecit(&walkers, 18, progress, 2.0, &mut rng);
+        assert_eq!(out.len(), 18);
+        assert!((beta_out - beta_star).abs() < 1e-15);
+        // Empirical offspring frequencies should be closer to pure softmax
+        // expected counts than to soft-ref expected counts (Monte Carlo, but
+        // expected counts themselves are deterministic and pure-softmax).
+        let expected_soft = residual_expected_counts(&probs, 18);
+        let e_ref = branch_reference(&energies);
+        let soft_w: Vec<f64> = energies
+            .iter()
+            .map(|&e| walker_weight(e, e_ref, beta_star))
+            .collect();
+        let expected_legacy = residual_expected_counts(&soft_w, 18);
+        // Deterministic: pure-softmax and soft-ref expected vectors differ.
+        let l1: f64 = expected_soft
+            .iter()
+            .zip(expected_legacy.iter())
+            .map(|(a, b)| (a - b).abs())
+            .sum();
+        assert!(
+            l1 > 0.5,
+            "pure softmax and soft-ref residual counts nearly equal (L1={l1}); H*={h_star}"
+        );
+        // Soft-ref residual entropy is NOT H* at full concentration.
+        let h_legacy = mass_entropy(&expected_legacy);
+        assert!(
+            (h_legacy - h_star).abs() > 0.05,
+            "legacy residual entropy {h_legacy} accidentally equals H* {h_star}"
+        );
+        let h_pure = mass_entropy(&expected_soft);
+        assert!((h_pure - h_star).abs() < 1e-5);
     }
 
     #[test]
