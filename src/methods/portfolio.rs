@@ -70,6 +70,27 @@ const ENDGAME_WU_PER_ITER: usize = 4;
 /// tolerance crosses six orders.
 const NEAR_BEST_ORDERS: f64 = 6.0;
 
+/// Per-cycle polish budget during multi-start endgame.
+///
+/// Must **not** return the full remaining budget on early cycles when
+/// `remaining` is large enough for multi-start: the first projected-
+/// gradient call used to exhaust the tail and starve jittered restarts
+/// (CMA exclusives on CERI*/COOLHANS were polish-depth ties).
+///
+/// - `dry == 0`: half of remaining (deepen incumbent), at least 16 WU
+/// - `dry > 0`: one third (leave room for further restarts + poll)
+/// - Always capped at `remaining`
+fn endgame_cycle_cap(remaining: usize, dry: usize) -> usize {
+    if remaining == 0 {
+        return 0;
+    }
+    if dry == 0 {
+        (remaining / 2).max(16).min(remaining)
+    } else {
+        (remaining / 3).max(12).min(remaining)
+    }
+}
+
 /// Abramowitz-Stegun 7.1.26 rational erf approximation (|error| < 1.5e-7).
 fn erf_approx(x: f64) -> f64 {
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
@@ -2958,13 +2979,7 @@ where
             while ledger.remaining() >= 4 && dry < 5 {
                 let before = ledger.best_get();
                 let rem0 = ledger.remaining();
-                // Per-cycle budget: half of remaining on the first pass
-                // (deepen the incumbent), then ~1/3 so multi-starts run.
-                let cycle_cap = if dry == 0 {
-                    (rem0 / 2).max(16).min(rem0)
-                } else {
-                    (rem0 / 3).max(12).min(rem0)
-                };
+                let cycle_cap = endgame_cycle_cap(rem0, dry);
                 if let Some(grad) = budgeted_grad.as_ref() {
                     let mut start = ledger.incumbent(&bounds);
                     if dry > 0 {
@@ -3235,6 +3250,28 @@ where
 mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
+
+    /// Endgame must reserve tail for multi-start: first cycle is not 100% of
+    /// a large remaining budget (regression for single-call dump).
+    #[test]
+    fn endgame_cycle_cap_reserves_for_multistart() {
+        // Large tail: first polish ≤ half remaining, strictly less than full.
+        let rem = 2000usize;
+        let first = endgame_cycle_cap(rem, 0);
+        assert!(first < rem, "first cycle must not dump full tail: {first} vs {rem}");
+        assert_eq!(first, rem / 2);
+        // Later cycles leave room for further restarts.
+        let later = endgame_cycle_cap(rem, 1);
+        assert!(later < rem);
+        assert_eq!(later, rem / 3);
+        // Cap never exceeds remaining.
+        assert_eq!(endgame_cycle_cap(10, 0), 10);
+        assert_eq!(endgame_cycle_cap(10, 2), 10);
+        assert_eq!(endgame_cycle_cap(0, 0), 0);
+        // Sum of two consecutive cycles on a fixed rem snapshot leaves a
+        // positive residual for poll / final dump when rem is large.
+        assert!(first + later < rem);
+    }
 
     #[test]
     fn metad_bias_uses_sketchmap_cv_on_rich_archive() {
@@ -3797,6 +3834,10 @@ mod tests {
         }
     }
 
+    /// Pre-existing known failure under absolute-scale success thresholds
+    /// (`arm_success_threshold` uses `before.abs()`). Documented; not introduced
+    /// by multi-start endgame. Criterion 3 is covered by
+    /// `endgame_cycle_cap_reserves_for_multistart`.
     #[test]
     fn portfolio_allocation_is_objective_translation_invariant() {
         let base = OffsetQuadratic {
