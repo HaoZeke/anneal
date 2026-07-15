@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import multiprocessing as mp
 import os
 import sys
 import warnings
@@ -27,6 +28,11 @@ from scipy.optimize import (
     differential_evolution,
     dual_annealing,
 )
+
+# BoTorch TuRBO and Nevergrad NGOpt have been observed to SIGSEGV inside
+# native backends on some CUTEst cells. Run those cells in a spawn child so
+# a crash becomes status=error:crash and the shard continues.
+_ISOLATED_METHODS = frozenset({"turbo", "ngopt"})
 
 from experiments.anneal_sota import (
     DEFAULT_HYBRID_K_POLISH,
@@ -732,6 +738,115 @@ def run_method_cell(
     }
 
 
+def _crash_row(problem, dim, method_name, seed, initial, status="error:crash"):
+    return {
+        "problem": problem,
+        "dim": dim,
+        "method": method_name,
+        "seed": seed,
+        "initial": initial,
+        "best": float("inf"),
+        "evals": 0,
+        "objective_evals": 0,
+        "grad_evals": 0,
+        "status": status,
+    }
+
+
+def _isolated_cell_worker(conn, payload):
+    """Child entry: reload CUTEst problem and run one method cell."""
+    try:
+        config = default_cutest_config(
+            payload["bench_root"], cache_dir=payload["pycutest_cache"]
+        )
+        prob = load(payload["problem"], sif_params=None, config=config)
+        low = np.asarray(payload["low"], dtype=float)
+        high = np.asarray(payload["high"], dtype=float)
+        anchor = np.asarray(payload["anchor"], dtype=float)
+        counter = Counter(prob.fn, payload["budget"])
+        method = METHODS[payload["method_name"]]
+        row = run_method_cell(
+            method_name=payload["method_name"],
+            method=method,
+            problem=payload["problem"],
+            dim=payload["dim"],
+            seed=payload["seed"],
+            initial=payload["initial"],
+            counter=counter,
+            low=low,
+            high=high,
+            grad=prob.grad,
+            anchor=anchor,
+        )
+        conn.send(row)
+    except Exception as exc:  # noqa: BLE001
+        conn.send(
+            _crash_row(
+                payload["problem"],
+                payload["dim"],
+                payload["method_name"],
+                payload["seed"],
+                payload["initial"],
+                status=f"error:{type(exc).__name__}",
+            )
+        )
+    finally:
+        conn.close()
+
+
+def run_method_cell_isolated(
+    *,
+    method_name,
+    problem,
+    dim,
+    seed,
+    initial,
+    budget,
+    low,
+    high,
+    anchor,
+    bench_root,
+    pycutest_cache,
+):
+    """Run turbo/ngopt in a spawn child so native SIGSEGV does not kill the shard."""
+    payload = {
+        "method_name": method_name,
+        "problem": problem,
+        "dim": dim,
+        "seed": seed,
+        "initial": initial,
+        "budget": budget,
+        "low": np.asarray(low, dtype=float),
+        "high": np.asarray(high, dtype=float),
+        "anchor": np.asarray(anchor, dtype=float),
+        "bench_root": bench_root,
+        "pycutest_cache": pycutest_cache,
+    }
+    ctx = mp.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_isolated_cell_worker, args=(child_conn, payload))
+    proc.start()
+    child_conn.close()
+    proc.join()
+    if proc.exitcode != 0:
+        status = f"error:crash_exit_{proc.exitcode}"
+        if parent_conn.poll():
+            try:
+                parent_conn.recv()
+            except Exception:  # noqa: BLE001
+                pass
+        parent_conn.close()
+        return _crash_row(problem, dim, method_name, seed, initial, status=status)
+    if not parent_conn.poll(timeout=1.0):
+        parent_conn.close()
+        return _crash_row(
+            problem, dim, method_name, seed, initial, status="error:no_result"
+        )
+    row = parent_conn.recv()
+    parent_conn.close()
+    return row
+
+
 def _shard_targets(targets, shard_index: int, shard_count: int):
     if shard_count <= 0:
         raise ValueError("shard_count must be positive")
@@ -916,24 +1031,39 @@ def main():
             try:
                 for s in range(args.seeds):
                     for name, fnc in methods.items():
-                        c = Counter(
-                            prob.fn,
-                            args.budget,
-                            walker_pool=walker_pool if name == "dmc_pop" else None,
-                        )
-                        row = run_method_cell(
-                            method_name=name,
-                            method=fnc,
-                            problem=t.name,
-                            dim=dim,
-                            seed=s,
-                            initial=initial,
-                            counter=c,
-                            low=low,
-                            high=high,
-                            grad=prob.grad,
-                            anchor=anchor,
-                        )
+                        if name in _ISOLATED_METHODS:
+                            row = run_method_cell_isolated(
+                                method_name=name,
+                                problem=t.name,
+                                dim=dim,
+                                seed=s,
+                                initial=initial,
+                                budget=args.budget,
+                                low=low,
+                                high=high,
+                                anchor=anchor,
+                                bench_root=args.bench_root,
+                                pycutest_cache=args.pycutest_cache,
+                            )
+                        else:
+                            c = Counter(
+                                prob.fn,
+                                args.budget,
+                                walker_pool=walker_pool if name == "dmc_pop" else None,
+                            )
+                            row = run_method_cell(
+                                method_name=name,
+                                method=fnc,
+                                problem=t.name,
+                                dim=dim,
+                                seed=s,
+                                initial=initial,
+                                counter=c,
+                                low=low,
+                                high=high,
+                                grad=prob.grad,
+                                anchor=anchor,
+                            )
                         rows.append(row)
                         _write_sota_row(w, f, row)
             finally:
