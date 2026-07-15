@@ -194,12 +194,17 @@ inverse map \(\beta^\star=H^{-1}(H_\star)\).
 :END:
 | Symbol / step | Location |
 |---------------+----------|
-| \(H(\beta)\) (D8.3) | =softmax_entropy= in =src/methods/dmc_population.rs= |
+| \(H(\beta)\) (D8.3) | =softmax_entropy= / =softmax_probs= in =src/methods/dmc_population.rs= |
 | \(H'(\beta)=-\beta\mathrm{Var}(E)\) (D8.4) | verified in =proofs/d8_entropy_calibrated_beta.py= |
 | \(H_\star(\rho)\) (D8.5) | =target_entropy= |
 | \(\beta^\star=H^{-1}(H_\star)\) | =calibrate_beta= |
-| residual steps 4–5 | =population_control= / =population_control_ecit= |
+| pure softmax masses (D8.2) steps 4–5 | =ecit_residual_probs= → =population_control_weighted= |
+| ECIT entry | =population_control_ecit= (not soft-ref =population_control=) |
 | progress \(\rho\) | budget fraction in =run_dmc_population_seeded= |
+
+Note: legacy =population_control= still uses a soft min/median reference energy for
+engineering robustness when called outside ECIT; D8 residual control must use
+pure softmax (=softmax_probs=) so that the residual weight entropy equals \(H_\star\).
 
 ** Executable check
 :PROPERTIES:
