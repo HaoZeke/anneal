@@ -1,0 +1,211 @@
+* D8: Entropy-calibrated inverse temperature for residual population control
+:PROPERTIES:
+:CUSTOM_ID: d8-entropy-calibrated-inverse-temperature
+:END:
+
+** Scope and quantity being optimized
+:PROPERTIES:
+:CUSTOM_ID: d8-scope
+:END:
+A multi-walker residual population-control step holds a fixed target size
+\(N_{\mathrm{tgt}}\) and must turn raw energies \(E_1,\ldots,E_N\) into
+offspring masses \(m_i\ge 0\) with \(\sum_i m_i = N_{\mathrm{tgt}}\).
+The classical DMC weight \(m_i \propto e^{-\beta E_i}\) introduces a free
+scale \(\beta\). Engineering schedules pick \(\beta\) from a gap heuristic;
+this derivation *calibrates* \(\beta\) by matching the Shannon entropy of
+the normalized weight law to a budget-progress target. The optimized
+quantity is the free-energy functional whose unique minimizer is the
+exponential family at the calibrated \(\beta^\star\).
+
+** Assumptions
+:PROPERTIES:
+:CUSTOM_ID: d8-assumptions
+:END:
+1. Finite energies \(E_i\in\mathbb{R}\) for \(i=1,\ldots,N\) with \(N\ge 2\).
+2. Residual (or multinomial) resampling uses normalized masses
+   \(p_i(\beta)=e^{-\beta E_i}/Z(\beta)\), \(Z(\beta)=\sum_j e^{-\beta E_j}\).
+3. Progress parameter \(\rho\in[0,1]\) is known (evaluation budget spent /
+   total budget). No Monte Carlo noise enters the identities below.
+
+** Free-energy model and optimal masses
+:PROPERTIES:
+:CUSTOM_ID: d8-free-energy
+:END:
+For a fixed \(\beta>0\), the entropic free-energy problem on the simplex is
+
+\begin{equation}
+\min_{p\in\Delta^{N-1}}
+  \underbrace{\sum_i p_i E_i}_{\text{mean energy}}
+  +\frac{1}{\beta}\underbrace{\sum_i p_i\log p_i}_{\text{negative entropy}}.
+\tag{D8.1}
+\end{equation}
+
+*** Proposition D8.1 (softmax is the unique minimizer)
+:PROPERTIES:
+:CUSTOM_ID: d8-prop-softmax
+:END:
+The unique minimizer of (D8.1) is
+\[
+p_i^\star(\beta)
+  =\frac{e^{-\beta E_i}}{\sum_j e^{-\beta E_j}}.
+\tag{D8.2}
+\]
+
+/Proof./ Lagrangian \(\mathcal{L}=\sum p_i E_i+(1/\beta)\sum p_i\log p_i
++\lambda(1-\sum p_i)\). Stationarity:
+\[
+E_i+\frac{1}{\beta}(\log p_i+1)-\lambda=0
+\implies p_i\propto e^{-\beta E_i}.
+\]
+Strict convexity of \(p\mapsto\sum p\log p\) on the simplex yields uniqueness. \(\square\)
+
+Expected offspring under target size are \(m_i=N_{\mathrm{tgt}}\,p_i^\star(\beta)\).
+Residual resampling takes \(\lfloor m_i\rfloor\) copies and multinomial-fills
+the fractional remainders (Liu, /Monte Carlo Strategies in Scientific Computing/).
+
+** Entropy as a monotone thermometer
+:PROPERTIES:
+:CUSTOM_ID: d8-entropy-thermometer
+:END:
+Define the Shannon entropy of the exponential family
+\begin{equation}
+H(\beta)
+  :=-\sum_i p_i(\beta)\log p_i(\beta)
+  =\log Z(\beta)+\beta\,\langle E\rangle_\beta,
+\tag{D8.3}
+\end{equation}
+where \(\langle E\rangle_\beta=\sum_i p_i(\beta)E_i\).
+
+*** Proposition D8.2 (derivative identity)
+:PROPERTIES:
+:CUSTOM_ID: d8-prop-derivative
+:END:
+For all \(\beta\ge 0\),
+\begin{equation}
+H'(\beta)=-\beta\,\mathrm{Var}_{p(\beta)}(E).
+\tag{D8.4}
+\end{equation}
+In particular \(H\) is nonincreasing; if not all \(E_i\) are equal then
+\(H'(\beta)<0\) for every \(\beta>0\).
+
+/Proof./ Standard exponential-family calculus:
+\[
+\frac{\partial\log Z}{\partial\beta}=-\langle E\rangle,\qquad
+\frac{\partial\langle E\rangle}{\partial\beta}=-\mathrm{Var}(E).
+\]
+Differentiate (D8.3):
+\begin{align*}
+H'
+  &=\frac{Z'}{Z}+\langle E\rangle+\beta\langle E\rangle'
+  =-\langle E\rangle+\langle E\rangle+\beta\bigl(-\mathrm{Var}(E)\bigr)
+  =-\beta\,\mathrm{Var}(E).
+\end{align*}
+\(\square\)
+
+*** Proposition D8.3 (endpoint limits)
+:PROPERTIES:
+:CUSTOM_ID: d8-prop-limits
+:END:
+\[
+H(0)=\log N,\qquad
+\lim_{\beta\to\infty}H(\beta)=\log m,
+\]
+where \(m=\#\{i:E_i=\min_j E_j\}\) is the multiplicity of the lowest energy.
+
+/Proof./ At \(\beta=0\), \(p_i=1/N\) so \(H=\log N\). As \(\beta\to\infty\),
+mass concentrates on the argmin set of size \(m\), yielding entropy \(\log m\). \(\square\)
+
+*** Corollary D8.4 (unique entropy calibration)
+:PROPERTIES:
+:CUSTOM_ID: d8-cor-unique
+:END:
+If not all energies coincide, then for every target
+\(H_\star\in(\log m,\log N]\) there exists a unique \(\beta^\star\ge 0\)
+with \(H(\beta^\star)=H_\star\). Continuity of \(H\), strict decrease on
+\((0,\infty)\), and the endpoint limits give the claim. \(\square\)
+
+** Progress-linked target entropy
+:PROPERTIES:
+:CUSTOM_ID: d8-target-schedule
+:END:
+Let \(\rho\in[0,1]\) be the fraction of the evaluation budget spent and
+\(f\in(0,1]\) an elite-floor factor (default \(f=1/N_{\mathrm{tgt}}\) so
+\(\log(fN)\) tends to \(\log 1=0\) only in the extreme; we use
+\(f=\max(2,N)/N\) so \(H_{\mathrm{floor}}=\log 2\) unless \(N=1\)).
+Set the target entropy by linear interpolation in log-population space:
+\begin{equation}
+H_\star(\rho)
+  =(1-\rho)\log N
+  +\rho\log\bigl(\max\{1,\,f\,N\}\bigr).
+\tag{D8.5}
+\end{equation}
+Early search (\(\rho\approx 0\)) keeps \(H_\star\approx\log N\) (near-uniform
+branching, exploration). Late search (\(\rho\to 1\)) forces low entropy
+(concentration on elites).
+
+A safe bisection upper bound uses the range \(R=\max_i E_i-\min_i E_i\):
+\begin{equation}
+\beta_{\max}
+  =\begin{cases}
+     0 & R\le 0,\\
+     \dfrac{20\log N}{R} & R>0,
+   \end{cases}
+\tag{D8.6}
+\end{equation}
+which drives \(H(\beta_{\max})\) near \(\log m\) for nondegenerate spectra.
+
+** Algorithm D8 (ECIT residual population control)
+:PROPERTIES:
+:CUSTOM_ID: d8-algorithm
+:END:
+Input: energies \(\{E_i\}_{i=1}^N\), target size \(N_{\mathrm{tgt}}\),
+progress \(\rho\in[0,1]\), elite-floor factor \(f\in(0,1]\), RNG.
+
+1. Shift energies by \(E_i\leftarrow E_i-\min_j E_j\) (numerically stable softmax).
+2. Compute \(H_\star\) from (D8.5) with the *current* population size \(N\).
+3. If all finite \(E_i\) are equal, set \(\beta^\star=0\); else bisect on
+   \([0,\beta_{\max}]\) (D8.6) until \(H(\beta^\star)=H_\star\) within
+   absolute tolerance \(10^{-8}\) (or max 64 iterations).
+4. Form \(p_i=p_i^\star(\beta^\star)\) by (D8.2); set expected counts
+   \(m_i=N_{\mathrm{tgt}}\,p_i\).
+5. Residual resampling: place \(\lfloor m_i\rfloor\) copies of walker \(i\);
+   multinomial-draw the remaining \(N_{\mathrm{tgt}}-\sum\lfloor m_i\rfloor\)
+   slots from residual masses \(m_i-\lfloor m_i\rfloor\).
+6. Return the controlled population of size \(N_{\mathrm{tgt}}\).
+
+Output: offspring walkers and the calibrated \(\beta^\star\).
+
+** Relation to D6–D7 and to engineering \(\beta\) schedules
+:PROPERTIES:
+:CUSTOM_ID: d8-relation
+:END:
+D6 constrains *local Metropolis temperature* for one-step descent on a
+sphere; D7 constrains escape windows under a budget. D8 calibrates the
+*population-control* inverse temperature so residual branching realizes a
+prescribed diversity (entropy) rather than an ad-hoc gap scale
+\(\beta\sim c/\mathrm{gap}\). The free-energy problem (D8.1) is the
+variational origin of the exponential weights already used by DMC-style
+arms; the new operating law is the entropy target (D8.5) and the unique
+inverse map \(\beta^\star=H^{-1}(H_\star)\).
+
+** Implementation map
+:PROPERTIES:
+:CUSTOM_ID: d8-impl-map
+:END:
+| Symbol / step | Location |
+|---------------+----------|
+| \(H(\beta)\) (D8.3) | =softmax_entropy= in =src/methods/dmc_population.rs= |
+| \(H'(\beta)=-\beta\mathrm{Var}(E)\) (D8.4) | verified in =proofs/d8_entropy_calibrated_beta.py= |
+| \(H_\star(\rho)\) (D8.5) | =target_entropy= |
+| \(\beta^\star=H^{-1}(H_\star)\) | =calibrate_beta= |
+| residual steps 4–5 | =population_control= / =population_control_ecit= |
+| progress \(\rho\) | budget fraction in =run_dmc_population_seeded= |
+
+** Executable check
+:PROPERTIES:
+:CUSTOM_ID: d8-check
+:END:
+=proofs/d8_entropy_calibrated_beta.py= re-derives (D8.4) symbolically for
+a two-level spectrum, checks numerical \(H'\) vs \(-\beta\mathrm{Var}\),
+monotonicity, endpoint limits, uniqueness of calibration, and residual
+mass conservation under the algorithm.
