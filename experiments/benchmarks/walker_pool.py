@@ -30,13 +30,24 @@ def _config_from_paths(paths: dict[str, str]):
 
 
 def _worker_init(name: str, sif_params: dict | None, paths: dict[str, str]) -> None:
+    """Load one CUTEst clone per worker. Serialize compile with a file lock."""
     global _WORKER_FN
+    import fcntl
+    from pathlib import Path
+
     from experiments.benchmarks.cutest_runner import load
 
     config = _config_from_paths(paths)
     config.validate()
-    prob = load(name, sif_params=sif_params, config=config)
-    _WORKER_FN = prob.fn
+    lock_path = Path(paths["cache_dir"]) / f".cutest_load_{name}.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "a+", encoding="utf-8") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            prob = load(name, sif_params=sif_params, config=config)
+            _WORKER_FN = prob.fn
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
 
 
 def _worker_eval_chunk(rows: np.ndarray) -> np.ndarray:

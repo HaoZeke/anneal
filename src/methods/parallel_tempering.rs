@@ -132,20 +132,15 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
         let mut swap_attempts = 0;
         let mut swap_accepts = 0;
 
-        use rayon::prelude::*;
-
         for epoch in 0..n_epochs {
             let mut accepted = vec![0usize; m];
             let mut rejected = vec![0usize; m];
             for inner in 0..self.k_inner {
-                // Independent Metropolis steps per temperature; swaps stay serial.
-                let step_flags: Vec<bool> = states
-                    .par_iter_mut()
-                    .zip(rngs.par_iter_mut())
-                    .map(|(state, rng)| self.sampler.step(state, epoch, rng))
-                    .collect();
-                for (c, ok) in step_flags.into_iter().enumerate() {
-                    if ok {
+                // Serial chain steps: Python/CUTEst objectives hold the GIL;
+                // Rayon fan-out deadlocks under pyo3 attach. Native Sync
+                // objectives still scale via multi-walker dmc_pop batches.
+                for c in 0..m {
+                    if self.sampler.step(&mut states[c], epoch, &mut rngs[c]) {
                         accepted[c] += 1;
                     } else {
                         rejected[c] += 1;
