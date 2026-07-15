@@ -50,22 +50,19 @@ class _Budget(Exception):
 class Counter:
     """Budgeted objective for SOTA cells.
 
-    ``eval_batch`` is the multi-walker entry used by ``dmc_population_optimize``:
-    independent walker proposals are evaluated under one budget charge block.
-    Set ``ANNEAL_WALKER_THREADS`` > 1 to fan out walkers with a thread pool.
-    CUTEst Fortran is typically not re-entrant, so the default is serial
-    evaluation of the batch (still one Python entry from Rust).
+    ``eval_batch`` is the multi-walker entry used by ``dmc_population_optimize``.
+    For true CUTEst scaling pass a ``ProcessWalkerPool`` (one problem clone per
+    worker process). Set ``ANNEAL_WALKER_WORKERS`` to the process count.
     """
 
-    def __init__(self, fn, budget):
+    def __init__(self, fn, budget, *, walker_pool=None):
         self.fn = fn
         self.budget = budget
         self.n = 0
         self.objective_evals = 0
         self.grad_evals = 0
         self.best = float("inf")
-        self._lock = __import__("threading").Lock()
-        self._walker_threads = max(1, int(os.environ.get("ANNEAL_WALKER_THREADS", "1")))
+        self._walker_pool = walker_pool
 
     def _consume(self, k: int = 1):
         if self.n + k > self.budget:
@@ -83,8 +80,8 @@ class Counter:
     def eval_batch(self, X):
         """Evaluate a (n, dim) walker proposal matrix; returns length-n vector.
 
-        Called from Rust ``dmc_pop`` / multi-start paths. Charges ``n`` work
-        units up front, then evaluates rows (optionally threaded).
+        Called from Rust dmc_pop each generation. Charges ``n`` work units,
+        then evaluates all walker proposals (process pool when configured).
         """
         X = np.asarray(X, dtype=float)
         if X.ndim == 1:
@@ -95,26 +92,20 @@ class Counter:
         self._consume(n)
         self.objective_evals += n
 
-        def _one(row):
-            return float(self.fn(np.asarray(row, float).reshape(-1)))
-
-        if self._walker_threads <= 1 or n == 1:
-            vals = [_one(X[i]) for i in range(n)]
+        if self._walker_pool is not None and n > 1:
+            vals = np.asarray(self._walker_pool.eval_matrix(X), dtype=float)
         else:
-            # Threaded walkers. Safe only if ``fn`` releases the GIL and is
-            # re-entrant (native Sync objectives). For default CUTEst, keep
-            # ANNEAL_WALKER_THREADS=1 or use process-level problem clones.
-            from concurrent.futures import ThreadPoolExecutor
-
-            with ThreadPoolExecutor(max_workers=min(self._walker_threads, n)) as pool:
-                vals = list(pool.map(_one, [X[i] for i in range(n)]))
+            vals = np.asarray(
+                [float(self.fn(np.asarray(X[i], float).reshape(-1))) for i in range(n)],
+                dtype=float,
+            )
 
         best = self.best
         for v in vals:
             if math.isfinite(v) and v < best:
                 best = v
         self.best = best
-        return np.asarray(vals, dtype=float)
+        return vals
 
     def record_initial(self, value):
         """Charge and retain the protocol's common starting objective."""
@@ -907,25 +898,52 @@ def main():
             initial = float(prob.fn(anchor))
             if not math.isfinite(initial):
                 raise ValueError(f"non-finite starting objective for {t.name}")
-            for s in range(args.seeds):
-                for name, fnc in methods.items():
-                    c = Counter(prob.fn, args.budget)
-                    row = run_method_cell(
-                        method_name=name,
-                        method=fnc,
-                        problem=t.name,
-                        dim=dim,
-                        seed=s,
-                        initial=initial,
-                        counter=c,
-                        low=low,
-                        high=high,
-                        grad=prob.grad,
-                        anchor=anchor,
-                    )
-                    rows.append(row)
-                    _write_sota_row(w, f, row)
-            print(f"  {t.name} (dim {dim}) done", flush=True)
+            # Process-pool walker clones for dmc_pop (true multi-walker scaling).
+            from experiments.benchmarks.walker_pool import (
+                ProcessWalkerPool,
+                default_worker_count,
+            )
+
+            n_workers = default_worker_count()
+            walker_pool = None
+            if n_workers > 1 and "dmc_pop" in methods:
+                walker_pool = ProcessWalkerPool.create(
+                    t.name,
+                    n_workers=n_workers,
+                    config=config,
+                    sif_params=None,
+                )
+            try:
+                for s in range(args.seeds):
+                    for name, fnc in methods.items():
+                        c = Counter(
+                            prob.fn,
+                            args.budget,
+                            walker_pool=walker_pool if name == "dmc_pop" else None,
+                        )
+                        row = run_method_cell(
+                            method_name=name,
+                            method=fnc,
+                            problem=t.name,
+                            dim=dim,
+                            seed=s,
+                            initial=initial,
+                            counter=c,
+                            low=low,
+                            high=high,
+                            grad=prob.grad,
+                            anchor=anchor,
+                        )
+                        rows.append(row)
+                        _write_sota_row(w, f, row)
+            finally:
+                if walker_pool is not None:
+                    walker_pool.shutdown()
+            print(
+                f"  {t.name} (dim {dim}) done"
+                + (f" [walker_workers={n_workers}]" if n_workers > 1 else ""),
+                flush=True,
+            )
 
     # win-rate summary: per (problem, seed), which method reached the lowest best
     wins = {m: 0 for m in methods}
