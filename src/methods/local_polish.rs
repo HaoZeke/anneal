@@ -4,11 +4,9 @@
 use eindir_core::Bounds;
 use eindir_core::Gradient;
 use eindir_core::Objective;
-use eindir_core::eval_batch_parallel;
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use rayon::prelude::*;
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::cool::{Cooling, TsallisCool};
@@ -427,10 +425,10 @@ where
         let pos = bounds.clip(start);
         clipped.row_mut(i).assign(&pos);
     }
-    // Native multi-start screening: Rayon over independent starts.
-    // (Python callables should implement eval_batch and call sites that
-    // need GIL/CUTEst batching should use Objective::eval_batch instead.)
-    let values = eval_batch_parallel(obj, clipped.view());
+    // Trait eval_batch: Python overrides for single-GIL / process-pool walkers;
+    // native types may use Rayon in their own override. Never Rayon over
+    // Python::attach here (GIL deadlock).
+    let values = obj.eval_batch(clipped.view());
     let n_evals_screen = values.len();
     let mut screened: Vec<(f64, Array1<f64>)> = values
         .iter()
@@ -455,24 +453,16 @@ where
     } else {
         top_k.min(screened.len())
     };
-    // Independent L-BFGS polishes on the top-k starts (Objective/Gradient are Sync).
-    let polish_results: Vec<LocalPolishResult> = screened
-        .into_iter()
-        .take(polish_limit)
-        .collect::<Vec<_>>()
-        .into_par_iter()
-        .map(|(_value, start)| {
-            projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol)
-        })
-        .collect();
-
+    // Serial polish of top-k: Python gradients cannot run under Rayon (GIL).
     let mut n_evals = n_evals_screen;
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
-    let mut polished_values = Vec::with_capacity(polish_results.len());
-    let mut polished_projected_grad_norms = Vec::with_capacity(polish_results.len());
-    let mut polished_stationary = Vec::with_capacity(polish_results.len());
-    for result in polish_results {
+    let mut polished_values = Vec::with_capacity(polish_limit);
+    let mut polished_projected_grad_norms = Vec::with_capacity(polish_limit);
+    let mut polished_stationary = Vec::with_capacity(polish_limit);
+    for (_value, start) in screened.into_iter().take(polish_limit) {
+        let result =
+            projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol);
         n_evals += result.n_evals;
         n_grads += result.n_grads;
         n_polished += 1;
