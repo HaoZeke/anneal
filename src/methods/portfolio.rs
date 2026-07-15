@@ -2944,21 +2944,37 @@ where
             // D5 endgame: the tail is pure polish (explore-first is
             // optimal; see proofs/d5_endgame_switch.py). Cycle
             // quasi-Newton polish with shrinking trust-region poll
-            // restarts until the budget is gone or two cycles go dry.
+            // restarts until the budget is gone or dry cycles exhaust.
+            //
+            // Critical: do *not* dump all remaining WU into the first
+            // projected_gradient call. CMA exclusives on CERI*/COOLHANS
+            // are polish-depth ties; multi-start jittered restarts need
+            // a reserved share of the tail.
             ledger.cap_set(budget);
             coordinate_opposition_scout(&budgeted_obj, &ledger, &bounds);
             let mut dry = 0usize;
-            while ledger.remaining() >= 4 && dry < 3 {
+            // Up to 5 polish cycles; each takes at most ~1/3 of *current*
+            // remaining so later restarts and poll still fire.
+            while ledger.remaining() >= 4 && dry < 5 {
                 let before = ledger.best_get();
+                let rem0 = ledger.remaining();
+                // Per-cycle budget: half of remaining on the first pass
+                // (deepen the incumbent), then ~1/3 so multi-starts run.
+                let cycle_cap = if dry == 0 {
+                    (rem0 / 2).max(16).min(rem0)
+                } else {
+                    (rem0 / 3).max(12).min(rem0)
+                };
                 if let Some(grad) = budgeted_grad.as_ref() {
                     let mut start = ledger.incumbent(&bounds);
                     if dry > 0 {
-                        // Jittered quasi-Newton restart: a relative-scale
-                        // perturbation escapes line-search stall points
-                        // while staying inside the incumbent basin.
+                        // Jitter scale grows with dry count: first restart
+                        // is line-search scale, later restarts explore a
+                        // slightly larger basin neighborhood (still local).
+                        let scale = 1e-7 * (10.0f64).powi(dry.min(3) as i32);
                         for v in start.iter_mut() {
                             let u = 2.0 * rng.random::<f64>() - 1.0;
-                            *v += 1e-7 * (1.0 + v.abs()) * u;
+                            *v += scale * (1.0 + v.abs()) * u;
                         }
                         start = bounds.clip(start.view());
                     }
@@ -2966,21 +2982,20 @@ where
                         &budgeted_obj,
                         grad,
                         start,
-                        ledger.remaining(),
+                        cycle_cap,
                         1.0,
-                        1e-12,
+                        1e-14,
                     );
                 }
                 if budgeted_grad.is_none() && ledger.remaining() >= 8 {
-                    // Gradient-free polish: the D6 chain at gap ~ 0 is
-                    // anisotropic greedy descent with a learned
-                    // covariance - poll steps are isotropic and stall on
-                    // ill-conditioned basin bottoms.
+                    // Gradient-free polish: D6 / am_sa chain (gap-proportional
+                    // T, Haario covariance) — isotropic poll stalls on
+                    // ill-conditioned bottoms.
                     if let Some(st) = states.am.as_mut() {
                         st.x = ledger.incumbent(&bounds);
                         st.f_x = ledger.best_get();
                     }
-                    let am_share = (ledger.remaining() / 2).max(8);
+                    let am_share = (ledger.remaining() / 2).max(8).min(cycle_cap.max(8));
                     run_arm(
                         ArmKind::AmSa,
                         &budgeted_obj,
@@ -2994,13 +3009,14 @@ where
                 }
                 let rem = ledger.remaining();
                 if rem >= 8 {
+                    let poll_share = (rem / 3).max(8).min(rem);
                     qmc_trust_region_poll(
                         &budgeted_obj,
                         ledger.incumbent(&bounds),
-                        (rem / 2).max(8).min(rem),
+                        poll_share,
                         rng.random::<u64>(),
                         0.0,
-                        3,
+                        4,
                         0,
                     );
                 }
@@ -3010,6 +3026,37 @@ where
                 } else {
                     dry += 1;
                 }
+            }
+            // Final greedy dump: anything left goes to one last polish
+            // from the best incumbent (no multi-start reserve needed).
+            if let Some(grad) = budgeted_grad.as_ref() {
+                let rem = ledger.remaining();
+                if rem >= 4 {
+                    projected_gradient_polish(
+                        &budgeted_obj,
+                        grad,
+                        ledger.incumbent(&bounds),
+                        rem,
+                        1.0,
+                        1e-14,
+                    );
+                }
+            } else if ledger.remaining() >= 8 {
+                if let Some(st) = states.am.as_mut() {
+                    st.x = ledger.incumbent(&bounds);
+                    st.f_x = ledger.best_get();
+                }
+                let rem = ledger.remaining();
+                run_arm(
+                    ArmKind::AmSa,
+                    &budgeted_obj,
+                    budgeted_grad.as_ref(),
+                    &ledger,
+                    &mut states,
+                    &mut rng,
+                    rem,
+                    budget,
+                );
             }
             break;
         }
