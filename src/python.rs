@@ -250,6 +250,57 @@ impl Objective<f64> for CallableObjective {
                 .expect("anneal.run: objective callable returned non-float")
         })
     }
+
+    /// Batch evaluation for multi-walker / multi-start steps.
+    ///
+    /// Prefer a Python `eval_batch(X)` method when present (CUTEst SOTA
+    /// counters use this for parallel walker objectives). Otherwise evaluate
+    /// all rows under a single GIL attach (avoids n attach thrash).
+    fn eval_batch(&self, x: ndarray::ArrayView2<f64>) -> Array1<f64> {
+        use numpy::PyArray2;
+        let n = x.nrows();
+        if n == 0 {
+            return Array1::zeros(0);
+        }
+        Python::attach(|py| {
+            // Multi-walker entry: Python objects (e.g. SOTA Counter) may
+            // evaluate independent walker proposals in parallel.
+            if let Ok(batch_fn) = self.fn_.getattr(py, "eval_batch") {
+                let rows: Vec<Vec<f64>> = x
+                    .outer_iter()
+                    .map(|row| row.iter().copied().collect())
+                    .collect();
+                let py_arr =
+                    PyArray2::from_vec2(py, &rows).expect("anneal: build walker batch array");
+                let r = batch_fn
+                    .call1(py, (py_arr,))
+                    .expect("anneal: objective.eval_batch raised");
+                if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
+                    return Array1::from_vec(arr.as_slice().expect("contiguous").to_vec());
+                }
+                if let Ok(seq) = r.extract::<Vec<f64>>(py) {
+                    assert_eq!(seq.len(), n, "eval_batch length mismatch");
+                    return Array1::from(seq);
+                }
+                panic!("anneal: objective.eval_batch must return float array or sequence");
+            }
+            // Single attach, serial walkers (cheaper than n attach/release).
+            let mut out = Vec::with_capacity(n);
+            for row in x.outer_iter() {
+                let owned: Vec<f64> = row.iter().copied().collect();
+                let py_arr = PyArray1::from_vec(py, owned);
+                let r = self
+                    .fn_
+                    .call1(py, (py_arr,))
+                    .expect("anneal.run: objective callable raised");
+                out.push(
+                    r.extract::<f64>(py)
+                        .expect("anneal.run: objective callable returned non-float"),
+                );
+            }
+            Array1::from(out)
+        })
+    }
 }
 
 /// Internal gradient adapter: a Python callable that takes a numpy
