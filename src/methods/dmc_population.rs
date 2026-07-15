@@ -13,7 +13,7 @@
 //! Public API: [`dmc_population_optimize`], [`run_dmc_population_seeded`]
 //! (Python `anneal.dmc_population_optimize`, portfolio `DmcPop` arm).
 
-use eindir_core::{Bounds, Gradient, Objective, eval_batch_parallel};
+use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
@@ -1037,8 +1037,12 @@ where
             });
         }
 
-        // Parallel objective evaluations (eindir batch helper).
-        let energies = eval_batch_parallel(obj, trial_mat.view());
+        // Multi-walker proposals evaluated as one batch.
+        // - Python/CUTEst: CallableObjective::eval_batch → Counter.eval_batch
+        // - Native Sync: eindir default is serial; use Rayon via eval_batch
+        //   override only where provided (see eval_batch_parallel for explicit
+        //   native fan-out at other call sites).
+        let energies = obj.eval_batch(trial_mat.view());
         n_evals += energies.len();
 
         for (pi, meta) in metas.into_iter().enumerate() {

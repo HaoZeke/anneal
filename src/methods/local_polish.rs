@@ -427,6 +427,9 @@ where
         let pos = bounds.clip(start);
         clipped.row_mut(i).assign(&pos);
     }
+    // Native multi-start screening: Rayon over independent starts.
+    // (Python callables should implement eval_batch and call sites that
+    // need GIL/CUTEst batching should use Objective::eval_batch instead.)
     let values = eval_batch_parallel(obj, clipped.view());
     let n_evals_screen = values.len();
     let mut screened: Vec<(f64, Array1<f64>)> = values

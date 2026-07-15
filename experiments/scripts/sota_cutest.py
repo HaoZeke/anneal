@@ -48,6 +48,15 @@ class _Budget(Exception):
 
 
 class Counter:
+    """Budgeted objective for SOTA cells.
+
+    ``eval_batch`` is the multi-walker entry used by ``dmc_population_optimize``:
+    independent walker proposals are evaluated under one budget charge block.
+    Set ``ANNEAL_WALKER_THREADS`` > 1 to fan out walkers with a thread pool.
+    CUTEst Fortran is typically not re-entrant, so the default is serial
+    evaluation of the batch (still one Python entry from Rust).
+    """
+
     def __init__(self, fn, budget):
         self.fn = fn
         self.budget = budget
@@ -55,23 +64,61 @@ class Counter:
         self.objective_evals = 0
         self.grad_evals = 0
         self.best = float("inf")
+        self._lock = __import__("threading").Lock()
+        self._walker_threads = max(1, int(os.environ.get("ANNEAL_WALKER_THREADS", "1")))
 
-    def _consume(self):
-        if self.n >= self.budget:
+    def _consume(self, k: int = 1):
+        if self.n + k > self.budget:
             raise _Budget()
-        self.n += 1
+        self.n += k
 
     def __call__(self, x):
-        self._consume()
+        self._consume(1)
         self.objective_evals += 1
         v = float(self.fn(np.asarray(x, float).reshape(-1)))
         if math.isfinite(v) and v < self.best:
             self.best = v
         return v
 
+    def eval_batch(self, X):
+        """Evaluate a (n, dim) walker proposal matrix; returns length-n vector.
+
+        Called from Rust ``dmc_pop`` / multi-start paths. Charges ``n`` work
+        units up front, then evaluates rows (optionally threaded).
+        """
+        X = np.asarray(X, dtype=float)
+        if X.ndim == 1:
+            X = X.reshape(1, -1)
+        n = int(X.shape[0])
+        if n == 0:
+            return np.zeros(0, dtype=float)
+        self._consume(n)
+        self.objective_evals += n
+
+        def _one(row):
+            return float(self.fn(np.asarray(row, float).reshape(-1)))
+
+        if self._walker_threads <= 1 or n == 1:
+            vals = [_one(X[i]) for i in range(n)]
+        else:
+            # Threaded walkers. Safe only if ``fn`` releases the GIL and is
+            # re-entrant (native Sync objectives). For default CUTEst, keep
+            # ANNEAL_WALKER_THREADS=1 or use process-level problem clones.
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(self._walker_threads, n)) as pool:
+                vals = list(pool.map(_one, [X[i] for i in range(n)]))
+
+        best = self.best
+        for v in vals:
+            if math.isfinite(v) and v < best:
+                best = v
+        self.best = best
+        return np.asarray(vals, dtype=float)
+
     def record_initial(self, value):
         """Charge and retain the protocol's common starting objective."""
-        self._consume()
+        self._consume(1)
         self.objective_evals += 1
         value = float(value)
         if math.isfinite(value) and value < self.best:
@@ -79,7 +126,7 @@ class Counter:
 
     def counted_grad(self, grad):
         def jac(x):
-            self._consume()
+            self._consume(1)
             self.grad_evals += 1
             return np.asarray(grad(np.asarray(x, float).reshape(-1)), float)
 
