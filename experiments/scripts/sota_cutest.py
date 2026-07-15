@@ -297,6 +297,37 @@ def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
     return counter.best
 
 
+def gpmd(counter, low, high, dim, grad, rng, anchor=None):
+    """Gap-Proportional Metropolis Descent (derived: T = ½ gap / d)."""
+    del dim
+    import anneal
+
+    remaining = counter.budget - counter.n
+    if remaining <= 0:
+        return counter.best
+    jac = counter.counted_grad(grad) if grad is not None else None
+    try:
+        out = anneal.gpmd_optimize(
+            counter,
+            low,
+            high,
+            budget=remaining,
+            seed=int(rng.integers(1 << 31)),
+            grad_fn=jac,
+            x0=anchor,
+        )
+        best = float(out.get("best_val", float("inf")))
+        pos = np.asarray(out.get("best_pos", []), dtype=float).reshape(-1)
+        if pos.size == low.size:
+            if np.any(pos < low - 1e-8) or np.any(pos > high + 1e-8):
+                best = float("inf")
+        if math.isfinite(best) and best < counter.best:
+            counter.best = best
+    except _Budget:
+        pass
+    return counter.best
+
+
 def sci_dual_annealing(counter, low, high, dim, grad, rng, anchor=None):
     bounds = list(zip(low, high))
     x0 = np.asarray(anchor, dtype=np.float64).copy() if anchor is not None else None
@@ -659,6 +690,7 @@ METHODS = {
     "portfolio": portfolio,
     "portfolio_legacy": portfolio_legacy,
     "dmc_pop": dmc_pop,
+    "gpmd": gpmd,
     "hybrid_de": hybrid_de,
     "basinhopping": sci_basinhopping,
     "dual_annealing": sci_dual_annealing,

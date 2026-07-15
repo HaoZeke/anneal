@@ -1,0 +1,102 @@
+#+TITLE: GPMD: Gap-Proportional Metropolis Descent
+#+SUBTITLE: Derivation → algorithm (Trefethen-style)
+#+OPTIONS: toc:2
+
+* Problem
+
+Bound-constrained continuous minimization of a smooth objective \(f:\mathbb{R}^d\to\mathbb{R}\)
+under a finite evaluation budget. At a *local* quadratic basin we want a
+single Metropolis chain whose temperature and proposal scale maximize the
+expected *one-step decrease of the current state energy* (not the incumbent
+record, which ignores uphill proposals).
+
+* Continuous model (evolution-strategy sphere)
+
+Take \(f(x)=\|x\|^2/2\) measured from the basin bottom, and the isotropic
+proposal
+\[
+y = x + \sigma z,\qquad z\sim N(0,I_d),\qquad
+\sigma = c\,\frac{\|x\|}{d}
+\]
+(Rechenberg / ES scaling). As \(d\to\infty\), the energy change
+\(\Delta=f(y)-f(x)\) satisfies the limiting law
+\[
+D := \frac{d\,\Delta}{f(x)} \;\Longrightarrow\; N(c^2,\,4c^2).
+\tag{M1}
+\]
+Write the dimensionless temperature \(\theta = T\,d/f(x)\) and the
+normalized Metropolis state-gain
+\[
+G(c,\theta)
+  = -\mathbb{E}\bigl[D\,\min\{1,\,e^{-D/\theta}\}\bigr].
+\tag{M2}
+\]
+
+* Key identity (load-bearing)
+
+Let \(p_c\) be the \(N(c^2,4c^2)\) density. For every \(u>0\),
+\[
+\frac{p_c(-u)}{p_c(u)} = e^{-u/2}.
+\tag{I1}
+\]
+Pairing \(+u\) and \(-u\) in (M2) yields
+\[
+G(c,\theta)
+  = \int_0^\infty u\,p_c(u)\,
+    \bigl(e^{-u/2}-e^{-u/\theta}\bigr)\,du.
+\tag{I2}
+\]
+Hence, for every \(c>0\):
+\[
+G(c,\theta)>0 \;\Longleftrightarrow\; 0<\theta<2,\qquad
+G(c,2)=0,\qquad
+G(c,\theta)<0 \;\Longleftrightarrow\; \theta>2.
+\tag{T1}
+\]
+(Small-step expansion \(G=c^2(2-\theta)/\theta+O(c^3)\) is consistent but not
+used to prove the sign.)
+
+* Operating point and algorithm
+
+Inside the positive-drift window choose the model operating point
+\(\theta_\star=1/2\) (≈91% of maximal \(G^\star\) at moderate acceptance).
+The inverse map from (M1)–(T1) is the *gap-proportional temperature*
+\[
+T(x)
+  = \theta_\star\,\frac{f(x)-f^\star}{d}
+  = \frac12\,\frac{f(x)-f_{\mathrm{best}}}{d},
+\tag{A1}
+\]
+using the best-so-far as a proxy for \(f^\star\). Proposal *shape* is the
+running covariance of the chain (Haario–Saksman–Tamminen); proposal *size*
+is Robbins–Monro adaptation targeting the model acceptance
+\(\alpha^\star(\theta_\star)\approx 0.32\) (SymPy/numerics). Reflection into
+the box preserves proposal symmetry for Metropolis.
+
+**Algorithm GPMD** (budget \(B\), box, seed):
+
+1. Initialize \(x\) by QMC or given \(x_0\); set \(f\leftarrow f(x)\), \(f_{\mathrm{best}}\leftarrow f\).
+2. Reserve polish tail \(B_{\mathrm{pol}}=\lfloor B/4\rfloor\); set \(B_{\mathrm{sa}}=B-B_{\mathrm{pol}}\).
+3. While work \(<B_{\mathrm{sa}}\):
+   - \(T\leftarrow\tfrac12\max(f-f_{\mathrm{best}},\varepsilon)/d\).
+   - Propose \(y\sim N(x,\sigma^2\hat\Sigma)\) (or isotropic if scatter thin); reflect into box.
+   - Metropolis: accept if \(\Delta\le 0\) or \(U<e^{-\Delta/T}\).
+   - Update scatter / RM scale toward \(\alpha^\star=0.32\); charge evals.
+4. Spend \(B_{\mathrm{pol}}\) on projected L-BFGS (or coordinate) polish of \(x_{\mathrm{best}}\).
+5. Return \(x_{\mathrm{best}}\).
+
+* Position in the literature
+
+- Parent: Metropolis–Hastings on a quadratic basin; ES progress rate (Rechenberg);
+  adaptive Metropolis (Haario et al.); *not* Xiang dual annealing (GSA visiting
+  + L-BFGS as global method).
+- Claim boundary: *local* expected state descent under (M1). Multimodal escape is
+  outside (T1); use restarts/portfolio arms for that (D7).
+- Dual annealing remains the GSA+local-search baseline for *global* search;
+  GPMD is the descent-phase law productized as a callable algorithm.
+
+* Verification
+
+- SymPy: (I1), (I2) sign factorization, \(\alpha^\star(\theta_\star)\), \(c^\star\).
+- Lean: algebraic proof of (I1) for \(\mu=c^2\), \(\sigma^2=4c^2\); corollary (T1) for the integrand sign.
+- Implementation: =src/methods/gpmd.rs=; Python =anneal.gpmd_optimize=; SOTA method =gpmd=.
