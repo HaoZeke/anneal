@@ -228,6 +228,8 @@ def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
         return counter.best
     jac = counter.counted_grad(grad) if grad is not None else None
     try:
+        # Walker count ~sqrt(budget), floors for DE/crossover proposals.
+        tn = max(8, min(40, int(remaining**0.5 * 0.9), remaining // 4))
         out = anneal.dmc_population_optimize(
             counter,
             low,
@@ -235,7 +237,7 @@ def dmc_pop(counter, low, high, dim, grad, rng, anchor=None):
             budget=remaining,
             seed=int(rng.integers(1 << 31)),
             grad_fn=jac,
-            target_n=min(24, max(4, remaining // 16)),
+            target_n=tn,
             steps_per_control=3,
             x0=anchor,
         )

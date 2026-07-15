@@ -2080,14 +2080,16 @@ fn run_arm<O, G>(
             run_tps_arm(obj, ledger, states, rng, slice, &bounds, dim);
         }
         ArmKind::DmcPop => {
-            // Classical population-controlled diffusion (DMC-inspired).
-            // Charges the shared ledger via BudgetedObjective / Gradient.
-            // Walker 0 starts at the incumbent so slices exploit the archive.
+            // Classical population-controlled diffusion (DMC / population-
+            // annealing pattern): residual branching, DE+diffusion proposals,
+            // QMC init, elite polish. Walker 0 starts at the incumbent.
             let maxf = ledger.remaining().min(slice);
-            if maxf < 8 {
+            if maxf < 12 {
                 return;
             }
-            let target_n = (maxf / 16).clamp(4, 24);
+            let target_n = crate::methods::dmc_population::recommend_target_n(maxf, dim)
+                .clamp(6, 32)
+                .min(maxf / 3);
             let seed_pos = ledger.incumbent(&bounds);
             let fresh_obj = BudgetedObjective {
                 inner: obj.inner,
