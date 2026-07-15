@@ -172,39 +172,43 @@ where
     M: crate::movekernel::MoveKernel<f64>,
     A: crate::accept::AcceptRule<f64>,
 {
+    use rayon::prelude::*;
+
     let cooling = variant.cool.clone();
+    let n_starts = n_starts.max(1);
     let starts = eindir_core::low_discrepancy_points(
         variant.obj.bounds(),
-        n_starts.max(1),
+        n_starts,
         qmc_skip_from_seed(seed),
     );
-    let mut best_history = None;
+    // Independent QMC multi-starts: each chain has its own RNG and state.
+    let histories: Vec<History> = (0..n_starts)
+        .into_par_iter()
+        .map(|idx| {
+            let start = starts.row(idx);
+            let pos = variant.obj.bounds().clip(start);
+            let val = variant.obj.eval(pos.view());
+            let pair = eindir_core::FPair { pos, val };
+            let state = State {
+                cur: pair.clone(),
+                best: pair,
+            };
+            let chain_seed =
+                seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
+            let mut rng = StdRng::seed_from_u64(chain_seed);
+            drive_rs(
+                &variant,
+                &cooling,
+                state,
+                n_epochs,
+                steps_per_epoch,
+                &mut rng,
+            )
+        })
+        .collect();
 
-    for (idx, start) in starts.outer_iter().enumerate() {
-        let pos = variant.obj.bounds().clip(start);
-        let val = variant.obj.eval(pos.view());
-        let pair = eindir_core::FPair { pos, val };
-        let state = State {
-            cur: pair.clone(),
-            best: pair,
-        };
-        let chain_seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
-        let mut rng = StdRng::seed_from_u64(chain_seed);
-        let history = drive_rs(
-            &variant,
-            &cooling,
-            state,
-            n_epochs,
-            steps_per_epoch,
-            &mut rng,
-        );
-        if best_history
-            .as_ref()
-            .is_none_or(|best: &History| history.best.val < best.best.val)
-        {
-            best_history = Some(history);
-        }
-    }
-
-    best_history.expect("n_starts.max(1) guarantees at least one chain")
+    histories
+        .into_iter()
+        .min_by(|a, b| a.best.val.total_cmp(&b.best.val))
+        .expect("n_starts.max(1) guarantees at least one chain")
 }

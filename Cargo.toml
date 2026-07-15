@@ -22,10 +22,11 @@ python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-eindir-core = { version = "0.5.1" }
+eindir-core = { version = "0.5.2", path = "../eindir" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
+rayon       = "1.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
 
