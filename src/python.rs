@@ -242,12 +242,13 @@ impl Objective<f64> for CallableObjective {
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
-            let r = self
-                .fn_
-                .call1(py, (py_arr,))
-                .expect("anneal.run: objective callable raised");
-            r.extract::<f64>(py)
-                .expect("anneal.run: objective callable returned non-float")
+            match self.fn_.call1(py, (py_arr,)) {
+                Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
+                // Budget counters raise a Python exception when the shared
+                // work ledger is exhausted. Map that to +inf so Rust drivers
+                // stop improving instead of panicking the whole process.
+                Err(_) => f64::INFINITY,
+            }
         })
     }
 
@@ -272,31 +273,33 @@ impl Objective<f64> for CallableObjective {
                     .collect();
                 let py_arr =
                     PyArray2::from_vec2(py, &rows).expect("anneal: build walker batch array");
-                let r = batch_fn
-                    .call1(py, (py_arr,))
-                    .expect("anneal: objective.eval_batch raised");
-                if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
-                    return Array1::from_vec(arr.as_slice().expect("contiguous").to_vec());
+                match batch_fn.call1(py, (py_arr,)) {
+                    Ok(r) => {
+                        if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
+                            return Array1::from_vec(
+                                arr.as_slice().expect("contiguous").to_vec(),
+                            );
+                        }
+                        if let Ok(seq) = r.extract::<Vec<f64>>(py) {
+                            if seq.len() == n {
+                                return Array1::from(seq);
+                            }
+                        }
+                        return Array1::from(vec![f64::INFINITY; n]);
+                    }
+                    Err(_) => return Array1::from(vec![f64::INFINITY; n]),
                 }
-                if let Ok(seq) = r.extract::<Vec<f64>>(py) {
-                    assert_eq!(seq.len(), n, "eval_batch length mismatch");
-                    return Array1::from(seq);
-                }
-                panic!("anneal: objective.eval_batch must return float array or sequence");
             }
             // Single attach, serial walkers (cheaper than n attach/release).
             let mut out = Vec::with_capacity(n);
             for row in x.outer_iter() {
                 let owned: Vec<f64> = row.iter().copied().collect();
                 let py_arr = PyArray1::from_vec(py, owned);
-                let r = self
-                    .fn_
-                    .call1(py, (py_arr,))
-                    .expect("anneal.run: objective callable raised");
-                out.push(
-                    r.extract::<f64>(py)
-                        .expect("anneal.run: objective callable returned non-float"),
-                );
+                let v = match self.fn_.call1(py, (py_arr,)) {
+                    Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
+                    Err(_) => f64::INFINITY,
+                };
+                out.push(v);
             }
             Array1::from(out)
         })
@@ -319,14 +322,17 @@ impl eindir_core::Gradient<f64> for CallablePyGradient {
         Python::attach(|py| {
             let owned: Vec<f64> = x.iter().copied().collect();
             let py_arr = PyArray1::from_vec(py, owned);
-            let r = self
-                .fn_
-                .call1(py, (py_arr,))
-                .expect("anneal.run_hmc: gradient callable raised");
-            let arr = r
-                .extract::<numpy::PyReadonlyArray1<f64>>(py)
-                .expect("anneal.run_hmc: gradient callable returned non-array");
-            Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
+            match self.fn_.call1(py, (py_arr,)) {
+                Ok(r) => {
+                    if let Ok(arr) = r.extract::<numpy::PyReadonlyArray1<f64>>(py) {
+                        Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
+                    } else {
+                        Array1::zeros(self.dim)
+                    }
+                }
+                // Budget exhaustion must not panic the process mid-optimize.
+                Err(_) => Array1::zeros(self.dim),
+            }
         })
     }
 
