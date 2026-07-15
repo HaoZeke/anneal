@@ -70,7 +70,7 @@ const ENDGAME_WU_PER_ITER: usize = 4;
 /// tolerance crosses six orders.
 const NEAR_BEST_ORDERS: f64 = 6.0;
 
-/// Per-cycle polish budget during multi-start endgame.
+/// Per-cycle polish budget during multi-start endgame, in **work units**.
 ///
 /// Must **not** return the full remaining budget on early cycles when
 /// `remaining` is large enough for multi-start: the first projected-
@@ -80,6 +80,11 @@ const NEAR_BEST_ORDERS: f64 = 6.0;
 /// - `dry == 0`: half of remaining (deepen incumbent), at least 16 WU
 /// - `dry > 0`: one third (leave room for further restarts + poll)
 /// - Always capped at `remaining`
+///
+/// Callers must convert WU → `max_fevals` via [`endgame_polish_max_fevals`]
+/// and/or pin the ledger cap for the cycle; passing this value raw as
+/// `projected_gradient_polish(..., max_fevals, ...)` double-charges (eval+grad
+/// per step) and can still dump the full tail.
 fn endgame_cycle_cap(remaining: usize, dry: usize) -> usize {
     if remaining == 0 {
         return 0;
@@ -89,6 +94,47 @@ fn endgame_cycle_cap(remaining: usize, dry: usize) -> usize {
     } else {
         (remaining / 3).max(12).min(remaining)
     }
+}
+
+/// Convert an endgame cycle work-unit budget into `max_fevals` for
+/// [`projected_gradient_polish`].
+///
+/// Each polish step charges ~`PROJECTED_GRADIENT_STEP_WORK` (1 obj + 1 grad).
+/// Returning `cycle_wu / PROJECTED_GRADIENT_STEP_WORK` keeps ledger spend ≤
+/// the cycle WU when the temporary ledger cap is also applied.
+fn endgame_polish_max_fevals(cycle_wu: usize) -> usize {
+    low_dimensional_refinement_fevals(cycle_wu).max(if cycle_wu > 0 { 1 } else { 0 })
+}
+
+/// Run one endgame projected-gradient cycle under a hard work-unit ceiling.
+///
+/// Pins `ledger.cap` to `used + cycle_wu` for the duration of the polish so
+/// BudgetedObjective/Gradient stop charging once the cycle budget is spent,
+/// then restores `outer_cap` (normally the full portfolio budget).
+fn run_endgame_projected_polish_cycle<O, G>(
+    obj: &BudgetedObjective<'_, O>,
+    grad: &BudgetedGradient<'_, G>,
+    ledger: &BudgetLedger,
+    start: Array1<f64>,
+    cycle_wu: usize,
+    outer_cap: usize,
+    grad_tol: f64,
+) where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+{
+    if cycle_wu == 0 {
+        return;
+    }
+    let maxf = endgame_polish_max_fevals(cycle_wu);
+    if maxf == 0 {
+        return;
+    }
+    let used0 = ledger.used_get();
+    let cycle_ceiling = (used0 + cycle_wu).min(outer_cap);
+    ledger.cap_set(cycle_ceiling);
+    let _ = projected_gradient_polish(obj, grad, start, maxf, 1.0, grad_tol);
+    ledger.cap_set(outer_cap);
 }
 
 /// Abramowitz-Stegun 7.1.26 rational erf approximation (|error| < 1.5e-7).
@@ -2979,7 +3025,8 @@ where
             while ledger.remaining() >= 4 && dry < 5 {
                 let before = ledger.best_get();
                 let rem0 = ledger.remaining();
-                let cycle_cap = endgame_cycle_cap(rem0, dry);
+                // cycle_cap is work units, not max_fevals.
+                let cycle_wu = endgame_cycle_cap(rem0, dry);
                 if let Some(grad) = budgeted_grad.as_ref() {
                     let mut start = ledger.incumbent(&bounds);
                     if dry > 0 {
@@ -2993,24 +3040,29 @@ where
                         }
                         start = bounds.clip(start.view());
                     }
-                    projected_gradient_polish(
+                    run_endgame_projected_polish_cycle(
                         &budgeted_obj,
                         grad,
+                        &ledger,
                         start,
-                        cycle_cap,
-                        1.0,
+                        cycle_wu,
+                        budget,
                         1e-14,
                     );
                 }
                 if budgeted_grad.is_none() && ledger.remaining() >= 8 {
                     // Gradient-free polish: D6 / am_sa chain (gap-proportional
                     // T, Haario covariance) — isotropic poll stalls on
-                    // ill-conditioned bottoms.
+                    // ill-conditioned bottoms. AmSa slice length ≈ MH
+                    // proposals ≈ 1 WU each, so cycle_wu is the right unit.
                     if let Some(st) = states.am.as_mut() {
                         st.x = ledger.incumbent(&bounds);
                         st.f_x = ledger.best_get();
                     }
-                    let am_share = (ledger.remaining() / 2).max(8).min(cycle_cap.max(8));
+                    let am_share = (ledger.remaining() / 2).max(8).min(cycle_wu.max(8));
+                    // Temporary cap so AmSa cannot overrun the cycle share.
+                    let used0 = ledger.used_get();
+                    ledger.cap_set((used0 + am_share).min(budget));
                     run_arm(
                         ArmKind::AmSa,
                         &budgeted_obj,
@@ -3021,10 +3073,13 @@ where
                         am_share,
                         budget,
                     );
+                    ledger.cap_set(budget);
                 }
                 let rem = ledger.remaining();
                 if rem >= 8 {
                     let poll_share = (rem / 3).max(8).min(rem);
+                    let used0 = ledger.used_get();
+                    ledger.cap_set((used0 + poll_share).min(budget));
                     qmc_trust_region_poll(
                         &budgeted_obj,
                         ledger.incumbent(&bounds),
@@ -3034,6 +3089,7 @@ where
                         4,
                         0,
                     );
+                    ledger.cap_set(budget);
                 }
                 let after = ledger.best_get();
                 if after < before {
@@ -3047,11 +3103,12 @@ where
             if let Some(grad) = budgeted_grad.as_ref() {
                 let rem = ledger.remaining();
                 if rem >= 4 {
+                    let maxf = endgame_polish_max_fevals(rem).max(1);
                     projected_gradient_polish(
                         &budgeted_obj,
                         grad,
                         ledger.incumbent(&bounds),
-                        rem,
+                        maxf,
                         1.0,
                         1e-14,
                     );
@@ -3251,26 +3308,82 @@ mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
 
-    /// Endgame must reserve tail for multi-start: first cycle is not 100% of
-    /// a large remaining budget (regression for single-call dump).
+    /// Pure WU split: first cycle is half remaining on a large tail.
     #[test]
     fn endgame_cycle_cap_reserves_for_multistart() {
-        // Large tail: first polish ≤ half remaining, strictly less than full.
         let rem = 2000usize;
         let first = endgame_cycle_cap(rem, 0);
         assert!(first < rem, "first cycle must not dump full tail: {first} vs {rem}");
         assert_eq!(first, rem / 2);
-        // Later cycles leave room for further restarts.
         let later = endgame_cycle_cap(rem, 1);
-        assert!(later < rem);
         assert_eq!(later, rem / 3);
-        // Cap never exceeds remaining.
-        assert_eq!(endgame_cycle_cap(10, 0), 10);
-        assert_eq!(endgame_cycle_cap(10, 2), 10);
-        assert_eq!(endgame_cycle_cap(0, 0), 0);
-        // Sum of two consecutive cycles on a fixed rem snapshot leaves a
-        // positive residual for poll / final dump when rem is large.
         assert!(first + later < rem);
+        // WU → max_fevals conversion: fevals * step_work ≤ cycle_wu.
+        let maxf = endgame_polish_max_fevals(first);
+        assert!(
+            maxf * PROJECTED_GRADIENT_STEP_WORK <= first,
+            "max_fevals {maxf} would charge more than cycle_wu {first}"
+        );
+        assert!(maxf < rem, "max_fevals must be well below remaining WU");
+        assert_eq!(endgame_polish_max_fevals(0), 0);
+    }
+
+    /// Real path: first endgame polish cycle under BudgetedObjective must not
+    /// consume the full remaining ledger tail (multi-start residual stays).
+    #[test]
+    fn endgame_first_polish_cycle_leaves_ledger_residual() {
+        let obj = ShiftQuadratic::new();
+        let dim = Objective::dim(&obj);
+        let budget = 2000usize;
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let budgeted_grad = BudgetedGradient {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        // Seed the ledger with a charged evaluation away from the origin
+        // so polish has work to do (otherwise it may exit immediately).
+        let start = Array1::from_elem(dim, 1.5);
+        let f0 = budgeted_obj.eval(start.view());
+        assert!(f0.is_finite());
+        let used0 = ledger.used_get();
+        let rem0 = ledger.remaining();
+        assert!(rem0 > 100, "need a large tail for the multi-start claim");
+        let cycle_wu = endgame_cycle_cap(rem0, 0);
+        assert!(cycle_wu < rem0);
+        assert_eq!(cycle_wu, rem0 / 2);
+
+        run_endgame_projected_polish_cycle(
+            &budgeted_obj,
+            &budgeted_grad,
+            &ledger,
+            start,
+            cycle_wu,
+            budget,
+            1e-14,
+        );
+
+        let used1 = ledger.used_get();
+        let rem1 = ledger.remaining();
+        let spent = used1.saturating_sub(used0);
+        // Hard ledger cap: first cycle cannot spend more than cycle_wu.
+        assert!(
+            spent <= cycle_wu,
+            "first polish spent {spent} WU > cycle_wu {cycle_wu} (rem0={rem0})"
+        );
+        // Residual must remain a large fraction of the pre-cycle tail so
+        // multi-start / poll / final dump still have budget.
+        assert!(
+            rem1 >= rem0 / 3,
+            "after first cycle remaining {rem1} is too small vs rem0 {rem0} (spent {spent})"
+        );
+        // Cap restored to the outer budget.
+        assert_eq!(ledger.cap_get(), budget);
+        assert!(ledger.best_get().is_finite());
+        assert!(ledger.best_get() <= f0 + 1e-12);
     }
 
     #[test]
