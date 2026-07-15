@@ -43,6 +43,7 @@ from anneal._core import (
     global_optimize as _core_global_optimize,
     global_optimize_objective as _core_global_optimize_objective,
     dmc_population_optimize as _core_dmc_population_optimize,
+    gpmd_optimize as _core_gpmd_optimize,
     run,
     run_hmc,
     run_qmc,
@@ -517,6 +518,35 @@ def gle_langevin_preconditioned_objective(
     return out
 
 
+def gpmd_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    x0=None,
+):
+    """Gap-Proportional Metropolis Descent (T = ½ · gap / d).
+
+    See docs/derivations/gpmd_algorithm.org. Local descent law from the
+    ES-sphere Metropolis model (θ⋆=1/2 ∈ (0,2)); not dual annealing.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    out = _core_gpmd_optimize(
+        obj_fn,
+        low_arr,
+        high_arr,
+        int(budget),
+        int(seed),
+        grad_fn,
+        x0_arr,
+    )
+    return out
+
+
 def dmc_population_optimize(
     obj_fn,
     low,
@@ -661,6 +691,7 @@ __all__ = [
     "gle_langevin_preconditioned",
     "gle_langevin_preconditioned_objective",
     "dmc_population_optimize",
+    "gpmd_optimize",
     "global_optimize",
     "global_optimize_objective",
     "run",
