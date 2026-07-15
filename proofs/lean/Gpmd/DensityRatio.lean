@@ -1,40 +1,50 @@
+/-!
+# GPMD (I1): Gaussian log-density ratio algebra
+
+Phase III / D6.6 algebraic core. **No Mathlib.**
+
+Machine-checked steps matching `docs/derivations/gpmd_algorithm.org` (I1):
+
+1. Difference of squares: `a² − b² = (a−b)(a+b)`
+2. Gaussian numerator: `(-u−μ)² − (u−μ)² = 4 u μ`
+3. General log-ratio coefficient after canceling the `4u`
+4. ES specialization: when `σ² = 4 μ` and `μ ≠ 0`, `-2 μ / σ² = -1/2`
+
+Proofs use Lean 4 core `grind` (CommRing / field arithmetic), not
+`native_decide` on a pre-simplified rational constant.
+-/
+
 namespace Gpmd
 
-def half : Rat := 1 / 2
-def two : Rat := 2
-def four : Rat := 4
+/-- Difference of squares over `Int`. -/
+theorem sq_sub_sq (a b : Int) : a * a - b * b = (a - b) * (a + b) := by
+  grind
 
-theorem density_ratio_coefficient : (2 : Rat) / 4 = half := by
-  native_decide
+/-- Numerator identity in the Gaussian log-density ratio:
+    `(-u-μ)² - (u-μ)² = 4 u μ`. -/
+theorem gauss_num_expand (u μ : Int) :
+    (-u - μ) * (-u - μ) - (u - μ) * (u - μ) = 4 * u * μ := by
+  grind
 
-theorem log_ratio_coeff_on_one :
-    - ((2 : Rat) * 1) / (4 * 1) = -half := by
-  native_decide
+/-- Same identity over `Rat` (used for the coefficient specialization). -/
+theorem gauss_num_expand_rat (u μ : Rat) :
+    (-u - μ) * (-u - μ) - (u - μ) * (u - μ) = 4 * u * μ := by
+  grind
 
-theorem theta_star_pos : (0 : Rat) < half := by native_decide
-theorem theta_star_lt_two : half < two := by native_decide
-theorem theta_star_in_window : (0 : Rat) < half ∧ half < two :=
-  ⟨theta_star_pos, theta_star_lt_two⟩
+/-- After dividing by `2 σ²`, the log-ratio coefficient of `u` is `-2 μ / σ²`. -/
+theorem log_ratio_coeff (μ σ2 : Rat) :
+    -(4 * μ) / (2 * σ2) = -(2 * μ) / σ2 := by
+  grind
 
-theorem dimensionless_example_d4_gap8 :
-    (4 : Rat) * (half * 8 / 4) / 8 = half := by
-  native_decide
+/-- ES limit specialization: `μ = c²`, `σ² = 4 c² = 4 μ`.
+    Coefficient of `u` in the log-ratio is exactly `-1/2`. -/
+theorem es_coeff (μ : Rat) (_hμ : μ ≠ 0) :
+    -(2 * μ) / (4 * μ) = (-1 : Rat) / 2 := by
+  grind
 
-theorem inv_theta_half_at_one :
-    (1 : Rat) / 1 - half = (two - 1) / (two * 1) := by
-  native_decide
-
-theorem inv_theta_half_at_four :
-    (1 : Rat) / 4 - half = (two - 4) / (two * 4) := by
-  native_decide
-
-theorem factor_pos_when_theta_half : (0 : Rat) < (two - half) / (two * half) := by
-  native_decide
-
-theorem factor_neg_when_theta_four : (two - 4) / (two * 4) < (0 : Rat) := by
-  native_decide
-
-theorem factor_zero_when_theta_two : (two - two) / (two * two) = (0 : Rat) := by
-  native_decide
+/-- Combined I1 coefficient under ES law `σ² = 4 μ` (μ ≠ 0). -/
+theorem density_ratio_coefficient (μ : Rat) (_hμ : μ ≠ 0) :
+    -(4 * μ) / (2 * (4 * μ)) = (-1 : Rat) / 2 := by
+  grind
 
 end Gpmd

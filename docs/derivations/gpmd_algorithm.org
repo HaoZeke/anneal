@@ -1,116 +1,322 @@
 #+TITLE: GPMD: Gap-Proportional Metropolis Descent
-#+SUBTITLE: Derivation by Pólya’s four phases
+#+SUBTITLE: Derivation by Pólya’s four phases (parent model: D6)
 #+OPTIONS: toc:2
 
 * (I) Understand the problem
 
 ** What is the unknown?
-A temperature law \(T=T(x)\) and proposal scale rule for a Metropolis chain
-so that, on a *local* quadratic basin, the expected one-step decrease of the
-*current state energy* is positive and near-optimal under a standard
-evolution-strategy proposal scaling.
+A temperature law \(T=T(x)\) (and a consistent proposal-scale adaptation rule)
+for a Metropolis chain so that, on a *local* quadratic basin, the expected
+one-step decrease of the *current chain-state energy* is positive and near
+the model optimum under evolution-strategy proposal scaling.
 
 ** What are the data?
-- Smooth objective \(f:\mathbb{R}^d\to\mathbb{R}\) (locally \(f(x)=\|x\|^2/2\)
-  from the basin bottom).
-- Isotropic Gaussian proposal \(y=x+\sigma z\), \(z\sim N(0,I_d)\), with
-  ES scaling \(\sigma=c\|x\|/d\) (Rechenberg).
-- Metropolis acceptance \(\min\{1,e^{-\Delta/T}\}\), \(\Delta=f(y)-f(x)\).
-- Finite evaluation budget \(B\) (work units).
+- Local model objective \(f(x)=\|x\|^2/2\) measured from the basin bottom
+  (sphere). On a general basin one substitutes a local quadratic; see D6
+  anisotropic remarks.
+- Proposal \(y=x+\sigma z\) with \(z\sim N(0,I_d)\) and ES scale
+  \(\sigma=c\|x\|/d\) (Rechenberg).
+- Metropolis acceptance \(a_T(\Delta)=\min\{1,\exp(-\Delta/T)\}\),
+  \(\Delta=f(y)-f(x)\).
+- Work-unit budget \(B\).
 
 ** What is the condition?
-The law must be derived from the asymptotic model, not chosen as a free
-cooling schedule. Multimodal *escape* is a different problem (outside this
-unknown); here the condition is local *descent* of the chain state.
+Temperature must follow from the sign of the state-gain functional in the
+limiting model (not a free geometric schedule). The unknown is *local
+descent of the chain state*, not global multimodal escape and not
+best-so-far one-step improvement (the latter is independent of \(T\);
+see D6 §Scope).
 
 ** Literature parent
-Local Metropolis on a quadratic + ES progress theory + adaptive Metropolis
-(Haario–Saksman–Tamminen) for proposal *shape*. This is *not* Xiang dual
-annealing (GSA visiting + L-BFGS as a global solver).
+- *Parent mathematical model:* D6 (annealed Metropolis state-drift scaling)
+  in =docs/derivations/d6_annealed_descent_scaling.org= /
+  =proofs/d6_annealed_descent_scaling.py=.
+- *Engineering parents:* adaptive Metropolis for covariance shape
+  (Haario–Saksman–Tamminen); Robbins–Monro for scale.
+- *Not claimed:* Xiang dual annealing / GSA visiting as a global solver.
 
 * (II) Devise a plan
 
-** Have we seen a related problem?
-Yes: maximize expected progress of a \((1+1)\)-ES on the sphere (Rechenberg);
-Metropolis at \(T=0\) recovers pure descent. Adaptive MCMC optimizes a
-different objective (stationary diffusion speed, Roberts–Gelman–Gilks).
+** Related problems
+- Maximize \((1+1)\)-ES progress on the sphere (Rechenberg): \(T=0\) limit of Metropolis.
+- Stationary-chain optimal scaling (Roberts–Gelman–Gilks): different objective
+  (diffusion speed of the equilibrium chain), not state descent under budget.
 
-** Auxiliary problem
-Pass to the \(d\to\infty\) limit with ES scaling so \(\Delta\) is Gaussian, then
-optimize the normalized gain
-\[
-G(c,\theta)=-\mathbb{E}\bigl[D\min\{1,e^{-D/\theta}\}\bigr],\quad
-\theta=Td/f(x),\quad D=d\Delta/f(x).
-\]
-
-** Tools for checking (not a methodology brand)
-- SymPy: expand Gaussian density ratios and algebraic factors.
-- Lean: machine-check the coefficient identities and \(\theta_\star\in(0,2)\).
-- Implementation: enforce \(T=\theta_\star(f-f_{\mathrm{best}})/d\).
+** Plan
+1. Expand \(\Delta\) exactly for \(f=\|x\|^2/2\).
+2. Normalize by \(f/d\), impose ES scaling, pass to the \(d\to\infty\) limit to
+   obtain a Gaussian law for \(D\) (model M1; same as D6.2).
+3. Define normalized gain \(G(c,\theta)\) (D6.3).
+4. Prove the density-ratio identity (I1 / D6.6) and the pairing formula (I2 / D6.7).
+5. Conclude the critical window (T1 / Prop. D6.1).
+6. Cross-check the small-step expansion (D6.8).
+7. Choose an interior operating point \(\theta_\star=\tfrac12\) using the
+   numerically maximized residual rate \(G^\star(\theta)/G^\star(0)\).
+8. Invert \(\theta=Td/f\) with the implementable proxy \(f_{\mathrm{best}}\) for
+   the unknown basin bottom \(f^\star\), yielding the gap-proportional law (A1).
+9. Write the explicit algorithm and check it (SymPy, Lean algebra, unit tests).
 
 * (III) Carry out the plan
 
-** Model (M1)
-Under \(\sigma=c\|x\|/d\),
+** Exact energy increment
+Let \(f(x)=\|x\|^2/2\) and \(y=x+\sigma z\). Then
+\begin{equation}
+\Delta
+  = f(y)-f(x)
+  = \sigma\, x^\top z + \frac{\sigma^2}{2}\|z\|^2.
+\tag{GPMD.1}
+\end{equation}
+(This is an identity, not a limit.)
+
+** ES scaling and normalization
+Set \(\sigma=c\|x\|/d\) with \(c>0\) fixed and write
 \[
+D := \frac{d\,\Delta}{f(x)}.
+\]
+Since \(f(x)=\|x\|^2/2\),
+\begin{equation}
+D
+  = \frac{d}{f(x)}\Bigl(\sigma\, x^\top z + \tfrac12\sigma^2\|z\|^2\Bigr)
+  = 2c\,\frac{x^\top z}{\|x\|}
+    + c^2\,\frac{\|z\|^2}{d}.
+\tag{GPMD.2}
+\end{equation}
+As \(d\to\infty\): \(\|z\|^2/d\to 1\) in probability, and
+\(x^\top z/\|x\|\sim N(0,1)\), so
+\begin{equation}
 D \;\Longrightarrow\; N(c^2,\,4c^2).
-\]
+\tag{M1 / D6.2}
+\end{equation}
+(M1) is an *asymptotic model*. All identities below are exact *inside* that
+model (same convention as D6). Finite-\(d\) corrections are not claimed.
 
-** Identity (I1)
-Let \(p_c\) be the \(N(c^2,4c^2)\) density. For \(u>0\),
-\[
-\frac{p_c(-u)}{p_c(u)}=e^{-u/2}.
-\]
-Proof sketch: \(\log p(-u)-\log p(u)=-2u\mu/\sigma^2\) for any Gaussian
-\(N(\mu,\sigma^2)\); set \(\mu=c^2\), \(\sigma^2=4c^2\).
+** Gain functional
+With dimensionless temperature \(\theta=Td/f(x)\),
+\begin{equation}
+G(c,\theta)
+  = -\mathbb{E}\bigl[D\min\{1,e^{-D/\theta}\}\bigr].
+\tag{GPMD.3 / D6.3}
+\end{equation}
+This is the expected *normalized* decrease of the *current* energy, not of
+the incumbent record (D6 §Scope).
 
-** Pairing (I2)–(T1)
-\[
-G(c,\theta)=\int_0^\infty u\,p_c(u)\,(e^{-u/2}-e^{-u/\theta})\,du.
-\]
-The weight \(e^{-u/2}-e^{-u/\theta}\) has the sign of \(2-\theta\) for \(u>0\).
-Hence for every \(c>0\):
-\[
-G>0 \Leftrightarrow 0<\theta<2,\quad G(\cdot,2)=0,\quad G<0\Leftrightarrow\theta>2.
-\]
+** Small-step expansion (independent check)
+For small \(c\), expand (GPMD.3) in the limiting Gaussian model to obtain
+\begin{equation}
+G(c,\theta)
+  = c^2\frac{2-\theta}{\theta}+O(c^3)
+  \qquad(\theta>0).
+\tag{GPMD.4 / D6.8}
+\end{equation}
+The leading coefficient changes sign at \(\theta=2\), consistent with (T1)
+below, but the global proof does *not* use the expansion (same warning as D6).
 
-** Operating point
-Choose \(\theta_\star=\tfrac12\in(0,2)\). Numerics (SymPy/MC): at \(\theta_\star\),
-\(c^\star\approx 1.32\), \(G^\star\approx 0.37\), \(\alpha^\star\approx 0.32\).
+** Identity (I1) — Gaussian density ratio (D6.6)
+Let \(p_c\) be the density of \(N(c^2,4c^2)\). For \(u>0\),
+\begin{equation}
+\log\frac{p_c(-u)}{p_c(u)}
+  = -\frac{(-u-c^2)^2-(u-c^2)^2}{2\cdot(4c^2)}
+  = -\frac{u}{2}.
+\tag{I1 / D6.6}
+\end{equation}
 
-** Operating law (A1)
+*Proof (full algebra).* For any Gaussian \(N(\mu,\sigma^2)\) with density \(p\),
 \[
-T(x)=\theta_\star\frac{f(x)-f_{\mathrm{best}}}{d}=\frac12\frac{f(x)-f_{\mathrm{best}}}{d}.
+\log p(-u)-\log p(u)
+  = -\frac{(-u-\mu)^2-(u-\mu)^2}{2\sigma^2}.
 \]
-Proposal size: Robbins–Monro on \(\log\sigma\) targeting \(\alpha^\star=0.32\).
-Proposal shape: running covariance when enough samples exist (else isotropic).
-Budget: reserve a polish fraction \(\rho_{\mathrm{pol}}=\tfrac14\) of \(B\).
+Expand the numerator:
+\[
+(-u-\mu)^2-(u-\mu)^2
+  = (u^2+2u\mu+\mu^2)-(u^2-2u\mu+\mu^2)
+  = 4u\mu,
+\]
+so
+\[
+\log p(-u)-\log p(u)
+  = -\frac{4u\mu}{2\sigma^2}
+  = -\frac{2u\mu}{\sigma^2}.
+\]
+Specialize \(\mu=c^2\), \(\sigma^2=4c^2\) (\(c\neq 0\)):
+\[
+-\frac{2u c^2}{4c^2} = -\frac{u}{2}.
+\]
+Exponentiating gives \(p_c(-u)/p_c(u)=e^{-u/2}\). \(\square\)
+
+(Lean checks the algebraic steps of this expansion and the specialization
+\(-2\mu/\sigma^2=-1/2\) when \(\sigma^2=4\mu\). SymPy re-derives the same
+identities symbolically.)
+
+** Proposition (T1 / D6.1) — critical temperature in the limiting model
+For every \(c>0\), \(G(c,\theta)>0\) when \(0<\theta<2\), \(G(c,2)=0\), and
+\(G(c,\theta)<0\) when \(\theta>2\).
+
+*Proof (pairing, as D6.1).* Write \(G=-\mathbb{E}[D\,a_\theta(D)]\) with
+\(a_\theta(D)=\min\{1,e^{-D/\theta}\}\). Split the expectation into \(D>0\) and
+\(D<0\). On \(\{D\le 0\}\) one has \(a_\theta=1\). On \(\{D>0\}\) one has
+\(a_\theta=e^{-D/\theta}\). Pair \(+u\) and \(-u\) for \(u>0\): the contribution of
+the pair is proportional to
+\[
+u\,p_c(u)\,e^{-u/\theta}
+  - (-u)\,p_c(-u)
+  = u\,p_c(u)\Bigl(
+      e^{-u/\theta}
+      + \frac{p_c(-u)}{p_c(u)}
+    \Bigr)
+  - 2u\,p_c(-u)
+\]
+more cleanly, following D6.7: using \(p_c(-u)=e^{-u/2}p_c(u)\) from (I1),
+\begin{equation}
+G(c,\theta)
+  = \int_0^\infty u\,p_c(u)\,
+    \bigl(e^{-u/2}-e^{-u/\theta}\bigr)\,du.
+\tag{I2 / D6.7}
+\end{equation}
+Here \(u\,p_c(u)>0\) for all \(u>0\). For fixed \(u>0\) and \(\theta>0\),
+\[
+e^{-u/2}>e^{-u/\theta}
+  \;\Longleftrightarrow\;
+  -\tfrac12 > -\tfrac1\theta
+  \;\Longleftrightarrow\;
+  \tfrac1\theta > \tfrac12
+  \;\Longleftrightarrow\;
+  \theta < 2,
+\]
+with equality at \(\theta=2\) and the reverse inequality for \(\theta>2\).
+Therefore the integrand is pointwise positive / zero / negative exactly when
+\(\theta\) is less than / equal to / greater than \(2\), which yields (T1).
+\(\square\)
+
+** Choice of operating point \(\theta_\star=\tfrac12\)
+Any \(\theta\in(0,2)\) is feasible for local descent. We fix the interior
+value
+\[
+\theta_\star := \tfrac12
+\]
+because:
+1. It lies strictly inside the window of (T1) (Lean: \(\theta_\star\in(0,2)\)).
+2. Numerical maximization of \(G(c,\theta_\star)\) over \(c>0\) (SymPy/MC in
+   =proofs/gpmd_derive.py=; same constants as D6) yields
+   \(c^\star\approx 1.32\), \(G^\star(\theta_\star)\approx 0.368\), and
+   acceptance \(\alpha^\star\approx 0.32\).
+3. Relative to the pure-descent maximum \(G^\star(0)\approx 0.405\) (Rechenberg
+   limit recovered as \(\theta\to 0\)), one has
+   \[
+   \frac{G^\star(\theta_\star)}{G^\star(0)}
+     \approx \frac{0.368}{0.405}
+     \approx 0.91.
+   \]
+   So \(\theta_\star=\tfrac12\) keeps about *91% of the maximal model descent
+   rate* while leaving a non-trivial Metropolis temperature (acceptance
+   rises from \(\approx 0.27\) at \(\theta=0\) to \(\approx 0.32\)).
+
+** Proxy for the basin bottom: \(f^\star\) vs \(f_{\mathrm{best}}\)
+In the sphere model, \(\theta=Td/f(x)\) uses \(f(x)=\|x\|^2/2\) measured from
+the *true* bottom \(f^\star=0\). In a general basin one wants
+\[
+\theta = \frac{T\,d}{f(x)-f^\star},
+\]
+but \(f^\star\) is unknown. The implementable gap is the best-so-far record
+\(f_{\mathrm{best}}\le f(x)\) maintained by the chain. Then
+\begin{equation}
+T(x)
+  = \theta_\star\frac{f(x)-f_{\mathrm{best}}}{d}
+  = \frac12\frac{f(x)-f_{\mathrm{best}}}{d}
+\tag{A1}
+\end{equation}
+is exactly the inversion of \(\theta=\theta_\star\) with the *proxy gap*
+\(f-f_{\mathrm{best}}\) in place of \(f-f^\star\).
+
+Justification of the proxy:
+- Always \(f_{\mathrm{best}}\ge f^\star\), so \(f-f_{\mathrm{best}}\le f-f^\star\): the
+  implemented temperature is *no hotter* than the model law with the true
+  bottom. That keeps the chain on the *cold* side of the window when the
+  record is imperfect—safer for local descent than overheating.
+- As the record approaches the basin floor, \(f_{\mathrm{best}}\downarrow f^\star\)
+  and (A1) recovers the model law.
+- When \(f=f_{\mathrm{best}}\), (A1) forces \(T\to 0^+\) (with a numerical floor
+  \(\varepsilon\)), i.e. pure descent at the incumbent—consistent with
+  “no thermal exploration needed when the chain sits at the best known
+  point of the current basin.”
+
+** Proposal shape and size (implementation of the free \(c\))
+The model free parameter \(c\) is realized as a *scale* multiplier on a
+proposal covariance: isotropic until enough samples accumulate, then a
+diagonal / scatter estimate (Haario-style running mean and outer products),
+with Robbins–Monro adaptation of \(\log\sigma\) targeting \(\alpha^\star=0.32\).
+Shape adaptation is justified by D6’s anisotropic remark: isotropic proposals
+on ill-conditioned quadratics collapse the critical temperature; whitening
+restores \(\theta_c=2\).
+
+** Budget split
+Reserve a polish fraction \(\rho_{\mathrm{pol}}=\tfrac14\) of \(B\) for a terminal
+projected-gradient (or coordinate) polish of \(x_{\mathrm{best}}\). The fraction
+is a fixed design constant of the algorithm (same spirit as D5’s polish
+reserve), not a free cooling parameter.
 
 ** Algorithm GPMD (explicit)
 
-1. Initialize \(x\) (given \(x_0\) or random in the box); \(f\leftarrow f(x)\); \(f_{\mathrm{best}}\leftarrow f\).
-2. \(B_{\mathrm{pol}}\leftarrow\lfloor B/4\rfloor\); \(B_{\mathrm{sa}}\leftarrow B-B_{\mathrm{pol}}\).
-3. While work \(< B_{\mathrm{sa}}\):
-   a. \(T\leftarrow \tfrac12\max(f-f_{\mathrm{best}},\varepsilon)/d\).
-   b. Propose \(y\) from \(N(x,\sigma^2\hat\Sigma)\) (isotropic if scatter thin); reflect into box.
-   c. Metropolis accept/reject with temperature \(T\); charge one objective eval.
-   d. Update scatter / RM \(\log\sigma\) toward \(\alpha^\star=0.32\); update \(f_{\mathrm{best}}\).
-4. Spend remaining polish budget on projected gradient (if gradient given) or coordinate polish of \(x_{\mathrm{best}}\).
+1. Initialize \(x\) (given \(x_0\) or random in the box); evaluate
+   \(f\leftarrow f(x)\); set \(f_{\mathrm{best}}\leftarrow f\), \(x_{\mathrm{best}}\leftarrow x\).
+2. Set \(B_{\mathrm{pol}}\leftarrow\lfloor B/4\rfloor\) and
+   \(B_{\mathrm{sa}}\leftarrow B-B_{\mathrm{pol}}\).
+3. While work \(<B_{\mathrm{sa}}\):
+   a. \(T\leftarrow\tfrac12\max(f-f_{\mathrm{best}},\varepsilon)/d\)    (A1).
+   b. Propose \(y\sim N(x,\sigma^2\hat\Sigma)\) (isotropic if scatter thin);
+      reflect into the box.
+   c. Metropolis accept/reject at temperature \(T\); charge one objective eval.
+   d. Update scatter and Robbins–Monro \(\log\sigma\) toward \(\alpha^\star=0.32\);
+      if accepted and \(f<f_{\mathrm{best}}\), update the record.
+4. Spend the polish reserve on projected gradient (if a gradient is supplied)
+   or coordinate polish of \(x_{\mathrm{best}}\).
 5. Return \(x_{\mathrm{best}}\).
 
-Parameters introduced above: \(\theta_\star=\tfrac12\), \(\alpha^\star=0.32\), \(\rho_{\mathrm{pol}}=\tfrac14\), \(\varepsilon>0\) floor on the gap. No further free cooling schedule.
+Parameters introduced by the math: \(\theta_\star=\tfrac12\),
+\(\alpha^\star\approx 0.32\) (from maximizing \(G\) at \(\theta_\star\)),
+\(\rho_{\mathrm{pol}}=\tfrac14\), gap floor \(\varepsilon>0\). No free geometric
+cooling schedule.
 
 * (IV) Look back
 
-** Check the algebra
-- SymPy: (I1), factor \(1/\theta-1/2=(2-\theta)/(2\theta)\), sign of \(G\) at \(\theta\in\{0.5,2,3\}\).
-- Lean: coefficient \(2\mu/(4\mu)=1/2\); \(\theta_\star\in(0,2)\); factor trichotomy samples.
+** What this is, and what it is not (claim boundary)
+This note is a *driver packaging* of the D6 sphere-limit model, not a new
+optimization theory and not a field-SOTA global solver.
 
-** Check the implementation
-- Code must call \(T=\theta_\star(f-f_{\mathrm{best}})/d\) (not a geometric schedule).
-- Unit tests: sphere improves under budget; fixed hot \(T\) loses on sphere; budget not exceeded.
+| Claim | Status |
+|-------+--------|
+| Elementary algebra of (I1)/(T1) factors | Checked (SymPy + Lean =grind=) |
+| Local descent window \(\theta\in(0,2)\) under (M1) | Parent D6; restated here |
+| Implementable \(T=\tfrac12(f-f_{\mathrm{best}})/d\) | Shipped as =gap_proportional_temp= / arm =am_sa= |
+| Novel asymptotic rate vs literature SA | *Not claimed* |
+| Standalone win over dual annealing / CMA-ES on CUTEst | *Not claimed*; pairwise evidence lives on the *portfolio* driver |
+| Thesis-level novelty of the algebra itself | *No* — the algebra is standard Gaussian ratio + pairing |
 
-** Can we use the result?
-GPMD is a *local descent* arm. For deep multimodal barriers, pair with restarts
-or a portfolio (escape window analysis). Do not claim global SOTA vs dual annealing
-from (T1) alone.
+Lean checks are deliberately elementary (difference of squares, rational
+cancellation). They are regression locks on the derivation steps, not a
+research contribution.
+
+** Does the answer check against the derivation plan?
+- Algebra of (I1): expanded in Phase III; SymPy =proofs/gpmd_derive.py=;
+  Lean =gauss_num_expand= / =es_coeff= / =density_ratio_coefficient=
+  (=proofs/lean/Gpmd=; core =grind=, no Mathlib, no =native_decide= on a
+  pre-simplified constant).
+- Pairing (T1): Prop. (T1) cites D6.1; SymPy factor identity + MC sign of \(G\);
+  Lean =inv_theta_half_factor= and sign samples.
+- Small-step (GPMD.4): consistent with \(\theta_c=2\); not the global proof.
+- (A1) with \(f_{\mathrm{best}}\) proxy: justified under *cold-side* safety above.
+- Implementation: =gap_proportional_temp= is (A1); unit tests require sphere
+  refinement and improvement over fixed-hot Metropolis (local check only).
+
+** Competitive seat (literature)
+Local Metropolis with Haario-style covariance and a *derived* temperature
+law sits next to adaptive Metropolis (Haario–Saksman–Tamminen) and ES
+progress theory (Rechenberg), *not* next to Xiang dual annealing (GSA
+visiting + L-BFGS as a global solver) or CMA-ES. Empirical head-to-head on
+CUTEst is a property of the *portfolio* (=global_optimize=), which already
+includes this law as arm =am_sa= among MetaD/DE/GSA/polish arms.
+
+** Parent citation
+(M1), (I1), (I2), (T1), and the small-step check are the D6 model. GPMD
+adds only: Pólya packaging for the driver, the \(f_{\mathrm{best}}\) proxy, the
+fixed interior operating point with residual-rate rationale, and the shipped
+code path.
