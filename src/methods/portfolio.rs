@@ -834,15 +834,49 @@ impl BasinRegistry {
     /// Per-slice probability that one more restart both discovers an
     /// unseen basin (Good-Turing missing mass n1/n) and that the new
     /// basin beats every seen one (record probability 1/(w+1)).
+    /// D9: [`discovery_value`].
     fn record_discovery_prob(&self) -> Option<f64> {
         if self.n_samples < 5 {
             return None;
         }
         let n1 = self.entries.iter().filter(|(_, _, h)| *h == 1).count();
         let w = self.entries.len();
-        Some((n1 as f64 / self.n_samples as f64) / (w as f64 + 1.0))
+        Some(discovery_value(n1, self.n_samples, w))
     }
 }
+
+/// D9.3: Good-Turing x record discovery value theta_disc = n1 / (n (w+1)).
+///
+/// See `docs/derivations/d9_good_turing_record.org` and
+/// `proofs/d9_good_turing_record.py`.
+pub fn discovery_value(n1: usize, n: usize, w: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    (n1 as f64 / n as f64) / (w as f64 + 1.0)
+}
+
+/// D10.1 win objective under D9 discovery: W(p) = (q0+(1-q0)(1-pi_e))*P_conv.
+///
+/// `theta_disc` is [`discovery_value`]; `p_conv` is polish conversion probability
+/// for the proposed polish work `polish`; `slice_size` is exploration slice length.
+pub fn win_objective_discovery(
+    remaining: usize,
+    polish: usize,
+    slice_size: usize,
+    theta_disc: f64,
+    p_conv: f64,
+) -> f64 {
+    let polish = polish.min(remaining);
+    let slice_size = slice_size.max(1);
+    let e = remaining.saturating_sub(polish) / slice_size;
+    let theta = theta_disc.clamp(0.0, 1.0);
+    let q0 = 1.0 - theta;
+    let pi = (1.0 - theta).powi(e.min(128) as i32);
+    let p_conv = p_conv.clamp(0.0, 1.0);
+    (q0 + (1.0 - q0) * (1.0 - pi)) * p_conv
+}
+
 
 impl ArmStates {
     /// Next term of the Luby universal restart sequence
@@ -2857,24 +2891,28 @@ where
                         b_e += post.beta;
                     }
                 }
-                let q0 = match gt {
-                    Some(theta) => 1.0 - theta.min(1.0),
-                    None => b_e / (a_e + b_e).max(1e-12),
-                };
                 let win = |p: usize| -> f64 {
-                    let e = remaining.saturating_sub(p) / slice.max(1);
-                    let pi = match gt {
-                        Some(theta) => (1.0 - theta.min(1.0)).powi(e.min(128) as i32),
+                    let p_conv = contraction.conversion_prob(NEAR_BEST_ORDERS, p);
+                    match gt {
+                        // D10.1 under D9 discovery value.
+                        Some(theta) => win_objective_discovery(
+                            remaining,
+                            p,
+                            slice.max(1),
+                            theta,
+                            p_conv,
+                        ),
                         None => {
+                            // D4 Beta fallback: E[(1-theta)^e] product.
+                            let e = remaining.saturating_sub(p) / slice.max(1);
+                            let q0 = b_e / (a_e + b_e).max(1e-12);
                             let mut pi = 1.0f64;
                             for i in 0..e.min(128) {
                                 pi *= (b_e + i as f64) / (a_e + b_e + i as f64);
                             }
-                            pi
+                            (q0 + (1.0 - q0) * (1.0 - pi)) * p_conv
                         }
-                    };
-                    (q0 + (1.0 - q0) * (1.0 - pi))
-                        * contraction.conversion_prob(NEAR_BEST_ORDERS, p)
+                    }
                 };
                 let grid = 12usize;
                 let mut best_p = remaining / grid;
@@ -3189,6 +3227,23 @@ mod tests {
             bias.is_some(),
             "rich archive must produce a sketch-map CV bias"
         );
+    }
+
+    #[test]
+    fn d9_discovery_value_matches_formula() {
+        assert!((discovery_value(1, 6, 3) - (1.0 / 6.0) / 4.0).abs() < 1e-15);
+        assert!((discovery_value(0, 10, 4) - 0.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn d10_win_objective_e0_is_q0_times_conv() {
+        let theta = 0.25;
+        let w = win_objective_discovery(40, 40, 10, theta, 0.8);
+        assert!((w - (1.0 - theta) * 0.8).abs() < 1e-12);
+        // more polish conversion raises W at fixed e
+        let w_lo = win_objective_discovery(50, 20, 10, 0.1, 0.2);
+        let w_hi = win_objective_discovery(50, 20, 10, 0.1, 0.9);
+        assert!(w_hi > w_lo);
     }
 
     #[test]

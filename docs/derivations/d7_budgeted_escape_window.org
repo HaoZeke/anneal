@@ -1,0 +1,36 @@
+* D7: Budgeted annealing feasibility window
+:PROPERTIES:
+:CUSTOM_ID: d7-budgeted-escape-window
+:END:
+
+** Scope
+D6 bounds temperature *from above* for positive one-step state drift on a
+sphere: \(\theta=Td/\mathrm{gap}<2\). Escape theory bounds it *from below*:
+leaving a well of depth \(b\) under Metropolis dynamics costs order
+\(\exp(b/T)\) proposals. Within budget \(B\), a single fixed temperature can
+both escape and descend only inside
+\[
+\frac{b}{\ln B}\;\lesssim\; T\;<\;\frac{2\,(f(x)-f^{*})}{d},
+\]
+nonempty iff \(b\lesssim 2(f-f^{*})\ln B/d\).
+
+** Algorithm D7 (feasibility window diagnostic)
+1. Measure (or estimate) gap \(\Delta=f(x)-f^{*}\) and barrier depth \(b\).
+2. Compute \(T_{\mathrm{esc}}=b/\ln B\) and \(T_{\mathrm{desc}}=2\Delta/d\).
+3. If \(T_{\mathrm{esc}}<T_{\mathrm{desc}}\), a single-temperature chain is feasible
+   in this local model; else the window is empty and the portfolio must
+   *compose* separate escape mechanisms (restarts, bias, PT) with descent
+   arms (=am_sa=).
+
+This is a *motivating diagnostic*, not an impossibility theorem over
+arbitrary schedules. Executable evidence uses an exact finite double-well
+birth--death chain (no Monte Carlo).
+
+** Checks (=proofs/d7_budgeted_escape_window.py=)
+- Kramers: slope of \(\ln\mathbb{E}[\tau]\) vs \(1/T\) recovers barrier \(b\).
+- Window shape: escape within \(B\) at the D6 ceiling succeeds iff \(b\) is
+  below \(c\cdot 2\Delta\ln B/d\) with \(c=O(1)\).
+
+** Implementation implication
+Portfolio library splits escape (restart, PT, MetaD, TPS) from descent
+(=am_sa=, GLE polish) rather than one global cooling schedule.
