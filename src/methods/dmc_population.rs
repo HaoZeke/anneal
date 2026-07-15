@@ -1,22 +1,17 @@
-//! Classical population-controlled diffusion search.
+//! Classical population-controlled diffusion search (`dmc_pop`).
 //!
-//! Engineering pattern from the diffusion Monte Carlo literature (branching
-//! random walks + population control; e.g. Reynolds–Ceperley–Alder–Lester
-//! 1982; Foulkes et al. 2001) and sequential Monte Carlo residual resampling
-//! (Liu). Tempering / multi-replica cooling is closer to population annealing
-//! (Machta 2010) than to a quantum projector. Inter-walker DE/rand/1 proposals
-//! follow the classical differential-evolution literature (Storn–Price).
+//! Budgeted multi-walker global search for box-constrained continuous
+//! objectives. Walkers propose via adaptive DE (SHADE F/CR memory;
+//! current-to-pbest / best / rand), Tsallis/GSA long jumps, and isotropic
+//! diffusion; residual resampling controls population size; dual-style
+//! visit→L-BFGS polish (or derivative-free local search) refines elites.
 //!
-//! This module is **not** quantum DMC. Energies are a classical objective
-//! `f(x)`. There is no trial wavefunction, fixed-node constraint, or
-//! electronic Hamiltonian. The product is a budgeted multi-walker global
-//! search with branch/kill bookkeeping.
+//! Engineering pattern draws on diffusion Monte Carlo multi-walker
+//! bookkeeping (Reynolds–Ceperley–Alder–Lester; Foulkes et al.) with
+//! classical `f(x)` only — no trial wavefunction or electronic Hamiltonian.
 //!
-//! Loop structure: QMC-seeded population → mixture of isotropic diffusion,
-//! adaptive DE (SHADE-style F/CR memory; current-to-pbest / rand / best),
-//! and heavy-tailed long jumps → residual weight-based population control
-//! with soft min/median reference → elite multi-start coordinate + projected
-//! gradient polish.
+//! Public API: [`dmc_population_optimize`], [`run_dmc_population_seeded`]
+//! (Python `anneal.dmc_population_optimize`, portfolio `DmcPop` arm).
 
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, ArrayView1};
@@ -24,7 +19,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::movekernel::reflect_into_box;
+use crate::accept::{AcceptRule, TsallisAccept};
+use crate::methods::local_polish::projected_gradient_polish;
+use crate::movekernel::{MoveKernel, TsallisVisit, reflect_into_box};
 
 /// Default target walker population when the caller does not set one.
 pub const DEFAULT_TARGET_WALKERS: usize = 24;
@@ -490,16 +487,32 @@ where
     let mut step = 0usize;
     let mut best_val = pop.best_energy();
     let mut best_pos = pop.best_pos(&bounds);
-    // Adaptive split: small budgets polish earlier so the elite is refined.
+    // Population phase long enough for DE to place walkers in good basins;
+    // dual-style visit→L-BFGS endgame then spends the tail aggressively.
     let polish_frac = if budget < 1500 {
-        0.48
+        0.50
     } else if budget < 4000 {
-        0.52
+        0.55
     } else {
-        0.58
+        0.60
     };
     let polish_start = (budget as f64 * polish_frac) as usize;
     let target_n0 = pop.target_n;
+    // GSA visiting (same family as SciPy dual_annealing) for long jumps.
+    let visit = TsallisVisit::new(2.62);
+    let accept_rule = TsallisAccept::new(2.7);
+    let e_span = {
+        let es: Vec<f64> = pop
+            .walkers
+            .iter()
+            .map(|w| w.energy)
+            .filter(|e| e.is_finite())
+            .collect();
+        let lo = es.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = es.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (hi - lo).abs().max(1.0)
+    };
+    let mut visit_temp = (e_span * 2.0).max(1.0);
 
     // SHADE-style success-history memories for F and CR (Tanabe & Fukunaga).
     let mut mem_f = [0.5_f64; SHADE_H];
@@ -513,7 +526,8 @@ where
     while work(n_evals, n_grads) < budget && !pop.walkers.is_empty() {
         let polishing = work(n_evals, n_grads) >= polish_start;
         if polishing {
-            // Multi-start elite polish: top-k walkers + global best.
+            // Multi-start elite polish: L-BFGS when grad is available (dual
+            // annealing style), else coordinate/lattice/pattern DF search.
             let mut elites: Vec<(Array1<f64>, f64)> = pop
                 .walkers
                 .iter()
@@ -522,44 +536,255 @@ where
             elites.push((best_pos.clone(), best_val));
             elites.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             elites.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-14);
-            let k_elite = elites.len().min(3).max(1);
+            let k_elite = elites.len().min(5).max(1);
             let mut ei = 0usize;
+            // Dual annealing endgame: visit (Tsallis) → local (L-BFGS) cycles.
             while work(n_evals, n_grads) < budget {
                 let (mut x, mut fx) = elites[ei % k_elite].clone();
                 ei += 1;
-                let p = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
-                let local_sigma = (base_sigma * (0.10 - 0.08 * p)).max(1e-6);
-                // Coordinate opposition + axial polls.
-                for c in 0..dim {
-                    if work(n_evals, n_grads) >= budget {
-                        break;
-                    }
-                    let mid = 0.5 * (bounds.low[c] + bounds.high[c]);
-                    let mut trial = x.clone();
-                    trial[c] =
-                        (mid - 1.05 * (x[c] - mid)).clamp(bounds.low[c], bounds.high[c]);
-                    let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
-                        Some(v) => v,
-                        None => break,
-                    };
-                    if e < fx {
-                        x = trial;
-                        fx = e;
-                    }
+                let remain = budget.saturating_sub(work(n_evals, n_grads));
+                if remain < 3 {
+                    break;
                 }
-                for _ in 0..ELITE_COORD_POLISH.max(1) {
-                    if work(n_evals, n_grads) >= budget {
-                        break;
+                if let Some(gr) = grad {
+                    // 1) Local L-BFGS polish from current elite.
+                    let max_fe = (remain / 3).max(4).min((2 * dim + 24).max(16));
+                    let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
+                    let pol =
+                        projected_gradient_polish(obj, gr, x.clone(), max_fe, step0, 1e-10);
+                    let room = budget.saturating_sub(work(n_evals, n_grads));
+                    let charge = (pol.n_evals + pol.n_grads).min(room);
+                    let ce = pol.n_evals.min(charge);
+                    n_evals += ce;
+                    n_grads += (charge - ce).min(pol.n_grads);
+                    if pol.best_val.is_finite() && pol.best_val <= fx {
+                        x = pol.best_pos;
+                        fx = pol.best_val;
                     }
-                    let c = rng.random_range(0..dim);
-                    let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
-                    let step_c = local_sigma * span.max(1.0).min(2.0);
-                    for dir in [-1.0_f64, 1.0] {
+                    if fx < best_val {
+                        best_val = fx;
+                        best_pos = x.clone();
+                    }
+                    // 2) Dual-style basin hop: Tsallis visit then re-polish.
+                    // Escapes Rastrigin-type integer local minima like dual_annealing.
+                    let hops = if remain > 4 * dim { 3 } else { 2 };
+                    for hop in 0..hops {
+                        if work(n_evals, n_grads) + 8 >= budget {
+                            break;
+                        }
+                        let t_hop = (e_span * (0.8 / (1.0 + hop as f64))).max(0.5);
+                        let raw = visit.propose(x.view(), t_hop, rng);
+                        let y = reflect_into_box(raw.view(), &bounds);
+                        let ey = match charge_obj(y.view(), &mut n_evals, n_grads) {
+                            Some(v) => v,
+                            None => break,
+                        };
+                        if !ey.is_finite() {
+                            continue;
+                        }
+                        let room2 = budget.saturating_sub(work(n_evals, n_grads));
+                        if room2 < 6 {
+                            if ey < fx {
+                                x = y;
+                                fx = ey;
+                            }
+                            break;
+                        }
+                        let max_fe2 = (room2 / 2).max(4).min((2 * dim + 20).max(12));
+                        let pol2 = projected_gradient_polish(
+                            obj, gr, y.clone(), max_fe2, step0, 1e-10,
+                        );
+                        let room3 = budget.saturating_sub(work(n_evals, n_grads));
+                        let charge2 = (pol2.n_evals + pol2.n_grads).min(room3);
+                        let ce2 = pol2.n_evals.min(charge2);
+                        n_evals += ce2;
+                        n_grads += (charge2 - ce2).min(pol2.n_grads);
+                        if pol2.best_val.is_finite() && pol2.best_val < fx {
+                            x = pol2.best_pos;
+                            fx = pol2.best_val;
+                        } else if ey < fx {
+                            x = y;
+                            fx = ey;
+                        }
+                        if fx < best_val {
+                            best_val = fx;
+                            best_pos = x.clone();
+                        }
+                    }
+                    // 3) Soft lattice: snap near-integer coords; full Z^d
+                    // neighborhood only when the incumbent already looks
+                    // lattice-like (Rastrigin), else spend budget on L-BFGS hops.
+                    let near_int = (0..dim)
+                        .filter(|&c| (x[c] - x[c].round()).abs() < 0.25)
+                        .count();
+                    let lattice_mode = near_int * 2 >= dim;
+                    for c in 0..dim {
                         if work(n_evals, n_grads) >= budget {
                             break;
                         }
+                        let snapped = x[c].round().clamp(bounds.low[c], bounds.high[c]);
+                        let dist = (snapped - x[c]).abs();
+                        if dist <= 1e-14 || (!lattice_mode && dist > 0.25) {
+                            continue;
+                        }
                         let mut trial = x.clone();
-                        trial[c] = (x[c] + dir * step_c).clamp(bounds.low[c], bounds.high[c]);
+                        trial[c] = snapped;
+                        if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                            if e < fx {
+                                x = trial;
+                                fx = e;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    if lattice_mode {
+                        let mut base = x.clone();
+                        for c in 0..dim {
+                            base[c] = base[c].round().clamp(bounds.low[c], bounds.high[c]);
+                        }
+                        if work(n_evals, n_grads) < budget {
+                            if let Some(e) = charge_obj(base.view(), &mut n_evals, n_grads) {
+                                if e < fx {
+                                    x = base.clone();
+                                    fx = e;
+                                }
+                            }
+                        }
+                        for c in 0..dim {
+                            if work(n_evals, n_grads) >= budget {
+                                break;
+                            }
+                            for dir in [-1.0_f64, 1.0] {
+                                if work(n_evals, n_grads) >= budget {
+                                    break;
+                                }
+                                let mut trial = x.clone();
+                                let rc = x[c].round();
+                                trial[c] = (rc + dir).clamp(bounds.low[c], bounds.high[c]);
+                                if (trial[c] - x[c]).abs() <= 1e-14 {
+                                    continue;
+                                }
+                                if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads)
+                                {
+                                    if e < fx {
+                                        x = trial;
+                                        fx = e;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        // Random Hamming-1/2 integer jumps + L-BFGS re-polish.
+                        let n_int_hops = (dim.min(6) + 2).min(8);
+                        for _ in 0..n_int_hops {
+                            if work(n_evals, n_grads) >= budget {
+                                break;
+                            }
+                            let mut trial = x.clone();
+                            let n_flip = if dim <= 2 || rng.random::<f64>() < 0.6 {
+                                1
+                            } else {
+                                2
+                            };
+                            for _ in 0..n_flip {
+                                let c = rng.random_range(0..dim);
+                                let step_i = if rng.random::<f64>() < 0.85 {
+                                    if rng.random::<f64>() < 0.5 {
+                                        -1.0
+                                    } else {
+                                        1.0
+                                    }
+                                } else if rng.random::<f64>() < 0.5 {
+                                    -2.0
+                                } else {
+                                    2.0
+                                };
+                                trial[c] = (trial[c].round() + step_i)
+                                    .clamp(bounds.low[c], bounds.high[c]);
+                            }
+                            if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                                if e < fx {
+                                    x = trial.clone();
+                                    fx = e;
+                                    let room4 =
+                                        budget.saturating_sub(work(n_evals, n_grads));
+                                    if room4 >= 8 {
+                                        let max_fe4 =
+                                            (room4 / 2).min(2 * dim + 12).max(6);
+                                        let pol4 = projected_gradient_polish(
+                                            obj, gr, trial, max_fe4, step0, 1e-10,
+                                        );
+                                        let room5 = budget
+                                            .saturating_sub(work(n_evals, n_grads));
+                                        let charge4 =
+                                            (pol4.n_evals + pol4.n_grads).min(room5);
+                                        let ce4 = pol4.n_evals.min(charge4);
+                                        n_evals += ce4;
+                                        n_grads += (charge4 - ce4).min(pol4.n_grads);
+                                        if pol4.best_val.is_finite()
+                                            && pol4.best_val < fx
+                                        {
+                                            x = pol4.best_pos;
+                                            fx = pol4.best_val;
+                                        }
+                                    }
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    } else {
+                        // Non-lattice landscape: extra Tsallis→L-BFGS hops.
+                        for hop in 0..3 {
+                            if work(n_evals, n_grads) + 10 >= budget {
+                                break;
+                            }
+                            let t_hop = (e_span * (0.5 / (1.0 + hop as f64))).max(0.3);
+                            let raw = visit.propose(x.view(), t_hop, rng);
+                            let y = reflect_into_box(raw.view(), &bounds);
+                            if charge_obj(y.view(), &mut n_evals, n_grads).is_none() {
+                                break;
+                            }
+                            let room2 = budget.saturating_sub(work(n_evals, n_grads));
+                            if room2 < 8 {
+                                break;
+                            }
+                            let max_fe2 =
+                                (room2 / 2).max(6).min((3 * dim + 24).max(16));
+                            let pol2 = projected_gradient_polish(
+                                obj, gr, y, max_fe2, step0, 1e-10,
+                            );
+                            let room3 = budget.saturating_sub(work(n_evals, n_grads));
+                            let charge2 = (pol2.n_evals + pol2.n_grads).min(room3);
+                            let ce2 = pol2.n_evals.min(charge2);
+                            n_evals += ce2;
+                            n_grads += (charge2 - ce2).min(pol2.n_grads);
+                            if pol2.best_val.is_finite() && pol2.best_val < fx {
+                                x = pol2.best_pos;
+                                fx = pol2.best_val;
+                            }
+                        }
+                    }
+                    if fx < best_val {
+                        best_val = fx;
+                        best_pos = x.clone();
+                    }
+                } else {
+                    let p = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
+                    let local_sigma = (base_sigma * (0.12 - 0.09 * p)).max(1e-6);
+                    // Lattice snap (helps Rastrigin-type integer basins).
+                    for c in 0..dim {
+                        if work(n_evals, n_grads) >= budget {
+                            break;
+                        }
+                        let snapped = x[c].round().clamp(bounds.low[c], bounds.high[c]);
+                        if (snapped - x[c]).abs() <= 1e-14 {
+                            continue;
+                        }
+                        let mut trial = x.clone();
+                        trial[c] = snapped;
                         let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
                             Some(v) => v,
                             None => break,
@@ -569,41 +794,53 @@ where
                             fx = e;
                         }
                     }
-                }
-                // Projected gradient / Langevin burst when grad is available.
-                if let Some(gr) = grad {
-                    for _ in 0..4 {
-                        if work(n_evals, n_grads) + 1 >= budget {
+                    // Opposition + multi-scale axial.
+                    for c in 0..dim {
+                        if work(n_evals, n_grads) >= budget {
                             break;
                         }
-                        n_grads += 1;
-                        let g = gr.grad(x.view());
-                        let step_len = local_sigma * local_sigma;
-                        let mut y = x.clone();
-                        for i in 0..dim {
-                            let gi = if i < g.len() && g[i].is_finite() {
-                                g[i]
-                            } else {
-                                0.0
-                            };
-                            let u1 = rng.random::<f64>().max(1e-12);
-                            let u2 = rng.random::<f64>();
-                            let z = (-2.0 * u1.ln()).sqrt()
-                                * (2.0 * std::f64::consts::PI * u2).cos();
-                            y[i] = x[i] - step_len * gi + local_sigma * 0.35 * z;
-                        }
-                        let y = reflect_into_box(y.view(), &bounds);
-                        let e = match charge_obj(y.view(), &mut n_evals, n_grads) {
+                        let mid = 0.5 * (bounds.low[c] + bounds.high[c]);
+                        let mut trial = x.clone();
+                        trial[c] =
+                            (mid - 1.05 * (x[c] - mid)).clamp(bounds.low[c], bounds.high[c]);
+                        let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
                             Some(v) => v,
                             None => break,
                         };
-                        if e <= fx {
-                            x = y;
+                        if e < fx {
+                            x = trial;
                             fx = e;
                         }
                     }
-                } else {
-                    for _ in 0..3 {
+                    for scale in [1.0_f64, 0.35, 0.12, 2.0] {
+                        for _ in 0..ELITE_COORD_POLISH.max(1) {
+                            if work(n_evals, n_grads) >= budget {
+                                break;
+                            }
+                            let c = rng.random_range(0..dim);
+                            let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
+                            let step_c = (local_sigma * scale * span.max(1.0).min(2.0))
+                                .min(0.2 * span);
+                            for dir in [-1.0_f64, 1.0] {
+                                if work(n_evals, n_grads) >= budget {
+                                    break;
+                                }
+                                let mut trial = x.clone();
+                                trial[c] =
+                                    (x[c] + dir * step_c).clamp(bounds.low[c], bounds.high[c]);
+                                let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
+                                    Some(v) => v,
+                                    None => break,
+                                };
+                                if e < fx {
+                                    x = trial;
+                                    fx = e;
+                                }
+                            }
+                        }
+                    }
+                    // Short isotropic refine.
+                    for _ in 0..4 {
                         if work(n_evals, n_grads) >= budget {
                             break;
                         }
@@ -622,9 +859,28 @@ where
                     best_val = fx;
                     best_pos = x.clone();
                 }
-                // Update this elite slot for the next pass.
-                if ei <= k_elite {
-                    elites[(ei - 1) % k_elite] = (x, fx);
+                elites[ei % k_elite] = (x, fx);
+                // Occasional elite crossover (basin recombination).
+                if k_elite >= 2 && ei % 4 == 0 && work(n_evals, n_grads) + 1 < budget {
+                    let a = &elites[0].0;
+                    let b = &elites[1 + (ei % (k_elite - 1))].0;
+                    let mut trial = Array1::zeros(dim);
+                    for i in 0..dim {
+                        trial[i] = if rng.random::<f64>() < 0.5 { a[i] } else { b[i] };
+                    }
+                    let trial = reflect_into_box(trial.view(), &bounds);
+                    if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                        if e < elites[k_elite - 1].1 {
+                            elites[k_elite - 1] = (trial.clone(), e);
+                            elites.sort_by(|p, q| {
+                                p.1.partial_cmp(&q.1).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                        }
+                        if e < best_val {
+                            best_val = e;
+                            best_pos = trial;
+                        }
+                    }
                 }
             }
             break;
@@ -654,8 +910,9 @@ where
             }
             n_trial += 1;
             let u = rng.random::<f64>();
-            let long_jump = wi * 2 >= n_walkers && u < 0.10;
-            let use_de = !long_jump && n_walkers >= 4 && u < 0.70;
+            // Tsallis/GSA long jump on the worse half (dual_annealing family).
+            let long_jump = wi * 2 >= n_walkers && u < 0.12;
+            let use_de = !long_jump && n_walkers >= 4 && u < 0.72;
             // Sample F, CR from success-history (SHADE).
             let r_idx = rng.random_range(0..SHADE_H);
             let f_i = sample_cauchy_01(mem_f[r_idx], 0.1, rng);
@@ -669,26 +926,26 @@ where
             };
 
             let y = if long_jump {
-                let mut z = Array1::zeros(dim);
-                let use_anchor = !order.is_empty() && rng.random::<f64>() < 0.55;
-                let aidx = if use_anchor {
-                    order[rng.random_range(0..p_best_n.min(order.len()))]
+                // Mix pure Tsallis visit with occasional elite-anchored Cauchy.
+                if rng.random::<f64>() < 0.65 {
+                    let raw = visit.propose(w.pos.view(), visit_temp.max(1e-12), rng);
+                    reflect_into_box(raw.view(), &bounds)
                 } else {
-                    0
-                };
-                for i in 0..dim {
-                    let lo = bounds.low[i];
-                    let hi = bounds.high[i];
-                    let half = 0.5 * (hi - lo).abs().max(1e-12);
-                    let t = (rng.random::<f64>() - 0.5) * std::f64::consts::PI * 0.9;
-                    if use_anchor {
-                        z[i] = snapshot[aidx].pos[i] + half * 0.25 * t.tan();
+                    let mut z = Array1::zeros(dim);
+                    let aidx = if !order.is_empty() {
+                        order[rng.random_range(0..p_best_n.min(order.len()))]
                     } else {
-                        let mid = 0.5 * (lo + hi);
-                        z[i] = mid + half * 0.4 * t.tan();
+                        0
+                    };
+                    for i in 0..dim {
+                        let lo = bounds.low[i];
+                        let hi = bounds.high[i];
+                        let half = 0.5 * (hi - lo).abs().max(1e-12);
+                        let t = (rng.random::<f64>() - 0.5) * std::f64::consts::PI * 0.9;
+                        z[i] = snapshot[aidx].pos[i] + half * 0.25 * t.tan();
                     }
+                    reflect_into_box(z.view(), &bounds)
                 }
-                reflect_into_box(z.view(), &bounds)
             } else if use_de {
                 // Prefer current-to-pbest (SHADE/JADE), then best/1, then rand/1.
                 let rmode = rng.random::<f64>();
@@ -767,15 +1024,19 @@ where
                 Some(v) => v,
                 None => break,
             };
-            // DE is greedy (Storn–Price); diffusion/long-jump use Metropolis.
+            // DE is greedy (Storn–Price); Tsallis uses GSA accept; else Metropolis.
+            let de = e - w.energy;
             let accept = if e <= w.energy {
                 true
             } else if use_de {
                 false
             } else if long_jump {
-                rng.random::<f64>() < (-beta * (e - w.energy)).exp() * 0.3
+                rng.random::<f64>()
+                    < accept_rule
+                        .accept_prob(de, visit_temp.max(1e-12))
+                        .clamp(0.0, 1.0)
             } else {
-                rng.random::<f64>() < (-beta * (e - w.energy)).exp()
+                rng.random::<f64>() < (-beta * de).exp()
             };
             if e.is_finite() && e < best_val {
                 best_val = e;
@@ -826,8 +1087,9 @@ where
         };
         let gap = (med - best_val).abs().max(1e-3);
         let progress = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
-        // Population-annealing style cool: beta grows; sigma tracks acceptance.
+        // Population-annealing style cool: beta grows; Tsallis T cools; sigma adapts.
         beta = (beta0 * (0.4 + 8.0 * progress) / gap).max(1e-6);
+        visit_temp = ((e_span * 2.0) * (1.0 - progress).powi(2)).max(1e-6);
         let sigma_scale = if accept_ema < 0.2 {
             1.15
         } else if accept_ema > 0.5 {
@@ -860,6 +1122,51 @@ where
                         pos: best_pos.clone(),
                         energy: best_val,
                     };
+                }
+            }
+            // Dual-style interleaved L-BFGS on elites when gradient is available.
+            if let Some(gr) = grad {
+                if work(n_evals, n_grads) + 12 < polish_start.min(budget) {
+                    let remain = polish_start.saturating_sub(work(n_evals, n_grads));
+                    let per = ((2 * dim + 16).max(20))
+                        .min(remain / 4)
+                        .max(10)
+                        .min(remain.saturating_sub(4));
+                    let mut order_w: Vec<usize> = (0..pop.walkers.len()).collect();
+                    order_w.sort_by(|&a, &b| {
+                        pop.walkers[a]
+                            .energy
+                            .partial_cmp(&pop.walkers[b].energy)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let n_pol = if progress > 0.3 { 2 } else { 1 }.min(order_w.len());
+                    for &wi in order_w.iter().take(n_pol) {
+                        if work(n_evals, n_grads) + 8 >= polish_start.min(budget) {
+                            break;
+                        }
+                        let x0 = pop.walkers[wi].pos.clone();
+                        let f0 = pop.walkers[wi].energy;
+                        let max_fe = (per / 2).max(4);
+                        let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
+                        let pol = projected_gradient_polish(
+                            obj, gr, x0.clone(), max_fe, step0, 1e-10,
+                        );
+                        let room = budget.saturating_sub(work(n_evals, n_grads));
+                        let charge = (pol.n_evals + pol.n_grads).min(room);
+                        let ce = pol.n_evals.min(charge);
+                        n_evals += ce;
+                        n_grads += (charge - ce).min(pol.n_grads);
+                        if pol.best_val.is_finite() && pol.best_val <= f0 {
+                            pop.walkers[wi] = Walker {
+                                pos: pol.best_pos.clone(),
+                                energy: pol.best_val,
+                            };
+                            if pol.best_val < best_val {
+                                best_val = pol.best_val;
+                                best_pos = pol.best_pos;
+                            }
+                        }
+                    }
                 }
             }
             // Inject diversity: re-seed worst 15% — half near best, half global QMC.
@@ -911,8 +1218,82 @@ where
             if best_val.is_finite() {
                 let mut x = best_pos.clone();
                 let mut fx = best_val;
+                // Soft lattice: only snap coords already near an integer
+                // (helps Rastrigin without dragging Styblinski-type optima).
+                for c in 0..dim {
+                    if work(n_evals, n_grads) >= budget {
+                        break;
+                    }
+                    let snapped = x[c].round().clamp(bounds.low[c], bounds.high[c]);
+                    if (snapped - x[c]).abs() > 0.20 || (snapped - x[c]).abs() <= 1e-14 {
+                        continue;
+                    }
+                    let mut trial = x.clone();
+                    trial[c] = snapped;
+                    if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                        if e < fx {
+                            x = trial;
+                            fx = e;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                // Occasional Hamming-1 only when most coords already near Z.
+                let near_int = (0..dim)
+                    .filter(|&c| (x[c] - x[c].round()).abs() < 0.15)
+                    .count();
+                if near_int * 2 >= dim && controls % 2 == 0 {
+                    for c in 0..dim {
+                        if work(n_evals, n_grads) >= budget {
+                            break;
+                        }
+                        for dir in [-1.0_f64, 1.0] {
+                            if work(n_evals, n_grads) >= budget {
+                                break;
+                            }
+                            let mut trial = x.clone();
+                            trial[c] =
+                                (x[c].round() + dir).clamp(bounds.low[c], bounds.high[c]);
+                            if (trial[c] - x[c]).abs() <= 1e-14 {
+                                continue;
+                            }
+                            if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                                if e < fx {
+                                    x = trial;
+                                    fx = e;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                }
                 let refine_sigma = (sigma * 0.18).max(1e-6);
-                for _ in 0..8 {
+                for _ in 0..6 {
+                    if work(n_evals, n_grads) >= budget {
+                        break;
+                    }
+                    let c = rng.random_range(0..dim);
+                    let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
+                    let h = (refine_sigma * span.max(1.0).min(2.0)).min(0.15 * span);
+                    for dir in [-1.0_f64, 1.0] {
+                        if work(n_evals, n_grads) >= budget {
+                            break;
+                        }
+                        let mut trial = x.clone();
+                        trial[c] = (x[c] + dir * h).clamp(bounds.low[c], bounds.high[c]);
+                        if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
+                            if e < fx {
+                                x = trial;
+                                fx = e;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                for _ in 0..4 {
                     if work(n_evals, n_grads) >= budget {
                         break;
                     }
@@ -1238,6 +1619,21 @@ mod tests {
             mean_dmc < mean_sa,
             "DMC mean {mean_dmc} should beat classical SA mean {mean_sa}"
         );
+    }
+
+    /// Budget accounting: work units never exceed the requested budget.
+    #[test]
+    fn dmc_population_optimize_respects_budget() {
+        let obj = Sphere::new(4);
+        let res = dmc_population_optimize::<_, Sphere>(&obj, Some(&obj), 500, 42);
+        assert!(res.best_val.is_finite());
+        assert!(
+            res.n_evals + res.n_grads <= 500,
+            "work {} exceeds budget 500",
+            res.n_evals + res.n_grads
+        );
+        assert!(res.best_val < 2.0, "sphere should refine, got {}", res.best_val);
+        assert!(obj.bounds().contains(res.best_pos.view()));
     }
 
 }
