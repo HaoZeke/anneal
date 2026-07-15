@@ -3,8 +3,10 @@
 //! Budgeted multi-walker global search for box-constrained continuous
 //! objectives. Walkers propose via adaptive DE (SHADE F/CR memory;
 //! current-to-pbest / best / rand), Tsallis/GSA long jumps, and isotropic
-//! diffusion; residual resampling controls population size; dual-style
-//! visit→L-BFGS polish (or derivative-free local search) refines elites.
+//! diffusion; residual resampling controls population size with **D8
+//! entropy-calibrated inverse temperature** (`calibrate_beta` /
+//! `population_control_ecit`); dual-style visit→L-BFGS polish (or
+//! derivative-free local search) refines elites.
 //!
 //! Engineering pattern draws on diffusion Monte Carlo multi-walker
 //! bookkeeping (Reynolds–Ceperley–Alder–Lester; Foulkes et al.) with
@@ -182,6 +184,125 @@ fn branch_reference(energies: &[f64]) -> f64 {
     0.65 * e_min + 0.35 * e_med
 }
 
+// ---------------------------------------------------------------------------
+// D8: Entropy-calibrated inverse temperature (ECIT) for residual control.
+// docs/derivations/d8_entropy_calibrated_beta.org
+// ---------------------------------------------------------------------------
+
+/// Shannon entropy \(H(\beta)=-\sum p_i\log p_i\) of the exponential family
+/// \(p_i\propto e^{-\beta E_i}\) (D8.3). Energies are shifted by their min
+/// for numerical stability; the shift does not change \(H\).
+pub fn softmax_entropy(energies: &[f64], beta: f64) -> f64 {
+    let finite: Vec<f64> = energies.iter().copied().filter(|e| e.is_finite()).collect();
+    let n = finite.len();
+    if n == 0 {
+        return 0.0;
+    }
+    if n == 1 {
+        return 0.0;
+    }
+    let e_min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let beta = beta.max(0.0);
+    let mut z = 0.0;
+    let mut weights = Vec::with_capacity(n);
+    for &e in &finite {
+        let w = (-beta * (e - e_min)).exp().max(1e-300);
+        weights.push(w);
+        z += w;
+    }
+    if !(z.is_finite() && z > 0.0) {
+        return (n as f64).ln();
+    }
+    let mut h = 0.0;
+    for w in weights {
+        let p = w / z;
+        if p > 0.0 {
+            h -= p * p.ln();
+        }
+    }
+    h
+}
+
+/// Progress-linked target entropy (D8.5):
+/// \(H_\star(\rho)=(1-\rho)\log N+\rho\log(\max\{1,f_{\mathrm{elite}}\})\).
+///
+/// `elite_floor` is the elite count in entropy units (default 2).
+pub fn target_entropy(n: usize, progress: f64, elite_floor: f64) -> f64 {
+    let n = n.max(1);
+    let rho = progress.clamp(0.0, 1.0);
+    let floor_n = elite_floor.clamp(1.0, n as f64);
+    (1.0 - rho) * (n as f64).ln() + rho * floor_n.ln()
+}
+
+/// Safe bisection upper bound \(\beta_{\max}=20\log N / R\) (D8.6).
+pub fn beta_search_max(energies: &[f64]) -> f64 {
+    let finite: Vec<f64> = energies.iter().copied().filter(|e| e.is_finite()).collect();
+    if finite.len() < 2 {
+        return 0.0;
+    }
+    let e_min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let e_max = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let r = e_max - e_min;
+    if r <= 0.0 {
+        return 0.0;
+    }
+    20.0 * (finite.len() as f64).ln() / r
+}
+
+/// Unique \(\beta^\star=H^{-1}(H_\star)\) by bisection (Corollary D8.4).
+pub fn calibrate_beta(energies: &[f64], h_star: f64) -> f64 {
+    let finite: Vec<f64> = energies.iter().copied().filter(|e| e.is_finite()).collect();
+    let n = finite.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let h0 = softmax_entropy(&finite, 0.0);
+    let e_min = finite.iter().copied().fold(f64::INFINITY, f64::min);
+    let m = finite
+        .iter()
+        .filter(|&&e| (e - e_min).abs() < 1e-15 * (1.0 + e_min.abs()))
+        .count()
+        .max(1);
+    let h_inf = (m as f64).ln();
+    // Degenerate spectrum: H is flat → any beta is equivalent; use 0.
+    if h0 <= h_inf + 1e-9 {
+        return 0.0;
+    }
+    let lo_h = h_inf + 1e-12;
+    let h_star = if h_star < lo_h {
+        lo_h
+    } else if h_star > h0 {
+        h0
+    } else {
+        h_star
+    };
+    const TOL: f64 = 1e-8;
+    if (h_star - h0).abs() <= TOL {
+        return 0.0;
+    }
+    let mut lo = 0.0;
+    let mut hi = beta_search_max(&finite).max(1e-12);
+    for _ in 0..40 {
+        if softmax_entropy(&finite, hi) <= h_star + TOL {
+            break;
+        }
+        hi *= 2.0;
+    }
+    for _ in 0..64 {
+        let mid = 0.5 * (lo + hi);
+        let h_mid = softmax_entropy(&finite, mid);
+        if h_mid > h_star {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        if (h_mid - h_star).abs() <= TOL || (hi - lo) <= TOL * (1.0 + mid) {
+            return mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
+
 /// Residual + multinomial branch/kill (population control).
 ///
 /// Residual resampling (standard sequential Monte Carlo / particle filtering)
@@ -189,6 +310,9 @@ fn branch_reference(energies: &[f64]) -> f64 {
 /// remainder. This has lower variance than pure multinomial branching while
 /// preserving the DMC engineering pattern of population control to a fixed
 /// target size (Liu, *Monte Carlo Strategies in Scientific Computing*).
+///
+/// When `beta` is supplied by [`calibrate_beta`] (D8), weights realize the
+/// free-energy minimizer at the entropy-matched inverse temperature.
 pub fn population_control<R: Rng>(
     walkers: &[Walker],
     target_n: usize,
@@ -258,6 +382,23 @@ pub fn population_control<R: Rng>(
     }
     out.truncate(target_n);
     out
+}
+
+/// D8 ECIT residual control: calibrate \(\beta^\star\) to \(H_\star(\rho)\), then
+/// residual-resample. Returns `(offspring, beta_star)`.
+pub fn population_control_ecit<R: Rng>(
+    walkers: &[Walker],
+    target_n: usize,
+    progress: f64,
+    elite_floor: f64,
+    rng: &mut R,
+) -> (Vec<Walker>, f64) {
+    let energies: Vec<f64> = walkers.iter().map(|w| w.energy).collect();
+    let n = energies.iter().filter(|e| e.is_finite()).count().max(1);
+    let h_star = target_entropy(n, progress, elite_floor);
+    let beta_star = calibrate_beta(&energies, h_star);
+    let out = population_control(walkers, target_n, beta_star, rng);
+    (out, beta_star)
 }
 
 /// Isotropic diffusion proposal, reflected into the box.
@@ -1110,8 +1251,9 @@ where
         };
         let gap = (med - best_val).abs().max(1e-3);
         let progress = (work(n_evals, n_grads) as f64 / budget as f64).clamp(0.0, 1.0);
-        // Population-annealing style cool: beta grows; Tsallis T cools; sigma adapts.
-        beta = (beta0 * (0.4 + 8.0 * progress) / gap).max(1e-6);
+        // D8 ECIT: residual-control beta is calibrated to H_*(progress).
+        // Tsallis visit temperature and diffusion scale still cool with progress.
+        let _gap_beta = (beta0 * (0.4 + 8.0 * progress) / gap).max(1e-6);
         visit_temp = ((e_span * 2.0) * (1.0 - progress).powi(2)).max(1e-6);
         let sigma_scale = if accept_ema < 0.2 {
             1.15
@@ -1126,7 +1268,11 @@ where
             .max(8.0) as usize;
 
         if step % steps_per_control == 0 {
-            pop.walkers = population_control(&pop.walkers, pop.target_n, beta, rng);
+            // Algorithm D8: entropy-calibrated residual population control.
+            let (next, beta_star) =
+                population_control_ecit(&pop.walkers, pop.target_n, progress, 2.0, rng);
+            pop.walkers = next;
+            beta = beta_star.max(1e-6);
             controls += 1;
             pop.walkers
                 .retain(|w| w.energy.is_finite() && w.pos.iter().all(|x| x.is_finite()));
@@ -1421,6 +1567,44 @@ mod tests {
         fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
             x.mapv(|v| 2.0 * v)
         }
+    }
+
+    /// D8.3–D8.5: H(0)=log N, H decreases in beta, calibrate hits H_star.
+    #[test]
+    fn d8_entropy_calibrated_beta_matches_target() {
+        let energies = [0.0, 0.5, 1.0, 2.0, 5.0];
+        let n = energies.len();
+        let h0 = softmax_entropy(&energies, 0.0);
+        assert!((h0 - (n as f64).ln()).abs() < 1e-12, "H(0)={h0}");
+        let h1 = softmax_entropy(&energies, 1.0);
+        let h5 = softmax_entropy(&energies, 5.0);
+        assert!(h1 <= h0 + 1e-12, "H not monotone: {h1} > {h0}");
+        assert!(h5 <= h1 + 1e-12, "H not monotone: {h5} > {h1}");
+        for progress in [0.0, 0.35, 0.7, 1.0] {
+            let h_star = target_entropy(n, progress, 2.0);
+            let beta = calibrate_beta(&energies, h_star);
+            let h = softmax_entropy(&energies, beta);
+            assert!(
+                (h - h_star).abs() < 1e-5 * (1.0 + h_star.abs()),
+                "progress={progress}: H(beta*)={h} vs H*={h_star} beta={beta}"
+            );
+        }
+    }
+
+    /// D8 residual control preserves target size and returns finite beta*.
+    #[test]
+    fn d8_population_control_ecit_preserves_size() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let walkers: Vec<Walker> = (0..12)
+            .map(|i| Walker {
+                pos: Array1::from_elem(2, i as f64),
+                energy: (i as f64) * 0.4,
+            })
+            .collect();
+        let (out, beta_star) = population_control_ecit(&walkers, 16, 0.4, 2.0, &mut rng);
+        assert_eq!(out.len(), 16);
+        assert!(beta_star.is_finite() && beta_star >= 0.0);
+        assert!(out.iter().all(|w| w.energy.is_finite()));
     }
 
     #[test]
