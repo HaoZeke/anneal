@@ -1,102 +1,116 @@
 #+TITLE: GPMD: Gap-Proportional Metropolis Descent
-#+SUBTITLE: Derivation → algorithm (Trefethen-style)
+#+SUBTITLE: Derivation by Pólya’s four phases
 #+OPTIONS: toc:2
 
-* Problem
+* (I) Understand the problem
 
-Bound-constrained continuous minimization of a smooth objective \(f:\mathbb{R}^d\to\mathbb{R}\)
-under a finite evaluation budget. At a *local* quadratic basin we want a
-single Metropolis chain whose temperature and proposal scale maximize the
-expected *one-step decrease of the current state energy* (not the incumbent
-record, which ignores uphill proposals).
+** What is the unknown?
+A temperature law \(T=T(x)\) and proposal scale rule for a Metropolis chain
+so that, on a *local* quadratic basin, the expected one-step decrease of the
+*current state energy* is positive and near-optimal under a standard
+evolution-strategy proposal scaling.
 
-* Continuous model (evolution-strategy sphere)
+** What are the data?
+- Smooth objective \(f:\mathbb{R}^d\to\mathbb{R}\) (locally \(f(x)=\|x\|^2/2\)
+  from the basin bottom).
+- Isotropic Gaussian proposal \(y=x+\sigma z\), \(z\sim N(0,I_d)\), with
+  ES scaling \(\sigma=c\|x\|/d\) (Rechenberg).
+- Metropolis acceptance \(\min\{1,e^{-\Delta/T}\}\), \(\Delta=f(y)-f(x)\).
+- Finite evaluation budget \(B\) (work units).
 
-Take \(f(x)=\|x\|^2/2\) measured from the basin bottom, and the isotropic
-proposal
+** What is the condition?
+The law must be derived from the asymptotic model, not chosen as a free
+cooling schedule. Multimodal *escape* is a different problem (outside this
+unknown); here the condition is local *descent* of the chain state.
+
+** Literature parent
+Local Metropolis on a quadratic + ES progress theory + adaptive Metropolis
+(Haario–Saksman–Tamminen) for proposal *shape*. This is *not* Xiang dual
+annealing (GSA visiting + L-BFGS as a global solver).
+
+* (II) Devise a plan
+
+** Have we seen a related problem?
+Yes: maximize expected progress of a \((1+1)\)-ES on the sphere (Rechenberg);
+Metropolis at \(T=0\) recovers pure descent. Adaptive MCMC optimizes a
+different objective (stationary diffusion speed, Roberts–Gelman–Gilks).
+
+** Auxiliary problem
+Pass to the \(d\to\infty\) limit with ES scaling so \(\Delta\) is Gaussian, then
+optimize the normalized gain
 \[
-y = x + \sigma z,\qquad z\sim N(0,I_d),\qquad
-\sigma = c\,\frac{\|x\|}{d}
-\]
-(Rechenberg / ES scaling). As \(d\to\infty\), the energy change
-\(\Delta=f(y)-f(x)\) satisfies the limiting law
-\[
-D := \frac{d\,\Delta}{f(x)} \;\Longrightarrow\; N(c^2,\,4c^2).
-\tag{M1}
-\]
-Write the dimensionless temperature \(\theta = T\,d/f(x)\) and the
-normalized Metropolis state-gain
-\[
-G(c,\theta)
-  = -\mathbb{E}\bigl[D\,\min\{1,\,e^{-D/\theta}\}\bigr].
-\tag{M2}
+G(c,\theta)=-\mathbb{E}\bigl[D\min\{1,e^{-D/\theta}\}\bigr],\quad
+\theta=Td/f(x),\quad D=d\Delta/f(x).
 \]
 
-* Key identity (load-bearing)
+** Tools for checking (not a methodology brand)
+- SymPy: expand Gaussian density ratios and algebraic factors.
+- Lean: machine-check the coefficient identities and \(\theta_\star\in(0,2)\).
+- Implementation: enforce \(T=\theta_\star(f-f_{\mathrm{best}})/d\).
 
-Let \(p_c\) be the \(N(c^2,4c^2)\) density. For every \(u>0\),
+* (III) Carry out the plan
+
+** Model (M1)
+Under \(\sigma=c\|x\|/d\),
 \[
-\frac{p_c(-u)}{p_c(u)} = e^{-u/2}.
-\tag{I1}
+D \;\Longrightarrow\; N(c^2,\,4c^2).
 \]
-Pairing \(+u\) and \(-u\) in (M2) yields
+
+** Identity (I1)
+Let \(p_c\) be the \(N(c^2,4c^2)\) density. For \(u>0\),
 \[
-G(c,\theta)
-  = \int_0^\infty u\,p_c(u)\,
-    \bigl(e^{-u/2}-e^{-u/\theta}\bigr)\,du.
-\tag{I2}
+\frac{p_c(-u)}{p_c(u)}=e^{-u/2}.
 \]
-Hence, for every \(c>0\):
+Proof sketch: \(\log p(-u)-\log p(u)=-2u\mu/\sigma^2\) for any Gaussian
+\(N(\mu,\sigma^2)\); set \(\mu=c^2\), \(\sigma^2=4c^2\).
+
+** Pairing (I2)–(T1)
 \[
-G(c,\theta)>0 \;\Longleftrightarrow\; 0<\theta<2,\qquad
-G(c,2)=0,\qquad
-G(c,\theta)<0 \;\Longleftrightarrow\; \theta>2.
-\tag{T1}
+G(c,\theta)=\int_0^\infty u\,p_c(u)\,(e^{-u/2}-e^{-u/\theta})\,du.
 \]
-(Small-step expansion \(G=c^2(2-\theta)/\theta+O(c^3)\) is consistent but not
-used to prove the sign.)
-
-* Operating point and algorithm
-
-Inside the positive-drift window choose the model operating point
-\(\theta_\star=1/2\) (≈91% of maximal \(G^\star\) at moderate acceptance).
-The inverse map from (M1)–(T1) is the *gap-proportional temperature*
+The weight \(e^{-u/2}-e^{-u/\theta}\) has the sign of \(2-\theta\) for \(u>0\).
+Hence for every \(c>0\):
 \[
-T(x)
-  = \theta_\star\,\frac{f(x)-f^\star}{d}
-  = \frac12\,\frac{f(x)-f_{\mathrm{best}}}{d},
-\tag{A1}
+G>0 \Leftrightarrow 0<\theta<2,\quad G(\cdot,2)=0,\quad G<0\Leftrightarrow\theta>2.
 \]
-using the best-so-far as a proxy for \(f^\star\). Proposal *shape* is the
-running covariance of the chain (Haario–Saksman–Tamminen); proposal *size*
-is Robbins–Monro adaptation targeting the model acceptance
-\(\alpha^\star(\theta_\star)\approx 0.32\) (SymPy/numerics). Reflection into
-the box preserves proposal symmetry for Metropolis.
 
-**Algorithm GPMD** (budget \(B\), box, seed):
+** Operating point
+Choose \(\theta_\star=\tfrac12\in(0,2)\). Numerics (SymPy/MC): at \(\theta_\star\),
+\(c^\star\approx 1.32\), \(G^\star\approx 0.37\), \(\alpha^\star\approx 0.32\).
 
-1. Initialize \(x\) by QMC or given \(x_0\); set \(f\leftarrow f(x)\), \(f_{\mathrm{best}}\leftarrow f\).
-2. Reserve polish tail \(B_{\mathrm{pol}}=\lfloor B/4\rfloor\); set \(B_{\mathrm{sa}}=B-B_{\mathrm{pol}}\).
-3. While work \(<B_{\mathrm{sa}}\):
-   - \(T\leftarrow\tfrac12\max(f-f_{\mathrm{best}},\varepsilon)/d\).
-   - Propose \(y\sim N(x,\sigma^2\hat\Sigma)\) (or isotropic if scatter thin); reflect into box.
-   - Metropolis: accept if \(\Delta\le 0\) or \(U<e^{-\Delta/T}\).
-   - Update scatter / RM scale toward \(\alpha^\star=0.32\); charge evals.
-4. Spend \(B_{\mathrm{pol}}\) on projected L-BFGS (or coordinate) polish of \(x_{\mathrm{best}}\).
+** Operating law (A1)
+\[
+T(x)=\theta_\star\frac{f(x)-f_{\mathrm{best}}}{d}=\frac12\frac{f(x)-f_{\mathrm{best}}}{d}.
+\]
+Proposal size: Robbins–Monro on \(\log\sigma\) targeting \(\alpha^\star=0.32\).
+Proposal shape: running covariance when enough samples exist (else isotropic).
+Budget: reserve a polish fraction \(\rho_{\mathrm{pol}}=\tfrac14\) of \(B\).
+
+** Algorithm GPMD (explicit)
+
+1. Initialize \(x\) (given \(x_0\) or random in the box); \(f\leftarrow f(x)\); \(f_{\mathrm{best}}\leftarrow f\).
+2. \(B_{\mathrm{pol}}\leftarrow\lfloor B/4\rfloor\); \(B_{\mathrm{sa}}\leftarrow B-B_{\mathrm{pol}}\).
+3. While work \(< B_{\mathrm{sa}}\):
+   a. \(T\leftarrow \tfrac12\max(f-f_{\mathrm{best}},\varepsilon)/d\).
+   b. Propose \(y\) from \(N(x,\sigma^2\hat\Sigma)\) (isotropic if scatter thin); reflect into box.
+   c. Metropolis accept/reject with temperature \(T\); charge one objective eval.
+   d. Update scatter / RM \(\log\sigma\) toward \(\alpha^\star=0.32\); update \(f_{\mathrm{best}}\).
+4. Spend remaining polish budget on projected gradient (if gradient given) or coordinate polish of \(x_{\mathrm{best}}\).
 5. Return \(x_{\mathrm{best}}\).
 
-* Position in the literature
+Parameters introduced above: \(\theta_\star=\tfrac12\), \(\alpha^\star=0.32\), \(\rho_{\mathrm{pol}}=\tfrac14\), \(\varepsilon>0\) floor on the gap. No further free cooling schedule.
 
-- Parent: Metropolis–Hastings on a quadratic basin; ES progress rate (Rechenberg);
-  adaptive Metropolis (Haario et al.); *not* Xiang dual annealing (GSA visiting
-  + L-BFGS as global method).
-- Claim boundary: *local* expected state descent under (M1). Multimodal escape is
-  outside (T1); use restarts/portfolio arms for that (D7).
-- Dual annealing remains the GSA+local-search baseline for *global* search;
-  GPMD is the descent-phase law productized as a callable algorithm.
+* (IV) Look back
 
-* Verification
+** Check the algebra
+- SymPy: (I1), factor \(1/\theta-1/2=(2-\theta)/(2\theta)\), sign of \(G\) at \(\theta\in\{0.5,2,3\}\).
+- Lean: coefficient \(2\mu/(4\mu)=1/2\); \(\theta_\star\in(0,2)\); factor trichotomy samples.
 
-- SymPy: (I1), (I2) sign factorization, \(\alpha^\star(\theta_\star)\), \(c^\star\).
-- Lean: algebraic proof of (I1) for \(\mu=c^2\), \(\sigma^2=4c^2\); corollary (T1) for the integrand sign.
-- Implementation: =src/methods/gpmd.rs=; Python =anneal.gpmd_optimize=; SOTA method =gpmd=.
+** Check the implementation
+- Code must call \(T=\theta_\star(f-f_{\mathrm{best}})/d\) (not a geometric schedule).
+- Unit tests: sphere improves under budget; fixed hot \(T\) loses on sphere; budget not exceeded.
+
+** Can we use the result?
+GPMD is a *local descent* arm. For deep multimodal barriers, pair with restarts
+or a portfolio (escape window analysis). Do not claim global SOTA vs dual annealing
+from (T1) alone.
