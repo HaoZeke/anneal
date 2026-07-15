@@ -4,9 +4,11 @@
 use eindir_core::Bounds;
 use eindir_core::Gradient;
 use eindir_core::Objective;
-use ndarray::Array1;
+use eindir_core::eval_batch_parallel;
+use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rayon::prelude::*;
 
 use crate::accept::{AcceptRule, TsallisAccept};
 use crate::cool::{Cooling, TsallisCool};
@@ -419,38 +421,55 @@ where
         n_starts,
         crate::runner::qmc_skip_from_seed(seed),
     );
-    let mut screened = Vec::with_capacity(n_starts);
-    let mut n_evals = 0usize;
-    let mut best_pos = bounds.clip(starts.row(0));
-    let mut best_val = f64::INFINITY;
-
-    for start in starts.outer_iter() {
+    // Clip starts into a dense matrix, then batch-evaluate in parallel.
+    let mut clipped = Array2::<f64>::zeros((n_starts, bounds.dims));
+    for (i, start) in starts.outer_iter().enumerate() {
         let pos = bounds.clip(start);
-        let value = obj.eval(pos.view());
-        n_evals += 1;
-        if value.is_finite() {
-            if value < best_val {
-                best_val = value;
-                best_pos = pos.clone();
-            }
-            screened.push((value, pos));
-        }
+        clipped.row_mut(i).assign(&pos);
     }
+    let values = eval_batch_parallel(obj, clipped.view());
+    let n_evals_screen = values.len();
+    let mut screened: Vec<(f64, Array1<f64>)> = values
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &value)| {
+            if value.is_finite() {
+                Some((value, clipped.row(i).to_owned()))
+            } else {
+                None
+            }
+        })
+        .collect();
     screened.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let (mut best_pos, mut best_val) = if let Some((v, p)) = screened.first() {
+        (p.clone(), *v)
+    } else {
+        (bounds.clip(starts.row(0)), f64::INFINITY)
+    };
 
     let polish_limit = if top_k == 0 {
         screened.len()
     } else {
         top_k.min(screened.len())
     };
+    // Independent L-BFGS polishes on the top-k starts (Objective/Gradient are Sync).
+    let polish_results: Vec<LocalPolishResult> = screened
+        .into_iter()
+        .take(polish_limit)
+        .collect::<Vec<_>>()
+        .into_par_iter()
+        .map(|(_value, start)| {
+            projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol)
+        })
+        .collect();
+
+    let mut n_evals = n_evals_screen;
     let mut n_grads = 0usize;
     let mut n_polished = 0usize;
-    let mut polished_values = Vec::with_capacity(polish_limit);
-    let mut polished_projected_grad_norms = Vec::with_capacity(polish_limit);
-    let mut polished_stationary = Vec::with_capacity(polish_limit);
-    for (_value, start) in screened.into_iter().take(polish_limit) {
-        let result =
-            projected_gradient_polish(obj, gradient, start, max_fevals_per_start, step0, grad_tol);
+    let mut polished_values = Vec::with_capacity(polish_results.len());
+    let mut polished_projected_grad_norms = Vec::with_capacity(polish_results.len());
+    let mut polished_stationary = Vec::with_capacity(polish_results.len());
+    for result in polish_results {
         n_evals += result.n_evals;
         n_grads += result.n_grads;
         n_polished += 1;

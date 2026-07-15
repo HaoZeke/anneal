@@ -13,8 +13,8 @@
 //! Public API: [`dmc_population_optimize`], [`run_dmc_population_seeded`]
 //! (Python `anneal.dmc_population_optimize`, portfolio `DmcPop` arm).
 
-use eindir_core::{Bounds, Gradient, Objective};
-use ndarray::{Array1, ArrayView1};
+use eindir_core::{Bounds, Gradient, Objective, eval_batch_parallel};
+use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -886,10 +886,9 @@ where
             break;
         }
 
-        // Population phase: adaptive DE + diffusion + long jumps.
+        // Population phase: propose (serial RNG) → batch-eval (rayon) → accept.
         let n_walkers = pop.walkers.len();
         let snapshot: Vec<Walker> = pop.walkers.clone();
-        // p-best pool: top max(2, 0.15 N) for current-to-pbest.
         let mut order: Vec<usize> = (0..n_walkers).collect();
         order.sort_by(|&a, &b| {
             snapshot[a]
@@ -904,29 +903,41 @@ where
         let mut n_accept = 0usize;
         let mut n_trial = 0usize;
 
-        for (wi, w) in pop.walkers.iter_mut().enumerate() {
-            if work(n_evals, n_grads) >= budget {
-                break;
-            }
+        let remain = budget.saturating_sub(work(n_evals, n_grads));
+        let n_prop = n_walkers.min(remain);
+        if n_prop == 0 {
+            break;
+        }
+
+        // Meta for accept after parallel eval.
+        struct PropMeta {
+            wi: usize,
+            use_de: bool,
+            long_jump: bool,
+            f_i: f64,
+            cr_i: f64,
+            u_accept: f64,
+        }
+        let mut metas = Vec::with_capacity(n_prop);
+        let mut trial_mat = Array2::<f64>::zeros((n_prop, dim));
+
+        for (pi, wi) in (0..n_prop).enumerate() {
+            let w = &snapshot[wi];
             n_trial += 1;
             let u = rng.random::<f64>();
-            // Tsallis/GSA long jump on the worse half (dual_annealing family).
             let long_jump = wi * 2 >= n_walkers && u < 0.12;
             let use_de = !long_jump && n_walkers >= 4 && u < 0.72;
-            // Sample F, CR from success-history (SHADE).
             let r_idx = rng.random_range(0..SHADE_H);
             let f_i = sample_cauchy_01(mem_f[r_idx], 0.1, rng);
             let cr_i = {
-                let n01 = {
-                    let u1 = rng.random::<f64>().max(1e-12);
-                    let u2 = rng.random::<f64>();
-                    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
-                };
+                let u1 = rng.random::<f64>().max(1e-12);
+                let u2 = rng.random::<f64>();
+                let n01 = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                 (mem_cr[r_idx] + 0.1 * n01).clamp(0.0, 1.0)
             };
+            let u_accept = rng.random::<f64>();
 
             let y = if long_jump {
-                // Mix pure Tsallis visit with occasional elite-anchored Cauchy.
                 if rng.random::<f64>() < 0.65 {
                     let raw = visit.propose(w.pos.view(), visit_temp.max(1e-12), rng);
                     reflect_into_box(raw.view(), &bounds)
@@ -947,7 +958,6 @@ where
                     reflect_into_box(z.view(), &bounds)
                 }
             } else if use_de {
-                // Prefer current-to-pbest (SHADE/JADE), then best/1, then rand/1.
                 let rmode = rng.random::<f64>();
                 let mode = if rmode < 0.5 {
                     0
@@ -959,7 +969,6 @@ where
                 let mut trial = Array1::zeros(dim);
                 let j_rand = rng.random_range(0..dim);
                 let pick_not = |forbid: &[usize], rng: &mut R| -> usize {
-                    // Bounded rejection; fall back if population is tiny.
                     for _ in 0..32 {
                         let j = rng.random_range(0..n_walkers);
                         if !forbid.contains(&j) {
@@ -976,7 +985,6 @@ where
                     }
                 };
                 if mode == 0 && n_walkers >= 3 {
-                    // current-to-pbest/1: x + F(x_pbest - x) + F(x_r1 - x_r2)
                     let pbest = order[rng.random_range(0..p_best_n.min(order.len()))];
                     let r1 = pick_not(&[wi, pbest], rng);
                     let x_r2 = arch_or_pop(rng);
@@ -990,7 +998,6 @@ where
                         }
                     }
                 } else if mode == 1 && n_walkers >= 3 {
-                    // best/1
                     let best_i = order[0];
                     let r1 = pick_not(&[wi, best_i], rng);
                     let x_r2 = arch_or_pop(rng);
@@ -1003,7 +1010,6 @@ where
                         }
                     }
                 } else {
-                    // rand/1
                     let r1 = pick_not(&[wi], rng);
                     let r2 = pick_not(&[wi, r1], rng);
                     let x_r3 = arch_or_pop(rng);
@@ -1020,23 +1026,37 @@ where
             } else {
                 diffusion_displace(w.pos.view(), &bounds, sigma, None, rng)
             };
-            let e = match charge_obj(y.view(), &mut n_evals, n_grads) {
-                Some(v) => v,
-                None => break,
-            };
-            // DE is greedy (Storn–Price); Tsallis uses GSA accept; else Metropolis.
+            trial_mat.row_mut(pi).assign(&y);
+            metas.push(PropMeta {
+                wi,
+                use_de,
+                long_jump,
+                f_i,
+                cr_i,
+                u_accept,
+            });
+        }
+
+        // Parallel objective evaluations (eindir batch helper).
+        let energies = eval_batch_parallel(obj, trial_mat.view());
+        n_evals += energies.len();
+
+        for (pi, meta) in metas.into_iter().enumerate() {
+            let e = energies[pi];
+            let y = trial_mat.row(pi).to_owned();
+            let w = &mut pop.walkers[meta.wi];
             let de = e - w.energy;
             let accept = if e <= w.energy {
                 true
-            } else if use_de {
+            } else if meta.use_de {
                 false
-            } else if long_jump {
-                rng.random::<f64>()
+            } else if meta.long_jump {
+                meta.u_accept
                     < accept_rule
                         .accept_prob(de, visit_temp.max(1e-12))
                         .clamp(0.0, 1.0)
             } else {
-                rng.random::<f64>() < (-beta * de).exp()
+                meta.u_accept < (-beta * de).exp()
             };
             if e.is_finite() && e < best_val {
                 best_val = e;
@@ -1044,13 +1064,12 @@ where
             }
             if accept {
                 n_accept += 1;
-                if use_de {
+                if meta.use_de {
                     let delta = (w.energy - e).max(0.0);
-                    sf_success.push(f_i);
-                    scr_success.push(cr_i);
+                    sf_success.push(meta.f_i);
+                    scr_success.push(meta.cr_i);
                     s_delta.push(delta.max(1e-18));
                 }
-                // Archive discarded parent (JADE).
                 if archive.len() < archive_cap {
                     archive.push(w.pos.clone());
                 } else if !archive.is_empty() && rng.random::<f64>() < 0.25 {
