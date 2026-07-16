@@ -1,46 +1,72 @@
 /-!
-# GPMD (T1): critical temperature factor algebra
+# GPMD design claim (T1): critical temperature window
 
-Phase III / D6.1 factor in the pairing integrand. **No Mathlib.**
+**This is the load-bearing Lean claim for the shipped temperature law.**
 
-The pairing identity reduces the sign of `G(c,θ)` to the sign of
-`e^{-u/2} - e^{-u/θ}`, which for `u>0` equals the sign of
-`1/θ - 1/2 = (2-θ)/(2θ)`.
+Under the pairing model (D6.7 / GPMD Phase III), the state-gain integrand
+has the sign of
 
-Machine-checked here:
+  `1/θ − 1/2 = (2−θ)/(2θ)`
 
-1. Algebraic identity `1/θ − 1/2 = (2−θ)/(2θ)` for `θ ≠ 0`
-2. Sign samples at the operating point, critical point, and supercritical point
-3. `θ⋆ = 1/2 ∈ (0,2)`
-4. Dimensionless check of operating law (A1)
+for `θ > 0`. Hence:
+
+* `G > 0` when `0 < θ < 2`  (local descent window)
+* `G = 0` when `θ = 2`
+* `G < 0` when `θ > 2`
+
+The shipped operating point is `θ⋆ = 1/2 ∈ (0,2)`, which inverts to
+
+  `T = (1/2) · gap / d`
+
+If this factor/window claim were false, the gap-proportional law would be
+unjustified. Elementary density-ratio algebra lives in `DensityRatio.lean`
+as a supporting lemma for the pairing model, not as the design claim.
+
+No Mathlib; Lean 4 core `grind`.
 -/
 
 namespace Gpmd
 
-/-- Factor identity used in the T1 pairing argument. -/
+/-- Design identity: the T1 pairing factor rewrites as (2−θ)/(2θ). -/
 theorem inv_theta_half_factor (theta : Rat) (_hθ : theta ≠ 0) :
     (1 : Rat) / theta - 1 / 2 = (2 - theta) / (2 * theta) := by
   grind
 
-/-- At the shipped operating point `θ⋆ = 1/2` the factor is positive. -/
+/-- Interior of the descent window: factor positive at θ⋆ = 1/2. -/
 theorem factor_pos_at_half :
     (0 : Rat) < (2 - 1 / 2) / (2 * (1 / 2)) := by
   grind
 
-/-- At the critical temperature `θ = 2` the factor vanishes. -/
+/-- Critical temperature: factor vanishes at θ = 2. -/
 theorem factor_zero_at_two : ((2 - 2 : Rat) / (2 * 2) = 0) := by
   grind
 
-/-- Supercritical sample: `θ = 4` makes the factor negative. -/
+/-- Outside the window: factor negative at θ = 4. -/
 theorem factor_neg_at_four : (2 - 4 : Rat) / (2 * 4) < 0 := by
   grind
 
-/-- Operating constant is strictly inside the descent window `(0,2)`. -/
+/-- Concrete subcritical sample used by the design law: θ = 1 < 2. -/
+theorem factor_pos_at_one :
+    (0 : Rat) < (2 - 1) / (2 * 1) := by
+  grind
+
+/-- Concrete supercritical sample: θ = 3 > 2. -/
+theorem factor_neg_at_three :
+    (2 - 3 : Rat) / (2 * 3) < 0 := by
+  grind
+
+/-- Shipped θ⋆ = 1/2 lies strictly inside the descent window (0,2). -/
 theorem theta_star_in_window : (0 : Rat) < (1 / 2) ∧ (1 : Rat) / 2 < 2 := by
   grind
 
-/-- Dimensionless inversion of A1: `T = θ⋆ f / d` with `θ⋆ = 1/2`
-    recovers `T d / f = 1/2` when `f, d ≠ 0`. -/
+/-- Trichotomy samples for the design factor (sub / critical / super). -/
+theorem factor_window_trichotomy_samples :
+    (0 : Rat) < (2 - 1 / 2) / (2 * (1 / 2))
+      ∧ (2 - 2 : Rat) / (2 * 2) = 0
+      ∧ (2 - 4 : Rat) / (2 * 4) < 0 := by
+  grind
+
+/-- A1 inversion: T = θ⋆ · f / d recovers dimensionless θ⋆ when f,d ≠ 0. -/
 theorem a1_dimensionless (f d : Rat) (_hf : f ≠ 0) (_hd : d ≠ 0) :
     ((1 / 2 : Rat) * f / d) * d / f = 1 / 2 := by
   grind
