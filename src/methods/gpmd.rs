@@ -18,7 +18,7 @@ use crate::movekernel::reflect_into_box;
 
 /// Dimensionless operating temperature θ⋆ = 1/2 (inside (0,2) window).
 pub const THETA_STAR: f64 = 0.5;
-/// Model acceptance target α*(θ⋆) ≈ 0.32 (SymPy/MC in proofs/gpmd_derive.py).
+/// Model acceptance target α*(θ⋆) ≈ 0.32 (D6 optimize_c at θ=1/2; proofs/gpmd_derive.py).
 pub const ALPHA_TARGET: f64 = 0.32;
 /// Fraction of budget reserved for terminal polish.
 pub const POLISH_FRACTION: f64 = 0.25;

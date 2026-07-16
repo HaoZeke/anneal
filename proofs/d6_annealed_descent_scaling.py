@@ -70,8 +70,9 @@ maximization over c inside the positive-drift window gives:
 The resulting alpha*(theta) curve is the acceptance target the AM-SA
 arm tracks by Robbins-Monro on its global proposal scale (the
 covariance SHAPE still comes from Haario-style adaptation; this result
-fixes the SIZE). The curve is exported as a rational-knot table for the
-Rust implementation (src/methods/portfolio.rs, AM_SA_ALPHA_KNOTS).
+fixes the SIZE). The operating point theta=0.5 (alpha*~0.32) is shipped
+as scalars AM_THETA_TILDE / AM_ALPHA_TARGET in portfolio.rs and
+THETA_STAR / ALPHA_TARGET in gpmd.rs (not a multi-knot table).
 """
 
 import math
