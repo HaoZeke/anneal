@@ -1,5 +1,5 @@
-#+TITLE: GPMD: Gap-Proportional Metropolis Descent
-#+SUBTITLE: Derivation by Pólya’s four phases (parent model: D6)
+#+TITLE: GPMD: Gap-proportional Metropolis (local driver note)
+#+SUBTITLE: D6 packaging for a shipped arm — not a research algorithm
 #+OPTIONS: toc:2
 
 * (I) Understand the problem
@@ -307,16 +307,19 @@ research contribution.
 - Implementation: =gap_proportional_temp= is (A1); unit tests require sphere
   refinement and improvement over fixed-hot Metropolis (local check only).
 
-** Competitive seat (literature)
-Local Metropolis with Haario-style covariance and a *derived* temperature
-law sits next to adaptive Metropolis (Haario–Saksman–Tamminen) and ES
-progress theory (Rechenberg), *not* next to Xiang dual annealing (GSA
-visiting + L-BFGS as a global solver) or CMA-ES. Empirical head-to-head on
-CUTEst is a property of the *portfolio* (=global_optimize=), which already
-includes this law as arm =am_sa= among MetaD/DE/GSA/polish arms.
+** What was actually added (no research framing)
+This file is an *implementation note* for a temperature schedule already
+implied by D6: fix \(\theta_\star=\tfrac12\), replace \(f-f^\star\) by
+\(f-f_{\mathrm{best}}\), ship Haario/RM proposal adaptation and a polish
+tail. That is engineering packaging of a known local model.
+
+It is **not**:
+- a new global optimization algorithm,
+- a competitor to dual annealing, CMA-ES, or basinhopping as a solver class,
+- a thesis contribution (the algebra is standard; Lean/SymPy only lock it),
+- field SOTA evidence (any CUTEst numbers for competitiveness belong to the
+  *portfolio* driver and a fixed protocol, not to this note).
 
 ** Parent citation
-(M1), (I1), (I2), (T1), and the small-step check are the D6 model. GPMD
-adds only: Pólya packaging for the driver, the \(f_{\mathrm{best}}\) proxy, the
-fixed interior operating point with residual-rate rationale, and the shipped
-code path.
+(M1), (I1), (I2), (T1), and the small-step check are D6. GPMD is a name for
+the shipped driver path only.

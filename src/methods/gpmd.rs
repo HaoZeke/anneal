@@ -1,15 +1,11 @@
-//! Gap-Proportional Metropolis Descent (GPMD).
+//! Gap-proportional Metropolis (local descent arm / standalone helper).
 //!
-//! Algorithm derived in `docs/derivations/gpmd_algorithm.org`:
-//! - Model (M1): ES sphere ⇒ Δ normalized ~ N(c², 4c²)
-//! - Identity (I1)/(T1): state gain G>0 iff θ = T d / gap ∈ (0, 2)
-//! - Operating law (A1): T = (1/2) · (f − f_best) / d
-//! - Proposal: running covariance (Haario) + RM scale targeting α* ≈ 0.32
-//! - Tail: reserved polish fraction of the budget
-//!
-//! Literature parent: local Metropolis on a quadratic basin + adaptive
-//! Metropolis (Haario–Saksman–Tamminen), *not* Xiang dual annealing.
-//! Escape of deep multimodal barriers is outside the claim boundary.
+//! Implementation note (not a new global solver): temperature
+//! `T = (1/2) * max(f - f_best, ε) / d` from the D6 sphere-limit window
+//! with the best-so-far gap as a proxy; Haario-style scatter + RM scale
+//! toward α* ≈ 0.32; terminal polish fraction of the budget.
+//! Details: `docs/derivations/gpmd_algorithm.org` (explicitly not
+//! dual-annealing / CMA-ES / field SOTA).
 
 use eindir_core::{Bounds, Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};

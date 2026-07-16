@@ -527,10 +527,10 @@ def gpmd_optimize(
     grad_fn=None,
     x0=None,
 ):
-    """Gap-Proportional Metropolis Descent (T = ½ · gap / d).
+    """Local Metropolis with T = ½ · (f − f_best) / d (D6 packaging).
 
-    See docs/derivations/gpmd_algorithm.org. Local descent law from the
-    ES-sphere Metropolis model (θ⋆=1/2 ∈ (0,2)); not dual annealing.
+    Implementation helper / portfolio arm material — not a global SOTA
+    solver. See docs/derivations/gpmd_algorithm.org.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
