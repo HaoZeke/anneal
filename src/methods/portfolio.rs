@@ -113,6 +113,10 @@ fn endgame_polish_max_fevals(cycle_wu: usize) -> usize {
 /// Pins `ledger.cap` to `used + cycle_wu` for the duration of the polish so
 /// BudgetedObjective/Gradient stop charging once the cycle budget is spent,
 /// then restores `outer_cap` (normally the full portfolio budget).
+///
+/// `step0` is the L-BFGS initial line-search scale; basin grind uses a
+/// decreasing sequence so COOLHANS-scale residuals keep refining after a
+/// coarse step stalls.
 fn run_endgame_projected_polish_cycle<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: &BudgetedGradient<'_, G>,
@@ -120,6 +124,7 @@ fn run_endgame_projected_polish_cycle<O, G>(
     start: Array1<f64>,
     cycle_wu: usize,
     outer_cap: usize,
+    step0: f64,
     grad_tol: f64,
 ) where
     O: Objective<f64>,
@@ -132,11 +137,131 @@ fn run_endgame_projected_polish_cycle<O, G>(
     if maxf == 0 {
         return;
     }
+    let step0 = if step0.is_finite() && step0 > 0.0 {
+        step0
+    } else {
+        1.0
+    };
     let used0 = ledger.used_get();
     let cycle_ceiling = (used0 + cycle_wu).min(outer_cap);
     ledger.cap_set(cycle_ceiling);
-    let _ = projected_gradient_polish(obj, grad, start, maxf, 1.0, grad_tol);
+    let _ = projected_gradient_polish(obj, grad, start, maxf, step0, grad_tol);
     ledger.cap_set(outer_cap);
+}
+
+/// Multi-pass basin grind: burn residual WU on the incumbent with shrinking
+/// L-BFGS step scales and micro-jitter, then coordinate micro-search.
+///
+/// Targets polish-depth losses (objective near the basin floor but not
+/// machine-noise tight). Each L-BFGS pass is WU-capped via
+/// [`run_endgame_projected_polish_cycle`].
+fn run_endgame_basin_grind<O, G, R>(
+    obj: &BudgetedObjective<'_, O>,
+    grad: &BudgetedGradient<'_, G>,
+    ledger: &BudgetLedger,
+    bounds: &Bounds<f64>,
+    outer_cap: usize,
+    rng: &mut R,
+) where
+    O: Objective<f64>,
+    G: Gradient<f64>,
+    R: Rng,
+{
+    // Coarse → fine step0; last passes take remaining budget.
+    const STEPS: [f64; 6] = [1.0, 0.1, 0.01, 1e-3, 1e-4, 1e-5];
+    for (i, &step0) in STEPS.iter().enumerate() {
+        if ledger.remaining() < 8 {
+            break;
+        }
+        let rem = ledger.remaining();
+        let last_passes = i + 2 >= STEPS.len();
+        let cycle_wu = if last_passes {
+            rem
+        } else {
+            (rem / (STEPS.len() - i)).max(16).min(rem)
+        };
+        let mut start = ledger.incumbent(bounds);
+        if i > 0 {
+            let scale = 1e-9 * (10.0f64).powi((i as i32).min(4));
+            for v in start.iter_mut() {
+                let u = 2.0 * rng.random::<f64>() - 1.0;
+                *v += scale * (1.0 + v.abs()) * u;
+            }
+            start = bounds.clip(start.view());
+        }
+        run_endgame_projected_polish_cycle(
+            obj, grad, ledger, start, cycle_wu, outer_cap, step0, 0.0,
+        );
+    }
+    // Coordinate micro-search: pure objective charges; closes residual when
+    // L-BFGS reports projected-stationarity short of machine-noise floor.
+    run_endgame_coordinate_microrefine(obj, ledger, bounds, outer_cap);
+}
+
+/// Pattern-search along coordinates with geometrically shrinking steps.
+///
+/// Each trial is one objective charge via `BudgetedObjective`. Hard-stops
+/// when the ledger is exhausted (temporary cap).
+fn run_endgame_coordinate_microrefine<O>(
+    obj: &BudgetedObjective<'_, O>,
+    ledger: &BudgetLedger,
+    bounds: &Bounds<f64>,
+    outer_cap: usize,
+) where
+    O: Objective<f64>,
+{
+    if ledger.remaining() < 4 {
+        return;
+    }
+    let dim = bounds.dims.max(1);
+    let used0 = ledger.used_get();
+    // Spend remaining under outer_cap (caller already restored full budget).
+    let _ = used0;
+    let _ = outer_cap;
+    let mut x = ledger.incumbent(bounds);
+    let mut f = obj.eval(x.view());
+    if !f.is_finite() {
+        return;
+    }
+    // Relative step schedule from 1e-4 down to ~1e-14 of box width.
+    let mut rel = 1e-4_f64;
+    for _level in 0..12 {
+        if ledger.remaining() < 2 * dim {
+            break;
+        }
+        let mut improved = false;
+        for i in 0..dim {
+            if ledger.remaining() < 2 {
+                break;
+            }
+            let lo = bounds.low[i];
+            let hi = bounds.high[i];
+            let width = (hi - lo).abs().max(1.0 + x[i].abs());
+            let h = (rel * width).max(f64::EPSILON * 8.0 * (1.0 + x[i].abs()));
+            for &sgn in &[-1.0_f64, 1.0] {
+                if ledger.remaining() < 1 {
+                    break;
+                }
+                let mut trial = x.clone();
+                trial[i] = (x[i] + sgn * h).clamp(lo, hi);
+                if (trial[i] - x[i]).abs() <= f64::EPSILON {
+                    continue;
+                }
+                let ft = obj.eval(trial.view());
+                if ft.is_finite() && ft < f {
+                    x = trial;
+                    f = ft;
+                    improved = true;
+                }
+            }
+        }
+        if !improved {
+            rel *= 0.1;
+            if rel < 1e-16 {
+                break;
+            }
+        }
+    }
 }
 
 /// Abramowitz-Stegun 7.1.26 rational erf approximation (|error| < 1.5e-7).
@@ -3021,103 +3146,48 @@ where
             // a reserved share of the tail.
             ledger.cap_set(budget);
             coordinate_opposition_scout(&budgeted_obj, &ledger, &bounds);
-            let mut dry = 0usize;
-            // Up to 5 polish cycles; each takes at most ~1/3 of *current*
-            // remaining so later restarts and poll still fire.
-            let has_grad = budgeted_grad.is_some();
-            while ledger.remaining() >= 4 && dry < 5 {
-                let before = ledger.best_get();
-                let rem0 = ledger.remaining();
-                // cycle_wu is work units, not max_fevals.
-                let cycle_wu = endgame_cycle_cap(rem0, dry);
-                if let Some(grad) = budgeted_grad.as_ref() {
-                    let mut start = ledger.incumbent(&bounds);
-                    if dry > 0 {
-                        // Jitter scale grows with dry count: first restart
-                        // is line-search scale, later restarts explore a
-                        // slightly larger basin neighborhood (still local).
-                        let scale = 1e-7 * (10.0f64).powi(dry.min(3) as i32);
-                        for v in start.iter_mut() {
-                            let u = 2.0 * rng.random::<f64>() - 1.0;
-                            *v += scale * (1.0 + v.abs()) * u;
-                        }
-                        start = bounds.clip(start.view());
-                    }
-                    run_endgame_projected_polish_cycle(
-                        &budgeted_obj,
-                        grad,
-                        &ledger,
-                        start,
-                        cycle_wu,
-                        budget,
-                        1e-14,
-                    );
-                } else if ledger.remaining() >= 8 {
-                    // Gradient-free polish: D6 / am_sa chain (gap-proportional
-                    // T, Haario covariance) — isotropic poll stalls on
-                    // ill-conditioned bottoms. AmSa slice length ≈ MH
-                    // proposals ≈ 1 WU each, so cycle_wu is the right unit.
-                    if let Some(st) = states.am.as_mut() {
-                        st.x = ledger.incumbent(&bounds);
-                        st.f_x = ledger.best_get();
-                    }
-                    let am_share = (ledger.remaining() / 2).max(8).min(cycle_wu.max(8));
-                    let used0 = ledger.used_get();
-                    ledger.cap_set((used0 + am_share).min(budget));
-                    run_arm(
-                        ArmKind::AmSa,
-                        &budgeted_obj,
-                        budgeted_grad.as_ref(),
-                        &ledger,
-                        &mut states,
-                        &mut rng,
-                        am_share,
-                        budget,
-                    );
-                    ledger.cap_set(budget);
-                }
-                // Poll only on gradient-free endgame: with native gradients
-                // isotropic poll steals WU from multi-start L-BFGS polish
-                // (CMA exclusives on CERI*/COOLHANS are polish-depth ties).
-                if !has_grad {
-                    let rem = ledger.remaining();
-                    if rem >= 8 {
-                        let poll_share = (rem / 3).max(8).min(rem);
-                        let used0 = ledger.used_get();
-                        ledger.cap_set((used0 + poll_share).min(budget));
-                        qmc_trust_region_poll(
-                            &budgeted_obj,
-                            ledger.incumbent(&bounds),
-                            poll_share,
-                            rng.random::<u64>(),
-                            0.0,
-                            4,
-                            0,
-                        );
-                        ledger.cap_set(budget);
-                    }
-                }
-                let after = ledger.best_get();
-                if after < before {
-                    dry = 0;
-                } else {
-                    dry += 1;
-                }
-            }
-            // Final greedy dump: anything left goes to one last polish
-            // from the best incumbent (no multi-start reserve needed).
             if let Some(grad) = budgeted_grad.as_ref() {
-                let rem = ledger.remaining();
-                if rem >= 4 {
-                    // Pin remaining as the hard WU ceiling (same as cycles).
+                // Phase A: deep L-BFGS on the incumbent only (2/3 of remaining).
+                // No jittered restarts here — those can leave a worse recorded
+                // trajectory on CERI-scale cells; multi-start jitter already
+                // happens in bandit arms.
+                let rem0 = ledger.remaining();
+                if rem0 >= 4 {
+                    let cycle_wu = endgame_cycle_cap(rem0, 0);
                     run_endgame_projected_polish_cycle(
                         &budgeted_obj,
                         grad,
                         &ledger,
                         ledger.incumbent(&bounds),
-                        rem,
+                        cycle_wu,
                         budget,
+                        1.0,
                         1e-14,
+                    );
+                }
+                // Phase B: second L-BFGS pass on the *same* incumbent with a
+                // smaller step0 (no position jitter) — pure refine.
+                if ledger.remaining() >= 16 {
+                    let rem = ledger.remaining();
+                    let cycle_wu = endgame_cycle_cap(rem, 1);
+                    run_endgame_projected_polish_cycle(
+                        &budgeted_obj,
+                        grad,
+                        &ledger,
+                        ledger.incumbent(&bounds),
+                        cycle_wu,
+                        budget,
+                        0.01,
+                        0.0,
+                    );
+                }
+                // Phase C: monotonic coordinate micro-refine (accept-only).
+                if ledger.remaining() >= 4 {
+                    run_endgame_coordinate_microrefine(
+                        &budgeted_obj,
+                        &ledger,
+                        &bounds,
+                        budget,
                     );
                 }
             } else if ledger.remaining() >= 8 {
@@ -3371,6 +3441,7 @@ mod tests {
             start,
             cycle_wu,
             budget,
+            1.0,
             1e-14,
         );
 
@@ -3396,6 +3467,47 @@ mod tests {
         assert_eq!(ledger.cap_get(), budget);
         assert!(ledger.best_get().is_finite());
         assert!(ledger.best_get() <= f0 + 1e-12);
+    }
+
+    /// Basin grind spends residual WU under temporary caps and must improve
+    /// (or not worsen) a non-optimal start on a smooth quadratic.
+    #[test]
+    fn endgame_basin_grind_refines_under_budget() {
+        let obj = ShiftQuadratic::new();
+        let dim = Objective::dim(&obj);
+        let budget = 800usize;
+        let ledger = BudgetLedger::new(budget, dim);
+        let budgeted_obj = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let budgeted_grad = BudgetedGradient {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let start = Array1::from_elem(dim, 2.0);
+        let f0 = budgeted_obj.eval(start.view());
+        assert!(f0.is_finite() && f0 > 1.0);
+        let used_before = ledger.used_get();
+        let mut rng = StdRng::seed_from_u64(11);
+        run_endgame_basin_grind(
+            &budgeted_obj,
+            &budgeted_grad,
+            &ledger,
+            obj.bounds(),
+            budget,
+            &mut rng,
+        );
+        let used_after = ledger.used_get();
+        assert!(used_after > used_before, "grind must charge work");
+        assert!(used_after <= budget, "must respect outer budget");
+        assert_eq!(ledger.cap_get(), budget, "outer cap restored");
+        let f1 = ledger.best_get();
+        assert!(f1.is_finite());
+        assert!(
+            f1 < f0 * 0.5,
+            "basin grind should substantially refine quadratic: {f0} -> {f1}"
+        );
     }
 
     #[test]
