@@ -1,44 +1,44 @@
-"""Pytest for GPMD SymPy design lab identities and operating constants."""
+"""Pytest for GPMD design lab — D6 closed-form research path."""
 
+from proofs.d6_annealed_descent_scaling import WITNESS_PARTIALS, gain, optimize_c
 from proofs.gpmd_derive import (
-    algebraic_exponent,
-    density_ratio_identity,
-    general_gaussian_log_ratio,
+    closed_form_matches_mc,
     integrand_sign_factor,
-    operating_constants,
+    operating_at_theta_star,
+    residual_descent_rate,
     small_step_gain_leading,
-    symbolic_energy_increment,
-    symbolic_normalized_D,
 )
 
 
-def test_symbolic_model_builds():
-    d = symbolic_energy_increment()
-    assert "sigma" in str(d["delta"])
-    n = symbolic_normalized_D()
-    assert n["limit_var_from_g"] is not None
-
-
-def test_density_ratio():
-    assert density_ratio_identity()
-
-
-def test_algebraic_exponent():
-    assert algebraic_exponent()
+def test_d6_partial_expectations_gate():
+    assert WITNESS_PARTIALS
 
 
 def test_integrand_factor():
     assert integrand_sign_factor()
 
 
-def test_general_log_ratio():
-    assert general_gaussian_log_ratio()
-
-
-def test_small_step_critical_at_two():
+def test_small_step_theta_c_two():
     assert small_step_gain_leading()
 
 
-def test_operating_alpha_in_range():
-    _c, _g, alpha = operating_constants(0.5)
-    assert 0.25 < alpha < 0.40
+def test_closed_form_gain_positive_inside_window():
+    assert gain(1.2, 0.5) > 0.0
+    assert gain(1.2, 3.0) < 0.0
+
+
+def test_closed_form_matches_mc_validation():
+    assert closed_form_matches_mc()
+
+
+def test_operating_at_half_residual_rate():
+    c, g, a, rate = operating_at_theta_star(0.5)
+    assert 0.25 < a < 0.40
+    assert rate > 0.85
+    assert c > 0.5
+
+
+def test_optimize_c_at_zero_matches_rechenberg_order():
+    c0, g0, a0 = optimize_c(0.0)
+    assert abs(c0 - 1.224) < 0.02
+    assert abs(a0 - 0.270) < 0.02
