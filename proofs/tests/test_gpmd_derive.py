@@ -1,12 +1,22 @@
-"""Pytest for GPMD SymPy derivation."""
+"""Pytest for GPMD SymPy design lab identities and operating constants."""
 
 from proofs.gpmd_derive import (
     algebraic_exponent,
     density_ratio_identity,
+    general_gaussian_log_ratio,
     integrand_sign_factor,
     operating_constants,
-    partial_expectations,
+    small_step_gain_leading,
+    symbolic_energy_increment,
+    symbolic_normalized_D,
 )
+
+
+def test_symbolic_model_builds():
+    d = symbolic_energy_increment()
+    assert "sigma" in str(d["delta"])
+    n = symbolic_normalized_D()
+    assert n["limit_var_from_g"] is not None
 
 
 def test_density_ratio():
@@ -21,8 +31,12 @@ def test_integrand_factor():
     assert integrand_sign_factor()
 
 
-def test_partial():
-    assert partial_expectations()
+def test_general_log_ratio():
+    assert general_gaussian_log_ratio()
+
+
+def test_small_step_critical_at_two():
+    assert small_step_gain_leading()
 
 
 def test_operating_alpha_in_range():
