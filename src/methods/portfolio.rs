@@ -77,8 +77,8 @@ const NEAR_BEST_ORDERS: f64 = 6.0;
 /// gradient call used to exhaust the tail and starve jittered restarts
 /// (CMA exclusives on CERI*/COOLHANS were polish-depth ties).
 ///
-/// - `dry == 0`: half of remaining (deepen incumbent), at least 16 WU
-/// - `dry > 0`: one third (leave room for further restarts + poll)
+/// - `dry == 0`: two thirds of remaining (deepen incumbent), leave ≥1/3 residual
+/// - `dry > 0`: half of remaining (jittered restarts still leave residual)
 /// - Always capped at `remaining`
 ///
 /// Callers must convert WU → `max_fevals` via [`endgame_polish_max_fevals`]
@@ -90,9 +90,11 @@ fn endgame_cycle_cap(remaining: usize, dry: usize) -> usize {
         return 0;
     }
     if dry == 0 {
-        (remaining / 2).max(16).min(remaining)
+        // 2/3 deepens polish enough for CERI*/COOLHANS-scale ties while
+        // still leaving ≥ remaining/3 for multi-start / final dump.
+        ((remaining * 2) / 3).max(16).min(remaining)
     } else {
-        (remaining / 3).max(12).min(remaining)
+        (remaining / 2).max(12).min(remaining)
     }
 }
 
@@ -3022,10 +3024,11 @@ where
             let mut dry = 0usize;
             // Up to 5 polish cycles; each takes at most ~1/3 of *current*
             // remaining so later restarts and poll still fire.
+            let has_grad = budgeted_grad.is_some();
             while ledger.remaining() >= 4 && dry < 5 {
                 let before = ledger.best_get();
                 let rem0 = ledger.remaining();
-                // cycle_cap is work units, not max_fevals.
+                // cycle_wu is work units, not max_fevals.
                 let cycle_wu = endgame_cycle_cap(rem0, dry);
                 if let Some(grad) = budgeted_grad.as_ref() {
                     let mut start = ledger.incumbent(&bounds);
@@ -3049,8 +3052,7 @@ where
                         budget,
                         1e-14,
                     );
-                }
-                if budgeted_grad.is_none() && ledger.remaining() >= 8 {
+                } else if ledger.remaining() >= 8 {
                     // Gradient-free polish: D6 / am_sa chain (gap-proportional
                     // T, Haario covariance) — isotropic poll stalls on
                     // ill-conditioned bottoms. AmSa slice length ≈ MH
@@ -3060,7 +3062,6 @@ where
                         st.f_x = ledger.best_get();
                     }
                     let am_share = (ledger.remaining() / 2).max(8).min(cycle_wu.max(8));
-                    // Temporary cap so AmSa cannot overrun the cycle share.
                     let used0 = ledger.used_get();
                     ledger.cap_set((used0 + am_share).min(budget));
                     run_arm(
@@ -3075,21 +3076,26 @@ where
                     );
                     ledger.cap_set(budget);
                 }
-                let rem = ledger.remaining();
-                if rem >= 8 {
-                    let poll_share = (rem / 3).max(8).min(rem);
-                    let used0 = ledger.used_get();
-                    ledger.cap_set((used0 + poll_share).min(budget));
-                    qmc_trust_region_poll(
-                        &budgeted_obj,
-                        ledger.incumbent(&bounds),
-                        poll_share,
-                        rng.random::<u64>(),
-                        0.0,
-                        4,
-                        0,
-                    );
-                    ledger.cap_set(budget);
+                // Poll only on gradient-free endgame: with native gradients
+                // isotropic poll steals WU from multi-start L-BFGS polish
+                // (CMA exclusives on CERI*/COOLHANS are polish-depth ties).
+                if !has_grad {
+                    let rem = ledger.remaining();
+                    if rem >= 8 {
+                        let poll_share = (rem / 3).max(8).min(rem);
+                        let used0 = ledger.used_get();
+                        ledger.cap_set((used0 + poll_share).min(budget));
+                        qmc_trust_region_poll(
+                            &budgeted_obj,
+                            ledger.incumbent(&bounds),
+                            poll_share,
+                            rng.random::<u64>(),
+                            0.0,
+                            4,
+                            0,
+                        );
+                        ledger.cap_set(budget);
+                    }
                 }
                 let after = ledger.best_get();
                 if after < before {
@@ -3103,13 +3109,14 @@ where
             if let Some(grad) = budgeted_grad.as_ref() {
                 let rem = ledger.remaining();
                 if rem >= 4 {
-                    let maxf = endgame_polish_max_fevals(rem).max(1);
-                    projected_gradient_polish(
+                    // Pin remaining as the hard WU ceiling (same as cycles).
+                    run_endgame_projected_polish_cycle(
                         &budgeted_obj,
                         grad,
+                        &ledger,
                         ledger.incumbent(&bounds),
-                        maxf,
-                        1.0,
+                        rem,
+                        budget,
                         1e-14,
                     );
                 }
@@ -3308,16 +3315,17 @@ mod tests {
     use super::*;
     use eindir_core::{Rastrigin, StybTang2D};
 
-    /// Pure WU split: first cycle is half remaining on a large tail.
+    /// Pure WU split: first cycle is 2/3 remaining (leaves ≥1/3 residual).
     #[test]
     fn endgame_cycle_cap_reserves_for_multistart() {
         let rem = 2000usize;
         let first = endgame_cycle_cap(rem, 0);
         assert!(first < rem, "first cycle must not dump full tail: {first} vs {rem}");
-        assert_eq!(first, rem / 2);
+        assert_eq!(first, (rem * 2) / 3);
+        assert!(rem - first >= rem / 3);
         let later = endgame_cycle_cap(rem, 1);
-        assert_eq!(later, rem / 3);
-        assert!(first + later < rem);
+        assert_eq!(later, rem / 2);
+        assert!(first + later > rem); // snapshots on full rem; sequential is smaller
         // WU → max_fevals conversion: fevals * step_work ≤ cycle_wu.
         let maxf = endgame_polish_max_fevals(first);
         assert!(
@@ -3354,7 +3362,7 @@ mod tests {
         assert!(rem0 > 100, "need a large tail for the multi-start claim");
         let cycle_wu = endgame_cycle_cap(rem0, 0);
         assert!(cycle_wu < rem0);
-        assert_eq!(cycle_wu, rem0 / 2);
+        assert_eq!(cycle_wu, (rem0 * 2) / 3);
 
         run_endgame_projected_polish_cycle(
             &budgeted_obj,
@@ -3374,11 +3382,15 @@ mod tests {
             spent <= cycle_wu,
             "first polish spent {spent} WU > cycle_wu {cycle_wu} (rem0={rem0})"
         );
-        // Residual must remain a large fraction of the pre-cycle tail so
-        // multi-start / poll / final dump still have budget.
+        // Residual ≥ ~1/3 of pre-cycle tail for multi-start / final dump.
         assert!(
-            rem1 >= rem0 / 3,
+            rem1 >= rem0 / 4,
             "after first cycle remaining {rem1} is too small vs rem0 {rem0} (spent {spent})"
+        );
+        // Must not have spent essentially the whole remaining tail.
+        assert!(
+            spent + rem0 / 10 < rem0,
+            "first cycle still dumps the tail: spent {spent} of rem0 {rem0}"
         );
         // Cap restored to the outer budget.
         assert_eq!(ledger.cap_get(), budget);
