@@ -30,15 +30,10 @@ from proofs.d6_annealed_descent_scaling import (
     WITNESS_PARTIALS,
     WITNESS_THETA_C,
     WITNESS_THETA_C_EXACT,
-    _Phi,
-    _phi,
-    acceptance,
     alpha_curve,
     critical_theta,
     gain,
     optimize_c,
-    paired_increment_global_sign,
-    partial_expectation_identities,
     theta_c_exactly_two_symbolic,
 )
 
@@ -115,32 +110,29 @@ def closed_form_matches_mc(tol: float = 0.02) -> bool:
     return ok
 
 
-# Keep thin aliases used by older tests
-def density_ratio_identity() -> bool:
-    return paired_increment_global_sign()  # includes p(-u)/p(u)=e^{-u/2}
-
-
-def algebraic_exponent() -> bool:
-    return paired_increment_global_sign()
+def density_ratio_under_m1() -> bool:
+    """p(-u)/p(u)=e^{-u/2} under M1: same algebra as D6 paired_increment ratio_ok."""
+    u, c = sp.symbols("u c", positive=True)
+    mu = c**2
+    s2 = 4 * c**2
+    log_ratio = sp.simplify(-((-u - mu) ** 2 - (u - mu) ** 2) / (2 * s2))
+    return sp.simplify(log_ratio + u / 2) == 0
 
 
 def integrand_sign_factor() -> bool:
+    """(1/θ - 1/2) = (2-θ)/(2θ); sign of pairing weight in D6 G integral."""
     theta = sp.symbols("theta", positive=True)
     expr = sp.together(1 / theta - sp.Rational(1, 2))
     return sp.simplify(expr - (2 - theta) / (2 * theta)) == 0
 
 
-def general_gaussian_log_ratio() -> bool:
-    mu, s, u = sp.symbols("mu s u", positive=True)
-    log_ratio = sp.simplify(-((-u - mu) ** 2 - (u - mu) ** 2) / (2 * s**2))
-    return sp.simplify(log_ratio + 2 * u * mu / s**2) == 0
-
-
 def small_step_gain_leading() -> bool:
+    """Delegate to D6 symbolic series: G ~ c²(2-θ)/θ so θ_c=2."""
     return theta_c_exactly_two_symbolic()
 
 
 def operating_constants(theta_star: float = THETA_STAR) -> tuple[float, float, float]:
+    """Alias for D6 optimize_c(theta_star) → (c*, G*, α*)."""
     c, g, a = optimize_c(theta_star)
     return c, g, a
 
