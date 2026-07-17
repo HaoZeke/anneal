@@ -14,6 +14,7 @@
 pub mod additive_independence;
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
+pub mod bfwt;
 pub mod dmc_population;
 pub mod gpmd;
 pub mod gle_langevin;
@@ -31,6 +32,10 @@ pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
     fit_laplace, pilot_draws, pilot_draws_qmc,
+};
+pub use bfwt::{
+    BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, budget_feasible_temp,
+    bfwt_optimize, t_des, t_hi, t_lo, window_nonempty,
 };
 pub use dmc_population::{
     DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
