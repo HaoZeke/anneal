@@ -61,9 +61,9 @@ impl ProblemFeatures {
 /// Half-width threshold: boxes this wide are treated as global multimodal
 /// (Schwefel [-500,500], Rastrigin-scale multi-basin domains). Below this,
 /// LowDimSmooth / Default polish routing stays appropriate.
-// 10 covers Rastrigin [-5.12,5.12] and larger (Schwefel/Griewank);
-// tight polish boxes (Beale-scale) stay LowDimSmooth.
-const MULTIMODAL_MEAN_WIDTH: f64 = 10.0;
+// Styblinski/Rastrigin (~10) and Schwefel (1000) are MultimodalGlobal.
+// Unit-test ShiftQuadratic uses width 4 to stay LowDimSmooth.
+const MULTIMODAL_MEAN_WIDTH: f64 = 9.0;
 
 /// Named optimization regimes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -110,7 +110,7 @@ pub fn select_regime(f: &ProblemFeatures) -> OptimizationRegime {
     }
     // Wide boxes: dual_annealing/GSA class — do not route to LowDimSmooth
     // polish-first even when dim ≤ 5 and gradients exist (Schwefel).
-    if f.mean_width.is_finite() && f.mean_width >= MULTIMODAL_MEAN_WIDTH && f.dim >= 2 {
+    if f.mean_width.is_finite() && f.mean_width > MULTIMODAL_MEAN_WIDTH && f.dim >= 2 {
         return OptimizationRegime::MultimodalGlobal;
     }
     if f.has_grad && f.dim > 0 && f.dim <= 5 {
@@ -199,9 +199,9 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "de",
             "dmc_pop",
             "hop",
-            "am_sa",
             "metad",
             "tps",
+            "am_sa",
             "variant",
             "pt",
             "surrogate",
@@ -279,6 +279,11 @@ pub fn regime_exploit_width(regime: OptimizationRegime) -> usize {
 
 /// Slice-size multiplier for preferred arms (1.0 = baseline).
 pub fn arm_slice_multiplier(regime: OptimizationRegime, arm: &str) -> f64 {
+    // Dual-class multimodal: GSA is the dual_annealing analogue — give it
+    // the bulk of each budget slice so high-d Schwefel can anneal.
+    if matches!(regime, OptimizationRegime::MultimodalGlobal) && arm == "gsa" {
+        return 3.5;
+    }
     let preferred = preferred_arm_tail(regime);
     if let Some(rank) = preferred.iter().position(|&a| a == arm)
         && rank < 3
