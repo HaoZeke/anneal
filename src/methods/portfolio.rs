@@ -1643,17 +1643,35 @@ fn dual_style_local_search<O, G, R>(
         return;
     }
     let dim = bounds.dims.max(1);
-    // dual_annealing LS maxiter scales with dim; multi-start covers basins
-    // (Styblinski multi-modal wells + Schwefel near-global refinement).
-    let n_starts = if dim >= 20 {
-        5
-    } else if dim >= 10 {
-        4
+    let wide = mean_width(bounds) >= 50.0;
+    let has_analytic = grad.is_some();
+    // Analytic grad: global multi-start is cheap enough to hunt Schwefel basins.
+    // FD grad costs 2d evals per step — prefer *depth* on incumbent (+ few
+    // restarts); shallow global FD multi-start regressed schwefel_nograd_d10.
+    let n_starts = if has_analytic {
+        if wide && dim >= 20 {
+            12
+        } else if wide && dim >= 10 {
+            8
+        } else if dim >= 20 {
+            6
+        } else {
+            5
+        }
+    } else if wide {
+        3 // deep FD: incumbent + 2 restarts near best
     } else {
         3
     };
-    let per_start = (work_units / n_starts).max(8);
+    let per_start = (work_units / n_starts).max(if has_analytic { 8 } else { 24 });
     let x_inc = ledger.incumbent(bounds);
+    let n_qmc = (n_starts - 1).max(1);
+    let qmc = eindir_core::shifted_low_discrepancy_points(
+        bounds,
+        n_qmc,
+        qmc_skip_from_seed(rng.random::<u64>()),
+        rng.random::<u64>(),
+    );
 
     for s in 0..n_starts {
         if ledger.remaining() < 8 {
@@ -1661,20 +1679,38 @@ fn dual_style_local_search<O, G, R>(
         }
         let start = if s == 0 {
             x_inc.clone()
+        } else if has_analytic && wide {
+            // Global QMC sample — needs cheap analytic polish to pay off.
+            let qi = (s - 1) % n_qmc;
+            if qi < qmc.nrows() {
+                bounds.clip(qmc.row(qi))
+            } else {
+                let mut y = Array1::zeros(dim);
+                for i in 0..dim {
+                    y[i] = bounds.low[i]
+                        + (bounds.high[i] - bounds.low[i]) * rng.random::<f64>();
+                }
+                bounds.clip(y.view())
+            }
         } else {
-            // Gaussian jitter scaled by box width / sqrt(dim) (basin hop scale).
-            let mut y = x_inc.clone();
-            let scale = 0.15 / (dim as f64).sqrt();
+            // Local hop around *current* ledger best (FD-safe).
+            let best = ledger.incumbent(bounds);
+            let mut y = best.clone();
+            let scale = if wide { 0.25 } else { 0.12 } / (dim as f64).sqrt();
             for i in 0..dim {
                 let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
                 let noise: f64 = rand_distr::StandardNormal.sample(rng);
-                y[i] = (x_inc[i] + scale * w * noise).clamp(bounds.low[i], bounds.high[i]);
+                y[i] = (best[i] + scale * w * noise).clamp(bounds.low[i], bounds.high[i]);
             }
             y
         };
-        // max_fevals: projected_gradient_polish double-charges with analytic
-        // grad; with FD, each "grad" is 2d evals already on the ledger via obj.
-        let maxf = (per_start / 2).max(4).min(ledger.remaining().max(4));
+        // FD: spend most of per_start as polish depth (grad is expensive).
+        let maxf = if has_analytic {
+            (per_start / 2).max(4)
+        } else {
+            per_start.max(16)
+        }
+        .min(ledger.remaining().max(4));
         let start_budget = maxf.min(ledger.remaining());
         if start_budget < 4 {
             break;
@@ -3400,8 +3436,10 @@ where
         )
         && mean_width(&bounds) >= 50.0
     {
-        // 92% front-load: leave a thin residual for endgame polish only.
-        let front_budget = ((budget as f64) * 0.92).round() as usize;
+        // High-d wide boxes need more residual multi-start LS budget
+        // (dual spends heavily on local search); mid-d keep GSA-heavy.
+        let front_frac = if dim >= 20 { 0.72 } else { 0.88 };
+        let front_budget = ((budget as f64) * front_frac).round() as usize;
         let explore_share = (front_budget / 15).max(16);
         let de_share = (front_budget / 12).max(16);
         let gsa_share = front_budget.saturating_sub(explore_share + de_share);
@@ -3460,10 +3498,8 @@ where
         // no jac). Multi-start FD / analytic polish closes residual dual
         // exclusives (no-grad Schwefel, high-d Styblinski wells).
         if ledger.remaining() >= 32 {
-            let polish = ((budget as f64) * 0.12).round() as usize;
-            let polish = polish
-                .max(64)
-                .min(ledger.remaining().saturating_sub(8).max(32));
+            // Spend almost all residual on global multi-start LS (not thin 12%).
+            let polish = ledger.remaining().saturating_sub(16).max(64);
             dual_style_local_search(
                 &budgeted_obj,
                 budgeted_grad.as_ref(),
