@@ -1586,65 +1586,114 @@ where
     })
 }
 
-/// Gradient-free pattern search polish (dual_annealing LS stand-in without jac).
-/// Charges objective evals on `obj`'s ledger; mutates ledger best via evals.
-fn pattern_search_polish<O>(
+/// Central finite differences through a budgeted objective (dual_annealing
+/// L-BFGS-B without analytic jac). Each stencil pair charges real evals.
+struct BudgetedFiniteDiffGradient<'a, O: Objective<f64>> {
+    obj: &'a BudgetedObjective<'a, O>,
+    /// Relative step: h_i = h_frac * box_width_i (clamped).
+    h_frac: f64,
+}
+
+impl<O: Objective<f64>> Gradient<f64> for BudgetedFiniteDiffGradient<'_, O> {
+    fn dim(&self) -> usize {
+        self.obj.dim()
+    }
+
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let dim = x.len();
+        let bounds = self.obj.bounds();
+        let mut g = Array1::zeros(dim);
+        for i in 0..dim {
+            let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
+            let h = (self.h_frac * w).clamp(1e-8, 0.05 * w);
+            let mut xp = x.to_owned();
+            let mut xm = x.to_owned();
+            xp[i] = (x[i] + h).clamp(bounds.low[i], bounds.high[i]);
+            xm[i] = (x[i] - h).clamp(bounds.low[i], bounds.high[i]);
+            let fp = self.obj.eval(xp.view());
+            let fm = self.obj.eval(xm.view());
+            let den = (xp[i] - xm[i]).abs().max(1e-16);
+            if fp.is_finite() && fm.is_finite() {
+                g[i] = (fp - fm) / den;
+            }
+        }
+        g
+    }
+}
+
+/// Dual_annealing-class local search: multi-start projected quasi-Newton
+/// with native gradients or central finite differences (no-grad Schwefel).
+/// Charges the shared ledger. Target residual dual exclusives: no-grad
+/// Schwefel basins need FD L-BFGS depth that pure pattern search lacks.
+fn dual_style_local_search<O, G, R>(
     obj: &BudgetedObjective<'_, O>,
+    grad: Option<&BudgetedGradient<'_, G>>,
     ledger: &BudgetLedger,
     bounds: &Bounds<f64>,
-    rng: &mut StdRng,
+    rng: &mut R,
+    work_units: usize,
+    outer_cap: usize,
 ) where
     O: Objective<f64>,
+    G: Gradient<f64>,
+    R: Rng,
 {
-    let dim = bounds.dims.max(1);
-    let mut x = ledger.incumbent(bounds);
-    let mut f = ledger.best_get();
-    if !f.is_finite() {
-        f = obj.eval(x.view());
+    let work_units = work_units.min(ledger.remaining());
+    if work_units < 8 {
+        return;
     }
-    let mut step_frac = 0.1;
-    while !ledger.exhausted() && step_frac > 1e-8 {
-        let mut improved = false;
-        for axis in 0..dim {
-            if ledger.exhausted() {
-                break;
-            }
-            let w = (bounds.high[axis] - bounds.low[axis]).abs().max(1e-12);
-            let step = step_frac * w;
-            for &dir in &[-1.0_f64, 1.0] {
-                if ledger.exhausted() {
-                    break;
-                }
-                let mut y = x.clone();
-                y[axis] = (x[axis] + dir * step).clamp(bounds.low[axis], bounds.high[axis]);
-                let fy = obj.eval(y.view());
-                if fy.is_finite() && fy < f {
-                    x = y;
-                    f = fy;
-                    improved = true;
-                }
-            }
+    let dim = bounds.dims.max(1);
+    // dual_annealing LS maxiter scales with dim; multi-start covers basins
+    // (Styblinski multi-modal wells + Schwefel near-global refinement).
+    let n_starts = if dim >= 20 {
+        5
+    } else if dim >= 10 {
+        4
+    } else {
+        3
+    };
+    let per_start = (work_units / n_starts).max(8);
+    let x_inc = ledger.incumbent(bounds);
+
+    for s in 0..n_starts {
+        if ledger.remaining() < 8 {
+            break;
         }
-        // Occasional random diagonal probe (helps high-d Schwefel).
-        if !ledger.exhausted() {
-            let mut y = x.clone();
+        let start = if s == 0 {
+            x_inc.clone()
+        } else {
+            // Gaussian jitter scaled by box width / sqrt(dim) (basin hop scale).
+            let mut y = x_inc.clone();
+            let scale = 0.15 / (dim as f64).sqrt();
             for i in 0..dim {
                 let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
-                y[i] = (x[i] + step_frac * w * (rng.random::<f64>() - 0.5) * 2.0)
-                    .clamp(bounds.low[i], bounds.high[i]);
+                let noise: f64 = rand_distr::StandardNormal.sample(rng);
+                y[i] = (x_inc[i] + scale * w * noise).clamp(bounds.low[i], bounds.high[i]);
             }
-            let fy = obj.eval(y.view());
-            if fy.is_finite() && fy < f {
-                x = y;
-                f = fy;
-                improved = true;
+            y
+        };
+        // max_fevals: projected_gradient_polish double-charges with analytic
+        // grad; with FD, each "grad" is 2d evals already on the ledger via obj.
+        let maxf = (per_start / 2).max(4).min(ledger.remaining().max(4));
+        let start_budget = maxf.min(ledger.remaining());
+        if start_budget < 4 {
+            break;
+        }
+        let ceiling = ledger.used_get() + start_budget;
+        ledger.cap_set(ceiling.min(outer_cap));
+        match grad {
+            Some(g) => {
+                let _ = projected_gradient_polish(obj, g, start, start_budget, 0.1, 1e-12);
+            }
+            None => {
+                let fd = BudgetedFiniteDiffGradient {
+                    obj,
+                    h_frac: 1e-5,
+                };
+                let _ = projected_gradient_polish(obj, &fd, start, start_budget, 0.1, 1e-12);
             }
         }
-        if improved {
-            step_frac = (step_frac * 1.2).min(0.5);
-        } else {
-            step_frac *= 0.5;
-        }
+        ledger.cap_set(outer_cap);
     }
 }
 
@@ -3408,15 +3457,49 @@ where
             }
         }
         // dual_annealing always runs local search (L-BFGS-B, finite-diff if
-        // no jac). When native grad is absent, finish the front-load with a
-        // charged pattern search from the incumbent (no-grad Schwefel).
-        if budgeted_grad.is_none() && ledger.remaining() >= 32 {
-            let polish = (ledger.remaining() / 2).min(budget / 10).max(32);
-            let ceiling = ledger.used_get() + polish;
-            ledger.cap_set(ceiling.min(budget));
-            pattern_search_polish(&budgeted_obj, &ledger, &bounds, &mut rng);
+        // no jac). Multi-start FD / analytic polish closes residual dual
+        // exclusives (no-grad Schwefel, high-d Styblinski wells).
+        if ledger.remaining() >= 32 {
+            let polish = ((budget as f64) * 0.12).round() as usize;
+            let polish = polish
+                .max(64)
+                .min(ledger.remaining().saturating_sub(8).max(32));
+            dual_style_local_search(
+                &budgeted_obj,
+                budgeted_grad.as_ref(),
+                &ledger,
+                &bounds,
+                &mut rng,
+                polish,
+                budget,
+            );
             ledger.cap_set(budget);
         }
+    }
+
+    // Mid-width MultimodalGlobal (Styblinski-class): multi-start polish seed
+    // even without the Schwefel GSA front-load (width gate is mean_width>=50).
+    if policy == PortfolioPolicy::Auto
+        && matches!(
+            regime,
+            crate::methods::regime::OptimizationRegime::MultimodalGlobal
+        )
+        && mean_width(&bounds) < 50.0
+        && budgeted_grad.is_some()
+        && ledger.remaining() >= 48
+    {
+        let polish = ((budget as f64) * 0.10).round() as usize;
+        let polish = polish.max(48).min(ledger.remaining() / 3);
+        dual_style_local_search(
+            &budgeted_obj,
+            budgeted_grad.as_ref(),
+            &ledger,
+            &bounds,
+            &mut rng,
+            polish,
+            budget,
+        );
+        ledger.cap_set(budget);
     }
 
     let mut round = 0usize;
@@ -3581,18 +3664,27 @@ where
                         budget,
                     );
                 }
-            } else if ledger.remaining() >= 8 {
-                if let Some(st) = states.am.as_mut() {
-                    st.x = ledger.incumbent(&bounds);
-                    st.f_x = ledger.best_get();
+                // Phase D: multi-start dual-style LS (closes Styblinski dual leads).
+                if ledger.remaining() >= 32 {
+                    let rem = ledger.remaining();
+                    dual_style_local_search(
+                        &budgeted_obj,
+                        Some(grad),
+                        &ledger,
+                        &bounds,
+                        &mut rng,
+                        rem,
+                        budget,
+                    );
                 }
+            } else if ledger.remaining() >= 8 {
+                // No native grad: dual-class FD multi-start polish (not AmSa-only).
                 let rem = ledger.remaining();
-                run_arm(
-                    ArmKind::AmSa,
+                dual_style_local_search::<_, G, _>(
                     &budgeted_obj,
-                    budgeted_grad.as_ref(),
+                    None,
                     &ledger,
-                    &mut states,
+                    &bounds,
                     &mut rng,
                     rem,
                     budget,
@@ -4697,6 +4789,36 @@ mod tests {
         let gle = arms.iter().position(|a| *a == ArmKind::Gle).expect("gle");
         let de = arms.iter().position(|a| *a == ArmKind::De);
         assert!(de.is_none_or(|d| gle < d));
+    }
+
+    #[test]
+    fn dual_style_fd_local_search_improves_quadratic_without_analytic_grad() {
+        // Real path: no BudgetedGradient; FD multi-start polish on ledger.
+        let obj = ShiftQuadratic::new();
+        let ledger = BudgetLedger::new(400, Objective::dim(&obj));
+        let budgeted = BudgetedObjective {
+            inner: &obj,
+            ledger: &ledger,
+        };
+        let far = Array1::from_vec(vec![-1.5, 1.5]);
+        let f0 = budgeted.eval(far.view());
+        assert!(f0.is_finite() && f0 > 1.0);
+        let mut rng = StdRng::seed_from_u64(19);
+        dual_style_local_search(
+            &budgeted,
+            None::<&BudgetedGradient<'_, ShiftQuadratic>>,
+            &ledger,
+            obj.bounds(),
+            &mut rng,
+            300,
+            400,
+        );
+        let f1 = ledger.best_get();
+        assert!(
+            f1 < f0 * 0.25,
+            "FD dual-style LS should refine quadratic; start {f0} best {f1}"
+        );
+        assert!(ledger.used_get() <= 400);
     }
 
     #[test]
