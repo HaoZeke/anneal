@@ -22,6 +22,8 @@ pub struct ProblemFeatures {
     pub noise_sigma: Option<f64>,
     /// Box aspect ratio (max/min side length).
     pub aspect_ratio: f64,
+    /// Mean finite side length of the design box (Schwefel-class signal).
+    pub mean_width: f64,
     /// Shared work-unit budget.
     pub budget: usize,
 }
@@ -50,10 +52,18 @@ impl ProblemFeatures {
             has_grad,
             noise_sigma,
             aspect_ratio: geom.aspect_ratio,
+            mean_width: geom.mean_width,
             budget,
         }
     }
 }
+
+/// Half-width threshold: boxes this wide are treated as global multimodal
+/// (Schwefel [-500,500], Rastrigin-scale multi-basin domains). Below this,
+/// LowDimSmooth / Default polish routing stays appropriate.
+// 10 covers Rastrigin [-5.12,5.12] and larger (Schwefel/Griewank);
+// tight polish boxes (Beale-scale) stay LowDimSmooth.
+const MULTIMODAL_MEAN_WIDTH: f64 = 10.0;
 
 /// Named optimization regimes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -66,6 +76,9 @@ pub enum OptimizationRegime {
     StochasticNoise,
     /// No gradient; multimodal / elongated box: DE / GSA / surrogate.
     MultimodalNoGrad,
+    /// Large design box (Schwefel-class): global GSA/DE first even with grads.
+    /// dual_annealing wins the synthetic protocol when LowDimSmooth starves GSA.
+    MultimodalGlobal,
     /// Safe fallback when no specialized regime matches.
     Default,
 }
@@ -94,6 +107,11 @@ impl std::error::Error for RegimeError {}
 pub fn select_regime(f: &ProblemFeatures) -> OptimizationRegime {
     if f.noise_sigma.is_some_and(|s| s.is_finite() && s > 0.0) {
         return OptimizationRegime::StochasticNoise;
+    }
+    // Wide boxes: dual_annealing/GSA class — do not route to LowDimSmooth
+    // polish-first even when dim ≤ 5 and gradients exist (Schwefel).
+    if f.mean_width.is_finite() && f.mean_width >= MULTIMODAL_MEAN_WIDTH && f.dim >= 2 {
+        return OptimizationRegime::MultimodalGlobal;
     }
     if f.has_grad && f.dim > 0 && f.dim <= 5 {
         return OptimizationRegime::LowDimSmooth;
@@ -174,6 +192,24 @@ pub fn preferred_arm_tail(regime: OptimizationRegime) -> &'static [&'static str]
             "tr_poll",
             "pt",
         ],
+        // Match dual_annealing's strength: heavy-tailed visit + population
+        // search before local polish (synthetic SOTA protocol losses).
+        OptimizationRegime::MultimodalGlobal => &[
+            "gsa",
+            "de",
+            "dmc_pop",
+            "hop",
+            "am_sa",
+            "metad",
+            "tps",
+            "variant",
+            "pt",
+            "surrogate",
+            "tr_poll",
+            "shift",
+            "gle",
+            "hmc",
+        ],
         OptimizationRegime::Default => &[
             "shift",
             "hop",
@@ -223,6 +259,8 @@ pub fn regime_exploit_prob(regime: OptimizationRegime) -> f64 {
         OptimizationRegime::LowDimSmooth => 0.35,
         OptimizationRegime::HighDimIllConditioned => 0.40,
         OptimizationRegime::MultimodalNoGrad => 0.50,
+        // Dual-class boxes: strong GSA/DE exploit (synthetic protocol).
+        OptimizationRegime::MultimodalGlobal => 0.55,
         OptimizationRegime::StochasticNoise => 0.35,
         OptimizationRegime::Default => 0.20,
     }
@@ -234,6 +272,7 @@ pub fn regime_exploit_width(regime: OptimizationRegime) -> usize {
     match regime {
         OptimizationRegime::HighDimIllConditioned => 3,
         OptimizationRegime::LowDimSmooth => 3,
+        OptimizationRegime::MultimodalGlobal => 3,
         _ => 2,
     }
 }
@@ -312,20 +351,28 @@ pub fn order_arms(available: &[&str], regime: OptimizationRegime, k_active: usiz
 mod tests {
     use super::*;
 
-    fn feats(dim: usize, has_grad: bool, noise: Option<f64>, aspect: f64) -> ProblemFeatures {
+    fn feats(
+        dim: usize,
+        has_grad: bool,
+        noise: Option<f64>,
+        aspect: f64,
+        mean_width: f64,
+    ) -> ProblemFeatures {
         ProblemFeatures {
             dim,
             has_grad,
             noise_sigma: noise,
             aspect_ratio: aspect,
+            mean_width,
             budget: 8000,
         }
     }
 
     #[test]
     fn low_dim_smooth_with_grad() {
+        // Tight box keeps LowDimSmooth (not MultimodalGlobal).
         assert_eq!(
-            select_regime(&feats(3, true, None, 1.0)),
+            select_regime(&feats(3, true, None, 1.0, 4.0)),
             OptimizationRegime::LowDimSmooth
         );
     }
@@ -333,7 +380,7 @@ mod tests {
     #[test]
     fn high_dim_grad() {
         assert_eq!(
-            select_regime(&feats(50, true, None, 1.0)),
+            select_regime(&feats(50, true, None, 1.0, 4.0)),
             OptimizationRegime::HighDimIllConditioned
         );
     }
@@ -341,7 +388,7 @@ mod tests {
     #[test]
     fn noise_dominates() {
         assert_eq!(
-            select_regime(&feats(3, true, Some(0.1), 1.0)),
+            select_regime(&feats(3, true, Some(0.1), 1.0, 4.0)),
             OptimizationRegime::StochasticNoise
         );
     }
@@ -349,9 +396,20 @@ mod tests {
     #[test]
     fn multimodal_no_grad() {
         assert_eq!(
-            select_regime(&feats(10, false, None, 1.0)),
+            select_regime(&feats(10, false, None, 1.0, 4.0)),
             OptimizationRegime::MultimodalNoGrad
         );
+    }
+
+    #[test]
+    fn wide_box_is_multimodal_global_even_with_grad() {
+        // Schwefel-class: width 1000 >> MULTIMODAL_MEAN_WIDTH.
+        assert_eq!(
+            select_regime(&feats(5, true, None, 1.0, 1000.0)),
+            OptimizationRegime::MultimodalGlobal
+        );
+        let tail = preferred_arm_tail(OptimizationRegime::MultimodalGlobal);
+        assert_eq!(tail[0], "gsa");
     }
 
     #[test]

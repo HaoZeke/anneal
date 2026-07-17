@@ -25,9 +25,11 @@ import numpy as np
 from experiments.scripts.sota_cutest import (
     FIELDNAMES,
     Counter,
+    bfwt,
     classical,
     cma_es,
     cma_es_ipop,
+    gpmd,
     portfolio,
     portfolio_legacy,
     run_method_cell,
@@ -181,6 +183,8 @@ def main():
         "cma_es": cma_es,
         "cma_es_ipop": cma_es_ipop,
         "classical": classical,
+        "gpmd": gpmd,
+        "bfwt": bfwt,
     }
     for m in method_names:
         if m not in runners:

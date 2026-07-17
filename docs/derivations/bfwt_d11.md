@@ -19,10 +19,15 @@ Load-bearing identity: window nonempty ⇔ `b̂ · d < 2 · gap · log(B + e)`.
 
 ## Not claimed
 
+- **Not SOTA as a standalone solver.** On the synthetic protocol
+  (`sota_synthetic_protocol.py`, budget 3000, 62 cells) standalone BFWT
+  records ~58% cell wins / mean rank ~4.8 vs dual_annealing ~97% / ~3.1.
+  Competitive wins belong to the **portfolio** driver (`global_optimize`),
+  not this local law.
 - Not dual-annealing / GSA (no visiting distribution redesign).
-- Not field SOTA on CUTEst or global optimization benchmarks.
-- Not that `b̂` is estimated optimally; it is an external proxy input.
-- Not a replacement for multi-start / portfolio when the window is empty (escape_forced is a deliberate fallback, not a proof of escape).
+- Not that `b̂` is estimated optimally; standalone takes it as input; the
+  portfolio AmSa arm estimates it online from rejected uphill deltas.
+- Not a replacement for multi-start / portfolio when the window is empty.
 
 ## Recoveries / relations
 
