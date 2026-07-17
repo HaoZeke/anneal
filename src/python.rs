@@ -1503,6 +1503,90 @@ fn gpmd_optimize(
     Ok(out.into())
 }
 
+/// Budget-Feasible Window Temperature (BFWT / D11).
+///
+/// Clamps design temperature T_des = (1/2)·gap/d into the D6∩D7 window
+/// [b_hat/log(B+e), 2·gap/d]. When `barrier_hat` is 0, recovers GPMD.
+/// Derivation: `proofs/d11_budget_feasible_temp.py`. Local law under the
+/// stated models only — not a dual-annealing field-SOTA claim.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, barrier_hat = 0.0, grad_fn = None, x0 = None))]
+fn bfwt_optimize(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    low: PyReadonlyArray1<'_, f64>,
+    high: PyReadonlyArray1<'_, f64>,
+    budget: usize,
+    seed: u64,
+    barrier_hat: f64,
+    grad_fn: Option<Py<PyAny>>,
+    x0: Option<PyReadonlyArray1<'_, f64>>,
+) -> PyResult<Py<PyDict>> {
+    let low_vec = low.as_slice()?.to_vec();
+    let high_vec = high.as_slice()?.to_vec();
+    validate_box_bounds(&low_vec, &high_vec)?;
+    if budget == 0 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    if !barrier_hat.is_finite() || barrier_hat < 0.0 {
+        return Err(PyValueError::new_err(
+            "barrier_hat must be a finite non-negative float",
+        ));
+    }
+    let dim = low_vec.len();
+    let bounds = Bounds::new(Array1::from_vec(low_vec), Array1::from_vec(high_vec), 1e-9);
+    let seed_arr = if let Some(x0) = x0 {
+        let sl = x0.as_slice()?;
+        if sl.len() != dim {
+            return Err(PyValueError::new_err(format!(
+                "x0 length {} does not match dimension {}",
+                sl.len(),
+                dim
+            )));
+        }
+        Some(Array1::from_vec(sl.to_vec()))
+    } else {
+        None
+    };
+    let seed_view = seed_arr.as_ref().map(|a| a.view());
+    let obj = CallableObjective {
+        fn_: obj_fn,
+        bounds,
+    };
+    let result = match grad_fn {
+        Some(grad_fn) => {
+            let grad = CallablePyGradient { fn_: grad_fn, dim };
+            crate::methods::bfwt::bfwt_optimize(
+                &obj,
+                Some(&grad),
+                budget,
+                seed,
+                barrier_hat,
+                seed_view,
+            )
+        }
+        None => crate::methods::bfwt::bfwt_optimize::<_, CallablePyGradient>(
+            &obj,
+            None,
+            budget,
+            seed,
+            barrier_hat,
+            seed_view,
+        ),
+    };
+    let out = PyDict::new(py);
+    out.set_item("best_val", result.best_val)?;
+    out.set_item(
+        "best_pos",
+        PyArray1::from_slice(py, result.best_pos.as_slice().unwrap()),
+    )?;
+    out.set_item("n_evals", result.n_evals)?;
+    out.set_item("n_grads", result.n_grads)?;
+    out.set_item("n_accept", result.n_accept)?;
+    out.set_item("last_mode", result.last_mode.as_str())?;
+    Ok(out.into())
+}
+
 /// Runs the Thompson-allocated portfolio global optimizer.
 ///
 /// One generic driver with a single budget knob: a discounted
@@ -1853,6 +1937,7 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_qmc, m)?)?;
     m.add_function(wrap_pyfunction!(dmc_population_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(gpmd_optimize, m)?)?;
+    m.add_function(wrap_pyfunction!(bfwt_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize, m)?)?;
     m.add_function(wrap_pyfunction!(global_optimize_objective, m)?)?;
     Ok(())
