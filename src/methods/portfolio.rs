@@ -854,23 +854,25 @@ struct ArmStates {
     am: Option<AmSaState>,
 }
 
-/// Persistent adaptive-Metropolis descent chain: the D6 annealed-descent
-/// scaling law productized (proofs/d6_annealed_descent_scaling.py).
+/// Persistent adaptive-Metropolis descent chain (D6 + D11 BFWT).
 ///
 /// Temperature is not a schedule in epoch index. On a locally quadratic
 /// basin, expected one-step decrease of the current chain-state energy is
-/// positive iff theta = T d / (f(x) - f*) < 2 exactly (D6, symbolic
-/// paired-increment identity), so the chain runs at the gap-proportional law
-///     T(x) = THETA_TILDE (f(x) - f_best) / d,
-/// with THETA_TILDE = 0.5 keeping ~91% of the maximal descent rate:
-/// cooling happens exactly as fast as measured progress, with no cooling
-/// constant. The proposal SHAPE is the chain's running covariance
-/// (Haario, Saksman, and Tamminen 2001; ergodic under diminishing
-/// adaptation, Roberts and Rosenthal 2007); the proposal SIZE tracks the
-/// D6 optimal acceptance alpha*(0.5) ~ 0.32 by Robbins-Monro - the
-/// descent-side analogue of the 0.234 sampling rule, recovering
-/// Rechenberg's 0.270 at theta -> 0. Reflection into the box keeps the
-/// proposal symmetric (law L1), so Metropolis acceptance stays valid.
+/// positive iff theta = T d / (f(x) - f*) < 2 exactly (D6), so the design
+/// point is T_des = θ⋆ (f - f_best) / d with θ⋆ = 0.5 (~91% residual
+/// descent). Pure gap-proportional T freezes when the chain sits at the
+/// incumbent (gap → 0): no uphill moves remain possible. D11 BFWT clamps
+/// T into the D6∩D7 window using an online barrier proxy (EMA of rejected
+/// uphill deltas) and remaining work-unit budget, so escape temperature
+/// stays positive under budgeted barriers. Empty window → T_lo (escape
+/// forced). See `proofs/d11_budget_feasible_temp.py`.
+///
+/// Proposal SHAPE is the chain's running covariance (Haario et al. 2001;
+/// diminishing adaptation). SIZE tracks α* ≈ 0.32 by Robbins-Monro.
+/// Reflection into the box keeps the proposal symmetric (law L1).
+/// Stagnation triggers an IPOP-style reseed from a fresh box draw so the
+/// arm does not spend the whole budget frozen in one basin (CMA-class
+/// NLS cells: KIRBY2LS / HAHN1LS on the CUTEst SOTA census).
 struct AmSaState {
     x: Array1<f64>,
     f_x: f64,
@@ -882,12 +884,20 @@ struct AmSaState {
     log_scale: f64,
     /// Robbins-Monro step counter (diminishing adaptation).
     rm_n: usize,
+    /// EMA of rejected uphill energy deltas (D7 barrier proxy for BFWT).
+    barrier_hat: f64,
+    /// Consecutive AmSa slices without ledger incumbent improvement.
+    stagnant_slices: usize,
+    /// IPOP-style reseed generation (grows proposal scale after reseed).
+    reseed_gen: usize,
 }
 
-/// D6 operating temperature theta = T d / gap (91% of maximal descent).
-const AM_THETA_TILDE: f64 = 0.5;
-/// D6 optimal acceptance at AM_THETA_TILDE.
+/// D6 optimal acceptance at θ⋆ = 1/2 (design interior of BFWT).
 const AM_ALPHA_TARGET: f64 = 0.32;
+/// EMA rate for barrier_hat from rejected uphill moves.
+const AM_BARRIER_EMA: f64 = 0.15;
+/// Reseed AmSa after this many non-improving slices (IPOP-style).
+const AM_STAGNANT_RESEED: usize = 3;
 
 impl AmSaState {
     fn new(x: Array1<f64>, f_x: f64) -> Self {
@@ -900,7 +910,26 @@ impl AmSaState {
             f_x,
             log_scale: 0.0,
             rm_n: 0,
+            barrier_hat: 0.0,
+            stagnant_slices: 0,
+            reseed_gen: 0,
         }
+    }
+
+    /// Hard reseed: new point, wipe scatter, keep barrier_hat warm.
+    fn reseed(&mut self, x: Array1<f64>, f_x: f64) {
+        let d = x.len();
+        self.mean = x.clone();
+        self.scatter = Array2::zeros((d, d));
+        self.n_obs = 1;
+        self.x = x;
+        self.f_x = f_x;
+        self.log_scale = 0.0;
+        self.rm_n = 0;
+        self.stagnant_slices = 0;
+        self.reseed_gen = self.reseed_gen.saturating_add(1);
+        // Mildly inflate barrier so the next incarnation keeps escape heat.
+        self.barrier_hat = (self.barrier_hat * 1.5).max(1e-6);
     }
 
     /// Welford-style running mean/scatter update over chain states.
@@ -2121,12 +2150,10 @@ fn run_arm<O, G>(
             }
         }
         ArmKind::AmSa => {
-            // D6 annealed-descent chain: gap-proportional temperature
-            // T = 0.5 gap / d (progress requires theta < 2; see
-            // proofs/d6_annealed_descent_scaling.py), Haario covariance
-            // shape, Robbins-Monro size targeting alpha* ~ 0.32.
-            // Exact Metropolis only: declared evaluation noise routes to
-            // the OSA-capable arms instead.
+            // D6 + D11 BFWT adaptive Metropolis: design T from gap, floor
+            // from barrier_hat / log(B+e), ceiling at θ=2; Haario shape;
+            // Robbins-Monro size; IPOP reseed on stagnation. Exact
+            // Metropolis only (noise → OSA-capable arms).
             if states.noise_sigma.is_some() {
                 return;
             }
@@ -2139,19 +2166,55 @@ fn run_arm<O, G>(
                 }
                 states.am = Some(AmSaState::new(x, f_x));
             }
+            // IPOP-style reseed when the chain has not moved the ledger.
+            {
+                let st = states.am.as_mut().expect("am chain installed");
+                if st.stagnant_slices >= AM_STAGNANT_RESEED && ledger.remaining() >= 2 {
+                    let mut x = Array1::zeros(d);
+                    for i in 0..d {
+                        let lo = bounds.low[i];
+                        let hi = bounds.high[i];
+                        x[i] = lo + (hi - lo) * rng.random::<f64>();
+                    }
+                    let x = bounds.clip(x.view());
+                    let f_x = obj.eval(x.view());
+                    if f_x.is_finite() {
+                        st.reseed(x, f_x);
+                    } else {
+                        st.stagnant_slices = 0;
+                    }
+                }
+            }
             let st = states.am.as_mut().expect("am chain installed");
             let l = st.proposal_chol(&bounds);
             let base = 2.38 / (d as f64).sqrt();
+            // IPOP: inflate step after reseeds to explore a wider basin.
+            let reseed_boost = 1.5_f64.powi(st.reseed_gen.min(6) as i32);
+            let before_best = ledger.best_get();
             for _ in 0..slice {
                 if ledger.remaining() < 1 {
                     break;
                 }
-                let gap = (st.f_x - ledger.best_get()).max(0.0);
-                let temp = AM_THETA_TILDE * gap / d as f64;
+                let rem = ledger.remaining() as f64;
+                // D11 BFWT: clamp design T into D6∩D7 window.
+                let (temp, _mode) = crate::methods::bfwt::budget_feasible_temp(
+                    st.f_x,
+                    ledger.best_get(),
+                    d,
+                    rem,
+                    st.barrier_hat,
+                );
+                // Fallback floor if BFWT collapses (tiny gap, zero barrier).
+                let temp = temp.max(if st.barrier_hat > 0.0 {
+                    0.0
+                } else {
+                    // residual heat from |f| so pure freeze at incumbent is rare
+                    1e-6 * st.f_x.abs().max(1.0) / d as f64
+                });
                 let z: Vec<f64> = (0..d)
                     .map(|_| rand_distr::StandardNormal.sample(rng))
                     .collect();
-                let scale = st.log_scale.exp() * base;
+                let scale = st.log_scale.exp() * base * reseed_boost;
                 let mut y = st.x.clone();
                 for i in 0..d {
                     let mut acc = 0.0;
@@ -2178,7 +2241,21 @@ fn run_arm<O, G>(
                     st.f_x = f_y;
                     let x_obs = st.x.clone();
                     st.observe(x_obs.view());
+                } else if delta > 0.0 {
+                    // Rejected uphill: feed D7 barrier proxy for BFWT.
+                    st.barrier_hat = if st.barrier_hat <= 0.0 {
+                        delta
+                    } else {
+                        (1.0 - AM_BARRIER_EMA) * st.barrier_hat + AM_BARRIER_EMA * delta
+                    };
                 }
+            }
+            if ledger.best_get() < before_best - 1e-15 * before_best.abs().max(1.0) {
+                st.stagnant_slices = 0;
+                // Successful descent shrinks barrier estimate.
+                st.barrier_hat *= 0.5;
+            } else {
+                st.stagnant_slices = st.stagnant_slices.saturating_add(1);
             }
         }
         ArmKind::Variant => {

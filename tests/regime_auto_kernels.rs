@@ -23,6 +23,7 @@ fn regime_policy_maps_features() {
         has_grad: true,
         noise_sigma: None,
         aspect_ratio: 1.0,
+        mean_width: 4.0,
         budget: 4000,
     };
     assert_eq!(select_regime(&low), OptimizationRegime::LowDimSmooth);
@@ -31,6 +32,7 @@ fn regime_policy_maps_features() {
         has_grad: true,
         noise_sigma: None,
         aspect_ratio: 1.0,
+        mean_width: 4.0,
         budget: 8000,
     };
     assert_eq!(
@@ -42,9 +44,22 @@ fn regime_policy_maps_features() {
         has_grad: false,
         noise_sigma: Some(0.05),
         aspect_ratio: 1.0,
+        mean_width: 4.0,
         budget: 2000,
     };
     assert_eq!(select_regime(&noisy), OptimizationRegime::StochasticNoise);
+    let schwefel = ProblemFeatures {
+        dim: 5,
+        has_grad: true,
+        noise_sigma: None,
+        aspect_ratio: 1.0,
+        mean_width: 1000.0,
+        budget: 3000,
+    };
+    assert_eq!(
+        select_regime(&schwefel),
+        OptimizationRegime::MultimodalGlobal
+    );
 }
 
 #[test]
@@ -76,6 +91,7 @@ fn explore_first_under_all_regimes() {
         OptimizationRegime::LowDimSmooth,
         OptimizationRegime::HighDimIllConditioned,
         OptimizationRegime::MultimodalNoGrad,
+        OptimizationRegime::MultimodalGlobal,
         OptimizationRegime::StochasticNoise,
     ] {
         let ordered = order_arms(&avail, regime, 6);

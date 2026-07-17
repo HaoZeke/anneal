@@ -44,6 +44,7 @@ from anneal._core import (
     global_optimize_objective as _core_global_optimize_objective,
     dmc_population_optimize as _core_dmc_population_optimize,
     gpmd_optimize as _core_gpmd_optimize,
+    bfwt_optimize as _core_bfwt_optimize,
     run,
     run_hmc,
     run_qmc,
@@ -547,6 +548,38 @@ def gpmd_optimize(
     return out
 
 
+def bfwt_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    barrier_hat: float = 0.0,
+    grad_fn=None,
+    x0=None,
+):
+    """Local Metropolis with D11 budget-feasible window temperature.
+
+    Clamps design T into the D6∩D7 window. Standalone is not the SOTA
+    driver; competitive wins use ``global_optimize`` (portfolio). See
+    docs/derivations/bfwt_d11.md.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    out = _core_bfwt_optimize(
+        obj_fn,
+        low_arr,
+        high_arr,
+        int(budget),
+        int(seed),
+        float(barrier_hat),
+        grad_fn,
+        x0_arr,
+    )
+    return out
+
+
 def dmc_population_optimize(
     obj_fn,
     low,
@@ -692,6 +725,7 @@ __all__ = [
     "gle_langevin_preconditioned_objective",
     "dmc_population_optimize",
     "gpmd_optimize",
+    "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",
     "run",
