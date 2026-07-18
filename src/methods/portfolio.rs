@@ -790,9 +790,6 @@ struct HopState {
     x_cur: Option<Array1<f64>>,
     f_cur: f64,
     generation: usize,
-    /// Displacement between the last two accepted hop minima: a cheap
-    /// valley-direction estimate that directs alternate hop proposals.
-    last_disp: Option<Array1<f64>>,
 }
 
 struct DeState {
@@ -2214,58 +2211,34 @@ fn run_arm<O, G>(
                 x_cur: None,
                 f_cur: f64::INFINITY,
                 generation: 0,
-                last_disp: None,
             });
             let mut x_cur = state
                 .x_cur
                 .clone()
                 .unwrap_or_else(|| ledger.incumbent(&bounds));
             let mut f_cur = state.f_cur.min(ledger.best_get());
+            let temp = ladder_temperature(archive_temp0(ledger), state.generation);
             let width = &bounds.high - &bounds.low;
-            // Basin-hopping loop: a converged descent returns its unspent
-            // budget, which immediately funds the next hop, so hop count
-            // scales with the slice instead of the pull count. Alternate
-            // proposals jump along the displacement between the last two
-            // accepted minima -- a valley-direction estimate that reaches
-            // successor basins of narrow curved valleys that isotropic
-            // jumps leave sideways.
-            let mut hops = 0usize;
-            while ledger.remaining() >= 4 && hops < 64 {
-                hops += 1;
-                let temp = ladder_temperature(archive_temp0(ledger), state.generation);
+            // One full-depth descent per slice: ill-conditioned valleys
+            // reward depth over hop count.
+            if ledger.remaining() >= 4 {
                 let mut trial = x_cur.clone();
-                let directed = state
-                    .last_disp
-                    .as_ref()
-                    .is_some_and(|d| d.iter().any(|v| v.abs() > 0.0))
-                    && rng.random::<f64>() < 0.5;
-                if directed {
-                    let d = state.last_disp.as_ref().expect("guarded above");
-                    let lambda = 0.5 + 1.5 * rng.random::<f64>();
-                    let sign = if rng.random::<f64>() < 0.5 { 1.0 } else { -1.0 };
-                    for j in 0..dim {
-                        let w = if width[j] > 0.0 { width[j] } else { 1.0 };
-                        let noise: f64 = rand_distr::StandardNormal.sample(rng);
-                        trial[j] += sign * lambda * d[j] + 0.25 * state.step * w * noise;
-                    }
-                } else {
-                    for j in 0..dim {
-                        let w = if width[j] > 0.0 { width[j] } else { 1.0 };
-                        let noise: f64 = rand_distr::StandardNormal.sample(rng);
-                        trial[j] += state.step * w * noise;
-                    }
+                for j in 0..dim {
+                    let w = if width[j] > 0.0 { width[j] } else { 1.0 };
+                    let noise: f64 = rand_distr::StandardNormal.sample(rng);
+                    trial[j] += state.step * w * noise;
                 }
                 // Reflect the symmetric basin-hop perturbation into the box
                 // (keeps the hop proposal symmetric for the Metropolis guard
                 // below; clipping would bias hops toward the boundary).
                 let trial = crate::movekernel::reflect_into_box(trial.view(), &bounds);
-                // Descent-dominated valleys reward full-depth descents
-                // (basin-hopping depth); multimodal boxes keep the
-                // half-slice cap so hops stay frequent.
+                // Descent-dominated valleys reward one full-depth descent
+                // per slice (basin-hopping depth); multimodal boxes keep
+                // the half-slice cap so hops stay frequent.
                 let hop_depth = if states.deep_hops {
-                    ledger.remaining().saturating_sub(2).max(4)
+                    slice.saturating_sub(2).max(4)
                 } else {
-                    (slice / 2).max(4)
+                    slice / 2
                 };
                 let res = projected_gradient_polish(obj, grad, trial, hop_depth, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
@@ -2273,19 +2246,16 @@ fn run_arm<O, G>(
                 } else if res.best_val < f_cur
                     || metropolis(energy_delta(res.best_val, f_cur), temp, rng)
                 {
-                    if f_cur.is_finite() {
-                        state.last_disp = Some(&res.best_pos - &x_cur);
-                    }
                     x_cur = res.best_pos;
                     f_cur = res.best_val;
                     state.step = (state.step * HOP_GROW).min(1.0);
                 } else {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
                 }
-                state.generation += 1;
             }
             state.x_cur = Some(x_cur);
             state.f_cur = f_cur;
+            state.generation += 1;
         }
         ArmKind::Surrogate => {
             // Archive-fit additive surrogate: the fit costs nothing, the
