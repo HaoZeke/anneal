@@ -841,6 +841,9 @@ struct CenterProbe {
 
 #[derive(Default)]
 struct ArmStates {
+    /// Probe verdict: short spread descents found a single basin depth
+    /// class, so budget rewards depth-first hopping over global visiting.
+    descent_dominated: bool,
     hop: Option<HopState>,
     de: Option<DeState>,
     gsa: Option<GsaState>,
@@ -2230,7 +2233,15 @@ fn run_arm<O, G>(
                 // (keeps the hop proposal symmetric for the Metropolis guard
                 // below; clipping would bias hops toward the boundary).
                 let trial = crate::movekernel::reflect_into_box(trial.view(), &bounds);
-                let res = projected_gradient_polish(obj, grad, trial, slice / 2, 1.0, 1e-8);
+                // Descent-dominated valleys reward one full-depth descent
+                // per slice (basin-hopping depth); multimodal boxes keep
+                // the half-slice cap so hops stay frequent.
+                let hop_depth = if states.descent_dominated {
+                    slice.saturating_sub(2).max(4)
+                } else {
+                    slice / 2
+                };
+                let res = projected_gradient_polish(obj, grad, trial, hop_depth, 1.0, 1e-8);
                 if !res.best_val.is_finite() {
                     state.step = (state.step * HOP_SHRINK).max(1e-4);
                 } else if res.best_val < f_cur
@@ -3307,7 +3318,7 @@ where
         noise_sigma,
         budget,
     );
-    let regime = match policy {
+    let mut regime = match policy {
         PortfolioPolicy::Auto => crate::methods::regime::select_regime(&features),
         PortfolioPolicy::Legacy => crate::methods::regime::OptimizationRegime::Default,
     };
@@ -3321,6 +3332,57 @@ where
         inner: g,
         ledger: &ledger,
     });
+
+    // Probe-based demotion for mid-width MultimodalGlobal boxes. Width alone
+    // cannot separate a Styblinski-class multi-basin box from a least-squares
+    // valley of the same width, and the wide-box (Schwefel) front-load only
+    // fires at mean_width >= 50, so this gate spends ~2% of the budget on
+    // short spread descents and commits to global visiting only when at
+    // least two basin depth classes appear.
+    let mut descent_dominated = false;
+    if policy == PortfolioPolicy::Auto
+        && matches!(
+            regime,
+            crate::methods::regime::OptimizationRegime::MultimodalGlobal
+        )
+        && mean_width(&bounds) < 50.0
+        && let Some(bg) = budgeted_grad.as_ref()
+    {
+        let probe_budget = (budget / 50).clamp(24, 120);
+        // Each descent step charges one eval and one gradient.
+        let per_start = (probe_budget / (3 * PROJECTED_GRADIENT_STEP_WORK)).max(6);
+        let center = (&bounds.low + &bounds.high) * 0.5;
+        let qmc = eindir_core::shifted_low_discrepancy_points(
+            &bounds,
+            2,
+            qmc_skip_from_seed(seed ^ 0x9E37_u64),
+            seed ^ 0x9E37_u64,
+        );
+        let mut starts = vec![bounds.clip(center.view())];
+        for row in qmc.outer_iter() {
+            starts.push(bounds.clip(row));
+        }
+        let ceiling = ledger.used_get() + probe_budget;
+        ledger.cap_set(ceiling.min(budget));
+        let probe = crate::methods::routing_probe::multimodality_probe(
+            &budgeted_obj,
+            bg,
+            &bounds,
+            &starts,
+            per_start,
+        );
+        ledger.cap_set(budget);
+        if let Some(probe) = probe
+            && !probe.multimodal()
+        {
+            descent_dominated = true;
+            regime = if dim <= 5 {
+                crate::methods::regime::OptimizationRegime::LowDimSmooth
+            } else {
+                crate::methods::regime::OptimizationRegime::Default
+            };
+        }
+    }
 
     // Derived scheduler quantities; see the module constants for the
     // two governing numbers. Auto unlocks extra specialized arms so the
@@ -3357,10 +3419,20 @@ where
             ArmPosterior::with_prior(discount, a0, b0)
         })
         .collect();
+    if descent_dominated {
+        // Depth-first evidence: bias Thompson sampling toward the hop arm
+        // (perturb + full-depth descent), the basin-hopping analogue.
+        for (arm, post) in arms.iter().zip(posteriors.iter_mut()) {
+            if arm.name() == "hop" {
+                *post = ArmPosterior::with_prior(discount, 6.0, 1.0);
+            }
+        }
+    }
     // TPE dual-density history over arm indices (Auto policy).
     let mut tpe = crate::methods::tpe::TpeCategorical::new(arms.len());
     let mut states = ArmStates {
         noise_sigma,
+        descent_dominated,
         ..ArmStates::default()
     };
     let mut rng = StdRng::seed_from_u64(seed);
