@@ -70,6 +70,7 @@ pub use hmc::{
 };
 pub use laws::LawViolation;
 pub use methods::{
+    AmsaResult, amsa_optimize,
     ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_BETA0,
     DEFAULT_GAMMA, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
     GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,

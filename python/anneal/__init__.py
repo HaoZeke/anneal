@@ -44,6 +44,7 @@ from anneal._core import (
     global_optimize_objective as _core_global_optimize_objective,
     dmc_population_optimize as _core_dmc_population_optimize,
     gpmd_optimize as _core_gpmd_optimize,
+    amsa_optimize as _core_amsa_optimize,
     bfwt_optimize as _core_bfwt_optimize,
     run,
     run_hmc,
@@ -548,6 +549,37 @@ def gpmd_optimize(
     return out
 
 
+def amsa_optimize(
+    obj_fn,
+    low,
+    high,
+    budget: int,
+    seed: int = 0,
+    grad_fn=None,
+    x0=None,
+):
+    """Standalone whitened BFWT annealed descent (AmSa).
+
+    One adaptive Metropolis chain: BFWT temperature (D11), Haario
+    covariance whitening, Robbins-Monro scale control toward the design
+    acceptance 0.32, online barrier estimate from rejected uphill moves,
+    IPOP-style reseeds on stagnation, and a stall-recovering projected
+    quasi-Newton polish tail when ``grad_fn`` is supplied.
+    """
+    low_arr = np.asarray(low, dtype=np.float64)
+    high_arr = np.asarray(high, dtype=np.float64)
+    x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    return _core_amsa_optimize(
+        obj_fn,
+        low_arr,
+        high_arr,
+        int(budget),
+        int(seed),
+        grad_fn,
+        x0_arr,
+    )
+
+
 def bfwt_optimize(
     obj_fn,
     low,
@@ -725,6 +757,7 @@ __all__ = [
     "gle_langevin_preconditioned_objective",
     "dmc_population_optimize",
     "gpmd_optimize",
+    "amsa_optimize",
     "bfwt_optimize",
     "global_optimize",
     "global_optimize_objective",
