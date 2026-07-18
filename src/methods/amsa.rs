@@ -169,6 +169,15 @@ pub struct AmsaResult {
 }
 
 const POLISH_FRACTION: f64 = 0.25;
+/// Probability of a heavy-tailed (Cauchy radial) jump in the whitened
+/// metric: the descent analysis governs the small-step regime, while
+/// occasional long jumps priced by the same Metropolis rule supply the
+/// well-to-well escape that Gaussian tails cannot (Schwefel-class).
+const TAIL_JUMP_PROB: f64 = 0.15;
+/// Cap on the Cauchy radial factor (reflection handles the rest).
+const TAIL_JUMP_CAP: f64 = 1e3;
+/// Polish burst on stagnation, as a fraction of the remaining SA budget.
+const STAGNATION_POLISH_FRAC: f64 = 0.125;
 
 /// Run whitened BFWT annealed descent under a work-unit budget.
 ///
@@ -212,7 +221,7 @@ where
     };
     let f_start = obj.eval(start.view());
     let mut n_evals = 1usize;
-    let n_grads_sa = 0usize;
+    let mut n_grads = 0usize;
     if !f_start.is_finite() {
         return AmsaResult {
             best_pos: start,
@@ -230,15 +239,15 @@ where
     // Epoch length ties stagnation detection to dimension.
     let epoch = (8 * (d + 1)).clamp(32, 256);
 
-    while n_evals + n_grads_sa < sa_budget {
+    while n_evals + n_grads < sa_budget {
         let epoch_best = best_val;
         let reseed_boost = 1.5_f64.powi(st.reseed_gen.min(6) as i32);
         let l = st.proposal_chol(&bounds);
         for _ in 0..epoch {
-            if n_evals + n_grads_sa >= sa_budget {
+            if n_evals + n_grads >= sa_budget {
                 break;
             }
-            let rem = (sa_budget - n_evals - n_grads_sa) as f64;
+            let rem = (sa_budget - n_evals - n_grads) as f64;
             let (temp, _mode) = crate::methods::bfwt::budget_feasible_temp(
                 st.f_x,
                 best_val,
@@ -254,7 +263,12 @@ where
             let z: Vec<f64> = (0..d)
                 .map(|_| rand_distr::StandardNormal.sample(&mut rng))
                 .collect();
-            let scale = st.log_scale.exp() * base * reseed_boost;
+            let mut scale = st.log_scale.exp() * base * reseed_boost;
+            if rng.random::<f64>() < TAIL_JUMP_PROB {
+                let u: f64 = rng.random::<f64>();
+                let tail = (std::f64::consts::PI * (u - 0.5)).tan().abs();
+                scale *= tail.clamp(1.0, TAIL_JUMP_CAP);
+            }
             let mut y = st.x.clone();
             for i in 0..d {
                 let mut acc = 0.0;
@@ -299,7 +313,25 @@ where
         } else {
             st.stagnant_slices = st.stagnant_slices.saturating_add(1);
         }
-        if st.stagnant_slices >= AM_STAGNANT_RESEED && n_evals + n_grads_sa + 2 < sa_budget {
+        if st.stagnant_slices >= AM_STAGNANT_RESEED
+            && let Some(g) = grad
+            && n_evals + n_grads + 8 < sa_budget
+        {
+            // Polish burst before abandoning the basin: dual_annealing runs
+            // local search throughout; matching that closes near-best cells
+            // the chain alone leaves shallow.
+            let rem = sa_budget - n_evals - n_grads;
+            let burst = (((rem as f64) * STAGNATION_POLISH_FRAC) as usize).clamp(8, rem);
+            let pol = projected_gradient_polish(obj, g, best_pos.clone(), burst / 2, 0.1, 1e-10);
+            n_evals += pol.n_evals;
+            n_grads += pol.n_grads;
+            if pol.best_val.is_finite() && pol.best_val < best_val {
+                best_val = pol.best_val;
+                best_pos = pol.best_pos;
+                st.stagnant_slices = 0;
+            }
+        }
+        if st.stagnant_slices >= AM_STAGNANT_RESEED && n_evals + n_grads + 2 < sa_budget {
             let mut x = Array1::zeros(d);
             for i in 0..d {
                 x[i] = bounds.low[i] + (bounds.high[i] - bounds.low[i]) * rng.random::<f64>();
@@ -320,7 +352,6 @@ where
         }
     }
 
-    let mut n_grads = 0usize;
     if let Some(g) = grad {
         let remain = budget.saturating_sub(n_evals + n_grads);
         let polish_use = polish_budget.min(remain);
