@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.7.1](https://github.com/HaoZeke/anneal/tree/0.7.1) - 2026-07-18
+
+### Added
+
+- `amsa_optimize`: the portfolio's whitened BFWT annealed-descent machinery
+  (Haario covariance whitening, budget-feasible window temperature, online
+  barrier estimate, Robbins--Monro scale control, IPOP reseeds) as a
+  standalone solver with per-coordinate Cauchy tail moves, stagnation
+  polish bursts, a Python binding, and comparison-protocol wiring. The
+  portfolio's behaviour is unchanged.
+
+
 ## [0.7.0](https://github.com/HaoZeke/anneal/tree/0.7.0) - 2026-07-18
 
 ### Added
