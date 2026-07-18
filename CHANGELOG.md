@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.6.0](https://github.com/HaoZeke/anneal/tree/0.6.0) - 2026-07-18
+
+### Added
+
+- Population-controlled diffusion arm `dmc_pop`: branch/kill walker
+  bookkeeping for classical box-constrained minimization, with residual
+  branching, SHADE differential-evolution memory, QMC initialization,
+  elitist inject, shrinking population targets, dual-style L-BFGS elite
+  polish, and multi-walker batch evaluation on the CUTEst SOTA path.
+- Annealed-descent arm `am_sa` implementing the D6 gap-proportional
+  cooling law with running-covariance proposals and Robbins--Monro step
+  control, plus the D11 budget-feasible window temperature (BFWT)
+  schedule and a `MultimodalGlobal` regime with a dual-class GSA path.
+- Portfolio auto policy: feature-based regime routing, Tree-structured
+  Parzen density-ratio allocation, Good--Turing x record-statistics
+  budget-conversion gate, D5 terminal polish reserve, Bayesian
+  one-step-lookahead endgame with Luby restarts, and a bounded
+  coordinate-opposition scout.
+- Enhanced-sampling arms behind the same ledger: well-tempered
+  metadynamics on sketch-map collective variables and transition-path
+  shooting moves for continuous boxes.
+- Executable derivation ledger extended to D5--D11 (SymPy, and Lean for
+  the T1 window), with the GPMD design lab emitting shipped constants.
+- Status-bearing SOTA census tooling: frozen CUTEst manifests, budgeted
+  TuRBO and NGOpt/Py-BOBYQA baselines, solver-local restart recovery,
+  and performance/data/Pareto profile plotting from the census CSV.
+- Rayon fan-out for parallel tempering, QMC multi-start, polish, and
+  `dmc_pop`; quickstart notebook and stand-alone portfolio script.
+
+### Changed
+
+- `eindir-core` requirement raised to 0.5.2 for the parallel
+  `eval_batch` and Halton design paths.
+
 ## [0.5.0](https://github.com/HaoZeke/anneal/tree/0.5.0) - 2026-06-26
 
 ### Removed
