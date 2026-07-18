@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.7.0](https://github.com/HaoZeke/anneal/tree/0.7.0) - 2026-07-18
+
+### Added
+
+- Probe-based regime routing: mid-width multimodal-global commitments now
+  spend ~2% of the budget on three short projected descents from spread
+  starts; a single basin depth class demotes to polish-heavy routing, and
+  multi-basin landscapes where descents pay route large slices to the
+  perturb-and-descend hop arm (full slice depth) instead of GSA
+  (`routing_probe` module).
+
+### Fixed
+
+- `projected_gradient_polish` no longer plateaus on ill-conditioned
+  valleys: quadratic-interpolation backtracking replaces naive halving,
+  the L-BFGS curvature floor drops from sqrt(eps) to 8*eps so genuine
+  high-kappa pairs survive, and a failed line search restarts the memory
+  two orders finer from the best point instead of returning early. On the
+  CUTEst least-squares loss set this converts repeated 4e-6 plateaus into
+  cell wins (LANCZOS2LS to 2e-11, NELSONLS 52 -> 3.8) with no control
+  regressions.
+- `rgpot_minimize` example gated behind the `capi` feature with
+  `eindir-core/capi` forwarded, restoring plain `cargo test`.
+
 ## [0.6.0](https://github.com/HaoZeke/anneal/tree/0.6.0) - 2026-07-18
 
 ### Added
