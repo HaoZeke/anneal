@@ -840,9 +840,9 @@ struct CenterProbe {
 
 #[derive(Default)]
 struct ArmStates {
-    /// Probe verdict: short spread descents found a single basin depth
-    /// class, so budget rewards depth-first hopping over global visiting.
-    descent_dominated: bool,
+    /// Probe verdict: descents pay on this landscape, so each hop should
+    /// spend its full slice on one deep descent (basin-hopping depth).
+    deep_hops: bool,
     hop: Option<HopState>,
     de: Option<DeState>,
     gsa: Option<GsaState>,
@@ -2235,7 +2235,7 @@ fn run_arm<O, G>(
                 // Descent-dominated valleys reward one full-depth descent
                 // per slice (basin-hopping depth); multimodal boxes keep
                 // the half-slice cap so hops stay frequent.
-                let hop_depth = if states.descent_dominated {
+                let hop_depth = if states.deep_hops {
                     slice.saturating_sub(2).max(4)
                 } else {
                     slice / 2
@@ -3339,6 +3339,7 @@ where
     // short spread descents and commits to global visiting only when at
     // least two basin depth classes appear.
     let mut descent_dominated = false;
+    let mut hop_first = false;
     if policy == PortfolioPolicy::Auto
         && matches!(
             regime,
@@ -3371,15 +3372,28 @@ where
             per_start,
         );
         ledger.cap_set(budget);
-        if let Some(probe) = probe
-            && !probe.multimodal()
-        {
-            descent_dominated = true;
-            regime = if dim <= 5 {
-                crate::methods::regime::OptimizationRegime::LowDimSmooth
+        if let Some(probe) = probe {
+            if !probe.multimodal() {
+                descent_dominated = true;
+                regime = if dim <= 5 {
+                    crate::methods::regime::OptimizationRegime::LowDimSmooth
+                } else {
+                    crate::methods::regime::OptimizationRegime::Default
+                };
             } else {
-                crate::methods::regime::OptimizationRegime::Default
-            };
+                // Multiple basins, but do descents pay? Compare the descent
+                // gain with the gain from raw sampling alone: when descending
+                // beats sampling by a wide margin, the basin-hopping pattern
+                // (deep descent per jump) dominates heavy-tailed visiting.
+                let raw_gain =
+                    (probe.worst_start_value - probe.best_start_value).max(0.0);
+                let descent_gain =
+                    (probe.worst_start_value - probe.best_descent_value).max(0.0);
+                if descent_gain.is_finite() && descent_gain > 3.0 * raw_gain.max(f64::MIN_POSITIVE)
+                {
+                    hop_first = true;
+                }
+            }
         }
     }
 
@@ -3418,7 +3432,7 @@ where
             ArmPosterior::with_prior(discount, a0, b0)
         })
         .collect();
-    if descent_dominated {
+    if descent_dominated || hop_first {
         // Depth-first evidence: bias Thompson sampling toward the hop arm
         // (perturb + full-depth descent), the basin-hopping analogue.
         for (arm, post) in arms.iter().zip(posteriors.iter_mut()) {
@@ -3431,7 +3445,7 @@ where
     let mut tpe = crate::methods::tpe::TpeCategorical::new(arms.len());
     let mut states = ArmStates {
         noise_sigma,
-        descent_dominated,
+        deep_hops: descent_dominated || hop_first,
         ..ArmStates::default()
     };
     let mut rng = StdRng::seed_from_u64(seed);
@@ -3863,7 +3877,16 @@ where
         let threshold = scheduler_success_threshold(arms[choice], &ledger);
         // Auto: preferred arms get larger slices under the same total budget.
         let arm_slice = if policy == PortfolioPolicy::Auto {
-            let mult = crate::methods::regime::arm_slice_multiplier(regime, arms[choice].name());
+            let name = arms[choice].name();
+            let mut mult = crate::methods::regime::arm_slice_multiplier(regime, name);
+            if hop_first {
+                // Probe: descents pay; hop takes the large slices instead of GSA.
+                if name == "gsa" {
+                    mult = 1.0;
+                } else if name == "hop" {
+                    mult = mult.max(3.5);
+                }
+            }
             ((slice as f64) * mult).round() as usize
         } else {
             slice

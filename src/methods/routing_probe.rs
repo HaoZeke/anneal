@@ -23,6 +23,8 @@ pub struct RoutingProbe {
     pub distinct_basins: usize,
     /// Best raw (un-descended) start value observed.
     pub best_start_value: f64,
+    /// Worst raw (un-descended) start value observed.
+    pub worst_start_value: f64,
     /// Best descended value.
     pub best_descent_value: f64,
 }
@@ -124,6 +126,7 @@ where
         descent_values,
         distinct_basins,
         best_start_value,
+        worst_start_value: worst_start,
         best_descent_value,
     })
 }
