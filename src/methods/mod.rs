@@ -23,6 +23,7 @@ pub mod mcmc_sa;
 pub mod parallel_tempering;
 pub mod portfolio;
 pub mod regime;
+pub mod routing_probe;
 pub mod sketchmap;
 pub mod tpe;
 pub mod tps_shoot;
