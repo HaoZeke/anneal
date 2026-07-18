@@ -263,19 +263,27 @@ where
             let z: Vec<f64> = (0..d)
                 .map(|_| rand_distr::StandardNormal.sample(&mut rng))
                 .collect();
-            let mut scale = st.log_scale.exp() * base * reseed_boost;
-            if rng.random::<f64>() < TAIL_JUMP_PROB {
-                let u: f64 = rng.random::<f64>();
-                let tail = (std::f64::consts::PI * (u - 0.5)).tan().abs();
-                scale *= tail.clamp(1.0, TAIL_JUMP_CAP);
-            }
+            let scale = st.log_scale.exp() * base * reseed_boost;
             let mut y = st.x.clone();
-            for i in 0..d {
-                let mut acc = 0.0;
-                for j in 0..=i {
-                    acc += l[(i, j)] * z[j];
+            if rng.random::<f64>() < TAIL_JUMP_PROB {
+                // Per-coordinate Cauchy displacements in raw coordinates:
+                // separable multi-well landscapes (Schwefel class) need
+                // coordinate-wise well flips that no single radial jump in
+                // the whitened metric can produce.
+                for i in 0..d {
+                    let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
+                    let u: f64 = rng.random::<f64>();
+                    let c = (std::f64::consts::PI * (u - 0.5)).tan();
+                    y[i] += 0.1 * w * c.clamp(-TAIL_JUMP_CAP, TAIL_JUMP_CAP);
                 }
-                y[i] += scale * acc;
+            } else {
+                for i in 0..d {
+                    let mut acc = 0.0;
+                    for j in 0..=i {
+                        acc += l[(i, j)] * z[j];
+                    }
+                    y[i] += scale * acc;
+                }
             }
             let y = reflect_into_box(y.view(), &bounds);
             let f_y = obj.eval(y.view());
