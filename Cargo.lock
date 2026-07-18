@@ -24,7 +24,7 @@ dependencies = [
  "cbindgen",
  "criterion",
  "dlpk",
- "eindir-core 0.5.2",
+ "eindir-core",
  "ndarray 0.17.2",
  "num-traits",
  "numpy",
@@ -289,22 +289,9 @@ dependencies = [
 
 [[package]]
 name = "eindir-core"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f3944f8716a5f0aafacdc58feaf1db571d54942ba0609e8ec49a5e28f142e6"
-dependencies = [
- "cbindgen",
- "dlpk",
- "ndarray 0.17.2",
- "num-traits",
- "rand",
- "rand_distr",
- "thiserror",
-]
-
-[[package]]
-name = "eindir-core"
 version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6fb7523dd5458e184ceb87773846ff91659efe891a91411c57eea029e31afbe"
 dependencies = [
  "cbindgen",
  "dlpk",
@@ -919,7 +906,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be07673045c30cff6a2d0a9b6da531d6ff62c20e6045bcff144d860e64c2e2e8"
 dependencies = [
  "dlpk",
- "eindir-core 0.5.1",
+ "eindir-core",
 ]
 
 [[package]]
