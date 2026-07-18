@@ -15,7 +15,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [features]
 default = []
-capi = []
+capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
 [dependencies]
@@ -69,3 +69,7 @@ lto      = "thin"
 [[bench]]
 name    = "sa_bench"
 harness = false
+
+[[example]]
+name = "rgpot_minimize"
+required-features = ["capi"]

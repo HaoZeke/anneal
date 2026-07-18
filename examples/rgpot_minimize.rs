@@ -15,7 +15,7 @@
 //! It is a stand-in for any real rgpot potential (LJ, CuH2, NWChem, ...): all
 //! of them plug into rgpot through the exact same force-callback ABI used here.
 //!
-//! Run: `cargo run --example rgpot_minimize`
+//! Run: `cargo run --features capi --example rgpot_minimize`
 //! It is also wired as an asserting integration test (see the bottom module).
 
 use std::os::raw::c_void;
