@@ -33,7 +33,6 @@ use rand_distr::{Beta, Distribution};
 
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
-use crate::accept::{AcceptRule, TsallisAccept};
 use crate::bias::Bias;
 use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
