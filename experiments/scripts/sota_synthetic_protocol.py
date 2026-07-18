@@ -25,6 +25,7 @@ import numpy as np
 from experiments.scripts.sota_cutest import (
     FIELDNAMES,
     Counter,
+    amsa,
     bfwt,
     classical,
     cma_es,
@@ -184,6 +185,7 @@ def main():
         "cma_es_ipop": cma_es_ipop,
         "classical": classical,
         "gpmd": gpmd,
+        "amsa": amsa,
         "bfwt": bfwt,
     }
     for m in method_names:

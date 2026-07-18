@@ -23,6 +23,7 @@ pub mod mcmc_sa;
 pub mod parallel_tempering;
 pub mod portfolio;
 pub mod regime;
+pub mod amsa;
 pub mod routing_probe;
 pub mod sketchmap;
 pub mod tpe;
@@ -34,6 +35,7 @@ pub use bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
     fit_laplace, pilot_draws, pilot_draws_qmc,
 };
+pub use amsa::{AmsaResult, amsa_optimize};
 pub use bfwt::{
     BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, budget_feasible_temp,
     bfwt_optimize, t_des, t_hi, t_lo, window_nonempty,

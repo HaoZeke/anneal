@@ -34,6 +34,7 @@ use rand_distr::{Beta, Distribution};
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
 use crate::bias::Bias;
+use crate::methods::amsa::{AM_ALPHA_TARGET, AM_BARRIER_EMA, AM_STAGNANT_RESEED, AmSaState};
 use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
@@ -892,140 +893,6 @@ struct ArmStates {
 /// Stagnation triggers an IPOP-style reseed from a fresh box draw so the
 /// arm does not spend the whole budget frozen in one basin (CMA-class
 /// NLS cells: KIRBY2LS / HAHN1LS on the CUTEst SOTA census).
-struct AmSaState {
-    x: Array1<f64>,
-    f_x: f64,
-    mean: Array1<f64>,
-    /// Unnormalized scatter matrix sum (x - mean) outer products.
-    scatter: Array2<f64>,
-    n_obs: usize,
-    /// Robbins-Monro log proposal-scale multiplier.
-    log_scale: f64,
-    /// Robbins-Monro step counter (diminishing adaptation).
-    rm_n: usize,
-    /// EMA of rejected uphill energy deltas (D7 barrier proxy for BFWT).
-    barrier_hat: f64,
-    /// Consecutive AmSa slices without ledger incumbent improvement.
-    stagnant_slices: usize,
-    /// IPOP-style reseed generation (grows proposal scale after reseed).
-    reseed_gen: usize,
-}
-
-/// D6 optimal acceptance at θ⋆ = 1/2 (design interior of BFWT).
-const AM_ALPHA_TARGET: f64 = 0.32;
-/// EMA rate for barrier_hat from rejected uphill moves.
-const AM_BARRIER_EMA: f64 = 0.15;
-/// Reseed AmSa after this many non-improving slices (IPOP-style).
-const AM_STAGNANT_RESEED: usize = 3;
-
-impl AmSaState {
-    fn new(x: Array1<f64>, f_x: f64) -> Self {
-        let d = x.len();
-        Self {
-            mean: x.clone(),
-            scatter: Array2::zeros((d, d)),
-            n_obs: 1,
-            x,
-            f_x,
-            log_scale: 0.0,
-            rm_n: 0,
-            barrier_hat: 0.0,
-            stagnant_slices: 0,
-            reseed_gen: 0,
-        }
-    }
-
-    /// Hard reseed: new point, wipe scatter, keep barrier_hat warm.
-    fn reseed(&mut self, x: Array1<f64>, f_x: f64) {
-        let d = x.len();
-        self.mean = x.clone();
-        self.scatter = Array2::zeros((d, d));
-        self.n_obs = 1;
-        self.x = x;
-        self.f_x = f_x;
-        self.log_scale = 0.0;
-        self.rm_n = 0;
-        self.stagnant_slices = 0;
-        self.reseed_gen = self.reseed_gen.saturating_add(1);
-        // Mildly inflate barrier so the next incarnation keeps escape heat.
-        self.barrier_hat = (self.barrier_hat * 1.5).max(1e-6);
-    }
-
-    /// Welford-style running mean/scatter update over chain states.
-    fn observe(&mut self, x: ArrayView1<f64>) {
-        self.n_obs += 1;
-        let n = self.n_obs as f64;
-        let delta = &x.to_owned() - &self.mean;
-        self.mean = &self.mean + &delta.mapv(|v| v / n);
-        let delta2 = &x.to_owned() - &self.mean;
-        for i in 0..delta.len() {
-            for j in 0..delta.len() {
-                self.scatter[(i, j)] += delta[i] * delta2[j];
-            }
-        }
-    }
-
-    /// Covariance Cholesky factor with Haario-style regularization:
-    /// Sigma_hat + eps diag(width^2). Falls back to the diagonal on
-    /// factorization failure.
-    fn proposal_chol(&self, bounds: &Bounds<f64>) -> Array2<f64> {
-        let d = self.x.len();
-        let mut cov = Array2::zeros((d, d));
-        // Haario burn-in: until the chain has 2d accepted observations
-        // the scatter is uninformative, so propose from a box-scaled
-        // identity ((0.1 width_i)^2) rather than the near-zero scatter;
-        // a frozen initial chain wastes its whole slice inside one basin.
-        if self.n_obs < 2 * d {
-            let mut l = Array2::zeros((d, d));
-            for i in 0..d {
-                let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
-                l[(i, i)] = 0.1 * w;
-            }
-            return l;
-        }
-        let denom = (self.n_obs as f64 - 1.0).max(1.0);
-        for i in 0..d {
-            for j in 0..d {
-                cov[(i, j)] = self.scatter[(i, j)] / denom;
-            }
-        }
-        for i in 0..d {
-            let w = (bounds.high[i] - bounds.low[i]).abs().max(1e-12);
-            cov[(i, i)] += 1e-6 * w * w + 1e-12;
-        }
-        cholesky_lower(&cov).unwrap_or_else(|| {
-            let mut l = Array2::zeros((d, d));
-            for i in 0..d {
-                l[(i, i)] = cov[(i, i)].sqrt();
-            }
-            l
-        })
-    }
-}
-
-/// Dense lower Cholesky for the small proposal covariances (d <= ~64).
-fn cholesky_lower(a: &Array2<f64>) -> Option<Array2<f64>> {
-    let d = a.nrows();
-    let mut l: Array2<f64> = Array2::zeros((d, d));
-    for i in 0..d {
-        for j in 0..=i {
-            let mut s = a[(i, j)];
-            for k in 0..j {
-                s -= l[(i, k)] * l[(j, k)];
-            }
-            if i == j {
-                if s <= 0.0 || !s.is_finite() {
-                    return None;
-                }
-                l[(i, j)] = s.sqrt();
-            } else {
-                l[(i, j)] = s / l[(j, j)];
-            }
-        }
-    }
-    Some(l)
-}
-
 /// Distinct-basin bookkeeping over restart endpoints. Restart slices draw
 /// basins (approximately) i.i.d. from the basin-of-attraction measure, so
 /// the Good-Turing singleton fraction n1/n estimates the missing basin
