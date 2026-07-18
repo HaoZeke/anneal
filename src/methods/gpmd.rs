@@ -7,7 +7,7 @@
 //! Details: `docs/derivations/gpmd_algorithm.org` (explicitly not
 //! dual-annealing / CMA-ES / field SOTA).
 
-use eindir_core::{Bounds, Gradient, Objective};
+use eindir_core::{Gradient, Objective};
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
