@@ -369,3 +369,54 @@ fn projected_gradient_polish_recovers_from_oversized_initial_scaling() {
     assert!(result.n_evals <= 16);
     assert!(result.n_grads <= 16);
 }
+
+/// Kappa ~ 1e8 diagonal quadratic: the LANCZOS-class valley in miniature.
+///
+/// The pre-fix line search (Armijo halving, sqrt(eps) curvature floor, break
+/// on first stall) plateaus around 1e-6 here with budget left; interpolated
+/// backtracking plus stall recovery must polish to the deep floor.
+struct IllConditionedQuadratic {
+    bounds: Bounds<f64>,
+}
+
+impl IllConditionedQuadratic {
+    const KAPPA: f64 = 1e8;
+
+    fn new() -> Self {
+        Self {
+            bounds: Bounds::new(array![-5.0, -5.0], array![5.0, 5.0], 0.0),
+        }
+    }
+}
+
+impl Objective<f64> for IllConditionedQuadratic {
+    fn dim(&self) -> usize {
+        2
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        x[0] * x[0] + Self::KAPPA * x[1] * x[1]
+    }
+}
+
+#[test]
+fn projected_gradient_polish_reaches_deep_floor_on_ill_conditioned_valley() {
+    let obj = IllConditionedQuadratic::new();
+    let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
+        Array1::from_vec(vec![2.0 * x[0], 2.0 * IllConditionedQuadratic::KAPPA * x[1]])
+    });
+
+    let result = projected_gradient_polish(&obj, &grad, array![4.0, 3.0], 2000, 1.0, 1e-12);
+
+    assert!(
+        result.best_val < 1e-14,
+        "polish stalled at {:.3e} after {} evals + {} grads",
+        result.best_val,
+        result.n_evals,
+        result.n_grads
+    );
+}

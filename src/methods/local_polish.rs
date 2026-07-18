@@ -131,7 +131,12 @@ impl LbfgsMemory {
         let ys = y.dot(&s);
         let s_norm = vector_norm(&s);
         let y_norm = vector_norm(&y);
-        let curvature_floor = f64::EPSILON.sqrt() * s_norm * y_norm;
+        // The rejection criterion is the scale-invariant curvature cosine
+        // ys / (|s||y|). A sqrt(eps) floor (~1.5e-8) silently discards every
+        // pair on a kappa ~ 1e8 valley, emptying the memory exactly where
+        // quasi-Newton curvature matters most; an 8*eps floor still rejects
+        // sign violations and pure round-off pairs.
+        let curvature_floor = 8.0 * f64::EPSILON * s_norm * y_norm;
         if !ys.is_finite() || ys <= curvature_floor {
             return false;
         }
@@ -291,6 +296,10 @@ where
     let mut prev_pgrad = None;
     let mut final_projected_grad_norm = f64::INFINITY;
     let mut final_grad_matches_x = false;
+    // Stall-recovery scale: each failed line search restarts the memory two
+    // orders finer from the best point instead of abandoning the remaining
+    // budget. The floor ties to machine precision at the incumbent scale.
+    let mut stall_scale = step0;
 
     while n_evals < max_fevals {
         let grad = gradient.grad(x.view());
@@ -350,7 +359,21 @@ where
                     accepted = true;
                     break;
                 }
-                alpha *= BACKTRACK_SHRINK;
+                // Quadratic interpolation on f(x + a p) from f, f', and the
+                // rejected trial; the safeguarded minimizer replaces naive
+                // halving and roughly doubles the accept rate per trial on
+                // ill-conditioned valleys.
+                if trial_value.is_finite() {
+                    let denom = trial_value - value + alpha * directional_decrease;
+                    if denom > 0.0 && denom.is_finite() {
+                        let alpha_q = 0.5 * directional_decrease * alpha * alpha / denom;
+                        alpha = alpha_q.clamp(0.1 * alpha, BACKTRACK_SHRINK * alpha);
+                    } else {
+                        alpha *= BACKTRACK_SHRINK;
+                    }
+                } else {
+                    alpha *= BACKTRACK_SHRINK;
+                }
             }
             if accepted || fallback_attempted {
                 break;
@@ -369,7 +392,21 @@ where
             fallback_attempted = true;
         }
         if !accepted {
-            break;
+            // Line search failed with budget remaining: restart two orders
+            // finer from the best point instead of abandoning the polish.
+            // Rebuilding the memory at the finer scale recovers curvature
+            // pairs that cancellation destroyed at the coarse scale.
+            stall_scale *= 1e-2;
+            let x_scale = 1.0 + vector_norm(&best_pos);
+            if stall_scale < f64::EPSILON.powf(2.0 / 3.0) * x_scale {
+                break;
+            }
+            memory.reset(stall_scale);
+            x = best_pos.clone();
+            value = best_val;
+            prev_x = None;
+            prev_pgrad = None;
+            continue;
         }
     }
 
