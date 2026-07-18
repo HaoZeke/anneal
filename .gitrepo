@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = git@github.com:HaoZeke/anneal
+	branch = main
+	commit = 9bed29ca941f275ce472cb71d22fec752ab03e3d
+	parent = 
+	method = merge
+	cmdver = 0.4.9
