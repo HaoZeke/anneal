@@ -1,7 +1,6 @@
 # Custom
 .pdm.toml
 *.ipynb
-!examples/notebooks/*.ipynb
 .bench/
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
