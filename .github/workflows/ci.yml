@@ -98,7 +98,7 @@ jobs:
       - name: Execute quickstart notebook (MyST source)
         if: runner.os != 'macOS' && matrix.python-version == '3.12'
         run: |
-          .venv/bin/python -m pip install jupytext nbclient ipykernel
+          .venv/bin/python -m pip install jupytext nbconvert nbclient ipykernel
           .venv/bin/python -m jupytext --to ipynb --execute --output - \
             examples/notebooks/01_quickstart.md > /dev/null
 
