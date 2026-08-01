@@ -2,7 +2,7 @@ cff-version: 1.2.0
 title: "anneal: typed simulated-annealing components"
 message: "If you use anneal, please cite the paper and the software."
 type: software
-version: 0.7.1
+version: 0.7.2
 date-released: "2026-06-26"
 authors:
   - family-names: "Goswami"
