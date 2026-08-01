@@ -239,14 +239,8 @@ where
             let remain = budget.saturating_sub(work(n_evals, n_grads));
             let polish_use = polish_budget.min(remain);
             if polish_use >= 4 {
-                let pol = projected_gradient_polish(
-                    obj,
-                    g,
-                    best_pos.clone(),
-                    polish_use,
-                    0.1,
-                    1e-8,
-                );
+                let pol =
+                    projected_gradient_polish(obj, g, best_pos.clone(), polish_use, 0.1, 1e-8);
                 n_evals += pol.n_evals;
                 n_grads += pol.n_grads;
                 if pol.best_val < best_val && pol.best_val.is_finite() {
@@ -281,11 +275,7 @@ mod tests {
     impl Sphere {
         fn new(d: usize) -> Self {
             Self {
-                bounds: Bounds::new(
-                    Array1::from_elem(d, -2.0),
-                    Array1::from_elem(d, 2.0),
-                    1e-12,
-                ),
+                bounds: Bounds::new(Array1::from_elem(d, -2.0), Array1::from_elem(d, 2.0), 1e-12),
             }
         }
     }

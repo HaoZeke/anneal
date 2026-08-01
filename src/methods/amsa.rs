@@ -152,7 +152,6 @@ pub(crate) fn cholesky_lower(a: &Array2<f64>) -> Option<Array2<f64>> {
     Some(l)
 }
 
-
 /// Result of one standalone AmSa run.
 #[derive(Clone, Debug)]
 pub struct AmsaResult {

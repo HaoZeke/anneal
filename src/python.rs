@@ -276,9 +276,7 @@ impl Objective<f64> for CallableObjective {
                 match batch_fn.call1(py, (py_arr,)) {
                     Ok(r) => {
                         if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
-                            return Array1::from_vec(
-                                arr.as_slice().expect("contiguous").to_vec(),
-                            );
+                            return Array1::from_vec(arr.as_slice().expect("contiguous").to_vec());
                         }
                         if let Ok(seq) = r.extract::<Vec<f64>>(py) {
                             if seq.len() == n {
@@ -1408,21 +1406,19 @@ fn dmc_population_optimize(
                 &mut rng,
             )
         }
-        None => crate::methods::dmc_population::run_dmc_population_seeded::<
-            _,
-            CallablePyGradient,
-            _,
-        >(
-            &obj,
-            None,
-            budget,
-            seed,
-            target_n,
-            steps_per_control,
-            crate::methods::dmc_population::DEFAULT_BETA0,
-            seed_view,
-            &mut rng,
-        ),
+        None => {
+            crate::methods::dmc_population::run_dmc_population_seeded::<_, CallablePyGradient, _>(
+                &obj,
+                None,
+                budget,
+                seed,
+                target_n,
+                steps_per_control,
+                crate::methods::dmc_population::DEFAULT_BETA0,
+                seed_view,
+                &mut rng,
+            )
+        }
     };
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
@@ -1502,7 +1498,6 @@ fn gpmd_optimize(
     out.set_item("n_propose", result.n_propose)?;
     Ok(out.into())
 }
-
 
 /// Standalone whitened BFWT annealed descent (AmSa).
 ///

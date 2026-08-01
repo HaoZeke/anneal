@@ -249,7 +249,11 @@ pub fn softmax_entropy(energies: &[f64], beta: f64) -> f64 {
 /// Shannon entropy of an arbitrary positive mass vector (normalized in-place
 /// for the sum). Used to audit residual weight laws against \(H_\star\).
 pub fn mass_entropy(weights: &[f64]) -> f64 {
-    let total: f64 = weights.iter().copied().filter(|w| w.is_finite() && *w > 0.0).sum();
+    let total: f64 = weights
+        .iter()
+        .copied()
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .sum();
     if !(total.is_finite() && total > 0.0) {
         return 0.0;
     }
@@ -347,7 +351,11 @@ pub fn calibrate_beta(energies: &[f64], h_star: f64) -> f64 {
 /// from a positive weight vector (length must match the walker count).
 pub fn residual_expected_counts(weights: &[f64], target_n: usize) -> Vec<f64> {
     let target_n = target_n.max(1) as f64;
-    let total: f64 = weights.iter().copied().filter(|w| w.is_finite() && *w > 0.0).sum();
+    let total: f64 = weights
+        .iter()
+        .copied()
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .sum();
     if !(total.is_finite() && total > 0.0) {
         return vec![0.0; weights.len()];
     }
@@ -669,8 +677,7 @@ where
                     for i in 0..dim {
                         let u1 = rng.random::<f64>().max(1e-12);
                         let u2 = rng.random::<f64>();
-                        let z = (-2.0 * u1.ln()).sqrt()
-                            * (2.0 * std::f64::consts::PI * u2).cos();
+                        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                         y[i] += jitter * z;
                     }
                     reflect_into_box(y.view(), &bounds)
@@ -697,10 +704,7 @@ where
                 controls: 0,
             };
         }
-        Population {
-            target_n,
-            walkers,
-        }
+        Population { target_n, walkers }
     };
 
     let base_sigma = default_sigma(&bounds) * 2.0;
@@ -772,8 +776,7 @@ where
                     // 1) Local L-BFGS polish from current elite.
                     let max_fe = (remain / 3).max(4).min((2 * dim + 24).max(16));
                     let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
-                    let pol =
-                        projected_gradient_polish(obj, gr, x.clone(), max_fe, step0, 1e-10);
+                    let pol = projected_gradient_polish(obj, gr, x.clone(), max_fe, step0, 1e-10);
                     let room = budget.saturating_sub(work(n_evals, n_grads));
                     let charge = (pol.n_evals + pol.n_grads).min(room);
                     let ce = pol.n_evals.min(charge);
@@ -813,9 +816,8 @@ where
                             break;
                         }
                         let max_fe2 = (room2 / 2).max(4).min((2 * dim + 20).max(12));
-                        let pol2 = projected_gradient_polish(
-                            obj, gr, y.clone(), max_fe2, step0, 1e-10,
-                        );
+                        let pol2 =
+                            projected_gradient_polish(obj, gr, y.clone(), max_fe2, step0, 1e-10);
                         let room3 = budget.saturating_sub(work(n_evals, n_grads));
                         let charge2 = (pol2.n_evals + pol2.n_grads).min(room3);
                         let ce2 = pol2.n_evals.min(charge2);
@@ -887,8 +889,7 @@ where
                                 if (trial[c] - x[c]).abs() <= 1e-14 {
                                     continue;
                                 }
-                                if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads)
-                                {
+                                if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
                                     if e < fx {
                                         x = trial;
                                         fx = e;
@@ -913,11 +914,7 @@ where
                             for _ in 0..n_flip {
                                 let c = rng.random_range(0..dim);
                                 let step_i = if rng.random::<f64>() < 0.85 {
-                                    if rng.random::<f64>() < 0.5 {
-                                        -1.0
-                                    } else {
-                                        1.0
-                                    }
+                                    if rng.random::<f64>() < 0.5 { -1.0 } else { 1.0 }
                                 } else if rng.random::<f64>() < 0.5 {
                                     -2.0
                                 } else {
@@ -930,24 +927,18 @@ where
                                 if e < fx {
                                     x = trial.clone();
                                     fx = e;
-                                    let room4 =
-                                        budget.saturating_sub(work(n_evals, n_grads));
+                                    let room4 = budget.saturating_sub(work(n_evals, n_grads));
                                     if room4 >= 8 {
-                                        let max_fe4 =
-                                            (room4 / 2).min(2 * dim + 12).max(6);
+                                        let max_fe4 = (room4 / 2).min(2 * dim + 12).max(6);
                                         let pol4 = projected_gradient_polish(
                                             obj, gr, trial, max_fe4, step0, 1e-10,
                                         );
-                                        let room5 = budget
-                                            .saturating_sub(work(n_evals, n_grads));
-                                        let charge4 =
-                                            (pol4.n_evals + pol4.n_grads).min(room5);
+                                        let room5 = budget.saturating_sub(work(n_evals, n_grads));
+                                        let charge4 = (pol4.n_evals + pol4.n_grads).min(room5);
                                         let ce4 = pol4.n_evals.min(charge4);
                                         n_evals += ce4;
                                         n_grads += (charge4 - ce4).min(pol4.n_grads);
-                                        if pol4.best_val.is_finite()
-                                            && pol4.best_val < fx
-                                        {
+                                        if pol4.best_val.is_finite() && pol4.best_val < fx {
                                             x = pol4.best_pos;
                                             fx = pol4.best_val;
                                         }
@@ -973,11 +964,8 @@ where
                             if room2 < 8 {
                                 break;
                             }
-                            let max_fe2 =
-                                (room2 / 2).max(6).min((3 * dim + 24).max(16));
-                            let pol2 = projected_gradient_polish(
-                                obj, gr, y, max_fe2, step0, 1e-10,
-                            );
+                            let max_fe2 = (room2 / 2).max(6).min((3 * dim + 24).max(16));
+                            let pol2 = projected_gradient_polish(obj, gr, y, max_fe2, step0, 1e-10);
                             let room3 = budget.saturating_sub(work(n_evals, n_grads));
                             let charge2 = (pol2.n_evals + pol2.n_grads).min(room3);
                             let ce2 = pol2.n_evals.min(charge2);
@@ -1023,8 +1011,7 @@ where
                         }
                         let mid = 0.5 * (bounds.low[c] + bounds.high[c]);
                         let mut trial = x.clone();
-                        trial[c] =
-                            (mid - 1.05 * (x[c] - mid)).clamp(bounds.low[c], bounds.high[c]);
+                        trial[c] = (mid - 1.05 * (x[c] - mid)).clamp(bounds.low[c], bounds.high[c]);
                         let e = match charge_obj(trial.view(), &mut n_evals, n_grads) {
                             Some(v) => v,
                             None => break,
@@ -1041,8 +1028,8 @@ where
                             }
                             let c = rng.random_range(0..dim);
                             let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
-                            let step_c = (local_sigma * scale * span.max(1.0).min(2.0))
-                                .min(0.2 * span);
+                            let step_c =
+                                (local_sigma * scale * span.max(1.0).min(2.0)).min(0.2 * span);
                             for dir in [-1.0_f64, 1.0] {
                                 if work(n_evals, n_grads) >= budget {
                                     break;
@@ -1088,7 +1075,11 @@ where
                     let b = &elites[1 + (ei % (k_elite - 1))].0;
                     let mut trial = Array1::zeros(dim);
                     for i in 0..dim {
-                        trial[i] = if rng.random::<f64>() < 0.5 { a[i] } else { b[i] };
+                        trial[i] = if rng.random::<f64>() < 0.5 {
+                            a[i]
+                        } else {
+                            b[i]
+                        };
                     }
                     let trial = reflect_into_box(trial.view(), &bounds);
                     if let Some(e) = charge_obj(trial.view(), &mut n_evals, n_grads) {
@@ -1225,8 +1216,8 @@ where
                     let x_r2 = arch_or_pop(rng);
                     for i in 0..dim {
                         if i == j_rand || rng.random::<f64>() < cr_i {
-                            trial[i] = snapshot[best_i].pos[i]
-                                + f_i * (snapshot[r1].pos[i] - x_r2[i]);
+                            trial[i] =
+                                snapshot[best_i].pos[i] + f_i * (snapshot[r1].pos[i] - x_r2[i]);
                         } else {
                             trial[i] = w.pos[i];
                         }
@@ -1237,8 +1228,7 @@ where
                     let x_r3 = arch_or_pop(rng);
                     for i in 0..dim {
                         if i == j_rand || rng.random::<f64>() < cr_i {
-                            trial[i] = snapshot[r1].pos[i]
-                                + f_i * (snapshot[r2].pos[i] - x_r3[i]);
+                            trial[i] = snapshot[r1].pos[i] + f_i * (snapshot[r2].pos[i] - x_r3[i]);
                         } else {
                             trial[i] = w.pos[i];
                         }
@@ -1358,16 +1348,11 @@ where
             pop.walkers
                 .retain(|w| w.energy.is_finite() && w.pos.iter().all(|x| x.is_finite()));
             if best_val.is_finite() && !pop.walkers.is_empty() {
-                if let Some((wi, _)) = pop
-                    .walkers
-                    .iter()
-                    .enumerate()
-                    .max_by(|(_, a), (_, b)| {
-                        a.energy
-                            .partial_cmp(&b.energy)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                {
+                if let Some((wi, _)) = pop.walkers.iter().enumerate().max_by(|(_, a), (_, b)| {
+                    a.energy
+                        .partial_cmp(&b.energy)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                }) {
                     pop.walkers[wi] = Walker {
                         pos: best_pos.clone(),
                         energy: best_val,
@@ -1398,9 +1383,8 @@ where
                         let f0 = pop.walkers[wi].energy;
                         let max_fe = (per / 2).max(4);
                         let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
-                        let pol = projected_gradient_polish(
-                            obj, gr, x0.clone(), max_fe, step0, 1e-10,
-                        );
+                        let pol =
+                            projected_gradient_polish(obj, gr, x0.clone(), max_fe, step0, 1e-10);
                         let room = budget.saturating_sub(work(n_evals, n_grads));
                         let charge = (pol.n_evals + pol.n_grads).min(room);
                         let ce = pol.n_evals.min(charge);
@@ -1445,8 +1429,8 @@ where
                         for i in 0..dim {
                             let u1 = rng.random::<f64>().max(1e-12);
                             let u2 = rng.random::<f64>();
-                            let z = (-2.0 * u1.ln()).sqrt()
-                                * (2.0 * std::f64::consts::PI * u2).cos();
+                            let z =
+                                (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
                             y[i] += jit * z;
                         }
                         reflect_into_box(y.view(), &bounds)
@@ -1503,8 +1487,7 @@ where
                                 break;
                             }
                             let mut trial = x.clone();
-                            trial[c] =
-                                (x[c].round() + dir).clamp(bounds.low[c], bounds.high[c]);
+                            trial[c] = (x[c].round() + dir).clamp(bounds.low[c], bounds.high[c]);
                             if (trial[c] - x[c]).abs() <= 1e-14 {
                                 continue;
                             }
@@ -1830,16 +1813,7 @@ mod tests {
     fn run_controls_population_and_improves_sphere() {
         let obj = Sphere::new(3);
         let mut rng = StdRng::seed_from_u64(11);
-        let res = run_dmc_population::<_, Sphere, _>(
-            &obj,
-            None,
-            400,
-            11,
-            12,
-            3,
-            1.0,
-            &mut rng,
-        );
+        let res = run_dmc_population::<_, Sphere, _>(&obj, None, 400, 11, 12, 3, 1.0, &mut rng);
         assert!(res.n_evals <= 400);
         assert!(res.final_population > 0);
         assert!(res.final_population <= 12 + 2); // control targets 12
@@ -1895,7 +1869,9 @@ mod tests {
                 5
             }
             fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-                x.mapv(|xi| 2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin())
+                x.mapv(|xi| {
+                    2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin()
+                })
             }
         }
         let obj = Rastrigin5::new();
@@ -1958,8 +1934,12 @@ mod tests {
             }
         }
         impl Objective<f64> for Rastrigin5 {
-            fn dim(&self) -> usize { 5 }
-            fn bounds(&self) -> &Bounds<f64> { &self.bounds }
+            fn dim(&self) -> usize {
+                5
+            }
+            fn bounds(&self) -> &Bounds<f64> {
+                &self.bounds
+            }
             fn eval(&self, x: ArrayView1<f64>) -> f64 {
                 let d = x.len() as f64;
                 10.0 * d
@@ -1969,9 +1949,13 @@ mod tests {
             }
         }
         impl Gradient<f64> for Rastrigin5 {
-            fn dim(&self) -> usize { 5 }
+            fn dim(&self) -> usize {
+                5
+            }
             fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
-                x.mapv(|xi| 2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin())
+                x.mapv(|xi| {
+                    2.0 * xi + 20.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * xi).sin()
+                })
             }
         }
         // Fair protocol: both methods spend objective-only work units (no
@@ -2018,8 +2002,11 @@ mod tests {
             "work {} exceeds budget 500",
             res.n_evals + res.n_grads
         );
-        assert!(res.best_val < 2.0, "sphere should refine, got {}", res.best_val);
+        assert!(
+            res.best_val < 2.0,
+            "sphere should refine, got {}",
+            res.best_val
+        );
         assert!(obj.bounds().contains(res.best_pos.view()));
     }
-
 }
