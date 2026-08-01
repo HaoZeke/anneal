@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.7.2](https://github.com/HaoZeke/anneal/tree/0.7.2) - 2026-08-01
+
+### Changed
+
+- Lint cleanup with no behavioural change: removed the superseded endgame
+  basin-grind driver and the portfolio-local unit-box helpers (the
+  stall-recovering interpolated polish owns that path since 0.7.0),
+  collapsed nested conditionals into let-chains, switched to
+  `clamp`/`is_multiple_of`, documented `GpmdResult` fields, and promoted
+  the theta-star descent-window check to a compile-time assertion.
+- Commit lint in CI now checks from the latest tag; the pre-convention
+  legacy history is no longer linted.
+
 ## [0.7.1](https://github.com/HaoZeke/anneal/tree/0.7.1) - 2026-07-18
 
 ### Added
