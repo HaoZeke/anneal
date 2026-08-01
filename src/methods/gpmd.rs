@@ -18,6 +18,10 @@ use crate::movekernel::reflect_into_box;
 
 /// Dimensionless operating temperature θ⋆ = 1/2 (inside (0,2) window).
 pub const THETA_STAR: f64 = 0.5;
+const _: () = assert!(
+    THETA_STAR > 0.0 && THETA_STAR < 2.0,
+    "theta* must sit inside the (0,2) descent window (D6)"
+);
 /// Model acceptance target α*(θ⋆) ≈ 0.32 (D6 optimize_c at θ=1/2; proofs/gpmd_derive.py).
 pub const ALPHA_TARGET: f64 = 0.32;
 /// Fraction of budget reserved for terminal polish.
@@ -30,11 +34,17 @@ const SIGMA_FLOOR_FRAC: f64 = 1e-4;
 /// Result of one GPMD run.
 #[derive(Clone, Debug)]
 pub struct GpmdResult {
+    /// Best position found.
     pub best_pos: Array1<f64>,
+    /// Objective value at [`GpmdResult::best_pos`].
     pub best_val: f64,
+    /// Objective evaluations charged.
     pub n_evals: usize,
+    /// Gradient evaluations charged.
     pub n_grads: usize,
+    /// Accepted proposals.
     pub n_accept: usize,
+    /// Total proposals.
     pub n_propose: usize,
 }
 
@@ -72,6 +82,7 @@ where
     run_gpmd(obj, grad, budget, seed, x0, &mut rng)
 }
 
+/// Run GPMD with a caller-supplied RNG; see [`gpmd_optimize`] for the seeded entry.
 pub fn run_gpmd<O, G, R>(
     obj: &O,
     grad: Option<&G>,
@@ -336,11 +347,6 @@ mod tests {
         let t = gap_proportional_temp(4.0, 0.0, 4);
         // θ* * 4 / 4 = 0.5
         assert!((t - 0.5).abs() < 1e-12);
-    }
-
-    #[test]
-    fn theta_star_in_descent_window() {
-        assert!(THETA_STAR > 0.0 && THETA_STAR < 2.0);
     }
 
     #[test]

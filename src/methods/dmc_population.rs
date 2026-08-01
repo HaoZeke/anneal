@@ -575,6 +575,7 @@ pub struct DmcPopulationResult {
 ///
 /// When `seed_x` is `Some`, the first walker is placed at that point (clipped
 /// into the box) so portfolio slices can continue from the incumbent.
+#[allow(clippy::too_many_arguments)]
 pub fn run_dmc_population<O, G, R>(
     obj: &O,
     grad: Option<&G>,
@@ -604,6 +605,7 @@ where
 }
 
 /// Same as [`run_dmc_population`] with an optional seed position for walker 0.
+#[allow(clippy::too_many_arguments)]
 pub fn run_dmc_population_seeded<O, G, R>(
     obj: &O,
     grad: Option<&G>,
@@ -623,7 +625,7 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims.max(1);
     // Honour the caller's target; only clamp to a feasible range.
-    let target_n = target_n.clamp(4, budget.max(4).min(64));
+    let target_n = target_n.clamp(4, budget.clamp(4, 64));
     let steps_per_control = steps_per_control.max(1);
     let mut n_evals = 0usize;
     let mut n_grads = 0usize;
@@ -762,7 +764,7 @@ where
             elites.push((best_pos.clone(), best_val));
             elites.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
             elites.dedup_by(|a, b| (a.1 - b.1).abs() < 1e-14);
-            let k_elite = elites.len().min(5).max(1);
+            let k_elite = elites.len().clamp(1, 5);
             let mut ei = 0usize;
             // Dual annealing endgame: visit (Tsallis) → local (L-BFGS) cycles.
             while work(n_evals, n_grads) < budget {
@@ -867,13 +869,12 @@ where
                         for c in 0..dim {
                             base[c] = base[c].round().clamp(bounds.low[c], bounds.high[c]);
                         }
-                        if work(n_evals, n_grads) < budget {
-                            if let Some(e) = charge_obj(base.view(), &mut n_evals, n_grads) {
-                                if e < fx {
-                                    x = base.clone();
-                                    fx = e;
-                                }
-                            }
+                        if work(n_evals, n_grads) < budget
+                            && let Some(e) = charge_obj(base.view(), &mut n_evals, n_grads)
+                            && e < fx
+                        {
+                            x = base.clone();
+                            fx = e;
                         }
                         for c in 0..dim {
                             if work(n_evals, n_grads) >= budget {
@@ -1029,7 +1030,7 @@ where
                             let c = rng.random_range(0..dim);
                             let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
                             let step_c =
-                                (local_sigma * scale * span.max(1.0).min(2.0)).min(0.2 * span);
+                                (local_sigma * scale * span.clamp(1.0, 2.0)).min(0.2 * span);
                             for dir in [-1.0_f64, 1.0] {
                                 if work(n_evals, n_grads) >= budget {
                                     break;
@@ -1070,7 +1071,7 @@ where
                 }
                 elites[ei % k_elite] = (x, fx);
                 // Occasional elite crossover (basin recombination).
-                if k_elite >= 2 && ei % 4 == 0 && work(n_evals, n_grads) + 1 < budget {
+                if k_elite >= 2 && ei.is_multiple_of(4) && work(n_evals, n_grads) + 1 < budget {
                     let a = &elites[0].0;
                     let b = &elites[1 + (ei % (k_elite - 1))].0;
                     let mut trial = Array1::zeros(dim);
@@ -1338,7 +1339,7 @@ where
             .round()
             .max(8.0) as usize;
 
-        if step % steps_per_control == 0 {
+        if step.is_multiple_of(steps_per_control) {
             // Algorithm D8: entropy-calibrated residual population control.
             let (next, beta_star) =
                 population_control_ecit(&pop.walkers, pop.target_n, progress, 2.0, rng);
@@ -1347,58 +1348,58 @@ where
             controls += 1;
             pop.walkers
                 .retain(|w| w.energy.is_finite() && w.pos.iter().all(|x| x.is_finite()));
-            if best_val.is_finite() && !pop.walkers.is_empty() {
-                if let Some((wi, _)) = pop.walkers.iter().enumerate().max_by(|(_, a), (_, b)| {
+            if best_val.is_finite()
+                && !pop.walkers.is_empty()
+                && let Some((wi, _)) = pop.walkers.iter().enumerate().max_by(|(_, a), (_, b)| {
                     a.energy
                         .partial_cmp(&b.energy)
                         .unwrap_or(std::cmp::Ordering::Equal)
-                }) {
-                    pop.walkers[wi] = Walker {
-                        pos: best_pos.clone(),
-                        energy: best_val,
-                    };
-                }
+                })
+            {
+                pop.walkers[wi] = Walker {
+                    pos: best_pos.clone(),
+                    energy: best_val,
+                };
             }
             // Dual-style interleaved L-BFGS on elites when gradient is available.
-            if let Some(gr) = grad {
-                if work(n_evals, n_grads) + 12 < polish_start.min(budget) {
-                    let remain = polish_start.saturating_sub(work(n_evals, n_grads));
-                    let per = ((2 * dim + 16).max(20))
-                        .min(remain / 4)
-                        .max(10)
-                        .min(remain.saturating_sub(4));
-                    let mut order_w: Vec<usize> = (0..pop.walkers.len()).collect();
-                    order_w.sort_by(|&a, &b| {
-                        pop.walkers[a]
-                            .energy
-                            .partial_cmp(&pop.walkers[b].energy)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                    let n_pol = if progress > 0.3 { 2 } else { 1 }.min(order_w.len());
-                    for &wi in order_w.iter().take(n_pol) {
-                        if work(n_evals, n_grads) + 8 >= polish_start.min(budget) {
-                            break;
-                        }
-                        let x0 = pop.walkers[wi].pos.clone();
-                        let f0 = pop.walkers[wi].energy;
-                        let max_fe = (per / 2).max(4);
-                        let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
-                        let pol =
-                            projected_gradient_polish(obj, gr, x0.clone(), max_fe, step0, 1e-10);
-                        let room = budget.saturating_sub(work(n_evals, n_grads));
-                        let charge = (pol.n_evals + pol.n_grads).min(room);
-                        let ce = pol.n_evals.min(charge);
-                        n_evals += ce;
-                        n_grads += (charge - ce).min(pol.n_grads);
-                        if pol.best_val.is_finite() && pol.best_val <= f0 {
-                            pop.walkers[wi] = Walker {
-                                pos: pol.best_pos.clone(),
-                                energy: pol.best_val,
-                            };
-                            if pol.best_val < best_val {
-                                best_val = pol.best_val;
-                                best_pos = pol.best_pos;
-                            }
+            if let Some(gr) = grad
+                && work(n_evals, n_grads) + 12 < polish_start.min(budget)
+            {
+                let remain = polish_start.saturating_sub(work(n_evals, n_grads));
+                let per = ((2 * dim + 16).max(20))
+                    .min(remain / 4)
+                    .max(10)
+                    .min(remain.saturating_sub(4));
+                let mut order_w: Vec<usize> = (0..pop.walkers.len()).collect();
+                order_w.sort_by(|&a, &b| {
+                    pop.walkers[a]
+                        .energy
+                        .partial_cmp(&pop.walkers[b].energy)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                let n_pol = if progress > 0.3 { 2 } else { 1 }.min(order_w.len());
+                for &wi in order_w.iter().take(n_pol) {
+                    if work(n_evals, n_grads) + 8 >= polish_start.min(budget) {
+                        break;
+                    }
+                    let x0 = pop.walkers[wi].pos.clone();
+                    let f0 = pop.walkers[wi].energy;
+                    let max_fe = (per / 2).max(4);
+                    let step0 = (default_sigma(&bounds) * 0.5).max(1e-4);
+                    let pol = projected_gradient_polish(obj, gr, x0.clone(), max_fe, step0, 1e-10);
+                    let room = budget.saturating_sub(work(n_evals, n_grads));
+                    let charge = (pol.n_evals + pol.n_grads).min(room);
+                    let ce = pol.n_evals.min(charge);
+                    n_evals += ce;
+                    n_grads += (charge - ce).min(pol.n_grads);
+                    if pol.best_val.is_finite() && pol.best_val <= f0 {
+                        pop.walkers[wi] = Walker {
+                            pos: pol.best_pos.clone(),
+                            energy: pol.best_val,
+                        };
+                        if pol.best_val < best_val {
+                            best_val = pol.best_val;
+                            best_pos = pol.best_pos;
                         }
                     }
                 }
@@ -1423,7 +1424,7 @@ where
                     if work(n_evals, n_grads) >= budget {
                         break;
                     }
-                    let y = if k % 2 == 0 {
+                    let y = if k.is_multiple_of(2) {
                         let mut y = best_pos.clone();
                         let jit = (sigma * 3.0).max(default_sigma(&bounds) * 0.5);
                         for i in 0..dim {
@@ -1477,7 +1478,7 @@ where
                 let near_int = (0..dim)
                     .filter(|&c| (x[c] - x[c].round()).abs() < 0.15)
                     .count();
-                if near_int * 2 >= dim && controls % 2 == 0 {
+                if near_int * 2 >= dim && controls.is_multiple_of(2) {
                     for c in 0..dim {
                         if work(n_evals, n_grads) >= budget {
                             break;
@@ -1509,7 +1510,7 @@ where
                     }
                     let c = rng.random_range(0..dim);
                     let span = (bounds.high[c] - bounds.low[c]).abs().max(1e-12);
-                    let h = (refine_sigma * span.max(1.0).min(2.0)).min(0.15 * span);
+                    let h = (refine_sigma * span.clamp(1.0, 2.0)).min(0.15 * span);
                     for dir in [-1.0_f64, 1.0] {
                         if work(n_evals, n_grads) >= budget {
                             break;

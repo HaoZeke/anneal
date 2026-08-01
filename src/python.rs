@@ -278,10 +278,10 @@ impl Objective<f64> for CallableObjective {
                         if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
                             return Array1::from_vec(arr.as_slice().expect("contiguous").to_vec());
                         }
-                        if let Ok(seq) = r.extract::<Vec<f64>>(py) {
-                            if seq.len() == n {
-                                return Array1::from(seq);
-                            }
+                        if let Ok(seq) = r.extract::<Vec<f64>>(py)
+                            && seq.len() == n
+                        {
+                            return Array1::from(seq);
                         }
                         return Array1::from(vec![f64::INFINITY; n]);
                     }
