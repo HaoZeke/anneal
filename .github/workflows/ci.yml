@@ -95,6 +95,12 @@ jobs:
       - name: pytest
         run: .venv/bin/python -m pytest pytest/
 
+      - name: Execute quickstart notebook
+        if: runner.os != 'macOS' && matrix.python-version == '3.12'
+        run: |
+          .venv/bin/python -m pip install nbclient ipykernel
+          .venv/bin/jupyter execute --timeout 600 examples/notebooks/01_quickstart.ipynb
+
   ffi-smoke:
     name: FFI smoke (linux + cargo-c + valgrind)
     runs-on: ubuntu-latest
