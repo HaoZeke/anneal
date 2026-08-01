@@ -191,8 +191,7 @@ where
             cur: pair.clone(),
             best: pair,
         };
-        let chain_seed =
-            seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
+        let chain_seed = seed.wrapping_add(0x9e37_79b9_7f4a_7c15_u64.wrapping_mul(idx as u64 + 1));
         let mut rng = StdRng::seed_from_u64(chain_seed);
         let history = drive_rs(
             &variant,

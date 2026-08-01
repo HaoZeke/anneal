@@ -34,10 +34,10 @@ use rand_distr::{Beta, Distribution};
 use eindir_core::{AdditiveSurrogate, Bounds, Gradient, Objective, ReducedObjective};
 
 use crate::bias::Bias;
-use crate::methods::amsa::{AM_ALPHA_TARGET, AM_BARRIER_EMA, AM_STAGNANT_RESEED, AmSaState};
 use crate::cool::{Cooling, LogCool, TsallisCool};
 use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
+use crate::methods::amsa::{AM_ALPHA_TARGET, AM_BARRIER_EMA, AM_STAGNANT_RESEED, AmSaState};
 use crate::methods::bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, fit_laplace, pilot_draws_qmc,
 };
@@ -986,7 +986,6 @@ pub fn win_objective_discovery(
     (q0 + (1.0 - q0) * (1.0 - pi)) * p_conv
 }
 
-
 impl ArmStates {
     /// Next term of the Luby universal restart sequence
     /// 1,1,2,1,1,2,4,1,... (Luby, Sinclair, Zuckerman 1993): the expected
@@ -1556,8 +1555,7 @@ fn dual_style_local_search<O, G, R>(
             } else {
                 let mut y = Array1::zeros(dim);
                 for i in 0..dim {
-                    y[i] = bounds.low[i]
-                        + (bounds.high[i] - bounds.low[i]) * rng.random::<f64>();
+                    y[i] = bounds.low[i] + (bounds.high[i] - bounds.low[i]) * rng.random::<f64>();
                 }
                 bounds.clip(y.view())
             }
@@ -1591,10 +1589,7 @@ fn dual_style_local_search<O, G, R>(
                 let _ = projected_gradient_polish(obj, g, start, start_budget, 0.1, 1e-12);
             }
             None => {
-                let fd = BudgetedFiniteDiffGradient {
-                    obj,
-                    h_frac: 1e-5,
-                };
+                let fd = BudgetedFiniteDiffGradient { obj, h_frac: 1e-5 };
                 let _ = projected_gradient_polish(obj, &fd, start, start_budget, 0.1, 1e-12);
             }
         }
@@ -1692,8 +1687,7 @@ fn run_persistent_gsa<O, G>(
                 } else {
                     let delta = proposal_val - state.vals[chain];
                     // dual_annealing accept_reject (accept=-5), not Tsallis q_a.
-                    state.rng.random::<f64>()
-                        < dual_accept_prob(delta, t_accept, DUAL_ACCEPT_PARAM)
+                    state.rng.random::<f64>() < dual_accept_prob(delta, t_accept, DUAL_ACCEPT_PARAM)
                 };
                 if accepted {
                     state.xs[chain] = proposal;
@@ -3252,10 +3246,8 @@ where
                 // gain with the gain from raw sampling alone: when descending
                 // beats sampling by a wide margin, the basin-hopping pattern
                 // (deep descent per jump) dominates heavy-tailed visiting.
-                let raw_gain =
-                    (probe.worst_start_value - probe.best_start_value).max(0.0);
-                let descent_gain =
-                    (probe.worst_start_value - probe.best_descent_value).max(0.0);
+                let raw_gain = (probe.worst_start_value - probe.best_start_value).max(0.0);
+                let descent_gain = (probe.worst_start_value - probe.best_descent_value).max(0.0);
                 if descent_gain.is_finite() && descent_gain > 3.0 * raw_gain.max(f64::MIN_POSITIVE)
                 {
                     hop_first = true;
@@ -3551,13 +3543,9 @@ where
                     let p_conv = contraction.conversion_prob(NEAR_BEST_ORDERS, p);
                     match gt {
                         // D10.1 under D9 discovery value.
-                        Some(theta) => win_objective_discovery(
-                            remaining,
-                            p,
-                            slice.max(1),
-                            theta,
-                            p_conv,
-                        ),
+                        Some(theta) => {
+                            win_objective_discovery(remaining, p, slice.max(1), theta, p_conv)
+                        }
                         None => {
                             // D4 Beta fallback: E[(1-theta)^e] product.
                             let e = remaining.saturating_sub(p) / slice.max(1);
@@ -3645,12 +3633,7 @@ where
                 }
                 // Phase C: monotonic coordinate micro-refine (accept-only).
                 if ledger.remaining() >= 4 {
-                    run_endgame_coordinate_microrefine(
-                        &budgeted_obj,
-                        &ledger,
-                        &bounds,
-                        budget,
-                    );
+                    run_endgame_coordinate_microrefine(&budgeted_obj, &ledger, &bounds, budget);
                 }
                 // Phase D: multi-start dual-style LS (closes Styblinski dual leads).
                 if ledger.remaining() >= 32 {
@@ -3870,7 +3853,10 @@ mod tests {
     fn endgame_cycle_cap_reserves_for_multistart() {
         let rem = 2000usize;
         let first = endgame_cycle_cap(rem, 0);
-        assert!(first < rem, "first cycle must not dump full tail: {first} vs {rem}");
+        assert!(
+            first < rem,
+            "first cycle must not dump full tail: {first} vs {rem}"
+        );
         assert_eq!(first, (rem * 2) / 3);
         assert!(rem - first >= rem / 3);
         let later = endgame_cycle_cap(rem, 1);
@@ -4612,8 +4598,7 @@ mod tests {
         // mathematical invariance that matters for the objective).
         let offset = 1.0e4;
         assert!(
-            (a.best_val + offset - b.best_val).abs()
-                <= 1e-3 * (a.best_val.abs() + offset).max(1.0)
+            (a.best_val + offset - b.best_val).abs() <= 1e-3 * (a.best_val.abs() + offset).max(1.0)
                 || (a.best_val.is_finite() && b.best_val.is_finite()),
             "best_val should translate by offset: a={} b={}",
             a.best_val,

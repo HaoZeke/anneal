@@ -407,7 +407,10 @@ impl Objective<f64> for IllConditionedQuadratic {
 fn projected_gradient_polish_reaches_deep_floor_on_ill_conditioned_valley() {
     let obj = IllConditionedQuadratic::new();
     let grad = AnalyticGradient::new(2, |x: ArrayView1<f64>| {
-        Array1::from_vec(vec![2.0 * x[0], 2.0 * IllConditionedQuadratic::KAPPA * x[1]])
+        Array1::from_vec(vec![
+            2.0 * x[0],
+            2.0 * IllConditionedQuadratic::KAPPA * x[1],
+        ])
     });
 
     let result = projected_gradient_polish(&obj, &grad, array![4.0, 3.0], 2000, 1.0, 1e-12);

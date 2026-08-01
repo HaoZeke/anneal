@@ -12,46 +12,46 @@
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
 pub mod additive_independence;
+pub mod amsa;
 pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod bfwt;
 pub mod dmc_population;
-pub mod gpmd;
 pub mod gle_langevin;
+pub mod gpmd;
 pub mod local_polish;
 pub mod mcmc_sa;
 pub mod parallel_tempering;
 pub mod portfolio;
 pub mod regime;
-pub mod amsa;
 pub mod routing_probe;
 pub mod sketchmap;
 pub mod tpe;
 pub mod tps_shoot;
 
 pub use additive_independence::{AdditiveIndependenceResult, additive_independence_sa};
+pub use amsa::{AmsaResult, amsa_optimize};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
     fit_laplace, pilot_draws, pilot_draws_qmc,
 };
-pub use amsa::{AmsaResult, amsa_optimize};
 pub use bfwt::{
-    BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, budget_feasible_temp,
-    bfwt_optimize, t_des, t_hi, t_lo, window_nonempty,
+    BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, bfwt_optimize,
+    budget_feasible_temp, t_des, t_hi, t_lo, window_nonempty,
 };
 pub use dmc_population::{
     DEFAULT_BETA0, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
     Population, Walker, default_sigma, diffusion_displace, dmc_population_optimize,
     population_control, run_dmc_population, walker_weight,
 };
-pub use gpmd::{
-    ALPHA_TARGET, GpmdResult, POLISH_FRACTION, THETA_STAR, gap_proportional_temp, gpmd_optimize,
-    run_gpmd,
-};
 pub use gle_langevin::{
     GleLangevinResult, GlePreconditioner, estimate_gle_omega0, estimate_gle_preconditioner,
     gle_langevin_adaptive_sa, gle_langevin_preconditioned_sa, gle_langevin_sa,
+};
+pub use gpmd::{
+    ALPHA_TARGET, GpmdResult, POLISH_FRACTION, THETA_STAR, gap_proportional_temp, gpmd_optimize,
+    run_gpmd,
 };
 pub use local_polish::{
     LocalPolishResult, QmcPolishResult, projected_gradient_polish, qmc_best1bin_scout,

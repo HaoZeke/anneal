@@ -70,16 +70,15 @@ pub use hmc::{
 };
 pub use laws::LawViolation;
 pub use methods::{
-    AmsaResult, amsa_optimize,
-    ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_BETA0,
+    AmsaResult, ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_BETA0,
     DEFAULT_GAMMA, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
     GelmanRubin, GleLangevinResult, GlePreconditioner, LaplacePosterior, LocalPolishResult,
     MultiChainResult, MultiChainSampler, MultiChainState, OptimizationRegime,
     ParallelTemperingSampler, PilotObservation, PilotPrior, Population, PortfolioPolicy,
     PortfolioResult, ProblemFeatures, PtChainState, PtResult, Q_V_MAX, Q_V_MIN, QmcPolishResult,
     RegimeError, ShootDirection, TARGET_ACCEPT_RATE, TpeCategorical, TpeContinuous1d, Walker,
-    arm_prior_boost, arm_slice_multiplier, check_accept_path, default_sigma, diffusion_displace,
-    dmc_population_optimize, estimate_gle_omega0, estimate_gle_preconditioner,
+    amsa_optimize, arm_prior_boost, arm_slice_multiplier, check_accept_path, default_sigma,
+    diffusion_displace, dmc_population_optimize, estimate_gle_omega0, estimate_gle_preconditioner,
     exact_accept_allowed, fit_laplace, geometric_ladder, gle_langevin_adaptive_sa,
     gle_langevin_preconditioned_sa, gle_langevin_sa, order_arms, pilot_draws, pilot_draws_qmc,
     population_control, portfolio_optimize, portfolio_optimize_with_policy, preferred_arm_tail,

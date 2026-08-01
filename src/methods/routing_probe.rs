@@ -93,14 +93,7 @@ where
         if v0.is_finite() {
             start_values.push(v0);
         }
-        let polish = projected_gradient_polish(
-            obj,
-            grad,
-            clipped,
-            max_fevals_per_start,
-            0.1,
-            0.0,
-        );
+        let polish = projected_gradient_polish(obj, grad, clipped, max_fevals_per_start, 0.1, 0.0);
         if polish.best_val.is_finite() {
             descent_values.push(polish.best_val);
         }
@@ -110,10 +103,7 @@ where
     }
     descent_values.sort_by(|a, b| a.partial_cmp(b).expect("finite values"));
     let best_descent_value = descent_values[0];
-    let best_start_value = start_values
-        .iter()
-        .copied()
-        .fold(f64::INFINITY, f64::min);
+    let best_start_value = start_values.iter().copied().fold(f64::INFINITY, f64::min);
     let worst_start = start_values
         .iter()
         .copied()
@@ -194,7 +184,11 @@ mod tests {
             let v = x[0];
             let a = (v + 2.0) * (v + 2.0);
             let b = (v - 2.0) * (v - 2.0) + 1.5;
-            let g = if a <= b { 2.0 * (v + 2.0) } else { 2.0 * (v - 2.0) };
+            let g = if a <= b {
+                2.0 * (v + 2.0)
+            } else {
+                2.0 * (v - 2.0)
+            };
             let mut out = Array1::zeros(x.len());
             out[0] = g;
             out
@@ -203,11 +197,7 @@ mod tests {
 
     fn box2(width: f64) -> Bounds<f64> {
         let half = width / 2.0;
-        Bounds::new(
-            Array1::from_elem(2, -half),
-            Array1::from_elem(2, half),
-            0.0,
-        )
+        Bounds::new(Array1::from_elem(2, -half), Array1::from_elem(2, half), 0.0)
     }
 
     fn starts2(bounds: &Bounds<f64>) -> Vec<Array1<f64>> {
@@ -221,8 +211,7 @@ mod tests {
     fn quadratic_probe_reports_single_basin() {
         let obj = Quadratic { bounds: box2(10.0) };
         let starts = starts2(&obj.bounds);
-        let probe = multimodality_probe(&obj, &obj, &obj.bounds, &starts, 60)
-            .expect("probe runs");
+        let probe = multimodality_probe(&obj, &obj, &obj.bounds, &starts, 60).expect("probe runs");
         assert_eq!(probe.distinct_basins, 1, "{probe:?}");
         assert!(!probe.multimodal());
     }
@@ -231,8 +220,7 @@ mod tests {
     fn two_well_probe_reports_two_basins() {
         let obj = TwoWell { bounds: box2(10.0) };
         let starts = starts2(&obj.bounds);
-        let probe = multimodality_probe(&obj, &obj, &obj.bounds, &starts, 60)
-            .expect("probe runs");
+        let probe = multimodality_probe(&obj, &obj, &obj.bounds, &starts, 60).expect("probe runs");
         assert!(probe.distinct_basins >= 2, "{probe:?}");
         assert!(probe.multimodal());
     }
