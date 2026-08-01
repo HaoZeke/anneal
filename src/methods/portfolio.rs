@@ -114,9 +114,8 @@ fn endgame_polish_max_fevals(cycle_wu: usize) -> usize {
 /// BudgetedObjective/Gradient stop charging once the cycle budget is spent,
 /// then restores `outer_cap` (normally the full portfolio budget).
 ///
-/// `step0` is the L-BFGS initial line-search scale; basin grind uses a
-/// decreasing sequence so COOLHANS-scale residuals keep refining after a
-/// coarse step stalls.
+/// `step0` is the L-BFGS initial line-search scale.
+#[allow(clippy::too_many_arguments)]
 fn run_endgame_projected_polish_cycle<O, G>(
     obj: &BudgetedObjective<'_, O>,
     grad: &BudgetedGradient<'_, G>,
@@ -147,55 +146,6 @@ fn run_endgame_projected_polish_cycle<O, G>(
     ledger.cap_set(cycle_ceiling);
     let _ = projected_gradient_polish(obj, grad, start, maxf, step0, grad_tol);
     ledger.cap_set(outer_cap);
-}
-
-/// Multi-pass basin grind: burn residual WU on the incumbent with shrinking
-/// L-BFGS step scales and micro-jitter, then coordinate micro-search.
-///
-/// Targets polish-depth losses (objective near the basin floor but not
-/// machine-noise tight). Each L-BFGS pass is WU-capped via
-/// [`run_endgame_projected_polish_cycle`].
-fn run_endgame_basin_grind<O, G, R>(
-    obj: &BudgetedObjective<'_, O>,
-    grad: &BudgetedGradient<'_, G>,
-    ledger: &BudgetLedger,
-    bounds: &Bounds<f64>,
-    outer_cap: usize,
-    rng: &mut R,
-) where
-    O: Objective<f64>,
-    G: Gradient<f64>,
-    R: Rng,
-{
-    // Coarse → fine step0; last passes take remaining budget.
-    const STEPS: [f64; 6] = [1.0, 0.1, 0.01, 1e-3, 1e-4, 1e-5];
-    for (i, &step0) in STEPS.iter().enumerate() {
-        if ledger.remaining() < 8 {
-            break;
-        }
-        let rem = ledger.remaining();
-        let last_passes = i + 2 >= STEPS.len();
-        let cycle_wu = if last_passes {
-            rem
-        } else {
-            (rem / (STEPS.len() - i)).max(16).min(rem)
-        };
-        let mut start = ledger.incumbent(bounds);
-        if i > 0 {
-            let scale = 1e-9 * (10.0f64).powi((i as i32).min(4));
-            for v in start.iter_mut() {
-                let u = 2.0 * rng.random::<f64>() - 1.0;
-                *v += scale * (1.0 + v.abs()) * u;
-            }
-            start = bounds.clip(start.view());
-        }
-        run_endgame_projected_polish_cycle(
-            obj, grad, ledger, start, cycle_wu, outer_cap, step0, 0.0,
-        );
-    }
-    // Coordinate micro-search: pure objective charges; closes residual when
-    // L-BFGS reports projected-stationarity short of machine-noise floor.
-    run_endgame_coordinate_microrefine(obj, ledger, bounds, outer_cap);
 }
 
 /// Pattern-search along coordinates with geometrically shrinking steps.
@@ -1102,23 +1052,6 @@ fn mean_width(bounds: &Bounds<f64>) -> f64 {
     total / dim as f64
 }
 
-fn unit_coordinate(pos: f64, low: f64, high: f64) -> f64 {
-    let width = high - low;
-    if width.is_finite() && width > 0.0 {
-        ((pos - low) / width).clamp(0.0, 1.0)
-    } else {
-        0.5
-    }
-}
-
-fn unit_to_box(unit: &Array1<f64>, low: &Array1<f64>, high: &Array1<f64>) -> Array1<f64> {
-    Array1::from_iter(
-        unit.iter()
-            .zip(low.iter().zip(high.iter()))
-            .map(|(u, (lo, hi))| lo + u.clamp(0.0, 1.0) * (hi - lo)),
-    )
-}
-
 fn arm_success_threshold(arm: ArmKind, before: f64) -> f64 {
     let scale = if before.is_finite() {
         before.abs()
@@ -1418,7 +1351,7 @@ where
     // cools each chain too few epochs on high-d Schwefel. Prefer 1–3 chains;
     // extra starts come from IPOP reseed of the worst chain.
     let chain_count = if dim >= 10 {
-        1usize.max(1).min(slice)
+        1usize.min(slice)
     } else {
         (slice / 8).clamp(2, 4).min(slice)
     };
@@ -1526,10 +1459,8 @@ fn dual_style_local_search<O, G, R>(
         } else {
             5
         }
-    } else if wide {
-        3 // deep FD: incumbent + 2 restarts near best
     } else {
-        3
+        3 // deep FD: incumbent + 2 restarts near best
     };
     let per_start = (work_units / n_starts).max(if has_analytic { 8 } else { 24 });
     let x_inc = ledger.incumbent(bounds);
@@ -1699,43 +1630,40 @@ fn run_persistent_gsa<O, G>(
             }
         }
         // dual_annealing local_search when energy improved this temperature step.
-        if improved {
-            if let Some(g) = grad {
-                if let Some((best_i, best_v)) = state
-                    .vals
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, v)| v.is_finite())
-                    .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                    .map(|(i, v)| (i, *v))
-                {
-                    if obj.ledger.remaining() >= 8 {
-                        let polish_budget = 16.min(
-                            (slice / 8)
-                                .max(8)
-                                .min(obj.ledger.remaining().saturating_sub(1)),
-                        );
-                        if polish_budget >= 4 {
-                            let res = projected_gradient_polish(
-                                obj,
-                                g,
-                                state.xs[best_i].clone(),
-                                polish_budget,
-                                1.0,
-                                1e-10,
-                            );
-                            if res.best_val.is_finite() && res.best_val < best_v {
-                                state.xs[best_i] = res.best_pos;
-                                state.vals[best_i] = res.best_val;
-                            }
-                        }
-                    }
+        if improved
+            && let Some(g) = grad
+            && let Some((best_i, best_v)) = state
+                .vals
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| v.is_finite())
+                .min_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, v)| (i, *v))
+            && obj.ledger.remaining() >= 8
+        {
+            let polish_budget = 16.min(
+                (slice / 8)
+                    .max(8)
+                    .min(obj.ledger.remaining().saturating_sub(1)),
+            );
+            if polish_budget >= 4 {
+                let res = projected_gradient_polish(
+                    obj,
+                    g,
+                    state.xs[best_i].clone(),
+                    polish_budget,
+                    1.0,
+                    1e-10,
+                );
+                if res.best_val.is_finite() && res.best_val < best_v {
+                    state.xs[best_i] = res.best_pos;
+                    state.vals[best_i] = res.best_val;
                 }
             }
         }
         // dual_annealing restarts local search after long non-improvement;
         // IPOP reseed every 5 epochs from a fresh QMC/random point (keep best).
-        if state.epoch > 0 && state.epoch % 5 == 0 && !obj.ledger.exhausted() {
+        if state.epoch > 0 && state.epoch.is_multiple_of(5) && !obj.ledger.exhausted() {
             let best_v = state
                 .vals
                 .iter()
@@ -1769,7 +1697,7 @@ fn run_persistent_gsa<O, G>(
                     state.vals[0] = v;
                 }
                 // Re-heat slightly after reseed so the new basin can be explored.
-                state.strategy_step = state.strategy_step / 2;
+                state.strategy_step /= 2;
             }
         }
         state.epoch += 1;
@@ -3933,47 +3861,6 @@ mod tests {
         assert_eq!(ledger.cap_get(), budget);
         assert!(ledger.best_get().is_finite());
         assert!(ledger.best_get() <= f0 + 1e-12);
-    }
-
-    /// Basin grind spends residual WU under temporary caps and must improve
-    /// (or not worsen) a non-optimal start on a smooth quadratic.
-    #[test]
-    fn endgame_basin_grind_refines_under_budget() {
-        let obj = ShiftQuadratic::new();
-        let dim = Objective::dim(&obj);
-        let budget = 800usize;
-        let ledger = BudgetLedger::new(budget, dim);
-        let budgeted_obj = BudgetedObjective {
-            inner: &obj,
-            ledger: &ledger,
-        };
-        let budgeted_grad = BudgetedGradient {
-            inner: &obj,
-            ledger: &ledger,
-        };
-        let start = Array1::from_elem(dim, 2.0);
-        let f0 = budgeted_obj.eval(start.view());
-        assert!(f0.is_finite() && f0 > 1.0);
-        let used_before = ledger.used_get();
-        let mut rng = StdRng::seed_from_u64(11);
-        run_endgame_basin_grind(
-            &budgeted_obj,
-            &budgeted_grad,
-            &ledger,
-            obj.bounds(),
-            budget,
-            &mut rng,
-        );
-        let used_after = ledger.used_get();
-        assert!(used_after > used_before, "grind must charge work");
-        assert!(used_after <= budget, "must respect outer budget");
-        assert_eq!(ledger.cap_get(), budget, "outer cap restored");
-        let f1 = ledger.best_get();
-        assert!(f1.is_finite());
-        assert!(
-            f1 < f0 * 0.5,
-            "basin grind should substantially refine quadratic: {f0} -> {f1}"
-        );
     }
 
     #[test]
