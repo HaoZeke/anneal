@@ -58,6 +58,114 @@ fn validate_box_bounds(low: &[f64], high: &[f64]) -> PyResult<()> {
 // Preset parameter holders.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Enhanced-sampling bias.
+//
+// The manuscript's Obj-slot transform, `F_eff(x) = F(x) + V(s(x))`, had no
+// Python surface: the bias module existed in the core and could not be reached
+// from the installed package. A driver written against the bindings therefore
+// could not use the transform the method is described in terms of.
+// ---------------------------------------------------------------------------
+
+/// Well-tempered bias keyed on basin identity rather than a collective
+/// variable.
+///
+/// A grid bias must be told which projection to watch, and fails silently when
+/// the competing structures do not separate along it. Keying on identity
+/// removes the choice: two states are the same basin when their fingerprints
+/// lie within `merge_radius`.
+///
+/// States are flattened `(n_points, 3)` point sets, fingerprinted by sorted
+/// pairwise distances, which is invariant to permutation, translation and
+/// rotation.
+#[pyclass(name = "BasinBias")]
+pub struct PyBasinBias {
+    inner: crate::bias::BasinBias<crate::bias::SortedPairs>,
+}
+
+#[pymethods]
+impl PyBasinBias {
+    #[new]
+    #[pyo3(signature = (n_points, merge_radius = 1e-2, w0 = 0.25, gamma = 5.0))]
+    fn new(n_points: usize, merge_radius: f64, w0: f64, gamma: f64) -> PyResult<Self> {
+        if n_points < 2 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "n_points must be at least 2",
+            ));
+        }
+        if !(gamma > 1.0) || !(w0 > 0.0) || !(merge_radius > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "require gamma > 1, w0 > 0, merge_radius > 0",
+            ));
+        }
+        Ok(Self {
+            inner: crate::bias::BasinBias::new(
+                crate::bias::SortedPairs { n_points },
+                merge_radius,
+                w0,
+                gamma,
+            ),
+        })
+    }
+
+    /// Accumulated bias at the basin containing `x`; zero for an unseen basin.
+    ///
+    /// The numpy bridge yields arrays from a different ndarray release than the
+    /// core is built against, so the buffer is reborrowed through a slice.
+    fn potential(&self, x: numpy::PyReadonlyArray1<f64>) -> PyResult<f64> {
+        use crate::bias::Bias;
+        let slice = x.as_slice().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err("x must be contiguous")
+        })?;
+        let v = ndarray::ArrayView1::from(slice);
+        let s = self.inner.cv(v);
+        Ok(self.inner.potential(s.view()))
+    }
+
+    /// Raise the bias on the basin containing `x`, registering it if unseen.
+    fn deposit(&mut self, x: numpy::PyReadonlyArray1<f64>, temp: f64) -> PyResult<()> {
+        use crate::bias::Bias;
+        if !(temp > 0.0) {
+            return Err(pyo3::exceptions::PyValueError::new_err("temp must be > 0"));
+        }
+        let slice = x.as_slice().map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err("x must be contiguous")
+        })?;
+        let v = ndarray::ArrayView1::from(slice);
+        let s = self.inner.cv(v);
+        self.inner.deposit(s.view(), temp);
+        Ok(())
+    }
+
+    /// Distinct basins registered so far.
+    #[getter]
+    fn n_basins(&self) -> usize {
+        self.inner.n_basins()
+    }
+
+    /// Deepest accumulated bias over all basins.
+    #[getter]
+    fn deepest(&self) -> f64 {
+        self.inner.deepest()
+    }
+
+    /// Good-Turing missing mass: share of basins seen exactly once, estimating
+    /// the chance the next visit opens a new one.
+    #[getter]
+    fn missing_mass(&self) -> f64 {
+        self.inner.missing_mass()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BasinBias(n_basins={}, deepest={:?}, missing_mass={:?})",
+            self.inner.n_basins(),
+            self.inner.deepest(),
+            self.inner.missing_mass()
+        )
+    }
+}
+
 /// Boltzmann preset parameters: initial temperature and Gaussian step size.
 #[pyclass(name = "Boltzmann")]
 #[derive(Clone, Copy, Debug)]
@@ -1969,6 +2077,7 @@ fn osa_acceptance_rate(
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
+    m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;
     m.add_class::<PyGsa>()?;

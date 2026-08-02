@@ -14,6 +14,7 @@ SaVariant::checked constructor; preset constructors call it under the hood.
 import numpy as np
 
 from anneal._core import (
+    BasinBias,
     Boltzmann,
     Bounds,
     EpochLine,
@@ -726,6 +727,7 @@ def global_optimize_objective(
 
 
 __all__ = [
+    "BasinBias",
     "Boltzmann",
     "Bounds",
     "DeviceHistory",
