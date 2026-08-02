@@ -217,3 +217,281 @@ mod tests {
         }
     }
 }
+
+/// Well-tempered bias keyed on discrete basin identity rather than on a
+/// collective variable.
+///
+/// A grid bias has to be told which projection to watch. That works when the
+/// competing structures separate along the chosen axis and fails silently when
+/// they do not: on the 38-atom Lennard-Jones cluster the close-packed and
+/// icosahedral funnels differ by 0.19 in the fourth Steinhardt parameter, while
+/// at 75 atoms the decahedral and icosahedral minima differ by 0.023, which is
+/// narrower than a sensible deposition width. The bias then fills a region that
+/// contains both competitors and the search never leaves.
+///
+/// Keying on identity removes the choice. Two states are the same basin when
+/// their fingerprints lie within `merge_radius`, so there is no axis to be
+/// blind along. Revisiting a basin raises its bias, which is the superbasin
+/// escape acceleration of Chatterjee and Voter (J Chem Phys 132, 194101, 2010)
+/// with the Barducci well-tempered weight on top.
+///
+/// The fingerprint must be invariant to whatever the objective is invariant
+/// under, or the same physical state registers as many basins. [`SortedPairs`]
+/// is the default for point sets: invariant to permutation, translation and
+/// rotation, and free of external dependencies.
+pub struct BasinBias<F: Fingerprint> {
+    fingerprint: F,
+    merge_radius: f64,
+    w0: f64,
+    gamma: f64,
+    centres: Vec<Array1<f64>>,
+    v: Vec<f64>,
+    visits: Vec<u64>,
+}
+
+/// Maps a state to a vector that compares equal for states in the same basin.
+pub trait Fingerprint: Send + Sync {
+    /// Descriptor of `x`. Two states in the same basin must map to vectors
+    /// within the bias's merge radius, and states in different basins must not.
+    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64>;
+}
+
+/// Sorted pairwise distances of a flattened `(n, 3)` point set.
+///
+/// Invariant to permutation of the points and to rigid motions, which are the
+/// symmetries of a cluster energy. Sorting is what supplies permutation
+/// invariance and is also why the descriptor is cheap.
+pub struct SortedPairs {
+    /// Points per state; the state length must be `3 * n_points`.
+    pub n_points: usize,
+}
+
+impl Fingerprint for SortedPairs {
+    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let n = self.n_points;
+        let mut d = Vec::with_capacity(n * (n - 1) / 2);
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = x[3 * i] - x[3 * j];
+                let dy = x[3 * i + 1] - x[3 * j + 1];
+                let dz = x[3 * i + 2] - x[3 * j + 2];
+                d.push((dx * dx + dy * dy + dz * dz).sqrt());
+            }
+        }
+        d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Array1::from(d)
+    }
+}
+
+impl<F: Fingerprint> BasinBias<F> {
+    /// Requires `gamma > 1`, `w0 > 0` and `merge_radius > 0`.
+    pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
+        assert!(gamma > 1.0, "gamma must be > 1");
+        assert!(w0 > 0.0, "w0 must be > 0");
+        assert!(merge_radius > 0.0, "merge_radius must be > 0");
+        Self {
+            fingerprint,
+            merge_radius,
+            w0,
+            gamma,
+            centres: Vec::new(),
+            v: Vec::new(),
+            visits: Vec::new(),
+        }
+    }
+
+    /// Index of the nearest registered basin within `merge_radius`.
+    fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
+        let mut best = None;
+        let mut best_dist = f64::INFINITY;
+        for (i, c) in self.centres.iter().enumerate() {
+            if c.len() != d.len() {
+                continue;
+            }
+            let mut acc = 0.0;
+            for k in 0..d.len() {
+                let diff = c[k] - d[k];
+                acc += diff * diff;
+            }
+            let dist = acc.sqrt();
+            if dist < best_dist {
+                best_dist = dist;
+                best = Some(i);
+            }
+        }
+        best.filter(|_| best_dist <= self.merge_radius)
+    }
+
+    /// Number of distinct basins registered so far.
+    pub fn n_basins(&self) -> usize {
+        self.centres.len()
+    }
+
+    /// Good-Turing missing mass: the share of basins seen exactly once, which
+    /// estimates the probability that the next visit opens a new one.
+    pub fn missing_mass(&self) -> f64 {
+        let total: u64 = self.visits.iter().sum();
+        if total == 0 {
+            return 1.0;
+        }
+        let singletons = self.visits.iter().filter(|&&c| c == 1).count() as f64;
+        singletons / total as f64
+    }
+
+    /// Deepest accumulated bias over all basins.
+    pub fn deepest(&self) -> f64 {
+        self.v.iter().copied().fold(0.0, f64::max)
+    }
+}
+
+impl<F: Fingerprint> Bias for BasinBias<F> {
+    /// The fingerprint itself is the collective variable: identity, not a
+    /// projection onto a chosen axis.
+    fn cv(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.fingerprint.describe(x)
+    }
+
+    fn potential(&self, s: ArrayView1<f64>) -> f64 {
+        self.lookup(s).map(|i| self.v[i]).unwrap_or(0.0)
+    }
+
+    fn deposit(&mut self, s: ArrayView1<f64>, temp: f64) {
+        let denom = (self.gamma - 1.0) * temp;
+        match self.lookup(s) {
+            Some(i) => {
+                // Barducci well-tempered weight: deposition slows where the
+                // bias is already deep, so a basin fills to a finite depth.
+                let w = self.w0 * (-self.v[i] / denom).exp();
+                self.v[i] += w;
+                self.visits[i] += 1;
+            }
+            None => {
+                self.centres.push(s.to_owned());
+                self.v.push(self.w0);
+                self.visits.push(1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod basin_bias_tests {
+    use super::*;
+    use ndarray::array;
+
+    fn tetra(scale: f64) -> Array1<f64> {
+        array![
+            0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale, 0.0, 0.0, 0.0, scale
+        ]
+    }
+
+    #[test]
+    fn sorted_pairs_is_permutation_invariant() {
+        let fp = SortedPairs { n_points: 4 };
+        let a = tetra(1.0);
+        // Same point set, atoms 0 and 2 exchanged.
+        let b = array![0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let da = fp.describe(a.view());
+        let db = fp.describe(b.view());
+        for k in 0..da.len() {
+            assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
+        }
+    }
+
+    #[test]
+    fn sorted_pairs_is_translation_invariant() {
+        let fp = SortedPairs { n_points: 4 };
+        let a = tetra(1.0);
+        let mut b = a.clone();
+        for i in 0..4 {
+            b[3 * i] += 7.5;
+            b[3 * i + 1] -= 2.25;
+        }
+        let da = fp.describe(a.view());
+        let db = fp.describe(b.view());
+        for k in 0..da.len() {
+            assert!((da[k] - db[k]).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn revisiting_a_basin_raises_only_that_basin() {
+        let mut bias = BasinBias::new(SortedPairs { n_points: 4 }, 1e-6, 0.5, 5.0);
+        let a = tetra(1.0);
+        let b = tetra(2.0);
+        let sa = bias.cv(a.view());
+        let sb = bias.cv(b.view());
+
+        bias.deposit(sa.view(), 1.0);
+        assert_eq!(bias.n_basins(), 1);
+        assert!(bias.potential(sa.view()) > 0.0);
+        assert_eq!(bias.potential(sb.view()), 0.0, "unrelated basin untouched");
+
+        bias.deposit(sb.view(), 1.0);
+        assert_eq!(bias.n_basins(), 2);
+    }
+
+    #[test]
+    fn well_tempered_deposits_shrink() {
+        let mut bias = BasinBias::new(SortedPairs { n_points: 4 }, 1e-6, 1.0, 2.0);
+        let a = tetra(1.0);
+        let s = bias.cv(a.view());
+        let mut last = 0.0;
+        let mut increments = Vec::new();
+        for _ in 0..6 {
+            bias.deposit(s.view(), 1.0);
+            let now = bias.potential(s.view());
+            increments.push(now - last);
+            last = now;
+        }
+        for w in increments.windows(2) {
+            assert!(w[1] < w[0], "well-tempered weights must decrease: {increments:?}");
+        }
+    }
+
+    /// The reason this type exists. A grid bias keyed on one projection cannot
+    /// distinguish two structures whose separation along that axis is below the
+    /// deposition width, so biasing one also biases the other. Keyed on
+    /// identity they stay separate however close the projection puts them.
+    #[test]
+    fn separates_basins_a_narrow_projection_would_merge() {
+        let fp = SortedPairs { n_points: 4 };
+        // Two genuinely different point sets whose mean pair distance, a
+        // one-dimensional projection, is nearly identical.
+        let a = tetra(1.0);
+        let b = array![
+            0.0, 0.0, 0.0, 1.02, 0.0, 0.0, 0.0, 0.98, 0.0, 0.0, 0.0, 1.0
+        ];
+        let da = fp.describe(a.view());
+        let db = fp.describe(b.view());
+        let mean = |v: &Array1<f64>| v.iter().sum::<f64>() / v.len() as f64;
+        assert!(
+            (mean(&da) - mean(&db)).abs() < 1e-2,
+            "the scalar projection should barely separate these"
+        );
+
+        let mut bias = BasinBias::new(SortedPairs { n_points: 4 }, 1e-3, 0.5, 5.0);
+        bias.deposit(da.view(), 1.0);
+        assert_eq!(bias.n_basins(), 1);
+        assert_eq!(
+            bias.potential(db.view()),
+            0.0,
+            "identity keying must leave the neighbouring basin unbiased"
+        );
+        bias.deposit(db.view(), 1.0);
+        assert_eq!(bias.n_basins(), 2, "these are two basins, not one");
+    }
+
+    #[test]
+    fn missing_mass_tracks_singletons() {
+        let mut bias = BasinBias::new(SortedPairs { n_points: 4 }, 1e-6, 0.5, 5.0);
+        assert_eq!(bias.missing_mass(), 1.0, "no visits yet");
+        let a = bias.cv(tetra(1.0).view());
+        let b = bias.cv(tetra(2.0).view());
+        bias.deposit(a.view(), 1.0);
+        bias.deposit(b.view(), 1.0);
+        assert!((bias.missing_mass() - 1.0).abs() < 1e-12, "both seen once");
+        bias.deposit(a.view(), 1.0);
+        assert!(bias.missing_mass() < 1.0, "a repeat lowers the missing mass");
+    }
+}
