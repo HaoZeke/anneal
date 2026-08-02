@@ -334,3 +334,396 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Cluster move kernels.
+//
+// A state here is a flattened `(n_points, 3)` point set. The kernels above
+// perturb every coordinate independently, which explores within a packing and
+// rarely leaves one: reaching a different morphology needs atoms to move in
+// concert. These three change the packing instead of jiggling it, and are the
+// moves the atomic cluster literature relies on for the sizes where a fixed
+// displacement stalls.
+// ---------------------------------------------------------------------------
+
+/// Centre of mass of a flattened point set.
+fn centroid(x: ArrayView1<f64>, n: usize) -> [f64; 3] {
+    let mut c = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            c[k] += x[3 * i + k];
+        }
+    }
+    for v in c.iter_mut() {
+        *v /= n as f64;
+    }
+    c
+}
+
+/// Rodrigues rotation of `v` about a unit `axis` by `angle`.
+fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
+    let (s, c) = angle.sin_cos();
+    let dot = v[0] * axis[0] + v[1] * axis[1] + v[2] * axis[2];
+    let cross = [
+        axis[1] * v[2] - axis[2] * v[1],
+        axis[2] * v[0] - axis[0] * v[2],
+        axis[0] * v[1] - axis[1] * v[0],
+    ];
+    [
+        v[0] * c + cross[0] * s + axis[0] * dot * (1.0 - c),
+        v[1] * c + cross[1] * s + axis[1] * dot * (1.0 - c),
+        v[2] * c + cross[2] * s + axis[2] * dot * (1.0 - c),
+    ]
+}
+
+fn random_unit<R: Rng>(rng: &mut R) -> [f64; 3] {
+    let nd = NormalDist::new(0.0, 1.0).expect("unit normal");
+    loop {
+        let v = [nd.sample(rng), nd.sample(rng), nd.sample(rng)];
+        let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        if n > 1e-12 {
+            return [v[0] / n, v[1] / n, v[2] / n];
+        }
+    }
+}
+
+/// Moves the least-coordinated point onto the surface of the set.
+///
+/// A point in a poor site is what blocks a better packing, and relocating it
+/// changes the structure rather than perturbing it. Coordination is counted
+/// within `neighbour_cutoff`, which keeps the kernel independent of the
+/// objective: no energy evaluation is spent choosing the point to move.
+pub struct SurfaceRelocate {
+    /// Points in the state; the state length must be `3 * n_points`.
+    pub n_points: usize,
+    /// Separation below which two points count as neighbours.
+    pub neighbour_cutoff: f64,
+}
+
+impl MoveKernel<f64> for SurfaceRelocate {
+    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+        let n = self.n_points;
+        let mut out = i.to_owned();
+        if n < 2 {
+            return out;
+        }
+        let mut coord = vec![0usize; n];
+        for a in 0..n {
+            for b in 0..n {
+                if a == b {
+                    continue;
+                }
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = i[3 * a + k] - i[3 * b + k];
+                    d2 += d * d;
+                }
+                if d2.sqrt() < self.neighbour_cutoff {
+                    coord[a] += 1;
+                }
+            }
+        }
+        let worst = (0..n).min_by_key(|&a| coord[a]).unwrap_or(0);
+        let c = centroid(i, n);
+        let mut shell: f64 = 0.0;
+        for a in 0..n {
+            if a == worst {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = i[3 * a + k] - c[k];
+                d2 += d * d;
+            }
+            shell = shell.max(d2.sqrt());
+        }
+        let dir = random_unit(rng);
+        let r = shell * (0.85 + 0.20 * rng.random::<f64>());
+        for k in 0..3 {
+            out[3 * worst + k] = c[k] + dir[k] * r;
+        }
+        out
+    }
+}
+
+/// Rotates the outer half of the set against its core.
+///
+/// Packings that share a core differ in how the surface sits on it, so twisting
+/// the shell probes that difference in one move.
+pub struct ShellRotate {
+    /// Points in the state.
+    pub n_points: usize,
+}
+
+impl MoveKernel<f64> for ShellRotate {
+    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+        let n = self.n_points;
+        let mut out = i.to_owned();
+        if n < 2 {
+            return out;
+        }
+        let c = centroid(i, n);
+        let mut radii: Vec<f64> = (0..n)
+            .map(|a| {
+                let mut d2 = 0.0;
+                for k in 0..3 {
+                    let d = i[3 * a + k] - c[k];
+                    d2 += d * d;
+                }
+                d2.sqrt()
+            })
+            .collect();
+        let mut sorted = radii.clone();
+        sorted.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        let median = sorted[n / 2];
+        let axis = random_unit(rng);
+        let angle = 0.3 + (std::f64::consts::PI - 0.3) * rng.random::<f64>();
+        for a in 0..n {
+            if radii[a] <= median {
+                continue;
+            }
+            let v = [
+                i[3 * a] - c[0],
+                i[3 * a + 1] - c[1],
+                i[3 * a + 2] - c[2],
+            ];
+            let w = rotate(v, axis, angle);
+            for k in 0..3 {
+                out[3 * a + k] = c[k] + w[k];
+            }
+        }
+        radii.clear();
+        out
+    }
+}
+
+/// Enforces an approximate `order`-fold rotation about a random axis.
+///
+/// The global minima of the hard cluster sizes are highly symmetric, and a
+/// nearly symmetric structure is unreachable by independent displacement
+/// because every point has to move together. Pairing each point with the
+/// nearest image of the rotated set and pulling the two together moves them in
+/// concert, which is what a symmetrisation move is for.
+pub struct Symmetrise {
+    /// Points in the state.
+    pub n_points: usize,
+    /// Rotation orders to draw from, for example `[2, 3, 4, 5, 6]`.
+    pub orders: Vec<usize>,
+    /// Largest separation at which a point and an image are considered partners.
+    pub pair_cutoff: f64,
+}
+
+impl MoveKernel<f64> for Symmetrise {
+    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+        let n = self.n_points;
+        let mut out = i.to_owned();
+        if n < 2 || self.orders.is_empty() {
+            return out;
+        }
+        let c = centroid(i, n);
+        let axis = random_unit(rng);
+        let order = self.orders[rng.random_range(0..self.orders.len())];
+        let angle = 2.0 * std::f64::consts::PI / order.max(1) as f64;
+        let blend = 0.3 + 0.4 * rng.random::<f64>();
+
+        let rotated: Vec<[f64; 3]> = (0..n)
+            .map(|a| {
+                let v = [
+                    i[3 * a] - c[0],
+                    i[3 * a + 1] - c[1],
+                    i[3 * a + 2] - c[2],
+                ];
+                rotate(v, axis, angle)
+            })
+            .collect();
+
+        for a in 0..n {
+            let v = [
+                i[3 * a] - c[0],
+                i[3 * a + 1] - c[1],
+                i[3 * a + 2] - c[2],
+            ];
+            let mut best = 0usize;
+            let mut best_d = f64::INFINITY;
+            for (b, w) in rotated.iter().enumerate() {
+                let d = ((v[0] - w[0]).powi(2) + (v[1] - w[1]).powi(2) + (v[2] - w[2]).powi(2))
+                    .sqrt();
+                if d < best_d {
+                    best_d = d;
+                    best = b;
+                }
+            }
+            if best_d < self.pair_cutoff {
+                for k in 0..3 {
+                    out[3 * a + k] = c[k] + (1.0 - blend) * v[k] + blend * rotated[best][k];
+                }
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod cluster_move_tests {
+    use super::*;
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+
+    /// Regular octahedron: symmetric, so symmetrisation should nearly fix it.
+    fn octahedron() -> Array1<f64> {
+        Array1::from(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ])
+    }
+
+    fn com(x: &Array1<f64>, n: usize) -> [f64; 3] {
+        centroid(x.view(), n)
+    }
+
+    #[test]
+    fn surface_relocate_moves_exactly_one_point() {
+        let k = SurfaceRelocate {
+            n_points: 6,
+            neighbour_cutoff: 1.6,
+        };
+        let x = octahedron();
+        let mut rng = StdRng::seed_from_u64(1);
+        let y = k.propose(x.view(), 1.0, &mut rng);
+        let moved = (0..6)
+            .filter(|&a| {
+                (0..3).any(|c| (x[3 * a + c] - y[3 * a + c]).abs() > 1e-9)
+            })
+            .count();
+        assert_eq!(moved, 1, "relocation must touch a single point");
+    }
+
+    #[test]
+    fn shell_rotate_preserves_centroid_and_radii() {
+        let k = ShellRotate { n_points: 6 };
+        let x = octahedron();
+        let mut rng = StdRng::seed_from_u64(2);
+        let y = k.propose(x.view(), 1.0, &mut rng);
+        let cx = com(&x, 6);
+        let cy = com(&y, 6);
+        for c in 0..3 {
+            assert!((cx[c] - cy[c]).abs() < 1e-9, "rotation must not translate");
+        }
+        // A rotation about the centroid preserves every distance to it.
+        let mut rx: Vec<f64> = (0..6)
+            .map(|a| {
+                ((x[3 * a] - cx[0]).powi(2)
+                    + (x[3 * a + 1] - cx[1]).powi(2)
+                    + (x[3 * a + 2] - cx[2]).powi(2))
+                .sqrt()
+            })
+            .collect();
+        let mut ry: Vec<f64> = (0..6)
+            .map(|a| {
+                ((y[3 * a] - cy[0]).powi(2)
+                    + (y[3 * a + 1] - cy[1]).powi(2)
+                    + (y[3 * a + 2] - cy[2]).powi(2))
+                .sqrt()
+            })
+            .collect();
+        rx.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ry.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        for (a, b) in rx.iter().zip(ry.iter()) {
+            assert!((a - b).abs() < 1e-9, "radii multiset must be preserved");
+        }
+    }
+
+    #[test]
+    fn symmetrise_leaves_an_already_symmetric_set_near_itself() {
+        let k = Symmetrise {
+            n_points: 6,
+            orders: vec![4],
+            pair_cutoff: 2.5,
+        };
+        let x = octahedron();
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = k.propose(x.view(), 1.0, &mut rng);
+        // Fourfold axes of an octahedron map it onto itself, so the blend
+        // toward a matched image cannot move any point far.
+        let mut worst: f64 = 0.0;
+        for a in 0..6 {
+            let d = ((x[3 * a] - y[3 * a]).powi(2)
+                + (x[3 * a + 1] - y[3 * a + 1]).powi(2)
+                + (x[3 * a + 2] - y[3 * a + 2]).powi(2))
+            .sqrt();
+            worst = worst.max(d);
+        }
+        assert!(worst < 1.5, "symmetric input drifted by {worst}");
+    }
+
+    #[test]
+    fn symmetrise_increases_symmetry_of_a_distorted_set() {
+        // Distortion measure: how far the set is from its own image under the
+        // rotation that symmetrisation enforces.
+        let mut x = octahedron();
+        x[0] += 0.35;
+        x[4] -= 0.30;
+        x[8] += 0.25;
+        let k = Symmetrise {
+            n_points: 6,
+            orders: vec![4],
+            pair_cutoff: 2.5,
+        };
+        let mut rng = StdRng::seed_from_u64(4);
+        let mut improved = 0;
+        for _ in 0..24 {
+            let y = k.propose(x.view(), 1.0, &mut rng);
+            if spread(&y) < spread(&x) {
+                improved += 1;
+            }
+        }
+        assert!(
+            improved > 0,
+            "symmetrisation never reduced the radial spread over 24 draws"
+        );
+    }
+
+    /// Standard deviation of distances to the centroid: zero for a set whose
+    /// points all lie on one shell, which every regular polytope satisfies.
+    fn spread(x: &Array1<f64>) -> f64 {
+        let n = 6;
+        let c = centroid(x.view(), n);
+        let r: Vec<f64> = (0..n)
+            .map(|a| {
+                ((x[3 * a] - c[0]).powi(2)
+                    + (x[3 * a + 1] - c[1]).powi(2)
+                    + (x[3 * a + 2] - c[2]).powi(2))
+                .sqrt()
+            })
+            .collect();
+        let m = r.iter().sum::<f64>() / n as f64;
+        (r.iter().map(|v| (v - m).powi(2)).sum::<f64>() / n as f64).sqrt()
+    }
+
+    #[test]
+    fn kernels_preserve_state_length() {
+        let x = octahedron();
+        let mut rng = StdRng::seed_from_u64(5);
+        let kernels: Vec<Box<dyn Fn(&mut StdRng) -> Array1<f64>>> = vec![
+            Box::new(|r| {
+                SurfaceRelocate {
+                    n_points: 6,
+                    neighbour_cutoff: 1.6,
+                }
+                .propose(octahedron().view(), 1.0, r)
+            }),
+            Box::new(|r| ShellRotate { n_points: 6 }.propose(octahedron().view(), 1.0, r)),
+            Box::new(|r| {
+                Symmetrise {
+                    n_points: 6,
+                    orders: vec![3, 4],
+                    pair_cutoff: 2.5,
+                }
+                .propose(octahedron().view(), 1.0, r)
+            }),
+        ];
+        for k in kernels {
+            assert_eq!(k(&mut rng).len(), x.len());
+        }
+    }
+}
