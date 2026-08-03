@@ -167,12 +167,14 @@ fn main() {
         total_charged += ledger.spent();
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
-             returned {}  paths {}/{} escaped  \
+             basins {} ({:.1} hops each)  returned {}  paths {}/{} escaped  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
             out.screened_out,
             ledger.spent(),
+            out.basins,
+            out.hops as f64 / out.basins.max(1) as f64,
             out.returned,
             out.path_escapes,
             out.paths,
