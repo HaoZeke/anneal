@@ -118,6 +118,8 @@ fn main() {
     cfg.tabu_on_stall = opts.contains(&"tabu");
     // The relaxation decision taken under a posterior.
     cfg.bayes_screen = opts.contains(&"bayes");
+    // The move chosen from the structure the chain is standing on.
+    cfg.contextual_moves = opts.contains(&"ctx");
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
@@ -368,7 +370,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -404,6 +406,7 @@ fn main() {
             out.screen.0,
             out.screen.2,
             out.screen.3,
+            out.contextual.0,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))

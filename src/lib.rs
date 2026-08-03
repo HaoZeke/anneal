@@ -14,6 +14,7 @@ pub mod adapter;
 pub mod allocate;
 pub mod bias;
 /// The cooling-schedule trait: `epoch -> temperature`.
+pub mod contextual;
 pub mod cool;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
