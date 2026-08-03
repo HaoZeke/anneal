@@ -239,6 +239,13 @@ pub struct Config {
     /// quantity three separate calibrations here failed to pin down.
     pub anneal_diversity: bool,
     /// Fraction of the starting radius the annealed threshold falls to.
+    ///
+    /// Bounded below by what basin identity needs, which is not what a
+    /// population diversity threshold needs. A merge radius under the distance
+    /// a single hop covers, 0.4766 on 75-point minima, stops recognising a
+    /// structure already visited: annealing 0.7 down to 0.07 took a run from
+    /// 250 basins at 25 revisits to 4423 at 2.6, and the best found from
+    /// -396.282 to -394.629.
     pub diversity_floor: f64,
     /// Revisits a basin should take before the accumulated bias clears the
     /// escape gap, when the height is adaptive.
@@ -293,7 +300,7 @@ impl Config {
             stall_patience: 60,
             path_images: 9,
             anneal_diversity: false,
-            diversity_floor: 0.1,
+            diversity_floor: 0.75,
             height_revisits: 4.0,
             screen_margin: 2.0,
             screen_steps: 25,
