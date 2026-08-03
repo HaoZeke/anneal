@@ -207,7 +207,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {} lmin {:.4}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -226,6 +226,7 @@ fn main() {
             out.visit_counts.0,
             out.visit_counts.1,
             out.visit_counts.2,
+            out.soft_crossed,
             out.soft_escapes,
             out.soft_lambda,
             converged + capped,
