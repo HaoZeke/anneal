@@ -119,6 +119,19 @@ fn main() {
     // The deposit height matters only now that basins are revisited: at 33
     // revisits a height of 0.25 accumulates to about 8, against escape gaps
     // measured at 0.09 for the cheapest and 0.18 at the tenth percentile.
+    // How coarse a basin is, which decides how deep the bias gets anywhere.
+    //
+    // Traced at 75 points, a hundred thousand hops register about three
+    // thousand basins, so each one collects around thirty deposits and the
+    // icosahedral funnel never fills: a run can spend ninety-eight thousand
+    // hops inside it without a single improvement. A radius that merges the
+    // variants of a funnel into one basin puts the same deposits in one place.
+    if let Ok(v) = std::env::var("MERGE_RADIUS") {
+        if let Ok(r) = v.parse::<f64>() {
+            cfg.merge_radius = r;
+            println!("  merge radius {r}");
+        }
+    }
     if let Ok(h) = std::env::var("BIAS_HEIGHT") {
         if let Ok(v) = h.parse::<f64>() {
             cfg.bias_height = v;
