@@ -317,10 +317,12 @@ pub struct Config {
     /// response to a revisit.
     ///
     /// This is the scaled-move form: the escape scale multiplies the move
-    /// amplitude. Goedecker reports it as strictly weaker than short molecular
-    /// dynamics, which crosses lower barriers through the Bell-Evans-Polanyi
-    /// correlation, but it carries the same feedback law and is what validates
-    /// the controller before dynamics is wired.
+    /// amplitude and the acceptance threshold replaces Metropolis. Soft-mode
+    /// climbs are *not* taken every hop under this flag; they are the separate
+    /// [`Config::escape_on_stall`] path. Measured: activating every hop under a
+    /// gradient cost ~687 charged evaluations per hop on LJ38 and bought 291
+    /// hops from 200k, which is not a search. The controller and the climb are
+    /// complementary and must stay separable.
     pub minima_hopping: bool,
     /// Lanczos steps for the soft-mode escape.
     ///
@@ -869,40 +871,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         // The escape scale multiplies the move amplitude. A chain that keeps
         // returning proposes further each time until it leaves.
         let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
-        // With a gradient available the escape leaves along the softest
-        // non-rigid direction rather than in a random one. That is the
-        // difference between an escape and a scattering: the softest mode is
-        // the cheapest way out of the basin, and displacing along it crosses
-        // the low barrier rather than a random high one.
-        let mut trial = match (cfg.minima_hopping, grad.as_deref_mut()) {
-            (true, Some(g)) => {
-                // The feedback sets how far past the saddle to go. A chain that
-                // keeps coming back is thrown further beyond the ridge it just
-                // crossed, which is the same law acting on a quantity that can
-                // deliver an escape.
-                let act = Activation {
-                    step: cfg.escape_amplitude,
-                    overshoot: cfg.escape_overshoot * escape,
-                    max_steps: cfg.escape_max_climb,
-                    lanczos_steps: cfg.escape_lanczos_steps,
-                    epsilon: cfg.escape_epsilon,
-                    ..Activation::default()
-                };
-                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
-                match activate(x.view(), |y| g(ledger, y), &act, sign) {
-                    Some(o) => {
-                        soft_escapes += 1;
-                        if o.crossed {
-                            soft_crossed += 1;
-                        }
-                        soft_lambda += o.lambda;
-                        o.state
-                    }
-                    None => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
-                }
-            }
-            _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
-        };
+        // Ordinary hops: scale the library move by the escape feedback. Soft
+        // mode climbs live under `escape_on_stall` below; they are a few per
+        // cent of the budget when the chain has stopped improving, not the
+        // default proposal.
+        let mut trial = kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng);
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -1035,11 +1008,21 @@ fn run_full<'g, R: Rng + ?Sized>(
         bias.deposit(bias.cv(x.view()).view(), temperature);
 
         // A climb out of the funnel, when nothing else is working.
+        //
+        // Under minima hopping the escape scale also multiplies the overshoot:
+        // a chain that has been revisiting is thrown further past the ridge it
+        // just crossed, which is the same feedback law on a quantity that can
+        // actually leave a basin.
         if cfg.escape_on_stall && escape_stall.observe(ledger.best) {
             if let Some(g) = grad.as_deref_mut() {
+                let scale = if cfg.minima_hopping {
+                    feedback.escape()
+                } else {
+                    1.0
+                };
                 let act = Activation {
                     step: cfg.escape_amplitude,
-                    overshoot: cfg.escape_overshoot,
+                    overshoot: cfg.escape_overshoot * scale,
                     max_steps: cfg.escape_max_climb,
                     lanczos_steps: cfg.escape_lanczos_steps,
                     epsilon: cfg.escape_epsilon,
@@ -1051,6 +1034,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     if o.crossed {
                         soft_crossed += 1;
                     }
+                    soft_lambda += o.lambda;
                     let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
                     ledger.record(ee, xe.view());
                     hops += 1;
@@ -1061,9 +1045,17 @@ fn run_full<'g, R: Rng + ?Sized>(
                     // Taken whatever its energy. The chain has already shown it
                     // cannot improve from where it is, so the value of the new
                     // structure is that it is somewhere else.
+                    if cfg.minima_hopping {
+                        let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+                        let reached = identity.basin_of(xe.view());
+                        feedback.observe(Some(from), reached);
+                        here = Some(reached);
+                    }
                     e = ee;
                     x = xe;
-                    here = None;
+                    if !cfg.minima_hopping {
+                        here = None;
+                    }
                 }
             }
         }
