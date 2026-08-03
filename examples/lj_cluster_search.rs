@@ -8,6 +8,7 @@
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
+use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
@@ -74,67 +75,78 @@ fn main() {
     // The temperature and step come from Wales and Doye's protocol for basin
     // hopping on the quenched surface, a reduced temperature of 0.8 and a step
     // between 0.36 and 0.40, rather than from tuning here.
-    let cfg = Config::for_cluster(n);
+    let mut cfg = Config::for_cluster(n);
+    // Keying on shape rather than on the descriptor, so the merge threshold is
+    // a length. Enabled by the fourth argument so both are measurable.
+    cfg.shape_keyed = args.get(4).map(|v| v == "shape").unwrap_or(false);
+    if cfg.shape_keyed {
+        // A length now, not a number in descriptor space: two structures whose
+        // atoms can be brought within this of each other by a permutation and
+        // a rigid motion are the same basin.
+        cfg.merge_radius = 0.2;
+        println!("  keying on IRA shape distance, merge radius {} (a length)", cfg.merge_radius);
+    }
 
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
     for seed in 0..seeds {
         let mut ledger = Ledger::new(budget);
-        // The driver owns the search; the numerics under it are the caller's,
-        // so the relaxation is supplied here. Steepest descent with a
-        // backtracking line search, every evaluation charged, stopping the
-        // moment the ledger refuses.
+        // The driver owns the search; the numerics under it are the caller's.
+        // A hand-rolled steepest descent with backtracking cost 830 charged
+        // evaluations per hop here against about 79 for a quasi-Newton
+        // relaxation, so a three million unit budget bought a few thousand
+        // hops rather than tens of thousands, and the search failed for want
+        // of relaxations rather than for want of a mechanism.
+        let mut opt = WarmLbfgs::default();
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-            let mut cur = x.to_owned();
-            let (mut f, mut g) = match charged(led, cur.view()) {
-                Some(v) => v,
-                None => return (f64::INFINITY, cur),
-            };
-            let mut step = 1e-3;
-            for _ in 0..iters {
-                let gnorm = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
-                if gnorm < 1e-8 {
-                    break;
-                }
-                let mut moved = false;
-                for _ in 0..20 {
-                    let mut trial = cur.clone();
-                    for i in 0..trial.len() {
-                        trial[i] -= step * g[i];
-                    }
-                    match charged(led, trial.view()) {
-                        None => return (f, cur),
-                        Some((ft, gt)) => {
-                            if ft < f {
-                                cur = trial;
-                                f = ft;
-                                g = gt;
-                                step *= 1.6;
-                                moved = true;
-                                break;
-                            }
-                            step *= 0.5;
-                        }
-                    }
-                }
-                if !moved {
-                    break;
-                }
-            }
-            (f, cur)
+            // Curvature is not carried between relaxations: measured on this
+            // problem, retaining it across a structural change costs more than
+            // it saves.
+            opt.forget();
+            let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+            (f, xr)
         };
         let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+
+        // The reported value is checked against a fresh evaluation of the
+        // structure it claims to come from, off the ledger and outside the
+        // driver. A search that reports a number its own answer does not have
+        // is the failure worth catching, and nothing else here would catch it.
+        let verified = match out.best_state.as_ref() {
+            Some(x) => {
+                assert_eq!(
+                    x.len(),
+                    3 * n,
+                    "seed {seed} returned {} coordinates for {n} points",
+                    x.len()
+                );
+                let (e, g) = lj(x.view());
+                let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+                assert!(
+                    (e - out.best).abs() < 1e-6,
+                    "seed {seed} reported {:.6} but its structure is {:.6}",
+                    out.best,
+                    e
+                );
+                Some((e, gmax))
+            }
+            None => None,
+        };
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
         if hit {
             solved += 1;
         }
         deepest = deepest.min(out.best);
         println!(
-            "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}{}",
+            "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
+             verified {}{}",
             out.best,
             out.hops,
             out.screened_out,
             ledger.spent(),
+            verified
+                .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
+                .unwrap_or_else(|| "NO STATE".into()),
             if hit { "  SOLVED" } else { "" }
         );
     }

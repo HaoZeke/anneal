@@ -21,7 +21,7 @@ use std::os::raw::{c_double, c_int};
 
 use ndarray::{Array1, ArrayView1};
 
-use crate::bias::Fingerprint;
+use crate::bias::{BasinMetric, Fingerprint};
 
 unsafe extern "C" {
     /// `libira_try_mat` from `src/library_sofi.f90`.
@@ -436,5 +436,22 @@ mod sofi_tests {
         let wrong = axis_deviation(x.view(), [0.0, 1.0, phi], 4).unwrap();
         assert!(real < 1e-6, "fivefold deviation {real} should vanish");
         assert!(wrong > 0.1, "fourfold deviation {wrong} should not");
+    }
+}
+
+impl BasinMetric for IraMetric {
+    /// Hausdorff distance under the optimal permutation and rigid motion.
+    ///
+    /// This is what makes a merge threshold a length rather than a number in
+    /// descriptor space. Two states differing by relabelling or by a rotation
+    /// return zero however their coordinates are written, so the threshold does
+    /// not have to absorb those symmetries and does not have to be re-found at
+    /// every system size.
+    ///
+    /// A failed match reads as infinity, which puts the pair in different
+    /// basins. That is the safe direction: merging on a distance that was never
+    /// computed empties the bias that separating them exists for.
+    fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        IraMetric::distance(self, a, b)
     }
 }

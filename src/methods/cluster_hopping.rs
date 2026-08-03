@@ -144,8 +144,20 @@ pub struct Config {
     pub bias_height: f64,
     /// Well-tempered bias factor; must exceed one.
     pub bias_gamma: f64,
-    /// Fingerprint distance below which two states are the same basin.
+    /// Distance below which two states are the same basin.
+    ///
+    /// Its units are those of whichever metric keys the bias. Against a sorted
+    /// distance spectrum compared by Euclidean distance it is a number in
+    /// descriptor space with no physical meaning; against a shape distance it
+    /// is a length.
     pub merge_radius: f64,
+    /// Key basins on IRA shape distance rather than on the descriptor.
+    ///
+    /// Measured on LJ38 at 400 thousand charged evaluations: keying on the
+    /// descriptor solves 1 seed in 8. The threshold there has to absorb
+    /// relabelling and rotation, which is what makes it untransferable between
+    /// sizes and what three separate calibrations failed to pin down.
+    pub shape_keyed: bool,
     /// How far above the incumbent a screened trial may land and still be
     /// promoted to a full relaxation.
     pub screen_margin: f64,
@@ -168,6 +180,7 @@ impl Config {
             bias_height: 0.25,
             bias_gamma: 5.0,
             merge_radius: 1e-2,
+            shape_keyed: false,
             screen_margin: 2.0,
             screen_steps: 25,
             relax_steps: 200,
@@ -288,12 +301,28 @@ pub fn run<R: Rng + ?Sized>(
     rng: &mut R,
 ) -> Outcome {
     let n = cfg.n_points;
+    // The descriptor and the metric have to agree. A shape distance is
+    // computed from coordinates, so keying on it means passing coordinates
+    // through rather than reducing them to a sorted distance spectrum first;
+    // handing the spectrum to a shape metric would compare the wrong objects
+    // and quietly return distances that mean nothing.
     let mut bias = BasinBias::new(
-        SortedPairs { n_points: n },
+        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
         cfg.merge_radius,
         cfg.bias_height,
         cfg.bias_gamma,
     );
+    #[cfg(feature = "ira")]
+    if cfg.shape_keyed {
+        bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
+    }
+    #[cfg(not(feature = "ira"))]
+    assert!(
+        !cfg.shape_keyed,
+        "shape keying needs the `ira` feature; without it the threshold would \
+         silently remain a descriptor-space number"
+    );
+
     let kernels = ClusterMove::library(n);
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
@@ -487,5 +516,38 @@ mod tests {
         repair(&mut x, n, 0.85);
         let d = ((x[0] - x[3]).powi(2) + (x[1] - x[4]).powi(2) + (x[2] - x[5]).powi(2)).sqrt();
         assert!(d >= 0.85 - 1e-6, "overlap survived repair at {d}");
+    }
+}
+
+/// Descriptor for basin keying, matched to the metric that will compare it.
+///
+/// A sorted distance spectrum is permutation and rotation invariant already, so
+/// Euclidean distance on it is a usable if scale-broken notion of sameness.
+/// A shape metric quotients out those symmetries itself and needs the
+/// coordinates, so the two cannot be mixed.
+pub enum ClusterFingerprint {
+    /// Sorted pairwise distances, compared by Euclidean distance.
+    Spectrum(SortedPairs),
+    /// Coordinates, for a metric that does its own matching.
+    Coordinates,
+}
+
+impl ClusterFingerprint {
+    /// The descriptor a given keying requires.
+    pub fn for_keying(n_points: usize, shape_keyed: bool) -> Self {
+        if shape_keyed {
+            ClusterFingerprint::Coordinates
+        } else {
+            ClusterFingerprint::Spectrum(SortedPairs { n_points })
+        }
+    }
+}
+
+impl Fingerprint for ClusterFingerprint {
+    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        match self {
+            ClusterFingerprint::Spectrum(s) => s.describe(x),
+            ClusterFingerprint::Coordinates => x.to_owned(),
+        }
     }
 }
