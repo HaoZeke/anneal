@@ -39,6 +39,8 @@ pub mod neigh;
 pub mod noise_accept;
 /// The pure-Rust SA driver loop.
 pub mod runner;
+/// Collective variables from the spectrum of the visited-basin graph.
+pub mod spectral;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
 /// Shared algebra-facing type definitions.
