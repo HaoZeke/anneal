@@ -88,6 +88,13 @@ fn main() {
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     cfg.return_screen = opts.contains(&"rscreen");
+    if opts.contains(&"pt") {
+        // A ladder sharing one budget, not four budgets. The comparison is
+        // against a single chain at the same total cost.
+        cfg.replicas = 4;
+        println!("  replica exchange: {} chains, swap every {} hops, top x{}",
+                 cfg.replicas, cfg.swap_period, cfg.ladder_top);
+    }
     // The deposit height matters only now that basins are revisited: at 33
     // revisits a height of 0.25 accumulates to about 8, against escape gaps
     // measured at 0.09 for the cheapest and 0.18 at the tenth percentile.
@@ -177,7 +184,7 @@ fn main() {
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
-             paths {} improved {} gain {:.3}  \
+             swaps {}/{}  paths {} improved {} gain {:.3}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -186,6 +193,8 @@ fn main() {
             out.basins,
             out.hops as f64 / out.basins.max(1) as f64,
             out.returned,
+            out.swaps_accepted,
+            out.swaps_tried,
             out.paths,
             out.path_improvements,
             out.path_gain,

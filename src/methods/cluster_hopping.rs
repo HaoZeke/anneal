@@ -32,6 +32,7 @@ use rand::rngs::StdRng;
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
+use crate::exchange::{Exchange, MetropolisExchange};
 use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 
@@ -208,6 +209,28 @@ pub struct Config {
     pub allocate_moves: bool,
     /// Set the deposit height from the escape gaps the chain observes.
     pub adaptive_height: bool,
+    /// Hops a single `run` may take before returning, when set.
+    ///
+    /// Used by the replica ladder to advance one chain by a slice; a plain run
+    /// leaves it unset and stops only when the ledger does.
+    pub max_hops: Option<usize>,
+    /// Replicas run on a temperature ladder, with periodic swaps.
+    ///
+    /// One is the plain chain. Above one, the driver runs a ladder and offers
+    /// swaps through [`crate::exchange::Exchange`], which is the crate's own
+    /// operator and satisfies detailed balance by construction.
+    ///
+    /// This is the standard non-local mechanism for a multi-funnel landscape
+    /// and the measurements here say why it is the right one to reach for: no
+    /// single move from the plateau reaches anything lower, so a cold chain
+    /// cannot leave it, while a hot chain crosses freely and finds nothing
+    /// precise. A swap moves a hot chain's crossing down to a cold chain that
+    /// can polish it, which neither temperature achieves alone.
+    pub replicas: usize,
+    /// Hops between swap attempts.
+    pub swap_period: usize,
+    /// Hottest temperature on the ladder, as a multiple of `temperature`.
+    pub ladder_top: f64,
     /// Abandon a trial whose short relaxation is heading back to the current
     /// basin, before paying for the full one.
     ///
@@ -295,6 +318,10 @@ impl Config {
             budget_window: false,
             allocate_moves: false,
             adaptive_height: false,
+            max_hops: None,
+            replicas: 1,
+            swap_period: 50,
+            ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
             stall_patience: 60,
@@ -332,6 +359,10 @@ pub struct Outcome {
     pub charged: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
+    /// Swap attempts between adjacent replicas.
+    pub swaps_tried: usize,
+    /// Swaps accepted.
+    pub swaps_accepted: usize,
     /// Paths attempted after a stall.
     pub paths: usize,
     /// Paths that produced a structure outside the starting basin.
@@ -441,12 +472,41 @@ pub fn run<R: Rng + ?Sized>(
     // through rather than reducing them to a sorted distance spectrum first;
     // handing the spectrum to a shape metric would compare the wrong objects
     // and quietly return distances that mean nothing.
-    let mut bias = BasinBias::new(
-        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
-        cfg.merge_radius,
-        cfg.bias_height,
-        cfg.bias_gamma,
-    );
+    // One chain per rung, each with its own bias, alive for the whole run.
+    //
+    // The bias has to persist per replica. Advancing a rung by calling this
+    // function again would construct a fresh one every slice, and a
+    // well-tempered bias rebuilt every fifty hops has nothing to accumulate:
+    // measured that way an LJ38 run registered 18 basins instead of about 200.
+    let n_rep = cfg.replicas.max(1);
+    let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
+        .map(|_| {
+            BasinBias::new(
+                ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+            )
+        })
+        .collect();
+    // Geometric ladder, so swap acceptance is spaced evenly rather than
+    // bunched at one end.
+    let temps: Vec<f64> = (0..n_rep)
+        .map(|k| {
+            if n_rep == 1 {
+                cfg.temperature
+            } else {
+                cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
+            }
+        })
+        .collect();
+    let exchange = MetropolisExchange;
+    let mut swaps_tried = 0usize;
+    let mut swaps_accepted = 0usize;
+    let mut rep = 0usize;
+    let mut since_swap = 0usize;
+    let mut bias = biases.remove(0);
+    let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
         bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
@@ -492,6 +552,12 @@ pub fn run<R: Rng + ?Sized>(
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     ledger.record(e, x.view());
+    for _ in 1..n_rep {
+        let s0 = random_cluster(n, 0.7, cfg.min_separation, rng);
+        let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
+        ledger.record(e0, x0.view());
+        chains.push((e0, x0));
+    }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut hops = 0usize;
@@ -605,6 +671,53 @@ pub fn run<R: Rng + ?Sized>(
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
 
+        if n_rep > 1 {
+            since_swap += 1;
+            if since_swap >= cfg.swap_period {
+                since_swap = 0;
+                // Park the active rung, offer a swap with the next, then make
+                // that one active. Each rung keeps its own bias and its own
+                // temperature; only the states move, so a hot rung's crossing
+                // lands in a cold rung that can polish it.
+                chains.insert(rep, (e, x.clone()));
+                biases.insert(rep, std::mem::replace(
+                    &mut bias,
+                    BasinBias::new(
+                        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                        cfg.merge_radius,
+                        cfg.bias_height,
+                        cfg.bias_gamma,
+                    ),
+                ));
+                let k = rep;
+                let j = (rep + 1) % n_rep;
+                if k != j {
+                    swaps_tried += 1;
+                    let p = exchange.swap_accept_prob(
+                        chains[k].0.min(chains[j].0),
+                        temps[k.min(j)],
+                        chains[k].0.max(chains[j].0),
+                        temps[k.max(j)],
+                    );
+                    if rng.random::<f64>() < p {
+                        swaps_accepted += 1;
+                        chains.swap(k, j);
+                    }
+                }
+                rep = j;
+                let (ne, nx) = chains.remove(rep);
+                e = ne;
+                x = nx;
+                bias = biases.remove(rep);
+            }
+        }
+
+        if let Some(cap) = cfg.max_hops {
+            if hops >= cap {
+                break;
+            }
+        }
+
         if cfg.path_on_stall {
             // Diversity is judged on the descriptor, which is the same notion
             // of sameness the bias is keyed on, so an archive member is one the
@@ -688,6 +801,8 @@ pub fn run<R: Rng + ?Sized>(
         basins: bias.n_basins(),
         charged: ledger.spent(),
         returned,
+        swaps_tried,
+        swaps_accepted,
         paths: paths_run,
         path_escapes,
         path_improvements,
