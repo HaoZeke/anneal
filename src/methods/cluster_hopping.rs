@@ -328,7 +328,15 @@ pub struct Outcome {
     /// Paths attempted after a stall.
     pub paths: usize,
     /// Paths that produced a structure outside the starting basin.
+    ///
+    /// Nearly always all of them, and so not worth much on its own: an image
+    /// interpolated towards a different structure differs from the start by
+    /// construction. The useful count is `path_improvements`.
     pub path_escapes: usize,
+    /// Paths that produced a structure lower than the chain was standing on.
+    pub path_improvements: usize,
+    /// Total depth gained from paths, in energy units.
+    pub path_gain: f64,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -472,6 +480,8 @@ pub fn run<R: Rng + ?Sized>(
     let mut archive: Vec<(f64, Array1<f64>)> = Vec::new();
     let mut paths_run = 0usize;
     let mut path_escapes = 0usize;
+    let mut path_improvements = 0usize;
+    let mut path_gain = 0.0_f64;
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     ledger.record(e, x.view());
@@ -652,6 +662,8 @@ pub fn run<R: Rng + ?Sized>(
                     if let Some(esc) = out.best_escape() {
                         path_escapes += 1;
                         if esc.energy < e {
+                            path_improvements += 1;
+                            path_gain += e - esc.energy;
                             e = esc.energy;
                             x = esc.state.clone();
                         }
@@ -671,6 +683,8 @@ pub fn run<R: Rng + ?Sized>(
         returned,
         paths: paths_run,
         path_escapes,
+        path_improvements,
+        path_gain,
     }
 }
 

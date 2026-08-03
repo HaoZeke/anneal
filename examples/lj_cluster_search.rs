@@ -176,7 +176,8 @@ fn main() {
         total_charged += ledger.spent();
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
-             basins {} ({:.1} hops each)  returned {}  paths {}/{} escaped  \
+             basins {} ({:.1} hops each)  returned {}  \
+             paths {} improved {} gain {:.3}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -185,8 +186,9 @@ fn main() {
             out.basins,
             out.hops as f64 / out.basins.max(1) as f64,
             out.returned,
-            out.path_escapes,
             out.paths,
+            out.path_improvements,
+            out.path_gain,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
