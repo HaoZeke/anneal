@@ -86,6 +86,7 @@ fn main() {
     cfg.allocate_moves = opts.contains(&"thompson");
     cfg.adaptive_height = opts.contains(&"height");
     cfg.anneal_diversity = opts.contains(&"csa");
+    cfg.path_on_stall = opts.contains(&"path");
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }

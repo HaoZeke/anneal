@@ -32,6 +32,7 @@ use rand::rngs::StdRng;
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
+use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 
 /// The move library, dispatched by value.
@@ -207,6 +208,18 @@ pub struct Config {
     pub allocate_moves: bool,
     /// Set the deposit height from the escape gaps the chain observes.
     pub adaptive_height: bool,
+    /// Attempt a multi-step path between funnels when hopping stalls.
+    ///
+    /// Basin hopping searches to depth one, and from the structure a 75-point
+    /// search settles into none of 1800 single moves reaches anything lower. A
+    /// path relaxes images between the current structure and a structurally
+    /// different archive member, so the corridor between two funnels is
+    /// examined rather than jumped.
+    pub path_on_stall: bool,
+    /// Hops without improvement before a path is attempted.
+    pub stall_patience: usize,
+    /// Images relaxed along a path.
+    pub path_images: usize,
     /// Anneal the merge radius from wide to narrow across the budget.
     ///
     /// The threshold that decides when two structures are one basin is a
@@ -253,6 +266,9 @@ impl Config {
             budget_window: false,
             allocate_moves: false,
             adaptive_height: false,
+            path_on_stall: false,
+            stall_patience: 60,
+            path_images: 9,
             anneal_diversity: false,
             diversity_floor: 0.1,
             height_revisits: 4.0,
@@ -284,6 +300,10 @@ pub struct Outcome {
     pub basins: usize,
     /// Charged evaluations spent.
     pub charged: usize,
+    /// Paths attempted after a stall.
+    pub paths: usize,
+    /// Paths that produced a structure outside the starting basin.
+    pub path_escapes: usize,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -419,6 +439,14 @@ pub fn run<R: Rng + ?Sized>(
     // begins where the fixed version sat rather than somewhere new.
     let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
         .with_final_fraction(cfg.diversity_floor);
+    let mut stall = StallDetector::new(cfg.stall_patience);
+    // Structures kept for path endpoints. Only ones far from every member are
+    // added, because interpolating between two structures in one funnel lands
+    // back in it, which is what archive-based escape moves holding a single
+    // funnel's structures already showed.
+    let mut archive: Vec<(f64, Array1<f64>)> = Vec::new();
+    let mut paths_run = 0usize;
+    let mut path_escapes = 0usize;
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     ledger.record(e, x.view());
@@ -477,6 +505,15 @@ pub fn run<R: Rng + ?Sized>(
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
         hops += 1;
+        // Kept before the acceptance branch, which may move `x_new` into the
+        // chain. The archive wants the structure this hop produced whether or
+        // not the chain took it: a rejected structure in a different funnel is
+        // exactly the path endpoint that is otherwise never seen again.
+        let produced = if cfg.path_on_stall {
+            Some((e_new, x_new.clone()))
+        } else {
+            None
+        };
 
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
@@ -504,6 +541,78 @@ pub fn run<R: Rng + ?Sized>(
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+
+        if cfg.path_on_stall {
+            // Diversity is judged on the descriptor, which is the same notion
+            // of sameness the bias is keyed on, so an archive member is one the
+            // bias would call a different basin.
+            let (pe, px) = produced.expect("kept when path_on_stall is set");
+            let d_new = bias.cv(px.view());
+            let far = archive.iter().all(|(_, a)| {
+                let da = bias.cv(a.view());
+                da.iter()
+                    .zip(d_new.iter())
+                    .map(|(p, q)| (p - q) * (p - q))
+                    .sum::<f64>()
+                    .sqrt()
+                    > 4.0 * cfg.merge_radius
+            });
+            if far && archive.len() < 32 {
+                archive.push((pe, px));
+            }
+            if stall.observe(e) && archive.len() >= 2 {
+                // The deepest member that is not where the chain already is.
+                let target = archive
+                    .iter()
+                    .filter(|(_, a)| {
+                        let da = bias.cv(a.view());
+                        let dc = bias.cv(x.view());
+                        da.iter()
+                            .zip(dc.iter())
+                            .map(|(p, q)| (p - q) * (p - q))
+                            .sum::<f64>()
+                            .sqrt()
+                            > 4.0 * cfg.merge_radius
+                    })
+                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+                    .map(|(_, a)| a.clone());
+                if let Some(t) = target {
+                    paths_run += 1;
+                    let start_cv = bias.cv(x.view());
+                    let out = interpolate_path(
+                        x.view(),
+                        t.view(),
+                        cfg.path_images,
+                        |img| {
+                            if ledger.remaining() == 0 {
+                                return None;
+                            }
+                            let (ev, xv) = relax(ledger, img, cfg.relax_steps);
+                            ledger.record(ev, xv.view());
+                            Some((ev, xv))
+                        },
+                        |st| {
+                            let d = bias.cv(st);
+                            d.iter()
+                                .zip(start_cv.iter())
+                                .map(|(p, q)| (p - q) * (p - q))
+                                .sum::<f64>()
+                                .sqrt()
+                                > cfg.merge_radius
+                        },
+                    );
+                    // The deepest structure that actually left, not the deepest
+                    // overall: the deepest is usually a relaxation back home.
+                    if let Some(esc) = out.best_escape() {
+                        path_escapes += 1;
+                        if esc.energy < e {
+                            e = esc.energy;
+                            x = esc.state.clone();
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Outcome {
@@ -513,6 +622,8 @@ pub fn run<R: Rng + ?Sized>(
         screened_out,
         basins: bias.n_basins(),
         charged: ledger.spent(),
+        paths: paths_run,
+        path_escapes,
     }
 }
 
