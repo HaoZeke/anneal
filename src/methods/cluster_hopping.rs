@@ -31,6 +31,7 @@ use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, Fingerprint, SortedPairs};
+use crate::diversity::DiversityAnnealer;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 
 /// The move library, dispatched by value.
@@ -164,6 +165,11 @@ impl Ledger {
     }
 
     /// Charged evaluations remaining.
+    /// Charged evaluations the ledger was created with.
+    pub fn budget(&self) -> usize {
+        self.budget
+    }
+
     pub fn remaining(&self) -> usize {
         self.budget.saturating_sub(self.spent)
     }
@@ -201,6 +207,15 @@ pub struct Config {
     pub allocate_moves: bool,
     /// Set the deposit height from the escape gaps the chain observes.
     pub adaptive_height: bool,
+    /// Anneal the merge radius from wide to narrow across the budget.
+    ///
+    /// The threshold that decides when two structures are one basin is a
+    /// temperature rather than a setting, and the only published method that
+    /// solves the hard cluster sizes reliably anneals it. Held fixed, it is the
+    /// quantity three separate calibrations here failed to pin down.
+    pub anneal_diversity: bool,
+    /// Fraction of the starting radius the annealed threshold falls to.
+    pub diversity_floor: f64,
     /// Revisits a basin should take before the accumulated bias clears the
     /// escape gap, when the height is adaptive.
     pub height_revisits: f64,
@@ -238,6 +253,8 @@ impl Config {
             budget_window: false,
             allocate_moves: false,
             adaptive_height: false,
+            anneal_diversity: false,
+            diversity_floor: 0.1,
             height_revisits: 4.0,
             screen_margin: 2.0,
             screen_steps: 25,
@@ -396,6 +413,12 @@ pub fn run<R: Rng + ?Sized>(
     // fixed, since a height above the gap empties a basin on one revisit and
     // the gap is a property of the landscape.
     let mut height = AdaptiveHeight::new(0.1, cfg.height_revisits, cfg.bias_height);
+    // Starts at the configured radius and narrows. The paper's rule takes the
+    // start from the spread of an initial population; here the configured value
+    // is the start, so a run that does not anneal is unchanged and one that does
+    // begins where the fixed version sat rather than somewhere new.
+    let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
+        .with_final_fraction(cfg.diversity_floor);
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     ledger.record(e, x.view());
@@ -414,6 +437,10 @@ pub fn run<R: Rng + ?Sized>(
             cfg.temperature
         };
 
+        if cfg.anneal_diversity {
+            let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
+            bias.set_merge_radius(diversity.threshold(progress));
+        }
         let k = if cfg.allocate_moves {
             allocator.select(rng)
         } else {

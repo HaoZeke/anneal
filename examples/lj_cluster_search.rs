@@ -85,6 +85,7 @@ fn main() {
     cfg.budget_window = opts.contains(&"bfwt");
     cfg.allocate_moves = opts.contains(&"thompson");
     cfg.adaptive_height = opts.contains(&"height");
+    cfg.anneal_diversity = opts.contains(&"csa");
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }

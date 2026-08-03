@@ -335,6 +335,21 @@ impl<F: Fingerprint> BasinBias<F> {
         }
     }
 
+    /// Sets the distance below which two descriptors are one basin.
+    ///
+    /// Exposed because this is a schedule rather than a setting. Lee, Lee and
+    /// Scheraga show the threshold plays the role of a temperature and is
+    /// annealed from wide to narrow, and their method solves the cluster sizes
+    /// a fixed threshold does not. See [`crate::diversity`].
+    pub fn set_merge_radius(&mut self, radius: f64) {
+        self.merge_radius = radius;
+    }
+
+    /// Current merge radius.
+    pub fn merge_radius(&self) -> f64 {
+        self.merge_radius
+    }
+
     /// Sets the height deposited per revisit.
     ///
     /// Exposed because the right value is a property of the landscape rather
