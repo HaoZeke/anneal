@@ -49,6 +49,7 @@ pub mod noise_accept;
 pub mod path;
 pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
+pub mod screen;
 pub mod spectral;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
