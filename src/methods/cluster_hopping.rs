@@ -486,7 +486,7 @@ impl Config {
 }
 
 /// What a run produced.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Outcome {
     /// Lowest quenched value found.
     pub best: f64,
