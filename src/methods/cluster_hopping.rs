@@ -271,7 +271,18 @@ impl Config {
             temperature: 0.8,
             bias_height: 0.25,
             bias_gamma: 5.0,
-            merge_radius: 1e-2,
+            // Calibrated against the descriptor it is compared with, not
+            // guessed. Over 75-point minima the sorted-pair distance between
+            // independent minima is 0.9212 at the closest with a median of
+            // 3.28, while a structure one hop away sits at 0.4766 to 0.58, so
+            // 0.7 separates a return from a genuinely different minimum.
+            //
+            // The previous 0.01 was fifty times below the smallest distance
+            // that ever occurs, so every structure was its own basin: the
+            // per-basin bias deposited one hill per structure and never
+            // accumulated, an escape test was always true and a return test
+            // never was. The mechanism was inert rather than ineffective.
+            merge_radius: 0.7,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
