@@ -24,6 +24,30 @@ use ndarray::{Array1, ArrayView1};
 use crate::bias::Fingerprint;
 
 unsafe extern "C" {
+    /// `libira_try_mat` from `src/library_sofi.f90`.
+    ///
+    /// Applies one candidate symmetry operation to a structure and returns the
+    /// Hausdorff distance between the structure and its own image under that
+    /// operation, together with the permutation realising it.
+    ///
+    /// This is the SOFI entry point that matters for a search. Asking SOFI for
+    /// a point group returns a discrete answer, and on this landscape that
+    /// answer is C1 for every quenched minimum at every threshold from 0.3 to
+    /// 2.0, so a coordinate built on it is constant and a bias deposited on it
+    /// cancels. The deviation under a named operation is continuous and is
+    /// defined whether or not the structure has the symmetry: it measures how
+    /// far a structure is from having a fivefold axis rather than whether it
+    /// has one.
+    fn libira_try_mat(
+        nat: c_int,
+        typ: *const c_int,
+        coords: *const c_double,
+        rmat: *const c_double,
+        dh: *mut c_double,
+        // By reference, as for the output buffers of `libira_match`.
+        perm: *const *mut c_int,
+    );
+
     /// `libira_match` from `src/library_ira.f90`.
     ///
     /// Returns the rigid transform taking structure 2 onto structure 1 and the
@@ -40,9 +64,16 @@ unsafe extern "C" {
         coords2: *const c_double,
         candidate2: *const c_int,
         kmax_factor: c_double,
-        rotation: *mut c_double,
-        translation: *mut c_double,
-        permutation: *mut c_int,
+        // Declared `type(c_ptr), intent(in)` without `value`, so Fortran
+        // receives these by reference and dereferences once to reach the
+        // buffer. Passing the buffer address directly makes it read the first
+        // eight bytes of the buffer as an address, which segfaults. The
+        // arguments above carry `value` and are passed directly; the
+        // difference is one keyword in the Fortran and the whole calling
+        // convention here.
+        rotation: *const *mut c_double,
+        translation: *const *mut c_double,
+        permutation: *const *mut c_int,
         hd: *mut c_double,
         cerr: *mut c_int,
     );
@@ -55,6 +86,10 @@ pub enum ShapeError {
     SizeMismatch(usize, usize),
     /// IRA reported a non-zero status.
     Library(i32),
+    /// A coordinate buffer whose length is not a multiple of three.
+    NotThreeDimensional(usize),
+    /// An empty structure, which has no symmetry to measure.
+    Empty,
 }
 
 impl std::fmt::Display for ShapeError {
@@ -63,6 +98,10 @@ impl std::fmt::Display for ShapeError {
             ShapeError::SizeMismatch(a, b) => {
                 write!(f, "shape match needs equal point counts, got {a} and {b}")
             }
+            ShapeError::NotThreeDimensional(n) => {
+                write!(f, "coordinate length {n} is not a multiple of three")
+            }
+            ShapeError::Empty => write!(f, "an empty structure has no symmetry"),
             ShapeError::Library(c) => write!(f, "IRA returned status {c}"),
         }
     }
@@ -102,29 +141,38 @@ pub fn match_shapes(
     let cb: Vec<f64> = b.iter().copied().collect();
     let typ = vec![1_i32; n1];
 
+    // Length `nat` with a leading -1, the sentinel IRA's own interface uses for
+    // equal atom counts to mean "choose your own frames". A null pointer is not
+    // an option: the Fortran calls `c_f_pointer` on this argument with no
+    // `c_associated` guard, so null becomes a Fortran pointer to address zero.
+    let mut candidate = vec![0_i32; n1];
+    candidate[0] = -1;
+
     let mut rotation = [0.0_f64; 9];
     let mut translation = [0.0_f64; 3];
     let mut permutation = vec![0_i32; n1];
     let mut hd = 0.0_f64;
     let mut cerr = 0_i32;
 
-    // SAFETY: every pointer is to a live buffer of the length IRA is told,
-    // the candidate pointers are null which the interface accepts, and the
-    // outputs are sized 9, 3 and n as the interface requires.
+    // SAFETY: every pointer is to a live buffer of the length IRA is told. The
+    // candidate arrays are allocated and carry the sentinel rather than being
+    // null. The three output buffers are passed by reference because Fortran
+    // declares them `type(c_ptr), intent(in)` without `value`, unlike the
+    // inputs above, and the outputs are sized 9, 3 and n as required.
     unsafe {
         libira_match(
             n1 as c_int,
             typ.as_ptr(),
             ca.as_ptr(),
-            std::ptr::null(),
+            candidate.as_ptr(),
             n2 as c_int,
             typ.as_ptr(),
             cb.as_ptr(),
-            std::ptr::null(),
+            candidate.as_ptr(),
             kmax_factor,
-            rotation.as_mut_ptr(),
-            translation.as_mut_ptr(),
-            permutation.as_mut_ptr(),
+            &rotation.as_mut_ptr(),
+            &translation.as_mut_ptr(),
+            &permutation.as_mut_ptr(),
             &mut hd,
             &mut cerr,
         );
@@ -247,5 +295,146 @@ mod tests {
         let a = octahedron();
         let b = Array1::from(vec![0.0, 0.0, 0.0]);
         assert_eq!(IraMetric::default().distance(a.view(), b.view()), f64::INFINITY);
+    }
+}
+
+/// Deviation of a structure from invariance under one operation.
+///
+/// `matrix` is a three by three orthogonal operation in row-major order.
+/// Returns the Hausdorff distance between the structure and its image, which
+/// is zero when the operation is an exact symmetry and grows smoothly with the
+/// departure from it.
+///
+/// The continuous quantity is the useful one. A point group is a discrete
+/// answer that reads C1 for every structure a search on this landscape visits,
+/// so a bias on it deposits on a constant; the deviation under a chosen
+/// operation separates structures that no group label distinguishes.
+pub fn symmetry_deviation(
+    coords: ArrayView1<f64>,
+    matrix: &[f64; 9],
+) -> Result<f64, ShapeError> {
+    if coords.len() % 3 != 0 {
+        return Err(ShapeError::NotThreeDimensional(coords.len()));
+    }
+    let n = coords.len() / 3;
+    if n == 0 {
+        return Err(ShapeError::Empty);
+    }
+    let owned: Vec<f64> = coords.iter().copied().collect();
+    let types = vec![1_i32; n];
+    let mut perm = vec![0_i32; n];
+    let mut dh: c_double = 0.0;
+    // Safety: every pointer is to a live buffer of the length the Fortran
+    // declares from `nat`, and `dh` and `perm` are the only ones written.
+    unsafe {
+        libira_try_mat(
+            n as c_int,
+            types.as_ptr(),
+            owned.as_ptr(),
+            matrix.as_ptr(),
+            &mut dh,
+            &perm.as_mut_ptr(),
+        );
+    }
+    if !dh.is_finite() || dh < 0.0 {
+        return Err(ShapeError::Library(-1));
+    }
+    Ok(dh)
+}
+
+/// Rotation by `angle` about a unit `axis`, row-major, for [`symmetry_deviation`].
+pub fn rotation_matrix(axis: [f64; 3], angle: f64) -> [f64; 9] {
+    let norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let [x, y, z] = [axis[0] / norm, axis[1] / norm, axis[2] / norm];
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    [
+        t * x * x + c,
+        t * x * y - s * z,
+        t * x * z + s * y,
+        t * x * y + s * z,
+        t * y * y + c,
+        t * y * z - s * x,
+        t * x * z - s * y,
+        t * y * z + s * x,
+        t * z * z + c,
+    ]
+}
+
+/// Smallest deviation over the rotations of an `order`-fold axis.
+///
+/// A structure is scored against a symmetry it need not possess, so the result
+/// is a distance from that symmetry rather than a test for it. Minimising over
+/// the non-trivial powers keeps the quantity a property of the axis rather than
+/// of which power happens to be tried.
+pub fn axis_deviation(
+    coords: ArrayView1<f64>,
+    axis: [f64; 3],
+    order: usize,
+) -> Result<f64, ShapeError> {
+    if order < 2 {
+        return Err(ShapeError::Library(-2));
+    }
+    let mut best = f64::INFINITY;
+    for k in 1..order {
+        let angle = 2.0 * std::f64::consts::PI * (k as f64) / (order as f64);
+        let d = symmetry_deviation(coords, &rotation_matrix(axis, angle))?;
+        best = best.min(d);
+    }
+    Ok(best)
+}
+
+#[cfg(test)]
+mod sofi_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    /// Twelve vertices of a regular icosahedron, which has exact fivefold axes.
+    fn icosahedron() -> Array1<f64> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut v = Vec::new();
+        for s1 in [-1.0_f64, 1.0] {
+            for s2 in [-1.0_f64, 1.0] {
+                v.extend_from_slice(&[0.0, s1, s2 * phi]);
+                v.extend_from_slice(&[s1, s2 * phi, 0.0]);
+                v.extend_from_slice(&[s1 * phi, 0.0, s2]);
+            }
+        }
+        Array1::from(v)
+    }
+
+    #[test]
+    fn rotation_matrix_is_orthogonal_with_unit_determinant() {
+        let m = rotation_matrix([0.3, -0.5, 0.81], 1.1);
+        let r = [
+            [m[0], m[1], m[2]],
+            [m[3], m[4], m[5]],
+            [m[6], m[7], m[8]],
+        ];
+        for i in 0..3 {
+            for j in 0..3 {
+                let dot: f64 = (0..3).map(|k| r[i][k] * r[j][k]).sum();
+                let want = if i == j { 1.0 } else { 0.0 };
+                assert!((dot - want).abs() < 1e-12, "not orthogonal at {i},{j}");
+            }
+        }
+        let det = r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1])
+            - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+            + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]);
+        assert!((det - 1.0).abs() < 1e-12, "determinant {det}");
+    }
+
+    /// The property the module exists for: the deviation is near zero along a
+    /// symmetry the structure has, and clearly positive along one it does not.
+    #[test]
+    fn deviation_separates_a_real_axis_from_a_wrong_one() {
+        let x = icosahedron();
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        // A fivefold axis of the icosahedron passes through a vertex.
+        let real = axis_deviation(x.view(), [0.0, 1.0, phi], 5).unwrap();
+        // A fourfold rotation is not a symmetry of an icosahedron.
+        let wrong = axis_deviation(x.view(), [0.0, 1.0, phi], 4).unwrap();
+        assert!(real < 1e-6, "fivefold deviation {real} should vanish");
+        assert!(wrong > 0.1, "fourfold deviation {wrong} should not");
     }
 }
