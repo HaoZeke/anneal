@@ -15,6 +15,8 @@
 pub mod cluster_hopping;
 /// History-conditioned escape feedback, after Goedecker's minima hopping.
 pub mod activation;
+pub mod bank;
+pub mod csa_cluster;
 pub mod minima_hopping;
 /// Quasi-Newton relaxation whose curvature persists between calls.
 pub mod warm_lbfgs;

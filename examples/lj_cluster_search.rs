@@ -63,6 +63,13 @@ fn main() {
     let n: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(38);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400_000);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(8);
+    // Where the seed numbering starts, so a campaign can put one seed on each
+    // core instead of walking them in one process. Seeds are the same runs
+    // either way: seed 5 of one process and seed 5 of another are identical.
+    let seed0: u64 = std::env::var("SEED_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
 
     let reference = reference(n);
     println!(
@@ -122,7 +129,7 @@ fn main() {
     let mut deepest = f64::INFINITY;
     let mut total_hops = 0usize;
     let mut total_charged = 0usize;
-    for seed in 0..seeds {
+    for seed in seed0..(seed0 + seeds) {
         let mut ledger = Ledger::new(budget);
         // The driver owns the search; the numerics under it are the caller's.
         // A hand-rolled steepest descent with backtracking cost 830 charged

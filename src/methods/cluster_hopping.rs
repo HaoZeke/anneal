@@ -223,6 +223,19 @@ impl Ledger {
         true
     }
 
+    /// Charges `n` units at once, returning `false` when the budget ran out
+    /// partway.
+    ///
+    /// For a caller that ran work against a sub-ledger and is settling up. The
+    /// alternative, handing the real ledger to the inner run, makes any budget
+    /// arithmetic inside it see the whole campaign's budget rather than the
+    /// slice it was given.
+    pub fn charge_many(&mut self, n: usize) -> bool {
+        let room = self.remaining();
+        self.spent += n.min(room);
+        n <= room
+    }
+
     /// Records a value and its state when it improves the incumbent.
     pub fn record(&mut self, value: f64, state: ArrayView1<f64>) {
         if value < self.best {
@@ -231,12 +244,12 @@ impl Ledger {
         }
     }
 
-    /// Charged evaluations remaining.
     /// Charged evaluations the ledger was created with.
     pub fn budget(&self) -> usize {
         self.budget
     }
 
+    /// Charged evaluations remaining.
     pub fn remaining(&self) -> usize {
         self.budget.saturating_sub(self.spent)
     }
@@ -541,7 +554,15 @@ pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (
 ///
 /// Optional because only the soft-mode escape needs it: everything else in this
 /// driver works from relaxations alone.
-pub type Grad<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>;
+pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
+
+/// A borrow of one, for a caller that has a gradient to lend.
+///
+/// The two lifetimes are separate on purpose. Tying the trait object's lifetime
+/// to the borrow makes the pair invariant, so a caller that holds a gradient and
+/// wants to lend it to a sequence of inner runs cannot reborrow it: it has one
+/// gradient and can hand it over once.
+pub type Grad<'a> = &'a mut GradFn<'a>;
 
 /// Moves the centre of mass to the origin.
 fn recentre(x: &mut Array1<f64>, n: usize) {
@@ -633,12 +654,12 @@ pub fn run<R: Rng + ?Sized>(
 /// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
 /// displacement, which carries the same feedback law and is what Goedecker
 /// reports as strictly weaker.
-pub fn run_with_gradient<R: Rng + ?Sized>(
+pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
     relax: Relax<'_>,
-    mut grad: Option<Grad<'_>>,
+    mut grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Outcome {
     let n = cfg.n_points;
@@ -1234,11 +1255,11 @@ pub fn optimize(cfg: &Config, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) 
 }
 
 /// As [`optimize`], with a gradient for the soft-mode escape.
-pub fn optimize_with_gradient(
+pub fn optimize_with_gradient<'g>(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: Relax<'_>,
-    grad: Option<Grad<'_>>,
+    grad: Option<&mut GradFn<'g>>,
     seed: u64,
 ) -> Outcome {
     let mut rng = StdRng::seed_from_u64(seed);
