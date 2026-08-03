@@ -282,6 +282,28 @@ fn main() {
         if hit {
             solved += 1;
         }
+        // Where the run got its answer. Printed for the last few improvements
+        // only: the early ones are a descent from a random start and say
+        // nothing.
+        if let Some(r) = reference {
+            if let Some((h, b, e)) = out
+                .improvements
+                .iter()
+                .find(|(_, _, e)| *e < r + 1e-4)
+            {
+                println!(
+                    "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    out.hops,
+                    100.0 * *h as f64 / out.hops.max(1) as f64
+                );
+            } else if let Some((h, b, e)) = out.improvements.last() {
+                println!(
+                    "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    out.hops,
+                    100.0 * *h as f64 / out.hops.max(1) as f64
+                );
+            }
+        }
         deepest = deepest.min(out.best);
         if seed == 0 && out.rungs.len() > 1 {
             for (t, b, en) in &out.rungs {
