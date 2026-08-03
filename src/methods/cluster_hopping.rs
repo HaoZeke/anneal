@@ -1255,15 +1255,28 @@ fn run_full<'g, R: Rng + ?Sized>(
             if accept {
                 angular_accepted += 1;
             }
-            // R adjusted toward the target acceptance. Raising it makes the
-            // criterion stricter, so fewer and looser points qualify.
-            let rate = angular_accepted as f64 / angular_tried.max(1) as f64;
-            let step = 0.01 / (angular_tried as f64).sqrt().max(1.0);
-            angular_ratio = if rate > cfg.angular_target {
-                (angular_ratio - step).max(0.05)
-            } else {
-                (angular_ratio + step).min(0.95)
-            };
+            // R adjusted toward the target acceptance, and the sign is the
+            // part that has to be right.
+            //
+            // A low R is the strict criterion: it fires only when some point is
+            // very loosely bound, and relocating such a point almost always
+            // helps, so acceptance is high. A high R fires on ordinary surface
+            // points, where relocation usually hurts. Acceptance therefore
+            // falls as R rises, and accepting too often calls for a larger R.
+            //
+            // Coupled the other way it is positive feedback and runs to a
+            // bound: measured at 75 points, five seeds settled near R = 0.11
+            // and two ran to the 0.95 ceiling, firing the move on 30000 and
+            // 63000 hops of a hundred thousand and ending at -386.30 and
+            // -394.99. Wales and Doye report R converging to between 0.40 and
+            // 0.44.
+            //
+            // Robbins-Monro on the acceptance indicator rather than on a
+            // cumulative rate. A cumulative rate stops responding once the run
+            // is long, so an early transient is never corrected.
+            let hit = if accept { 1.0 } else { 0.0 };
+            let step = 0.02 / (1.0 + angular_tried as f64 / 500.0).sqrt();
+            angular_ratio = (angular_ratio + step * (hit - cfg.angular_target)).clamp(0.05, 0.95);
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
@@ -1796,6 +1809,31 @@ mod tests {
         assert!(
             (rnew - rmax).abs() < 1e-9,
             "landed at radius {rnew} where the cluster's largest is {rmax}"
+        );
+    }
+
+    /// The ratio has to settle where the acceptance target is met, not run to
+    /// a bound. Driven by a process whose acceptance falls as the ratio rises,
+    /// which is the coupling the real criterion has.
+    #[test]
+    fn the_angular_ratio_settles_rather_than_running_away() {
+        let target = 0.5_f64;
+        let mut ratio = 0.42_f64;
+        let mut tried = 0usize;
+        // Acceptance probability 1 - r, so the fixed point is r = 0.5.
+        let mut seed = 12345u64;
+        for _ in 0..20_000 {
+            tried += 1;
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let u = ((seed >> 33) as f64) / ((1u64 << 31) as f64);
+            let accept = u < (1.0 - ratio);
+            let hit = if accept { 1.0 } else { 0.0 };
+            let step = 0.02 / (1.0 + tried as f64 / 500.0).sqrt();
+            ratio = (ratio + step * (hit - target)).clamp(0.05, 0.95);
+        }
+        assert!(
+            (0.35..0.65).contains(&ratio),
+            "the ratio settled at {ratio}, not near the fixed point of 0.5"
         );
     }
 
