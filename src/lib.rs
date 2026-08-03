@@ -52,6 +52,9 @@ pub mod version;
 #[cfg(feature = "capi")]
 pub mod ffi;
 /// pyo3 module entry point exposed as `anneal._core`.
+#[cfg(feature = "ira")]
+pub mod shape;
+
 #[cfg(feature = "python")]
 pub mod python;
 

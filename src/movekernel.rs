@@ -15,7 +15,7 @@ use crate::neigh::{BoxConstrained, ContinuousR_n, Neighborhood};
 /// sampled-validation constructor. The conservative default is `false`.
 pub trait MoveKernel<T: Float>: Send + Sync {
     /// Draws a proposal point from the kernel at temperature `t`.
-    fn propose<R: Rng>(&self, i: ArrayView1<T>, t: T, rng: &mut R) -> Array1<T>;
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<T>, t: T, rng: &mut R) -> Array1<T>;
 
     /// Witnesses L2: returns `true` iff `supp(propose) subseteq n` over the
     /// implementor's declared domain. Sampled validation also exercises the
@@ -43,7 +43,7 @@ impl Gaussian {
 }
 
 impl MoveKernel<f64> for Gaussian {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let dist = NormalDist::new(0.0, self.sigma).expect("sigma > 0");
         Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
     }
@@ -75,7 +75,7 @@ impl Cauchy {
 }
 
 impl MoveKernel<f64> for Cauchy {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let dist = CauchyDist::new(0.0, self.gamma).expect("gamma > 0");
         Array1::from_iter(i.iter().map(|&xi| xi + dist.sample(rng)))
     }
@@ -151,7 +151,7 @@ impl TsallisVisit {
 }
 
 impl MoveKernel<f64> for TsallisVisit {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let qv = self.q_v;
         // SciPy dual_annealing VisitingDistribution constants (qv-dependent).
         let factor2 = (qv - 1.0).powf(4.0 - qv);
@@ -238,7 +238,7 @@ impl<M> Reflected<M> {
 }
 
 impl<M: MoveKernel<f64>> MoveKernel<f64> for Reflected<M> {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let mut p = self.inner.propose(i, t, rng);
         for (k, pk) in p.iter_mut().enumerate() {
             *pk = reflect_coord(*pk, self.bounds.low[k], self.bounds.high[k]);
@@ -376,7 +376,7 @@ fn rotate(v: [f64; 3], axis: [f64; 3], angle: f64) -> [f64; 3] {
     ]
 }
 
-fn random_unit<R: Rng>(rng: &mut R) -> [f64; 3] {
+fn random_unit<R: Rng + ?Sized>(rng: &mut R) -> [f64; 3] {
     let nd = NormalDist::new(0.0, 1.0).expect("unit normal");
     loop {
         let v = [nd.sample(rng), nd.sample(rng), nd.sample(rng)];
@@ -401,7 +401,7 @@ pub struct SurfaceRelocate {
 }
 
 impl MoveKernel<f64> for SurfaceRelocate {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let n = self.n_points;
         let mut out = i.to_owned();
         if n < 2 {
@@ -456,7 +456,7 @@ pub struct ShellRotate {
 }
 
 impl MoveKernel<f64> for ShellRotate {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let n = self.n_points;
         let mut out = i.to_owned();
         if n < 2 {
@@ -514,7 +514,7 @@ pub struct Symmetrise {
 }
 
 impl MoveKernel<f64> for Symmetrise {
-    fn propose<R: Rng>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, _t: f64, rng: &mut R) -> Array1<f64> {
         let n = self.n_points;
         let mut out = i.to_owned();
         if n < 2 || self.orders.is_empty() {

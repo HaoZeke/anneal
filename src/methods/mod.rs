@@ -11,6 +11,8 @@
 //! Accept) is silent on this loop control, so both styles are
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
+/// Basin hopping over quenched minima with a basin-keyed bias.
+pub mod cluster_hopping;
 pub mod additive_independence;
 pub mod amsa;
 pub mod bayesian_mixing;
