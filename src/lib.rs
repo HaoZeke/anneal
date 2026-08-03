@@ -10,6 +10,8 @@ pub mod accept;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.
 pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
+/// Proposal allocation and the budget-window temperature law.
+pub mod allocate;
 pub mod bias;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
