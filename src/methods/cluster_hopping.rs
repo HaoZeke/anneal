@@ -324,6 +324,18 @@ pub struct Config {
     pub escape_overshoot: f64,
     /// Climbing steps before a climb is abandoned.
     pub escape_max_climb: usize,
+    /// Climb out of the basin when the chain stops improving.
+    ///
+    /// The escape and the plain chain have opposite economics and this is how
+    /// they are combined. A climb is a guaranteed way out of a funnel and costs
+    /// 637 charged evaluations against 30 for an ordinary hop, so running one
+    /// every hop buys 471 hops where the plain chain buys a hundred thousand
+    /// and loses LJ38 outright. Running one only when the chain has stopped
+    /// improving costs a few per cent and supplies the one thing a biased
+    /// random walk has no mechanism for: leaving a funnel on purpose.
+    pub escape_on_stall: bool,
+    /// Hops without improvement before a climb is triggered.
+    pub escape_stall_patience: usize,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -437,6 +449,8 @@ impl Config {
             escape_amplitude: 0.25,
             escape_overshoot: 1.5,
             escape_max_climb: 24,
+            escape_on_stall: false,
+            escape_stall_patience: 400,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -485,6 +499,10 @@ pub struct Outcome {
     pub soft_escapes: usize,
     /// Of those, the ones whose climb reached a saddle.
     pub soft_crossed: usize,
+    /// Climbs triggered by a stall.
+    pub stall_escapes: usize,
+    /// Energy gained by those that landed lower than where they left.
+    pub stall_escape_gain: f64,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
     /// Per-rung temperature, basin count and best energy.
@@ -705,6 +723,11 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
+    // Its own detector, so a run using both this and the path search does not
+    // have the two mechanisms consuming each other's triggers.
+    let mut escape_stall = StallDetector::new(cfg.escape_stall_patience);
+    let mut stall_escapes = 0usize;
+    let mut stall_escape_gain = 0.0_f64;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -940,6 +963,40 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
 
+        // A climb out of the funnel, when nothing else is working.
+        if cfg.escape_on_stall && escape_stall.observe(ledger.best) {
+            if let Some(g) = grad.as_deref_mut() {
+                let act = Activation {
+                    step: cfg.escape_amplitude,
+                    overshoot: cfg.escape_overshoot,
+                    max_steps: cfg.escape_max_climb,
+                    lanczos_steps: cfg.escape_lanczos_steps,
+                    epsilon: cfg.escape_epsilon,
+                    ..Activation::default()
+                };
+                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                if let Some(o) = activate(x.view(), |y| g(ledger, y), &act, sign) {
+                    soft_escapes += 1;
+                    if o.crossed {
+                        soft_crossed += 1;
+                    }
+                    let (ee, xe) = relax(ledger, o.state.view(), cfg.relax_steps);
+                    ledger.record(ee, xe.view());
+                    hops += 1;
+                    stall_escapes += 1;
+                    if ee < e {
+                        stall_escape_gain += e - ee;
+                    }
+                    // Taken whatever its energy. The chain has already shown it
+                    // cannot improve from where it is, so the value of the new
+                    // structure is that it is somewhere else.
+                    e = ee;
+                    x = xe;
+                    here = None;
+                }
+            }
+        }
+
         if n_rep > 1 {
             since_swap += 1;
             if since_swap >= cfg.swap_period {
@@ -1099,6 +1156,8 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
         soft_escapes,
         soft_crossed,
+        stall_escapes,
+        stall_escape_gain,
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
         } else {

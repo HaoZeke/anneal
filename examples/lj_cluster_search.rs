@@ -89,6 +89,7 @@ fn main() {
     cfg.path_on_stall = opts.contains(&"path");
     cfg.return_screen = opts.contains(&"rscreen");
     cfg.minima_hopping = opts.contains(&"mh");
+    cfg.escape_on_stall = opts.contains(&"climb");
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
@@ -163,7 +164,11 @@ fn main() {
             &cfg,
             &mut ledger,
             &mut relax,
-            if cfg.minima_hopping { Some(&mut grad) } else { None },
+            if cfg.minima_hopping || cfg.escape_on_stall {
+                Some(&mut grad)
+            } else {
+                None
+            },
             seed,
         );
 
@@ -207,7 +212,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -229,6 +234,8 @@ fn main() {
             out.soft_crossed,
             out.soft_escapes,
             out.soft_lambda,
+            out.stall_escapes,
+            out.stall_escape_gain,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
