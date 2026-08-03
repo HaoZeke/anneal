@@ -101,19 +101,37 @@ impl ClusterMove {
         t: f64,
         rng: &mut R,
     ) -> Array1<f64> {
+        self.propose_scaled(x, t, 1.0, rng)
+    }
+
+    /// Draws a proposal with the amplitude multiplied by `scale`.
+    ///
+    /// Only the two plain perturbations carry an amplitude to scale. Surface
+    /// relocation, shell rotation and symmetrisation change a packing rather
+    /// than displace by a length, so there is nothing for a scale to multiply
+    /// and they are drawn unchanged.
+    pub fn propose_scaled<R: Rng + ?Sized>(
+        &self,
+        x: ArrayView1<f64>,
+        t: f64,
+        scale: f64,
+        rng: &mut R,
+    ) -> Array1<f64> {
         match self {
             ClusterMove::AllPoints { step } => {
                 let mut y = x.to_owned();
+                let h = step * scale;
                 for v in y.iter_mut() {
-                    *v += rng.random_range(-step..*step);
+                    *v += rng.random_range(-h..h);
                 }
                 y
             }
             ClusterMove::SinglePoint { n_points, step } => {
                 let mut y = x.to_owned();
                 let i = rng.random_range(0..*n_points);
+                let h = step * scale;
                 for k in 0..3 {
-                    y[3 * i + k] += rng.random_range(-step..*step);
+                    y[3 * i + k] += rng.random_range(-h..h);
                 }
                 y
             }
@@ -121,6 +139,51 @@ impl ClusterMove {
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
         }
+    }
+}
+
+#[cfg(test)]
+mod move_scaling_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    /// The escape scale has to reach the step, which is the whole mechanism.
+    /// It did not: the amplitude moves ignored the temperature argument, so a
+    /// controller multiplying it changed nothing about how far a proposal
+    /// reached.
+    #[test]
+    fn scaling_widens_the_displacement() {
+        let mv = ClusterMove::AllPoints { step: 0.4 };
+        let x: Array1<f64> = Array1::zeros(30);
+        let spread = |scale: f64| {
+            let mut rng = StdRng::seed_from_u64(7);
+            let mut worst = 0.0_f64;
+            for _ in 0..200 {
+                let y = mv.propose_scaled(x.view(), 0.8, scale, &mut rng);
+                for v in y.iter() {
+                    worst = worst.max(v.abs());
+                }
+            }
+            worst
+        };
+        let one = spread(1.0);
+        let four = spread(4.0);
+        assert!(
+            (four / one - 4.0).abs() < 0.2,
+            "a scale of four should reach four times as far: {four} against {one}"
+        );
+    }
+
+    #[test]
+    fn the_unscaled_call_is_the_old_behaviour() {
+        let mv = ClusterMove::SinglePoint { n_points: 10, step: 1.0 };
+        let x: Array1<f64> = Array1::zeros(30);
+        let mut a = StdRng::seed_from_u64(3);
+        let mut b = StdRng::seed_from_u64(3);
+        let p = mv.propose(x.view(), 0.8, &mut a);
+        let q = mv.propose_scaled(x.view(), 0.8, 1.0, &mut b);
+        assert_eq!(p, q);
     }
 }
 
@@ -594,7 +657,11 @@ pub fn run<R: Rng + ?Sized>(
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
-    let mut last_basin: Option<usize> = None;
+    // The basin the *chain* stands in, not the one the last quench produced.
+    // A rejected trial leaves the chain where it was, so keying "same" on the
+    // previous quench counts a rejected excursion as a departure and the
+    // controller escalates against the wrong history.
+    let mut here: Option<usize> = None;
     // Basin identity for the controller, kept apart from the bias.
     //
     // The two mechanisms share a notion of "the same basin" and nothing else,
@@ -655,12 +722,8 @@ pub fn run<R: Rng + ?Sized>(
         // nothing and freeze the chain, which took LJ38 from 1 seed in 8 to 0.
         // The escape scale multiplies the move amplitude. A chain that keeps
         // returning proposes further each time until it leaves.
-        let move_scale = if cfg.minima_hopping {
-            cfg.temperature * feedback.escape()
-        } else {
-            cfg.temperature
-        };
-        let mut trial = kernels[k].propose(x.view(), move_scale, rng);
+        let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
+        let mut trial = kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng);
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -724,10 +787,14 @@ pub fn run<R: Rng + ?Sized>(
             // temperature cold enough to polish cannot cross and one hot
             // enough to cross cannot polish; the threshold adapts to whichever
             // the chain is currently failing at.
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             let reached = identity.basin_of(x_new.view());
-            feedback.observe(last_basin, reached);
-            last_basin = Some(reached);
-            feedback.accept(e_new - e)
+            feedback.observe(Some(from), reached);
+            let ok = feedback.accept(e_new - e);
+            if ok {
+                here = Some(reached);
+            }
+            ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
