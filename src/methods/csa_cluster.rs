@@ -132,10 +132,9 @@ where
     let mut improved = 0usize;
     let mut duplicates = 0usize;
 
-    // A placeholder threshold for the seeding phase, replaced from the data
-    // before the bank is used for anything. Nothing is judged against it: the
-    // seeding offers go into an empty bank with room.
-    let mut bank = Bank::new(bank_cfg.capacity, 1e9);
+    // The threshold is set from the seeding population below. Nothing is
+    // judged against this one: the seeding phase bypasses the rule entirely.
+    let mut bank = Bank::new(bank_cfg.capacity, 1.0);
 
     // Seeding: independent chains from random starts, which is also how the
     // threshold gets a scale.
@@ -147,7 +146,7 @@ where
         let out = slice_run(cfg, ledger, relax, &mut grad, start.view(), bank_cfg.slice, &mut rng);
         slices += 1;
         if let Some(s) = out.best_state.as_ref() {
-            bank.offer(s.view(), out.best, &mut distance);
+            bank.seed(s.view(), out.best);
         }
     }
 

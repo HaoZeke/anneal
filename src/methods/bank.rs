@@ -179,6 +179,30 @@ impl Bank {
         }
     }
 
+    /// Adds a solution without applying the replacement rule.
+    ///
+    /// For the seeding phase only, and it is not a convenience. `Dcut` is meant
+    /// to come from the spread of the first population, so the first population
+    /// cannot be filtered by a `Dcut`: with a placeholder threshold wide enough
+    /// to admit anything, every seed after the first resembles the first, the
+    /// bank ends the phase holding one member, and there is no spread to
+    /// measure. Measured on LJ38, eight seeding chains left a bank of one.
+    ///
+    /// Returns `false` when the bank is full, which ends the phase.
+    pub fn seed(&mut self, state: ArrayView1<f64>, energy: f64) -> bool {
+        if self.members.len() >= self.capacity {
+            return false;
+        }
+        self.offered += 1;
+        self.novel += 1;
+        self.members.push(Member {
+            state: state.to_owned(),
+            energy,
+            hits: 0,
+        });
+        true
+    }
+
     /// Picks a member to search from next.
     ///
     /// Least-used first, breaking ties by energy. The bank is a set of regions
@@ -338,6 +362,20 @@ mod tests {
             used.iter().all(|&c| c == 3),
             "starts went {used:?} instead of evenly over the bank"
         );
+    }
+
+    /// The seeding phase has to leave a population with a spread in it, or
+    /// there is nothing to take the threshold from.
+    #[test]
+    fn seeding_fills_the_bank_regardless_of_distance() {
+        let mut b = Bank::new(4, 1e9);
+        for (v, e) in [(0.0, 3.0), (0.1, 2.0), (0.2, 1.0), (0.3, 0.0)] {
+            assert!(b.seed(point(v).view(), e));
+        }
+        assert_eq!(b.len(), 4);
+        assert!(!b.seed(point(9.0).view(), -5.0), "a full bank kept seeding");
+        let m = b.mean_distance(line).unwrap();
+        assert!(m > 0.0, "the seeded population has no spread: {m}");
     }
 
     #[test]

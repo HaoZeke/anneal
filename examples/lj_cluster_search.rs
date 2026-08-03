@@ -7,7 +7,9 @@
 //!
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
-use anneal_core::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger};
+use anneal_core::methods::csa_cluster::{self, BankConfig};
+use anneal_core::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
+use anneal_core::shape::IraMetric;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 
@@ -125,6 +127,25 @@ fn main() {
         println!("  keying on IRA shape distance, merge radius {} (a length)", cfg.merge_radius);
     }
 
+    // The bank arm. Runs the same chains under the same total budget, with
+    // where-to-start-next and what-to-keep decided by the diversity rule
+    // rather than by the chain itself.
+    let use_bank = opts.contains(&"bank");
+    let bank_cfg = BankConfig {
+        capacity: 8,
+        // An eighth of the budget per chain, so a bank of eight costs one
+        // chain's worth and the comparison is honest.
+        slice: budget / 16,
+        seeding: 8,
+        dcut_floor: 0.1,
+    };
+    if use_bank {
+        println!(
+            "  bank of {} chains, {} charged per slice, Dcut floor {}",
+            bank_cfg.capacity, bank_cfg.slice, bank_cfg.dcut_floor
+        );
+    }
+
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
     let mut total_hops = 0usize;
@@ -167,17 +188,53 @@ fn main() {
             }
             Some(lj(x).1)
         };
-        let out = optimize_with_gradient(
-            &cfg,
-            &mut ledger,
-            &mut relax,
-            if cfg.minima_hopping || cfg.escape_on_stall {
-                Some(&mut grad)
-            } else {
-                None
-            },
-            seed,
-        );
+        let out = if use_bank {
+            // A shape distance, so Dcut is a length: two structures whose
+            // points can be brought within it of each other by a permutation
+            // and a rigid motion are the same solution.
+            let ira = IraMetric::default();
+            let b = csa_cluster::run(
+                &cfg,
+                &bank_cfg,
+                &mut ledger,
+                &mut relax,
+                if cfg.minima_hopping || cfg.escape_on_stall {
+                    Some(&mut grad)
+                } else {
+                    None
+                },
+                |p, q| ira.distance(p, q),
+                seed,
+            );
+            println!(
+                "      bank: {} slices, Dcut {:.3} -> {:.3}, {} improved, {} novel, \
+                 {} duplicate, holding {:?}",
+                b.slices,
+                b.dcut.0,
+                b.dcut.1,
+                b.improved,
+                b.novel,
+                b.duplicates,
+                b.bank.iter().map(|e| (e * 100.0).round() / 100.0).collect::<Vec<_>>()
+            );
+            Outcome {
+                best: b.best,
+                best_state: b.best_state,
+                ..Outcome::default()
+            }
+        } else {
+            optimize_with_gradient(
+                &cfg,
+                &mut ledger,
+                &mut relax,
+                if cfg.minima_hopping || cfg.escape_on_stall {
+                    Some(&mut grad)
+                } else {
+                    None
+                },
+                seed,
+            )
+        };
 
         // The reported value is checked against a fresh evaluation of the
         // structure it claims to come from, off the ledger and outside the
