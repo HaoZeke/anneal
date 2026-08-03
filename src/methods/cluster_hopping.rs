@@ -943,9 +943,10 @@ fn run_full<'g, R: Rng + ?Sized>(
         }
         // Screen under every mode, including minima hopping. Turning the screen
         // off under MH paid full quenches for every scatter: ~228 force per hop
-        // against ~37 with the screen, and the budget bought 1.7k hops rather
-        // than 10k. A screened trial is a rejection for the chain and a "same
-        // basin" observation for the escape scale; it is not a new minimum.
+        // against ~37 with the screen. A screened trial still goes through
+        // Metropolis on the plain path (deposit rate and chain motion); under
+        // MH it is a rejection and a same-basin observation, because the
+        // controller needs a quenched minimum to classify.
         let screened_this = e_screen > ledger.best + cfg.screen_margin;
         let (e_new, x_new) = if screened_this || returning {
             if screened_this && !returning {
@@ -955,56 +956,51 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             relax(ledger, x_screen.view(), cfg.relax_steps)
         };
-        let unquenched = screened_this || returning;
+        // Under MH a screened structure is not a minimum; under Metropolis it
+        // is still a legal chain state (cheaper step, same deposit).
+        let unquenched = cfg.minima_hopping && (screened_this || returning);
         let improved = e_new < ledger.best - 1e-10;
-        // Only full quenches update the incumbent. A screened energy is not a
-        // minimum energy and must not own the best.
-        if !unquenched {
-            ledger.record(e_new, x_new.view());
-        }
+        ledger.record(e_new, x_new.view());
         hops += 1;
-        if improved && !unquenched && improvements.len() < 512 {
+        if improved && improvements.len() < 512 {
             improvements.push((hops, bias.n_basins(), e_new));
         }
         // Kept before the acceptance branch, which may move `x_new` into the
         // chain. The archive wants the structure this hop produced whether or
         // not the chain took it: a rejected structure in a different funnel is
         // exactly the path endpoint that is otherwise never seen again.
-        let produced = if cfg.path_on_stall && !unquenched {
+        let produced = if cfg.path_on_stall {
             Some((e_new, x_new.clone()))
         } else {
             None
         };
 
         let s_old = bias.cv(x.view());
-        let s_new = if unquenched {
-            s_old.clone()
-        } else {
-            bias.cv(x_new.view())
-        };
+        let s_new = bias.cv(x_new.view());
         // Biased rise. The bias is part of the landscape the chain walks; a
         // threshold or Metropolis on raw energy alone ignores the deposits and
         // re-enters filled basins freely. Measured: MH accepting on raw delta
         // solved 1 of 4 LJ38 seeds at 400k where the biased Metropolis path
         // solved the same seed in ~10k hops.
         let delta = (e_new + bias.potential(s_new.view())) - (e + bias.potential(s_old.view()));
-        let accept = if unquenched {
-            if cfg.minima_hopping {
-                let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-                feedback.observe(Some(from), from);
-            }
-            false
-        } else if cfg.minima_hopping {
-            // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
-            // while still feeling the per-basin deposits.
+        let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-            let reached = identity.basin_of(x_new.view());
-            feedback.observe(Some(from), reached);
-            let ok = feedback.accept(delta);
-            if ok {
-                here = Some(reached);
+            if unquenched {
+                // No quenched destination: count as a return for the escape
+                // scale and stay put. Do not register the partial structure.
+                feedback.observe(Some(from), from);
+                false
+            } else {
+                // Threshold on the *biased* rise. Adapts like Goedecker's
+                // E_diff while still feeling the per-basin deposits.
+                let reached = identity.basin_of(x_new.view());
+                feedback.observe(Some(from), reached);
+                let ok = feedback.accept(delta);
+                if ok {
+                    here = Some(reached);
+                }
+                ok
             }
-            ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
