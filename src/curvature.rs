@@ -185,6 +185,89 @@ fn project_rigid(v: &mut Array1<f64>, x: ArrayView1<f64>) {
 /// Returns `None` when the Krylov space collapses before two eigenvalues are
 /// available, which happens when the projected start vector is already an
 /// eigenvector, rather than reporting a gap computed from one number.
+/// Eigenvalues and eigenvectors of a Lanczos tridiagonal, ascending.
+fn ritz(alphas: &[f64], betas: &[f64]) -> Option<(Vec<f64>, ndarray::Array2<f64>)> {
+    let m = alphas.len();
+    if m < 2 {
+        return None;
+    }
+    let mut t = ndarray::Array2::<f64>::zeros((m, m));
+    for i in 0..m {
+        t[[i, i]] = alphas[i];
+        if i + 1 < m {
+            t[[i, i + 1]] = betas[i];
+            t[[i + 1, i]] = betas[i];
+        }
+    }
+    let (vals, vecs) = crate::spectral::symmetric_eigen(t.view(), 128);
+    Some((vals.to_vec(), vecs))
+}
+
+/// Lanczos with full reorthogonalisation on an arbitrary symmetric operator.
+///
+/// Returns the diagonal, the off-diagonal and the basis. Split out because the
+/// low end of a spectrum is reached by running this twice, once on the operator
+/// and once on a shift of it.
+fn lanczos_tridiag<F, P>(
+    start: &Array1<f64>,
+    steps: usize,
+    op: &mut F,
+    project: &P,
+) -> Option<(Vec<f64>, Vec<f64>, Vec<Array1<f64>>)>
+where
+    F: FnMut(&Array1<f64>) -> Option<Array1<f64>>,
+    P: Fn(&mut Array1<f64>),
+{
+    let dim = start.len();
+    let mut q = start.clone();
+    let mut alphas: Vec<f64> = Vec::new();
+    let mut betas: Vec<f64> = Vec::new();
+    let mut q_prev: Option<Array1<f64>> = None;
+    let mut basis: Vec<Array1<f64>> = Vec::new();
+
+    for _ in 0..steps {
+        basis.push(q.clone());
+        let mut w = op(&q)?;
+        let alpha: f64 = w.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
+        alphas.push(alpha);
+        for i in 0..dim {
+            w[i] -= alpha * q[i];
+        }
+        if let (Some(prev), Some(beta)) = (q_prev.as_ref(), betas.last()) {
+            for i in 0..dim {
+                w[i] -= beta * prev[i];
+            }
+        }
+        // Full reorthogonalisation. Lanczos loses orthogonality in floating
+        // point and the lost directions reappear as spurious repeats of the
+        // extreme eigenvalues, which is exactly what this is asked for.
+        for b in &basis {
+            let dot: f64 = w.iter().zip(b.iter()).map(|(a, c)| a * c).sum();
+            for i in 0..dim {
+                w[i] -= dot * b[i];
+            }
+        }
+        // Re-projected explicitly, not only through the operator. The
+        // constrained subspace is an invariant subspace in exact arithmetic
+        // and not in floating point, and the directions the caller removed are
+        // a strong attractor: under the spectral shift below they carry the
+        // largest eigenvalue of the shifted operator, so a Krylov space that
+        // drifts into them returns the removed subspace as the answer.
+        project(&mut w);
+        let beta: f64 = w.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if beta <= 1e-10 {
+            break;
+        }
+        betas.push(beta);
+        q_prev = Some(q.clone());
+        q = w / beta;
+    }
+    if alphas.len() < 2 {
+        return None;
+    }
+    Some((alphas, betas, basis))
+}
+
 pub fn curvature_features<G>(
     x: ArrayView1<f64>,
     mut grad: G,
@@ -228,87 +311,73 @@ where
 
     // Deterministic start, spread over all coordinates so it is unlikely to be
     // orthogonal to the softest mode.
-    let mut q = Array1::from_shape_fn(dim, |i| ((i % 7) as f64 - 3.0) + 0.5);
-    project_rigid_with(&mut q, &rigid);
-    let n0: f64 = q.iter().map(|z| z * z).sum::<f64>().sqrt();
+    let mut q0 = Array1::from_shape_fn(dim, |i| ((i % 7) as f64 - 3.0) + 0.5);
+    project_rigid_with(&mut q0, &rigid);
+    let n0: f64 = q0.iter().map(|z| z * z).sum::<f64>().sqrt();
     if n0 <= 1e-12 {
         return None;
     }
-    q /= n0;
+    q0 /= n0;
 
-    let mut alphas: Vec<f64> = Vec::new();
-    let mut betas: Vec<f64> = Vec::new();
-    let mut q_prev: Option<Array1<f64>> = None;
-    let mut basis: Vec<Array1<f64>> = Vec::new();
+    // Two passes, because Lanczos converges from the ends of the spectrum
+    // outward and far faster at the top than at the bottom. A short run
+    // returns the largest eigenvalue to several digits and the smallest barely
+    // at all, and its lowest Ritz vector is dominated by stiff directions.
+    //
+    // That is not a small inaccuracy when the vector is used as a direction.
+    // Displacing an LJ38 minimum along the eight-step "softest" mode raised the
+    // energy so reliably that 6494 of 6550 trials failed the energy screen, and
+    // the reported smallest eigenvalue sat at 6.84 across every seed.
+    //
+    // The fix is the standard spectral transformation. Run once to bound the
+    // spectrum, then run again on `sigma I - H`, whose largest eigenvalue is
+    // the smallest of `H` and which Lanczos therefore resolves quickly. The
+    // cost is two passes rather than one.
+    let project = |w: &mut Array1<f64>| project_rigid_with(w, &rigid);
+    let (alphas, betas, _) =
+        lanczos_tridiag(&q0, steps, &mut |v| hv(v, &mut evaluations), &project)?;
+    let (top, _) = ritz(&alphas, &betas)?;
+    let sigma = top[top.len() - 1] * 1.05 + 1.0;
 
-    for _ in 0..steps {
-        basis.push(q.clone());
-        let mut w = hv(&q, &mut evaluations)?;
-        let alpha: f64 = w.iter().zip(q.iter()).map(|(a, b)| a * b).sum();
-        alphas.push(alpha);
-        for i in 0..dim {
-            w[i] -= alpha * q[i];
-        }
-        if let (Some(prev), Some(beta)) = (q_prev.as_ref(), betas.last()) {
+    let (alphas, betas, basis) = lanczos_tridiag(
+        &q0,
+        steps,
+        &mut |v| {
+            // Both terms are formed on the projected vector, so the shifted
+            // operator maps the constrained subspace into itself and the
+            // removed directions never acquire the eigenvalue `sigma`.
+            let mut vp = v.clone();
+            project_rigid_with(&mut vp, &rigid);
+            let h = hv(&vp, &mut evaluations)?;
+            let mut out = Array1::zeros(dim);
             for i in 0..dim {
-                w[i] -= beta * prev[i];
+                out[i] = sigma * vp[i] - h[i];
             }
-        }
-        // Full reorthogonalisation. Lanczos loses orthogonality in floating
-        // point and the lost directions reappear as spurious repeats of the
-        // extreme eigenvalues, which is exactly the gap this reports.
-        for b in &basis {
-            let dot: f64 = w.iter().zip(b.iter()).map(|(a, c)| a * c).sum();
-            for i in 0..dim {
-                w[i] -= dot * b[i];
-            }
-        }
-        // Re-projected explicitly, not only through the operator. The
-        // projected Hessian has a genuine zero eigenvalue of multiplicity six
-        // on the rigid subspace, which is a strong attractor: over a Krylov
-        // space approaching the full dimension, rounding drifts the basis out
-        // of the complement and those zeros are returned as the softest
-        // curvature. Reorthogonalising against the basis does not prevent it,
-        // because the drift is shared by the whole basis.
-        project_rigid_with(&mut w, &rigid);
-
-        let beta: f64 = w.iter().map(|z| z * z).sum::<f64>().sqrt();
-        if beta <= 1e-10 {
-            break;
-        }
-        betas.push(beta);
-        q_prev = Some(q.clone());
-        q = w / beta;
-    }
-
-    let m = alphas.len();
-    if m < 2 {
-        return None;
-    }
-    // Ritz values from the tridiagonal projection, via the crate's symmetric
-    // solver rather than a second implementation.
-    let mut t = ndarray::Array2::<f64>::zeros((m, m));
-    for i in 0..m {
-        t[[i, i]] = alphas[i];
-        if i + 1 < m {
-            t[[i, i + 1]] = betas[i];
-            t[[i + 1, i]] = betas[i];
-        }
-    }
-    let (vals, vecs) = crate::spectral::symmetric_eigen(t.view(), 128);
+            project_rigid_with(&mut out, &rigid);
+            Some(out)
+        },
+        &project,
+    )?;
+    let (mu, vecs) = ritz(&alphas, &betas)?;
+    let m = mu.len();
+    // Ascending in `mu` is descending in the eigenvalue of `H`.
+    let lambda_min = sigma - mu[m - 1];
+    let lambda_second = sigma - mu[m - 2];
 
     // The softest Ritz vector, lifted back to the full space.
     let mut mode = Array1::<f64>::zeros(dim);
     for (j, b) in basis.iter().enumerate().take(m) {
-        let c = vecs[[j, 0]];
+        let c = vecs[[j, m - 1]];
         for i in 0..dim {
             mode[i] += c * b[i];
         }
     }
+    project_rigid_with(&mut mode, &rigid);
     let norm: f64 = mode.iter().map(|z| z * z).sum::<f64>().sqrt();
-    if norm > 0.0 {
-        mode /= norm;
+    if norm <= 1e-12 {
+        return None;
     }
+    mode /= norm;
 
     let n_atoms = dim / 3;
     let mut p2 = 0.0;
@@ -325,9 +394,9 @@ where
     };
 
     Some(CurvatureFeatures {
-        lambda_min: vals[0],
-        lambda_second: vals[1],
-        gap: vals[1] - vals[0],
+        lambda_min,
+        lambda_second,
+        gap: lambda_second - lambda_min,
         participation,
         mode,
         evaluations,
@@ -379,7 +448,94 @@ mod tests {
             f.lambda_min
         );
         assert!(f.lambda_second >= f.lambda_min);
-        assert!(f.evaluations <= 48, "spent {} gradients", f.evaluations);
+        assert!(f.evaluations <= 96, "spent {} gradients", f.evaluations);
+    }
+
+    /// The projected operator, formed column by column, so a test can compare
+    /// against a dense decomposition rather than against a constant someone
+    /// worked out by hand. The rigid projection raises the smallest curvature
+    /// above the smallest entry of the spectrum, which is why the constant is
+    /// not simply the smallest scale.
+    fn dense_projected(x: ArrayView1<f64>, scales: &[f64], epsilon: f64) -> (f64, f64) {
+        let dim = x.len();
+        let g = quadratic_grad(scales);
+        let rigid = rigid_basis(x);
+        let mut h = ndarray::Array2::<f64>::zeros((dim, dim));
+        for j in 0..dim {
+            let mut e = Array1::<f64>::zeros(dim);
+            e[j] = 1.0;
+            project_rigid_with(&mut e, &rigid);
+            let mut xp = x.to_owned();
+            let mut xm = x.to_owned();
+            for i in 0..dim {
+                xp[i] += epsilon * e[i];
+                xm[i] -= epsilon * e[i];
+            }
+            let gp = g(xp.view()).unwrap();
+            let gm = g(xm.view()).unwrap();
+            let mut col = Array1::<f64>::zeros(dim);
+            for i in 0..dim {
+                col[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
+            }
+            project_rigid_with(&mut col, &rigid);
+            for i in 0..dim {
+                h[[i, j]] = col[i];
+            }
+        }
+        let (vals, _) = crate::spectral::symmetric_eigen(h.view(), 256);
+        // Six eigenvalues at zero belong to the projected-out rigid subspace.
+        let mut nz: Vec<f64> = vals.iter().copied().filter(|v| v.abs() > 1e-6).collect();
+        nz.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (nz[0], nz[1])
+    }
+
+    /// The case the three-value spectrum above cannot fail on. Lanczos ends a
+    /// short run knowing the top of a spectrum well and the bottom badly, and a
+    /// test whose operator has three distinct eigenvalues converges in three
+    /// steps whatever the method does.
+    #[test]
+    fn a_short_run_still_reaches_the_bottom_of_a_dense_spectrum() {
+        let scales: Vec<f64> = (0..90).map(|i| 1.5 + 1.65 * i as f64).collect();
+        let x = scattered(30);
+        let (truth, _) = dense_projected(x.view(), &scales, 1e-4);
+        let f = curvature_features(x.view(), quadratic_grad(&scales), 16, 1e-4).unwrap();
+        assert!(
+            (f.lambda_min - truth).abs() < 0.3,
+            "sixteen steps reported {} against a true smallest curvature of {truth}",
+            f.lambda_min
+        );
+    }
+
+    /// A direction is what the escape uses, so the mode has to be soft and not
+    /// merely have a plausible eigenvalue attached to it. Its Rayleigh quotient
+    /// is the test that ties the two together.
+    #[test]
+    fn the_mode_is_as_soft_as_its_eigenvalue_claims() {
+        let scales: Vec<f64> = (0..90).map(|i| 1.5 + 1.65 * i as f64).collect();
+        let x = scattered(30);
+        let (truth, _) = dense_projected(x.view(), &scales, 1e-4);
+        let f = curvature_features(x.view(), quadratic_grad(&scales), 16, 1e-4).unwrap();
+        let g = quadratic_grad(&scales);
+        let rigid = rigid_basis(x.view());
+        let eps = 1e-4;
+        let mut xp = x.to_owned();
+        let mut xm = x.to_owned();
+        for i in 0..x.len() {
+            xp[i] += eps * f.mode[i];
+            xm[i] -= eps * f.mode[i];
+        }
+        let gp = g(xp.view()).unwrap();
+        let gm = g(xm.view()).unwrap();
+        let mut hv = Array1::<f64>::zeros(x.len());
+        for i in 0..x.len() {
+            hv[i] = (gp[i] - gm[i]) / (2.0 * eps);
+        }
+        project_rigid_with(&mut hv, &rigid);
+        let rq: f64 = hv.iter().zip(f.mode.iter()).map(|(a, b)| a * b).sum();
+        assert!(
+            rq < truth + 0.5,
+            "the mode has curvature {rq} where the softest is {truth}"
+        );
     }
 
     #[test]
