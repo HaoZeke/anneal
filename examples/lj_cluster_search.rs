@@ -92,6 +92,7 @@ fn main() {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
         cfg.replicas = 4;
+        cfg.bias_by_rung = opts.contains(&"rungbias");
         println!("  replica exchange: {} chains, swap every {} hops, top x{}",
                  cfg.replicas, cfg.swap_period, cfg.ladder_top);
     }
