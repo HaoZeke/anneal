@@ -30,6 +30,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
+use crate::calibrate::StepCalibrator;
 use crate::methods::activation::{activate, Activation};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
@@ -366,6 +367,18 @@ pub struct Config {
     pub escape_stall_patience: usize,
     /// Multiple of the longest quiet stretch so far that counts as stuck.
     pub escape_stall_factor: f64,
+    /// Set the merge radius from how far an accepted hop actually reaches.
+    ///
+    /// A radius chosen by hand does not transfer: one calibrated at 38 points
+    /// is wrong at 75, and one calibrated in a sorted-distance spectrum is
+    /// wrong in a shape metric. Two structures are the same basin when a single
+    /// accepted hop can carry the chain between them, and the search reports
+    /// that step length for free. See [`crate::calibrate`].
+    pub calibrate_radius: bool,
+    /// Quantile of the accepted-hop step length the radius tracks.
+    pub calibrate_quantile: f64,
+    /// Accepted hops required before the calibrated radius is used.
+    pub calibrate_warmup: u64,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -473,6 +486,9 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            calibrate_radius: false,
+            calibrate_quantile: 0.9,
+            calibrate_warmup: 200,
             minima_hopping: false,
             escape_lanczos_steps: 16,
             escape_epsilon: 1e-4,
@@ -542,6 +558,10 @@ pub struct Outcome {
     /// hops: a run that improves ten thousand times is descending, and the
     /// tail of that is not what anyone is asking about.
     pub improvements: Vec<(usize, usize, f64)>,
+    /// Merge radius at the end of the run, calibrated or as configured.
+    pub merge_radius: f64,
+    /// Mean accepted-hop step length, which the radius is a quantile of.
+    pub mean_step: f64,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
@@ -828,6 +848,11 @@ fn run_full<'g, R: Rng + ?Sized>(
     // Kept here rather than in a StallDetector because the threshold is not a
     // constant: it is set from the longest quiet stretch this chain has already
     // survived.
+    let mut radius = StepCalibrator::new(
+        cfg.calibrate_quantile,
+        cfg.calibrate_warmup,
+        cfg.merge_radius,
+    );
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
@@ -1006,6 +1031,23 @@ fn run_full<'g, R: Rng + ?Sized>(
         };
         if cfg.allocate_moves {
             allocator.update(k, improved || accept);
+        }
+        if accept && cfg.calibrate_radius {
+            // How far this hop actually moved, in the metric the bias keys on.
+            let d: f64 = s_old
+                .iter()
+                .zip(s_new.iter())
+                .map(|(p, q)| (p - q) * (p - q))
+                .sum::<f64>()
+                .sqrt();
+            radius.observe(d);
+            if radius.warm() {
+                let r = radius.threshold();
+                if (r - bias.merge_radius()).abs() > 1e-12 {
+                    bias.set_merge_radius(r);
+                    identity.set_merge_radius(r);
+                }
+            }
         }
         if accept {
             // An accepted uphill step to a different basin samples the escape
@@ -1243,6 +1285,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     }
 
     let n_basins = bias.n_basins();
+    let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
         *slot = bias;
@@ -1262,6 +1305,8 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_escapes,
         soft_crossed,
         improvements,
+        merge_radius: final_radius,
+        mean_step: radius.mean_step(),
         stall_escapes,
         stall_escape_gain,
         soft_lambda: if soft_escapes > 0 {
