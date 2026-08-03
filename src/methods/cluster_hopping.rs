@@ -349,8 +349,23 @@ pub struct Config {
     /// improving costs a few per cent and supplies the one thing a biased
     /// random walk has no mechanism for: leaving a funnel on purpose.
     pub escape_on_stall: bool,
-    /// Hops without improvement before a climb is triggered.
+    /// Smallest number of hops without improvement before a climb is
+    /// triggered.
+    ///
+    /// A floor, not the trigger. The trigger is
+    /// `escape_stall_factor` times the longest quiet stretch this chain has
+    /// already survived, so a climb fires only when the chain is stuck longer
+    /// than it has ever been stuck before.
+    ///
+    /// A fixed patience cannot be set. Traced on 75 points, the runs that
+    /// succeed cross at 42 and 55 per cent of the way in, after 1500 to 1900
+    /// basins, and go tens of thousands of hops between improvements on the
+    /// way. A patience of 400 fires about 180 climbs into that and the chain
+    /// never accumulates: the arm scored 2 seeds in 8 against 9 in 16 without
+    /// it.
     pub escape_stall_patience: usize,
+    /// Multiple of the longest quiet stretch so far that counts as stuck.
+    pub escape_stall_factor: f64,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -465,7 +480,8 @@ impl Config {
             escape_overshoot: 1.5,
             escape_max_climb: 24,
             escape_on_stall: false,
-            escape_stall_patience: 400,
+            escape_stall_patience: 5_000,
+            escape_stall_factor: 2.0,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -809,9 +825,11 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut improvements: Vec<(usize, usize, f64)> = Vec::new();
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
-    // Its own detector, so a run using both this and the path search does not
-    // have the two mechanisms consuming each other's triggers.
-    let mut escape_stall = StallDetector::new(cfg.escape_stall_patience);
+    // Kept here rather than in a StallDetector because the threshold is not a
+    // constant: it is set from the longest quiet stretch this chain has already
+    // survived.
+    let mut quiet = 0usize;
+    let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
     let mut stall_escape_gain = 0.0_f64;
     let mut soft_lambda = 0.0_f64;
@@ -1029,7 +1047,24 @@ fn run_full<'g, R: Rng + ?Sized>(
         // a chain that has been revisiting is thrown further past the ridge it
         // just crossed, which is the same feedback law on a quantity that can
         // actually leave a basin.
-        if cfg.escape_on_stall && escape_stall.observe(ledger.best) {
+        if improved {
+            longest_quiet = longest_quiet.max(quiet);
+            quiet = 0;
+        } else {
+            quiet += 1;
+        }
+        // Stuck means stuck for longer than this chain has ever been stuck
+        // before, not stuck for some number someone chose. Traced on 75
+        // points, a run that succeeds goes tens of thousands of hops between
+        // improvements on its way to the crossing, so a fixed patience of 400
+        // fires about 180 climbs into a healthy search.
+        let stuck = quiet
+            >= cfg
+                .escape_stall_patience
+                .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        if cfg.escape_on_stall && stuck {
+            quiet = 0;
+            longest_quiet = 0;
             if let Some(g) = grad.as_deref_mut() {
                 let scale = if cfg.minima_hopping {
                     feedback.escape()
