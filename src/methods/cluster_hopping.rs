@@ -30,7 +30,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
-use crate::curvature::curvature_features;
+use crate::methods::activation::{activate, Activation};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
@@ -317,8 +317,13 @@ pub struct Config {
     pub escape_lanczos_steps: usize,
     /// Finite-difference step for the Hessian-vector product.
     pub escape_epsilon: f64,
-    /// Displacement along the softest mode, before the feedback scale.
+    /// Distance moved along the softest mode per climbing step.
     pub escape_amplitude: f64,
+    /// Push past the saddle, in units of the climbing step, before the
+    /// feedback scale multiplies it.
+    pub escape_overshoot: f64,
+    /// Climbing steps before a climb is abandoned.
+    pub escape_max_climb: usize,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -429,7 +434,9 @@ impl Config {
             minima_hopping: false,
             escape_lanczos_steps: 16,
             escape_epsilon: 1e-4,
-            escape_amplitude: 0.6,
+            escape_amplitude: 0.25,
+            escape_overshoot: 1.5,
+            escape_max_climb: 24,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -476,6 +483,8 @@ pub struct Outcome {
     pub visit_counts: (usize, usize, usize),
     /// Proposals made along the softest mode.
     pub soft_escapes: usize,
+    /// Of those, the ones whose climb reached a saddle.
+    pub soft_crossed: usize,
     /// Mean softest eigenvalue over those proposals.
     pub soft_lambda: f64,
     /// Per-rung temperature, basin count and best energy.
@@ -695,6 +704,7 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut soft_escapes = 0usize;
+    let mut soft_crossed = 0usize;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -772,29 +782,27 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         // the low barrier rather than a random high one.
         let mut trial = match (cfg.minima_hopping, grad.as_deref_mut()) {
             (true, Some(g)) => {
-                let mut calls = 0usize;
-                let feats = curvature_features(
-                    x.view(),
-                    |y| {
-                        calls += 1;
-                        g(ledger, y)
-                    },
-                    cfg.escape_lanczos_steps,
-                    cfg.escape_epsilon,
-                );
-                match feats {
-                    Some(f) => {
+                // The feedback sets how far past the saddle to go. A chain that
+                // keeps coming back is thrown further beyond the ridge it just
+                // crossed, which is the same law acting on a quantity that can
+                // deliver an escape.
+                let act = Activation {
+                    step: cfg.escape_amplitude,
+                    overshoot: cfg.escape_overshoot * escape,
+                    max_steps: cfg.escape_max_climb,
+                    lanczos_steps: cfg.escape_lanczos_steps,
+                    epsilon: cfg.escape_epsilon,
+                    ..Activation::default()
+                };
+                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                match activate(x.view(), |y| g(ledger, y), &act, sign) {
+                    Some(o) => {
                         soft_escapes += 1;
-                        // Either way along the mode; the softest direction is a
-                        // line, and its two ends are different minima.
-                        let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
-                        let amp = sign * cfg.escape_amplitude * escape;
-                        let mut y = x.to_owned();
-                        for (v, m) in y.iter_mut().zip(f.mode.iter()) {
-                            *v += amp * m;
+                        if o.crossed {
+                            soft_crossed += 1;
                         }
-                        soft_lambda += f.lambda_min;
-                        y
+                        soft_lambda += o.lambda;
+                        o.state
                     }
                     None => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
                 }
@@ -1090,6 +1098,7 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         escape_threshold: feedback.threshold(),
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
         soft_escapes,
+        soft_crossed,
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
         } else {

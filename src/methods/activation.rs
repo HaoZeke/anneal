@@ -47,6 +47,16 @@ pub struct Activation {
     pub perp_steps: usize,
     /// Step size of the perpendicular relaxation.
     pub perp_rate: f64,
+    /// Largest displacement one perpendicular step may make.
+    ///
+    /// A fixed rate is not safe on a potential whose gradient spans decades. On
+    /// a Lennard-Jones cluster two points a little too close carry a gradient of
+    /// order a thousand, and a rate of 0.02 against that moves the structure
+    /// twenty units and destroys it: measured on LJ38, 6 relaxations in 1589
+    /// reached a minimum and the returned structure had a gradient of 1.0 where
+    /// a minimum has 1e-6. The cap makes the step a direction with a bounded
+    /// length rather than a length proportional to the gradient.
+    pub perp_max_move: f64,
     /// Lanczos steps per curvature pass.
     pub lanczos_steps: usize,
     /// Finite-difference step for the curvature.
@@ -69,6 +79,7 @@ impl Default for Activation {
             max_steps: 24,
             perp_steps: 3,
             perp_rate: 0.02,
+            perp_max_move: 0.05,
             lanczos_steps: 12,
             epsilon: 1e-4,
             refresh: 3,
@@ -177,8 +188,18 @@ where
                 }
             };
             along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
+            let mut d = Array1::<f64>::zeros(dim);
             for i in 0..dim {
-                cur[i] -= cfg.perp_rate * (g[i] - along * mode[i]);
+                d[i] = cfg.perp_rate * (g[i] - along * mode[i]);
+            }
+            let n: f64 = d.iter().map(|z| z * z).sum::<f64>().sqrt();
+            let scale = if n > cfg.perp_max_move && n > 0.0 {
+                cfg.perp_max_move / n
+            } else {
+                1.0
+            };
+            for i in 0..dim {
+                cur[i] -= scale * d[i];
             }
         }
 
@@ -262,6 +283,36 @@ mod tests {
         let n: f64 = w.iter().map(|z| z * z).sum::<f64>().sqrt();
         w /= n;
         w
+    }
+
+    /// The cap has to bind on a stiff gradient, or the climb walks off the
+    /// structure it was refining.
+    #[test]
+    fn a_perpendicular_step_is_bounded_however_steep_the_gradient() {
+        let dim = 36;
+        let w = direction(dim);
+        // A gradient a thousand times the scale the rate was set for.
+        let g = move |x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            Some(Array1::from_shape_fn(x.len(), |i| 1500.0 * x[i] + 3.0 * (i % 5) as f64))
+        };
+        let cfg = Activation {
+            max_steps: 4,
+            ..Activation::default()
+        };
+        let out = activate(w.view(), g, &cfg, 1.0).unwrap();
+        let travelled: f64 = out
+            .state
+            .iter()
+            .zip(w.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+        let bound = out.steps as f64 * (cfg.step + cfg.perp_steps as f64 * cfg.perp_max_move)
+            + cfg.overshoot * cfg.step;
+        assert!(
+            travelled <= bound + 1e-9,
+            "moved {travelled:.3} where the caps allow {bound:.3}"
+        );
     }
 
     /// The property the module exists for. A straight displacement of the same
