@@ -30,6 +30,7 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
+use crate::curvature::curvature_features;
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
@@ -308,6 +309,16 @@ pub struct Config {
     /// correlation, but it carries the same feedback law and is what validates
     /// the controller before dynamics is wired.
     pub minima_hopping: bool,
+    /// Lanczos steps for the soft-mode escape.
+    ///
+    /// Each costs two gradient evaluations, charged. Eight resolves the softest
+    /// mode of a cluster well enough to displace along, against about forty
+    /// charged evaluations for the relaxation that follows.
+    pub escape_lanczos_steps: usize,
+    /// Finite-difference step for the Hessian-vector product.
+    pub escape_epsilon: f64,
+    /// Displacement along the softest mode, before the feedback scale.
+    pub escape_amplitude: f64,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -416,6 +427,9 @@ impl Config {
             swap_period: 50,
             bias_by_rung: false,
             minima_hopping: false,
+            escape_lanczos_steps: 8,
+            escape_epsilon: 1e-4,
+            escape_amplitude: 0.6,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -460,6 +474,10 @@ pub struct Outcome {
     pub escape_threshold: f64,
     /// Quenches classified as a return, a known basin and a new one.
     pub visit_counts: (usize, usize, usize),
+    /// Proposals made along the softest mode.
+    pub soft_escapes: usize,
+    /// Mean softest eigenvalue over those proposals.
+    pub soft_lambda: f64,
     /// Per-rung temperature, basin count and best energy.
     ///
     /// What says whether a ladder is doing its job rather than merely swapping:
@@ -491,6 +509,12 @@ pub struct Outcome {
 /// gradient and the minimiser are the caller's: this module owns the search,
 /// not the numerics under it.
 pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>);
+
+/// Gradient of the objective, charged to the ledger by the caller.
+///
+/// Optional because only the soft-mode escape needs it: everything else in this
+/// driver works from relaxations alone.
+pub type Grad<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>;
 
 /// Moves the centre of mass to the origin.
 fn recentre(x: &mut Array1<f64>, n: usize) {
@@ -574,6 +598,22 @@ pub fn run<R: Rng + ?Sized>(
     relax: Relax<'_>,
     rng: &mut R,
 ) -> Outcome {
+    run_with_gradient(cfg, start, ledger, relax, None, rng)
+}
+
+/// As [`run`], with a gradient for the soft-mode escape.
+///
+/// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
+/// displacement, which carries the same feedback law and is what Goedecker
+/// reports as strictly weaker.
+pub fn run_with_gradient<R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut grad: Option<Grad<'_>>,
+    rng: &mut R,
+) -> Outcome {
     let n = cfg.n_points;
     // The descriptor and the metric have to agree. A shape distance is
     // computed from coordinates, so keying on it means passing coordinates
@@ -654,6 +694,8 @@ pub fn run<R: Rng + ?Sized>(
     let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
+    let mut soft_escapes = 0usize;
+    let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
@@ -723,7 +765,42 @@ pub fn run<R: Rng + ?Sized>(
         // The escape scale multiplies the move amplitude. A chain that keeps
         // returning proposes further each time until it leaves.
         let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
-        let mut trial = kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng);
+        // With a gradient available the escape leaves along the softest
+        // non-rigid direction rather than in a random one. That is the
+        // difference between an escape and a scattering: the softest mode is
+        // the cheapest way out of the basin, and displacing along it crosses
+        // the low barrier rather than a random high one.
+        let mut trial = match (cfg.minima_hopping, grad.as_deref_mut()) {
+            (true, Some(g)) => {
+                let mut calls = 0usize;
+                let feats = curvature_features(
+                    x.view(),
+                    |y| {
+                        calls += 1;
+                        g(ledger, y)
+                    },
+                    cfg.escape_lanczos_steps,
+                    cfg.escape_epsilon,
+                );
+                match feats {
+                    Some(f) => {
+                        soft_escapes += 1;
+                        // Either way along the mode; the softest direction is a
+                        // line, and its two ends are different minima.
+                        let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                        let amp = sign * cfg.escape_amplitude * escape;
+                        let mut y = x.to_owned();
+                        for (v, m) in y.iter_mut().zip(f.mode.iter()) {
+                            *v += amp * m;
+                        }
+                        soft_lambda += f.lambda_min;
+                        y
+                    }
+                    None => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                }
+            }
+            _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+        };
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -977,6 +1054,12 @@ pub fn run<R: Rng + ?Sized>(
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
+        soft_escapes,
+        soft_lambda: if soft_escapes > 0 {
+            soft_lambda / soft_escapes as f64
+        } else {
+            f64::NAN
+        },
         rungs: {
             // The active rung is held outside the parked list, so it is put
             // back in place before reporting.
@@ -1044,9 +1127,20 @@ pub fn random_cluster<R: Rng + ?Sized>(n: usize, density: f64, min_sep: f64, rng
 
 /// Convenience entry point seeding its own start.
 pub fn optimize(cfg: &Config, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) -> Outcome {
+    optimize_with_gradient(cfg, ledger, relax, None, seed)
+}
+
+/// As [`optimize`], with a gradient for the soft-mode escape.
+pub fn optimize_with_gradient(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<Grad<'_>>,
+    seed: u64,
+) -> Outcome {
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-    run(cfg, start.view(), ledger, relax, &mut rng)
+    run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
 }
 
 #[cfg(test)]
