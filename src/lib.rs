@@ -44,6 +44,8 @@ pub mod neigh;
 /// Noise-aware acceptance (Ball, Branke & Meisel 2018 sequential OSA rule).
 pub mod noise_accept;
 /// The pure-Rust SA driver loop.
+/// Multi-step paths between minima, where one hop cannot cross.
+pub mod path;
 pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod spectral;
