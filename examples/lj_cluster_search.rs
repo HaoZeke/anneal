@@ -112,6 +112,8 @@ fn main() {
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
     cfg.restart_on_stall = opts.contains(&"restart");
+    // Wales and Doye's angular move on the worst-bound point.
+    cfg.angular_moves = opts.contains(&"angular");
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
@@ -362,7 +364,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -389,6 +391,9 @@ fn main() {
             out.merge_radius,
             out.mean_step,
             out.restarts,
+            out.angular.1,
+            out.angular.0,
+            out.angular.2,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
