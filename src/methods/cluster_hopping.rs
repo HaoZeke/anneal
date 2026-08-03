@@ -31,6 +31,7 @@ use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::calibrate::StepCalibrator;
+use crate::screen::Screen;
 use crate::methods::activation::{activate, Activation};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
@@ -504,6 +505,22 @@ pub struct Config {
     /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
     /// generally converged to between 0.40 and 0.44."
     pub angular_target: f64,
+    /// Decide whether to finish a relaxation from a posterior rather than
+    /// from a fixed margin.
+    ///
+    /// The margin screen is the one mechanism here measured to be worth having,
+    /// at 13 seeds in 24 against 2 in 8 without it, and what it does is spend
+    /// numerical effort where it is likely to pay. That is a decision under
+    /// uncertainty about a quantity not yet computed, and a constant is a poor
+    /// way to make it. See [`crate::screen`].
+    pub bayes_screen: bool,
+    /// Trials relaxed regardless of the posterior, to keep the model's training
+    /// set from being censored by the rule it trains.
+    pub bayes_exploration: f64,
+    /// Posterior probability of improvement above which a trial is relaxed.
+    pub bayes_threshold: f64,
+    /// Observations before the posterior is consulted at all.
+    pub bayes_warmup: usize,
     /// Forbid the funnel the chain is stuck in, rather than making it
     /// expensive.
     ///
@@ -660,6 +677,10 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            bayes_screen: false,
+            bayes_exploration: 0.1,
+            bayes_threshold: 0.05,
+            bayes_warmup: 300,
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
@@ -743,6 +764,9 @@ pub struct Outcome {
     pub mean_step: f64,
     /// Angular moves attempted, and the ratio they settled at.
     pub angular: (usize, usize, f64),
+    /// Screen decisions: made, relaxed, forced by the exploration floor, and
+    /// observations the model was fitted on.
+    pub screen: (usize, usize, usize, usize),
     /// Funnels quarantined, and proposals refused for landing in one.
     pub tabu: (usize, usize),
     /// Restarts triggered by a stall.
@@ -1043,6 +1067,15 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut angular_ratio = 0.42_f64;
     let mut angular_tried = 0usize;
     let mut angular_accepted = 0usize;
+    // Intercept, screened energy, how far the partial relaxation moved in
+    // descriptor space, and the incumbent's distance from it. All cheap, all
+    // already computed by the margin screen.
+    let mut screen = Screen::new(
+        4,
+        cfg.bayes_warmup,
+        cfg.bayes_exploration,
+        cfg.bayes_threshold,
+    );
     let mut tabu: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
     let mut restarts = 0usize;
@@ -1175,14 +1208,41 @@ fn run_full<'g, R: Rng + ?Sized>(
         // Metropolis on the plain path (deposit rate and chain motion); under
         // MH it is a rejection and a same-basin observation, because the
         // controller needs a quenched minimum to classify.
-        let screened_this = e_screen > ledger.best + cfg.screen_margin;
+        // Features of the partial relaxation: an intercept, the screened
+        // energy, how far the partial relaxation moved in descriptor space, and
+        // their product. All of it is already computed above by the return
+        // screen, so consulting the posterior costs no evaluations.
+        let feats = {
+            let ds = bias.cv(x_screen.view());
+            let dc = bias.cv(x.view());
+            let drift: f64 = ds
+                .iter()
+                .zip(dc.iter())
+                .map(|(p, q)| (p - q) * (p - q))
+                .sum::<f64>()
+                .sqrt();
+            Array1::from(vec![1.0, e_screen, drift, e_screen * drift])
+        };
+        let screened_this = if cfg.bayes_screen {
+            // Refusing is what "screened" means here: the posterior says
+            // finishing this relaxation is unlikely to improve on the
+            // incumbent, so the evaluations go elsewhere.
+            !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
+        } else {
+            e_screen > ledger.best + cfg.screen_margin
+        };
         let (e_new, x_new) = if screened_this || returning {
             if screened_this && !returning {
                 screened_out += 1;
             }
             (e_screen, x_screen)
         } else {
-            relax(ledger, x_screen.view(), cfg.relax_steps)
+            let out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            if cfg.bayes_screen {
+                // The answer to the question the posterior was asked.
+                screen.observe(feats.view(), out.0);
+            }
+            out
         };
         // Under MH a screened structure is not a minimum; under Metropolis it
         // is still a legal chain state (cheaper step, same deposit).
@@ -1587,6 +1647,12 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_crossed,
         improvements,
         angular: (angular_tried, angular_accepted, angular_ratio),
+        screen: (
+            screen.decided,
+            screen.relaxed,
+            screen.explored,
+            screen.observations(),
+        ),
         tabu: (tabu.len(), tabu_hits),
         restarts,
         merge_radius: final_radius,
