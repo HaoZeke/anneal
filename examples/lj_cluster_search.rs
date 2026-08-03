@@ -87,6 +87,7 @@ fn main() {
     cfg.adaptive_height = opts.contains(&"height");
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
+    cfg.return_screen = opts.contains(&"rscreen");
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
@@ -100,6 +101,8 @@ fn main() {
 
     let mut solved = 0usize;
     let mut deepest = f64::INFINITY;
+    let mut total_hops = 0usize;
+    let mut total_charged = 0usize;
     for seed in 0..seeds {
         let mut ledger = Ledger::new(budget);
         // The driver owns the search; the numerics under it are the caller's.
@@ -160,6 +163,8 @@ fn main() {
             solved += 1;
         }
         deepest = deepest.min(out.best);
+        total_hops += out.hops;
+        total_charged += ledger.spent();
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              relaxed {converged}/{} converged  verified {}{}",
@@ -174,7 +179,14 @@ fn main() {
             if hit { "  SOLVED" } else { "" }
         );
     }
-    println!("{solved}/{seeds} solved, deepest {deepest:.6}");
+    // Both counts, since a force budget and a hop budget are different
+    // contests and the literature reports hops.
+    println!(
+        "{solved}/{seeds} solved, deepest {deepest:.6}   \
+         mean hops {:.0}, force per hop {:.0}",
+        total_hops as f64 / seeds as f64,
+        total_charged as f64 / total_hops.max(1) as f64
+    );
     if let Some(r) = reference {
         println!("gap to reference {:+.6}", deepest - r);
     }
