@@ -172,6 +172,26 @@ pub fn match_shapes(
     // null. The three output buffers are passed by reference because Fortran
     // declares them `type(c_ptr), intent(in)` without `value`, unlike the
     // inputs above, and the outputs are sized 9, 3 and n as required.
+    // The pair is written before the call, not after: the failure being chased
+    // kills the process inside the library, so nothing after the call runs.
+    // Off unless asked for.
+    if std::env::var_os("ANNEAL_DUMP_IRA").is_some() {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("ira_pair.txt")
+        {
+            let fmt = |v: &Vec<f64>| {
+                v.iter().map(|z| format!("{z:.17e}")).collect::<Vec<_>>().join(" ")
+            };
+            let _ = writeln!(f, "PAIR {n1}");
+            let _ = writeln!(f, "A {}", fmt(&ca));
+            let _ = writeln!(f, "B {}", fmt(&cb));
+            let _ = f.flush();
+        }
+    }
+
     unsafe {
         libira_match(
             n1 as c_int,
