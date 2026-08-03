@@ -13,6 +13,8 @@ pub mod adapter;
 pub mod bias;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
+/// Spectral statistics of the curvature, without forming a Hessian.
+pub mod curvature;
 /// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
