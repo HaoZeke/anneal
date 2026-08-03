@@ -335,6 +335,21 @@ impl<F: Fingerprint> BasinBias<F> {
         }
     }
 
+    /// Sets the height deposited per revisit.
+    ///
+    /// Exposed because the right value is a property of the landscape rather
+    /// than of this type: it has to be commensurate with the energy cost of
+    /// leaving a basin, and a height above that cost empties a basin on a
+    /// single revisit instead of filling it.
+    pub fn set_height(&mut self, w0: f64) {
+        self.w0 = w0;
+    }
+
+    /// Current deposit height.
+    pub fn height(&self) -> f64 {
+        self.w0
+    }
+
     /// Replaces how sameness is measured.
     ///
     /// The descriptor and the notion of sameness are separate choices. Keying

@@ -78,7 +78,16 @@ fn main() {
     let mut cfg = Config::for_cluster(n);
     // Keying on shape rather than on the descriptor, so the merge threshold is
     // a length. Enabled by the fourth argument so both are measurable.
-    cfg.shape_keyed = args.get(4).map(|v| v == "shape").unwrap_or(false);
+    // Mechanisms named on the command line, so each is measurable against the
+    // others rather than all arriving at once.
+    let opts: Vec<&str> = args.get(4).map(|v| v.split(',').collect()).unwrap_or_default();
+    cfg.shape_keyed = opts.contains(&"shape");
+    cfg.budget_window = opts.contains(&"bfwt");
+    cfg.allocate_moves = opts.contains(&"thompson");
+    cfg.adaptive_height = opts.contains(&"height");
+    if !opts.is_empty() {
+        println!("  mechanisms: {}", opts.join(", "));
+    }
     if cfg.shape_keyed {
         // A length now, not a number in descriptor space: two structures whose
         // atoms can be brought within this of each other by a permutation and

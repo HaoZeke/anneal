@@ -29,7 +29,8 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::bias::{Bias, BasinBias, Fingerprint, SortedPairs};
+use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
+use crate::bias::{AdaptiveHeight, Bias, BasinBias, Fingerprint, SortedPairs};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 
 /// The move library, dispatched by value.
@@ -151,6 +152,18 @@ pub struct Config {
     /// descriptor space with no physical meaning; against a shape distance it
     /// is a length.
     pub merge_radius: f64,
+    /// Design point for the budget-window temperature, as a fraction of the
+    /// sphere-model descent boundary. Must lie strictly below two.
+    pub theta: f64,
+    /// Set the temperature by the budget-window law rather than holding it.
+    pub budget_window: bool,
+    /// Choose the move kernel by discounted Thompson allocation.
+    pub allocate_moves: bool,
+    /// Set the deposit height from the escape gaps the chain observes.
+    pub adaptive_height: bool,
+    /// Revisits a basin should take before the accumulated bias clears the
+    /// escape gap, when the height is adaptive.
+    pub height_revisits: f64,
     /// Key basins on IRA shape distance rather than on the descriptor.
     ///
     /// Measured on LJ38 at 400 thousand charged evaluations: keying on the
@@ -181,6 +194,11 @@ impl Config {
             bias_gamma: 5.0,
             merge_radius: 1e-2,
             shape_keyed: false,
+            theta: 0.5,
+            budget_window: false,
+            allocate_moves: false,
+            adaptive_height: false,
+            height_revisits: 4.0,
             screen_margin: 2.0,
             screen_steps: 25,
             relax_steps: 200,
@@ -324,6 +342,20 @@ pub fn run<R: Rng + ?Sized>(
     );
 
     let kernels = ClusterMove::library(n);
+    // Which kernel to propose from is learned rather than drawn uniformly. The
+    // useful move changes as the search moves through the landscape, so the
+    // evidence is discounted and a decaying floor keeps every kernel reachable.
+    let mut allocator = FlooredThompson::new(kernels.len());
+    // The temperature is the law rather than a setting: the design point
+    // clamped between the sphere-model descent ceiling and the birth-death
+    // escape floor, with the barrier estimated from the uphill steps the chain
+    // declines. On a funnelled landscape the window is routinely empty, which
+    // is counted rather than hidden.
+    let mut law = BudgetWindowTemperature::new(3 * n, cfg.theta);
+    // The deposit height is set from the escape gaps observed rather than
+    // fixed, since a height above the gap empties a basin on one revisit and
+    // the gap is a property of the landscape.
+    let mut height = AdaptiveHeight::new(0.1, cfg.height_revisits, cfg.bias_height);
 
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     ledger.record(e, x.view());
@@ -334,7 +366,24 @@ pub fn run<R: Rng + ?Sized>(
         if ledger.remaining() == 0 {
             break;
         }
-        let k = rng.random_range(0..kernels.len());
+        // Gap to the incumbent, which is what the law scales the window by.
+        let gap = (e - ledger.best).abs().max(1e-12);
+        let temperature = if cfg.budget_window {
+            law.temperature(gap, ledger.remaining())
+        } else {
+            cfg.temperature
+        };
+
+        let k = if cfg.allocate_moves {
+            allocator.select(rng)
+        } else {
+            rng.random_range(0..kernels.len())
+        };
+        // The move scale stays the configured temperature. The law's
+        // temperature is an acceptance temperature: it governs which uphill
+        // steps are taken, not how far a proposal reaches. Feeding it to the
+        // kernel makes a correctly small temperature shrink the proposals to
+        // nothing and freeze the chain, which took LJ38 from 1 seed in 8 to 0.
         let mut trial = kernels[k].propose(x.view(), cfg.temperature, rng);
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
@@ -345,9 +394,10 @@ pub fn run<R: Rng + ?Sized>(
         let (e_screen, x_screen) = relax(ledger, trial.view(), cfg.screen_steps);
         if e_screen > ledger.best + cfg.screen_margin {
             screened_out += 1;
-            continue;
+                continue;
         }
         let (e_new, x_new) = relax(ledger, x_screen.view(), cfg.relax_steps);
+        let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
         hops += 1;
 
@@ -355,12 +405,28 @@ pub fn run<R: Rng + ?Sized>(
         let s_new = bias.cv(x_new.view());
         let delta = (e_new + bias.potential(s_new.view())) - (e + bias.potential(s_old.view()));
         let accept = delta < 0.0
-            || rng.random::<f64>() < (-delta / cfg.temperature.max(1e-12)).exp();
+            || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp();
+        if cfg.allocate_moves {
+            allocator.update(k, improved || accept);
+        }
         if accept {
+            // An accepted uphill step to a different basin samples the escape
+            // distribution, which is the quantity the deposit height has to be
+            // commensurate with.
+            if cfg.adaptive_height && e_new > e {
+                height.observe(e_new - e);
+                bias.set_height(height.height());
+            }
             e = e_new;
             x = x_new;
+        } else if cfg.budget_window {
+            // The biased delta, which is what the chain actually declined, not
+            // the raw energy difference. The bias is part of the barrier the
+            // chain faces, and estimating the barrier without it measures a
+            // landscape the chain is not walking on.
+            law.observe_rejection(delta);
         }
-        bias.deposit(bias.cv(x.view()).view(), cfg.temperature);
+        bias.deposit(bias.cv(x.view()).view(), temperature);
     }
 
     Outcome {
