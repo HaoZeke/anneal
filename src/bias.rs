@@ -374,6 +374,108 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
     }
 }
 
+/// Deposit height estimated from the escape gaps a chain actually sees.
+///
+/// A per-basin bias only moves a chain once the bias in the occupied basin
+/// exceeds the energy cost of leaving it, so the deposit height and that cost
+/// have to be commensurate. Setting the height by hand does not survive contact
+/// with a real landscape: on a 75-point Lennard-Jones cluster the cheapest
+/// escape from the structure basin hopping plateaus at costs 0.0906 and the
+/// tenth percentile costs 0.1831, against a hand-set default of 0.25, so one
+/// deposit clears both and the chain abandons a basin after a single revisit
+/// rather than filling what it is sitting in. The same default at a different
+/// size, or on a different potential, is wrong in whichever direction that
+/// landscape happens to run.
+///
+/// The gaps are observable: every rejected uphill proposal is a sample from the
+/// escape distribution. This tracks a low quantile of those samples and sets
+/// the height so that a chosen number of revisits clears it, which makes the
+/// bias self-scaling in the units of the landscape rather than of the author.
+///
+/// The estimate is a P-square style quantile tracker rather than a stored
+/// history, so the cost does not grow with the run.
+pub struct AdaptiveHeight {
+    /// Quantile of the escape gap the bias aims to clear, in [0, 1).
+    pub quantile: f64,
+    /// Revisits a basin should take before that gap is cleared.
+    pub revisits: f64,
+    /// Current quantile estimate.
+    estimate: f64,
+    /// Samples seen, which sets the step size and the warm-up.
+    count: u64,
+    /// Height used until enough samples have arrived.
+    prior: f64,
+    /// Samples required before the estimate replaces the prior.
+    warmup: u64,
+    /// Running mean gap, used only to scale the update step.
+    scale: f64,
+}
+
+impl AdaptiveHeight {
+    /// Tracker aiming at `quantile`, clearing it in `revisits` deposits.
+    pub fn new(quantile: f64, revisits: f64, prior: f64) -> Self {
+        assert!(
+            (0.0..1.0).contains(&quantile),
+            "quantile must lie in [0, 1), got {quantile}"
+        );
+        assert!(revisits > 0.0, "revisits must be positive, got {revisits}");
+        Self {
+            quantile,
+            revisits,
+            estimate: prior * revisits,
+            count: 0,
+            prior,
+            warmup: 32,
+            scale: prior * revisits,
+        }
+    }
+
+    /// Records one observed escape gap, which must be positive.
+    ///
+    /// A non-positive gap is a downhill move and says nothing about the cost of
+    /// leaving, so it is ignored rather than dragging the estimate to zero.
+    pub fn observe(&mut self, gap: f64) {
+        if !(gap > 0.0) || !gap.is_finite() {
+            return;
+        }
+        self.count += 1;
+        let n = self.count as f64;
+        self.scale += (gap - self.scale) / n;
+        // Robbins-Monro stochastic approximation of the quantile. The step is
+        // up by `q` when the sample lies above the estimate and down by
+        // `1 - q` when it lies below, which is the pairing that puts the fixed
+        // point at the quantile: there a fraction `1 - q` of samples lies above
+        // and `q` below, so the expected drift is `(1 - q) q - q (1 - q) = 0`.
+        // Weighting the other way round leaves a drift of `0.81` against `0.01`
+        // at the tenth percentile and the estimate climbs away from it.
+        let step = self.scale.max(1e-12) / n.sqrt();
+        if gap > self.estimate {
+            self.estimate += step * self.quantile;
+        } else {
+            self.estimate -= step * (1.0 - self.quantile);
+        }
+        self.estimate = self.estimate.max(0.0);
+    }
+
+    /// Height to deposit per revisit.
+    pub fn height(&self) -> f64 {
+        if self.count < self.warmup {
+            return self.prior;
+        }
+        (self.estimate / self.revisits).max(1e-12)
+    }
+
+    /// Current estimate of the targeted escape-gap quantile.
+    pub fn gap_estimate(&self) -> f64 {
+        self.estimate
+    }
+
+    /// Samples recorded.
+    pub fn samples(&self) -> u64 {
+        self.count
+    }
+}
+
 #[cfg(test)]
 mod basin_bias_tests {
     use super::*;
@@ -493,5 +595,71 @@ mod basin_bias_tests {
         assert!((bias.missing_mass() - 1.0).abs() < 1e-12, "both seen once");
         bias.deposit(a.view(), 1.0);
         assert!(bias.missing_mass() < 1.0, "a repeat lowers the missing mass");
+    }
+}
+
+#[cfg(test)]
+mod adaptive_tests {
+    use super::AdaptiveHeight;
+
+    /// Deterministic exponential-ish stream, avoiding a dependency on an rng.
+    fn gaps(n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|i| {
+                let u = ((i * 7919 + 13) % 1000) as f64 / 1000.0;
+                -(1.0 - u).ln() * 2.5
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tracks_a_low_quantile_of_the_observed_gaps() {
+        let mut h = AdaptiveHeight::new(0.1, 4.0, 0.25);
+        let sample = gaps(4000);
+        for g in &sample {
+            h.observe(*g);
+        }
+        let mut sorted = sample.clone();
+        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let truth = sorted[(0.1 * sorted.len() as f64) as usize];
+        let est = h.gap_estimate();
+        assert!(
+            (est - truth).abs() < 0.5 * truth.max(0.2),
+            "estimate {est} far from the tenth percentile {truth}"
+        );
+    }
+
+    #[test]
+    fn holds_the_prior_until_warmed_up() {
+        let mut h = AdaptiveHeight::new(0.1, 4.0, 0.25);
+        h.observe(3.0);
+        assert_eq!(h.height(), 0.25, "an estimate from one sample is noise");
+    }
+
+    #[test]
+    fn clears_the_estimated_gap_in_the_requested_revisits() {
+        let mut h = AdaptiveHeight::new(0.1, 5.0, 0.25);
+        for g in gaps(2000) {
+            h.observe(g);
+        }
+        let total = h.height() * 5.0;
+        assert!(
+            (total - h.gap_estimate()).abs() < 1e-9,
+            "five deposits of {} should reach {}",
+            h.height(),
+            h.gap_estimate()
+        );
+    }
+
+    #[test]
+    fn ignores_downhill_and_non_finite_samples() {
+        let mut h = AdaptiveHeight::new(0.1, 4.0, 0.25);
+        for _ in 0..100 {
+            h.observe(-1.0);
+            h.observe(0.0);
+            h.observe(f64::NAN);
+        }
+        assert_eq!(h.samples(), 0);
+        assert_eq!(h.height(), 0.25);
     }
 }
