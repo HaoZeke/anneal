@@ -14,11 +14,17 @@
 //! chain is and somewhere structurally different, each relaxed, so the corridor
 //! between two funnels is examined rather than jumped.
 //!
-//! This is the operation behind funnel hopping in the cluster literature, and
-//! it is cheap to state: interpolate between two minima, relax the images, and
-//! keep any that lands outside the basin it started from. A relaxation from a
-//! point partway along lands in whichever basin claims that point, which need
-//! not be either endpoint's, and that is the escape a perturbation cannot make.
+//! Fully relaxing an interpolated image does not do this, and the measurement is
+//! unambiguous. Between the structure a 75-point search settles into and each of
+//! four constructed morphologies, every image relaxed either back to the start
+//! or onto the endpoint: the deepest structure each path produced was that
+//! path's own endpoint, to every printed digit. A fully relaxed image slides
+//! into whichever basin owns it and the corridor is never sampled.
+//!
+//! [`transverse_path`] removes the component of the gradient along the path
+//! before descending, so an image falls to the valley floor while staying where
+//! it was placed. That projection is what a nudged elastic band uses and the
+//! reason it is used.
 //!
 //! Two things make it work rather than merely run.
 //!
@@ -66,6 +72,101 @@ impl PathOutcome {
             .map(|i| &self.points[*i])
             .min_by(|a, b| a.energy.partial_cmp(&b.energy).unwrap())
     }
+}
+
+/// Descends an image perpendicular to the path tangent.
+///
+/// Relaxing an interpolated image fully is not a path method and the
+/// measurement says so plainly: between the structure a 75-point search settles
+/// into and each of four constructed morphologies, every image relaxed either
+/// back to the start or onto the endpoint, and the deepest structure any path
+/// produced was the endpoint itself. A fully relaxed image slides into whichever
+/// basin owns it, so the corridor is never sampled.
+///
+/// Removing the tangential component leaves the image free to fall into the
+/// valley floor while staying where it was placed along the path, which is the
+/// projection a nudged elastic band uses and the reason it is used.
+fn project_out_tangent(g: &mut Array1<f64>, tangent: ArrayView1<f64>) {
+    let norm2: f64 = tangent.iter().map(|t| t * t).sum();
+    if norm2 <= 1e-30 {
+        return;
+    }
+    let dot: f64 = g.iter().zip(tangent.iter()).map(|(a, b)| a * b).sum();
+    let coeff = dot / norm2;
+    for i in 0..g.len() {
+        g[i] -= coeff * tangent[i];
+    }
+}
+
+/// Relaxes images perpendicular to the path between two structures.
+///
+/// `grad` returns the value and gradient at a point, charging the caller's
+/// ledger, and `None` when the budget is spent.
+///
+/// Each image descends with the component of the gradient along the path
+/// removed, so it settles into the valley floor at its own position rather than
+/// sliding to an endpoint. The images that come out are candidate structures
+/// along the corridor; a caller relaxes the promising ones fully.
+pub fn transverse_path<G>(
+    a: ArrayView1<f64>,
+    b: ArrayView1<f64>,
+    n_images: usize,
+    steps: usize,
+    step_size: f64,
+    mut grad: G,
+) -> Vec<(f64, Array1<f64>)>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+{
+    if a.len() != b.len() || n_images == 0 {
+        return Vec::new();
+    }
+    let mut images: Vec<Array1<f64>> = (0..n_images)
+        .map(|k| {
+            let lambda = (k + 1) as f64 / (n_images + 1) as f64;
+            let mut image = Array1::zeros(a.len());
+            for i in 0..a.len() {
+                image[i] = (1.0 - lambda) * a[i] + lambda * b[i];
+            }
+            image
+        })
+        .collect();
+
+    let mut values = vec![f64::INFINITY; n_images];
+    'outer: for _ in 0..steps {
+        for k in 0..n_images {
+            // Tangent from the neighbouring images, and from the endpoints at
+            // the ends, so the band keeps its direction rather than curling.
+            let prev: Array1<f64> = if k == 0 {
+                a.to_owned()
+            } else {
+                images[k - 1].clone()
+            };
+            let next: Array1<f64> = if k + 1 == n_images {
+                b.to_owned()
+            } else {
+                images[k + 1].clone()
+            };
+            let mut tangent = next.clone();
+            for i in 0..tangent.len() {
+                tangent[i] -= prev[i];
+            }
+            let Some((f, mut g)) = grad(images[k].view()) else {
+                break 'outer;
+            };
+            values[k] = f;
+            project_out_tangent(&mut g, tangent.view());
+            let gmax = g.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            // Scaled by the gradient size: an image between two minima can sit
+            // on a repulsive wall where the gradient is enormous, and a fixed
+            // step there moves it nowhere useful.
+            let scale = if gmax > 1.0 { step_size / gmax } else { step_size };
+            for i in 0..images[k].len() {
+                images[k][i] -= scale * g[i];
+            }
+        }
+    }
+    values.into_iter().zip(images).collect()
 }
 
 /// Relaxes images interpolated between two structures.
@@ -313,5 +414,74 @@ mod tests {
         assert_eq!(d.since_improvement(), 1);
         d.observe(-2.0);
         assert_eq!(d.since_improvement(), 0, "progress must reset the count");
+    }
+}
+
+#[cfg(test)]
+mod transverse_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    /// A two-dimensional surface with a valley between two minima, so an image
+    /// placed on the ridge should fall into the valley and stay between them
+    /// rather than sliding to an end.
+    fn valley(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        // Minima near (-2, 0) and (2, 0); y is a stiff transverse direction.
+        let (a, b) = (x[0], x[1]);
+        let f = 0.1 * (a * a - 4.0).powi(2) + 3.0 * b * b;
+        let g = Array1::from(vec![0.4 * a * (a * a - 4.0), 6.0 * b]);
+        (f, g)
+    }
+
+    #[test]
+    fn tangential_motion_is_removed() {
+        let mut g = Array1::from(vec![3.0, 4.0]);
+        let t = Array1::from(vec![1.0, 0.0]);
+        project_out_tangent(&mut g, t.view());
+        assert!(g[0].abs() < 1e-12, "tangential part survived: {}", g[0]);
+        assert!((g[1] - 4.0).abs() < 1e-12, "transverse part was altered");
+    }
+
+    /// The property the function exists for: images stay spread along the path
+    /// instead of collapsing onto the endpoints.
+    #[test]
+    fn images_stay_spread_along_the_path() {
+        let a = Array1::from(vec![-2.0, 0.0]);
+        let b = Array1::from(vec![2.0, 0.0]);
+        // Displaced off the valley floor, so there is something to relax.
+        let out = transverse_path(a.view(), b.view(), 7, 200, 0.05, |v| {
+            let mut w = v.to_owned();
+            w[1] += 0.8;
+            let (f, g) = valley(w.view());
+            Some((f, g))
+        });
+        assert_eq!(out.len(), 7);
+        let xs: Vec<f64> = out.iter().map(|(_, s)| s[0]).collect();
+        // Every image must still lie strictly between the endpoints.
+        for x in &xs {
+            assert!(
+                *x > -2.0 && *x < 2.0,
+                "an image left the interval at {x}, which is the sliding this prevents"
+            );
+        }
+        // And they must remain distinct, not piled at one point.
+        let spread = xs.iter().cloned().fold(f64::MIN, f64::max)
+            - xs.iter().cloned().fold(f64::MAX, f64::min);
+        assert!(spread > 1.0, "images collapsed together, spread {spread}");
+    }
+
+    #[test]
+    fn an_exhausted_budget_stops_the_band() {
+        let a = Array1::from(vec![-2.0, 0.0]);
+        let b = Array1::from(vec![2.0, 0.0]);
+        let mut left = 3;
+        let out = transverse_path(a.view(), b.view(), 5, 100, 0.05, |v| {
+            if left == 0 {
+                return None;
+            }
+            left -= 1;
+            Some(valley(v))
+        });
+        assert_eq!(out.len(), 5, "the band should still report its images");
     }
 }
