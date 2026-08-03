@@ -31,6 +31,7 @@ use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::calibrate::StepCalibrator;
+use crate::contextual::ContextualAllocator;
 use crate::screen::Screen;
 use crate::methods::activation::{activate, Activation};
 use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
@@ -505,6 +506,17 @@ pub struct Config {
     /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
     /// generally converged to between 0.40 and 0.44."
     pub angular_target: f64,
+    /// Choose the move from where the chain is standing.
+    ///
+    /// The allocator learns one success rate per move, which is the right model
+    /// when a move has a rate and the wrong one when it has a precondition. The
+    /// angular move is the clear case: it is not applied at a frequency, it is
+    /// applied when a point crosses a pair-energy criterion, and a rate learned
+    /// across the times it was and was not appropriate describes no situation
+    /// the chain is ever in. See [`crate::contextual`].
+    pub contextual_moves: bool,
+    /// Rate at which the contextual allocator picks uniformly regardless.
+    pub contextual_floor: f64,
     /// Decide whether to finish a relaxation from a posterior rather than
     /// from a fixed margin.
     ///
@@ -677,6 +689,8 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            contextual_moves: false,
+            contextual_floor: 0.1,
             bayes_screen: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
@@ -764,6 +778,8 @@ pub struct Outcome {
     pub mean_step: f64,
     /// Angular moves attempted, and the ratio they settled at.
     pub angular: (usize, usize, f64),
+    /// Picks per move under the contextual allocator, and choices it forced.
+    pub contextual: (Vec<usize>, usize),
     /// Screen decisions: made, relaxed, forced by the exploration floor, and
     /// observations the model was fitted on.
     pub screen: (usize, usize, usize, usize),
@@ -1070,6 +1086,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // Intercept, screened energy, how far the partial relaxation moved in
     // descriptor space, and the incumbent's distance from it. All cheap, all
     // already computed by the margin screen.
+    let mut contextual = ContextualAllocator::new(kernels.len(), 3, cfg.contextual_floor);
     let mut screen = Screen::new(
         4,
         cfg.bayes_warmup,
@@ -1140,10 +1157,28 @@ fn run_full<'g, R: Rng + ?Sized>(
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
             bias.set_merge_radius(diversity.threshold(progress));
         }
-        let k = if cfg.allocate_moves {
-            allocator.select(rng)
+        // What the chain is standing on, for an allocator that conditions on it.
+        //
+        // Pair-energy statistics, because that is what distinguishes the
+        // situations the moves are for: a structure with one badly bound point
+        // wants that point relocated, an evenly bound one does not. The same
+        // quantity Wales and Doye use for the angular criterion, read as a
+        // continuous context rather than a threshold.
+        let context = if cfg.contextual_moves {
+            let e = pair_energies(x.view(), n);
+            let lo = e.iter().copied().fold(f64::INFINITY, f64::min);
+            let hi = e.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            let mean = e.iter().sum::<f64>() / n.max(1) as f64;
+            let spread = if lo.abs() > 1e-12 { hi / lo } else { 0.0 };
+            let depth = if lo.abs() > 1e-12 { mean / lo } else { 0.0 };
+            Some(Array1::from(vec![1.0, spread, depth]))
         } else {
-            rng.random_range(0..kernels.len())
+            None
+        };
+        let k = match (&context, cfg.allocate_moves) {
+            (Some(c), _) => contextual.select(c.view(), rng),
+            (None, true) => allocator.select(rng),
+            (None, false) => rng.random_range(0..kernels.len()),
         };
         // The move scale stays the configured temperature. The law's
         // temperature is an acceptance temperature: it governs which uphill
@@ -1337,6 +1372,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             let hit = if accept { 1.0 } else { 0.0 };
             let step = 0.02 / (1.0 + angular_tried as f64 / 500.0).sqrt();
             angular_ratio = (angular_ratio + step * (hit - cfg.angular_target)).clamp(0.05, 0.95);
+        } else if let Some(c) = &context {
+            // The context is the one the move was chosen in, not the one the
+            // chain now stands in: the reward belongs to the decision.
+            contextual.update(
+                k,
+                c.view(),
+                if improved || accept { 1.0 } else { 0.0 },
+            );
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
@@ -1647,6 +1690,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_crossed,
         improvements,
         angular: (angular_tried, angular_accepted, angular_ratio),
+        contextual: (contextual.picks.clone(), contextual.forced),
         screen: (
             screen.decided,
             screen.relaxed,
