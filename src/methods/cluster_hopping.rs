@@ -30,9 +30,10 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
-use crate::bias::{AdaptiveHeight, Bias, BasinBias, Fingerprint, SortedPairs};
+use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
+use crate::methods::minima_hopping::EscapeFeedback;
 use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 
@@ -229,6 +230,21 @@ pub struct Config {
     pub replicas: usize,
     /// Hops between swap attempts.
     pub swap_period: usize,
+    /// Drive the escape scale and the acceptance threshold from the history,
+    /// after Goedecker's minima hopping, instead of a Metropolis temperature.
+    ///
+    /// Revisiting a known minimum makes the *next escape* harder rather than
+    /// the *current basin* less attractive, which is a different use of the
+    /// same history the bias keeps. The transition region between funnels is
+    /// left crossable, which Goedecker argues is why flooding it is the wrong
+    /// response to a revisit.
+    ///
+    /// This is the scaled-move form: the escape scale multiplies the move
+    /// amplitude. Goedecker reports it as strictly weaker than short molecular
+    /// dynamics, which crosses lower barriers through the Bell-Evans-Polanyi
+    /// correlation, but it carries the same feedback law and is what validates
+    /// the controller before dynamics is wired.
+    pub minima_hopping: bool,
     /// Scale the deposit height with rung temperature.
     ///
     /// A bias pushes a chain out of where it sits and a low temperature keeps
@@ -336,6 +352,7 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            minima_hopping: false,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -374,6 +391,12 @@ pub struct Outcome {
     pub charged: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
+    /// Escape scale at the end of the run, when the controller is used.
+    pub escape_scale: f64,
+    /// Acceptance threshold at the end of the run.
+    pub escape_threshold: f64,
+    /// Quenches classified as a return, a known basin and a new one.
+    pub visit_counts: (usize, usize, usize),
     /// Per-rung temperature, basin count and best energy.
     ///
     /// What says whether a ladder is doing its job rather than merely swapping:
@@ -568,6 +591,20 @@ pub fn run<R: Rng + ?Sized>(
     let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
+    // The escape scale starts at the move library's own amplitude, so a run
+    // without feedback and one with it begin identically.
+    let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
+    let mut last_basin: Option<usize> = None;
+    // Basin identity for the controller, kept apart from the bias.
+    //
+    // The two mechanisms share a notion of "the same basin" and nothing else,
+    // and this map is never deposited into. Reading identity off the bias
+    // instead would break under replica exchange, where each rung owns its own
+    // bias and the indices of one rung mean nothing in another.
+    let mut identity = BasinIndex::new(
+        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+        cfg.merge_radius,
+    );
     // Structures kept for path endpoints. Only ones far from every member are
     // added, because interpolating between two structures in one funnel lands
     // back in it, which is what archive-based escape moves holding a single
@@ -616,7 +653,14 @@ pub fn run<R: Rng + ?Sized>(
         // steps are taken, not how far a proposal reaches. Feeding it to the
         // kernel makes a correctly small temperature shrink the proposals to
         // nothing and freeze the chain, which took LJ38 from 1 seed in 8 to 0.
-        let mut trial = kernels[k].propose(x.view(), cfg.temperature, rng);
+        // The escape scale multiplies the move amplitude. A chain that keeps
+        // returning proposes further each time until it leaves.
+        let move_scale = if cfg.minima_hopping {
+            cfg.temperature * feedback.escape()
+        } else {
+            cfg.temperature
+        };
+        let mut trial = kernels[k].propose(x.view(), move_scale, rng);
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -675,8 +719,18 @@ pub fn run<R: Rng + ?Sized>(
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
         let delta = (e_new + bias.potential(s_new.view())) - (e + bias.potential(s_old.view()));
-        let accept = delta < 0.0
-            || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp();
+        let accept = if cfg.minima_hopping {
+            // Threshold on the energy rise rather than Metropolis. A
+            // temperature cold enough to polish cannot cross and one hot
+            // enough to cross cannot polish; the threshold adapts to whichever
+            // the chain is currently failing at.
+            let reached = identity.basin_of(x_new.view());
+            feedback.observe(last_basin, reached);
+            last_basin = Some(reached);
+            feedback.accept(e_new - e)
+        } else {
+            delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
+        };
         if cfg.allocate_moves {
             allocator.update(k, improved || accept);
         }
@@ -853,6 +907,9 @@ pub fn run<R: Rng + ?Sized>(
         basins: bias.n_basins(),
         charged: ledger.spent(),
         returned,
+        escape_scale: feedback.escape(),
+        escape_threshold: feedback.threshold(),
+        visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
         rungs: {
             // The active rung is held outside the parked list, so it is put
             // back in place before reporting.
