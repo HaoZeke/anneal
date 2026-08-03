@@ -229,6 +229,20 @@ pub struct Config {
     pub replicas: usize,
     /// Hops between swap attempts.
     pub swap_period: usize,
+    /// Scale the deposit height with rung temperature.
+    ///
+    /// A bias pushes a chain out of where it sits and a low temperature keeps
+    /// it in, so a cold rung carrying a full bias is evicted from good basins
+    /// and cannot return. Measured on LJ75, that inverts the ladder: the
+    /// coldest rung held -391.3 while the hottest held -396.0, where a working
+    /// ladder has the deepest structure at the cold end.
+    ///
+    /// Scaling the height by the rung's temperature ratio leaves the coldest
+    /// rung nearly a plain hopping chain, which polishes, and the hottest
+    /// carrying the full bias, which crosses. The swap then moves a crossing
+    /// down to a chain that can refine it, which is the division of labour the
+    /// ladder exists for.
+    pub bias_by_rung: bool,
     /// Hottest temperature on the ladder, as a multiple of `temperature`.
     pub ladder_top: f64,
     /// Abandon a trial whose short relaxation is heading back to the current
@@ -321,6 +335,7 @@ impl Config {
             max_hops: None,
             replicas: 1,
             swap_period: 50,
+            bias_by_rung: false,
             ladder_top: 4.0,
             return_screen: false,
             path_on_stall: false,
@@ -486,27 +501,33 @@ pub fn run<R: Rng + ?Sized>(
     // well-tempered bias rebuilt every fifty hops has nothing to accumulate:
     // measured that way an LJ38 run registered 18 basins instead of about 200.
     let n_rep = cfg.replicas.max(1);
+    let rung_temp = |k: usize| -> f64 {
+        if n_rep == 1 {
+            cfg.temperature
+        } else {
+            cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
+        }
+    };
     let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
-        .map(|_| {
+        .map(|k| {
+            // The coldest rung keeps a token bias so it still recognises
+            // revisits; the hottest carries the configured height.
+            let h = if cfg.bias_by_rung && n_rep > 1 {
+                cfg.bias_height * (rung_temp(k) / cfg.temperature) / cfg.ladder_top
+            } else {
+                cfg.bias_height
+            };
             BasinBias::new(
                 ClusterFingerprint::for_keying(n, cfg.shape_keyed),
                 cfg.merge_radius,
-                cfg.bias_height,
+                h,
                 cfg.bias_gamma,
             )
         })
         .collect();
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
-    let temps: Vec<f64> = (0..n_rep)
-        .map(|k| {
-            if n_rep == 1 {
-                cfg.temperature
-            } else {
-                cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
-            }
-        })
-        .collect();
+    let temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
     let exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
@@ -687,6 +708,8 @@ pub fn run<R: Rng + ?Sized>(
                 // temperature; only the states move, so a hot rung's crossing
                 // lands in a cold rung that can polish it.
                 chains.insert(rep, (e, x.clone()));
+                // A placeholder only; the destination rung's own bias is taken
+                // below, so this is never deposited into.
                 biases.insert(rep, std::mem::replace(
                     &mut bias,
                     BasinBias::new(
