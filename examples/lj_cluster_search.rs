@@ -88,6 +88,15 @@ fn main() {
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     cfg.return_screen = opts.contains(&"rscreen");
+    // The deposit height matters only now that basins are revisited: at 33
+    // revisits a height of 0.25 accumulates to about 8, against escape gaps
+    // measured at 0.09 for the cheapest and 0.18 at the tenth percentile.
+    if let Ok(h) = std::env::var("BIAS_HEIGHT") {
+        if let Ok(v) = h.parse::<f64>() {
+            cfg.bias_height = v;
+            println!("  bias height {v}");
+        }
+    }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
