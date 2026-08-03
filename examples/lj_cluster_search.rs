@@ -179,6 +179,11 @@ fn main() {
             solved += 1;
         }
         deepest = deepest.min(out.best);
+        if seed == 0 && out.rungs.len() > 1 {
+            for (t, b, en) in &out.rungs {
+                println!("      rung T={t:.3}  basins {b:>5}  energy {en:>11.4}");
+            }
+        }
         total_hops += out.hops;
         total_charged += ledger.spent();
         println!(

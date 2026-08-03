@@ -359,6 +359,13 @@ pub struct Outcome {
     pub charged: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
+    /// Per-rung temperature, basin count and best energy.
+    ///
+    /// What says whether a ladder is doing its job rather than merely swapping:
+    /// a hot rung should register many basins and a poor energy, a cold rung
+    /// few basins and a deep one. A ladder where every rung looks alike is a
+    /// ladder whose spread is too narrow to be worth its cost.
+    pub rungs: Vec<(f64, usize, f64)>,
     /// Swap attempts between adjacent replicas.
     pub swaps_tried: usize,
     /// Swaps accepted.
@@ -693,12 +700,34 @@ pub fn run<R: Rng + ?Sized>(
                 let j = (rep + 1) % n_rep;
                 if k != j {
                     swaps_tried += 1;
-                    let p = exchange.swap_accept_prob(
-                        chains[k].0.min(chains[j].0),
-                        temps[k.min(j)],
-                        chains[k].0.max(chains[j].0),
-                        temps[k.max(j)],
-                    );
+                    // Bias exchange, not plain parallel tempering.
+                    //
+                    // Each rung carries its own accumulating bias, so each
+                    // samples exp(-(E + V_k)/T_k) rather than exp(-E/T_k), and
+                    // a swap acceptance built from raw energies is exchanging
+                    // between distributions neither chain is sampling. The
+                    // measured symptom was a ladder that never stratified:
+                    // four rungs with 141 to 179 basins each and energies not
+                    // ordered by temperature at all.
+                    //
+                    // The correct factor evaluates each rung's bias at both
+                    // states (Piana and Laio):
+                    //
+                    //   ln a = (1/T_k)[U_k(x_k) - U_k(x_j)]
+                    //        + (1/T_j)[U_j(x_j) - U_j(x_k)]
+                    //
+                    // with U_k(x) = E(x) + V_k(x). It reduces to the plain
+                    // Metropolis swap when the biases are equal, which is what
+                    // Exchange supplies and what this generalises.
+                    let (ek, xk) = (chains[k].0, chains[k].1.clone());
+                    let (ej, xj) = (chains[j].0, chains[j].1.clone());
+                    let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
+                    let vk_xj = biases[k].potential(biases[k].cv(xj.view()).view());
+                    let vj_xj = biases[j].potential(biases[j].cv(xj.view()).view());
+                    let vj_xk = biases[j].potential(biases[j].cv(xk.view()).view());
+                    let log_a = ((ek + vk_xk) - (ej + vk_xj)) / temps[k].max(1e-12)
+                        + ((ej + vj_xj) - (ek + vj_xk)) / temps[j].max(1e-12);
+                    let p = if log_a >= 0.0 { 1.0 } else { log_a.exp() };
                     if rng.random::<f64>() < p {
                         swaps_accepted += 1;
                         chains.swap(k, j);
@@ -801,6 +830,25 @@ pub fn run<R: Rng + ?Sized>(
         basins: bias.n_basins(),
         charged: ledger.spent(),
         returned,
+        rungs: {
+            // The active rung is held outside the parked list, so it is put
+            // back in place before reporting.
+            let mut all: Vec<(f64, usize, f64)> = Vec::with_capacity(n_rep);
+            let mut parked = biases.iter().map(|b| b.n_basins());
+            let mut energies = chains.iter().map(|(en, _)| *en);
+            for k in 0..n_rep {
+                if k == rep {
+                    all.push((temps[k], bias.n_basins(), e));
+                } else {
+                    all.push((
+                        temps[k],
+                        parked.next().unwrap_or(0),
+                        energies.next().unwrap_or(f64::NAN),
+                    ));
+                }
+            }
+            all
+        },
         swaps_tried,
         swaps_accepted,
         paths: paths_run,
