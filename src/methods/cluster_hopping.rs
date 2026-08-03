@@ -1127,7 +1127,14 @@ fn run_full<'g, R: Rng + ?Sized>(
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng);
+        let mut trial = if angular {
+            // The criterion decides this is the right move, so it takes the
+            // step rather than competing as one arm among many.
+            angular_tried += 1;
+            ClusterMove::Angular { n_points: n }.propose(x.view(), cfg.temperature, rng)
+        } else {
+            kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng)
+        };
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -1699,6 +1706,111 @@ mod tests {
             bias.n_basins() >= after_first,
             "the bias came back smaller than it went in"
         );
+    }
+
+    /// The angular move has to actually be taken, and the criterion has to
+    /// fire on a cluster that has a loose point. Both were wrong once: the
+    /// proposal branch was absent so the flag was computed and discarded, and
+    /// the attempt counter was never incremented so the acceptance rate read as
+    /// `accepted / 1` and drove the ratio to its floor.
+    #[test]
+    fn the_angular_move_relocates_the_worst_bound_point() {
+        // Twelve points on an icosahedron and one thrown far out.
+        //
+        // The geometry has to be relaxed, not merely spread out. Pair energy is
+        // highest for an overlapping point, not a distant one, so a fixture
+        // with two points on top of each other makes the criterion pick the
+        // overlap, which is the right answer to the wrong question.
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        // Edge length 2 before scaling; 0.56 puts neighbours near the
+        // Lennard-Jones minimum.
+        let sc = 0.56;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, phi],
+            [0.0, 1.0, -phi],
+            [0.0, -1.0, phi],
+            [0.0, -1.0, -phi],
+            [1.0, phi, 0.0],
+            [1.0, -phi, 0.0],
+            [-1.0, phi, 0.0],
+            [-1.0, -phi, 0.0],
+            [phi, 0.0, 1.0],
+            [-phi, 0.0, 1.0],
+            [phi, 0.0, -1.0],
+            [-phi, 0.0, -1.0],
+        ];
+        let n = 13;
+        let mut x = Array1::<f64>::zeros(3 * n);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = sc * v[k];
+            }
+        }
+        let last = n - 1;
+        x[3 * last] = 9.0;
+
+        let e = pair_energies(x.view(), n);
+        let hi = (0..n).max_by(|a, b| e[*a].partial_cmp(&e[*b]).unwrap()).unwrap();
+        assert_eq!(hi, last, "the distant point should be the worst bound");
+        assert_eq!(
+            worst_bound(x.view(), n, 0.42),
+            Some(last),
+            "the criterion should fire on a point this loose"
+        );
+
+        let mut rng = StdRng::seed_from_u64(9);
+        let y = ClusterMove::Angular { n_points: n }.propose(x.view(), 0.8, &mut rng);
+        // Every other point is untouched: "with all other atoms fixed".
+        for i in 0..last {
+            for k in 0..3 {
+                assert!((y[3 * i + k] - x[3 * i + k]).abs() < 1e-12, "point {i} moved");
+            }
+        }
+        assert!(
+            (0..3).any(|k| (y[3 * last + k] - x[3 * last + k]).abs() > 1e-9),
+            "the worst-bound point did not move"
+        );
+        // It lands at the largest radius in the cluster, about the centre of
+        // mass of the structure it was given.
+        let mut c = [0.0_f64; 3];
+        for i in 0..n {
+            for k in 0..3 {
+                c[k] += x[3 * i + k];
+            }
+        }
+        for v in c.iter_mut() {
+            *v /= n as f64;
+        }
+        let rmax = (0..n)
+            .map(|i| {
+                ((x[3 * i] - c[0]).powi(2)
+                    + (x[3 * i + 1] - c[1]).powi(2)
+                    + (x[3 * i + 2] - c[2]).powi(2))
+                .sqrt()
+            })
+            .fold(0.0_f64, f64::max);
+        let rnew = ((y[3 * last] - c[0]).powi(2)
+            + (y[3 * last + 1] - c[1]).powi(2)
+            + (y[3 * last + 2] - c[2]).powi(2))
+        .sqrt();
+        assert!(
+            (rnew - rmax).abs() < 1e-9,
+            "landed at radius {rnew} where the cluster's largest is {rmax}"
+        );
+    }
+
+    /// A compact cluster has no loose point, so the criterion must stay quiet.
+    #[test]
+    fn the_criterion_does_not_fire_on_an_even_cluster() {
+        let n = 13;
+        let mut x = Array1::<f64>::zeros(3 * n);
+        for i in 0..n {
+            let a = i as f64 * 0.48;
+            x[3 * i] = 1.1 * a.cos();
+            x[3 * i + 1] = 1.1 * a.sin();
+            x[3 * i + 2] = 0.2 * (i % 4) as f64;
+        }
+        assert_eq!(worst_bound(x.view(), n, 0.05), None);
     }
 
     /// A separable quadratic in the point coordinates: its minimum is every
