@@ -161,7 +161,20 @@ impl WarmLbfgs {
 
         let mut a_prev = 0.0;
         let mut f_prev = f0;
-        let mut a = 1.0;
+        // The first trial step is scaled by the direction's size. Starting at
+        // one is right for a well-scaled problem and useless where the
+        // gradient is enormous: a Lennard-Jones configuration with two points
+        // nearly coincident carries a gradient near 1e13, twenty backtracks
+        // from one reach only 1e-6, the search fails, and the relaxation
+        // returns its starting point.
+        //
+        // Measured against a reference minimiser on identical inputs, that is
+        // exactly what happened: on trials the reference relaxed to -146.7 and
+        // -168.0, this returned 3.8e8 and -4.1, having never left the start.
+        // It is the difference between a weak minimiser and one that does not
+        // run.
+        let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+        let mut a = if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 };
         let mut lo = 0.0;
         let mut f_lo = f0;
         let mut slope_lo = slope;
