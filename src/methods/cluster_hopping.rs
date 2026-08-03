@@ -514,6 +514,18 @@ pub struct Outcome {
     pub soft_escapes: usize,
     /// Of those, the ones whose climb reached a saddle.
     pub soft_crossed: usize,
+    /// Hop index, basin count and value at each new global best.
+    ///
+    /// What this answers is which mechanism is doing the work. A run whose
+    /// improvements all land in the first tenth of its hops was decided by
+    /// where it started, and the lever is more restarts; one that improves late
+    /// was carried there by the bias accumulating, and the lever is budget.
+    /// Without the trace both stories fit the same success rate.
+    ///
+    /// Capped, and the cap is on the number of *records* rather than on the
+    /// hops: a run that improves ten thousand times is descending, and the
+    /// tail of that is not what anyone is asking about.
+    pub improvements: Vec<(usize, usize, f64)>,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
@@ -794,6 +806,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
+    let mut improvements: Vec<(usize, usize, f64)> = Vec::new();
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
     // Its own detector, so a run using both this and the path search does not
@@ -946,6 +959,9 @@ fn run_full<'g, R: Rng + ?Sized>(
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
         hops += 1;
+        if improved && improvements.len() < 512 {
+            improvements.push((hops, bias.n_basins(), e_new));
+        }
         // Kept before the acceptance branch, which may move `x_new` into the
         // chain. The archive wants the structure this hop produced whether or
         // not the chain took it: a rejected structure in a different funnel is
@@ -1225,6 +1241,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
         soft_escapes,
         soft_crossed,
+        improvements,
         stall_escapes,
         stall_escape_gain,
         soft_lambda: if soft_escapes > 0 {
