@@ -80,6 +80,12 @@ pub struct EscapeFeedback {
     /// scale eventually proposes a structure so scattered that its relaxation
     /// costs far more than an ordinary one. The ceiling keeps the charged cost
     /// of a proposal bounded without removing the escalation.
+    ///
+    /// The default of four is set by that cost, not by taste. At a ceiling of
+    /// sixty-four an LJ38 run paid 138 charged evaluations per hop against 39
+    /// without the controller, so the same budget bought 2173 hops rather than
+    /// 7775 and the run solved 1 seed in 8 where the plain chain solved 8.
+    /// Escalation that prices itself out of the budget is not escalation.
     pub escape_ceiling: f64,
     /// Floor on the escape scale, so a run of discoveries cannot drive it to
     /// zero and freeze the search.
@@ -107,8 +113,8 @@ impl EscapeFeedback {
             visits_coeff: 0.1,
             alpha_accept: 1.0 / 1.05,
             alpha_reject: 1.05,
-            escape_ceiling: escape * 64.0,
-            escape_floor: escape / 64.0,
+            escape_ceiling: escape * 4.0,
+            escape_floor: escape / 4.0,
             visits: HashMap::new(),
             n_same: 0,
             n_known: 0,
