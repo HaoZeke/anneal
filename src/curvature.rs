@@ -56,6 +56,16 @@ pub struct CurvatureFeatures {
     /// the squared norm on atom `i`, so it does not depend on cluster size for
     /// a collective mode.
     pub participation: f64,
+    /// The softest non-rigid direction, unit norm.
+    ///
+    /// Returned rather than summarised because a direction is what an escape
+    /// needs. Goedecker's argument for molecular dynamics as the escape is that
+    /// it follows the soft modes and so crosses low barriers, by the
+    /// Bell-Evans-Polanyi correlation between barrier height and the energy
+    /// change along the path. An isotropic displacement has no such preference:
+    /// scaled up it crosses high barriers or none, measured on LJ38 as a
+    /// controller pinned at its ceiling with a discovery rate of 67 in 1871.
+    pub mode: Array1<f64>,
     /// Gradient evaluations spent.
     pub evaluations: usize,
 }
@@ -319,6 +329,7 @@ where
         lambda_second: vals[1],
         gap: vals[1] - vals[0],
         participation,
+        mode,
         evaluations,
     })
 }

@@ -7,7 +7,7 @@
 //!
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
-use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
+use anneal_core::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 
@@ -150,7 +150,22 @@ fn main() {
             }
             (f, xr)
         };
-        let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+        // The gradient the soft-mode escape needs, charged like everything
+        // else: a Lanczos pass is two evaluations per step and the escape
+        // must pay for them.
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+            if !led.charge() {
+                return None;
+            }
+            Some(lj(x).1)
+        };
+        let out = optimize_with_gradient(
+            &cfg,
+            &mut ledger,
+            &mut relax,
+            if cfg.minima_hopping { Some(&mut grad) } else { None },
+            seed,
+        );
 
         // The reported value is checked against a fresh evaluation of the
         // structure it claims to come from, off the ledger and outside the
@@ -192,6 +207,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {} lmin {:.4}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -205,6 +221,13 @@ fn main() {
             out.paths,
             out.path_improvements,
             out.path_gain,
+            out.escape_scale,
+            out.escape_threshold,
+            out.visit_counts.0,
+            out.visit_counts.1,
+            out.visit_counts.2,
+            out.soft_escapes,
+            out.soft_lambda,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
