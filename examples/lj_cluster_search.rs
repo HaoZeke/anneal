@@ -167,11 +167,15 @@ fn main() {
         total_charged += ledger.spent();
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
+             returned {}  paths {}/{} escaped  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
             out.screened_out,
             ledger.spent(),
+            out.returned,
+            out.path_escapes,
+            out.paths,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
