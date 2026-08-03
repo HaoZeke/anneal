@@ -504,6 +504,28 @@ pub struct Config {
     /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
     /// generally converged to between 0.40 and 0.44."
     pub angular_target: f64,
+    /// Forbid the funnel the chain is stuck in, rather than making it
+    /// expensive.
+    ///
+    /// Wales and Doye record the lockout directly: once the lowest icosahedral
+    /// minimum is reached at 75 points, the decahedron is never found later in
+    /// that run. Two responses were measured here and both failed. A
+    /// well-tempered bias raises the potential where the chain has been, and
+    /// runs that fail register as many basins as runs that succeed, so the
+    /// filling is not what decides it. Restarting the walker from a random
+    /// configuration failed too, nineteen times per run: a random start
+    /// descends into the icosahedral funnel again because that funnel's basin
+    /// of attraction is far wider. The lockout is entropic and a soft
+    /// penalty cannot outrun it.
+    ///
+    /// This rejects outright. Structures within the merge radius of a
+    /// quarantined one are refused whatever their energy, so the chain cannot
+    /// return to a funnel it has been declared stuck in. The ledger still
+    /// records them, so a quarantine that turns out to cover the answer costs
+    /// the search nothing it had already found.
+    pub tabu_on_stall: bool,
+    /// Quarantined structures held at once, oldest dropped first.
+    pub tabu_capacity: usize,
     /// Restart the walker from a fresh configuration on a stall, keeping the
     /// bias.
     ///
@@ -638,6 +660,8 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            tabu_on_stall: false,
+            tabu_capacity: 8,
             angular_moves: false,
             angular_target: 0.5,
             restart_on_stall: false,
@@ -719,6 +743,8 @@ pub struct Outcome {
     pub mean_step: f64,
     /// Angular moves attempted, and the ratio they settled at.
     pub angular: (usize, usize, f64),
+    /// Funnels quarantined, and proposals refused for landing in one.
+    pub tabu: (usize, usize),
     /// Restarts triggered by a stall.
     pub restarts: usize,
     /// Climbs triggered by a stall.
@@ -1017,6 +1043,8 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut angular_ratio = 0.42_f64;
     let mut angular_tried = 0usize;
     let mut angular_accepted = 0usize;
+    let mut tabu: Vec<Array1<f64>> = Vec::new();
+    let mut tabu_hits = 0usize;
     let mut restarts = 0usize;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
@@ -1197,6 +1225,25 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
+        // A quarantined funnel is refused whatever the energy. Checked after
+        // the acceptance test rather than instead of it, so the veto is
+        // visible as a veto rather than folded into the rule.
+        let mut accept = accept;
+        if !tabu.is_empty() && accept {
+            let d = s_new.view();
+            if tabu.iter().any(|t| {
+                t.len() == d.len()
+                    && t.iter()
+                        .zip(d.iter())
+                        .map(|(p, q)| (p - q) * (p - q))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= bias.merge_radius()
+            }) {
+                accept = false;
+                tabu_hits += 1;
+            }
+        }
         if angular {
             if accept {
                 angular_accepted += 1;
@@ -1272,7 +1319,26 @@ fn run_full<'g, R: Rng + ?Sized>(
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
-        if cfg.restart_on_stall && stuck {
+        if cfg.tabu_on_stall && stuck {
+            // The funnel the chain has been unable to leave, named by where it
+            // is standing.
+            let d = bias.cv(x.view());
+            if !tabu.iter().any(|t| {
+                t.len() == d.len()
+                    && t.iter()
+                        .zip(d.iter())
+                        .map(|(p, q)| (p - q) * (p - q))
+                        .sum::<f64>()
+                        .sqrt()
+                        <= bias.merge_radius()
+            }) {
+                if tabu.len() >= cfg.tabu_capacity {
+                    tabu.remove(0);
+                }
+                tabu.push(d);
+            }
+        }
+        if (cfg.restart_on_stall || cfg.tabu_on_stall) && stuck {
             quiet = 0;
             longest_quiet = 0;
             let fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
@@ -1501,6 +1567,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_crossed,
         improvements,
         angular: (angular_tried, angular_accepted, angular_ratio),
+        tabu: (tabu.len(), tabu_hits),
         restarts,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
