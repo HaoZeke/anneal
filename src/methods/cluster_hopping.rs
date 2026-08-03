@@ -427,7 +427,7 @@ impl Config {
             swap_period: 50,
             bias_by_rung: false,
             minima_hopping: false,
-            escape_lanczos_steps: 8,
+            escape_lanczos_steps: 16,
             escape_epsilon: 1e-4,
             escape_amplitude: 0.6,
             ladder_top: 4.0,
