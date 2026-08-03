@@ -64,6 +64,79 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Wales and Doye's angular move on the worst-bound point.
+    ///
+    /// "Each angular displacement consisted of choosing random theta and phi
+    /// spherical polar coordinates for the atom in question, taking the origin
+    /// at the center of mass and replacing the radius with the maximum value in
+    /// the cluster" (J. Phys. Chem. A 101, 5111).
+    ///
+    /// Not the same move as [`SurfaceRelocate`], which takes the
+    /// least-coordinated point and places it near the surface. This takes the
+    /// point with the highest pair energy and throws it to the far edge of the
+    /// cluster at a random angle, which is a much larger step and is the move
+    /// the 1997 paper used to reach the decahedral minima.
+    Angular {
+        /// Points in a state.
+        n_points: usize,
+    },
+}
+
+/// Pair energy per point, in the Lennard-Jones form Wales and Doye use to
+/// decide which point is worst bound.
+///
+/// `E(i) = sum_{j != i} 4 [ (1/r_ij)^12 - (1/r_ij)^6 ]`, so the total energy is
+/// half the sum. Reduced units, matching the rest of this driver.
+pub fn pair_energies(x: ArrayView1<f64>, n: usize) -> Array1<f64> {
+    let mut e = Array1::<f64>::zeros(n);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            let r2 = dx * dx + dy * dy + dz * dz;
+            if r2 <= 0.0 {
+                continue;
+            }
+            let s6 = 1.0 / (r2 * r2 * r2);
+            let v = 4.0 * (s6 * s6 - s6);
+            e[i] += v;
+            e[j] += v;
+        }
+    }
+    e
+}
+
+/// Whether the worst-bound point is loose enough for an angular move, and which
+/// one it is.
+///
+/// The criterion is the paper's: the highest pair energy rising above a
+/// fraction `ratio` of the lowest. Both are negative for a bound cluster, so
+/// this fires when the worst-bound point holds less than `ratio` of the binding
+/// the best-bound one does.
+pub fn worst_bound(x: ArrayView1<f64>, n: usize, ratio: f64) -> Option<usize> {
+    if n == 0 {
+        return None;
+    }
+    let e = pair_energies(x, n);
+    let mut hi = 0usize;
+    let mut lo = 0usize;
+    for i in 1..n {
+        if e[i] > e[hi] {
+            hi = i;
+        }
+        if e[i] < e[lo] {
+            lo = i;
+        }
+    }
+    if e[lo] >= 0.0 {
+        return None;
+    }
+    if e[hi] > ratio * e[lo] {
+        Some(hi)
+    } else {
+        None
+    }
 }
 
 impl ClusterMove {
@@ -135,6 +208,50 @@ impl ClusterMove {
                 for k in 0..3 {
                     y[3 * i + k] += rng.random_range(-h..h);
                 }
+                y
+            }
+            ClusterMove::Angular { n_points } => {
+                let n = *n_points;
+                let mut y = x.to_owned();
+                if n == 0 {
+                    return y;
+                }
+                // The centre of mass, and the radius of the point furthest from
+                // it, which is where the moved point lands.
+                let mut c = [0.0_f64; 3];
+                for i in 0..n {
+                    for k in 0..3 {
+                        c[k] += y[3 * i + k];
+                    }
+                }
+                for v in c.iter_mut() {
+                    *v /= n as f64;
+                }
+                let mut rmax = 0.0_f64;
+                for i in 0..n {
+                    let dx = y[3 * i] - c[0];
+                    let dy = y[3 * i + 1] - c[1];
+                    let dz = y[3 * i + 2] - c[2];
+                    rmax = rmax.max((dx * dx + dy * dy + dz * dz).sqrt());
+                }
+                let i = worst_bound(y.view(), n, 0.42).unwrap_or_else(|| {
+                    let e = pair_energies(y.view(), n);
+                    let mut hi = 0usize;
+                    for k in 1..n {
+                        if e[k] > e[hi] {
+                            hi = k;
+                        }
+                    }
+                    hi
+                });
+                // Uniform on the sphere: cos(theta) uniform in [-1, 1], not
+                // theta itself, or the poles are oversampled.
+                let cos_t: f64 = rng.random_range(-1.0..1.0);
+                let sin_t = (1.0 - cos_t * cos_t).max(0.0).sqrt();
+                let phi: f64 = rng.random_range(0.0..std::f64::consts::TAU);
+                y[3 * i] = c[0] + rmax * sin_t * phi.cos();
+                y[3 * i + 1] = c[1] + rmax * sin_t * phi.sin();
+                y[3 * i + 2] = c[2] + rmax * cos_t;
                 y
             }
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
@@ -367,6 +484,26 @@ pub struct Config {
     pub escape_stall_patience: usize,
     /// Multiple of the longest quiet stretch so far that counts as stuck.
     pub escape_stall_factor: f64,
+    /// Wales and Doye's angular move, applied when a point is loose.
+    ///
+    /// "If the highest pair energy rose above a fraction R of the lowest pair
+    /// energy then an angular move was employed for the atom in question with
+    /// all other atoms fixed" (J. Phys. Chem. A 101, 5111). This is the move
+    /// their unbiased search used to reach the decahedral minima at 75 and 102
+    /// points, and it is not in this crate's library: the nearest thing,
+    /// surface relocation, picks the least-coordinated point rather than the
+    /// worst-bound one and places it near the surface rather than at the far
+    /// edge.
+    ///
+    /// It replaces the allocator's choice on the steps where it fires, rather
+    /// than being one arm among many, because the criterion decides when it is
+    /// the right move.
+    pub angular_moves: bool,
+    /// Acceptance rate the pair-energy ratio is tuned to.
+    ///
+    /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
+    /// generally converged to between 0.40 and 0.44."
+    pub angular_target: f64,
     /// Restart the walker from a fresh configuration on a stall, keeping the
     /// bias.
     ///
@@ -501,6 +638,8 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            angular_moves: false,
+            angular_target: 0.5,
             restart_on_stall: false,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
@@ -578,6 +717,8 @@ pub struct Outcome {
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
     pub mean_step: f64,
+    /// Angular moves attempted, and the ratio they settled at.
+    pub angular: (usize, usize, f64),
     /// Restarts triggered by a stall.
     pub restarts: usize,
     /// Climbs triggered by a stall.
@@ -871,6 +1012,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         cfg.calibrate_warmup,
         cfg.merge_radius,
     );
+    // The pair-energy ratio, tuned to the paper's acceptance target. Started
+    // at their reported converged value so a short run is not spent finding it.
+    let mut angular_ratio = 0.42_f64;
+    let mut angular_tried = 0usize;
+    let mut angular_accepted = 0usize;
     let mut restarts = 0usize;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
@@ -945,6 +1091,9 @@ fn run_full<'g, R: Rng + ?Sized>(
         // nothing and freeze the chain, which took LJ38 from 1 seed in 8 to 0.
         // The escape scale multiplies the move amplitude. A chain that keeps
         // returning proposes further each time until it leaves.
+        // The angular move takes the step when a point is loose enough for the
+        // criterion to fire, whatever the allocator picked.
+        let angular = cfg.angular_moves && worst_bound(x.view(), n, angular_ratio).is_some();
         let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
@@ -1048,7 +1197,22 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
-        if cfg.allocate_moves {
+        if angular {
+            if accept {
+                angular_accepted += 1;
+            }
+            // R adjusted toward the target acceptance. Raising it makes the
+            // criterion stricter, so fewer and looser points qualify.
+            let rate = angular_accepted as f64 / angular_tried.max(1) as f64;
+            let step = 0.01 / (angular_tried as f64).sqrt().max(1.0);
+            angular_ratio = if rate > cfg.angular_target {
+                (angular_ratio - step).max(0.05)
+            } else {
+                (angular_ratio + step).min(0.95)
+            };
+        } else if cfg.allocate_moves {
+            // An angular step is not the allocator's, so it does not carry a
+            // reward for whichever arm the allocator happened to pick.
             allocator.update(k, improved || accept);
         }
         if accept && cfg.calibrate_radius {
@@ -1336,6 +1500,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_escapes,
         soft_crossed,
         improvements,
+        angular: (angular_tried, angular_accepted, angular_ratio),
         restarts,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
