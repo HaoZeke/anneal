@@ -1,19 +1,38 @@
 //! Limited-memory quasi-Newton relaxation whose curvature survives between calls.
 //!
-//! A hopping chain relaxes thousands of times, and each relaxation starts from
-//! a perturbation of a structure that was already relaxed. The curvature at the
-//! new start is close to the curvature at the old minimum, and a minimiser that
-//! discards its memory between calls rediscovers it every time.
+//! A hopping chain relaxes thousands of times, each from a perturbation of an
+//! already-relaxed structure, so the curvature at a new start resembles the
+//! curvature at the old minimum and a minimiser that forgets between calls pays
+//! to rediscover it. Since a work ledger charges evaluations rather than
+//! seconds, cutting evaluations per relaxation multiplies the hops a budget
+//! buys.
 //!
-//! Measured on a 75-point Lennard-Jones cluster with a library minimiser: a
-//! relaxation costs about 270 evaluations from a random start and 270 from a
-//! perturbed minimum, so nothing is being reused. Since a work ledger charges
-//! evaluations rather than seconds, halving that count doubles the number of
-//! hops a budget buys, which is the only lever on solve rate that does not
-//! require more budget.
+//! # Measured status
 //!
-//! The memory is dropped when a proposal is accepted from far away, because
-//! curvature carried across a structural change is worse than none.
+//! On a 75-point Lennard-Jones cluster, 400 relaxations from perturbed minima
+//! with overlapping pairs repaired first:
+//!
+//! | arm  | evals per relaxation | worst final `|g|` |
+//! |------|---------------------|-------------------|
+//! | cold | 4610                | 7.6               |
+//! | warm | 3389                | 9.7               |
+//!
+//! Retaining curvature costs 1.36 times fewer evaluations, but both arms stop
+//! against the iteration cap with gradients around 8 rather than the 1e-6
+//! tolerance, and a reference L-BFGS-B relaxes the same problem in about 270
+//! evaluations. This implementation is therefore an order of magnitude off a
+//! production minimiser, and the warm-to-cold ratio compares two arms that both
+//! fail to converge. Treat it as unvalidated on real potentials: the quadratic
+//! tests below are the only supported claim.
+//!
+//! Two facts from building it do transfer. Backtracking that enforces only
+//! sufficient decrease produces curvature pairs describing curvature never
+//! measured, and since every direction is built from the stored pairs, one bad
+//! pair degrades the whole memory: with Armijo alone, retaining curvature was
+//! 1.8 times worse than discarding it, and the strong Wolfe conditions reverse
+//! the sign. And a relaxation benchmark has to check the final gradient, since
+//! an unrepaired overlap returns a gradient near 1e13 that no line search
+//! recovers from, making a cost comparison count failures instead of work.
 
 use ndarray::{Array1, ArrayView1};
 
@@ -31,12 +50,12 @@ pub struct WarmLbfgs {
     pub max_pairs: usize,
     /// Gradient infinity norm below which a relaxation is converged.
     pub gtol: f64,
-    /// Backtracking contraction factor.
-    pub backtrack: f64,
-    /// Armijo sufficient-decrease constant.
+    /// Armijo sufficient-decrease constant, `c1` in the Wolfe conditions.
     pub armijo: f64,
-    /// Line-search steps attempted before the direction is abandoned.
-    pub max_backtracks: usize,
+    /// Curvature constant, `c2`. The usual choice for quasi-Newton is 0.9.
+    pub curvature: f64,
+    /// Line-search evaluations attempted before the direction is abandoned.
+    pub max_line_evals: usize,
 }
 
 impl Default for WarmLbfgs {
@@ -45,9 +64,9 @@ impl Default for WarmLbfgs {
             memory: Vec::new(),
             max_pairs: 8,
             gtol: 1e-6,
-            backtrack: 0.5,
             armijo: 1e-4,
-            max_backtracks: 20,
+            curvature: 0.9,
+            max_line_evals: 20,
         }
     }
 }
@@ -110,6 +129,140 @@ impl WarmLbfgs {
         }
     }
 
+
+    /// Strong Wolfe line search by bracketing then cubic-interpolated zoom.
+    ///
+    /// Nocedal and Wright algorithms 3.5 and 3.6. Returns whether a step was
+    /// accepted and how many evaluations it cost. On acceptance the point,
+    /// value and gradient are advanced and the curvature pair is stored.
+    fn line_search<F>(
+        &mut self,
+        x: &mut Array1<f64>,
+        f: &mut f64,
+        g: &mut Array1<f64>,
+        d: &Array1<f64>,
+        slope: f64,
+        fg: &mut F,
+    ) -> (bool, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        let f0 = *f;
+        let mut evals = 0usize;
+        let mut probe = |a: f64, fg: &mut F, evals: &mut usize| {
+            let mut t = x.clone();
+            t.scaled_add(a, d);
+            let r = fg(t.view());
+            if r.is_some() {
+                *evals += 1;
+            }
+            r
+        };
+
+        let mut a_prev = 0.0;
+        let mut f_prev = f0;
+        let mut a = 1.0;
+        let mut lo = 0.0;
+        let mut f_lo = f0;
+        let mut slope_lo = slope;
+        let mut hi = f64::NAN;
+        let mut bracketed = false;
+
+        for i in 0..self.max_line_evals {
+            let (fa, ga) = match probe(a, fg, &mut evals) {
+                Some(v) => v,
+                None => return (false, evals),
+            };
+            let slope_a = d.dot(&ga);
+            if fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev) {
+                lo = a_prev;
+                f_lo = f_prev;
+                hi = a;
+                bracketed = true;
+                break;
+            }
+            if slope_a.abs() <= -self.curvature * slope {
+                // Both Wolfe conditions hold: accept without zooming.
+                self.accept(x, f, g, d, a, fa, ga);
+                return (true, evals);
+            }
+            if slope_a >= 0.0 {
+                lo = a;
+                f_lo = fa;
+                slope_lo = slope_a;
+                hi = a_prev;
+                bracketed = true;
+                break;
+            }
+            a_prev = a;
+            f_prev = fa;
+            a *= 2.0;
+        }
+
+        if !bracketed {
+            return (false, evals);
+        }
+
+        while evals < self.max_line_evals {
+            // Quadratic interpolant of the low end, clamped away from the
+            // bracket edges so the interval keeps shrinking.
+            let width = hi - lo;
+            let mut trial = lo + 0.5 * width;
+            let denom = 2.0 * (f_lo - f_prev + slope_lo * width);
+            if denom.abs() > 1e-16 {
+                let q = lo + slope_lo * width * width / denom;
+                if (q - lo) / width > 0.1 && (q - lo) / width < 0.9 {
+                    trial = q;
+                }
+            }
+            let (ft, gt) = match probe(trial, fg, &mut evals) {
+                Some(v) => v,
+                None => return (false, evals),
+            };
+            let slope_t = d.dot(&gt);
+            if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
+                hi = trial;
+                f_prev = ft;
+            } else {
+                if slope_t.abs() <= -self.curvature * slope {
+                    self.accept(x, f, g, d, trial, ft, gt);
+                    return (true, evals);
+                }
+                if slope_t * (hi - lo) >= 0.0 {
+                    hi = lo;
+                }
+                lo = trial;
+                f_lo = ft;
+                slope_lo = slope_t;
+            }
+            if (hi - lo).abs() < 1e-14 {
+                break;
+            }
+        }
+        (false, evals)
+    }
+
+    /// Advances the iterate and records the curvature pair.
+    fn accept(
+        &mut self,
+        x: &mut Array1<f64>,
+        f: &mut f64,
+        g: &mut Array1<f64>,
+        d: &Array1<f64>,
+        step: f64,
+        f_new: f64,
+        g_new: Array1<f64>,
+    ) {
+        let mut s = d.clone();
+        s *= step;
+        let mut y = g_new.clone();
+        y -= &*g;
+        self.push(s, y);
+        x.scaled_add(step, d);
+        *f = f_new;
+        *g = g_new;
+    }
+
     /// Relaxes `x0`, calling `fg` for value and gradient.
     ///
     /// `fg` returns `None` when the caller's budget is spent, which ends the
@@ -143,33 +296,27 @@ impl WarmLbfgs {
                 self.forget();
                 continue;
             }
-            let mut step = 1.0;
-            let mut moved = false;
-            for _ in 0..self.max_backtracks {
-                let mut trial = x.clone();
-                trial.scaled_add(step, &d);
-                match fg(trial.view()) {
-                    None => return (f, x, evals),
-                    Some((ft, gt)) => {
-                        evals += 1;
-                        if ft <= f + self.armijo * step * slope {
-                            let mut s = trial.clone();
-                            s -= &x;
-                            let mut y = gt.clone();
-                            y -= &g;
-                            self.push(s, y);
-                            x = trial;
-                            f = ft;
-                            g = gt;
-                            moved = true;
-                            break;
-                        }
-                        step *= self.backtrack;
-                    }
-                }
-            }
+            // Strong Wolfe rather than plain backtracking. Armijo alone accepts
+            // a step that decreases the value without saying anything about the
+            // gradient, and the pair such a step contributes describes curvature
+            // that was never measured. Since every later direction is built from
+            // the stored pairs, one bad pair degrades the whole memory, which is
+            // why a chain carrying its curvature forward needs the curvature
+            // condition and not only the decrease condition.
+            let (ok, evals_used) = self.line_search(&mut x, &mut f, &mut g, &d, slope, &mut fg);
+            evals += evals_used;
+            let moved = ok;
             if !moved {
-                break;
+                // A failed line search along a quasi-Newton direction means the
+                // stored curvature no longer describes this region, not that the
+                // point is converged. Dropping the memory falls back to steepest
+                // descent, which always has a usable direction. Only give up
+                // when that fails too, since then the failure is the geometry
+                // and not the approximation.
+                if self.memory.is_empty() {
+                    break;
+                }
+                self.forget();
             }
         }
         (f, x, evals)
