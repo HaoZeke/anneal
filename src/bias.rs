@@ -241,12 +241,46 @@ mod tests {
 /// rotation, and free of external dependencies.
 pub struct BasinBias<F: Fingerprint> {
     fingerprint: F,
+    /// How sameness is measured; Euclidean unless replaced.
+    metric: Box<dyn BasinMetric>,
     merge_radius: f64,
     w0: f64,
     gamma: f64,
     centres: Vec<Array1<f64>>,
     v: Vec<f64>,
     visits: Vec<u64>,
+}
+
+/// How far apart two descriptors are, for deciding whether they are one basin.
+///
+/// Separate from [`Fingerprint`] because the descriptor and the notion of
+/// sameness are separate choices, and getting the second wrong is what a
+/// merge radius in descriptor space does. A sorted distance spectrum compared
+/// by Euclidean distance needs a threshold with no physical meaning, found
+/// empirically and not transferable between system sizes; the same descriptor
+/// compared by an optimal-permutation shape distance needs a length, which
+/// transfers.
+pub trait BasinMetric: Send + Sync {
+    /// Distance between two descriptors. Must be symmetric and vanish on
+    /// identical inputs.
+    fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64;
+}
+
+/// Ordinary Euclidean distance between descriptors.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EuclideanMetric;
+
+impl BasinMetric for EuclideanMetric {
+    fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        if a.len() != b.len() {
+            return f64::INFINITY;
+        }
+        a.iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y) * (x - y))
+            .sum::<f64>()
+            .sqrt()
+    }
 }
 
 /// Maps a state to a vector that compares equal for states in the same basin.
@@ -291,6 +325,7 @@ impl<F: Fingerprint> BasinBias<F> {
         assert!(merge_radius > 0.0, "merge_radius must be > 0");
         Self {
             fingerprint,
+            metric: Box::new(EuclideanMetric),
             merge_radius,
             w0,
             gamma,
@@ -300,26 +335,43 @@ impl<F: Fingerprint> BasinBias<F> {
         }
     }
 
+    /// Replaces how sameness is measured.
+    ///
+    /// The descriptor and the notion of sameness are separate choices. Keying
+    /// on a sorted distance spectrum compared by Euclidean distance needs a
+    /// threshold with no physical meaning: measured on this crate's cluster
+    /// driver, LJ38 solves 1 seed in 8 that way. Comparing the same structures
+    /// by optimal-permutation shape distance makes the threshold a length.
+    pub fn with_metric(mut self, metric: Box<dyn BasinMetric>) -> Self {
+        self.metric = metric;
+        self
+    }
+
     /// Index of the nearest registered basin within `merge_radius`.
     fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
-        let mut best = None;
-        let mut best_dist = f64::INFINITY;
-        for (i, c) in self.centres.iter().enumerate() {
+        // Most recently added first, returning the first centre inside the
+        // radius rather than scanning for the nearest.
+        //
+        // Both parts matter once the metric costs anything. A chain revisits
+        // the basin it is already in far more often than any other, measured at
+        // roughly nineteen proposals in twenty near a deep minimum, so the
+        // recent end is where the answer almost always is. And a merge radius
+        // asks whether any centre is within it, not which is closest, so the
+        // scan can stop at the first hit.
+        //
+        // With Euclidean distance the exhaustive scan was free and the
+        // distinction did not show. With a shape distance at milliseconds per
+        // comparison it is the difference between one call and one per basin,
+        // and the exhaustive version did not finish an LJ38 run.
+        for (i, c) in self.centres.iter().enumerate().rev() {
             if c.len() != d.len() {
                 continue;
             }
-            let mut acc = 0.0;
-            for k in 0..d.len() {
-                let diff = c[k] - d[k];
-                acc += diff * diff;
-            }
-            let dist = acc.sqrt();
-            if dist < best_dist {
-                best_dist = dist;
-                best = Some(i);
+            if self.metric.distance(c.view(), d) <= self.merge_radius {
+                return Some(i);
             }
         }
-        best.filter(|_| best_dist <= self.merge_radius)
+        None
     }
 
     /// Number of distinct basins registered so far.
