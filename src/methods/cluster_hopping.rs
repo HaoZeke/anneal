@@ -367,6 +367,21 @@ pub struct Config {
     pub escape_stall_patience: usize,
     /// Multiple of the longest quiet stretch so far that counts as stuck.
     pub escape_stall_factor: f64,
+    /// Restart the walker from a fresh configuration on a stall, keeping the
+    /// bias.
+    ///
+    /// What is stuck is the walker, not the landscape memory. Traced at 75
+    /// points, a run that fails stops improving at 2 to 26 per cent of the way
+    /// in and spends the rest inside the icosahedral funnel, while the runs
+    /// that succeed cross at 42 to 91 per cent; so a chain that has not crossed
+    /// early is unlikely to, and the thing worth keeping from its remaining
+    /// budget is what it has already filled in.
+    ///
+    /// Different from the climb, which moves the walker a short way and leaves
+    /// it in the same funnel, and from a bank, which splits the budget. This
+    /// spends nothing and discards nothing: the bias the old chain built is
+    /// what steers the new one away from where the old one was.
+    pub restart_on_stall: bool,
     /// Set the merge radius from how far an accepted hop actually reaches.
     ///
     /// A radius chosen by hand does not transfer: one calibrated at 38 points
@@ -486,6 +501,7 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            restart_on_stall: false,
             calibrate_radius: false,
             calibrate_quantile: 0.9,
             calibrate_warmup: 200,
@@ -562,6 +578,8 @@ pub struct Outcome {
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
     pub mean_step: f64,
+    /// Restarts triggered by a stall.
+    pub restarts: usize,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
@@ -853,6 +871,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         cfg.calibrate_warmup,
         cfg.merge_radius,
     );
+    let mut restarts = 0usize;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
@@ -1089,6 +1108,18 @@ fn run_full<'g, R: Rng + ?Sized>(
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        if cfg.restart_on_stall && stuck {
+            quiet = 0;
+            longest_quiet = 0;
+            let fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
+            let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
+            ledger.record(ef, xf.view());
+            hops += 1;
+            restarts += 1;
+            e = ef;
+            x = xf;
+            here = None;
+        }
         if cfg.escape_on_stall && stuck {
             quiet = 0;
             longest_quiet = 0;
@@ -1305,6 +1336,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_escapes,
         soft_crossed,
         improvements,
+        restarts,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,

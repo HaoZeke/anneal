@@ -110,6 +110,8 @@ fn main() {
     cfg.escape_on_stall = opts.contains(&"climb");
     // The radius read off the search's own step length rather than swept.
     cfg.calibrate_radius = opts.contains(&"calib");
+    // The walker restarted, the landscape memory kept.
+    cfg.restart_on_stall = opts.contains(&"restart");
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
@@ -360,7 +362,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {}  \
              relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
@@ -386,6 +388,7 @@ fn main() {
             out.stall_escape_gain,
             out.merge_radius,
             out.mean_step,
+            out.restarts,
             converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
