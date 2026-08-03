@@ -70,7 +70,9 @@ impl Default for BankConfig {
             capacity: 8,
             slice: 60_000,
             seeding: 8,
-            dcut_floor: 0.1,
+            // Dave/5 relative to a start of Dave/2, which is the published
+            // schedule. A floor of a tenth anneals four times too far.
+            dcut_floor: 0.4,
             mix_fraction: 0.5,
             mix_images: 7,
         }
@@ -226,13 +228,26 @@ where
 
         // A mixing round: relax the images between this member and another.
         if bank.len() >= 2 && rng.random::<f64>() < bank_cfg.mix_fraction {
-            let mut j = rng.random_range(0..bank.len());
-            if j == i {
-                j = (j + 1) % bank.len();
-            }
+            // The partner comes from the working bank or from the first bank,
+            // as in Lee, Lee and Scheraga. Drawing only from the working bank
+            // is what let every partner end up in the same funnel as every
+            // member; the first bank is the half of the population that cannot
+            // collapse.
+            let from_first = !bank.first_bank().is_empty() && rng.random::<bool>();
+            let (b, eb) = if from_first {
+                let j = rng.random_range(0..bank.first_bank().len());
+                let m = &bank.first_bank()[j];
+                (m.state.clone(), m.energy)
+            } else {
+                let mut j = rng.random_range(0..bank.len());
+                if j == i {
+                    j = (j + 1) % bank.len();
+                }
+                let m = &bank.members()[j];
+                (m.state.clone(), m.energy)
+            };
             let a = bank.members()[i].state.clone();
-            let b = bank.members()[j].state.clone();
-            let (ea, eb) = (bank.members()[i].energy, bank.members()[j].energy);
+            let ea = bank.members()[i].energy;
             let path = interpolate_path(
                 a.view(),
                 b.view(),

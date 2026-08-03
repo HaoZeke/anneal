@@ -62,6 +62,17 @@ pub struct Member {
 /// A population under the conformational-space-annealing replacement rule.
 pub struct Bank {
     members: Vec<Member>,
+    /// The seeding population, kept unchanged for the whole run.
+    ///
+    /// Lee, Lee and Scheraga keep a copy of the first bank and draw
+    /// perturbation partners from "either the first bank or the bank". It is
+    /// not a detail. Without it every member is free to descend, and at 75
+    /// points a bank of thirty ended holding structures between -396.28 and
+    /// -396.19: thirty icosahedral variants, each distinct under the threshold
+    /// and all in one funnel, with nothing left in the population to mix
+    /// against. The first bank is the part of the population that cannot
+    /// collapse, because nothing ever writes to it.
+    first: Vec<Member>,
     capacity: usize,
     /// Current `Dcut`. Set by the caller from a [`crate::diversity`] schedule.
     pub dcut: f64,
@@ -81,6 +92,7 @@ impl Bank {
         );
         Self {
             members: Vec::with_capacity(capacity),
+            first: Vec::with_capacity(capacity),
             capacity,
             dcut,
             offered: 0,
@@ -195,12 +207,19 @@ impl Bank {
         }
         self.offered += 1;
         self.novel += 1;
-        self.members.push(Member {
+        let m = Member {
             state: state.to_owned(),
             energy,
             hits: 0,
-        });
+        };
+        self.first.push(m.clone());
+        self.members.push(m);
         true
+    }
+
+    /// The seeding population, unchanged since the run began.
+    pub fn first_bank(&self) -> &[Member] {
+        &self.first
     }
 
     /// Picks a member to search from next.
@@ -376,6 +395,28 @@ mod tests {
         assert!(!b.seed(point(9.0).view(), -5.0), "a full bank kept seeding");
         let m = b.mean_distance(line).unwrap();
         assert!(m > 0.0, "the seeded population has no spread: {m}");
+    }
+
+    /// The population that cannot collapse. Every member of the working bank
+    /// may descend into one funnel; the first bank still holds what the run
+    /// started from, so there is always something to mix against.
+    #[test]
+    fn the_first_bank_is_never_written_to() {
+        let mut b = Bank::new(3, 1.0);
+        for (v, e) in [(0.0, 5.0), (10.0, 6.0), (20.0, 7.0)] {
+            b.seed(point(v).view(), e);
+        }
+        let before: Vec<f64> = b.first_bank().iter().map(|m| m.state[0]).collect();
+        // Drive every working member somewhere else and much lower.
+        for _ in 0..20 {
+            b.offer(point(0.2).view(), -100.0, line);
+            b.offer(point(10.2).view(), -101.0, line);
+            b.offer(point(20.2).view(), -102.0, line);
+        }
+        let after: Vec<f64> = b.first_bank().iter().map(|m| m.state[0]).collect();
+        assert_eq!(before, after, "the first bank moved");
+        let energies: Vec<f64> = b.first_bank().iter().map(|m| m.energy).collect();
+        assert_eq!(energies, vec![5.0, 6.0, 7.0]);
     }
 
     #[test]
