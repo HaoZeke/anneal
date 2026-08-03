@@ -88,6 +88,7 @@ fn main() {
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     cfg.return_screen = opts.contains(&"rscreen");
+    cfg.minima_hopping = opts.contains(&"mh");
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.

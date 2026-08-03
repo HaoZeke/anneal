@@ -13,6 +13,8 @@
 
 /// Basin hopping over quenched minima with a basin-keyed bias.
 pub mod cluster_hopping;
+/// History-conditioned escape feedback, after Goedecker's minima hopping.
+pub mod minima_hopping;
 /// Quasi-Newton relaxation whose curvature persists between calls.
 pub mod warm_lbfgs;
 pub mod additive_independence;

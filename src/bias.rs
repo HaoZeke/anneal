@@ -240,15 +240,126 @@ mod tests {
 /// is the default for point sets: invariant to permutation, translation and
 /// rotation, and free of external dependencies.
 pub struct BasinBias<F: Fingerprint> {
-    fingerprint: F,
-    /// How sameness is measured; Euclidean unless replaced.
-    metric: Box<dyn BasinMetric>,
-    merge_radius: f64,
+    index: BasinIndex<F>,
     w0: f64,
     gamma: f64,
-    centres: Vec<Array1<f64>>,
     v: Vec<f64>,
+}
+
+/// Which basin a state is in, with no potential attached.
+///
+/// The identity half of [`BasinBias`], split out because more than one
+/// mechanism needs to ask "have I been here before" and only one of them
+/// answers by depositing. History-conditioned escape uses the same rule to
+/// decide how hard to push next, and reading that off a bias would tie the two
+/// together: under replica exchange each rung owns its own bias, so the basin
+/// numbering of one rung means nothing in another, while a controller
+/// following one chain needs a numbering that outlives the swap.
+pub struct BasinIndex<F: Fingerprint> {
+    fingerprint: F,
+    metric: Box<dyn BasinMetric>,
+    merge_radius: f64,
+    centres: Vec<Array1<f64>>,
     visits: Vec<u64>,
+}
+
+impl<F: Fingerprint> BasinIndex<F> {
+    /// Index over `fingerprint`, calling two states the same within
+    /// `merge_radius`.
+    pub fn new(fingerprint: F, merge_radius: f64) -> Self {
+        assert!(merge_radius > 0.0, "merge_radius must be > 0");
+        Self {
+            fingerprint,
+            metric: Box::new(EuclideanMetric),
+            merge_radius,
+            centres: Vec::new(),
+            visits: Vec::new(),
+        }
+    }
+
+    /// Replaces the distance used to decide sameness.
+    pub fn with_metric(mut self, metric: Box<dyn BasinMetric>) -> Self {
+        self.metric = metric;
+        self
+    }
+
+    /// Descriptor of a state.
+    pub fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.fingerprint.describe(x)
+    }
+
+    /// Index of the nearest registered basin within `merge_radius`.
+    ///
+    /// Most recently added first, returning the first centre inside the radius
+    /// rather than scanning for the nearest.
+    ///
+    /// Both parts matter once the metric costs anything. A chain revisits the
+    /// basin it is already in far more often than any other, measured at
+    /// roughly nineteen proposals in twenty near a deep minimum, so the recent
+    /// end is where the answer almost always is. And a merge radius asks
+    /// whether any centre is within it, not which is closest, so the scan can
+    /// stop at the first hit.
+    ///
+    /// With Euclidean distance the exhaustive scan was free and the
+    /// distinction did not show. With a shape distance at milliseconds per
+    /// comparison it is the difference between one call and one per basin, and
+    /// the exhaustive version did not finish an LJ38 run.
+    pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
+        for (i, c) in self.centres.iter().enumerate().rev() {
+            if c.len() != d.len() {
+                continue;
+            }
+            if self.metric.distance(c.view(), d) <= self.merge_radius {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Registers a descriptor as a new basin and returns its index.
+    pub fn push(&mut self, d: Array1<f64>) -> usize {
+        self.centres.push(d);
+        self.visits.push(0);
+        self.centres.len() - 1
+    }
+
+    /// Records another visit to `i`.
+    pub fn bump(&mut self, i: usize) {
+        self.visits[i] += 1;
+    }
+
+    /// Index of the basin holding `x`, opening one if it is new, and counting
+    /// the visit.
+    pub fn basin_of(&mut self, x: ArrayView1<f64>) -> usize {
+        let d = self.describe(x);
+        let i = match self.lookup(d.view()) {
+            Some(i) => i,
+            None => self.push(d),
+        };
+        self.bump(i);
+        i
+    }
+
+    /// Number of distinct basins registered so far.
+    pub fn n_basins(&self) -> usize {
+        self.centres.len()
+    }
+
+    /// Times basin `i` has been recorded.
+    pub fn visits(&self, i: usize) -> u64 {
+        self.visits.get(i).copied().unwrap_or(0)
+    }
+
+    /// Sets the distance below which two descriptors are one basin.
+    pub fn set_merge_radius(&mut self, radius: f64) {
+        assert!(radius > 0.0, "merge_radius must be > 0");
+        self.merge_radius = radius;
+    }
+
+    /// Current merge radius.
+    pub fn merge_radius(&self) -> f64 {
+        self.merge_radius
+    }
 }
 
 /// How far apart two descriptors are, for deciding whether they are one basin.
@@ -322,16 +433,11 @@ impl<F: Fingerprint> BasinBias<F> {
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64) -> Self {
         assert!(gamma > 1.0, "gamma must be > 1");
         assert!(w0 > 0.0, "w0 must be > 0");
-        assert!(merge_radius > 0.0, "merge_radius must be > 0");
         Self {
-            fingerprint,
-            metric: Box::new(EuclideanMetric),
-            merge_radius,
+            index: BasinIndex::new(fingerprint, merge_radius),
             w0,
             gamma,
-            centres: Vec::new(),
             v: Vec::new(),
-            visits: Vec::new(),
         }
     }
 
@@ -342,12 +448,18 @@ impl<F: Fingerprint> BasinBias<F> {
     /// annealed from wide to narrow, and their method solves the cluster sizes
     /// a fixed threshold does not. See [`crate::diversity`].
     pub fn set_merge_radius(&mut self, radius: f64) {
-        self.merge_radius = radius;
+        self.index.set_merge_radius(radius);
     }
 
     /// Current merge radius.
     pub fn merge_radius(&self) -> f64 {
-        self.merge_radius
+        self.index.merge_radius()
+    }
+
+    /// The identity half, for a mechanism that keys on basins without
+    /// depositing.
+    pub fn index(&self) -> &BasinIndex<F> {
+        &self.index
     }
 
     /// Sets the height deposited per revisit.
@@ -373,50 +485,28 @@ impl<F: Fingerprint> BasinBias<F> {
     /// driver, LJ38 solves 1 seed in 8 that way. Comparing the same structures
     /// by optimal-permutation shape distance makes the threshold a length.
     pub fn with_metric(mut self, metric: Box<dyn BasinMetric>) -> Self {
-        self.metric = metric;
+        self.index = self.index.with_metric(metric);
         self
     }
 
     /// Index of the nearest registered basin within `merge_radius`.
     fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
-        // Most recently added first, returning the first centre inside the
-        // radius rather than scanning for the nearest.
-        //
-        // Both parts matter once the metric costs anything. A chain revisits
-        // the basin it is already in far more often than any other, measured at
-        // roughly nineteen proposals in twenty near a deep minimum, so the
-        // recent end is where the answer almost always is. And a merge radius
-        // asks whether any centre is within it, not which is closest, so the
-        // scan can stop at the first hit.
-        //
-        // With Euclidean distance the exhaustive scan was free and the
-        // distinction did not show. With a shape distance at milliseconds per
-        // comparison it is the difference between one call and one per basin,
-        // and the exhaustive version did not finish an LJ38 run.
-        for (i, c) in self.centres.iter().enumerate().rev() {
-            if c.len() != d.len() {
-                continue;
-            }
-            if self.metric.distance(c.view(), d) <= self.merge_radius {
-                return Some(i);
-            }
-        }
-        None
+        self.index.lookup(d)
     }
 
     /// Number of distinct basins registered so far.
     pub fn n_basins(&self) -> usize {
-        self.centres.len()
+        self.index.n_basins()
     }
 
     /// Good-Turing missing mass: the share of basins seen exactly once, which
     /// estimates the probability that the next visit opens a new one.
     pub fn missing_mass(&self) -> f64 {
-        let total: u64 = self.visits.iter().sum();
+        let total: u64 = self.index.visits.iter().sum();
         if total == 0 {
             return 1.0;
         }
-        let singletons = self.visits.iter().filter(|&&c| c == 1).count() as f64;
+        let singletons = self.index.visits.iter().filter(|&&c| c == 1).count() as f64;
         singletons / total as f64
     }
 
@@ -430,7 +520,7 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
     /// The fingerprint itself is the collective variable: identity, not a
     /// projection onto a chosen axis.
     fn cv(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        self.fingerprint.describe(x)
+        self.index.describe(x)
     }
 
     fn potential(&self, s: ArrayView1<f64>) -> f64 {
@@ -445,12 +535,13 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
                 // bias is already deep, so a basin fills to a finite depth.
                 let w = self.w0 * (-self.v[i] / denom).exp();
                 self.v[i] += w;
-                self.visits[i] += 1;
+                self.index.bump(i);
             }
             None => {
-                self.centres.push(s.to_owned());
+                self.index.push(s.to_owned());
                 self.v.push(self.w0);
-                self.visits.push(1);
+                let i = self.index.n_basins() - 1;
+                self.index.bump(i);
             }
         }
     }

@@ -52,7 +52,7 @@ impl Neighborhood<f64> for UnitInterval {
 struct EscapingMove;
 
 impl MoveKernel<f64> for EscapingMove {
-    fn propose<R: Rng>(&self, _i: ArrayView1<f64>, _t: f64, _rng: &mut R) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, _i: ArrayView1<f64>, _t: f64, _rng: &mut R) -> Array1<f64> {
         array![2.0]
     }
 }
