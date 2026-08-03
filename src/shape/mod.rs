@@ -145,12 +145,25 @@ pub fn match_shapes(
     // equal atom counts to mean "choose your own frames". A null pointer is not
     // an option: the Fortran calls `c_f_pointer` on this argument with no
     // `c_associated` guard, so null becomes a Fortran pointer to address zero.
-    let mut candidate = vec![0_i32; n1];
-    candidate[0] = -1;
+    // One array per structure, never one buffer passed twice. The Fortran
+    // takes both as pointers and reaches them through c_f_pointer, so aliasing
+    // them lets work on the first alter what the second is read as. It fails
+    // data-dependently, as a bounds error on a candidate index of zero, which
+    // is why some runs survived it.
+    let mut candidate_a = vec![0_i32; n1];
+    candidate_a[0] = -1;
+    let mut candidate_b = vec![0_i32; n2];
+    candidate_b[0] = -1;
 
     let mut rotation = [0.0_f64; 9];
     let mut translation = [0.0_f64; 3];
-    let mut permutation = vec![0_i32; n1];
+    // The identity, one-based, not zeros. The Fortran indexes its type and
+    // coordinate arrays with this buffer after the call, and zero is out of
+    // range there. IRA can return a zero status having left slots unwritten on
+    // a degenerate structure, which a search produces routinely and a unit test
+    // on clean structures never does, and the run then dies inside the library
+    // with a bounds error rather than at the call.
+    let mut permutation: Vec<i32> = (1..=n1 as i32).collect();
     let mut hd = 0.0_f64;
     let mut cerr = 0_i32;
 
@@ -164,11 +177,11 @@ pub fn match_shapes(
             n1 as c_int,
             typ.as_ptr(),
             ca.as_ptr(),
-            candidate.as_ptr(),
+            candidate_a.as_ptr(),
             n2 as c_int,
             typ.as_ptr(),
             cb.as_ptr(),
-            candidate.as_ptr(),
+            candidate_b.as_ptr(),
             kmax_factor,
             &rotation.as_mut_ptr(),
             &translation.as_mut_ptr(),

@@ -106,6 +106,12 @@ fn main() {
         // relaxation, so a three million unit budget bought a few thousand
         // hops rather than tens of thousands, and the search failed for want
         // of relaxations rather than for want of a mechanism.
+        // Convergence is counted, not assumed. A driver on the quenched
+        // landscape is only on it if its relaxations reach minima; one that
+        // stops at the iteration cap is hopping between arbitrary points and
+        // every mechanism above it is acting on noise.
+        let mut converged = 0usize;
+        let mut capped = 0usize;
         let mut opt = WarmLbfgs::default();
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             // Curvature is not carried between relaxations: measured on this
@@ -113,6 +119,12 @@ fn main() {
             // it saves.
             opt.forget();
             let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+            let (_, g) = lj(xr.view());
+            if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
+                converged += 1;
+            } else {
+                capped += 1;
+            }
             (f, xr)
         };
         let out = optimize(&cfg, &mut ledger, &mut relax, seed);
@@ -148,11 +160,12 @@ fn main() {
         deepest = deepest.min(out.best);
         println!(
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
-             verified {}{}",
+             relaxed {converged}/{} converged  verified {}{}",
             out.best,
             out.hops,
             out.screened_out,
             ledger.spent(),
+            converged + capped,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
                 .unwrap_or_else(|| "NO STATE".into()),
