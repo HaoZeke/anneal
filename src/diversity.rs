@@ -29,6 +29,24 @@
 //!
 //! What this module supplies is the schedule. The distance measure is the
 //! caller's, which for clusters is the shape distance in [`crate::shape`].
+//!
+//! # What this must not be applied to
+//!
+//! `Dcut` decides which new solutions are admitted to a population. A merge
+//! radius decides which structures count as the same basin for a bias. They
+//! are different parameters and only one of them can be annealed downwards
+//! freely.
+//!
+//! A basin threshold is bounded below by the distance a single accepted hop
+//! covers. Measured on 75-point minima that is 0.4766, against 0.9212 between
+//! independent minima, so a threshold below roughly a half stops recognising a
+//! structure the chain has already visited. Driving it there makes every hop
+//! open a new basin and the well-tempered bias never accumulates.
+//!
+//! That is not hypothetical. Annealing the merge radius from 0.7 to a tenth of
+//! it took an LJ75 run from about 250 basins at 25 revisits each to 4423 basins
+//! at 2.6, and the best structure found from -396.282 to -394.629. The schedule
+//! was correct and the quantity was wrong.
 
 /// A distance threshold annealed from wide to narrow over a budget.
 ///
