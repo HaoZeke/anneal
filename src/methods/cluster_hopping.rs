@@ -835,14 +835,39 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
         if returning {
             returned += 1;
         }
-        let (e_new, x_new) = if e_screen > ledger.best + cfg.screen_margin || returning {
-            if !returning {
+        // The escape controller does not screen. Minima hopping is defined on
+        // quenched minima: the curvature it escapes along and the energies it
+        // compares are properties of a minimum, so every escape is relaxed all
+        // the way and paid for.
+        //
+        // The screen cannot be kept under either reading. Letting a screened
+        // trial through leaves the chain on structures that are not minima, and
+        // 94 relaxations in 3148 reached one. Treating a screened trial as a
+        // rejection freezes the chain instead, because the screen compares
+        // against the best energy found anywhere: 3277 quenches, 3277 returns,
+        // one basin.
+        let screened_this =
+            !cfg.minima_hopping && e_screen > ledger.best + cfg.screen_margin;
+        let (e_new, x_new) = if screened_this || returning {
+            if screened_this && !returning {
                 screened_out += 1;
             }
             (e_screen, x_screen)
         } else {
             relax(ledger, x_screen.view(), cfg.relax_steps)
         };
+        // A chain under the escape controller has to stand on a minimum.
+        // Its escape reads the curvature at the current point and its
+        // acceptance compares quenched energies, and neither means anything at
+        // a partly relaxed structure. The energy screen is a budget economy for
+        // a Metropolis chain, which does not care what its state is as long as
+        // the energy is right; here a screened trial is simply rejected.
+        //
+        // Left in, it broke the invariant outright: 97 per cent of trials were
+        // screened, 94 relaxations in 3148 reached a minimum, and the softest
+        // eigenvalue the escape displaced along came back at -1.9 at a point
+        // the chain was treating as a minimum.
+        let unquenched = cfg.minima_hopping && (screened_this || returning);
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
         hops += 1;
@@ -865,13 +890,23 @@ pub fn run_with_gradient<R: Rng + ?Sized>(
             // enough to cross cannot polish; the threshold adapts to whichever
             // the chain is currently failing at.
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-            let reached = identity.basin_of(x_new.view());
-            feedback.observe(Some(from), reached);
-            let ok = feedback.accept(e_new - e);
-            if ok {
-                here = Some(reached);
+            if unquenched {
+                // The escape failed to produce a minimum, so it is a return
+                // for the escape scale and says nothing about which basin was
+                // reached. Registering the partly relaxed structure as a basin
+                // would fill the index with points that are not minima, and
+                // the acceptance threshold has no quenched energy to compare.
+                feedback.observe(Some(from), from);
+                false
+            } else {
+                let reached = identity.basin_of(x_new.view());
+                feedback.observe(Some(from), reached);
+                let ok = feedback.accept(e_new - e);
+                if ok {
+                    here = Some(reached);
+                }
+                ok
             }
-            ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
