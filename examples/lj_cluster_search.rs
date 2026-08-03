@@ -9,9 +9,11 @@
 
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
-use anneal_core::shape::IraMetric;
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
+
+#[cfg(feature = "ira")]
+use anneal_core::shape::IraMetric;
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
@@ -140,6 +142,13 @@ fn main() {
         dcut_floor: 0.1,
     };
     if use_bank {
+        #[cfg(not(feature = "ira"))]
+        {
+            eprintln!(
+                "the bank arm needs the `ira` feature (shape distance for Dcut); rebuild with --features ira"
+            );
+            std::process::exit(2);
+        }
         println!(
             "  bank of {} chains, {} charged per slice, Dcut floor {}",
             bank_cfg.capacity, bank_cfg.slice, bank_cfg.dcut_floor
@@ -189,40 +198,47 @@ fn main() {
             Some(lj(x).1)
         };
         let out = if use_bank {
-            // A shape distance, so Dcut is a length: two structures whose
-            // points can be brought within it of each other by a permutation
-            // and a rigid motion are the same solution.
-            let ira = IraMetric::default();
-            let b = csa_cluster::run(
-                &cfg,
-                &bank_cfg,
-                &mut ledger,
-                &mut relax,
-                if cfg.minima_hopping || cfg.escape_on_stall {
-                    Some(&mut grad)
-                } else {
-                    None
-                },
-                |p, q| ira.distance(p, q),
-                seed,
-            );
-            println!(
-                "      bank: {} slices, Dcut {:.3} -> {:.3}, {} improved, {} novel, \
-                 {} duplicate, holding {:?}",
-                b.slices,
-                b.dcut.0,
-                b.dcut.1,
-                b.improved,
-                b.novel,
-                b.duplicates,
-                b.bank.iter().map(|e| (e * 100.0).round() / 100.0).collect::<Vec<_>>()
-            );
-            Outcome {
-                best: b.best,
-                best_state: b.best_state,
-                hops: b.hops,
-                basins: b.basins,
-                ..Outcome::default()
+            #[cfg(feature = "ira")]
+            {
+                // A shape distance, so Dcut is a length: two structures whose
+                // points can be brought within it of each other by a permutation
+                // and a rigid motion are the same solution.
+                let ira = IraMetric::default();
+                let b = csa_cluster::run(
+                    &cfg,
+                    &bank_cfg,
+                    &mut ledger,
+                    &mut relax,
+                    if cfg.minima_hopping || cfg.escape_on_stall {
+                        Some(&mut grad)
+                    } else {
+                        None
+                    },
+                    |p, q| ira.distance(p, q),
+                    seed,
+                );
+                println!(
+                    "      bank: {} slices, Dcut {:.3} -> {:.3}, {} improved, {} novel, \
+                     {} duplicate, holding {:?}",
+                    b.slices,
+                    b.dcut.0,
+                    b.dcut.1,
+                    b.improved,
+                    b.novel,
+                    b.duplicates,
+                    b.bank.iter().map(|e| (e * 100.0).round() / 100.0).collect::<Vec<_>>()
+                );
+                Outcome {
+                    best: b.best,
+                    best_state: b.best_state,
+                    hops: b.hops,
+                    basins: b.basins,
+                    ..Outcome::default()
+                }
+            }
+            #[cfg(not(feature = "ira"))]
+            {
+                unreachable!("bank requires ira; checked at startup")
             }
         } else {
             optimize_with_gradient(
