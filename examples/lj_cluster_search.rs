@@ -157,7 +157,15 @@ fn main() {
         capacity,
         slice: env("BANK_SLICE", 3_000),
         seeding: capacity,
-        dcut_floor: 0.2,
+        dcut_floor: std::env::var("BANK_DCUT_FLOOR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.2),
+        mix_fraction: std::env::var("BANK_MIX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.5),
+        mix_images: 7,
     };
     if use_bank {
         #[cfg(not(feature = "ira"))]
@@ -237,13 +245,16 @@ fn main() {
                 );
                 println!(
                     "      bank: {} slices, Dcut {:.3} -> {:.3}, {} improved, {} novel, \
-                     {} duplicate, holding {:?}",
+                     {} duplicate, {} mixes ({} admitted, {} below both ends), holding {:?}",
                     b.slices,
                     b.dcut.0,
                     b.dcut.1,
                     b.improved,
                     b.novel,
                     b.duplicates,
+                    b.mixes,
+                    b.mix_admitted,
+                    b.mix_below_both,
                     b.bank.iter().map(|e| (e * 100.0).round() / 100.0).collect::<Vec<_>>()
                 );
                 Outcome {

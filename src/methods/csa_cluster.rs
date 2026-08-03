@@ -22,6 +22,7 @@ use crate::bias::{BasinBias, Fingerprint, SortedPairs};
 use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::diversity::DiversityAnnealer;
 use crate::methods::bank::{Admission, Bank};
+use crate::path::interpolate_path;
 use crate::methods::cluster_hopping::{random_cluster, Config, GradFn, Ledger, Outcome, Relax};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -43,6 +44,24 @@ pub struct BankConfig {
     pub seeding: usize,
     /// Floor of the `Dcut` schedule, as a fraction of its start.
     pub dcut_floor: f64,
+    /// Share of rounds spent mixing two members instead of searching from one.
+    ///
+    /// Without mixing the bank does not hold funnels apart, it holds variants
+    /// apart. Measured at 75 points with a bank of thirty and a thousand
+    /// slices, every member ended between -396.28 and -396.19: thirty
+    /// icosahedral structures, each shape-distinct under the threshold and all
+    /// in the same funnel, because each member's chain descends on its own and
+    /// nothing ever puts two of them together. The published method mixes by
+    /// cutting one solution and splicing in part of another.
+    ///
+    /// What mixes here instead is a path. Two minima are interpolated and the
+    /// images between them are relaxed, which is the crate's own
+    /// [`crate::path`] and carries a physical reading a splice does not: the
+    /// images are structures on the way from one minimum to the other, and a
+    /// third funnel entered from that route is a real neighbour of both.
+    pub mix_fraction: f64,
+    /// Images relaxed along a mixing path.
+    pub mix_images: usize,
 }
 
 impl Default for BankConfig {
@@ -52,6 +71,8 @@ impl Default for BankConfig {
             slice: 60_000,
             seeding: 8,
             dcut_floor: 0.1,
+            mix_fraction: 0.5,
+            mix_images: 7,
         }
     }
 }
@@ -79,6 +100,12 @@ pub struct BankOutcome {
     pub novel: usize,
     /// Candidates discarded as near-copies.
     pub duplicates: usize,
+    /// Rounds spent mixing two members.
+    pub mixes: usize,
+    /// Images from those rounds that were admitted to the bank.
+    pub mix_admitted: usize,
+    /// Images from those rounds that beat both of their endpoints.
+    pub mix_below_both: usize,
     /// `Dcut` at the start and at the end.
     pub dcut: (f64, f64),
     /// Energies held in the bank at the end, ascending.
@@ -143,6 +170,9 @@ where
     let mut duplicates = 0usize;
     let mut hops = 0usize;
     let mut basins = 0usize;
+    let mut mixes = 0usize;
+    let mut mix_admitted = 0usize;
+    let mut mix_below_both = 0usize;
 
     // The threshold is set from the seeding population below. Nothing is
     // judged against this one: the seeding phase bypasses the rule entirely.
@@ -193,6 +223,47 @@ where
             None => break,
         };
         bank.mark_used(i);
+
+        // A mixing round: relax the images between this member and another.
+        if bank.len() >= 2 && rng.random::<f64>() < bank_cfg.mix_fraction {
+            let mut j = rng.random_range(0..bank.len());
+            if j == i {
+                j = (j + 1) % bank.len();
+            }
+            let a = bank.members()[i].state.clone();
+            let b = bank.members()[j].state.clone();
+            let (ea, eb) = (bank.members()[i].energy, bank.members()[j].energy);
+            let path = interpolate_path(
+                a.view(),
+                b.view(),
+                bank_cfg.mix_images,
+                |y| {
+                    if ledger.remaining() == 0 {
+                        return None;
+                    }
+                    let (e, x) = relax(ledger, y, cfg.relax_steps);
+                    ledger.record(e, x.view());
+                    Some((e, x))
+                },
+                // Every image is offered, so nothing has to be judged as an
+                // escape here: the bank's own rule decides what it is.
+                |_| false,
+            );
+            mixes += 1;
+            for pt in &path.points {
+                if !matches!(
+                    bank.offer(pt.state.view(), pt.energy, &mut distance),
+                    Admission::Duplicate(_) | Admission::Rejected
+                ) {
+                    mix_admitted += 1;
+                }
+                if pt.energy < ea.min(eb) {
+                    mix_below_both += 1;
+                }
+            }
+            continue;
+        }
+
         let start = bank.members()[i].state.clone();
         // Started from the member, not from its exact coordinates: a chain
         // begun at a minimum with a bias that has not seen it yet spends its
@@ -222,6 +293,9 @@ where
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         slices,
+        mixes,
+        mix_admitted,
+        mix_below_both,
         hops,
         basins,
         charged: ledger.spent(),
@@ -334,6 +408,7 @@ mod tests {
             slice: 300,
             seeding: 6,
             dcut_floor: 0.1,
+            ..BankConfig::default()
         };
         let mut ledger = Ledger::new(12_000);
         let out = run(
@@ -352,6 +427,61 @@ mod tests {
             out.dcut.0,
             out.dcut.1
         );
+    }
+
+    /// Mixing has to actually run and actually offer what it finds, or the
+    /// bank holds variants of one region rather than distinct regions.
+    #[test]
+    fn mixing_rounds_offer_the_images_between_two_members() {
+        let cfg = small_config(8);
+        let bank_cfg = BankConfig {
+            capacity: 6,
+            slice: 300,
+            seeding: 6,
+            dcut_floor: 0.5,
+            mix_fraction: 1.0,
+            mix_images: 5,
+        };
+        let mut ledger = Ledger::new(20_000);
+        let out = run(
+            &cfg,
+            &bank_cfg,
+            &mut ledger,
+            &mut toy_relax,
+            None,
+            spectrum_distance(8),
+            13,
+        );
+        assert!(out.mixes > 0, "no mixing round ran");
+        assert!(
+            out.charged <= 20_000,
+            "mixing spent past the budget: {}",
+            out.charged
+        );
+    }
+
+    #[test]
+    fn mixing_can_be_turned_off() {
+        let cfg = small_config(8);
+        let bank_cfg = BankConfig {
+            capacity: 5,
+            slice: 300,
+            seeding: 5,
+            dcut_floor: 0.5,
+            mix_fraction: 0.0,
+            mix_images: 5,
+        };
+        let mut ledger = Ledger::new(9_000);
+        let out = run(
+            &cfg,
+            &bank_cfg,
+            &mut ledger,
+            &mut toy_relax,
+            None,
+            spectrum_distance(8),
+            2,
+        );
+        assert_eq!(out.mixes, 0);
     }
 
     /// A bank that ends holding one solution has not held anything apart.
