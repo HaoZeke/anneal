@@ -91,7 +91,14 @@ fn main() {
     // a length. Enabled by the fourth argument so both are measurable.
     // Mechanisms named on the command line, so each is measurable against the
     // others rather than all arriving at once.
-    let opts: Vec<&str> = args.get(4).map(|v| v.split(',').collect()).unwrap_or_default();
+    let mut opts: Vec<&str> = args.get(4).map(|v| v.split(',').collect()).unwrap_or_default();
+    // The working Python driver (askmc_hopping) is Thompson over moves, the
+    // budget-window temperature, and the per-basin bias the crate always
+    // carries. Naming that stack keeps the measurement comparable without
+    // assembling the flags from memory each time.
+    if opts.contains(&"askmc") {
+        opts.extend_from_slice(&["thompson", "bfwt"]);
+    }
     cfg.shape_keyed = opts.contains(&"shape");
     cfg.budget_window = opts.contains(&"bfwt");
     cfg.allocate_moves = opts.contains(&"thompson");
