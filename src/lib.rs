@@ -16,6 +16,7 @@ pub mod bias;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod cool;
 /// Spectral statistics of the curvature, without forming a Hessian.
+pub mod calibrate;
 pub mod curvature;
 /// Error variants returned by `anneal-core`.
 /// Annealing the distance at which two solutions count as one.
