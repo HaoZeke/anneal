@@ -140,13 +140,24 @@ fn main() {
     // where-to-start-next and what-to-keep decided by the diversity rule
     // rather than by the chain itself.
     let use_bank = opts.contains(&"bank");
+    // The slice length is the shape of the method, not a tuning knob. A bank
+    // whose slices are long is a handful of medium chains: at a sixteenth of
+    // the budget each, a bank of eight saw every member twice and scored 0
+    // seeds in 5. Conformational space annealing runs thousands of short
+    // perturbations against a bank of tens, so each member is revisited on the
+    // order of a hundred times.
+    let env = |k: &str, d: usize| {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(d)
+    };
+    let capacity = env("BANK_CAPACITY", 30);
     let bank_cfg = BankConfig {
-        capacity: 8,
-        // An eighth of the budget per chain, so a bank of eight costs one
-        // chain's worth and the comparison is honest.
-        slice: budget / 16,
-        seeding: 8,
-        dcut_floor: 0.1,
+        capacity,
+        slice: env("BANK_SLICE", 3_000),
+        seeding: capacity,
+        dcut_floor: 0.2,
     };
     if use_bank {
         #[cfg(not(feature = "ira"))]
