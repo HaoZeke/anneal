@@ -18,7 +18,8 @@
 //! that matters; a bank that quietly spends eight times the budget has proved
 //! nothing.
 
-use crate::bias::{Fingerprint, SortedPairs};
+use crate::bias::{BasinBias, Fingerprint, SortedPairs};
+use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::diversity::DiversityAnnealer;
 use crate::methods::bank::{Admission, Bank};
 use crate::methods::cluster_hopping::{random_cluster, Config, GradFn, Ledger, Outcome, Relax};
@@ -64,6 +65,12 @@ pub struct BankOutcome {
     pub best_state: Option<Array1<f64>>,
     /// Chains run.
     pub slices: usize,
+    /// Hops summed over the chains, so the report says what the run did rather
+    /// than reporting a default.
+    pub hops: usize,
+    /// Basins summed over the chains. Not distinct basins across the run: each
+    /// chain keeps its own bias and its own numbering.
+    pub basins: usize,
     /// Charged evaluations spent.
     pub charged: usize,
     /// Candidates that improved the member they resembled.
@@ -84,22 +91,25 @@ pub struct BankOutcome {
 /// the inner run makes every budget-aware mechanism inside it, the
 /// budget-window temperature above all, see the whole campaign's budget rather
 /// than the slice it was given.
+#[allow(clippy::too_many_arguments)]
 fn slice_run<'g>(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: Relax<'_>,
     grad: &mut Option<&mut GradFn<'g>>,
+    bias: &mut BasinBias<ClusterFingerprint>,
     start: ArrayView1<f64>,
     budget: usize,
     rng: &mut StdRng,
 ) -> Outcome {
     let mut slice_ledger = Ledger::new(budget.min(ledger.remaining()));
-    let out = crate::methods::cluster_hopping::run_with_gradient(
+    let out = crate::methods::cluster_hopping::run_with_bias(
         cfg,
         start,
         &mut slice_ledger,
         relax,
         grad.as_deref_mut(),
+        bias,
         rng,
     );
     ledger.charge_many(slice_ledger.spent());
@@ -131,10 +141,21 @@ where
     let mut slices = 0usize;
     let mut improved = 0usize;
     let mut duplicates = 0usize;
+    let mut hops = 0usize;
+    let mut basins = 0usize;
 
     // The threshold is set from the seeding population below. Nothing is
     // judged against this one: the seeding phase bypasses the rule entirely.
     let mut bank = Bank::new(bank_cfg.capacity, 1.0);
+    // One bias for the whole run, not one per chain. What it holds is where the
+    // landscape has already been filled in, which does not belong to whichever
+    // chain did the filling.
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+        cfg.merge_radius,
+        cfg.bias_height,
+        cfg.bias_gamma,
+    );
 
     // Seeding: independent chains from random starts, which is also how the
     // threshold gets a scale.
@@ -143,8 +164,10 @@ where
             break;
         }
         let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-        let out = slice_run(cfg, ledger, relax, &mut grad, start.view(), bank_cfg.slice, &mut rng);
+        let out = slice_run(cfg, ledger, relax, &mut grad, &mut bias, start.view(), bank_cfg.slice, &mut rng);
         slices += 1;
+        hops += out.hops;
+        basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             bank.seed(s.view(), out.best);
         }
@@ -179,8 +202,10 @@ where
             *v += rng.random_range(-0.15..0.15);
         }
 
-        let out = slice_run(cfg, ledger, relax, &mut grad, kick.view(), bank_cfg.slice, &mut rng);
+        let out = slice_run(cfg, ledger, relax, &mut grad, &mut bias, kick.view(), bank_cfg.slice, &mut rng);
         slices += 1;
+        hops += out.hops;
+        basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             match bank.offer(s.view(), out.best, &mut distance) {
                 Admission::Improved(_) => improved += 1,
@@ -197,6 +222,8 @@ where
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         slices,
+        hops,
+        basins,
         charged: ledger.spent(),
         improved,
         novel: bank.novel,

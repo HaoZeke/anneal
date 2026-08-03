@@ -659,7 +659,49 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
     relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    rng: &mut R,
+) -> Outcome {
+    run_full(cfg, start, ledger, relax, grad, None, rng)
+}
+
+/// As [`run_with_gradient`], with a bias supplied by the caller and left
+/// behind when the run ends.
+///
+/// For a caller running several chains under one budget. The well-tempered
+/// bias is a memory of the landscape rather than of the chain that walked it,
+/// and a funnel one chain has filled is filled for the next one. Rebuilding it
+/// per chain throws that away, which is not a small effect: at 75 points the
+/// crossing takes on the order of a hundred thousand hops of accumulation, and
+/// a bank of sixteen chains each starting from an empty bias solved 2 seeds in
+/// 8 where one long chain solved 9 in 16.
+///
+/// Only for a single-rung run. Replica exchange gives each rung its own bias by
+/// construction and there is nothing for one external bias to be.
+pub fn run_with_bias<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    bias: &mut BasinBias<ClusterFingerprint>,
+    rng: &mut R,
+) -> Outcome {
+    assert!(
+        cfg.replicas <= 1,
+        "a shared bias and a replica ladder are different things: \
+         each rung owns its own bias"
+    );
+    run_full(cfg, start, ledger, relax, grad, Some(bias), rng)
+}
+
+fn run_full<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
+    external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     rng: &mut R,
 ) -> Outcome {
     let n = cfg.n_points;
@@ -707,7 +749,15 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     let mut swaps_accepted = 0usize;
     let mut rep = 0usize;
     let mut since_swap = 0usize;
-    let mut bias = biases.remove(0);
+    // A caller's bias is used in place of the first rung's, and put back when
+    // the run ends, so the next chain starts where this one left off.
+    let (mut bias, carried) = match external_bias {
+        Some(b) => {
+            let fresh = biases.remove(0);
+            (std::mem::replace(b, fresh), Some(b))
+        }
+        None => (biases.remove(0), None),
+    };
     let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
@@ -1164,12 +1214,18 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         }
     }
 
+    let n_basins = bias.n_basins();
+    if let Some(slot) = carried {
+        // Handed back so the next chain inherits what this one learned.
+        *slot = bias;
+    }
+
     Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         hops,
         screened_out,
-        basins: bias.n_basins(),
+        basins: n_basins,
         charged: ledger.spent(),
         returned,
         escape_scale: feedback.escape(),
@@ -1192,7 +1248,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
             let mut energies = chains.iter().map(|(en, _)| *en);
             for k in 0..n_rep {
                 if k == rep {
-                    all.push((temps[k], bias.n_basins(), e));
+                    all.push((temps[k], n_basins, e));
                 } else {
                     all.push((
                         temps[k],
@@ -1270,6 +1326,42 @@ pub fn optimize_with_gradient<'g>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The claim the bank rests on: a bias handed to one chain and then to the
+    /// next carries what the first one learned. Without this each chain starts
+    /// from an empty bias, and at 75 points the crossing takes on the order of
+    /// a hundred thousand hops of accumulation to reach.
+    #[test]
+    fn a_supplied_bias_survives_the_run_that_used_it() {
+        let cfg = Config::for_cluster(8);
+        let mut bias = BasinBias::new(
+            ClusterFingerprint::for_keying(8, false),
+            cfg.merge_radius,
+            cfg.bias_height,
+            cfg.bias_gamma,
+        );
+        let mut rng = StdRng::seed_from_u64(4);
+        let start = random_cluster(8, 0.7, cfg.min_separation, &mut rng);
+
+        let mut l1 = Ledger::new(3_000);
+        let mut r1 = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        run_with_bias(&cfg, start.view(), &mut l1, &mut r1, None, &mut bias, &mut rng);
+        let after_first = bias.n_basins();
+        assert!(after_first > 0, "the first chain deposited nothing");
+
+        let mut l2 = Ledger::new(3_000);
+        let mut r2 = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        let out = run_with_bias(&cfg, start.view(), &mut l2, &mut r2, None, &mut bias, &mut rng);
+        assert!(
+            out.basins >= after_first,
+            "the second chain saw {} basins where the first left {after_first}",
+            out.basins
+        );
+        assert!(
+            bias.n_basins() >= after_first,
+            "the bias came back smaller than it went in"
+        );
+    }
 
     /// A separable quadratic in the point coordinates: its minimum is every
     /// point at the origin, so a relaxation is a step toward zero. Enough to

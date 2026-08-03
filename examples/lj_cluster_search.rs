@@ -220,6 +220,8 @@ fn main() {
             Outcome {
                 best: b.best,
                 best_state: b.best_state,
+                hops: b.hops,
+                basins: b.basins,
                 ..Outcome::default()
             }
         } else {
