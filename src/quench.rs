@@ -217,6 +217,34 @@ impl QuenchPredictor {
         })
     }
 
+    /// The energy to hand a caller that stopped this descent early.
+    ///
+    /// The extrapolated limit, floored so that it cannot sit at or below
+    /// `best`. The floor is the invariant, not a correction: a structure whose
+    /// descent was cut short is not a minimum, and an energy that beats the
+    /// incumbent is recorded as the run's answer. Arguing that the verdict
+    /// already guarantees it is not enough. It was argued, and a run came back
+    /// reporting a structure with a gradient of 7.1e2 where a relaxed one comes
+    /// back at 1e-6, because a trial can leave the screen by a second route:
+    /// the return screen takes the screened energy and structure directly,
+    /// without the full relaxation that the promising verdict assumed would
+    /// follow.
+    ///
+    /// `fallback` is the value at the point where the descent stopped, used
+    /// when there is no usable extrapolation.
+    pub fn stopped_energy(&self, best: f64, fallback: f64) -> f64 {
+        let raw = match self.predict() {
+            Some(p) if p.limit.is_finite() && p.limit < fallback => p.limit,
+            _ => fallback,
+        };
+        let floor = best + self.margin;
+        if raw > floor {
+            raw
+        } else {
+            floor
+        }
+    }
+
     /// Whether the descent can still reach `best`.
     ///
     /// Asymmetric on purpose. Calling a trial hopeless discards it, and a
@@ -352,6 +380,40 @@ mod tests {
             slow > fast,
             "slow decay reported {slow}, fast reported {fast}"
         );
+    }
+
+    /// The invariant, stated as a test rather than as an argument: whatever a
+    /// stopped descent extrapolates to, the caller is never handed a value
+    /// that would be recorded as an improvement over a real minimum.
+    #[test]
+    fn a_stopped_descent_never_reports_below_the_incumbent() {
+        let mut q = QuenchPredictor::new();
+        // A descent plunging well past the incumbent, which is exactly the
+        // case that produced a reported structure that was not a minimum.
+        let mut gap = 5.0;
+        for _ in 0..7 {
+            q.observe(-500.0 + gap);
+            gap *= 0.5;
+        }
+        let p = q.predict().expect("no prediction");
+        assert!(p.limit < -400.0, "limit {} is not below the incumbent", p.limit);
+        let e = q.stopped_energy(-100.0, -495.0);
+        assert!(e > -100.0, "stopped energy {e} beats the incumbent -100");
+    }
+
+    /// And it still passes the extrapolation through when that is above the
+    /// incumbent, or the floor would flatten every screened energy onto one
+    /// value and the chain would stop distinguishing proposals.
+    #[test]
+    fn a_stopped_descent_above_the_incumbent_keeps_its_estimate() {
+        let mut q = QuenchPredictor::new();
+        let mut gap = 5.0;
+        for _ in 0..7 {
+            q.observe(-40.0 + gap);
+            gap *= 0.5;
+        }
+        let e = q.stopped_energy(-100.0, -39.0);
+        assert!((e - q.predict().unwrap().limit).abs() < 1e-12, "estimate {e} was replaced");
     }
 
     /// The asymmetry, stated as a test: a prediction sitting just above the
