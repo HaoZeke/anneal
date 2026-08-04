@@ -176,6 +176,53 @@ mod tests {
     }
 
     #[test]
+    /// The prune is exact, so it has to agree with an exhaustive scan on every
+    /// query. A metric that reports no key is the exhaustive scan, which makes
+    /// this a comparison of the two paths through the same code on the same
+    /// data.
+    #[test]
+    fn the_triangle_prune_agrees_with_an_exhaustive_scan() {
+        /// The descriptor is the state, so the test exercises the index and
+        /// not a fingerprint.
+        struct RawFingerprint;
+        impl Fingerprint for RawFingerprint {
+            fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+                x.to_owned()
+            }
+        }
+
+        /// Euclidean distance with the key suppressed.
+        struct NoKey;
+        impl BasinMetric for NoKey {
+            fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+                EuclideanMetric.distance(a, b)
+            }
+        }
+
+        let mut rng = 88172645463325252u64;
+        let mut next = || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            (rng >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let dim = 24;
+        let points: Vec<Array1<f64>> = (0..300)
+            .map(|_| Array1::from((0..dim).map(|_| next() * 3.0).collect::<Vec<_>>()))
+            .collect();
+
+        for radius in [0.05, 0.4, 1.2, 3.0] {
+            let mut fast = BasinIndex::new(RawFingerprint, radius);
+            let mut slow = BasinIndex::new(RawFingerprint, radius).with_metric(Box::new(NoKey));
+            for p in &points {
+                let a = fast.basin_of(p.view());
+                let b = slow.basin_of(p.view());
+                assert_eq!(a, b, "radius {radius}: pruned scan gave {a}, exhaustive {b}");
+            }
+            assert_eq!(fast.n_basins(), slow.n_basins(), "radius {radius}");
+        }
+    }
+
     fn potential_is_zero_before_deposit() {
         let b = identity_projector_2d();
         let s = array![0.0, 0.0];
@@ -260,6 +307,8 @@ pub struct BasinIndex<F: Fingerprint> {
     metric: Box<dyn BasinMetric>,
     merge_radius: f64,
     centres: Vec<Array1<f64>>,
+    /// Triangle-inequality keys, parallel to `centres`.
+    keys: Vec<Option<f64>>,
     visits: Vec<u64>,
 }
 
@@ -273,6 +322,7 @@ impl<F: Fingerprint> BasinIndex<F> {
             metric: Box::new(EuclideanMetric),
             merge_radius,
             centres: Vec::new(),
+            keys: Vec::new(),
             visits: Vec::new(),
         }
     }
@@ -280,6 +330,13 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// Replaces the distance used to decide sameness.
     pub fn with_metric(mut self, metric: Box<dyn BasinMetric>) -> Self {
         self.metric = metric;
+        // Keys belong to the metric that produced them, so any already held
+        // are recomputed rather than carried into a different distance.
+        self.keys = self
+            .centres
+            .iter()
+            .map(|c| self.metric.key(c.view()))
+            .collect();
         self
     }
 
@@ -305,11 +362,20 @@ impl<F: Fingerprint> BasinIndex<F> {
     /// comparison it is the difference between one call and one per basin, and
     /// the exhaustive version did not finish an LJ38 run.
     pub fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
+        let dk = self.metric.key(d);
         for (i, c) in self.centres.iter().enumerate().rev() {
             if c.len() != d.len() {
                 continue;
             }
-            if self.metric.distance(c.view(), d) <= self.merge_radius {
+            // Exact, not a heuristic: the reverse triangle inequality says a
+            // centre whose key differs by more than the radius is further away
+            // than the radius, so skipping it cannot change the answer.
+            if let (Some(k), Some(ck)) = (dk, self.keys[i]) {
+                if (k - ck).abs() > self.merge_radius {
+                    continue;
+                }
+            }
+            if self.metric.distance_bounded(c.view(), d, self.merge_radius) <= self.merge_radius {
                 return Some(i);
             }
         }
@@ -318,6 +384,7 @@ impl<F: Fingerprint> BasinIndex<F> {
 
     /// Registers a descriptor as a new basin and returns its index.
     pub fn push(&mut self, d: Array1<f64>) -> usize {
+        self.keys.push(self.metric.key(d.view()));
         self.centres.push(d);
         self.visits.push(0);
         self.centres.len() - 1
@@ -375,6 +442,31 @@ pub trait BasinMetric: Send + Sync {
     /// Distance between two descriptors. Must be symmetric and vanish on
     /// identical inputs.
     fn distance(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64;
+
+    /// A scalar obeying `|key(a) - key(b)| <= distance(a, b)`, when the metric
+    /// has one.
+    ///
+    /// The reverse triangle inequality turns a scan into a subtraction for
+    /// every centre that cannot possibly be within the radius, which on a
+    /// 98-point cluster is nearly all of them: the descriptor there has 4753
+    /// entries, so one Euclidean comparison costs about as much as a
+    /// Lennard-Jones gradient, and a chain that has opened twenty thousand
+    /// basins pays that per centre on every miss.
+    ///
+    /// `None` for metrics with no such quantity, notably shape distances that
+    /// minimise over permutations and rotations, where the scan stays exact
+    /// and exhaustive.
+    fn key(&self, _v: ArrayView1<f64>) -> Option<f64> {
+        None
+    }
+
+    /// Distance, allowed to stop once it is certain to exceed `bound`.
+    ///
+    /// A caller asking whether a centre is within the merge radius does not
+    /// need the distance to a centre that is not.
+    fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, _bound: f64) -> f64 {
+        self.distance(a, b)
+    }
 }
 
 /// Ordinary Euclidean distance between descriptors.
@@ -391,6 +483,35 @@ impl BasinMetric for EuclideanMetric {
             .map(|(x, y)| (x - y) * (x - y))
             .sum::<f64>()
             .sqrt()
+    }
+
+    /// The Euclidean norm, which obeys the reverse triangle inequality.
+    fn key(&self, v: ArrayView1<f64>) -> Option<f64> {
+        Some(v.iter().map(|x| x * x).sum::<f64>().sqrt())
+    }
+
+    fn distance_bounded(&self, a: ArrayView1<f64>, b: ArrayView1<f64>, bound: f64) -> f64 {
+        if a.len() != b.len() {
+            return f64::INFINITY;
+        }
+        let limit = bound * bound;
+        let mut acc = 0.0;
+        // Checked in blocks rather than per element: the branch costs more
+        // than the arithmetic on a descriptor whose leading entries are nearly
+        // equal for every pair of structures, which is what a sorted distance
+        // spectrum is.
+        for chunk in 0..a.len().div_ceil(32) {
+            let lo = chunk * 32;
+            let hi = (lo + 32).min(a.len());
+            for k in lo..hi {
+                let d = a[k] - b[k];
+                acc += d * d;
+            }
+            if acc > limit {
+                return f64::INFINITY;
+            }
+        }
+        acc.sqrt()
     }
 }
 

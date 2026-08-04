@@ -68,6 +68,31 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Rebuild the structure by growing a local order, and quench into it.
+    ///
+    /// The only move here that crosses a funnel boundary in one step. Every
+    /// other proposal displaces points and relies on the quench to find a
+    /// nearby minimum, so the basins a chain can reach from where it stands are
+    /// the ones a displacement reaches, and no displacement of an icosahedral
+    /// 98-point structure lands in the tetrahedral funnel with usable
+    /// probability. A template is not reached, it is written down: the points
+    /// are indistinguishable, so the family's sites *are* the proposal.
+    ///
+    /// Nothing about it is specific to one potential. The order to grow is
+    /// read off the structure the chain stands on, by taking the neighbour
+    /// offsets of its best-coordinated point, and the alternatives come from
+    /// the classifier's template library rather than from a list of packings
+    /// someone chose for this problem. Which is worth proposing is left to the
+    /// allocator; nothing here knows that 38 points want a truncated
+    /// octahedron.
+    ///
+    /// See [`crate::lattice`].
+    Reseed {
+        /// Points in a state.
+        n_points: usize,
+        /// Where the local order to grow comes from.
+        source: crate::lattice::Source,
+    },
     /// Wales and Doye's angular move on the worst-bound point.
     ///
     /// "Each angular displacement consisted of choosing random theta and phi
@@ -173,6 +198,24 @@ impl ClusterMove {
         ]
     }
 
+    /// The library with the reseeding moves added.
+    ///
+    /// Separate because these are the only proposals that discard the current
+    /// structure rather than perturb it, so a caller comparing against the
+    /// displacement-only search needs to be able to ask for one or the other.
+    /// Every source is offered; which is worth drawing is the allocator's
+    /// question, not this function's.
+    pub fn library_with_reseed(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library(n);
+        for source in crate::lattice::Source::library() {
+            v.push(ClusterMove::Reseed {
+                n_points: n,
+                source,
+            });
+        }
+        v
+    }
+
     /// Draws a proposal from whichever kernel this is.
     pub fn propose<R: Rng + ?Sized>(
         &self,
@@ -213,6 +256,12 @@ impl ClusterMove {
                     y[3 * i + k] += rng.random_range(-h..h);
                 }
                 y
+            }
+            ClusterMove::Reseed { n_points, source } => {
+                // Both the order and the length scale are read off the current
+                // structure, so the move carries no knowledge of the potential
+                // and none of the objective it is proposing against.
+                crate::lattice::candidate(*source, x, *n_points, rng)
             }
             ClusterMove::Angular { n_points } => {
                 let n = *n_points;
@@ -737,6 +786,14 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Whether the move set includes growing a candidate from local order.
+    ///
+    /// The only proposals here that cross a funnel boundary in one step. Every
+    /// other move displaces points and lets the quench find a nearby minimum,
+    /// so the reachable set is whatever a displacement reaches, and on 98
+    /// points that set does not contain the tetrahedral funnel from anywhere in
+    /// the icosahedral one. See [`crate::lattice`].
+    pub reseed_moves: bool,
     /// Whether to score the quench extrapolation without acting on it.
     ///
     /// Runs the screening pass to its full length and records what an adaptive
@@ -830,6 +887,7 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            reseed_moves: false,
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
@@ -1182,7 +1240,11 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = ClusterMove::library(n);
+    let kernels = if cfg.reseed_moves {
+        ClusterMove::library_with_reseed(n)
+    } else {
+        ClusterMove::library(n)
+    };
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
