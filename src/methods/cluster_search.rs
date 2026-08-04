@@ -16,6 +16,7 @@
 //! and neither the driver nor this function can tell them apart.
 
 use crate::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
+use crate::quench::{QuenchPredictor, Verdict};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
@@ -25,18 +26,52 @@ use ndarray::{Array1, ArrayView1};
 pub struct RelaxStats {
     /// Relaxations that reached a point with a small gradient.
     pub converged: usize,
+    /// Charged evaluations spent in screening passes.
+    ///
+    /// Split from the full relaxations because the two are different levers.
+    /// Every mechanism in this crate that tried to change where the chain goes
+    /// was measured and failed; the one that helped, the return screen, buys
+    /// hops by not paying for relaxations that will be discarded. If throughput
+    /// is what moves the number then knowing which pass the budget goes to is
+    /// the first thing to establish, and it has never been measured here.
+    pub screen_charged: usize,
+    /// Charged evaluations spent in full relaxations.
+    pub full_charged: usize,
+    /// Charged evaluations spent confirming convergence.
+    pub check_charged: usize,
     /// Relaxations that stopped at their iteration cap.
     ///
     /// A large share of these is not by itself wrong, because the screening
     /// pass is capped deliberately, but a run where nothing converges is not on
     /// the quenched landscape and every mechanism above it is acting on noise.
     pub capped: usize,
+    /// Screening passes run.
+    pub screens: usize,
+    /// Descent steps those passes took, summed.
+    ///
+    /// Against `screens * screen_steps` this is what stopping on a decision
+    /// bought, and it is the only number that says whether it bought anything.
+    pub screen_steps_taken: usize,
 }
 
 impl RelaxStats {
     /// Relaxation calls made.
     pub fn total(&self) -> usize {
         self.converged + self.capped
+    }
+
+    /// Charged evaluations across both passes and the convergence check.
+    pub fn charged(&self) -> usize {
+        self.screen_charged + self.full_charged + self.check_charged
+    }
+
+    /// Share of the charged budget spent screening.
+    pub fn screen_share(&self) -> f64 {
+        let t = self.charged();
+        if t == 0 {
+            return 0.0;
+        }
+        self.screen_charged as f64 / t as f64
     }
 }
 
@@ -62,18 +97,87 @@ where
     // Split deliberately: the relaxation needs the optimizer mutably, the
     // gradient needs only the objective. Sharing the objective by reference is
     // what lets both closures exist at once.
+    // The driver calls the screening pass with `screen_steps` and the full one
+    // with `relax_steps`, so the iteration count identifies which is which.
+    let screen_iters = cfg.screen_steps;
+    let adaptive = cfg.adaptive_screen;
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         opt.forget();
-        let (f, xr, _) = opt.minimize(x, iters, |v| {
-            if !led.charge() {
-                return None;
+        let before = led.spent();
+        let screening = iters <= screen_iters;
+        // The screening pass stops when its own trajectory says the question is
+        // settled; the full relaxation runs to its tolerance, because there the
+        // answer is the structure and not a verdict about it.
+        let mut pred = QuenchPredictor::new();
+        let mut early = false;
+        let target = led.best;
+        let (f, xr, _) = opt.minimize_watched(
+            x,
+            iters,
+            |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            },
+            |_, fv| {
+                if !(screening && adaptive) {
+                    return true;
+                }
+                pred.observe(fv);
+                if pred.verdict(target) == Verdict::Undecided {
+                    return true;
+                }
+                early = true;
+                false
+            },
+        );
+        let cost = led.spent() - before;
+        if screening {
+            stats.screen_charged += cost;
+            stats.screen_steps_taken += pred.len();
+            stats.screens += 1;
+        } else {
+            stats.full_charged += cost;
+        }
+        // The energy the caller sees is the extrapolated limit, not the value
+        // at the point where the descent stopped.
+        //
+        // This is the whole of it. Stopping a screening quench after five steps
+        // instead of twenty-five cut the cost of a hop from 31 charged
+        // evaluations to 8 and quadrupled the hops, and solved nothing in three
+        // seeds where the fixed-length screen solved three: the value at step
+        // five is not the quenched energy, and a chain that accepts on it is
+        // walking on the raw landscape rather than the transformed one that
+        // basin hopping exists to walk on. The predictor already says where the
+        // descent was going; the estimate is what the chain should move on.
+        //
+        // Safe against reporting a point that is not a minimum, because the
+        // early stop only fires on a verdict, and a `Hopeless` verdict means
+        // the predicted limit sits above the incumbent by more than its own
+        // error. An extrapolated energy therefore cannot become the run's best.
+        // The `Promising` branch does not use it at all: it goes on to the full
+        // relaxation, which returns a real value.
+        let f = if early {
+            match pred.predict() {
+                Some(p) if p.limit.is_finite() && p.limit < f => p.limit,
+                _ => f,
             }
-            Some(objective.value_and_gradient(v))
-        });
+        } else {
+            f
+        };
+        // A descent stopped on a verdict is known not to be converged, so
+        // asking is spending an evaluation on an answer already in hand. The
+        // check stays on every other path, where the answer is not known.
+        if early {
+            stats.capped += 1;
+            return (f, xr);
+        }
         // Charged like any other evaluation: asking whether a relaxation
         // converged is asking the potential a question, and a protocol that
         // counts evaluations has to count this one.
         let converged = if led.charge() {
+            stats.check_charged += 1;
             let g = objective.grad(xr.view());
             g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
         } else {

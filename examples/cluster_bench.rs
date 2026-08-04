@@ -121,6 +121,7 @@ fn main() {
     let opts: Vec<&str> = args.get(5).map(|v| v.split(',').collect()).unwrap_or_default();
     cfg.allocate_moves = opts.contains(&"thompson");
     cfg.return_screen = opts.contains(&"rscreen");
+    cfg.adaptive_screen = opts.contains(&"aq");
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
@@ -274,7 +275,8 @@ fn main() {
         total_charged += ledger.spent();
         total_hops += out.hops;
         println!(
-            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  verified {}{}",
+            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  \
+             charged screen {} full {} check {} ({:.0}% screen)  qsteps {:.1}  verified {}{}",
             out.best,
             out.hops,
             out.basins,
@@ -282,6 +284,11 @@ fn main() {
             stats.total(),
             out.symmetrised.0,
             out.symmetrised.1,
+            stats.screen_charged,
+            stats.full_charged,
+            stats.check_charged,
+            100.0 * stats.screen_share(),
+            stats.screen_steps_taken as f64 / stats.screens.max(1) as f64,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
                 .unwrap_or_else(|| "NO STATE".into()),
