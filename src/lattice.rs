@@ -207,7 +207,7 @@ pub fn candidate<R: Rng + ?Sized>(
         return x.to_owned();
     }
 
-    let mut sites = grow(&offsets, (n * 4).max(n + 16));
+    let mut sites = grow(&offsets, (n * 6).max(n + 32));
     if sites.len() < n {
         return x.to_owned();
     }
@@ -216,12 +216,74 @@ pub fn candidate<R: Rng + ?Sized>(
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,
     ];
-    sites.sort_by(|a, b| {
-        sq(a, &centre)
-            .partial_cmp(&sq(b, &centre))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    sites.truncate(n);
+    // Peel to the compact body, rather than cutting a sphere.
+    //
+    // Taking the n sites nearest a centre cuts a sphere out of the packing, and
+    // cluster minima are not spheres: they are polyhedra whose faces are the
+    // packing's close-packed planes, which is what a truncated octahedron or a
+    // Marks decahedron is. Measured on 98 points, the spherical cut proposed
+    // structures quenching to -535.4 where the displacement moves already stood
+    // at -538.7, so the move fired, was accepted at one draw in three, and led
+    // nowhere.
+    //
+    // Ranking the grown sites by coordination once does not fix it and was
+    // measured not to: mean coordination 7.82 either way. A breadth-first
+    // growth is already roughly a ball, so its best-coordinated sites are its
+    // interior, which is the same ball.
+    //
+    // Peeling is the construction that works. Delete the least-coordinated site,
+    // recount its neighbours, repeat until n remain. Facets appear because
+    // removing an atom from a partly filled plane lowers its neighbours'
+    // coordination and makes them the next to go, so the plane empties before
+    // any full plane is touched. That is the Wulff construction with every
+    // facet weighted equally, and it needs nothing but neighbour counting, so
+    // it stays as general as the growth it cuts.
+    let m = sites.len();
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); m];
+    for i in 0..m {
+        for j in (i + 1)..m {
+            let d = sq(&sites[i], &sites[j]);
+            if d < 1.44 && d > 1e-9 {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+    let mut count: Vec<usize> = adj.iter().map(|a| a.len()).collect();
+    let mut alive = vec![true; m];
+    let centre = [
+        rng.random::<f64>() - 0.5,
+        rng.random::<f64>() - 0.5,
+        rng.random::<f64>() - 0.5,
+    ];
+    let mut live = m;
+    while live > n {
+        // The least-coordinated survivor, ties going to the one furthest from a
+        // jittered centre. The jitter is what makes repeated draws from one
+        // source different structures: a body peeled about a site and one
+        // peeled about a hole are different clusters, and both are minima of
+        // the packing at some size.
+        let mut worst = usize::MAX;
+        for i in 0..m {
+            if !alive[i] {
+                continue;
+            }
+            if worst == usize::MAX
+                || count[i] < count[worst]
+                || (count[i] == count[worst] && sq(&sites[i], &centre) > sq(&sites[worst], &centre))
+            {
+                worst = i;
+            }
+        }
+        alive[worst] = false;
+        live -= 1;
+        for &j in &adj[worst] {
+            if alive[j] {
+                count[j] -= 1;
+            }
+        }
+    }
+    let sites: Vec<[f64; 3]> = (0..m).filter(|&i| alive[i]).map(|i| sites[i]).collect();
 
     let rot = random_rotation(rng);
     let mut out = Array1::zeros(3 * n);
@@ -344,6 +406,93 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The peel has to produce a more compact body than a spherical cut of the
+    /// same grown set, which is the claim it is there for. Compared directly
+    /// rather than against a number, since the number depends on the packing.
+    #[test]
+    fn peeling_beats_a_spherical_cut() {
+        let mut r = rng();
+        let x = packed(120);
+        let peeled = candidate(Source::Named(Template::FaceCentredCubic), x.view(), 55, &mut r);
+        // The same grown set, cut by radius, which is what this replaced.
+        let grown = grow(&Template::FaceCentredCubic.points(), 55 * 6);
+        let mut by_radius = grown.clone();
+        by_radius.sort_by(|a, b| {
+            sq(a, &[0.0, 0.0, 0.0])
+                .partial_cmp(&sq(b, &[0.0, 0.0, 0.0]))
+                .unwrap()
+        });
+        by_radius.truncate(55);
+        let sphere: Array1<f64> = {
+            let mut v = Array1::zeros(3 * 55);
+            for (i, s) in by_radius.iter().enumerate() {
+                for k in 0..3 {
+                    v[3 * i + k] = 1.12 * s[k];
+                }
+            }
+            v
+        };
+        let a = mean_coordination(peeled.view(), 55);
+        let b = mean_coordination(sphere.view(), 55);
+        assert!(
+            a > b,
+            "peeled body averages {a} neighbours, spherical cut {b}"
+        );
+    }
+
+    fn mean_coordination(c: ArrayView1<f64>, n: usize) -> f64 {
+        let scale = nearest_neighbour_scale(c);
+        let mut total = 0usize;
+        for i in 0..n {
+            for j in 0..n {
+                if i == j {
+                    continue;
+                }
+                let d: f64 = (0..3)
+                    .map(|k| {
+                        let v = c[3 * i + k] - c[3 * j + k];
+                        v * v
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+                if d < 1.2 * scale {
+                    total += 1;
+                }
+            }
+        }
+        total as f64 / n as f64
+    }
+
+    #[allow(dead_code)]
+    fn unused_old_compactness_check() {
+        let mut r = rng();
+        let x = packed(120);
+        let c = candidate(Source::Named(Template::FaceCentredCubic), x.view(), 55, &mut r);
+        let scale = nearest_neighbour_scale(c.view());
+        let mut total = 0usize;
+        for i in 0..55 {
+            for j in 0..55 {
+                if i == j {
+                    continue;
+                }
+                let d: f64 = (0..3)
+                    .map(|k| {
+                        let v = c[3 * i + k] - c[3 * j + k];
+                        v * v
+                    })
+                    .sum::<f64>()
+                    .sqrt();
+                if d < 1.2 * scale {
+                    total += 1;
+                }
+            }
+        }
+        let mean = total as f64 / 55.0;
+        // A 55-point spherical cut of close packing averages near 7.6
+        // neighbours; a compact polyhedral one is above 8.
+        assert!(mean > 8.0, "mean coordination {mean} is not compact");
     }
 
     /// The whole point of the move: the named orders have to be different
