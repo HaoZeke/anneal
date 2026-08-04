@@ -1,0 +1,92 @@
+#+TITLE: D15–D19: Landscape theory under a charged force ledger
+#+OPTIONS: toc:2 num:t
+
+Wales-grade *structure* + force-ledger *objectives*. Executable modules
+=d15=…=d19=. Suite: 99 passed.
+
+* D15 — Staircase transform (Wales–Doye BH map)
+
+\[\tilde E(x)=E(Q(x)),\quad Q=\text{quench}.\]
+
+| Thm | Statement |
+|-----|-----------|
+| Q1–Q2 | Idempotent quench; \(E(Q(x))\le E(x)\) |
+| T1 | GM among minima is GM of \(\tilde E\) |
+| T2 | \(\tilde E\) constant on each basin (plateau) |
+| T3 | Continuous inter-basin barrier \(\ge\) staircase edge height \(\max(E_i,E_j)\) |
+| T5 | SSBH with symmetric proposal on minima = MH with energies \(E(m_i)\); \(\pi_i\propto e^{-E_i/T}\) |
+
+1-D three-well model deposits T1–T5 numerically; barrier order symbolic.
+
+* D16 — Mean force on the minima network
+
+\[
+F_i=\sum_j P_{ij}(C_{ij}+F_j),\quad F_{\mathrm{GM}}=0
+\]
+i.e. \((I-P_{TT})F_T=c_T\).
+
+| Result | Formula |
+|--------|---------|
+| Two-state Geo | \(F=Q/p\) (D12) |
+| Escape then local | \(F_I=Q/\varepsilon+Q/p\) |
+| \(\varepsilon=0\), mass on trap | \(F=\infty\) without multi-start |
+| Heterogeneous \(C_{ij}\) | Prefer cheap edges even if hop-count suboptimal |
+
+This is the ledger dual of discrete path sampling / master equations: same
+graph, objective = expected *force*, not just mean time.
+
+* D17 — Superbasins + compression
+
+- Superbasin cut at \(E_{\mathrm{cut}}\): union-find on edges with \(w\le E_{\mathrm{cut}}\).
+- Compression model: \(\alpha(\mu)=\sigma(a(\mu-\mu_0))\), \(b(\mu)=b_0-c\mu\).
+- \(\alpha'=a\alpha(1-\alpha)\). Compression can reopen D12 window; on LJ75
+  plateau need \(\mu_*\approx(8.69-b_{\max})/c\approx 5.7\) model units.
+- Two-phase BH lower bound: \(P\ge\alpha(\mu)(1-(1-p)^{M_2})\).
+
+* D18 — Force lower bounds (minimax class)
+
+| Bound | Statement |
+|-------|-----------|
+| L1 | Independent seeds, success \(\le\alpha\): \(\mathbb{E}[F]\ge Q_0/\alpha\) |
+| L2 | In \(G\): \(\mathbb{E}[F]\ge Q/p\) |
+| L3 | Omniscient catchment: \(\ge Q_0/\alpha+Q/p\) |
+| L4 | \(K\) funnels uniform: \(\alpha=1/K\Rightarrow\ge K Q_0\) |
+| L5 | Wales \(p_H\) in \(H\) hops: \(p=1-(1-p_H)^{1/H}\), \(\mathbb{E}[F]\ge Q/p\); fixed run \(=QH\) |
+| L6 | \(\varepsilon=0\) single chain: success \(\le\alpha<1\); finite high-prob solvers need multi-start / \(\varepsilon>0\) / population |
+
+**Wales conversion (Q=30, p_H=0.04, H=5000):** fixed run \(1.5\cdot 10^5\) force;
+Geo to first success \(\sim 3.7\cdot 10^6\) force. Any claim of "better than BH"
+must beat these on the *same* success definition.
+
+* D19 — Disconnectivity depth
+
+\[
+D(m)=\min_{\text{paths }m\to g}\max_{\text{edge }w}-E_g
+\]
+(minimax / bottleneck distance).
+
+| Thm | Statement |
+|-----|-----------|
+| T1 | \(D(m)\ge E_m-E_g\) |
+| T2 | \(D(g)=0\) |
+| T3–T4 | Kramers: \(\mathbb{E}[\mathrm{hops}]\ge e^{D/T}\), \(\mathbb{E}[F]\ge Q e^{D/T}\) |
+| T5 | \(\alpha\approx W_g/(W_g+W_t)\) (width ratio) |
+
+At \(D=8.69\), \(T=0.8\), \(Q=25\): \(F_{\mathrm{lb}}\sim 10^6\) for *crossing*
+the inter-funnel TS by rare hops — vs multi-start L1 \(\sim 10^2\)–\(10^3\) if
+\(\alpha\) is not tiny. **Different mechanism classes, different bounds.**
+
+* How this is "closer to Wales"
+
+| Wales object | Our dual under force ledger |
+|--------------|-----------------------------|
+| Staircase PES | D15 theorems + SSBH = MH on minima |
+| Rate matrix / DPS | D16 \(F=(I-P)^{-1}c\) force Green function |
+| Disconnectivity | D19 depth \(D(m)\), width → \(\alpha\) |
+| Compression BH | D17 two-phase + window reopening |
+| Empirical hop tables | D18 L5 conversion to force |
+
+What remains below Wales: no full PATHSAMPLE database math, no harmonic
+superposition free energies, no production disconnectivity for LJ75 in this
+repo — those need data, not more lemmas. The *lemmas for the ledger* are now
+in place.
