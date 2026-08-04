@@ -590,6 +590,33 @@ pub fn ptm(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Match> {
     out
 }
 
+/// Common-neighbour fractions as a morphology descriptor.
+///
+/// `[f555, f421, f422, f544, f433, bonds per point]`. These are the triplets
+/// that separate the packings the cluster sizes here compete between: `555` is
+/// the icosahedral signature, `421` close-packed cubic, `422` hexagonal, and a
+/// decahedron carries `555` together with a substantial `421` population, which
+/// an icosahedron does not.
+///
+/// Preferred over [`ptm_fractions`] for this purpose, and the reason is a
+/// measurement rather than a preference. Template matching classifies only
+/// points with a complete neighbour shell, which at 38 points is 6 of 38, so
+/// its fraction vector is dominated by the surface and resolved 13 distinct
+/// morphologies across 218 searches. Common-neighbour analysis reads every
+/// bonded pair, including the surface, and costs less because no rotational
+/// alignment is involved.
+pub fn cna_descriptor(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Array1<f64> {
+    let c = cna(x, n, cutoff);
+    Array1::from(vec![
+        c.fraction((5, 5, 5)),
+        c.fraction((4, 2, 1)),
+        c.fraction((4, 2, 2)),
+        c.fraction((5, 4, 4)),
+        c.fraction((4, 3, 3)),
+        c.bonds as f64 / n.max(1) as f64 / 6.0,
+    ])
+}
+
 /// Share of points carrying each template, as a descriptor.
 ///
 /// Ordered as face-centred cubic, hexagonal close packed, icosahedral, simple

@@ -23,7 +23,7 @@ use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::diversity::DiversityAnnealer;
 use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
-use crate::structure::ptm_fractions;
+use crate::structure::cna_descriptor;
 use crate::path::interpolate_path;
 use crate::methods::cluster_hopping::{random_cluster, Config, GradFn, Ledger, Outcome, Relax};
 use ndarray::{Array1, ArrayView1};
@@ -117,6 +117,14 @@ pub struct BankOutcome {
     pub novel: usize,
     /// Candidates discarded as near-copies.
     pub duplicates: usize,
+    /// Hop, charged evaluations, basins and value at each new campaign best.
+    ///
+    /// Merged from the slices with each slice's spend offset by what the
+    /// campaign had already spent, because a slice keeps its own sub-ledger and
+    /// its counts start from zero. Without the merge a caller asking this arm
+    /// for a first encounter time gets a censored answer from every run,
+    /// including the ones that found the answer.
+    pub improvements: Vec<(usize, usize, usize, f64)>,
     /// Morphologies the acquisition model holds.
     pub morphologies: usize,
     /// Rounds spent mixing two members.
@@ -138,7 +146,8 @@ pub struct BankOutcome {
 /// budget-window temperature above all, see the whole campaign's budget rather
 /// than the slice it was given.
 #[allow(clippy::too_many_arguments)]
-fn slice_run<'g>(
+#[allow(clippy::too_many_arguments)]
+fn slice_run_inner<'g>(
     cfg: &Config,
     ledger: &mut Ledger,
     relax: Relax<'_>,
@@ -147,7 +156,8 @@ fn slice_run<'g>(
     start: ArrayView1<f64>,
     budget: usize,
     rng: &mut StdRng,
-) -> Outcome {
+) -> (Outcome, usize) {
+    let before = ledger.spent();
     let mut slice_ledger = Ledger::new(budget.min(ledger.remaining()));
     let out = crate::methods::cluster_hopping::run_with_bias(
         cfg,
@@ -162,7 +172,22 @@ fn slice_run<'g>(
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
     }
-    out
+    (out, before)
+}
+
+/// As above, returning only the outcome for callers that do not merge traces.
+#[allow(clippy::too_many_arguments)]
+fn slice_run<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: &mut Option<&mut GradFn<'g>>,
+    bias: &mut BasinBias<ClusterFingerprint>,
+    start: ArrayView1<f64>,
+    budget: usize,
+    rng: &mut StdRng,
+) -> (Outcome, usize) {
+    slice_run_inner(cfg, ledger, relax, grad, bias, start, budget, rng)
 }
 
 /// Runs a bank of chains until the ledger is spent.
@@ -193,6 +218,13 @@ where
     // each local environment. Five numbers, so a Gaussian process over it is
     // exact and cheap; the coordinates would not be.
     let mut funnel = FunnelModel::new(0.15, 20.0, 1e-2);
+    // Between the first and second neighbour shells, where the radial
+    // distribution is near zero so the bond set is insensitive to the exact
+    // value. Expressed through the configured minimum separation so it follows
+    // the potential's length scale rather than assuming Lennard-Jones.
+    let bond_cutoff = cfg.min_separation * (1.39 / 0.85);
+    let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
+    let mut campaign_best = f64::INFINITY;
     let mut mixes = 0usize;
     let mut mix_admitted = 0usize;
     let mut mix_below_both = 0usize;
@@ -217,13 +249,22 @@ where
             break;
         }
         let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-        let out = slice_run(cfg, ledger, relax, &mut grad, &mut bias, start.view(), bank_cfg.slice, &mut rng);
+        let (out, spent_before) =
+            slice_run(cfg, ledger, relax, &mut grad, &mut bias, start.view(), bank_cfg.slice, &mut rng);
+        // Offset each slice's counts by what the campaign had already spent,
+        // since a slice keeps its own sub-ledger and starts from zero.
+        for &(h, c, b, e) in &out.improvements {
+            if e < campaign_best - 1e-12 && improvements.len() < 512 {
+                campaign_best = e;
+                improvements.push((hops + h, spent_before + c, b, e));
+            }
+        }
         slices += 1;
         hops += out.hops;
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(ptm_fractions(s.view(), cfg.n_points, 0.12).view(), out.best);
+                funnel.observe(cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(), out.best);
             }
             bank.seed(s.view(), out.best);
         }
@@ -252,7 +293,7 @@ where
             let mut best = None;
             let mut best_ei = f64::NEG_INFINITY;
             for (k, m) in bank.members().iter().enumerate() {
-                let d = ptm_fractions(m.state.view(), cfg.n_points, 0.12);
+                let d = cna_descriptor(m.state.view(), cfg.n_points, bond_cutoff);
                 let ei = funnel.expected_improvement(d.view());
                 if ei > best_ei {
                     best_ei = ei;
@@ -333,13 +374,22 @@ where
             *v += rng.random_range(-0.15..0.15);
         }
 
-        let out = slice_run(cfg, ledger, relax, &mut grad, &mut bias, kick.view(), bank_cfg.slice, &mut rng);
+        let (out, spent_before) =
+            slice_run(cfg, ledger, relax, &mut grad, &mut bias, kick.view(), bank_cfg.slice, &mut rng);
+        // Offset each slice's counts by what the campaign had already spent,
+        // since a slice keeps its own sub-ledger and starts from zero.
+        for &(h, c, b, e) in &out.improvements {
+            if e < campaign_best - 1e-12 && improvements.len() < 512 {
+                campaign_best = e;
+                improvements.push((hops + h, spent_before + c, b, e));
+            }
+        }
         slices += 1;
         hops += out.hops;
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(ptm_fractions(s.view(), cfg.n_points, 0.12).view(), out.best);
+                funnel.observe(cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(), out.best);
             }
             match bank.offer(s.view(), out.best, &mut distance) {
                 Admission::Improved(_) => improved += 1,
@@ -356,6 +406,7 @@ where
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         slices,
+        improvements,
         morphologies: funnel.len(),
         mixes,
         mix_admitted,
