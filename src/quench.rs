@@ -34,6 +34,26 @@
 //! quadratic region at all, and on a linear fit they dominate every later
 //! point.
 //!
+//! # Measured, and off
+//!
+//! The model does not hold on real quenches. Scoring each extrapolation
+//! against the value the full pass reaches, without acting on it, gives a mean
+//! absolute error of 12442 at the step where the rule would have stopped, 993
+//! at a warmup of eight, 19.1 at twelve and 3.6 at sixteen. Minima near the
+//! bottom of the 38 point landscape are separated by well under one unit, so a
+//! usable energy costs about twenty of the twenty-five steps.
+//!
+//! Acting on it is worse than the error alone suggests: with the extrapolated
+//! energy driving acceptance, eight seeds solved nothing where the fixed screen
+//! solved eight, because a chain handed energies off by four orders of
+//! magnitude rejects everything and stops exploring.
+//!
+//! What this settles is not the rule but the premise behind it. The screening
+//! pass looked like overhead because it takes 89 to 93 per cent of the charged
+//! budget against 8 per cent for the relaxations it guards. It is not
+//! overhead. It is the quench, and the relaxation that follows is the polish on
+//! the 2 per cent of trials that survive. There is no factor of two there.
+//!
 //! # Why this is not a gradient tolerance
 //!
 //! A tolerance asks whether the point has stopped moving. This asks whether the

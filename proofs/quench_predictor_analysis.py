@@ -7,6 +7,24 @@ Mirrors src/quench.rs QuenchPredictor math:
   - Hopeless / Promising rules
 
 No landscape toys. Theorems: exact recovery; Hopeless sound under zero residual.
+
+The zero-residual hypothesis is false on real quenches, by four orders of
+magnitude, and the measurement is recorded here because a proof whose
+hypothesis nobody checked is worse than no proof. Scoring the extrapolation
+against the value the full twenty-five step screen actually reaches, on
+Lennard-Jones at 38 points, mean absolute error at the step where the rule
+would have stopped:
+
+    warmup   stop step   mean |error|
+         4         4.2      12442.4
+         8         8.4        992.7
+        12        12.4         19.1
+        16        16.1          3.6
+
+Neighbouring minima near the bottom of that landscape are separated by well
+under one unit, so a usable energy needs about twenty of the twenty-five
+steps and the rule saves nothing. The theorems below remain true. They are
+true about a regime this problem does not enter.
 """
 from __future__ import annotations
 
