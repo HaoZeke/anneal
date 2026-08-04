@@ -21,7 +21,9 @@
 use crate::bias::{BasinBias, Fingerprint, SortedPairs};
 use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::diversity::DiversityAnnealer;
+use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
+use crate::structure::ptm_fractions;
 use crate::path::interpolate_path;
 use crate::methods::cluster_hopping::{random_cluster, Config, GradFn, Ledger, Outcome, Relax};
 use ndarray::{Array1, ArrayView1};
@@ -62,6 +64,18 @@ pub struct BankConfig {
     pub mix_fraction: f64,
     /// Images relaxed along a mixing path.
     pub mix_images: usize,
+    /// Choose the next member to search from by expected improvement over
+    /// morphology, rather than by which has been used least.
+    ///
+    /// Least-used is a round robin, and a round robin over a bank that has
+    /// collapsed into one funnel searches that funnel evenly. Measured at 75
+    /// points, every member ended between -396.28 and -396.19: thirty
+    /// icosahedral variants, each distinct under the threshold, and the
+    /// selection spread its starts across all of them. Expected improvement
+    /// scores a morphology the search has no evidence about above one it has
+    /// sampled repeatedly and found mediocre, which is the distinction a round
+    /// robin cannot make. See [`crate::funnel_bo`].
+    pub acquisition: bool,
 }
 
 impl Default for BankConfig {
@@ -75,6 +89,7 @@ impl Default for BankConfig {
             dcut_floor: 0.4,
             mix_fraction: 0.5,
             mix_images: 7,
+            acquisition: false,
         }
     }
 }
@@ -102,6 +117,8 @@ pub struct BankOutcome {
     pub novel: usize,
     /// Candidates discarded as near-copies.
     pub duplicates: usize,
+    /// Morphologies the acquisition model holds.
+    pub morphologies: usize,
     /// Rounds spent mixing two members.
     pub mixes: usize,
     /// Images from those rounds that were admitted to the bank.
@@ -172,6 +189,10 @@ where
     let mut duplicates = 0usize;
     let mut hops = 0usize;
     let mut basins = 0usize;
+    // A model of how low each morphology goes, over the share of points in
+    // each local environment. Five numbers, so a Gaussian process over it is
+    // exact and cheap; the coordinates would not be.
+    let mut funnel = FunnelModel::new(0.15, 20.0, 1e-2);
     let mut mixes = 0usize;
     let mut mix_admitted = 0usize;
     let mut mix_below_both = 0usize;
@@ -201,6 +222,9 @@ where
         hops += out.hops;
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
+            if bank_cfg.acquisition {
+                funnel.observe(ptm_fractions(s.view(), cfg.n_points, 0.12).view(), out.best);
+            }
             bank.seed(s.view(), out.best);
         }
     }
@@ -220,9 +244,30 @@ where
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
         bank.dcut = schedule.threshold(progress);
 
-        let i = match bank.next_start() {
-            Some(i) => i,
-            None => break,
+        let i = if bank_cfg.acquisition {
+            // The member whose morphology the model rates most promising,
+            // counting uncertainty: a region never sampled scores on its
+            // variance, which is how the search reaches a funnel it has no
+            // evidence about.
+            let mut best = None;
+            let mut best_ei = f64::NEG_INFINITY;
+            for (k, m) in bank.members().iter().enumerate() {
+                let d = ptm_fractions(m.state.view(), cfg.n_points, 0.12);
+                let ei = funnel.expected_improvement(d.view());
+                if ei > best_ei {
+                    best_ei = ei;
+                    best = Some(k);
+                }
+            }
+            match best {
+                Some(k) => k,
+                None => break,
+            }
+        } else {
+            match bank.next_start() {
+                Some(i) => i,
+                None => break,
+            }
         };
         bank.mark_used(i);
 
@@ -293,6 +338,9 @@ where
         hops += out.hops;
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
+            if bank_cfg.acquisition {
+                funnel.observe(ptm_fractions(s.view(), cfg.n_points, 0.12).view(), out.best);
+            }
             match bank.offer(s.view(), out.best, &mut distance) {
                 Admission::Improved(_) => improved += 1,
                 Admission::Duplicate(_) => duplicates += 1,
@@ -308,6 +356,7 @@ where
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         slices,
+        morphologies: funnel.len(),
         mixes,
         mix_admitted,
         mix_below_both,
@@ -456,6 +505,7 @@ mod tests {
             dcut_floor: 0.5,
             mix_fraction: 1.0,
             mix_images: 5,
+            acquisition: false,
         };
         let mut ledger = Ledger::new(20_000);
         let out = run(
@@ -485,6 +535,7 @@ mod tests {
             dcut_floor: 0.5,
             mix_fraction: 0.0,
             mix_images: 5,
+            acquisition: false,
         };
         let mut ledger = Ledger::new(9_000);
         let out = run(

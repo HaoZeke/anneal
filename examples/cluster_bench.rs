@@ -15,6 +15,7 @@
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
 use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger};
+use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_search::{
     first_encounter, median_encounter, search, verify, Encounter,
 };
@@ -142,6 +143,25 @@ fn main() {
         println!("  mechanisms: {}", opts.join(", "));
     }
 
+    // The bank arm, with the next start chosen by expected improvement over
+    // morphology rather than by a round robin.
+    let use_bank = opts.contains(&"bank");
+    let bank_cfg = BankConfig {
+        capacity: 30,
+        slice: budget / 400,
+        seeding: 30,
+        dcut_floor: 0.4,
+        mix_fraction: 0.5,
+        mix_images: 7,
+        acquisition: opts.contains(&"ei"),
+    };
+    if use_bank {
+        println!(
+            "  bank of {} , slice {}, acquisition {}",
+            bank_cfg.capacity, bank_cfg.slice, bank_cfg.acquisition
+        );
+    }
+
     let mut solved = 0usize;
     let mut encounters: Vec<Encounter> = Vec::new();
     let mut deepest = f64::INFINITY;
@@ -153,7 +173,44 @@ fn main() {
         // gradient and the convergence count all come from the crate now, so
         // this example cannot quietly run a different potential or a different
         // relaxation from any other caller.
-        let (out, stats) = search(&pot, &cfg, &mut ledger, seed);
+        let (out, stats) = if use_bank {
+            let mut opt2 = anneal_core::methods::warm_lbfgs::WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ndarray::ArrayView1<f64>, iters: usize| {
+                opt2.forget();
+                let (f, xr, _) = opt2.minimize(x, iters, |v| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(pot.value_and_gradient(v))
+                });
+                (f, xr)
+            };
+            let b = csa_cluster::run(
+                &cfg,
+                &bank_cfg,
+                &mut ledger,
+                &mut relax,
+                None,
+                anneal_core::methods::csa_cluster::spectrum_distance(n),
+                seed,
+            );
+            println!(
+                "      bank: {} slices, {} morphologies, Dcut {:.3} -> {:.3}, {} mixes",
+                b.slices, b.morphologies, b.dcut.0, b.dcut.1, b.mixes
+            );
+            (
+                anneal_core::methods::cluster_hopping::Outcome {
+                    best: b.best,
+                    best_state: b.best_state,
+                    hops: b.hops,
+                    basins: b.basins,
+                    ..Default::default()
+                },
+                anneal_core::methods::cluster_search::RelaxStats::default(),
+            )
+        } else {
+            search(&pot, &cfg, &mut ledger, seed)
+        };
 
         // The reported value is checked against a fresh evaluation of the
         // structure it claims to come from, off the ledger and outside the
