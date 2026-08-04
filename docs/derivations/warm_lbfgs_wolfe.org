@@ -1,0 +1,129 @@
+#+TITLE: Strong Wolfe line search and L-BFGS curvature in WarmLbfgs
+#+OPTIONS: toc:2 num:t
+
+* Abstract
+
+=WarmLbfgs= (=src/methods/warm_lbfgs.rs=) is the limited-memory quasi-Newton
+relaxer used under the charged ledger. This note records standard numerical
+optimization facts *as they apply to that code*, in the same spirit as Hager
+and Zhang, Algorithm 851 (CG_DESCENT): name the algorithm, state the
+hypothesis (strong Wolfe), prove the properties the implementation relies on
+(descent of the accepted step; curvature \(y^\top s>0\)), and bound the number
+of charged evaluations per iteration. No multi-funnel model.
+
+* 1. Algorithm (as shipped)
+
+At outer iteration \(k\), with point \(x_k\), value \(f_k\), gradient \(g_k\):
+
+1. If \(\|g_k\|_\infty < \mathtt{gtol}\), stop.
+2. Compute direction \(d_k\) by the two-loop L-BFGS recursion on stored pairs
+   \((s_j,y_j)\); if no pairs, \(d_k=-g_k\).
+3. If \(g_k^\top d_k \ge 0\), call =forget= (clear memory) and continue
+   (stale curvature).
+4. Line search along \(d_k\) for step \(\alpha>0\) attempting the *strong Wolfe*
+   conditions with parameters \(c_1=\)=armijo= (default \(10^{-4}\)) and
+   \(c_2=\)=curvature= (default \(0.9\)):
+   \begin{align}
+   f(x_k+\alpha d_k)
+   &\le f_k + c_1\alpha\, g_k^\top d_k,
+   \tag{W1}\\
+   \bigl|\nabla f(x_k+\alpha d_k)^\top d_k\bigr|
+   &\le -c_2\, g_k^\top d_k.
+   \tag{W2}
+   \end{align}
+5. On success: \(s_k=\alpha d_k\), \(y_k=g_{k+1}-g_k\), store the pair only if
+   \(s_k^\top y_k > 10^{-12}\) (=push=).
+6. At most =max_line_evals= (default 20) gradient evaluations in the line
+   search; failure clears memory or stops if memory already empty.
+
+Initial evaluation at \(x_0\) costs one charge before the loop.
+
+* 2. Hypotheses
+
+Throughout: \(f\in C^1(\mathbb{R}^n)\), \(g=\nabla f\). Line-search parameters
+satisfy \(0 < c_1 < c_2 < 1\). Direction satisfies \(g_k^\top d_k < 0\) when
+the line search is entered (enforced by step 3).
+
+* 3. Theorems
+
+** Theorem 1 (curvature from strong Wolfe).
+Suppose \(g_k^\top d_k < 0\) and \(\alpha>0\) satisfies (W1)--(W2). Let
+\(s=\alpha d_k\) and \(y=g(x_k+s)-g_k\). Then
+\begin{equation}
+  y^\top s \;\ge\; (1-c_2)\, (-g_k^\top d_k)\, \alpha \;>\; 0.
+  \tag{C}
+\end{equation}
+
+**Proof.** By (W2),
+\[
+  g(x_k+\alpha d_k)^\top d_k \;\ge\; c_2\, g_k^\top d_k
+\]
+(using \(g_k^\top d_k<0\) so \(-c_2 g_k^\top d_k>0\) and the absolute-value form).
+Thus
+\begin{align*}
+  y^\top d_k
+  &= g(x_k+\alpha d_k)^\top d_k - g_k^\top d_k
+  \;\ge\; c_2 g_k^\top d_k - g_k^\top d_k
+  = (c_2-1)\, g_k^\top d_k
+  = (1-c_2)\, (-g_k^\top d_k).
+\end{align*}
+Multiply by \(\alpha>0\): \(y^\top s \ge (1-c_2)\alpha (-g_k^\top d_k)>0\).
+\(\square\)
+
+** Corollary 1.1 (code gate is redundant under exact Wolfe, necessary in floating point).
+Any pair produced by a successful strong-Wolfe step satisfies the curvature
+condition \(y^\top s>0\). The test \(s^\top y>10^{-12}\) in =push= rejects
+numerically marginal pairs; it never accepts a pair forbidden by Theorem 1
+when (W1)--(W2) hold in exact arithmetic.
+
+** Theorem 2 (Armijo implies descent of the accepted point).
+If \(\alpha>0\) satisfies (W1) and \(g_k^\top d_k<0\), then
+\(f(x_k+\alpha d_k) < f_k\).
+
+**Proof.** Right-hand side of (W1) is \(f_k + c_1\alpha g_k^\top d_k < f_k\).
+\(\square\)
+
+** Theorem 3 (evaluation bound per outer iteration).
+Let \(L=\)=max_line_evals=. One outer iteration of =minimize= charges at most
+\(L\) evaluations inside the line search, plus the single evaluation of
+\((f_0,g_0)\) at start of =minimize= once per call. Over \(K\) outer
+iterations that all enter the line search,
+\begin{equation}
+  N_{\mathrm{eval}} \;\le\; 1 + K L.
+  \tag{B}
+\end{equation}
+If a line search returns without acceptance, those evaluations are still
+charged (budget truthfulness).
+
+**Proof.** Each line-search probe increments =evals= at most once per call to
+=fg=; the loop is capped by =max_line_evals=. Outer iterations do not call
+=fg= except through the line search and the initial evaluation. \(\square\)
+
+* 4. What the code does *not* claim (TOMS honesty)
+
+| Not claimed | Reason |
+|-------------|--------|
+| Global convergence of L-BFGS on general \(f\) | Needs standard assumptions (Lipschitz gradient, Wolfe line search always succeeds, etc.); see Nocedal--Wright |
+| Evaluation counts competitive with L-BFGS-B | Header of =warm_lbfgs.rs= reports ~10× more evals than a reference L-BFGS-B on LJ75; open defect |
+| Descent of the L-BFGS *direction* for arbitrary memory | Only: if \(g^\top d\ge 0\), memory is discarded. No CG_DESCENT-style \(g^\top d\le -c\|g\|^2\) for the two-loop formula |
+
+* 5. Why this matters for the charged ledger
+
+Every line-search probe is a force evaluation. Theorem 3 is the worst-case
+charge of one relaxation of length \(K\). The early-stop screen
+(=quench_predictor_analysis.org=) reduces \(K\) on hopeless trials; this note
+bounds what a *full* relaxation can spend.
+
+* 6. Verification
+
+Symbolic/numeric checks in =proofs/warm_lbfgs_wolfe.py=:
+- Theorem 1 inequality on random \(g,d,\alpha,c_2\) with a synthetic \(g_+\)
+  satisfying (W2);
+- Theorem 2 Armijo descent;
+- Bound (B) as arithmetic identity.
+
+* References
+
+- Hager and Zhang, Algorithm 851: CG_DESCENT, ACM TOMS 32 (2006).
+- Nocedal and Wright, *Numerical Optimization*, Ch. 3 (Wolfe), Ch. 7 (L-BFGS).
+- Byrd, Lu, Nocedal, Zhu, Algorithm 778: L-BFGS-B, ACM TOMS.
