@@ -704,6 +704,29 @@ pub struct Config {
     /// promoted to a full relaxation.
     pub screen_margin: f64,
     /// Relaxation steps in the screening pass.
+    /// Calibrated by sweep on the corrected relaxer, LJ38 at 4e5 charged
+    /// evaluations, four seeds each:
+    ///
+    /// | steps | solved | charged per hop | hops |
+    /// |-------|--------|-----------------|------|
+    /// | 6     | 0/4    | 11              | 149392 |
+    /// | 10    | 0/4    | 16              | 94412 |
+    /// | 15    | 1/4    | 21              | 66437 |
+    /// | 25    | 4/4    | 33              | 49728 |
+    /// | 40    | 4/4    | 47              | 33396 |
+    ///
+    /// Three times the hops buys nothing when the quench is short. The chain
+    /// moves on the transformed landscape, and a screened energy that has not
+    /// reached its basin is not a point on it, so a proposal is compared
+    /// against the incumbent on a quantity that is not the one being
+    /// minimised. 25 is the knee: 40 solves as often and costs 1.4 times as
+    /// much per hop, 15 costs less and solves once in four.
+    ///
+    /// This is the same wall the adaptive screening quench hit from the other
+    /// side. There the extrapolated energy was wrong by 1e4 at the step where
+    /// its rule fired; here a genuinely shorter quench is simply not enough
+    /// quench. Both say the screening pass is the quench rather than overhead
+    /// around it.
     pub screen_steps: usize,
     /// Whether the screening pass stops on a decision instead of `screen_steps`.
     ///
