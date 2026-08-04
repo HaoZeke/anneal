@@ -29,6 +29,7 @@ pub mod exchange;
 pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod funnel_bo;
+pub mod funnel_spectral;
 pub mod grad;
 /// Per-epoch run history returned by `run_rs`.
 pub mod history;
