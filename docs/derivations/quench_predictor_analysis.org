@@ -14,6 +14,33 @@ not global optimality of cluster search; it is *soundness of a Hopeless
 verdict under the geometric-decrement model that the code fits*, and an
 evaluation upper bound relative to a fixed-length screen.
 
+* 0. Outcome: the hypothesis is false on this landscape
+
+The analysis below is sound and the rule it analyses is off, because the
+geometric-decrement model the code fits does not describe a real quench from
+a perturbed cluster. Scoring each extrapolation against the value the full
+twenty-five step screen reaches, without acting on it:
+
+| warmup | stop step | mean abs. error |
+|--------+-----------+-----------------|
+|      4 |       4.2 |         12442.4 |
+|      8 |       8.4 |           992.7 |
+|     12 |      12.4 |            19.1 |
+|     16 |      16.1 |             3.6 |
+
+Minima near the bottom of the LJ38 landscape are separated by well under one
+unit, so a usable energy costs about twenty of the twenty-five steps and the
+rule saves nothing. Acting on it, eight seeds solved nothing where the
+fixed-length control solved eight: a chain given energies wrong by four
+orders of magnitude rejects every proposal, which is why it produced four
+times the hops and no progress.
+
+The premise is what this refutes. The screening pass looked like overhead at
+89--93% of the charged budget against 8% for the relaxations it guards. It is
+not overhead; it is the quench, and the full relaxation is the polish on the
+2% of trials that survive it. Sections 1 onward stand as the analysis of a
+rule that is correct about a regime this problem does not enter.
+
 * 1. Problem
 
 A screening quench produces a sequence of energies

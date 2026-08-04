@@ -23,7 +23,8 @@ tightly connected component and jumps across a cut. Algebraic connectivity
 2. **Graph.** On each accepted hop \(i\to j\) with \(i\neq j\), add weight 1
    to edge \((i,j)\).
 
-3. **Spectrum.** Every \(T\) such edges (or when \(|V|\) grows enough),
+3. **Spectrum.** Every =funnel_period= such edges (20 000 by default; the
+   refit is floored at 8),
    recompute the embedding: Jacobi eigensolve of the normalised Laplacian
    of the connected component used by `laplacian_embedding`. Standardise
    the Fiedler coordinate so its empirical scale does not shrink as
@@ -51,9 +52,13 @@ tightly connected component and jumps across a cut. Algebraic connectivity
 | SOFI axis residual | Continuous “distance to having Cₙ”; not a point-group label |
 | **Fiedler of hop graph** | Funnel coordinate *defined by reachability the run actually saw* |
 
-The paper claim is: under a charged force ledger, the multi-funnel CV is
-not hand-chosen; it is the spectral embedding of the observed transition
-graph, with basin nodes identified by IRA when available.
+The claim is about the coordinate, not about the search: the multi-funnel
+CV is not hand-chosen, it is the spectral embedding of the observed
+transition graph, with basin nodes identified by IRA when available. Every
+chosen descriptor tried here was measured and failed, which is the argument
+for a coordinate the run defines rather than one the author picks. It is
+not an argument that biasing along it helps, and that is a separate
+question with a separate answer below.
 
 * Code
 
@@ -69,14 +74,29 @@ graph, with basin nodes identified by IRA when available.
 ```rust
 let mut cfg = Config::for_cluster(n);
 cfg.track_funnels = true;
-cfg.funnel_period = 64; // refit schedule
+cfg.funnel_period = 20_000; // refit schedule; floored at 8
 // with ira:
 cfg.keying = Keying::Canonical;
 ```
+
+* Status: wired, not yet measured
+
+The spectral term enters the acceptance test (=cluster_hopping.rs=, the
+Metropolis branch under =track_funnels=), so this is the algorithm as it
+runs and not a proposal. What does not exist yet is a matched campaign
+against =track_funnels= off, so nothing here says whether it helps.
+
+That distinction is not pedantry in this crate. Nine mechanisms have been
+wired the same way and measured: minima hopping 0 of 4, funnel tabu 0 of 6,
+restart 2 of 8, coarser merge radius 0 of 18, calibrated radius 0 of 8,
+early termination 0 of 8, a CSA bank 0 of 8, canonical keying 1 of 6, and
+the adaptive screening quench 0 of 8 against 8 of 8 for its control. One
+helped: the return screen, 13 of 24 against 2 of 8. A mechanism described
+as correct before it is measured has, in this crate's record, about a one
+in ten chance of being an improvement.
 
 * What this is not
 
 - Not multi-start / plateau if-statements.
 - Not reimplementing IRA/SOFI.
-- Not a proof that LJ75 is solved; it is the correct *mathematical object*
-  for funnel-aware bias on this landscape, now actually driving Metropolis.
+- Not a claim that LJ75 or LJ98 is solved by it.
