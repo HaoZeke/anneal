@@ -220,18 +220,14 @@ impl CanonicalOrder {
             if src >= n || slot >= n {
                 return None;
             }
-            // `x R + t`, contracting the rotation on its first index.
-            //
-            // The other contraction is the transpose, which is a reflected
-            // frame and not a small error: it moved a relabelled copy of an
-            // asymmetric structure 1.08 away from itself where the correct one
-            // leaves it fixed. The same transpose was got wrong once before in
-            // this crate's IRA work, checking a match by hand.
+            // `R p + t`, with the rotation read row-major. The library
+            // transposes its matrix on the way out, again under "return
+            // C-style data", so no further transpose belongs here.
             let p = [x[3 * src], x[3 * src + 1], x[3 * src + 2]];
             for k in 0..3 {
-                out[3 * slot + k] = m.rotation[k] * p[0]
-                    + m.rotation[3 + k] * p[1]
-                    + m.rotation[6 + k] * p[2]
+                out[3 * slot + k] = m.rotation[3 * k] * p[0]
+                    + m.rotation[3 * k + 1] * p[1]
+                    + m.rotation[3 * k + 2] * p[2]
                     + m.translation[k];
             }
         }
@@ -355,8 +351,17 @@ pub fn match_shapes(
             // alongside a permutation that assigns one index twice and another
             // never, and a caller that used it would put points in each other's
             // places with nothing to signal it.
-            let perm: Vec<usize> =
-                permutation.iter().map(|&p| (p - 1).max(0) as usize).collect();
+            // Already zero-based. `libira_match` ends with
+            //
+            //   p_matrix = transpose( p_matrix )
+            //   p_perm(:) = p_perm(:) - 1
+            //
+            // under a comment reading "return C-style data", so subtracting one
+            // here converts a second time. That is what made every valid
+            // permutation look broken: a cyclic shift by five came back as
+            // [5,6,7,8,9,10,11,0,1,2,3,4] and this turned it into
+            // [4,5,6,7,8,9,10,0,0,1,2,3], with one index twice and one missing.
+            let perm: Vec<usize> = permutation.iter().map(|&p| p.max(0) as usize).collect();
             let mut seen = vec![false; n1];
             let ok = perm.len() == n1
                 && perm.iter().all(|&q| {
@@ -460,6 +465,63 @@ mod tests {
         y
     }
 
+    /// Relabelling the points must not move the descriptor: that is what makes
+    /// it a basin key at all.
+    #[test]
+    fn a_canonical_order_absorbs_relabelling() {
+        let r = generic12();
+        let c = CanonicalOrder::new(r.clone(), 1.8);
+        let a = c.canonicalise(r.view()).expect("reference did not canonicalise");
+        let b = c
+            .canonicalise(relabel(r.view(), 5).view())
+            .expect("relabelled copy did not canonicalise");
+        assert!(
+            rms(a.view(), b.view()) < 1e-6,
+            "relabelling moved the descriptor by {}",
+            rms(a.view(), b.view())
+        );
+    }
+
+    #[test]
+    fn a_canonical_order_absorbs_rigid_motions() {
+        let r = generic12();
+        let c = CanonicalOrder::new(r.clone(), 1.8);
+        let a = c.canonicalise(r.view()).unwrap();
+        let mut moved = Array1::<f64>::zeros(36);
+        for i in 0..12 {
+            let px = r[3 * i] + 4.0;
+            let py = r[3 * i + 1] - 2.0;
+            moved[3 * i] = -py;
+            moved[3 * i + 1] = px;
+            moved[3 * i + 2] = r[3 * i + 2] + 0.5;
+        }
+        let b = c.canonicalise(moved.view()).expect("moved copy did not canonicalise");
+        assert!(
+            rms(a.view(), b.view()) < 1e-6,
+            "a rigid motion moved the descriptor by {}",
+            rms(a.view(), b.view())
+        );
+    }
+
+    /// Genuinely different structures must stay apart, or the key merges basins
+    /// the search needs separate.
+    #[test]
+    fn different_structures_stay_apart_under_a_canonical_order() {
+        let r = generic12();
+        let c = CanonicalOrder::new(r.clone(), 1.8);
+        let a = c.canonicalise(r.view()).unwrap();
+        let mut far = r.clone();
+        for k in 0..3 {
+            far[k] *= 1.6;
+        }
+        let b = c.canonicalise(far.view()).expect("distorted copy did not canonicalise");
+        assert!(
+            rms(a.view(), b.view()) > 0.05,
+            "a clearly different structure came out {} away",
+            rms(a.view(), b.view())
+        );
+    }
+
     fn rms(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         let n = (a.len() / 3) as f64;
         (a.iter()
@@ -470,31 +532,47 @@ mod tests {
             .sqrt()
     }
 
-    /// The upstream defect, pinned so it is noticed when it goes away.
+    /// The permutation is zero-based on arrival and must survive the binding.
     ///
-    /// Matching a twelve-point structure to a relabelled copy of itself returns
-    /// success, a distance of zero and an identity rotation, alongside a
-    /// permutation that is not a bijection. When this test starts failing the
-    /// library has been fixed and [`CanonicalOrder`] becomes usable.
+    /// This is the test that was missing. Without it the binding subtracted one
+    /// from an already zero-based array and every valid permutation came back
+    /// with an index repeated and another absent, which reads exactly like a
+    /// library defect and was very nearly reported as one.
     #[test]
-    fn the_library_returns_a_permutation_that_cannot_be_used() {
+    fn a_relabelled_copy_returns_the_relabelling() {
         let r = generic12();
-        let q = relabel(r.view(), 5);
+        let shift = 5usize;
+        let q = relabel(r.view(), shift);
         let m = match_shapes(r.view(), q.view(), 1.8).expect("match failed outright");
         assert!(
             m.distance < 1e-9,
             "a relabelled copy should be at distance zero, got {}",
             m.distance
         );
-        assert!(
-            m.permutation.is_none(),
-            "the permutation validated; libira may be patched, so the canonical \
-             order path can be enabled and this test replaced"
-        );
+        let perm = m
+            .permutation
+            .as_ref()
+            .expect("a relabelled copy has a perfectly good correspondence");
+        let n = 12;
+        let mut seen = vec![false; n];
+        for &p in perm {
+            assert!(p < n && !seen[p], "not a bijection: {perm:?}");
+            seen[p] = true;
+        }
+        // `relabel` sends point i of the reference to slot (i + shift) % n of
+        // the query, so slot i of the reference corresponds to query point
+        // (i + shift) % n, and that is what the permutation reports.
+        for (slot, &src) in perm.iter().enumerate() {
+            assert_eq!(
+                src,
+                (slot + shift) % n,
+                "slot {slot} mapped to {src} in {perm:?}"
+            );
+        }
     }
 
-    /// A generic structure with no symmetry, where a canonical order would be
-    /// unique if the library supplied a usable permutation.
+    /// A generic structure with no symmetry, where the canonical order is
+    /// unique and relabelling is absorbed exactly.
     fn generic12() -> Array1<f64> {
         let mut x = Array1::<f64>::zeros(36);
         for i in 0..12 {
