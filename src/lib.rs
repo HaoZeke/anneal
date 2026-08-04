@@ -53,6 +53,7 @@ pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod screen;
 pub mod spectral;
+pub mod structure;
 pub mod symmetrise;
 pub mod terminate;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
