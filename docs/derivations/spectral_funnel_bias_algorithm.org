@@ -100,3 +100,21 @@ in ten chance of being an improvement.
 - Not multi-start / plateau if-statements.
 - Not reimplementing IRA/SOFI.
 - Not a claim that LJ75 or LJ98 is solved by it.
+
+* Acceptance rate of the chain the bias sits on
+
+Measured for the first time in this driver, LJ98 at 3e5 charged evaluations,
+one seed per temperature, counting acceptances before the tabu veto so the
+figure describes the rule and not the rule plus a veto:
+
+| T   | acceptance |
+|-----+------------|
+| 0.5 |      0.351 |
+| 0.8 |      0.435 |
+| 1.2 |      0.518 |
+
+White and Mayne report plain single-step basin hopping running near one
+half, which places the shipped default of 0.8 a little cold and 1.2 on the
+published operating point. Single seeds do not decide a temperature, so this
+is a reading of the rule, not a result: the arms differ by 0.8 in best
+energy, which is inside the seed-to-seed spread on this size.
