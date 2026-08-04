@@ -124,6 +124,9 @@ fn main() {
     cfg.adaptive_screen = opts.contains(&"aq");
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
+    if let Ok(v) = std::env::var("SCREEN_STEPS") {
+        cfg.screen_steps = v.parse().unwrap_or(25);
+    }
     if let Ok(v) = std::env::var("TEMP") {
         cfg.temperature = v.parse().unwrap_or(0.8);
     }
