@@ -125,6 +125,10 @@ fn main() {
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
     cfg.reseed_moves = opts.contains(&"reseed");
+    cfg.learn_construction = opts.contains(&"learn");
+    if cfg.learn_construction {
+        cfg.reseed_moves = true;
+    }
     if let Ok(v) = std::env::var("SCREEN_STEPS") {
         cfg.screen_steps = v.parse().unwrap_or(25);
     }

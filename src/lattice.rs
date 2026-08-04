@@ -158,10 +158,24 @@ pub fn observed_order(x: ArrayView1<f64>, cutoff: f64) -> Vec<[f64; 3]> {
 /// rather than a defect of the method: that is why icosahedral clusters stop
 /// competing above a few hundred points.
 pub fn grow(offsets: &[[f64; 3]], want: usize) -> Vec<[f64; 3]> {
+    grow_from(&[], offsets, want)
+}
+
+/// As [`grow`], starting from `seed` rather than from a single point.
+///
+/// A seed of existing positions is what lets a proposal keep part of the
+/// structure it came from: the new order grows around the kept part in the
+/// growth's own orientation, so the two meet at an interface instead of one
+/// replacing the other.
+pub fn grow_from(seed: &[[f64; 3]], offsets: &[[f64; 3]], want: usize) -> Vec<[f64; 3]> {
     if offsets.is_empty() {
         return Vec::new();
     }
-    let mut sites: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
+    let mut sites: Vec<[f64; 3]> = if seed.is_empty() {
+        vec![[0.0, 0.0, 0.0]]
+    } else {
+        seed.to_vec()
+    };
     let mut head = 0usize;
     while sites.len() < want && head < sites.len() {
         let s = sites[head];
@@ -198,6 +212,30 @@ pub fn candidate<R: Rng + ?Sized>(
     n: usize,
     rng: &mut R,
 ) -> Array1<f64> {
+    candidate_keeping(source, x, n, 0.0, rng)
+}
+
+/// As [`candidate`], retaining a `keep` fraction of the current structure as
+/// the seed the new order grows from.
+///
+/// The knob that makes this one move rather than two. At `keep = 0` the
+/// structure is discarded and a body is grown from nothing, which is the
+/// largest step the move set has. At `keep = 1` nothing is regrown. In between,
+/// the best-coordinated part of the current structure is kept and the new order
+/// is grown around it in its own orientation, so the proposal carries an
+/// interface between the two: a twin or a stacking fault, which is how a
+/// morphology actually changes rather than how it is replaced.
+///
+/// Which value pays is not fixed here. It is a continuous parameter, so it is
+/// something a posterior can be held over, which is what [`crate::construct`]
+/// does.
+pub fn candidate_keeping<R: Rng + ?Sized>(
+    source: Source,
+    x: ArrayView1<f64>,
+    n: usize,
+    keep: f64,
+    rng: &mut R,
+) -> Array1<f64> {
     let scale = nearest_neighbour_scale(x);
     let offsets = match source {
         Source::Observed => observed_order(x, 1.35),
@@ -207,7 +245,41 @@ pub fn candidate<R: Rng + ?Sized>(
         return x.to_owned();
     }
 
-    let mut sites = grow(&offsets, (n * 6).max(n + 32));
+    // The kept core, in units of the spacing and centred, which is the frame
+    // the growth works in.
+    let n_parent = x.len() / 3;
+    let n_keep = ((keep.clamp(0.0, 1.0) * n as f64).round() as usize).min(n_parent.min(n));
+    let mut seed: Vec<[f64; 3]> = Vec::new();
+    if n_keep > 0 {
+        let mut centre = [0.0; 3];
+        for i in 0..n_parent {
+            for k in 0..3 {
+                centre[k] += x[3 * i + k];
+            }
+        }
+        for c in centre.iter_mut() {
+            *c /= n_parent as f64;
+        }
+        let pts: Vec<[f64; 3]> = (0..n_parent)
+            .map(|i| {
+                [
+                    (x[3 * i] - centre[0]) / scale,
+                    (x[3 * i + 1] - centre[1]) / scale,
+                    (x[3 * i + 2] - centre[2]) / scale,
+                ]
+            })
+            .collect();
+        let counts: Vec<usize> = pts
+            .iter()
+            .map(|a| pts.iter().filter(|b| sq(a, b) < 1.44 && sq(a, b) > 1e-9).count())
+            .collect();
+        let mut order: Vec<usize> = (0..n_parent).collect();
+        order.sort_by(|&i, &j| counts[j].cmp(&counts[i]));
+        order.truncate(n_keep);
+        seed = order.into_iter().map(|i| pts[i]).collect();
+    }
+
+    let mut sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
     if sites.len() < n {
         return x.to_owned();
     }
