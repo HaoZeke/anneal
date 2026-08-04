@@ -375,6 +375,15 @@ fn main() {
                 );
                 let (e, g) = lj(x.view());
                 let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+                // The returned structure has to be a minimum, not merely carry
+                // the energy that was reported for it. Checking only the energy
+                // let an arm return a point with a gradient of 0.31, which the
+                // campaign table caught rather than this assertion.
+                assert!(
+                    gmax < 1e-3,
+                    "seed {seed} returned a structure with gradient {gmax:.2e}, \
+                     which is not a minimum"
+                );
                 assert!(
                     (e - out.best).abs() < 1e-6,
                     "seed {seed} reported {:.6} but its structure is {:.6}",
