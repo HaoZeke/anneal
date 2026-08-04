@@ -125,7 +125,13 @@ where
                     return true;
                 }
                 pred.observe(fv);
-                if pred.verdict(target) == Verdict::Undecided {
+                // Only the hopeless verdict stops the descent. A promising one
+                // is followed by the full relaxation anyway, so cutting its
+                // screen short saves at most the tail of a pass that 2 per cent
+                // of trials reach, and it hands the return screen an
+                // extrapolated energy below the incumbent attached to a
+                // structure that was never relaxed.
+                if pred.verdict(target) != Verdict::Hopeless {
                     return true;
                 }
                 early = true;
@@ -152,17 +158,11 @@ where
         // basin hopping exists to walk on. The predictor already says where the
         // descent was going; the estimate is what the chain should move on.
         //
-        // Safe against reporting a point that is not a minimum, because the
-        // early stop only fires on a verdict, and a `Hopeless` verdict means
-        // the predicted limit sits above the incumbent by more than its own
-        // error. An extrapolated energy therefore cannot become the run's best.
-        // The `Promising` branch does not use it at all: it goes on to the full
-        // relaxation, which returns a real value.
+        // The floor in `stopped_energy` is what keeps a cut-short descent from
+        // being reported as the run's answer. It is enforced there rather than
+        // inferred from the verdict here.
         let f = if early {
-            match pred.predict() {
-                Some(p) if p.limit.is_finite() && p.limit < f => p.limit,
-                _ => f,
-            }
+            pred.stopped_energy(target, f)
         } else {
             f
         };
