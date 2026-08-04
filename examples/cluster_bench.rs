@@ -17,6 +17,7 @@
 use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger};
 use anneal_core::methods::cluster_search::{search, verify};
 use anneal_core::potentials::{PairKind, PairPotential};
+use anneal_core::structure::{cna, ptm, ptm_fractions};
 
 /// The potential named on the command line.
 fn parse_potential(spec: &str, n: usize) -> Option<PairPotential> {
@@ -168,6 +169,34 @@ fn main() {
                 out.best
             );
         }
+        // What morphology the run actually ended in, which a success count
+        // does not say. Cheap enough to do once per seed on the answer.
+        let morphology = out.best_state.as_ref().map(|st| {
+            let c = cna(st.view(), n, 1.39 * pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0));
+            let f = ptm_fractions(st.view(), n, 0.12);
+            // The residual distribution, because a classification that reports
+            // nothing is either a structure with no order or a cutoff set in
+            // the wrong place, and the fractions alone cannot say which.
+            let mut r: Vec<f64> = ptm(st.view(), n, f64::INFINITY)
+                .iter()
+                .map(|m| m.rmsd)
+                .collect();
+            r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            format!(
+                "cna 555 {:.3} 421 {:.3} 422 {:.3} | ptm fcc {:.2} hcp {:.2} ico {:.2} other {:.2}",
+                c.fraction((5, 5, 5)),
+                c.fraction((4, 2, 1)),
+                c.fraction((4, 2, 2)),
+                f[0],
+                f[1],
+                f[2],
+                f[4]
+            ) + &format!(
+                " | rmsd min {:.3} median {:.3}",
+                r.first().copied().unwrap_or(f64::NAN),
+                r.get(r.len() / 2).copied().unwrap_or(f64::NAN)
+            )
+        });
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
         if hit {
             solved += 1;
@@ -189,6 +218,9 @@ fn main() {
                 .unwrap_or_else(|| "NO STATE".into()),
             if hit { "  SOLVED" } else { "" }
         );
+        if let Some(m) = morphology {
+            println!("      {m}");
+        }
     }
     println!(
         "{solved}/{seeds} solved, deepest {deepest:.6}   mean hops {}, force per hop {}",

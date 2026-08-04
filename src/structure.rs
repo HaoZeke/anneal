@@ -33,12 +33,21 @@
 //!
 //! What is implemented here is that comparison. The published method finds the
 //! correspondence between a neighbourhood and a template through the topology
-//! of the convex hull; this uses iterated closest-point assignment from an
-//! inertia-frame start, which is a different way of solving the same
+//! of the convex hull; this enumerates starting correspondences and refines
+//! each by iterated closest point, which is a different way of solving the same
 //! subproblem and is stated as such rather than claimed to be theirs. The
 //! classification and the residual are the parts anything downstream uses.
 
 use ndarray::{Array1, ArrayView1};
+
+/// Unit vector, or `None` when the input has no direction.
+fn normalise(v: [f64; 3]) -> Option<[f64; 3]> {
+    let n = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if n < 1e-12 {
+        return None;
+    }
+    Some([v[0] / n, v[1] / n, v[2] / n])
+}
 
 /// Counts of common-neighbour triplets over the bonded pairs of a structure.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -355,23 +364,90 @@ fn apply(r: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// Residual between a neighbourhood and a template, after scaling and rotation.
-///
-/// The correspondence is found by iterated closest-point assignment: match each
-/// template point to its nearest unused neighbour, refit the rotation, repeat.
-/// The published method uses the topology of the convex hull instead, which is
-/// exact where this is a heuristic; both are ways of solving the same
-/// subproblem, and the residual is what the classification reads.
-fn residual(neigh: &[[f64; 3]], template: &[[f64; 3]]) -> f64 {
-    let m = template.len();
-    if neigh.len() != m || m == 0 {
-        return f64::INFINITY;
+/// Rotation taking unit vector `a` onto unit vector `b`.
+fn align(a: [f64; 3], b: [f64; 3]) -> [[f64; 3]; 3] {
+    let v = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    let c = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if c < -1.0 + 1e-9 {
+        // Antiparallel: a half turn about any perpendicular axis.
+        let perp = if a[0].abs() < 0.9 {
+            [1.0, 0.0, 0.0]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+        let axis = normalise([
+            a[1] * perp[2] - a[2] * perp[1],
+            a[2] * perp[0] - a[0] * perp[2],
+            a[0] * perp[1] - a[1] * perp[0],
+        ])
+        .unwrap_or([0.0, 0.0, 1.0]);
+        return rotation_about(axis, std::f64::consts::PI);
     }
-    // Start from the identity, then alternate assignment and rotation.
-    let mut r = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    // Rodrigues from the cross product, in the form that avoids the angle.
+    let k = 1.0 / (1.0 + c);
+    [
+        [
+            c + v[0] * v[0] * k,
+            v[0] * v[1] * k - v[2],
+            v[0] * v[2] * k + v[1],
+        ],
+        [
+            v[1] * v[0] * k + v[2],
+            c + v[1] * v[1] * k,
+            v[1] * v[2] * k - v[0],
+        ],
+        [
+            v[2] * v[0] * k - v[1],
+            v[2] * v[1] * k + v[0],
+            c + v[2] * v[2] * k,
+        ],
+    ]
+}
+
+/// Rotation matrix about a unit axis.
+fn rotation_about(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    [
+        [
+            t * axis[0] * axis[0] + c,
+            t * axis[0] * axis[1] - s * axis[2],
+            t * axis[0] * axis[2] + s * axis[1],
+        ],
+        [
+            t * axis[0] * axis[1] + s * axis[2],
+            t * axis[1] * axis[1] + c,
+            t * axis[1] * axis[2] - s * axis[0],
+        ],
+        [
+            t * axis[0] * axis[2] - s * axis[1],
+            t * axis[1] * axis[2] + s * axis[0],
+            t * axis[2] * axis[2] + c,
+        ],
+    ]
+}
+
+fn matmul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut o = [[0.0_f64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                o[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+    o
+}
+
+/// One assignment-and-refit pass from a given starting rotation.
+fn icp(neigh: &[[f64; 3]], template: &[[f64; 3]], mut r: [[f64; 3]; 3]) -> f64 {
+    let m = template.len();
     let mut best = f64::INFINITY;
-    for _ in 0..12 {
-        // Assign each template point to the nearest unused neighbour.
+    for _ in 0..16 {
         let mut used = vec![false; m];
         let mut pairs: Vec<([f64; 3], [f64; 3])> = Vec::with_capacity(m);
         let mut total = 0.0;
@@ -405,6 +481,52 @@ fn residual(neigh: &[[f64; 3]], template: &[[f64; 3]]) -> f64 {
         let from: Vec<[f64; 3]> = pairs.iter().map(|(a, _)| *a).collect();
         let to: Vec<[f64; 3]> = pairs.iter().map(|(_, b)| *b).collect();
         r = kabsch(&from, &to);
+    }
+    best
+}
+
+/// Residual between a neighbourhood and a template, after scaling and rotation.
+///
+/// The correspondence is the hard part. Iterated closest point solves it from a
+/// starting rotation, and on these templates a single start is not enough: a
+/// close-packed or icosahedral neighbourhood has an isotropic inertia tensor,
+/// so there is no frame to align to and a start from the identity lands in a
+/// local optimum. Measured on the 38-point global minimum, whose core is
+/// close packed, that gave a best residual of 0.243 where an ideal environment
+/// gives 1e-6, and nothing classified.
+///
+/// So the starts are enumerated instead: map each template point onto the
+/// nearest neighbour in turn, spin about that axis through a few angles, and
+/// take the best. That fixes one correspondence per start and lets the
+/// assignment find the rest. The published method reaches the same
+/// correspondence through the topology of the convex hull, which is exact where
+/// this is a search; the residual is what anything downstream reads.
+fn residual(neigh: &[[f64; 3]], template: &[[f64; 3]]) -> f64 {
+    let m = template.len();
+    if neigh.len() != m || m == 0 {
+        return f64::INFINITY;
+    }
+    let first = match normalise(neigh[0]) {
+        Some(v) => v,
+        None => return f64::INFINITY,
+    };
+    let mut best = f64::INFINITY;
+    for t in template.iter() {
+        let tv = match normalise(*t) {
+            Some(v) => v,
+            None => continue,
+        };
+        let base = align(tv, first);
+        // A spin about the now-fixed direction, since aligning one pair leaves
+        // one angle free.
+        for k in 0..6 {
+            let spin = rotation_about(first, k as f64 * std::f64::consts::TAU / 6.0);
+            let r = matmul(&spin, &base);
+            let v = icp(neigh, template, r);
+            if v < best {
+                best = v;
+            }
+        }
     }
     best
 }
