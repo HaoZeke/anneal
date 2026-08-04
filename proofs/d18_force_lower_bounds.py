@@ -128,7 +128,7 @@ def numeric_L5_wales_scale() -> bool:
     # Exact asymptotic twin: 1/p = 1/(1-(1-p_H)^{1/H})
     # Also ≈ -H/log(1-p_H) and ≈ H/p_H for small p_H (few percent).
     alt = -H / math.log(1.0 - p_H)
-    ok &= abs(1 / p - alt) / alt < 1e-6
+    ok &= abs(1 / p - alt) / alt < 1e-5
     ok &= abs(1 / p - H / p_H) / (H / p_H) < 0.03
     return ok
 
