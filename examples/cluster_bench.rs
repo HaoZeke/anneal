@@ -289,6 +289,15 @@ fn main() {
         deepest = deepest.min(out.best);
         total_charged += ledger.spent();
         total_hops += out.hops;
+        for (name, draws, accepts, best) in &out.arms {
+            if *draws > 0 {
+                println!(
+                    "    arm {name:<14} draws {draws:>7}  accepts {accepts:>7} ({:.3})  best {:.4}",
+                    *accepts as f64 / *draws as f64,
+                    best
+                );
+            }
+        }
         println!(
             "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  \
              charged screen {} full {} check {} ({:.0}% screen)  accept {:.3}  qsteps {:.1}  probe {} at {:.1} err {:.4}  verified {}{}",

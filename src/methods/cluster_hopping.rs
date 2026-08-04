@@ -216,6 +216,19 @@ impl ClusterMove {
         v
     }
 
+    /// Short name, for per-arm reporting.
+    pub fn name(&self) -> String {
+        match self {
+            ClusterMove::AllPoints { .. } => "all".into(),
+            ClusterMove::SinglePoint { .. } => "single".into(),
+            ClusterMove::SurfaceRelocate(_) => "surface".into(),
+            ClusterMove::ShellRotate(_) => "shell".into(),
+            ClusterMove::Symmetrise(_) => "sym".into(),
+            ClusterMove::Angular { .. } => "angular".into(),
+            ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
+        }
+    }
+
     /// Draws a proposal from whichever kernel this is.
     pub fn propose<R: Rng + ?Sized>(
         &self,
@@ -989,6 +1002,8 @@ pub struct Outcome {
     pub swaps_tried: usize,
     /// Hops the acceptance rule took, before any veto.
     pub accepted: usize,
+    /// Per-arm draws, accepts and best quenched value, in library order.
+    pub arms: Vec<(String, usize, usize, f64)>,
     /// Swaps accepted.
     pub swaps_accepted: usize,
     /// Paths attempted after a stall.
@@ -1249,6 +1264,14 @@ fn run_full<'g, R: Rng + ?Sized>(
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
     let mut allocator = FlooredThompson::new(kernels.len());
+    // Per-arm draws and accepts. The crate's own methods note says a solve
+    // count cannot tell a mechanism that works poorly from one that does not
+    // run, and a move set is exactly where that applies: an arm the allocator
+    // learns to avoid and an arm that fires and is always rejected produce the
+    // same total.
+    let mut arm_draws = vec![0usize; kernels.len()];
+    let mut arm_accepts = vec![0usize; kernels.len()];
+    let mut arm_best = vec![f64::INFINITY; kernels.len()];
     // The temperature is the law rather than a setting: the design point
     // clamped between the sphere-model descent ceiling and the birth-death
     // escape floor, with the barrier estimated from the uphill steps the chain
@@ -1644,6 +1667,11 @@ fn run_full<'g, R: Rng + ?Sized>(
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
             allocator.update(k, improved || accept);
+            arm_draws[k] += 1;
+            if accept {
+                arm_accepts[k] += 1;
+            }
+            arm_best[k] = arm_best[k].min(e_new);
         }
         if accept && cfg.calibrate_radius {
             // How far this hop actually moved, in the metric the bias keys on.
@@ -2084,6 +2112,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         },
         swaps_tried,
         accepted,
+        arms: kernels
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (k.name(), arm_draws[i], arm_accepts[i], arm_best[i]))
+            .collect(),
         swaps_accepted,
         paths: paths_run,
         path_escapes,
