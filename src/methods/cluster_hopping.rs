@@ -497,11 +497,20 @@ pub struct Config {
     /// hops split into two parts with few edges between them and the chain sits
     /// in one, that is a funnel and not slow progress.
     ///
-    /// Reported rather than steered on, for now. It costs an
-    /// eigendecomposition of a matrix the size of the basin count, so it is
-    /// refitted on a schedule. See [`crate::funnel_spectral`].
+    /// Steer with spectral (Fiedler) well-tempered bias on the hop graph.
+    ///
+    /// When true, accepted hops build a transition graph on basin identity
+    /// (the same fingerprint as the per-basin bias; with `ira` and
+    /// [`Keying::Canonical`] that identity is IRA, not SortedPairs). The
+    /// second eigenvector of the normalised Laplacian is the continuous CV
+    /// for an extra well-tempered bias ([`crate::spectral::SpectralBias`]).
+    /// That is the algorithm: identity supplies resolution, the spectrum
+    /// supplies the funnel coordinate — no hand-chosen Q4. Refits cost an
+    /// eigendecomposition of a matrix the size of the basin count, on a
+    /// schedule ([`Config::funnel_period`]). See [`crate::funnel_spectral`]
+    /// and [`crate::spectral`].
     pub track_funnels: bool,
-    /// Hops between refits of the funnel partition.
+    /// Accepted hops between Laplacian refits / Fiedler updates.
     pub funnel_period: usize,
     /// Symmetrise onto the symmetry the structure nearly has, on a stall.
     ///
@@ -897,6 +906,8 @@ pub struct Outcome {
     pub rungs: Vec<(f64, usize, f64)>,
     /// Swap attempts between adjacent replicas.
     pub swaps_tried: usize,
+    /// Hops the acceptance rule took, before any veto.
+    pub accepted: usize,
     /// Swaps accepted.
     pub swaps_accepted: usize,
     /// Paths attempted after a stall.
@@ -1200,6 +1211,24 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut tabu_hits = 0usize;
     let mut funnels = crate::funnel_spectral::FunnelSpectrum::new();
     let mut funnel_split: Option<crate::funnel_spectral::Partition> = None;
+    // Spectral funnel bias: same fingerprint as the discrete basin bias, CV =
+    // Fiedler coordinate of the accepted-hop graph. Only allocated when
+    // track_funnels is on so a plain run pays nothing.
+    let mut spectral: Option<crate::spectral::SpectralBias<ClusterFingerprint>> =
+        if cfg.track_funnels {
+            let mut sb = crate::spectral::SpectralBias::new(
+                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                cfg.merge_radius,
+                cfg.bias_height,
+                cfg.bias_gamma,
+                0.35,
+            );
+            sb.refit_every = cfg.funnel_period.max(8);
+            sb.min_nodes = 8;
+            Some(sb)
+        } else {
+            None
+        };
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -1244,6 +1273,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     }
     let mut screened_out = 0usize;
     let mut returned = 0usize;
+    let mut accepted = 0usize;
     let mut hops = 0usize;
 
     loop {
@@ -1427,7 +1457,21 @@ fn run_full<'g, R: Rng + ?Sized>(
         // re-enters filled basins freely. Measured: MH accepting on raw delta
         // solved 1 of 4 LJ38 seeds at 400k where the biased Metropolis path
         // solved the same seed in ~10k hops.
-        let delta = (e_new + bias.potential(s_new.view())) - (e + bias.potential(s_old.view()));
+        //
+        // When track_funnels is on, the spectral term is well-tempered MetaD
+        // on the Fiedler coordinate of the hop graph (SpectralBias): it fills
+        // the *funnel* the chain is stuck in, not only the current basin.
+        let v_old = bias.potential(s_old.view())
+            + spectral
+                .as_ref()
+                .map(|sp| sp.potential(sp.cv(x.view()).view()))
+                .unwrap_or(0.0);
+        let v_new = bias.potential(s_new.view())
+            + spectral
+                .as_ref()
+                .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
+                .unwrap_or(0.0);
+        let delta = (e_new + v_new) - (e + v_old);
         let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
             if unquenched {
@@ -1449,6 +1493,15 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
+        // Counted before the tabu veto, so the figure describes the acceptance
+        // rule rather than the rule plus whatever the veto happens to remove.
+        // White and Mayne report plain basin hopping running near a half, and
+        // the temperature that produces it is the parameter every other
+        // mechanism here sits downstream of; it has never been measured in this
+        // driver.
+        if accept {
+            accepted += 1;
+        }
         // A quarantined funnel is refused whatever the energy. Checked after
         // the acceptance test rather than instead of it, so the veto is
         // visible as a veto rather than folded into the rule.
@@ -1553,6 +1606,12 @@ fn run_full<'g, R: Rng + ?Sized>(
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+        // Graph edge + Fiedler deposit at the chain's current basin. Called
+        // every hop (accepted or not) so the coordinate tracks occupation;
+        // only accepted moves grow the graph (visit records last→current).
+        if let Some(sp) = spectral.as_mut() {
+            sp.visit(x.view(), temperature);
+        }
 
         // A climb out of the funnel, when nothing else is working.
         //
@@ -1939,6 +1998,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             all
         },
         swaps_tried,
+        accepted,
         swaps_accepted,
         paths: paths_run,
         path_escapes,
@@ -2195,6 +2255,28 @@ mod tests {
         let out = optimize(&cfg, &mut ledger, &mut relax, 0);
         assert!(out.charged <= 500, "spent {} of 500", out.charged);
         assert_eq!(ledger.remaining(), 0, "a run should spend its budget");
+    }
+
+    #[test]
+    fn spectral_funnel_bias_runs_under_the_ledger() {
+        // track_funnels must not change the charge contract: SpectralBias is an
+        // extra term on the Metropolis delta and a graph update on hop identity,
+        // not a second force evaluation.
+        let mut cfg = Config::for_cluster(6);
+        cfg.track_funnels = true;
+        cfg.funnel_period = 8;
+        let mut ledger = Ledger::new(1500);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 11);
+        assert!(out.charged <= 1500, "spent {} of 1500", out.charged);
+        assert_eq!(ledger.remaining(), 0, "a funnel-biased run must still empty the ledger");
+        assert!(out.hops > 0, "no hop completed under spectral bias");
+        assert!(
+            out.accepted <= out.hops,
+            "accepted {} > hops {}",
+            out.accepted,
+            out.hops
+        );
     }
 
     #[test]

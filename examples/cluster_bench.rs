@@ -123,6 +123,9 @@ fn main() {
     cfg.return_screen = opts.contains(&"rscreen");
     cfg.adaptive_screen = opts.contains(&"aq");
     cfg.probe_screen = opts.contains(&"probe");
+    if let Ok(v) = std::env::var("TEMP") {
+        cfg.temperature = v.parse().unwrap_or(0.8);
+    }
     if let Ok(v) = std::env::var("QUENCH_WARMUP") {
         cfg.quench_warmup = v.parse().unwrap_or(4);
     }
@@ -283,7 +286,7 @@ fn main() {
         total_hops += out.hops;
         println!(
             "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  \
-             charged screen {} full {} check {} ({:.0}% screen)  qsteps {:.1}  probe {} at {:.1} err {:.4}  verified {}{}",
+             charged screen {} full {} check {} ({:.0}% screen)  accept {:.3}  qsteps {:.1}  probe {} at {:.1} err {:.4}  verified {}{}",
             out.best,
             out.hops,
             out.basins,
@@ -295,6 +298,7 @@ fn main() {
             stats.full_charged,
             stats.check_charged,
             100.0 * stats.screen_share(),
+            out.accepted as f64 / out.hops.max(1) as f64,
             stats.screen_steps_taken as f64 / stats.screens.max(1) as f64,
             stats.probe_stops,
             stats.probe_steps as f64 / stats.probe_stops.max(1) as f64,
