@@ -285,10 +285,36 @@ impl WarmLbfgs {
         &mut self,
         x0: ArrayView1<f64>,
         max_iter: usize,
-        mut fg: F,
+        fg: F,
     ) -> (f64, Array1<f64>, usize)
     where
         F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        self.minimize_watched(x0, max_iter, fg, |_, _| true)
+    }
+
+    /// Relaxes `x0`, offering each accepted iterate to `watch`.
+    ///
+    /// `watch` receives the iteration index and the value at that iterate, and
+    /// returning `false` ends the relaxation there. The point is a caller that
+    /// stops on a decision rather than on an iteration count: a screening pass
+    /// exists to answer one question, and the trajectory it produces says when
+    /// the answer is settled.
+    ///
+    /// The hook sits at the top of the iteration, not inside the line search,
+    /// so what it sees is always an accepted point with its value and gradient
+    /// consistent. Stopping mid-search would return a trial step the optimizer
+    /// had not adopted.
+    pub fn minimize_watched<F, W>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        max_iter: usize,
+        mut fg: F,
+        mut watch: W,
+    ) -> (f64, Array1<f64>, usize)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+        W: FnMut(usize, f64) -> bool,
     {
         let mut x = x0.to_owned();
         let mut evals = 0usize;
@@ -298,7 +324,10 @@ impl WarmLbfgs {
         };
         evals += 1;
 
-        for _ in 0..max_iter {
+        for it in 0..max_iter {
+            if !watch(it, f) {
+                break;
+            }
             if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < self.gtol {
                 break;
             }
@@ -340,6 +369,42 @@ impl WarmLbfgs {
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    /// The watched form has to agree with the plain one when the hook never
+    /// stops it, or every measurement taken through one does not describe the
+    /// other.
+    #[test]
+    fn watching_without_stopping_changes_nothing() {
+        let x0 = Array1::from(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        let mut a = WarmLbfgs::default();
+        let (fa, xa, ea) = a.minimize(x0.view(), 50, |v| Some(quad(v)));
+        let mut b = WarmLbfgs::default();
+        let (fb, xb, eb) = b.minimize_watched(x0.view(), 50, |v| Some(quad(v)), |_, _| true);
+        assert_eq!(ea, eb);
+        assert_eq!(fa, fb);
+        assert_eq!(xa, xb);
+    }
+
+    /// And it has to actually stop, at an accepted point rather than a trial
+    /// step: the value handed back must be the one the hook last saw.
+    #[test]
+    fn a_hook_that_refuses_stops_at_an_accepted_point() {
+        let x0 = Array1::from(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]);
+        let mut opt = WarmLbfgs::default();
+        let mut seen = Vec::new();
+        let (f, _, _) = opt.minimize_watched(
+            x0.view(),
+            50,
+            |v| Some(quad(v)),
+            |it, fv| {
+                seen.push(fv);
+                it < 3
+            },
+        );
+        assert_eq!(seen.len(), 4, "hook saw {} iterates", seen.len());
+        assert_eq!(f, *seen.last().unwrap());
+        assert!(f > 1e-10, "stopped hook still ran to convergence");
+    }
 
     /// Ill-conditioned quadratic: the case where curvature reuse should pay.
     fn quad(x: ArrayView1<f64>) -> (f64, Array1<f64>) {

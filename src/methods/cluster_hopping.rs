@@ -488,6 +488,21 @@ pub struct Config {
     pub escape_stall_patience: usize,
     /// Multiple of the longest quiet stretch so far that counts as stuck.
     pub escape_stall_factor: f64,
+    /// Track the funnel partition the search's own transitions imply.
+    ///
+    /// A stall is currently detected from energy: so many hops without a new
+    /// best. That conflates two situations a search should treat differently, a
+    /// chain polishing inside a region it can leave, and a chain that cannot
+    /// leave at all. The transition graph tells them apart: when the accepted
+    /// hops split into two parts with few edges between them and the chain sits
+    /// in one, that is a funnel and not slow progress.
+    ///
+    /// Reported rather than steered on, for now. It costs an
+    /// eigendecomposition of a matrix the size of the basin count, so it is
+    /// refitted on a schedule. See [`crate::funnel_spectral`].
+    pub track_funnels: bool,
+    /// Hops between refits of the funnel partition.
+    pub funnel_period: usize,
     /// Symmetrise onto the symmetry the structure nearly has, on a stall.
     ///
     /// Oakley, Johnston and Wales report the mean first encounter time for the
@@ -681,6 +696,15 @@ pub struct Config {
     pub screen_margin: f64,
     /// Relaxation steps in the screening pass.
     pub screen_steps: usize,
+    /// Whether the screening pass stops on a decision instead of `screen_steps`.
+    ///
+    /// The fixed length is where the budget goes: measured on 38 points, 89 to
+    /// 92 per cent of charged evaluations were spent screening, against 8 per
+    /// cent on the relaxations that screening exists to avoid. Every mechanism
+    /// in this crate that tried to change *where* the chain goes was measured
+    /// and failed; this one changes what a hop costs, which is the axis the
+    /// only successful mechanism so far, the return screen, also moved.
+    pub adaptive_screen: bool,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
     /// Container half-width, applied when a move is generated.
@@ -725,6 +749,8 @@ impl Config {
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
+            track_funnels: false,
+            funnel_period: 20_000,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
             symmetrise_patience: 2_000,
@@ -755,6 +781,7 @@ impl Config {
             height_revisits: 4.0,
             screen_margin: 2.0,
             screen_steps: 25,
+            adaptive_screen: false,
             relax_steps: 200,
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
@@ -826,6 +853,12 @@ pub struct Outcome {
     pub screen: (usize, usize, usize, usize),
     /// Funnels quarantined, and proposals refused for landing in one.
     pub tabu: (usize, usize),
+    /// The funnel partition at the end of the run: parts, and how separated.
+    ///
+    /// A connectivity near zero means the search's transitions split into two
+    /// nearly disconnected sets, which is what a funnel boundary looks like
+    /// from the inside.
+    pub funnel: Option<(usize, usize, f64)>,
     /// Symmetrisations attempted, and the energy they gained.
     pub symmetrised: (usize, f64),
     /// Restarts triggered by a stall.
@@ -1146,6 +1179,8 @@ fn run_full<'g, R: Rng + ?Sized>(
     );
     let mut tabu: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
+    let mut funnels = crate::funnel_spectral::FunnelSpectrum::new();
+    let mut funnel_split: Option<crate::funnel_spectral::Partition> = None;
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -1358,6 +1393,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             None
         };
 
+        // Where the chain stands before the acceptance test, so an accepted
+        // hop can be recorded as an edge from here to there. Taken only when
+        // the tracker is on, since it costs a descriptor and a lookup.
+        let here_before = if cfg.track_funnels {
+            Some(*here.get_or_insert_with(|| identity.basin_of(x.view())))
+        } else {
+            None
+        };
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
         // Biased rise. The bias is part of the landscape the chain walks; a
@@ -1513,6 +1556,21 @@ fn run_full<'g, R: Rng + ?Sized>(
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        if cfg.track_funnels {
+            // Accepted hops only. A rejected proposal says the chain declined
+            // to move, which is a statement about the acceptance rule rather
+            // than about reachability.
+            if accept {
+                if let Some(prev) = here_before {
+                    let now = identity.basin_of(x.view());
+                    funnels.record(prev, now);
+                    here = Some(now);
+                }
+            }
+            if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
+                funnel_split = funnels.split().ok();
+            }
+        }
         if cfg.symmetrise_on_stall && stuck {
             // The stall counter is cleared here, not only in the escape
             // branches below. Without it a stuck chain satisfies the condition
@@ -1827,6 +1885,10 @@ fn run_full<'g, R: Rng + ?Sized>(
             screen.observations(),
         ),
         tabu: (tabu.len(), tabu_hits),
+        funnel: funnel_split.as_ref().map(|p| {
+            let (a, b) = p.sizes();
+            (a, b, p.connectivity)
+        }),
         symmetrised: (symmetrised, symmetry_gain),
         restarts,
         merge_radius: final_radius,

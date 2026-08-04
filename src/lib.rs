@@ -53,6 +53,7 @@ pub mod path;
 pub mod potentials;
 pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
+pub mod quench;
 pub mod screen;
 pub mod spectral;
 pub mod structure;
