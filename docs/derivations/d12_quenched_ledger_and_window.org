@@ -1,0 +1,113 @@
+#+TITLE: D12: Quenched force ledger, emptiness, bias reopening
+#+OPTIONS: toc:2 num:t
+
+Parents: D6 (descent), D7 (escape), D11 (BFWT). Executable:
+=proofs/d12_quenched_ledger_and_window.py=.
+
+* Proposition A (window emptiness)
+
+Let \(g=f-f_{\mathrm{best}}>0\), dimension \(d\ge 1\), remaining work \(B\ge 0\),
+barrier proxy \(b\ge 0\), and \(e=\mathrm{e}\). Define
+\[
+T_{\mathrm{hi}}=\frac{2g}{d},\qquad
+T_{\mathrm{lo}}=\frac{b}{\ln(B+e)},\qquad
+b_{\max}(g,d,B)=\frac{2g\ln(B+e)}{d}.
+\]
+Then
+\[
+T_{\mathrm{lo}}<T_{\mathrm{hi}}
+\;\Longleftrightarrow\;
+b\,d < 2g\ln(B+e)
+\;\Longleftrightarrow\;
+b < b_{\max}(g,d,B).
+\]
+When the inequality fails the D6∩D7 window is empty: no single Metropolis
+temperature simultaneously satisfies the D6 descent ceiling and the D7
+escape floor.
+
+*Proof.* Cross-multiply positive quantities \(d\) and \(\ln(B+e)\). \(\square\)
+
+**Corollary (emptiness ratio).** \(r=b/b_{\max}\). The window is empty iff
+\(r>1\).
+
+**LJ75 plateau plug-in (literature \(b\), campaign \(g\)).**
+With \(b=8.69\), \(g=1.21\), \(d=225\), \(B=3\cdot 10^{6}\),
+\[
+b_{\max}\approx 0.160,\qquad r\approx 54.2,\qquad
+T_{\mathrm{lo}}\approx 0.583,\qquad T_{\mathrm{hi}}\approx 0.0108.
+\]
+The window is empty by more than an order of magnitude. Increasing \(B\) to
+\(10^{7}\) changes only the logarithm. Even \(g=50\) still yields
+\(b_{\max}\approx 6.63<8.69\).
+
+* Proposition B (force ledger on independent hops)
+
+Suppose each hop (proposal + local minimization to a new quenched minimum)
+charges \(Q\ge 0\) force evaluations in expectation, and successive hops
+succeed independently with probability \(p\in(0,1]\) (success = landing the
+target global minimum under the protocol). Let \(N\sim\mathrm{Geo}(p)\) on
+\(\{1,2,\ldots\}\). Then
+\[
+\mathbb{E}[N]=\frac{1}{p},\qquad
+\mathbb{E}[\text{force to first success}]=\frac{Q}{p}.
+\]
+
+*Proof.* \(\mathbb{E}[N]=\sum_{k\ge 1}k(1-p)^{k-1}p=1/p\); linearity. \(\square\)
+
+**Fixed multi-seed budget.** \(n\) seeds each run \(H\) hops:
+\[
+\text{force}=n\,H\,Q.
+\]
+If each seed has success probability \(p\) independently,
+\[
+\mathbb{P}(\text{at least one success})=1-(1-p)^{n}.
+\]
+
+These identities convert hop-success rates (Wales–Doye style) into force
+units under a charged ledger without new physical assumptions.
+
+* Proposition C (bias reopening)
+
+If a history-dependent bias reduces the *effective* barrier to \(b/\gamma\)
+with \(\gamma\ge 1\) (well-tempered MetaD depth factor in the D7 commentary),
+then the window is nonempty iff
+\[
+\frac{b}{\gamma}<b_{\max}(g,d,B)
+\;\Longleftrightarrow\;
+\gamma>\gamma_{*}:=\frac{b}{b_{\max}(g,d,B)}=\frac{b\,d}{2g\ln(B+e)}.
+\]
+On the LJ75 plateau numbers, \(\gamma_{*}\approx 54\). A collective-variable
+bias that does not reduce effective inter-funnel depth cannot reopen the
+window, regardless of schedule.
+
+* Effective dimension (link to D6 anisotropy)
+
+For \(f=x^{\top}Hx/2\) and an *isotropic* proposal, the small-step critical
+temperature is \(T_c=x^{\top}H^{2}x/\mathrm{tr}H\), which collapses along
+soft modes by a factor of order \(d/\kappa\). A proposal covariance
+proportional to \(H^{-1}\) whitens the quadratic and restores
+\(T_c=2f/d\) (\(\theta_c=2\)). Ambient coordinate dimension \(3N\) is not
+the right \(d\) for D6 once the chain lives in a soft subspace; covariance
+adaptation is the mechanism that restores the sphere ceiling. This does
+**not** reopen a multi-funnel barrier of height \(b\gg b_{\max}\); it only
+repairs local descent inside a basin.
+
+* What D12 does not claim
+
+- That \(b=8.69\) or \(g=1.21\) are re-derived here (inputs from literature /
+  campaign CSV).
+- That continuous Metropolis on the raw LJ potential equals quenched BH.
+- That Good–Turing discovery (D9) predicts Marks rates under funnel structure.
+- A rate theorem for CSA or MH; those remain operator + measurement claims.
+
+* Software
+
+| Function | Role |
+|----------|------|
+| =b_max=, =emptiness_ratio= | Prop A |
+| =expected_force_to_first_success= | Prop B geometric |
+| =expected_force_fixed_hop_budget= | Prop B multi-seed |
+| =gamma_min= | Prop C |
+| =LJ75_PLATEAU= table row | Deposit anchors |
+
+Witness: =WITNESS= and =pytest proofs/tests/test_d12_quenched_ledger_and_window.py=.
