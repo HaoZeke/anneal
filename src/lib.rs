@@ -48,6 +48,7 @@ pub mod noise_accept;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
+pub mod potentials;
 pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod screen;
