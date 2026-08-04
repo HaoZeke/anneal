@@ -61,12 +61,13 @@ def derive() -> None:
     g_n = g_qv_numerator(dx, T, q_v, D)
     print("Theorem 1: BSA Gaussian limit of GSA visiting distribution")
     print("  target           =", target)
-    print("  denominator form =", g_d)
+    print("  denominator form (correct Tsallis bracket) =", g_d)
     print("    limit q_v->1+  =", sp.limit(g_d, q_v, 1, "+"))
-    print("    witness        =", witness_for("denominator"))
-    print("  numerator form   =", g_n)
+    print("    witness (must be True)  =", witness_for("denominator"))
+    print("  numerator form (sign-error negative test) =", g_n)
     print("    limit q_v->1+  =", sp.limit(g_n, q_v, 1, "+"))
-    print("    witness        =", witness_for("numerator"))
+    print("    witness (must be False) =", witness_for("numerator"))
+    print("  WITNESS (module, denominator only) =", WITNESS)
 
 
 if __name__ == "__main__":
