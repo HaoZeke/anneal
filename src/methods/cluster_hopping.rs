@@ -216,6 +216,22 @@ impl ClusterMove {
         v
     }
 
+    /// The library with a single growth arm, for when a posterior picks the
+    /// construction.
+    ///
+    /// Five arms are five arms only while the arm decides what is built. Once
+    /// the constructor chooses the source itself, the labels no longer describe
+    /// the proposals, and the allocator is estimating five accept rates for one
+    /// move from evidence that has been shuffled between them.
+    pub fn library_with_learned_reseed(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library(n);
+        v.push(ClusterMove::Reseed {
+            n_points: n,
+            source: crate::lattice::Source::Observed,
+        });
+        v
+    }
+
     /// Short name, for per-arm reporting.
     pub fn name(&self) -> String {
         match self {
@@ -799,6 +815,19 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Whether a posterior chooses the growth move's parameters.
+    ///
+    /// The allocator decides which move to draw. This decides what the move
+    /// builds: which local order and how much of the current structure to keep.
+    /// Held on the construction rather than on the arm because that is where a
+    /// model can change what a hop reaches; the allocator's own arms carry
+    /// thousands of draws each and separate a 0.63 accept rate from a 0.00 one
+    /// without help. See [`crate::construct`].
+    pub learn_construction: bool,
+    /// Candidates built and scored per growth proposal.
+    ///
+    /// Costs no charged evaluations, since scoring is structural.
+    pub construct_width: usize,
     /// Whether the move set includes growing a candidate from local order.
     ///
     /// The only proposals here that cross a funnel boundary in one step. Every
@@ -900,6 +929,8 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            learn_construction: false,
+            construct_width: 4,
             reseed_moves: false,
             probe_screen: false,
             quench_warmup: 4,
@@ -1255,7 +1286,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.reseed_moves {
+    let kernels = if cfg.learn_construction {
+        ClusterMove::library_with_learned_reseed(n)
+    } else if cfg.reseed_moves {
         ClusterMove::library_with_reseed(n)
     } else {
         ClusterMove::library(n)
@@ -1272,6 +1305,17 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut arm_draws = vec![0usize; kernels.len()];
     let mut arm_accepts = vec![0usize; kernels.len()];
     let mut arm_best = vec![f64::INFINITY; kernels.len()];
+    // A posterior over what to build, consulted when a growth move is drawn.
+    // The allocator decides which move; this decides the move's parameters,
+    // which is the one place a model can change what a hop reaches rather than
+    // where it goes. Costs no charged evaluations: candidates are built and
+    // featured without calling the objective.
+    let mut constructor = if cfg.learn_construction {
+        Some(crate::construct::Constructor::new(cfg.construct_width))
+    } else {
+        None
+    };
+    let mut pending_features: Option<Array1<f64>> = None;
     // The temperature is the law rather than a setting: the design point
     // clamped between the sphere-model descent ceiling and the birth-death
     // escape floor, with the barrier estimated from the uphill steps the chain
@@ -1444,7 +1488,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             angular_tried += 1;
             ClusterMove::Angular { n_points: n }.propose(x.view(), cfg.temperature, rng)
         } else {
-            kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng)
+            match (&mut constructor, &kernels[k]) {
+                (Some(c), ClusterMove::Reseed { n_points, .. }) => {
+                    let (cand, f) = c.propose(x.view(), *n_points, rng);
+                    pending_features = Some(f);
+                    cand
+                }
+                _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+            }
         };
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
@@ -1672,6 +1723,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 arm_accepts[k] += 1;
             }
             arm_best[k] = arm_best[k].min(e_new);
+            // The quench the construction actually reached, which is the only
+            // feedback the posterior gets and the reason it costs nothing
+            // extra: this relaxation was paid for by the move regardless.
+            if let (Some(c), Some(f)) = (&mut constructor, pending_features.take()) {
+                c.observe(f.view(), e_new, e);
+            }
         }
         if accept && cfg.calibrate_radius {
             // How far this hop actually moved, in the metric the bias keys on.
