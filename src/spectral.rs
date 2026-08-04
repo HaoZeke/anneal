@@ -181,7 +181,7 @@ pub fn laplacian_embedding(
 }
 
 /// Basins visited, and the transitions observed between them.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct TransitionGraph {
     edges: BTreeMap<(usize, usize), f64>,
     nodes: BTreeSet<usize>,
