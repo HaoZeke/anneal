@@ -233,12 +233,19 @@ fn main() {
         let verified = out.best_state.as_ref().map(|x| {
             assert_eq!(x.len(), 3 * n, "seed {seed} returned {} coordinates", x.len());
             let (e, g) = pot.eval(x.view());
+            let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+            // A minimum, not merely a structure carrying the reported energy.
+            assert!(
+                gmax < 1e-3,
+                "seed {seed} returned a structure with gradient {gmax:.2e}, \
+                 which is not a minimum"
+            );
             assert!(
                 (e - out.best).abs() < 1e-6,
                 "seed {seed} reported {:.6} but its structure is {e:.6}",
                 out.best
             );
-            (e, g.iter().fold(0.0_f64, |a, v| a.max(v.abs())))
+            (e, gmax)
         });
         let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
         if hit {

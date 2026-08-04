@@ -1276,7 +1276,16 @@ fn run_full<'g, R: Rng + ?Sized>(
             // Refusing is what "screened" means here: the posterior says
             // finishing this relaxation is unlikely to improve on the
             // incumbent, so the evaluations go elsewhere.
-            !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
+            //
+            // Never refused while the partial energy already beats the
+            // incumbent, whatever the posterior says. A screened structure has
+            // not been relaxed, so recording one as the run's best reports a
+            // point that is not a minimum. The margin screen cannot do this,
+            // because it refuses only above `best + margin`; a posterior has no
+            // such guarantee, and a run of this arm returned a structure whose
+            // gradient was 0.31 where every other arm returns about 1e-6.
+            e_screen >= ledger.best
+                && !screen.decide(feats.view(), ledger.best, rng.random::<f64>())
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
