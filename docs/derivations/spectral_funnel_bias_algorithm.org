@@ -1,0 +1,82 @@
+#+TITLE: Spectral funnel bias (algorithm, as wired)
+#+OPTIONS: toc:2 num:t
+
+* What it is
+
+Not a restart heuristic and not Kabsch. The search already produces a
+weighted digraph \(G=(V,E)\) of *basins* (vertices = fingerprint classes;
+edges = accepted hops). The normalised graph Laplacian \(L\) has eigenvalues
+\(0=\lambda_1\le\lambda_2\le\cdots\). The Fiedler vector \(v_2\) (eigenvector
+for \(\lambda_2\)) is the continuous coordinate that varies slowly inside a
+tightly connected component and jumps across a cut. Algebraic connectivity
+\(\lambda_2\) is small precisely when that cut is a funnel boundary
+(Cameron-style network reading of multi-funnel landscapes).
+
+**Algorithm SFB (spectral funnel bias)**
+
+1. **Identity.** Map configuration \(x\) to a basin id by a fingerprint
+   (with feature `ira` and `Keying::Canonical`: one IRA match per hop to a
+   fixed reference, then Euclidean merge — *not* SortedPairs). SOFI is for
+   continuous symmetry residuals on a chosen axis; IRA is for basin
+   correspondence. Do not replace either with ad-hoc alignment.
+
+2. **Graph.** On each accepted hop \(i\to j\) with \(i\neq j\), add weight 1
+   to edge \((i,j)\).
+
+3. **Spectrum.** Every \(T\) such edges (or when \(|V|\) grows enough),
+   recompute the embedding: Jacobi eigensolve of the normalised Laplacian
+   of the connected component used by `laplacian_embedding`. Standardise
+   the Fiedler coordinate so its empirical scale does not shrink as
+   \(|V|\) grows.
+
+4. **Bias.** Well-tempered MetaD on the Fiedler coordinate \(s(x)=v_2(i(x))\):
+   \[
+   w_k = w_0\exp\bigl(-V_{k-1}(s_k)/((\gamma-1)T)\bigr),\quad
+   V \mathrel{+}= w_k\,\mathcal{N}(s_k,\sigma^2).
+   \]
+   Metropolis (or MH threshold) uses \(E(x)+V_{\mathrm{basin}}(x)+V_{\mathrm{Fiedler}}(s(x))\).
+
+5. **Cost.** One dense eigenproblem of size \(n_{\mathrm{basins}}\) every
+   \(T\) hops — not every force evaluation. Basin identity cost is one IRA
+   canonicalisation per hop when using Canonical keying, not one IRA call
+   per bank comparison.
+
+* Why this is the algorithm (not a guess CV)
+
+| Object | Role |
+|--------|------|
+| Q4 / Steinhardt | Fixed morphology guess; gap 0.023 on LJ75, thinner than deposition width |
+| SortedPairs | Cheap; merge radius knife-edge at N=75 |
+| IRA Hausdorff / Canonical | Length-scale basin identity (library) |
+| SOFI axis residual | Continuous “distance to having Cₙ”; not a point-group label |
+| **Fiedler of hop graph** | Funnel coordinate *defined by reachability the run actually saw* |
+
+The paper claim is: under a charged force ledger, the multi-funnel CV is
+not hand-chosen; it is the spectral embedding of the observed transition
+graph, with basin nodes identified by IRA when available.
+
+* Code
+
+| Piece | Location |
+|-------|----------|
+| Laplacian + Fiedler | `src/spectral.rs` (`laplacian_embedding`, Jacobi) |
+| `SpectralBias` | `src/spectral.rs` |
+| Driver wire | `Config::track_funnels` in `cluster_hopping.rs` (potential + `visit`) |
+| Partition diagnostic | `funnel_spectral.rs` |
+
+* Enable
+
+```rust
+let mut cfg = Config::for_cluster(n);
+cfg.track_funnels = true;
+cfg.funnel_period = 64; // refit schedule
+// with ira:
+cfg.keying = Keying::Canonical;
+```
+
+* What this is not
+
+- Not multi-start / plateau if-statements.
+- Not reimplementing IRA/SOFI.
+- Not a proof that LJ75 is solved; it is the correct *mathematical object*
+  for funnel-aware bias on this landscape, now actually driving Metropolis.
