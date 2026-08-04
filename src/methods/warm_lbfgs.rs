@@ -10,20 +10,30 @@
 //! # Measured status
 //!
 //! On a 75-point Lennard-Jones cluster, 400 relaxations from perturbed minima
-//! with overlapping pairs repaired first:
+//! with overlapping pairs repaired first, against SciPy's L-BFGS-B on the
+//! identical protocol:
 //!
-//! | arm  | evals per relaxation | worst final `|g|` |
-//! |------|---------------------|-------------------|
-//! | cold | 4610                | 7.6               |
-//! | warm | 3389                | 9.7               |
+//! | arm            | evals per relaxation | worst final `|g|` |
+//! |----------------|----------------------|-------------------|
+//! | cold           | 386.1                | 1.45e-5           |
+//! | warm           | 386.1                | 1.45e-5           |
+//! | L-BFGS-B       | 273                  | 1.43e-5           |
 //!
-//! Retaining curvature costs 1.36 times fewer evaluations, but both arms stop
-//! against the iteration cap with gradients around 8 rather than the 1e-6
-//! tolerance, and a reference L-BFGS-B relaxes the same problem in about 270
-//! evaluations. This implementation is therefore an order of magnitude off a
-//! production minimiser, and the warm-to-cold ratio compares two arms that both
-//! fail to converge. Treat it as unvalidated on real potentials: the quadratic
-//! tests below are the only supported claim.
+//! Both arms converge and cost 1.4 times a production minimiser. The deepest
+//! structure found over the 400 was -388.26 here against -386.84 for the
+//! reference, which is a property of which basins the perturbations landed in
+//! rather than of the minimisers.
+//!
+//! # The retained curvature does not survive, and the name is now vestigial
+//!
+//! Warm and cold agree to the last digit because the memory is empty at the
+//! end of every relaxation: 0 of 400 started with stored curvature. A
+//! relaxation terminates by line-search failure at a gradient near 1e-5,
+//! short of the 1e-6 tolerance, and that path discards the memory before
+//! returning. So the premise this type was built on, that curvature at a new
+//! start resembles curvature at the old minimum and is worth carrying, is not
+//! something this implementation tests. It is a correct L-BFGS whose warm
+//! start never engages.
 //!
 //! Two facts from building it do transfer. Backtracking that enforces only
 //! sufficient decrease produces curvature pairs describing curvature never
@@ -161,27 +171,51 @@ impl WarmLbfgs {
 
         let mut a_prev = 0.0;
         let mut f_prev = f0;
-        // The first trial step is scaled by the direction's size. Starting at
-        // one is right for a well-scaled problem and useless where the
-        // gradient is enormous: a Lennard-Jones configuration with two points
-        // nearly coincident carries a gradient near 1e13, twenty backtracks
-        // from one reach only 1e-6, the search fails, and the relaxation
-        // returns its starting point.
+        let mut slope_prev = slope;
+        // A quasi-Newton direction already carries the step length: the
+        // approximate inverse Hessian scales the gradient, so the unit step is
+        // the Newton step and trying anything else first discards the
+        // curvature the memory exists to hold. Nocedal and Wright state it as
+        // a rule, that alpha = 1 must always be tried first for Newton and
+        // quasi-Newton directions.
         //
-        // Measured against a reference minimiser on identical inputs, that is
-        // exactly what happened: on trials the reference relaxed to -146.7 and
-        // -168.0, this returned 3.8e8 and -4.1, having never left the start.
-        // It is the difference between a weak minimiser and one that does not
-        // run.
-        let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
-        let mut a = if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 };
+        // Scaling every trial by 1/||d|| instead cost a factor of twelve. Each
+        // iteration moved a distance of one through a 225-dimensional space
+        // whatever the curvature said, and a reference L-BFGS-B relaxed the
+        // same 400 perturbed 75-point structures in 273 evaluations each while
+        // this took 3389 and stopped against the iteration cap at a gradient
+        // near 8 rather than at its 1e-6 tolerance.
+        //
+        // The scaling is still right with no memory, where the direction is
+        // the raw negative gradient and carries no length information at all.
+        // A Lennard-Jones configuration with two points nearly coincident has
+        // a gradient near 1e13, and twenty backtracks from one reach only
+        // 1e-6, so the search fails and the relaxation returns its start.
+        let mut a = if self.memory.is_empty() {
+            let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
+            if dnorm > 1.0 {
+                1.0 / dnorm
+            } else {
+                1.0
+            }
+        } else {
+            1.0
+        };
         let mut lo = 0.0;
         let mut f_lo = f0;
         let mut slope_lo = slope;
         let mut hi = f64::NAN;
+        let mut f_hi = f64::NAN;
         let mut bracketed = false;
 
-        for i in 0..self.max_line_evals {
+        // Bracketing and zooming get their own budgets. Sharing one counter
+        // let a bracket that cost the whole allowance leave nothing for the
+        // zoom, so the search reported failure with a valid bracket in hand
+        // and the caller discarded the curvature memory in response.
+        let bracket_cap = self.max_line_evals;
+        let total_cap = 2 * self.max_line_evals;
+
+        for i in 0..bracket_cap {
             let (fa, ga) = match probe(a, fg, &mut evals) {
                 Some(v) => v,
                 None => return (false, evals),
@@ -190,7 +224,9 @@ impl WarmLbfgs {
             if fa > f0 + self.armijo * a * slope || (i > 0 && fa >= f_prev) {
                 lo = a_prev;
                 f_lo = f_prev;
+                slope_lo = slope_prev;
                 hi = a;
+                f_hi = fa;
                 bracketed = true;
                 break;
             }
@@ -204,11 +240,13 @@ impl WarmLbfgs {
                 f_lo = fa;
                 slope_lo = slope_a;
                 hi = a_prev;
+                f_hi = f_prev;
                 bracketed = true;
                 break;
             }
             a_prev = a;
             f_prev = fa;
+            slope_prev = slope_a;
             a *= 2.0;
         }
 
@@ -216,14 +254,19 @@ impl WarmLbfgs {
             return (false, evals);
         }
 
-        while evals < self.max_line_evals {
-            // Quadratic interpolant of the low end, clamped away from the
-            // bracket edges so the interval keeps shrinking.
+        while evals < total_cap {
+            // Quadratic interpolant through the low end's value and slope and
+            // the high end's value, clamped away from the bracket edges so the
+            // interval keeps shrinking. The high end's value is what the
+            // interpolant needs; using the bracketing phase's previous value
+            // collapsed the denominator to the slope term whenever the bracket
+            // came from the Armijo branch, since there the two are the same
+            // point.
             let width = hi - lo;
             let mut trial = lo + 0.5 * width;
-            let denom = 2.0 * (f_lo - f_prev + slope_lo * width);
+            let denom = 2.0 * (f_hi - f_lo - slope_lo * width);
             if denom.abs() > 1e-16 {
-                let q = lo + slope_lo * width * width / denom;
+                let q = lo - slope_lo * width * width / denom;
                 if (q - lo) / width > 0.1 && (q - lo) / width < 0.9 {
                     trial = q;
                 }
@@ -235,7 +278,7 @@ impl WarmLbfgs {
             let slope_t = d.dot(&gt);
             if ft > f0 + self.armijo * trial * slope || ft >= f_lo {
                 hi = trial;
-                f_prev = ft;
+                f_hi = ft;
             } else {
                 if slope_t.abs() <= -self.curvature * slope {
                     self.accept(x, f, g, d, trial, ft, gt);
@@ -243,6 +286,7 @@ impl WarmLbfgs {
                 }
                 if slope_t * (hi - lo) >= 0.0 {
                     hi = lo;
+                    f_hi = f_lo;
                 }
                 lo = trial;
                 f_lo = ft;

@@ -119,10 +119,18 @@ fn main() {
     let mut warm = WarmLbfgs::default();
     warm.minimize(base.view(), 3000, |v| Some(lj(v)));
     let mut warm_evals = 0usize;
+    let mut kept = 0usize;
     let mut warm_best = f64::INFINITY;
     let mut warm_gmax = 0.0_f64;
+    let mut carried = 0usize;
     for p in &perturbations {
+        if !warm.is_empty() {
+            carried += 1;
+        }
         let (f, x, c) = warm.minimize(p.view(), 3000, |v| Some(lj(v)));
+        if !warm.is_empty() {
+            kept += 1;
+        }
         warm_evals += c;
         warm_best = warm_best.min(f);
         // Convergence has to be checked, not assumed: a minimiser that stops
@@ -145,6 +153,7 @@ fn main() {
     }
 
     println!("LJ{n}, {hops} relaxations from perturbed minima, step {step}");
+    println!("  warm arm: {carried}/{hops} started with stored curvature, {kept} ended holding some");
     println!(
         "  cold  {:>8} evals  {:>7.1} per relaxation  best {:.6}  worst |g| {:.2e}",
         cold_evals,
