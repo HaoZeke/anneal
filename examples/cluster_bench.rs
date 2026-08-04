@@ -15,7 +15,9 @@
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
 use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger};
-use anneal_core::methods::cluster_search::{search, verify};
+use anneal_core::methods::cluster_search::{
+    first_encounter, median_encounter, search, verify, Encounter,
+};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::{cna, ptm, ptm_fractions};
 
@@ -141,6 +143,7 @@ fn main() {
     }
 
     let mut solved = 0usize;
+    let mut encounters: Vec<Encounter> = Vec::new();
     let mut deepest = f64::INFINITY;
     let mut total_charged = 0usize;
     let mut total_hops = 0usize;
@@ -201,6 +204,12 @@ fn main() {
         if hit {
             solved += 1;
         }
+        // The work to first reach the published minimum, which is the
+        // statistic worth comparing. A run that never reached it contributes a
+        // lower bound rather than being dropped.
+        if let Some(r) = reference {
+            encounters.push(first_encounter(&out, r, 1e-4, ledger.spent()));
+        }
         deepest = deepest.min(out.best);
         total_charged += ledger.spent();
         total_hops += out.hops;
@@ -229,5 +238,31 @@ fn main() {
     );
     if let Some(r) = reference {
         println!("gap to reference {:+.6}", deepest - r);
+    }
+    if !encounters.is_empty() {
+        let found: Vec<usize> = encounters
+            .iter()
+            .filter(|e| e.found())
+            .map(|e| e.charged())
+            .collect();
+        let censored = encounters.len() - found.len();
+        match median_encounter(&encounters) {
+            Some(m) => println!(
+                "first encounter: median {m} charged evaluations \
+                 ({} reached, {censored} censored)",
+                found.len()
+            ),
+            None => println!(
+                "first encounter: no median, {} of {} runs censored; \
+                 the median has not been observed",
+                censored,
+                encounters.len()
+            ),
+        }
+        if !found.is_empty() {
+            let lo = found.iter().copied().min().unwrap_or(0);
+            let hi = found.iter().copied().max().unwrap_or(0);
+            println!("  observed encounters span {lo} to {hi}");
+        }
     }
 }
