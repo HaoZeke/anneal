@@ -27,6 +27,23 @@
 //! is estimated in log space, where a multiplicative process is additive and a
 //! Gaussian on it is not obviously wrong.
 //!
+//! # Measured, and it does not pay here
+//!
+//! Wired to the screening pass at 75 points and three million evaluations it
+//! scored 0 seeds in 8, against 13 in 24 for the same driver without it. It
+//! fired on 107520 of 108893 hops and saved 857049 relaxation iterations, so
+//! the saving was real and the search was worse for it.
+//!
+//! Stopping nearly every screen means the chain acts on limits extrapolated
+//! from a handful of decrements, and the screen's job is to decide which
+//! trials deserve a full relaxation. Buying hops by degrading that decision is
+//! a bad trade at this ratio: hops cost about thirty evaluations and a missed
+//! crossing costs the run.
+//!
+//! Kept, tested, and off. It is a correct estimator of a limit; the fault is in
+//! spending its output on a decision this sensitive. A caller with a cheaper
+//! objective or a coarser question may find it pays.
+//!
 //! # What it will not do
 //!
 //! It never stops before [`Terminator::min_iters`], because two decrements
