@@ -128,6 +128,14 @@ fn main() {
         cfg.keying = Keying::Sites;
         println!("  keying on sorted site energies");
     }
+    if opts.contains(&"canon") {
+        // A length in coordinate space now: two structures whose points can be
+        // brought within this root-mean-square of each other by a permutation
+        // and a rigid motion are one basin.
+        cfg.keying = Keying::Canonical;
+        cfg.merge_radius = 0.3;
+        println!("  keying on a canonical order, merge radius {}", cfg.merge_radius);
+    }
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.

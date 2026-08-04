@@ -1007,6 +1007,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
         }
     };
+    // The chain's first minimum, taken before the bias is built because a
+    // canonical order needs a reference and a reference has to be a minimum.
+    // Matching against an unrelaxed start would fix the frame to a structure
+    // the search never revisits, and the match quality against it would decide
+    // how many later structures can be ordered at all.
+    let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
+    ledger.record(e, x.view());
+    let canonical_reference = x.clone();
     let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
         .map(|k| {
             // The coldest rung keeps a token bias so it still recognises
@@ -1017,7 +1025,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 cfg.bias_height
             };
             BasinBias::new(
-                ClusterFingerprint::of(n, effective_keying(cfg)),
+                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
                 cfg.merge_radius,
                 h,
                 cfg.bias_gamma,
@@ -1124,7 +1132,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // instead would break under replica exchange, where each rung owns its own
     // bias and the indices of one rung mean nothing in another.
     let mut identity = BasinIndex::new(
-        ClusterFingerprint::of(n, effective_keying(cfg)),
+        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
         cfg.merge_radius,
     );
     // Structures kept for path endpoints. Only ones far from every member are
@@ -1137,8 +1145,6 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut path_improvements = 0usize;
     let mut path_gain = 0.0_f64;
 
-    let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
-    ledger.record(e, x.view());
     for _ in 1..n_rep {
         let s0 = random_cluster(n, 0.7, cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
@@ -1544,7 +1550,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 biases.insert(rep, std::mem::replace(
                     &mut bias,
                     BasinBias::new(
-                        ClusterFingerprint::of(n, effective_keying(cfg)),
+                        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
                         cfg.merge_radius,
                         cfg.bias_height,
                         cfg.bias_gamma,
@@ -2081,6 +2087,10 @@ pub enum ClusterFingerprint {
     /// Sorted per-point pair energies, keying on how well each point is bound
     /// rather than on how far apart the points are.
     Sites(SiteEnergies),
+    /// Coordinates put in a canonical order against a fixed reference, so
+    /// Euclidean distance between two of them is a shape distance.
+    #[cfg(feature = "ira")]
+    Canonical(Box<crate::shape::CanonicalOrder>),
 }
 
 /// Which descriptor a run keys basins on.
@@ -2098,6 +2108,19 @@ pub enum Keying {
     Shape,
     /// Sorted per-point pair energies.
     Sites,
+    /// Coordinates canonically ordered against a fixed reference.
+    ///
+    /// The only keying here that does not throw correspondence away. Sorting
+    /// buys invariance by discarding which point holds which value; a canonical
+    /// order keeps it, so two structures with the same multiset of distances
+    /// and a different arrangement separate.
+    ///
+    /// It is also what makes shape keying affordable. A shape distance costs an
+    /// IRA call, so keying on it directly pays one call per basin comparison
+    /// and a bias holding thousands of basins cannot be queried at hop rate.
+    /// Matching each structure once against a reference costs one call per hop
+    /// and leaves every comparison Euclidean.
+    Canonical,
 }
 
 /// The keying a config asks for, honouring the older boolean.
@@ -2122,12 +2145,33 @@ impl ClusterFingerprint {
         )
     }
 
-    /// The descriptor for a named keying.
+    /// The descriptor for a named keying, without a reference.
+    ///
+    /// [`Keying::Canonical`] needs one and falls back to the distance spectrum
+    /// here; callers that want it should use [`ClusterFingerprint::of_with`].
     pub fn of(n_points: usize, keying: Keying) -> Self {
+        Self::of_with(n_points, keying, &Array1::zeros(0))
+    }
+
+    /// The descriptor for a named keying, against `reference`.
+    pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
         match keying {
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
+            #[cfg(feature = "ira")]
+            Keying::Canonical => {
+                if reference.len() == 3 * n_points {
+                    ClusterFingerprint::Canonical(Box::new(crate::shape::CanonicalOrder::new(
+                        reference.clone(),
+                        1.8,
+                    )))
+                } else {
+                    ClusterFingerprint::Spectrum(SortedPairs { n_points })
+                }
+            }
+            #[cfg(not(feature = "ira"))]
+            Keying::Canonical => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
         }
     }
 }
@@ -2138,6 +2182,8 @@ impl Fingerprint for ClusterFingerprint {
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
             ClusterFingerprint::Sites(s) => s.describe(x),
+            #[cfg(feature = "ira")]
+            ClusterFingerprint::Canonical(c) => c.describe(x),
         }
     }
 }
