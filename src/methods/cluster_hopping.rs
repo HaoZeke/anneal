@@ -793,18 +793,26 @@ pub struct Outcome {
     pub soft_escapes: usize,
     /// Of those, the ones whose climb reached a saddle.
     pub soft_crossed: usize,
-    /// Hop index, basin count and value at each new global best.
+    /// Hop, charged evaluations spent, basin count and value at each new
+    /// global best.
     ///
-    /// What this answers is which mechanism is doing the work. A run whose
-    /// improvements all land in the first tenth of its hops was decided by
-    /// where it started, and the lever is more restarts; one that improves late
-    /// was carried there by the bias accumulating, and the lever is budget.
-    /// Without the trace both stories fit the same success rate.
+    /// This is what a first-encounter time is computed from, and it is the
+    /// statistic worth reporting. A success rate at a fixed budget is the same
+    /// quantity through an arbitrary threshold: above the budget it saturates
+    /// and says nothing about the margin, below it censors and says nothing
+    /// about how near the failures came. The work to first reach a target is a
+    /// property of the method rather than of a budget someone chose, which is
+    /// why the literature quotes mean first encounter times.
     ///
-    /// Capped, and the cap is on the number of *records* rather than on the
-    /// hops: a run that improves ten thousand times is descending, and the
-    /// tail of that is not what anyone is asking about.
-    pub improvements: Vec<(usize, usize, f64)>,
+    /// The charged count is the part that makes it comparable. Hops are not:
+    /// two arms with different screening spend different amounts per hop, and
+    /// this campaign has arms ranging from 26 to 637 charged evaluations per
+    /// hop.
+    ///
+    /// Capped on the number of *records* rather than on the hops: a run that
+    /// improves ten thousand times is descending, and the tail of that is not
+    /// what anyone is asking about.
+    pub improvements: Vec<(usize, usize, usize, f64)>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -1110,7 +1118,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
-    let mut improvements: Vec<(usize, usize, f64)> = Vec::new();
+    let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
     // Kept here rather than in a StallDetector because the threshold is not a
@@ -1338,7 +1346,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         ledger.record(e_new, x_new.view());
         hops += 1;
         if improved && improvements.len() < 512 {
-            improvements.push((hops, bias.n_basins(), e_new));
+            improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
         }
         // Kept before the acceptance branch, which may move `x_new` into the
         // chain. The archive wants the structure this hop produced whether or
