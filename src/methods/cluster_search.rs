@@ -97,6 +97,103 @@ where
     (out, stats)
 }
 
+/// Work spent before a run first reached `target`, or how much it spent
+/// without reaching it.
+///
+/// The statistic to report. A success rate at a fixed budget is this quantity
+/// pushed through an arbitrary threshold: above the budget it saturates and
+/// hides the margin, below it censors and hides how near the failures came.
+/// Eight seeds in eight at twelve million evaluations and five in eight at
+/// three million are the same method described twice, badly.
+///
+/// A first encounter time is a property of the method. It is what lets one
+/// paper's result be compared with another's, and it is what makes a claim like
+/// a seventyfold improvement mean something.
+///
+/// # Censoring
+///
+/// A run that never reached the target has not produced a first encounter time;
+/// it has produced a lower bound. That is [`Encounter::Censored`], and it must
+/// not be dropped or replaced by the budget: dropping the failures reports the
+/// mean of the successes, which is smaller than the truth and gets smaller as
+/// the method gets worse.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Encounter {
+    /// Charged evaluations spent when the target was first reached.
+    Found {
+        /// Charged evaluations at the first crossing.
+        charged: usize,
+        /// Hops at the first crossing.
+        hops: usize,
+    },
+    /// The target was never reached; the run spent this much without it.
+    Censored {
+        /// Charged evaluations spent in total.
+        charged: usize,
+    },
+}
+
+impl Encounter {
+    /// The charged count either way, which is the encounter time when found and
+    /// a lower bound on it when censored.
+    pub fn charged(&self) -> usize {
+        match self {
+            Encounter::Found { charged, .. } | Encounter::Censored { charged } => *charged,
+        }
+    }
+
+    /// Whether the target was reached.
+    pub fn found(&self) -> bool {
+        matches!(self, Encounter::Found { .. })
+    }
+}
+
+/// The first encounter with `target` in a run's improvement trace.
+///
+/// `target` is compared with a tolerance, since a published minimum is quoted
+/// to six decimals and a relaxation lands near it rather than on it.
+pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
+    for &(hops, charged, _, e) in &out.improvements {
+        if e < target + tolerance {
+            return Encounter::Found { charged, hops };
+        }
+    }
+    Encounter::Censored { charged: spent }
+}
+
+/// Median first encounter time under censoring, by Kaplan-Meier.
+///
+/// The median is the point where the survival function first falls to a half.
+/// `None` when more than half the runs are censored, which is the honest answer:
+/// the median has not been observed, and quoting the mean of the successes
+/// instead reports a number that improves as the method gets worse.
+pub fn median_encounter(runs: &[Encounter]) -> Option<usize> {
+    if runs.is_empty() {
+        return None;
+    }
+    let mut events: Vec<(usize, bool)> = runs
+        .iter()
+        .map(|e| (e.charged(), e.found()))
+        .collect();
+    events.sort_by_key(|(c, _)| *c);
+
+    let mut at_risk = events.len() as f64;
+    let mut survival = 1.0_f64;
+    for (c, found) in events {
+        if found {
+            survival *= 1.0 - 1.0 / at_risk;
+            if survival <= 0.5 {
+                return Some(c);
+            }
+        }
+        at_risk -= 1.0;
+        if at_risk <= 0.0 {
+            break;
+        }
+    }
+    None
+}
+
 /// Checks that a reported result is what it claims to be.
 ///
 /// Returns the energy of the returned structure and its largest gradient
@@ -158,6 +255,65 @@ mod tests {
             out.best
         );
         assert!(gmax < 1e-3, "returned a structure with gradient {gmax:.2e}");
+    }
+
+    /// A run that reached the target reports where, and one that did not is
+    /// censored rather than being given the budget as its time.
+    #[test]
+    fn an_encounter_is_found_or_censored() {
+        let pot = PairPotential::lennard_jones(13);
+        let mut cfg = Config::for_cluster(13);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        let mut ledger = Ledger::new(150_000);
+        let (out, _) = search(&pot, &cfg, &mut ledger, 0);
+        let e = first_encounter(&out, -44.326801, 1e-4, ledger.spent());
+        match e {
+            Encounter::Found { charged, hops } => {
+                assert!(charged > 0 && charged <= ledger.spent());
+                assert!(hops > 0 && hops <= out.hops);
+            }
+            Encounter::Censored { charged } => assert_eq!(charged, ledger.spent()),
+        }
+
+        // A target nothing can reach must censor at the spend, not report a
+        // time.
+        let never = first_encounter(&out, -1e9, 1e-4, ledger.spent());
+        assert_eq!(never, Encounter::Censored { charged: ledger.spent() });
+    }
+
+    /// The median under censoring, and the refusal that keeps it honest.
+    #[test]
+    fn the_median_refuses_when_most_runs_are_censored() {
+        let found = |c: usize| Encounter::Found { charged: c, hops: c / 30 };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+
+        // Five found, spread; the median is the third.
+        let all = vec![found(10), found(20), found(30), found(40), found(50)];
+        assert_eq!(median_encounter(&all), Some(30));
+
+        // One found early, four censored late: the survival function never
+        // reaches a half, so there is no median to quote.
+        let mostly = vec![found(10), cens(90), cens(91), cens(92), cens(93)];
+        assert_eq!(median_encounter(&mostly), None);
+
+        // Censoring must not be treated as a success: replacing the censored
+        // runs with successes at the same times gives a median, which is
+        // exactly the error this guards against.
+        let wrong = vec![found(10), found(90), found(91), found(92), found(93)];
+        assert!(median_encounter(&wrong).is_some());
+    }
+
+    /// A censored run late in the ordering must not shrink the median.
+    #[test]
+    fn late_censoring_does_not_flatter_the_median() {
+        let found = |c: usize| Encounter::Found { charged: c, hops: 1 };
+        let cens = |c: usize| Encounter::Censored { charged: c };
+        let clean = vec![found(10), found(20), found(30), found(40)];
+        let with_censor = vec![found(10), found(20), found(30), cens(1000)];
+        let a = median_encounter(&clean).unwrap();
+        let b = median_encounter(&with_censor).unwrap();
+        assert!(b >= a, "censoring moved the median from {a} down to {b}");
     }
 
     /// LJ13 is the case with one answer everyone agrees on, so it is the one
