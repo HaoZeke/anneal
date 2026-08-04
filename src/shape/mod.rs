@@ -246,7 +246,23 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     /// back non-bijective even for a structure matched to a relabelled copy of
     /// itself.
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
-        self.canonicalise(x).unwrap_or_else(|| x.to_owned())
+        // Scaled by 1/sqrt(n), so Euclidean distance between two descriptors is
+        // a root-mean-square displacement per point rather than a total.
+        //
+        // Without it the threshold carries a hidden sqrt(n) and does not
+        // transfer between sizes, which is the defect the shape metric was
+        // brought in to remove. It also mis-set the radius directly: at 38
+        // points an unscaled 0.3 sat far below the distance one accepted hop
+        // covers, so the run opened 907 basins in 2465 hops, 2.7 hops each, and
+        // the bias had nothing to accumulate.
+        let n = self.n_points().max(1) as f64;
+        let s = 1.0 / n.sqrt();
+        self.canonicalise(x)
+            .map(|mut v| {
+                v *= s;
+                v
+            })
+            .unwrap_or_else(|| x.to_owned() * s)
     }
 }
 
