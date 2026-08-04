@@ -1678,7 +1678,7 @@ fn amsa_optimize(
 ///
 /// Clamps design temperature T_des = (1/2)·gap/d into the D6∩D7 window
 /// [b_hat/log(B+e), 2·gap/d]. When `barrier_hat` is 0, recovers GPMD.
-/// Derivation: `proofs/d11_budget_feasible_temp.py`. Local law under the
+/// Local law under the
 /// stated models only — not a dual-annealing field-SOTA claim.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, low, high, budget, seed = 0, barrier_hat = 0.0, grad_fn = None, x0 = None))]

@@ -122,6 +122,13 @@ fn main() {
     cfg.allocate_moves = opts.contains(&"thompson");
     cfg.return_screen = opts.contains(&"rscreen");
     cfg.adaptive_screen = opts.contains(&"aq");
+    cfg.probe_screen = opts.contains(&"probe");
+    if let Ok(v) = std::env::var("QUENCH_WARMUP") {
+        cfg.quench_warmup = v.parse().unwrap_or(4);
+    }
+    if let Ok(v) = std::env::var("QUENCH_CONF") {
+        cfg.quench_confidence = v.parse().unwrap_or(2.0);
+    }
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
@@ -276,7 +283,7 @@ fn main() {
         total_hops += out.hops;
         println!(
             "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  \
-             charged screen {} full {} check {} ({:.0}% screen)  qsteps {:.1}  verified {}{}",
+             charged screen {} full {} check {} ({:.0}% screen)  qsteps {:.1}  probe {} at {:.1} err {:.4}  verified {}{}",
             out.best,
             out.hops,
             out.basins,
@@ -289,6 +296,9 @@ fn main() {
             stats.check_charged,
             100.0 * stats.screen_share(),
             stats.screen_steps_taken as f64 / stats.screens.max(1) as f64,
+            stats.probe_stops,
+            stats.probe_steps as f64 / stats.probe_stops.max(1) as f64,
+            stats.probe_error / stats.probe_stops.max(1) as f64,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
                 .unwrap_or_else(|| "NO STATE".into()),

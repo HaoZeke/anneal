@@ -186,7 +186,6 @@ fn branch_reference(energies: &[f64]) -> f64 {
 
 // ---------------------------------------------------------------------------
 // D8: Entropy-calibrated inverse temperature (ECIT) for residual control.
-// docs/derivations/d8_entropy_calibrated_beta.org
 // ---------------------------------------------------------------------------
 
 /// Pure D8.2 softmax probabilities \(p_i\propto e^{-\beta E_i}\) (normalized).
