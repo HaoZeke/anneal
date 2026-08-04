@@ -22,7 +22,7 @@ const _: () = assert!(
     THETA_STAR > 0.0 && THETA_STAR < 2.0,
     "theta* must sit inside the (0,2) descent window (D6)"
 );
-/// Model acceptance target α*(θ⋆) ≈ 0.32 (D6 optimize_c at θ=1/2; proofs/gpmd_derive.py).
+/// Model acceptance target α*(θ⋆) ≈ 0.32, at θ=1/2.
 pub const ALPHA_TARGET: f64 = 0.32;
 /// Fraction of budget reserved for terminal polish.
 pub const POLISH_FRACTION: f64 = 0.25;

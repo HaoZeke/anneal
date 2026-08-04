@@ -237,7 +237,7 @@ fn normal_cdf(z: f64) -> f64 {
 /// improvements, x_i = ln(delta_{i+1}/delta_i) / w_{i+1}, where w_{i+1}
 /// is the work the improving slice spent: under geometric gap
 /// contraction per polish work unit, delta_{i+1}/delta_i = rho_wu^w
-/// exactly (proofs/d5_endgame_switch.py, check 2), so x_i estimates
+/// exactly, so x_i estimates
 /// ln rho_wu with measurement noise, giving the Normal likelihood. The
 /// prior centers on the contraction measured on ill-conditioned
 /// least-squares cells (rho ~ 0.965 per quasi-Newton iteration at
@@ -835,7 +835,7 @@ struct ArmStates {
 /// T into the D6∩D7 window using an online barrier proxy (EMA of rejected
 /// uphill deltas) and remaining work-unit budget, so escape temperature
 /// stays positive under budgeted barriers. Empty window → T_lo (escape
-/// forced). See `proofs/d11_budget_feasible_temp.py`.
+/// forced).
 ///
 /// Proposal SHAPE is the chain's running covariance (Haario et al. 2001;
 /// diminishing adaptation). SIZE tracks α* ≈ 0.32 by Robbins-Monro.
@@ -905,9 +905,6 @@ impl BasinRegistry {
 }
 
 /// D9.3: Good-Turing x record discovery value theta_disc = n1 / (n (w+1)).
-///
-/// See `docs/derivations/d9_good_turing_record.org` and
-/// `proofs/d9_good_turing_record.py`.
 pub fn discovery_value(n1: usize, n: usize, w: usize) -> f64 {
     if n == 0 {
         return 0.0;
@@ -3514,7 +3511,7 @@ where
         }
         if endgame_now || remaining < slice {
             // D5 endgame: the tail is pure polish (explore-first is
-            // optimal; see proofs/d5_endgame_switch.py). Cycle
+            // optimal). Cycle
             // quasi-Newton polish with shrinking trust-region poll
             // restarts until the budget is gone or dry cycles exhaust.
             //

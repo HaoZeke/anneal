@@ -9,7 +9,6 @@
 //!
 //! When `b_hat → 0`, recovers GPMD (`T = T_des`). Not a dual-annealing
 //! global solver; local law under stated models only.
-//! Derivation: `proofs/d11_budget_feasible_temp.py`.
 
 use eindir_core::{Gradient, Objective};
 use ndarray::{Array1, ArrayView1};

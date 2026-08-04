@@ -705,6 +705,22 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Whether to score the quench extrapolation without acting on it.
+    ///
+    /// Runs the screening pass to its full length and records what an adaptive
+    /// stop would have claimed, which is the only way to separate "the model is
+    /// wrong" from "the model is right and the search needs the precision".
+    pub probe_screen: bool,
+    /// Descent steps before the quench predictor may speak.
+    ///
+    /// The first steps of a quench from a perturbed cluster are nowhere near
+    /// the quadratic region: atoms sit close enough that energies run to 1e5,
+    /// and a log-linear fit through three such decrements extrapolates a tail
+    /// that has nothing to do with the basin. Measured, a stop at step 4 missed
+    /// the full pass by 1.0e4 on a landscape whose minima are 0.5 apart.
+    pub quench_warmup: usize,
+    /// Standard deviations of separation a verdict needs.
+    pub quench_confidence: f64,
     /// Relaxation steps in the full pass.
     pub relax_steps: usize,
     /// Container half-width, applied when a move is generated.
@@ -782,6 +798,9 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            probe_screen: false,
+            quench_warmup: 4,
+            quench_confidence: 2.0,
             relax_steps: 200,
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and

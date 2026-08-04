@@ -22,7 +22,7 @@ use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 
 /// What a search did, beyond the outcome the driver reports.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RelaxStats {
     /// Relaxations that reached a point with a small gradient.
     pub converged: usize,
@@ -47,6 +47,18 @@ pub struct RelaxStats {
     pub capped: usize,
     /// Screening passes run.
     pub screens: usize,
+    /// Screens where the predictor would have stopped, under probing.
+    pub probe_stops: usize,
+    /// Steps at which it would have stopped, summed.
+    pub probe_steps: usize,
+    /// Absolute error of the extrapolation against the full screen, summed.
+    ///
+    /// The number that decides whether a screening pass can be shortened at
+    /// all. If the extrapolation from five steps predicts the twenty-five step
+    /// energy to well inside the spacing between neighbouring minima, the extra
+    /// twenty steps are buying precision nothing uses. If it does not, the
+    /// screen is not overhead around the quench, it is the quench.
+    pub probe_error: f64,
     /// Descent steps those passes took, summed.
     ///
     /// Against `screens * screen_steps` this is what stopping on a decision
@@ -101,6 +113,7 @@ where
     // with `relax_steps`, so the iteration count identifies which is which.
     let screen_iters = cfg.screen_steps;
     let adaptive = cfg.adaptive_screen;
+    let probe = cfg.probe_screen;
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
         opt.forget();
         let before = led.spent();
@@ -109,7 +122,10 @@ where
         // settled; the full relaxation runs to its tolerance, because there the
         // answer is the structure and not a verdict about it.
         let mut pred = QuenchPredictor::new();
+        pred.warmup = cfg.quench_warmup;
+        pred.confidence = cfg.quench_confidence;
         let mut early = false;
+        let mut probe_at: Option<(usize, f64)> = None;
         let target = led.best;
         let (f, xr, _) = opt.minimize_watched(
             x,
@@ -121,6 +137,16 @@ where
                 Some(objective.value_and_gradient(v))
             },
             |_, fv| {
+                if screening && probe {
+                    // Never stops. Records where a stop would have happened and
+                    // what it would have claimed, so the claim can be scored
+                    // against the value the full pass actually reaches.
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
                 if !(screening && adaptive) {
                     return true;
                 }
@@ -138,6 +164,11 @@ where
                 false
             },
         );
+        if let Some((at, claim)) = probe_at {
+            stats.probe_stops += 1;
+            stats.probe_steps += at;
+            stats.probe_error += (claim - f).abs();
+        }
         let cost = led.spent() - before;
         if screening {
             stats.screen_charged += cost;
