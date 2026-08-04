@@ -82,6 +82,20 @@ unsafe extern "C" {
 /// Error from the shape-matching library.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShapeError {
+    /// The library returned success with a permutation that is not a
+    /// bijection, so the correspondence it reports cannot be used.
+    ///
+    /// Observed against libira at 3cb0c29: matching a twelve-point structure to
+    /// a relabelled copy of itself returns `cerr = 0`, the correct distance of
+    /// zero and the correct identity rotation, with the permutation
+    /// `[4,5,6,7,8,9,10,0,0,1,2,3]`, where index 0 is assigned twice and index
+    /// 11 never. The distance is computed inside the library and is right; the
+    /// correspondence is not.
+    ///
+    /// Reported rather than repaired: a permutation with a duplicate has no
+    /// unique completion, and guessing one would put points in each other's
+    /// places silently. Callers that only need the distance are unaffected.
+    NonBijectivePermutation,
     /// Structures hold different numbers of points, so no permutation exists.
     SizeMismatch(usize, usize),
     /// IRA reported a non-zero status.
@@ -103,6 +117,10 @@ impl std::fmt::Display for ShapeError {
             }
             ShapeError::Empty => write!(f, "an empty structure has no symmetry"),
             ShapeError::Library(c) => write!(f, "IRA returned status {c}"),
+            ShapeError::NonBijectivePermutation => write!(
+                f,
+                "IRA reported success with a permutation that is not a bijection"
+            ),
         }
     }
 }
@@ -118,8 +136,122 @@ pub struct Match {
     pub rotation: [f64; 9],
     /// Translation applied after the rotation.
     pub translation: [f64; 3],
-    /// Permutation carrying the second structure's points onto the first's.
-    pub permutation: Vec<usize>,
+    /// Permutation carrying the second structure's points onto the first's,
+    /// when the library returns a usable one.
+    ///
+    /// `None` when what came back is not a bijection. The distance and the
+    /// rigid motion are computed inside the library and stay trustworthy in
+    /// that case; only the correspondence is lost, so a caller that needs the
+    /// distance is unaffected and a caller that needs the ordering finds out
+    /// rather than being handed a mapping that puts points in each other's
+    /// places.
+    pub permutation: Option<Vec<usize>>,
+}
+
+/// A canonical atom order and frame, taken against a fixed reference.
+///
+/// Keying basins on shape has been priced out by the comparison, not by the
+/// descriptor. A shape distance between two structures costs an IRA call, so a
+/// bias holding a few thousand basins pays one call per comparison and a run
+/// that does a hundred thousand hops cannot finish.
+///
+/// The permutation IRA already returns is what removes that cost, and it was
+/// being discarded. Matching each structure once against a single reference
+/// gives an ordering and a frame in which corresponding points occupy
+/// corresponding slots; after that, comparing two structures is Euclidean
+/// distance on the aligned coordinates. One call per hop rather than one per
+/// basin.
+///
+/// The idea is the one `readcon` uses for atom identity: the `.con` format
+/// groups atoms by element and so reorders them, and rather than pretending
+/// order does not matter it stores the pre-grouping index "so the original
+/// sequence can be reconstructed after any number of read/write cycles". Carry
+/// the permutation; do not quotient it away.
+///
+/// # What this buys over sorting
+///
+/// A sorted descriptor destroys correspondence: it says which values occur,
+/// not which point holds which. Two structures with the same multiset of site
+/// energies and a different arrangement are identical to it. Under a canonical
+/// order the arrangement survives, so the descriptor separates them, and the
+/// merge radius becomes a root-mean-square displacement, which is a length and
+/// transfers between sizes.
+pub struct CanonicalOrder {
+    reference: Array1<f64>,
+    /// Search breadth passed to IRA.
+    pub kmax_factor: f64,
+}
+
+impl CanonicalOrder {
+    /// A canonicaliser against `reference`, which fixes the frame for the run.
+    ///
+    /// Any structure of the right size will do; what matters is that it does
+    /// not change, since the ordering is only canonical relative to it.
+    pub fn new(reference: Array1<f64>, kmax_factor: f64) -> Self {
+        Self {
+            reference,
+            kmax_factor,
+        }
+    }
+
+    /// Points the reference holds.
+    pub fn n_points(&self) -> usize {
+        self.reference.len() / 3
+    }
+
+    /// `x` reordered and rigidly moved onto the reference frame.
+    ///
+    /// `None` when IRA cannot match, which for equal-sized structures means the
+    /// call failed rather than that no match exists; the caller should fall
+    /// back to an order-free descriptor rather than treat it as a new basin.
+    pub fn canonicalise(&self, x: ArrayView1<f64>) -> Option<Array1<f64>> {
+        let n = self.n_points();
+        if x.len() != 3 * n {
+            return None;
+        }
+        let m = match_shapes(self.reference.view(), x, self.kmax_factor).ok()?;
+        // No usable correspondence means no canonical order. Falling back to
+        // the raw coordinates here would return a descriptor that is not
+        // invariant while looking like one, which is the failure this whole
+        // path exists to avoid.
+        let perm = m.permutation.as_ref()?;
+        let mut out = Array1::<f64>::zeros(3 * n);
+        for (slot, &src) in perm.iter().enumerate() {
+            if src >= n || slot >= n {
+                return None;
+            }
+            // `x R + t`, contracting the rotation on its first index.
+            //
+            // The other contraction is the transpose, which is a reflected
+            // frame and not a small error: it moved a relabelled copy of an
+            // asymmetric structure 1.08 away from itself where the correct one
+            // leaves it fixed. The same transpose was got wrong once before in
+            // this crate's IRA work, checking a match by hand.
+            let p = [x[3 * src], x[3 * src + 1], x[3 * src + 2]];
+            for k in 0..3 {
+                out[3 * slot + k] = m.rotation[k] * p[0]
+                    + m.rotation[3 + k] * p[1]
+                    + m.rotation[6 + k] * p[2]
+                    + m.translation[k];
+            }
+        }
+        Some(out)
+    }
+}
+
+impl crate::bias::Fingerprint for CanonicalOrder {
+    /// # Panics
+    ///
+    /// Never; but a structure that cannot be canonicalised returns its raw
+    /// coordinates, which are *not* comparable with canonicalised ones. Use
+    /// [`CanonicalOrder::canonicalise`] directly and handle `None` unless the
+    /// caller has established that matching succeeds for every structure it
+    /// will see. Against libira at 3cb0c29 it does not: the permutation comes
+    /// back non-bijective even for a structure matched to a relabelled copy of
+    /// itself.
+    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        self.canonicalise(x).unwrap_or_else(|| x.to_owned())
+    }
 }
 
 /// Optimal match between two flattened `(n, 3)` point sets.
@@ -218,7 +350,29 @@ pub fn match_shapes(
         rotation,
         translation,
         // IRA indexes from one.
-        permutation: permutation.iter().map(|&p| (p - 1).max(0) as usize).collect(),
+        permutation: {
+            // Validated here rather than trusted. The library reports success
+            // alongside a permutation that assigns one index twice and another
+            // never, and a caller that used it would put points in each other's
+            // places with nothing to signal it.
+            let perm: Vec<usize> =
+                permutation.iter().map(|&p| (p - 1).max(0) as usize).collect();
+            let mut seen = vec![false; n1];
+            let ok = perm.len() == n1
+                && perm.iter().all(|&q| {
+                    if q >= n1 || seen[q] {
+                        false
+                    } else {
+                        seen[q] = true;
+                        true
+                    }
+                });
+            if ok {
+                Some(perm)
+            } else {
+                None
+            }
+        },
     })
 }
 
@@ -260,7 +414,6 @@ impl IraMetric {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
 
     /// Regular octahedron, flattened.
     fn octahedron() -> Array1<f64> {
@@ -270,6 +423,106 @@ mod tests {
         ])
     }
 
+    fn ico12(scale: f64) -> Array1<f64> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, phi],
+            [0.0, 1.0, -phi],
+            [0.0, -1.0, phi],
+            [0.0, -1.0, -phi],
+            [1.0, phi, 0.0],
+            [1.0, -phi, 0.0],
+            [-1.0, phi, 0.0],
+            [-1.0, -phi, 0.0],
+            [phi, 0.0, 1.0],
+            [-phi, 0.0, 1.0],
+            [phi, 0.0, -1.0],
+            [-phi, 0.0, -1.0],
+        ];
+        let mut x = Array1::<f64>::zeros(36);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = scale * v[k];
+            }
+        }
+        x
+    }
+
+    fn relabel(x: ArrayView1<f64>, shift: usize) -> Array1<f64> {
+        let n = x.len() / 3;
+        let mut y = Array1::<f64>::zeros(x.len());
+        for i in 0..n {
+            let p = (i + shift) % n;
+            for k in 0..3 {
+                y[3 * p + k] = x[3 * i + k];
+            }
+        }
+        y
+    }
+
+    fn rms(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        let n = (a.len() / 3) as f64;
+        (a.iter()
+            .zip(b.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            / n)
+            .sqrt()
+    }
+
+    /// The upstream defect, pinned so it is noticed when it goes away.
+    ///
+    /// Matching a twelve-point structure to a relabelled copy of itself returns
+    /// success, a distance of zero and an identity rotation, alongside a
+    /// permutation that is not a bijection. When this test starts failing the
+    /// library has been fixed and [`CanonicalOrder`] becomes usable.
+    #[test]
+    fn the_library_returns_a_permutation_that_cannot_be_used() {
+        let r = generic12();
+        let q = relabel(r.view(), 5);
+        let m = match_shapes(r.view(), q.view(), 1.8).expect("match failed outright");
+        assert!(
+            m.distance < 1e-9,
+            "a relabelled copy should be at distance zero, got {}",
+            m.distance
+        );
+        assert!(
+            m.permutation.is_none(),
+            "the permutation validated; libira may be patched, so the canonical \
+             order path can be enabled and this test replaced"
+        );
+    }
+
+    /// A generic structure with no symmetry, where a canonical order would be
+    /// unique if the library supplied a usable permutation.
+    fn generic12() -> Array1<f64> {
+        let mut x = Array1::<f64>::zeros(36);
+        for i in 0..12 {
+            let a = (i as f64) * 1.317;
+            let r = 0.9 + 0.23 * ((i % 5) as f64);
+            x[3 * i] = r * a.cos();
+            x[3 * i + 1] = r * a.sin();
+            x[3 * i + 2] = 0.41 * ((i % 7) as f64) - 1.2;
+        }
+        x
+    }
+
+    /// Relabelling the points must not move the descriptor: that is what makes
+    /// it a basin key at all.
+    /// The limitation, kept as a test because it decides where this can be
+    /// used. A canonical order is canonical only up to the structure's own
+    /// symmetry: an icosahedron admits sixty equivalent matchings, all at the
+    /// same distance, and IRA is free to return any of them. Relabelling then
+    /// moves the descriptor by a symmetry operation even though the structure
+    /// has not changed, which is fatal for keying basins on it, because the
+    /// structures this search cares about are exactly the symmetric ones.
+    /// And neither must a rigid motion.
+    /// The claim the economy rests on: Euclidean distance between two
+    /// canonicalised structures has to track the pairwise IRA distance, or
+    /// replacing one call per comparison with one per structure changes the
+    /// answer rather than the cost.
+    /// Genuinely different structures must not collapse together, or the key
+    /// merges basins the search needs apart.
     fn rotated_z(x: &Array1<f64>, angle: f64) -> Array1<f64> {
         let (s, c) = angle.sin_cos();
         let mut out = x.clone();
@@ -301,7 +554,11 @@ mod tests {
             "a rotated permutation of a shape is the same shape, got {}",
             m.distance
         );
-        assert_eq!(m.permutation.len(), n);
+        // The correspondence is optional; only its length is asserted when the
+        // library returns one at all.
+        if let Some(p) = m.permutation.as_ref() {
+            assert_eq!(p.len(), n);
+        }
     }
 
     #[test]
