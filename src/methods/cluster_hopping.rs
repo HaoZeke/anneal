@@ -488,6 +488,21 @@ pub struct Config {
     pub escape_stall_patience: usize,
     /// Multiple of the longest quiet stretch so far that counts as stuck.
     pub escape_stall_factor: f64,
+    /// Symmetrise onto the symmetry the structure nearly has, on a stall.
+    ///
+    /// Oakley, Johnston and Wales report the mean first encounter time for the
+    /// 98-point cluster, whose global minimum is tetrahedral, improving by more
+    /// than seventyfold under a scheme of this kind. That is the case this
+    /// driver is weakest on: 3 seeds in 8 at twelve million evaluations against
+    /// 8 in 8 at 75 points.
+    ///
+    /// Applied when the chain is stuck rather than as an allocator arm, because
+    /// it is not a perturbation competing with the others. It either finds an
+    /// approximate symmetry and lands the structure on it, or finds none and
+    /// leaves the chain alone. See [`crate::symmetrise`].
+    pub symmetrise_on_stall: bool,
+    /// Largest deviation at which an approximate symmetry is worth using.
+    pub symmetry_tolerance: f64,
     /// Wales and Doye's angular move, applied when a point is loose.
     ///
     /// "If the highest pair energy rose above a fraction R of the lowest pair
@@ -703,6 +718,8 @@ impl Config {
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
+            symmetrise_on_stall: false,
+            symmetry_tolerance: 0.35,
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
@@ -793,6 +810,8 @@ pub struct Outcome {
     pub screen: (usize, usize, usize, usize),
     /// Funnels quarantined, and proposals refused for landing in one.
     pub tabu: (usize, usize),
+    /// Symmetrisations attempted, and the energy they gained.
+    pub symmetrised: (usize, f64),
     /// Restarts triggered by a stall.
     pub restarts: usize,
     /// Climbs triggered by a stall.
@@ -1112,6 +1131,8 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut tabu: Vec<Array1<f64>> = Vec::new();
     let mut tabu_hits = 0usize;
     let mut restarts = 0usize;
+    let mut symmetrised = 0usize;
+    let mut symmetry_gain = 0.0_f64;
     let mut quiet = 0usize;
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
@@ -1465,6 +1486,31 @@ fn run_full<'g, R: Rng + ?Sized>(
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        if cfg.symmetrise_on_stall && stuck {
+            // The structure is pushed onto whatever approximate symmetry it
+            // has and quenched. Taken only when it improves: unlike a funnel
+            // escape, this is a guess about where the answer is, not a way out
+            // of where the chain is.
+            if let Some((y, cand)) = crate::symmetrise::symmetrise_detected(
+                x.view(),
+                n,
+                &[2, 3, 4, 5, 6],
+                cfg.symmetry_tolerance,
+                cfg.merge_radius.max(0.5),
+            ) {
+                let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
+                ledger.record(es, xs.view());
+                hops += 1;
+                symmetrised += 1;
+                let _ = cand;
+                if es < e {
+                    symmetry_gain += e - es;
+                    e = es;
+                    x = xs;
+                    here = None;
+                }
+            }
+        }
         if cfg.tabu_on_stall && stuck {
             // The funnel the chain has been unable to leave, named by where it
             // is standing.
@@ -1721,6 +1767,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             screen.observations(),
         ),
         tabu: (tabu.len(), tabu_hits),
+        symmetrised: (symmetrised, symmetry_gain),
         restarts,
         merge_radius: final_radius,
         mean_step: radius.mean_step(),

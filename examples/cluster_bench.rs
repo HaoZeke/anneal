@@ -120,6 +120,8 @@ fn main() {
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
+    // Symmetrise onto the structure's own approximate symmetry when stuck.
+    cfg.symmetrise_on_stall = opts.contains(&"sym");
     cfg.budget_window = opts.contains(&"bfwt");
     if opts.contains(&"sites") {
         cfg.keying = Keying::Sites;
@@ -174,12 +176,14 @@ fn main() {
         total_charged += ledger.spent();
         total_hops += out.hops;
         println!(
-            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  verified {}{}",
+            "  seed {seed}: best {:.6}  hops {}  basins {}  relaxed {}/{}  sym {}/{:.2}  verified {}{}",
             out.best,
             out.hops,
             out.basins,
             stats.converged,
             stats.total(),
+            out.symmetrised.0,
+            out.symmetrised.1,
             verified
                 .map(|(e, gmax)| format!("{e:.6} |g| {gmax:.1e}"))
                 .unwrap_or_else(|| "NO STATE".into()),
