@@ -503,6 +503,13 @@ pub struct Config {
     pub symmetrise_on_stall: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
+    /// Hops without improvement before a symmetrisation is considered.
+    ///
+    /// Separate from the escape patience because the two answer different
+    /// questions: an escape is for a chain that cannot leave, this is for a
+    /// chain that has stopped finding anything and may be near a symmetric
+    /// answer without being on it.
+    pub symmetrise_patience: usize,
     /// Wales and Doye's angular move, applied when a point is loose.
     ///
     /// "If the highest pair energy rose above a fraction R of the lowest pair
@@ -720,6 +727,7 @@ impl Config {
             bayes_warmup: 300,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
+            symmetrise_patience: 2_000,
             tabu_on_stall: false,
             tabu_capacity: 8,
             angular_moves: false,
@@ -1487,6 +1495,13 @@ fn run_full<'g, R: Rng + ?Sized>(
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
         if cfg.symmetrise_on_stall && stuck {
+            // The stall counter is cleared here, not only in the escape
+            // branches below. Without it a stuck chain satisfies the condition
+            // on every subsequent hop and symmetrises on every one: measured at
+            // 98 points, 57989 firings in a single run, about one hop in seven,
+            // and the seed came back at -539.81 against a target of -543.67.
+            quiet = 0;
+            longest_quiet = 0;
             // The structure is pushed onto whatever approximate symmetry it
             // has and quenched. Taken only when it improves: unlike a funnel
             // escape, this is a guess about where the answer is, not a way out
