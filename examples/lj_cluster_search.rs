@@ -8,7 +8,9 @@
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
 use anneal_core::methods::csa_cluster::{self, BankConfig};
-use anneal_core::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
+use anneal_core::methods::cluster_hopping::{
+    optimize_with_gradient, Config, Keying, Ledger, Outcome,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 
@@ -120,6 +122,11 @@ fn main() {
     cfg.bayes_screen = opts.contains(&"bayes");
     // The move chosen from the structure the chain is standing on.
     cfg.contextual_moves = opts.contains(&"ctx");
+    // Basins keyed on how well each point is bound.
+    if opts.contains(&"sites") {
+        cfg.keying = Keying::Sites;
+        println!("  keying on sorted site energies");
+    }
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.

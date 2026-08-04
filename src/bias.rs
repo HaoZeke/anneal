@@ -411,6 +411,56 @@ pub struct SortedPairs {
     pub n_points: usize,
 }
 
+/// Sorted per-point pair energies of a flattened `(n, 3)` point set.
+///
+/// `E(i) = sum_{j != i} 4 [ (1/r_ij)^12 - (1/r_ij)^6 ]`, sorted. Invariant to
+/// permutation by the sort, and to rigid motions because it is built from
+/// distances, so it has the same symmetries as [`SortedPairs`] and the same
+/// cost, one pass over the pairs.
+///
+/// What it adds is that it is energetic. A sorted distance spectrum says how
+/// far apart the points are; this says how well each one is bound, so two
+/// structures with similar distance statistics and different coordination
+/// separate. That matters because basin identity is what the merge radius is
+/// measuring, and the radius is sharply sensitive: at 75 points, 0.7 in the
+/// distance spectrum gives 13 seeds in 24 while 0.95 gives 0 in 8. A
+/// descriptor whose distances between genuinely different structures are
+/// better separated is what would widen that band.
+///
+/// A richer alternative was measured and rejected on cost. The eigenvalue
+/// spectrum of the pairwise distance matrix is a stronger invariant, and it
+/// needs an order `n^3` decomposition per hop against the order `n^2` of the
+/// thirty energy evaluations a hop already spends, so it would cut the hop
+/// count roughly threefold. Hops are the scarce resource in this search.
+pub struct SiteEnergies {
+    /// Points per state; the state length must be `3 * n_points`.
+    pub n_points: usize,
+}
+
+impl Fingerprint for SiteEnergies {
+    fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let n = self.n_points;
+        let mut e = vec![0.0_f64; n];
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = x[3 * i] - x[3 * j];
+                let dy = x[3 * i + 1] - x[3 * j + 1];
+                let dz = x[3 * i + 2] - x[3 * j + 2];
+                let r2 = dx * dx + dy * dy + dz * dz;
+                if r2 <= 0.0 {
+                    continue;
+                }
+                let s6 = 1.0 / (r2 * r2 * r2);
+                let v = 4.0 * (s6 * s6 - s6);
+                e[i] += v;
+                e[j] += v;
+            }
+        }
+        e.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Array1::from(e)
+    }
+}
+
 impl Fingerprint for SortedPairs {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let n = self.n_points;
@@ -671,6 +721,97 @@ mod basin_bias_tests {
         for k in 0..da.len() {
             assert!((da[k] - db[k]).abs() < 1e-12, "component {k} differs");
         }
+    }
+
+    #[test]
+    fn site_energies_are_permutation_invariant() {
+        let f = SiteEnergies { n_points: 4 };
+        let a = tetra(1.1);
+        let mut b = Array1::zeros(12);
+        // Relabelled: 0 -> 2, 1 -> 0, 2 -> 3, 3 -> 1.
+        let perm = [2usize, 0, 3, 1];
+        for (i, p) in perm.iter().enumerate() {
+            for k in 0..3 {
+                b[3 * p + k] = a[3 * i + k];
+            }
+        }
+        let da = f.describe(a.view());
+        let db = f.describe(b.view());
+        for (p, q) in da.iter().zip(db.iter()) {
+            assert!((p - q).abs() < 1e-12, "{p} against {q}");
+        }
+    }
+
+    #[test]
+    fn site_energies_are_invariant_to_rigid_motions() {
+        let f = SiteEnergies { n_points: 4 };
+        let a = tetra(1.1);
+        let da = f.describe(a.view());
+        // Translate, then rotate a quarter turn about z.
+        let mut b = a.clone();
+        for i in 0..4 {
+            b[3 * i] += 3.0;
+            b[3 * i + 1] -= 1.5;
+            b[3 * i + 2] += 0.25;
+        }
+        let mut c = Array1::zeros(12);
+        for i in 0..4 {
+            c[3 * i] = -b[3 * i + 1];
+            c[3 * i + 1] = b[3 * i];
+            c[3 * i + 2] = b[3 * i + 2];
+        }
+        let dc = f.describe(c.view());
+        for (p, q) in da.iter().zip(dc.iter()) {
+            assert!((p - q).abs() < 1e-10, "{p} against {q}");
+        }
+    }
+
+    /// The reason to have it: it reports how well each point is bound, so
+    /// structures that differ in coordination separate even when their distance
+    /// statistics are close.
+    #[test]
+    fn site_energies_separate_structures_by_coordination() {
+        let n = 5;
+        let pairs = SortedPairs { n_points: n };
+        let sites = SiteEnergies { n_points: n };
+        // A square with a point at its centre, against the same square with the
+        // fifth point outside. The pair distances overlap heavily; the
+        // coordination does not.
+        let mut a = Array1::<f64>::zeros(3 * n);
+        let mut b = Array1::<f64>::zeros(3 * n);
+        for (i, (px, py)) in [(0.0, 0.0), (1.1, 0.0), (1.1, 1.1), (0.0, 1.1)]
+            .iter()
+            .enumerate()
+        {
+            for (t, v) in [(&mut a, 0), (&mut b, 0)] {
+                let _ = v;
+                t[3 * i] = *px;
+                t[3 * i + 1] = *py;
+            }
+        }
+        a[3 * 4] = 0.55;
+        a[3 * 4 + 1] = 0.55;
+        b[3 * 4] = 2.2;
+        b[3 * 4 + 1] = 0.55;
+
+        let dp: f64 = pairs
+            .describe(a.view())
+            .iter()
+            .zip(pairs.describe(b.view()).iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        let ds: f64 = sites
+            .describe(a.view())
+            .iter()
+            .zip(sites.describe(b.view()).iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            ds > dp,
+            "site energies separated the two by {ds} where distances gave {dp}"
+        );
     }
 
     #[test]

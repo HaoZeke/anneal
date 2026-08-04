@@ -34,7 +34,9 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::screen::Screen;
 use crate::methods::activation::{activate, Activation};
-use crate::bias::{AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SortedPairs};
+use crate::bias::{
+    AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SiteEnergies, SortedPairs,
+};
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
 use crate::methods::minima_hopping::EscapeFeedback;
@@ -506,6 +508,11 @@ pub struct Config {
     /// "R was adjusted to give an acceptance ratio for angular moves of 0.5 and
     /// generally converged to between 0.40 and 0.44."
     pub angular_target: f64,
+    /// Which descriptor basins are keyed on.
+    ///
+    /// Takes precedence over `shape_keyed`, which stays for callers that only
+    /// need the two-way choice.
+    pub keying: Keying,
     /// Choose the move from where the chain is standing.
     ///
     /// The allocator learns one success rate per move, which is the right model
@@ -689,6 +696,7 @@ impl Config {
             replicas: 1,
             swap_period: 50,
             bias_by_rung: false,
+            keying: Keying::Distances,
             contextual_moves: false,
             contextual_floor: 0.1,
             bayes_screen: false,
@@ -1009,7 +1017,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 cfg.bias_height
             };
             BasinBias::new(
-                ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                ClusterFingerprint::of(n, effective_keying(cfg)),
                 cfg.merge_radius,
                 h,
                 cfg.bias_gamma,
@@ -1116,7 +1124,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // instead would break under replica exchange, where each rung owns its own
     // bias and the indices of one rung mean nothing in another.
     let mut identity = BasinIndex::new(
-        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+        ClusterFingerprint::of(n, effective_keying(cfg)),
         cfg.merge_radius,
     );
     // Structures kept for path endpoints. Only ones far from every member are
@@ -1536,7 +1544,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 biases.insert(rep, std::mem::replace(
                     &mut bias,
                     BasinBias::new(
-                        ClusterFingerprint::for_keying(n, cfg.shape_keyed),
+                        ClusterFingerprint::of(n, effective_keying(cfg)),
                         cfg.merge_radius,
                         cfg.bias_height,
                         cfg.bias_gamma,
@@ -2070,15 +2078,56 @@ pub enum ClusterFingerprint {
     Spectrum(SortedPairs),
     /// Coordinates, for a metric that does its own matching.
     Coordinates,
+    /// Sorted per-point pair energies, keying on how well each point is bound
+    /// rather than on how far apart the points are.
+    Sites(SiteEnergies),
+}
+
+/// Which descriptor a run keys basins on.
+///
+/// Named rather than a boolean because there are now three and the choice is
+/// the lever: at 75 points the merge radius on a distance spectrum is sharply
+/// sensitive, 13 seeds in 24 at 0.7 against 0 in 8 at 0.95, and a descriptor
+/// that separates distinct structures more cleanly is what would widen that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Keying {
+    /// Sorted pairwise distances.
+    #[default]
+    Distances,
+    /// Coordinates, matched by a shape metric.
+    Shape,
+    /// Sorted per-point pair energies.
+    Sites,
+}
+
+/// The keying a config asks for, honouring the older boolean.
+fn effective_keying(cfg: &Config) -> Keying {
+    if cfg.shape_keyed && cfg.keying == Keying::Distances {
+        Keying::Shape
+    } else {
+        cfg.keying
+    }
 }
 
 impl ClusterFingerprint {
     /// The descriptor a given keying requires.
     pub fn for_keying(n_points: usize, shape_keyed: bool) -> Self {
-        if shape_keyed {
-            ClusterFingerprint::Coordinates
-        } else {
-            ClusterFingerprint::Spectrum(SortedPairs { n_points })
+        Self::of(
+            n_points,
+            if shape_keyed {
+                Keying::Shape
+            } else {
+                Keying::Distances
+            },
+        )
+    }
+
+    /// The descriptor for a named keying.
+    pub fn of(n_points: usize, keying: Keying) -> Self {
+        match keying {
+            Keying::Shape => ClusterFingerprint::Coordinates,
+            Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
+            Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
         }
     }
 }
@@ -2088,6 +2137,7 @@ impl Fingerprint for ClusterFingerprint {
         match self {
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
+            ClusterFingerprint::Sites(s) => s.describe(x),
         }
     }
 }
