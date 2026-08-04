@@ -1,0 +1,612 @@
+//! Naming the local structure a point sits in.
+//!
+//! Two analyses that OVITO made standard, ported because this crate needs them
+//! for its own reasons rather than for pictures.
+//!
+//! The Lennard-Jones sizes this crate is measured on fail by *morphology*: at
+//! 75 points the search settles into an icosahedral funnel and the answer is a
+//! Marks decahedron. Every continuous collective variable tried on that
+//! distinction was too blunt, the fourth-order bond-order parameter separating
+//! the two funnels by 0.023 against a deposition width four times larger. A
+//! per-point structural classification is a sharper instrument: an icosahedron
+//! and a decahedron differ in what their points *are*, not by a small number.
+//!
+//! # Common neighbour analysis
+//!
+//! Honeycutt and Andersen. Each bonded pair is labelled by three integers: how
+//! many neighbours the two share, how many bonds are among those shared
+//! neighbours, and the longest chain those bonds form. A pair inside an
+//! icosahedral shell gives `555`; a face-centred cubic environment gives `421`
+//! and hexagonal close packed gives `422`. A decahedron carries a fivefold axis
+//! and close-packed facets together, so it shows `555` alongside a substantial
+//! `421` population, which an icosahedron does not.
+//!
+//! # Polyhedral template matching
+//!
+//! Larsen, Schmidt and Schiøtz, *Robust structural identification via
+//! polyhedral template matching*, Modelling Simul. Mater. Sci. Eng. 24, 055007
+//! (2016). Common neighbour analysis decides through a bond cutoff, so it
+//! degrades when the structure is warm or strained: a bond that falls just
+//! outside the cutoff changes the triplet. Template matching instead compares
+//! the neighbourhood to ideal templates after scaling and optimal rotation, and
+//! reports the residual, so the answer degrades smoothly instead of flipping.
+//!
+//! What is implemented here is that comparison. The published method finds the
+//! correspondence between a neighbourhood and a template through the topology
+//! of the convex hull; this uses iterated closest-point assignment from an
+//! inertia-frame start, which is a different way of solving the same
+//! subproblem and is stated as such rather than claimed to be theirs. The
+//! classification and the residual are the parts anything downstream uses.
+
+use ndarray::{Array1, ArrayView1};
+
+/// Counts of common-neighbour triplets over the bonded pairs of a structure.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CnaCounts {
+    /// `(r, s, t)` keys and how often each occurred.
+    pub counts: Vec<((usize, usize, usize), usize)>,
+    /// Bonded pairs found.
+    pub bonds: usize,
+}
+
+impl CnaCounts {
+    /// Occurrences of one triplet.
+    pub fn get(&self, key: (usize, usize, usize)) -> usize {
+        self.counts
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| *v)
+            .unwrap_or(0)
+    }
+
+    /// Share of bonded pairs carrying a triplet.
+    pub fn fraction(&self, key: (usize, usize, usize)) -> f64 {
+        if self.bonds == 0 {
+            return 0.0;
+        }
+        self.get(key) as f64 / self.bonds as f64
+    }
+}
+
+/// Adjacency under a distance cutoff.
+fn adjacency(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<bool>> {
+    let c2 = cutoff * cutoff;
+    let mut adj = vec![vec![false; n]; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            if dx * dx + dy * dy + dz * dz < c2 {
+                adj[i][j] = true;
+                adj[j][i] = true;
+            }
+        }
+    }
+    adj
+}
+
+/// Bonds in the longest continuous chain among a set of common neighbours.
+///
+/// The third index, and the one that has to be counted the right way. It is the
+/// longest *trail*: each bond is used at most once and a point may be passed
+/// through more than once. Counting the longest simple path instead forbids
+/// closing a ring, and the icosahedral signature is a closed five-membered
+/// ring, so a perfect thirteen-point icosahedron reports `(5,5,4)` for its
+/// twelve centre-to-surface pairs where the literature reports `555`, and
+/// everything keyed on `555` reads zero.
+fn longest_trail(sub: &[Vec<bool>]) -> usize {
+    let m = sub.len();
+    if m == 0 {
+        return 0;
+    }
+    let mut edges: Vec<(usize, usize)> = Vec::new();
+    for i in 0..m {
+        for j in (i + 1)..m {
+            if sub[i][j] {
+                edges.push((i, j));
+            }
+        }
+    }
+    if edges.is_empty() {
+        return 0;
+    }
+    let mut incident: Vec<Vec<(usize, usize)>> = vec![Vec::new(); m];
+    for (k, &(i, j)) in edges.iter().enumerate() {
+        incident[i].push((k, j));
+        incident[j].push((k, i));
+    }
+    // Exhaustive over bonds, which is harmless: the set is the common
+    // neighbours of one pair and the bond count stays in single figures.
+    let mut best = 0usize;
+    for start in 0..m {
+        let mut stack: Vec<(usize, u64, usize)> = vec![(start, 0, 0)];
+        while let Some((node, used, length)) = stack.pop() {
+            if length > best {
+                best = length;
+            }
+            for &(k, next) in &incident[node] {
+                if k < 64 && (used >> k) & 1 == 0 {
+                    stack.push((next, used | (1 << k), length + 1));
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Common-neighbour triplets over every bonded pair.
+///
+/// The default cutoff for a Lennard-Jones cluster sits between the first and
+/// second neighbour shells, where the radial distribution is near zero, so the
+/// bond set is insensitive to its exact value.
+pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
+    let adj = adjacency(x, n, cutoff);
+    let mut counts: Vec<((usize, usize, usize), usize)> = Vec::new();
+    let mut bonds = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if !adj[i][j] {
+                continue;
+            }
+            bonds += 1;
+            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
+            let r = common.len();
+            let key = if r == 0 {
+                (0, 0, 0)
+            } else {
+                let sub: Vec<Vec<bool>> = common
+                    .iter()
+                    .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
+                    .collect();
+                let s: usize = sub
+                    .iter()
+                    .enumerate()
+                    .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
+                    .sum();
+                (r, s, longest_trail(&sub))
+            };
+            match counts.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, v)) => *v += 1,
+                None => counts.push((key, 1)),
+            }
+        }
+    }
+    CnaCounts { counts, bonds }
+}
+
+/// A local structure a neighbourhood can be matched to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Template {
+    /// Twelve neighbours, cuboctahedral.
+    FaceCentredCubic,
+    /// Twelve neighbours, anticuboctahedral.
+    HexagonalClosePacked,
+    /// Twelve neighbours, icosahedral.
+    Icosahedral,
+    /// Six neighbours, octahedral.
+    SimpleCubic,
+    /// Nothing matched within the residual cutoff.
+    Other,
+}
+
+impl Template {
+    /// Neighbours the template is built from.
+    pub fn size(&self) -> usize {
+        match self {
+            Template::FaceCentredCubic
+            | Template::HexagonalClosePacked
+            | Template::Icosahedral => 12,
+            Template::SimpleCubic => 6,
+            Template::Other => 0,
+        }
+    }
+
+    /// The ideal neighbour positions, scaled so the mean distance is one.
+    pub fn points(&self) -> Vec<[f64; 3]> {
+        let raw: Vec<[f64; 3]> = match self {
+            Template::FaceCentredCubic => vec![
+                [0.0, 1.0, 1.0], [0.0, -1.0, -1.0], [0.0, 1.0, -1.0], [0.0, -1.0, 1.0],
+                [1.0, 0.0, 1.0], [-1.0, 0.0, -1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0], [-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, 1.0, 0.0],
+            ],
+            Template::HexagonalClosePacked => {
+                // Six in-plane, three above and three below, the stacking that
+                // distinguishes it from the cubic packing.
+                let s3 = 3.0_f64.sqrt();
+                let a = 2.0_f64.sqrt();
+                vec![
+                    [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+                    [0.5, s3 / 2.0, 0.0], [-0.5, -s3 / 2.0, 0.0],
+                    [0.5, -s3 / 2.0, 0.0], [-0.5, s3 / 2.0, 0.0],
+                    [0.5, s3 / 6.0, a / s3], [-0.5, s3 / 6.0, a / s3], [0.0, -s3 / 3.0, a / s3],
+                    [0.5, s3 / 6.0, -a / s3], [-0.5, s3 / 6.0, -a / s3], [0.0, -s3 / 3.0, -a / s3],
+                ]
+            }
+            Template::Icosahedral => {
+                let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+                vec![
+                    [0.0, 1.0, p], [0.0, 1.0, -p], [0.0, -1.0, p], [0.0, -1.0, -p],
+                    [1.0, p, 0.0], [1.0, -p, 0.0], [-1.0, p, 0.0], [-1.0, -p, 0.0],
+                    [p, 0.0, 1.0], [-p, 0.0, 1.0], [p, 0.0, -1.0], [-p, 0.0, -1.0],
+                ]
+            }
+            Template::SimpleCubic => vec![
+                [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0], [0.0, -1.0, 0.0],
+                [0.0, 0.0, 1.0], [0.0, 0.0, -1.0],
+            ],
+            Template::Other => return Vec::new(),
+        };
+        normalise_scale(raw)
+    }
+
+    /// The templates a neighbourhood is tried against.
+    pub fn all() -> [Template; 4] {
+        [
+            Template::FaceCentredCubic,
+            Template::HexagonalClosePacked,
+            Template::Icosahedral,
+            Template::SimpleCubic,
+        ]
+    }
+}
+
+/// Scales a point set so its mean distance from the origin is one.
+///
+/// Scale invariance is what makes a residual comparable between a compressed
+/// interior and an expanded surface, and it is why template matching survives
+/// strain where a bond cutoff does not.
+fn normalise_scale(mut v: Vec<[f64; 3]>) -> Vec<[f64; 3]> {
+    if v.is_empty() {
+        return v;
+    }
+    let mean: f64 = v
+        .iter()
+        .map(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt())
+        .sum::<f64>()
+        / v.len() as f64;
+    if mean > 1e-12 {
+        for p in v.iter_mut() {
+            for k in 0..3 {
+                p[k] /= mean;
+            }
+        }
+    }
+    v
+}
+
+/// Optimal rotation taking `from` onto `to`, by the Kabsch construction.
+fn kabsch(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
+    let mut h = [[0.0_f64; 3]; 3];
+    for (a, b) in from.iter().zip(to.iter()) {
+        for i in 0..3 {
+            for j in 0..3 {
+                h[i][j] += a[i] * b[j];
+            }
+        }
+    }
+    // Rotation from the polar factor of H, obtained by a few Newton steps on
+    // R <- (R + R^-T) / 2 starting from H. Enough for point sets this small,
+    // and it avoids carrying a singular value decomposition for a 3x3.
+    let mut r = h;
+    for _ in 0..24 {
+        let inv_t = match invert_transpose(&r) {
+            Some(m) => m,
+            None => break,
+        };
+        let mut next = [[0.0_f64; 3]; 3];
+        let mut delta = 0.0;
+        for i in 0..3 {
+            for j in 0..3 {
+                next[i][j] = 0.5 * (r[i][j] + inv_t[i][j]);
+                delta += (next[i][j] - r[i][j]).abs();
+            }
+        }
+        r = next;
+        if delta < 1e-12 {
+            break;
+        }
+    }
+    r
+}
+
+/// Inverse transpose of a 3x3, or `None` when it is singular.
+fn invert_transpose(m: &[[f64; 3]; 3]) -> Option<[[f64; 3]; 3]> {
+    let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let c = [
+        [
+            m[1][1] * m[2][2] - m[1][2] * m[2][1],
+            m[1][2] * m[2][0] - m[1][0] * m[2][2],
+            m[1][0] * m[2][1] - m[1][1] * m[2][0],
+        ],
+        [
+            m[0][2] * m[2][1] - m[0][1] * m[2][2],
+            m[0][0] * m[2][2] - m[0][2] * m[2][0],
+            m[0][1] * m[2][0] - m[0][0] * m[2][1],
+        ],
+        [
+            m[0][1] * m[1][2] - m[0][2] * m[1][1],
+            m[0][2] * m[1][0] - m[0][0] * m[1][2],
+            m[0][0] * m[1][1] - m[0][1] * m[1][0],
+        ],
+    ];
+    // inverse = adj / det, and the transpose of that is c^T / det transposed
+    // again, so this returns (M^-1)^T directly.
+    let mut out = [[0.0_f64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            out[i][j] = c[j][i] / det;
+        }
+    }
+    Some(out)
+}
+
+fn apply(r: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
+    [
+        r[0][0] * v[0] + r[1][0] * v[1] + r[2][0] * v[2],
+        r[0][1] * v[0] + r[1][1] * v[1] + r[2][1] * v[2],
+        r[0][2] * v[0] + r[1][2] * v[1] + r[2][2] * v[2],
+    ]
+}
+
+/// Residual between a neighbourhood and a template, after scaling and rotation.
+///
+/// The correspondence is found by iterated closest-point assignment: match each
+/// template point to its nearest unused neighbour, refit the rotation, repeat.
+/// The published method uses the topology of the convex hull instead, which is
+/// exact where this is a heuristic; both are ways of solving the same
+/// subproblem, and the residual is what the classification reads.
+fn residual(neigh: &[[f64; 3]], template: &[[f64; 3]]) -> f64 {
+    let m = template.len();
+    if neigh.len() != m || m == 0 {
+        return f64::INFINITY;
+    }
+    // Start from the identity, then alternate assignment and rotation.
+    let mut r = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    let mut best = f64::INFINITY;
+    for _ in 0..12 {
+        // Assign each template point to the nearest unused neighbour.
+        let mut used = vec![false; m];
+        let mut pairs: Vec<([f64; 3], [f64; 3])> = Vec::with_capacity(m);
+        let mut total = 0.0;
+        for t in template.iter() {
+            let tr = apply(&r, *t);
+            let mut pick = usize::MAX;
+            let mut pick_d = f64::INFINITY;
+            for (k, nb) in neigh.iter().enumerate() {
+                if used[k] {
+                    continue;
+                }
+                let d = (nb[0] - tr[0]).powi(2) + (nb[1] - tr[1]).powi(2) + (nb[2] - tr[2]).powi(2);
+                if d < pick_d {
+                    pick_d = d;
+                    pick = k;
+                }
+            }
+            if pick == usize::MAX {
+                return f64::INFINITY;
+            }
+            used[pick] = true;
+            total += pick_d;
+            pairs.push((*t, neigh[pick]));
+        }
+        let rms = (total / m as f64).sqrt();
+        if rms < best - 1e-12 {
+            best = rms;
+        } else {
+            break;
+        }
+        let from: Vec<[f64; 3]> = pairs.iter().map(|(a, _)| *a).collect();
+        let to: Vec<[f64; 3]> = pairs.iter().map(|(_, b)| *b).collect();
+        r = kabsch(&from, &to);
+    }
+    best
+}
+
+/// The template a point's neighbourhood matches, and how well.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Match {
+    /// Best-matching template, or [`Template::Other`] past the cutoff.
+    pub template: Template,
+    /// Scale-invariant root-mean-square residual to it.
+    pub rmsd: f64,
+}
+
+/// Classifies every point by its local environment.
+///
+/// `cutoff` is the residual past which nothing is claimed. Larsen and coworkers
+/// use a value near 0.1 for warm structures; smaller is stricter.
+pub fn ptm(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Match> {
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        // Neighbours by distance, centred on the point.
+        let mut d: Vec<(f64, [f64; 3])> = (0..n)
+            .filter(|&j| j != i)
+            .map(|j| {
+                let v = [
+                    x[3 * j] - x[3 * i],
+                    x[3 * j + 1] - x[3 * i + 1],
+                    x[3 * j + 2] - x[3 * i + 2],
+                ];
+                (v[0] * v[0] + v[1] * v[1] + v[2] * v[2], v)
+            })
+            .collect();
+        d.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut best = Match {
+            template: Template::Other,
+            rmsd: f64::INFINITY,
+        };
+        for t in Template::all() {
+            let k = t.size();
+            if d.len() < k {
+                continue;
+            }
+            let neigh = normalise_scale(d.iter().take(k).map(|(_, v)| *v).collect());
+            let rms = residual(&neigh, &t.points());
+            if rms < best.rmsd {
+                best = Match {
+                    template: t,
+                    rmsd: rms,
+                };
+            }
+        }
+        if best.rmsd > cutoff {
+            best = Match {
+                template: Template::Other,
+                rmsd: best.rmsd,
+            };
+        }
+        out.push(best);
+    }
+    out
+}
+
+/// Share of points carrying each template, as a descriptor.
+///
+/// Ordered as face-centred cubic, hexagonal close packed, icosahedral, simple
+/// cubic, other, so it can be compared by distance like any other fingerprint.
+pub fn ptm_fractions(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Array1<f64> {
+    let m = ptm(x, n, cutoff);
+    let mut out = Array1::zeros(5);
+    for e in &m {
+        let k = match e.template {
+            Template::FaceCentredCubic => 0,
+            Template::HexagonalClosePacked => 1,
+            Template::Icosahedral => 2,
+            Template::SimpleCubic => 3,
+            Template::Other => 4,
+        };
+        out[k] += 1.0;
+    }
+    if n > 0 {
+        out /= n as f64;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    /// A thirteen-point icosahedron: a centre and twelve vertices.
+    fn icosahedron13() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, p], [0.0, 1.0, -p], [0.0, -1.0, p], [0.0, -1.0, -p],
+            [1.0, p, 0.0], [1.0, -p, 0.0], [-1.0, p, 0.0], [-1.0, -p, 0.0],
+            [p, 0.0, 1.0], [-p, 0.0, 1.0], [p, 0.0, -1.0], [-p, 0.0, -1.0],
+        ];
+        // Edge length 2 before scaling; the centre-to-vertex distance is then
+        // sqrt(1 + p^2), so scaling by its reciprocal puts vertices at 1.
+        let s = 1.0 / (1.0 + p * p).sqrt();
+        let mut x = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * (i + 1) + k] = s * v[k];
+            }
+        }
+        x
+    }
+
+    /// The centre of a perfect icosahedron. Its twelve centre-to-vertex pairs
+    /// are the ones the literature reports as 555, and counting the third index
+    /// as a simple path instead of a trail gives 554 and reads zero.
+    #[test]
+    fn an_icosahedron_centre_gives_the_five_five_five_signature() {
+        let x = icosahedron13();
+        // Cutoff between the first shell at 1 and the vertex-vertex distance,
+        // which for this scaling is about 1.05.
+        let c = cna(x.view(), 13, 1.2);
+        assert!(
+            c.get((5, 5, 5)) >= 12,
+            "expected at least twelve 555 pairs, counts {:?}",
+            c.counts
+        );
+        assert_eq!(c.get((5, 5, 4)), 0, "555 was miscounted as 554");
+    }
+
+    /// Template matching has to recognise the same structure, and by a
+    /// different route: no bond cutoff is involved.
+    #[test]
+    fn template_matching_calls_an_icosahedron_centre_icosahedral() {
+        let x = icosahedron13();
+        let m = ptm(x.view(), 13, 0.1);
+        assert_eq!(m[0].template, Template::Icosahedral, "rmsd {}", m[0].rmsd);
+        assert!(m[0].rmsd < 1e-6, "an ideal centre gave rmsd {}", m[0].rmsd);
+    }
+
+    /// A face-centred cubic environment: the twelve nearest neighbours of an
+    /// interior atom, which is the cuboctahedron.
+    #[test]
+    fn template_matching_calls_a_close_packed_environment_cubic() {
+        let mut pts: Vec<[f64; 3]> = vec![[0.0, 0.0, 0.0]];
+        for p in Template::FaceCentredCubic.points() {
+            pts.push(p);
+        }
+        let n = pts.len();
+        let mut x = Array1::<f64>::zeros(3 * n);
+        for (i, p) in pts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = p[k];
+            }
+        }
+        let m = ptm(x.view(), n, 0.1);
+        assert_eq!(m[0].template, Template::FaceCentredCubic, "rmsd {}", m[0].rmsd);
+        assert!(m[0].rmsd < 1e-6);
+    }
+
+    /// The property that motivates it over a bond cutoff: the answer degrades
+    /// smoothly under noise rather than flipping.
+    #[test]
+    fn the_residual_grows_with_noise_rather_than_flipping() {
+        let base = icosahedron13();
+        let mut last = -1.0;
+        for step in 0..4 {
+            let amp = 0.01 * step as f64;
+            let mut x = base.clone();
+            for (i, v) in x.iter_mut().enumerate() {
+                *v += amp * (((i * 29 + 7) % 13) as f64 / 6.0 - 1.0);
+            }
+            let m = ptm(x.view(), 13, 0.5);
+            assert!(
+                m[0].rmsd >= last,
+                "residual fell from {last} to {} as noise rose",
+                m[0].rmsd
+            );
+            last = m[0].rmsd;
+        }
+    }
+
+    /// A structure with no recognisable environment is called Other rather than
+    /// forced into the nearest template.
+    #[test]
+    fn a_random_environment_is_not_classified() {
+        let n = 13;
+        let mut x = Array1::<f64>::zeros(3 * n);
+        for i in 0..n {
+            let a = (i as f64) * 1.317;
+            let r = 0.7 + 0.4 * ((i % 5) as f64);
+            x[3 * i] = r * a.cos();
+            x[3 * i + 1] = r * a.sin();
+            x[3 * i + 2] = 0.61 * ((i % 4) as f64) - 0.9;
+        }
+        let m = ptm(x.view(), n, 0.08);
+        assert_eq!(m[0].template, Template::Other, "rmsd {}", m[0].rmsd);
+    }
+
+    #[test]
+    fn the_fractions_sum_to_one() {
+        let x = icosahedron13();
+        let f = ptm_fractions(x.view(), 13, 0.1);
+        let s: f64 = f.iter().sum();
+        assert!((s - 1.0).abs() < 1e-12, "fractions summed to {s}");
+    }
+}
