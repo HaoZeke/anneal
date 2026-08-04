@@ -13,6 +13,7 @@
 
 /// Basin hopping over quenched minima with a basin-keyed bias.
 pub mod cluster_hopping;
+pub mod cluster_search;
 /// History-conditioned escape feedback, after Goedecker's minima hopping.
 pub mod activation;
 pub mod bank;
