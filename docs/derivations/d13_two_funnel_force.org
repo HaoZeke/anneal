@@ -1,0 +1,71 @@
+#+TITLE: D13: Two-funnel force scaling and multi-start optimality
+#+OPTIONS: toc:2 num:t
+
+Executable: =proofs/d13_two_funnel_force.py=. Parents: D12 (force ledger),
+landscape facts (Wales: once lowest icosahedral, Marks never).
+
+* Model
+
+After setup cost \(Q_0\), a seed enters good funnel \(G\) with probability
+\(\alpha\) and trap funnel \(I\) with probability \(1-\alpha\).
+
+- In \(G\): each hop succeeds (hits GM) with probability \(p\).
+- In \(I\): inter-funnel escape probability per hop is \(\varepsilon\ge 0\).
+  The hard Wales regime is \(\varepsilon=0\).
+
+Each post-setup hop costs \(Q\) force units.
+
+* Proposition 1 (seed success, \(\varepsilon=0\))
+
+\[
+P_{\mathrm{seed}}(\alpha,p,H)=\alpha\bigl(1-(1-p)^{H}\bigr).
+\]
+
+* Proposition 2 (multi-start and sequential force)
+
+With \(n\) independent seeds,
+\[
+P=1-\bigl(1-P_{\mathrm{seed}}\bigr)^{n}.
+\]
+If \(H\to\infty\) and \(0<p\le 1\), then \(P_{\mathrm{seed}}\to\alpha\) and
+\[
+\mathbb{E}[\text{seeds to first success}]=\frac1\alpha,\qquad
+\mathbb{E}[\text{force}]=F_s/\alpha
+\]
+for sequential seeds each costing \(F_s\).
+
+* Proposition 3 (catchment lower bound)
+
+Under \(\varepsilon=0\), even if hops inside \(G\) are free and always succeed,
+expected force to eventual success is at least \(Q_0/\alpha\). Local refinement
+cannot remove the \(1/\alpha\) factor. Multi-start (or any mechanism that
+improves effective \(\alpha\)) is mandatory.
+
+* Proposition 5 (global split \(n\) vs \(H\))
+
+Under total force \(F=n(Q_0+HQ)\),
+\[
+P(n,H)=1\Bigl[1-\alpha\bigl(1-(1-p)^{H}\bigr)\Bigr]^{n}.
+\]
+Grid maximizer =optimal_split=. Special cases:
+
+- \(p=1\): prefer many seeds with \(H\ge 1\) (α-limited).
+- \(\alpha=1\): prefer large \(H\), small \(n\) (p-limited).
+- interior \((\alpha,p)\): tradeoff; restarts beat one long chain when
+  \(\varepsilon=0\) and \(\alpha\) is not near 1.
+
+* Proposition 6 (escape)
+
+\(P_{\mathrm{seed}}\) is nondecreasing in \(\varepsilon\); \(\varepsilon>0\)
+strictly beats \(\varepsilon=0\) at fixed \((\alpha,p,H)\) (mixture over escape
+time + local Geo(\(p\))).
+
+* Design consequences for anneal / JCC
+
+1. BFWT empty window (D12) + \(\varepsilon=0\) ⇒ **restarts / population / CSA**,
+   not longer single Metropolis chains.
+2. Report **catchment diagnostics** (funnel identity) early; kill seeds in \(I\).
+3. Force scales as \(1/\alpha\): improving basin keying that raises effective
+   \(\alpha\) is first-order; polishing \(p\) inside \(I\) is worthless.
+
+Witness: =D13_DERIVE_OK=, pytest green.
