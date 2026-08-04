@@ -12,6 +12,7 @@ use anneal_core::methods::cluster_hopping::{
     optimize_with_gradient, Config, Keying, Ledger, Outcome,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 
 #[cfg(feature = "ira")]
@@ -229,14 +230,51 @@ fn main() {
         // landscape is only on it if its relaxations reach minima; one that
         // stops at the iteration cap is hopping between arbitrary points and
         // every mechanism above it is acting on noise.
+        // The screening pass stopped as soon as its limit is decided.
+        let early_stop = opts.contains(&"early");
+        let mut early_stopped = 0usize;
+        let mut early_saved = 0usize;
         let mut converged = 0usize;
         let mut capped = 0usize;
         let mut opt = WarmLbfgs::default();
+        let screen_steps = cfg.screen_steps;
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             // Curvature is not carried between relaxations: measured on this
             // problem, retaining it across a structural change costs more than
             // it saves.
             opt.forget();
+            // Early termination applies to the screening pass only.
+            //
+            // The screen's output is allowed to be unconverged; the full
+            // relaxation's is not, because the driver puts it into the chain
+            // and every mechanism above assumes the chain stands on a minimum.
+            // Stopping the full relaxation early is the same defect that broke
+            // the escape controller, where 94 relaxations in 3148 reached a
+            // minimum and the curvature it steered by came back negative at a
+            // point being treated as one.
+            if early_stop && iters <= screen_steps {
+                let mut term = Terminator::default();
+                let mut cur = x.to_owned();
+                let mut f = f64::INFINITY;
+                let mut done = 0usize;
+                // Four at a time: enough for the ratio estimate to move, small
+                // enough that the saving is not given back.
+                while done < iters {
+                    let take = 4.min(iters - done);
+                    let (fi, xi, _) = opt.minimize(cur.view(), take, |v| charged(led, v));
+                    f = fi;
+                    cur = xi;
+                    done += take;
+                    term.observe(f);
+                    if term.settled_above(led.best) {
+                        early_stopped += 1;
+                        early_saved += iters - done;
+                        break;
+                    }
+                }
+                capped += 1;
+                return (f, cur);
+            }
             let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
             let (_, g) = lj(xr.view());
             if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
@@ -378,7 +416,8 @@ fn main() {
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
              escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
-             relaxed {converged}/{} converged  verified {}{}",
+             relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
+             verified {}{}",
             out.best,
             out.hops,
             out.screened_out,
