@@ -46,13 +46,25 @@ pub struct Plane {
     pub population: usize,
 }
 
-/// How a half is mapped onto the other side.
+/// How the far half is produced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
-    /// Reflect through the plane.
+    /// Replace the far half by the mirror image of the near half.
     ///
-    /// The mirror twin, and the operation relating the two stackings of a
-    /// close packing.
+    /// The construction that gives a twin its registry. Moving the far half by
+    /// the twin law instead, which is what a two-fold rotation about the
+    /// normal does for a close packing, is crystallographically the right
+    /// operation and produces the wrong structure here: the two halves keep
+    /// their own in-plane origins, so neighbours across the boundary land at
+    /// distances that are not the packing's, and Lennard-Jones charges for
+    /// each one. Measured, that proposal was accepted on 52 of 2228 draws
+    /// against 0.63 for a surface move, and scored 1 of 6 against a control at
+    /// 1 of 6.
+    ///
+    /// Mirroring the near half onto the far side cannot have that fault: every
+    /// distance on the far side is a distance that already existed on the
+    /// near side, and the boundary is the plane both halves were built
+    /// against.
     Reflect,
     /// Rotate about the normal by a fifth of a turn.
     ///
@@ -192,6 +204,57 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
     let tol = layer * s;
     let m = plane.normal;
     let mut y = x.to_owned();
+
+    if mode == Mode::Reflect {
+        // The near half, its mirror, and the far half's count. The far points
+        // are replaced by the mirror images nearest the boundary, so the
+        // structure keeps its size and the far side inherits a packing that
+        // already exists rather than one assembled at the boundary.
+        let signed: Vec<f64> = (0..n)
+            .map(|i| {
+                (0..3)
+                    .map(|k| (x[3 * i + k] - c[k]) * m[k])
+                    .sum::<f64>()
+                    - plane.offset
+            })
+            .collect();
+        let above: Vec<usize> = (0..n).filter(|&i| signed[i] > tol).collect();
+        let below: Vec<usize> = (0..n).filter(|&i| signed[i] < -tol).collect();
+        if above.is_empty() || below.is_empty() {
+            return y;
+        }
+        // The fuller side is the source and the thinner side is replaced.
+        //
+        // Requiring the near side to be the larger one meant returning the
+        // input whenever the plane cut off-centre, which is most planes, and
+        // the move did nothing at all: the test that asks whether it changed
+        // the structure is what caught that.
+        let (src_side, dst_side) = if below.len() >= above.len() {
+            (&below, &above)
+        } else {
+            (&above, &below)
+        };
+        // Mirror images of the source side, closest to the boundary first,
+        // since those are the ones a cluster of this size actually holds.
+        let mut order: Vec<usize> = src_side.clone();
+        order.sort_by(|&a, &b| {
+            signed[a]
+                .abs()
+                .partial_cmp(&signed[b].abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (slot, &src) in dst_side.iter().zip(order.iter()) {
+            for k in 0..3 {
+                // Reflection through the plane: the in-plane part is kept and
+                // the component along the normal changes sign about the plane.
+                let v = x[3 * src + k] - c[k];
+                let along = signed[src] + plane.offset;
+                y[3 * slot + k] = c[k] + v - 2.0 * (along - plane.offset) * m[k];
+            }
+        }
+        return y;
+    }
+
     for i in 0..n {
         let v = [
             x[3 * i] - c[0],
