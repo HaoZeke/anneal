@@ -125,6 +125,7 @@ fn main() {
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
     cfg.reseed_moves = opts.contains(&"reseed");
+    cfg.twin_moves = opts.contains(&"twin");
     cfg.learn_construction = opts.contains(&"learn");
     if cfg.learn_construction {
         cfg.reseed_moves = true;

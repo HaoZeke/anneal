@@ -68,6 +68,23 @@ pub enum ClusterMove {
     ShellRotate(ShellRotate),
     /// Enforce an approximate rotational symmetry.
     Symmetrise(Symmetrise),
+    /// Twin the structure across one of its dense planes.
+    ///
+    /// The move between a displacement, which never leaves the funnel, and a
+    /// rebuild, which leaves it and lands far above the incumbent. Close
+    /// packings differ by their stacking, and the operation relating them is a
+    /// reflection in a dense plane: a decahedron is five tetrahedra sharing
+    /// twin boundaries and an icosahedron is twenty. Reflecting one side
+    /// leaves every neighbour relation on each side intact and changes only
+    /// the contacts across the plane, so the proposal costs a boundary layer
+    /// rather than a structure and can survive an acceptance test that a
+    /// rebuilt candidate cannot.
+    ///
+    /// See [`crate::twin`].
+    Twin {
+        /// Points in a state.
+        n_points: usize,
+    },
     /// Rebuild the structure by growing a local order, and quench into it.
     ///
     /// The only move here that crosses a funnel boundary in one step. Every
@@ -198,6 +215,17 @@ impl ClusterMove {
         ]
     }
 
+    /// The library with the twin move added.
+    ///
+    /// Separate from the reseeding library because the two are different bets.
+    /// A reseed discards the structure; a twin keeps all of it but one
+    /// boundary layer, which is the whole reason to expect it to be accepted.
+    pub fn library_with_twin(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library(n);
+        v.push(ClusterMove::Twin { n_points: n });
+        v
+    }
+
     /// The library with the reseeding moves added.
     ///
     /// Separate because these are the only proposals that discard the current
@@ -241,6 +269,7 @@ impl ClusterMove {
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
             ClusterMove::Angular { .. } => "angular".into(),
+            ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
         }
     }
@@ -286,6 +315,7 @@ impl ClusterMove {
                 }
                 y
             }
+            ClusterMove::Twin { n_points } => crate::twin::propose(x, *n_points, rng),
             ClusterMove::Reseed { n_points, source } => {
                 // Both the order and the length scale are read off the current
                 // structure, so the move carries no knowledge of the potential
@@ -815,6 +845,11 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Whether the move set includes twinning across a dense plane.
+    ///
+    /// The one proposal here that changes morphology without discarding the
+    /// structure. See [`crate::twin`].
+    pub twin_moves: bool,
     /// Whether a posterior chooses the growth move's parameters.
     ///
     /// The allocator decides which move to draw. This decides what the move
@@ -929,6 +964,7 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            twin_moves: false,
             learn_construction: false,
             construct_width: 4,
             reseed_moves: false,
@@ -1286,7 +1322,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.learn_construction {
+    let kernels = if cfg.twin_moves {
+        ClusterMove::library_with_twin(n)
+    } else if cfg.learn_construction {
         ClusterMove::library_with_learned_reseed(n)
     } else if cfg.reseed_moves {
         ClusterMove::library_with_reseed(n)
