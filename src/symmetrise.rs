@@ -34,7 +34,20 @@ pub struct Candidate {
     /// Unit vector along the rotation axis, through the centroid.
     pub axis: [f64; 3],
     /// Rotation order; the operation is by `2 pi / order`.
+    ///
+    /// Order 1 with `improper` set is a plane: the reflection in the plane
+    /// through the centroid whose normal is `axis`.
     pub order: usize,
+    /// Whether the operation carries a reflection.
+    ///
+    /// The group a structure has is not always a rotation group. The 98-point
+    /// global minimum is tetrahedral and the 38-point one is octahedral, and
+    /// both of those are defined by their mirror planes: the proper rotations
+    /// alone give T and O, which are index-two subgroups missing exactly the
+    /// operations that pick out the structure. A generator set closed only
+    /// under proper rotations cannot express either, so the scheme could
+    /// symmetrise toward a subgroup of the target and never toward the target.
+    pub improper: bool,
     /// Root-mean-square distance between a point and its matched image.
     ///
     /// Zero for an exact symmetry. This is what "approximate" is measured by,
@@ -117,6 +130,46 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
     (total / n as f64).sqrt()
 }
 
+/// How far `x` is from being symmetric under the plane whose normal is `axis`.
+///
+/// The same statistic as [`deviation`] for a rotation: each point is reflected
+/// and matched to its nearest partner, and the root-mean-square of those
+/// distances is what "approximately symmetric" means here.
+pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
+    if n == 0 {
+        return f64::INFINITY;
+    }
+    let c = centroid(x, n);
+    let m = mirror_matrix(axis);
+    let mut total = 0.0;
+    for a in 0..n {
+        let v = [
+            x[3 * a] - c[0],
+            x[3 * a + 1] - c[1],
+            x[3 * a + 2] - c[2],
+        ];
+        let w = [
+            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+        ];
+        let mut best = f64::INFINITY;
+        for b in 0..n {
+            let u = [
+                x[3 * b] - c[0],
+                x[3 * b + 1] - c[1],
+                x[3 * b + 2] - c[2],
+            ];
+            let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
+            if d < best {
+                best = d;
+            }
+        }
+        total += best;
+    }
+    (total / n as f64).sqrt()
+}
+
 /// Axes worth testing, taken from the structure rather than at random.
 ///
 /// Two families. The principal axes of the inertia tensor, which is where a
@@ -165,6 +218,11 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
 ///
 /// `None` when nothing is even approximately symmetric, which is the signal to
 /// leave the structure alone.
+///
+/// Proper rotations only, because [`symmetrise`] averages a point around its
+/// orbit under a rotation and a reflection has no such orbit. Mirror planes are
+/// found by [`detect_all`], which exists to build a group rather than to push a
+/// structure along one operation.
 pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) -> Option<Candidate> {
     let mut best: Option<Candidate> = None;
     for axis in candidate_axes(x, n) {
@@ -174,12 +232,66 @@ pub fn detect(x: ArrayView1<f64>, n: usize, orders: &[usize], tolerance: f64) ->
                 best = Some(Candidate {
                     axis,
                     order,
+                    improper: false,
                     deviation: d,
                 });
             }
         }
     }
     best
+}
+
+/// All approximate symmetries of `x`, proper and improper.
+///
+/// [`detect`] returns only the best one, which is enough to symmetrise toward a
+/// single operation and not enough to build a group: a tetrahedral structure
+/// needs a three-fold axis and a plane together, and either alone generates a
+/// subgroup that is not the answer.
+pub fn detect_all(
+    x: ArrayView1<f64>,
+    n: usize,
+    orders: &[usize],
+    tolerance: f64,
+) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for axis in candidate_axes(x, n) {
+        for &order in orders {
+            let d = deviation(x, n, axis, order);
+            if d < tolerance {
+                out.push(Candidate {
+                    axis,
+                    order,
+                    improper: false,
+                    deviation: d,
+                });
+            }
+        }
+        let d = plane_deviation(x, n, axis);
+        if d < tolerance {
+            out.push(Candidate {
+                axis,
+                order: 1,
+                improper: true,
+                deviation: d,
+            });
+        }
+    }
+    out.sort_by(|a, b| {
+        a.deviation
+            .partial_cmp(&b.deviation)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
+/// Reflection in the plane through the centroid with normal `axis`.
+pub fn mirror_matrix(axis: [f64; 3]) -> Rot {
+    let [x, y, z] = axis;
+    [
+        [1.0 - 2.0 * x * x, -2.0 * x * y, -2.0 * x * z],
+        [-2.0 * y * x, 1.0 - 2.0 * y * y, -2.0 * y * z],
+        [-2.0 * z * x, -2.0 * z * y, 1.0 - 2.0 * z * z],
+    ]
 }
 
 /// Makes `x` exactly symmetric under the rotation `cand` describes.
@@ -349,8 +461,17 @@ pub fn generate_group(cands: &[Candidate], cap: usize) -> Vec<Rot> {
     let mut group: Vec<Rot> = vec![identity];
     let mut gens: Vec<Rot> = Vec::new();
     for c in cands {
-        let angle = 2.0 * std::f64::consts::PI / c.order.max(2) as f64;
-        gens.push(rot_matrix(c.axis, angle));
+        if c.improper {
+            // A reflection, which is what lifts a rotation group to the group
+            // the structure actually has: proper rotations alone give T where
+            // the 98-point minimum is Td, and O where the 38-point minimum is
+            // Oh. Both are index-two subgroups missing exactly the operations
+            // that define the target.
+            gens.push(mirror_matrix(c.axis));
+        } else {
+            let angle = 2.0 * std::f64::consts::PI / c.order.max(2) as f64;
+            gens.push(rot_matrix(c.axis, angle));
+        }
     }
     let mut changed = true;
     while changed && group.len() < cap {
@@ -523,6 +644,91 @@ mod tests {
     /// Detection has to find the axis the structure actually has, which is the
     /// difference between this and symmetrising about a random direction.
     #[test]
+/// The groups the hard structures actually have, which proper rotations alone
+    /// cannot express. Tetrahedral order is 24 and octahedral is 48; the
+    /// rotation subgroups are 12 and 24, so a generator set closed under proper
+    /// rotations stops exactly halfway.
+    #[test]
+    fn a_reflection_generator_reaches_the_full_groups() {
+        let s3 = 1.0 / 3.0_f64.sqrt();
+        // Tetrahedral. The rotation subgroup T needs a three-fold axis along a
+        // body diagonal and a two-fold along a coordinate axis; a diagonal
+        // mirror then doubles it to Td. A three-fold with a mirror containing
+        // it gives C3v of order six instead, which is what the first attempt
+        // at this test generated and what makes the choice of generators worth
+        // stating rather than assuming.
+        let td = generate_group(
+            &[
+                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
+                Candidate { axis: [0.0, 0.0, 1.0], order: 2, improper: false, deviation: 0.0 },
+                Candidate {
+                    axis: [1.0 / 2.0_f64.sqrt(), -1.0 / 2.0_f64.sqrt(), 0.0],
+                    order: 1,
+                    improper: true,
+                    deviation: 0.0,
+                },
+            ],
+            200,
+        );
+        assert_eq!(td.len(), 24, "tetrahedral group came out with {} elements", td.len());
+        assert!(
+            td.iter().any(|m| determinant(m) < 0.0),
+            "no improper element in a group that is half improper"
+        );
+
+        // Octahedral: a four-fold axis and a mirror plane normal to another.
+        let oh = generate_group(
+            &[
+                Candidate { axis: [0.0, 0.0, 1.0], order: 4, improper: false, deviation: 0.0 },
+                Candidate { axis: [1.0, 0.0, 0.0], order: 1, improper: true, deviation: 0.0 },
+                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
+            ],
+            200,
+        );
+        assert_eq!(oh.len(), 48, "octahedral group came out with {} elements", oh.len());
+    }
+
+    /// Without the reflection the same generators must give the proper
+    /// subgroup, which is the statement of what was missing before.
+    #[test]
+    fn proper_generators_alone_stop_at_the_rotation_subgroup() {
+        let s3 = 1.0 / 3.0_f64.sqrt();
+        let t = generate_group(
+            &[
+                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
+                Candidate { axis: [0.0, 0.0, 1.0], order: 2, improper: false, deviation: 0.0 },
+            ],
+            200,
+        );
+        assert_eq!(t.len(), 12, "rotation subgroup came out with {} elements", t.len());
+        assert!(
+            t.iter().all(|m| determinant(m) > 0.0),
+            "an improper element appeared with no reflection generator"
+        );
+    }
+
+    /// A plane the structure has must be detected, and one it lacks must not
+    /// be, or the group is built from operations that are not there.
+    #[test]
+    fn plane_detection_matches_the_structure() {
+        // A square in the xy plane: mirror in z is exact, mirror in a plane at
+        // an odd angle is not.
+        let x = ndarray::Array1::from(vec![
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0, 0.0,
+        ]);
+        let flat = plane_deviation(x.view(), 4, [0.0, 0.0, 1.0]);
+        assert!(flat < 1e-9, "the plane of a planar square read as {flat}");
+        let odd = plane_deviation(x.view(), 4, [0.3, 0.1, 0.95_f64.sqrt()]);
+        assert!(odd > 1e-3, "a plane the square lacks read as {odd}");
+    }
+
+    fn determinant(m: &Rot) -> f64 {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    }
+
+    #[test]
     fn detection_finds_an_axis_the_structure_has() {
         let x = jitter(&octahedron(1.0), 0.03);
         let cand = detect(x.view(), 6, &[2, 3, 4, 5, 6], 0.5).expect("nothing detected");
@@ -565,6 +771,7 @@ mod tests {
         let cand = Candidate {
             axis: [0.0, 0.0, 1.0],
             order: 4,
+            improper: false,
             deviation: 0.0,
         };
         let y = symmetrise(x.view(), 6, &cand, 1.0);
@@ -606,11 +813,13 @@ mod tests {
             Candidate {
                 axis: [s3, s3, s3],
                 order: 3,
+                improper: false,
                 deviation: 0.0,
             },
             Candidate {
                 axis: [0.0, 0.0, 1.0],
                 order: 2,
+                improper: false,
                 deviation: 0.0,
             },
         ];
@@ -630,11 +839,13 @@ mod tests {
             Candidate {
                 axis: [1.0, 0.0, 0.0],
                 order: 4,
+                improper: false,
                 deviation: 0.0,
             },
             Candidate {
                 axis: [0.0, 1.0, 0.0],
                 order: 4,
+                improper: false,
                 deviation: 0.0,
             },
         ];
@@ -651,8 +862,8 @@ mod tests {
         let single = symmetrise(x.view(), 6, &one, 1.0);
 
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 4, deviation: 0.0 },
-            Candidate { axis: [0.0, 1.0, 0.0], order: 4, deviation: 0.0 },
+            Candidate { axis: [1.0, 0.0, 0.0], order: 4, improper: false, deviation: 0.0 },
+            Candidate { axis: [0.0, 1.0, 0.0], order: 4, improper: false, deviation: 0.0 },
         ];
         let group = generate_group(&gens, 120);
         let full = symmetrise_group(x.view(), 6, &group, 1.0);
@@ -672,8 +883,8 @@ mod tests {
     fn the_group_leaves_an_exact_structure_alone() {
         let x = octahedron(1.1);
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 4, deviation: 0.0 },
-            Candidate { axis: [0.0, 1.0, 0.0], order: 4, deviation: 0.0 },
+            Candidate { axis: [1.0, 0.0, 0.0], order: 4, improper: false, deviation: 0.0 },
+            Candidate { axis: [0.0, 1.0, 0.0], order: 4, improper: false, deviation: 0.0 },
         ];
         let group = generate_group(&gens, 120);
         let y = symmetrise_group(x.view(), 6, &group, 1.0);
@@ -687,10 +898,11 @@ mod tests {
     #[test]
     fn incommensurate_axes_are_capped_rather_than_run_away() {
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 5, deviation: 0.0 },
+            Candidate { axis: [1.0, 0.0, 0.0], order: 5, improper: false, deviation: 0.0 },
             Candidate {
                 axis: [0.31, 0.77, 0.56],
                 order: 3,
+                improper: false,
                 deviation: 0.0,
             },
         ];

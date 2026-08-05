@@ -14,7 +14,15 @@ The algorithm, from Wales and Doye, J. Phys. Chem. A 101, 5111 (1997):
   * Single-step: the chain carries the quenched geometry, not the geometry
     before the quench. White and Mayne (1998) measure this variant as the
     better one, and it is what "plain basin hopping" refers to.
-  * Proposal: displace every coordinate uniformly by at most `step`.
+  * Proposal: displace every coordinate uniformly by at most `step`. With
+    `--angular`, a fraction of moves instead take the worst-bound atom and
+    replace its radius with the largest in the cluster at a fresh random
+    angle, which is the move the paper used to reach the decahedral minima at
+    75 points: "choosing random theta and phi spherical polar coordinates for
+    the atom in question, taking the origin at the center of mass and
+    replacing the radius with the maximum value in the cluster". Comparing
+    only against the plain variant would compare against the paper's weakest
+    protocol.
   * Acceptance: Metropolis on the quenched energies at fixed T.
   * `step` is adjusted toward an acceptance ratio of one half, which is the
     paper's own prescription.
@@ -29,6 +37,16 @@ than the crate's own rather than a weaker one. Nothing here is handicapped.
 from __future__ import annotations
 
 import argparse
+import os
+
+# Pinned before numpy is imported. The arrays here are a few hundred elements
+# wide, so a threaded BLAS spends more time synchronising than computing, and a
+# campaign of concurrent seeds oversubscribes the machine several times over:
+# nineteen of these drew thirty-nine cores' worth of CPU on a thirty-two core
+# host, which slows every one of them.
+for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 import math
 import sys
 
@@ -83,6 +101,30 @@ def lj(x: np.ndarray):
     return e, g.ravel()
 
 
+def angular_move(x: np.ndarray, rng) -> np.ndarray:
+    """Wales and Doye's angular move on the worst-bound atom.
+
+    The atom with the highest pair energy is thrown to the far edge of the
+    cluster at a random angle. A much larger step than a uniform displacement,
+    and the one the 1997 paper credits with reaching the decahedral minima.
+    """
+    p = x.reshape(-1, 3).copy()
+    n = len(p)
+    c = p.mean(axis=0)
+    d = p[:, None, :] - p[None, :, :]
+    r2 = (d * d).sum(-1)
+    np.fill_diagonal(r2, np.inf)
+    inv6 = 1.0 / r2 ** 3
+    per_atom = (4.0 * (inv6 * inv6 - inv6)).sum(axis=1)
+    worst = int(np.argmax(per_atom))
+    rmax = float(np.linalg.norm(p - c, axis=1).max())
+    ct = rng.uniform(-1.0, 1.0)
+    st = math.sqrt(max(0.0, 1.0 - ct * ct))
+    phi = rng.uniform(0.0, 2.0 * math.pi)
+    p[worst] = c + rmax * np.array([st * math.cos(phi), st * math.sin(phi), ct])
+    return p.ravel()
+
+
 def contain(x: np.ndarray, radius: float) -> np.ndarray:
     """Pull escaped atoms back inside the container.
 
@@ -114,7 +156,7 @@ def quench(x: np.ndarray, led: Ledger, maxiter: int = 3000):
 
 
 def basin_hopping(n: int, budget: int, seed: int, temperature: float = 0.8,
-                  target: float | None = None):
+                  target: float | None = None, angular: float = 0.0):
     rng = np.random.default_rng(seed)
     radius = 2.5 * n ** (1.0 / 3.0)
     led = Ledger(budget)
@@ -132,7 +174,10 @@ def basin_hopping(n: int, budget: int, seed: int, temperature: float = 0.8,
     window = 0
     window_accepted = 0
     while led.spent < led.budget:
-        y = x + rng.uniform(-step, step, size=x.shape)
+        if angular > 0.0 and rng.random() < angular:
+            y = angular_move(x, rng)
+        else:
+            y = x + rng.uniform(-step, step, size=x.shape)
         y = contain(y, radius)
         ey, y = quench(y, led, 3000)
         if ey is None:
@@ -161,16 +206,18 @@ def main() -> int:
     ap.add_argument("seeds", type=int, default=8, nargs="?")
     ap.add_argument("--seed0", type=int, default=0)
     ap.add_argument("--temperature", type=float, default=0.8)
+    ap.add_argument("--angular", type=float, default=0.0,
+                    help="fraction of proposals that are angular moves")
     a = ap.parse_args()
 
     ref = REFERENCE.get(a.n)
     print(f"LJ{a.n}, budget {a.budget} charged evaluations, {a.seeds} seeds, "
-          f"reference {ref if ref is not None else 'none'}")
+          f"angular {a.angular}, reference {ref if ref is not None else 'none'}")
     solved = 0
     hits = []
     deepest = math.inf
     for s in range(a.seed0, a.seed0 + a.seeds):
-        led, hops, acc = basin_hopping(a.n, a.budget, s, a.temperature, ref)
+        led, hops, acc = basin_hopping(a.n, a.budget, s, a.temperature, ref, a.angular)
         deepest = min(deepest, led.best)
         ok = ref is not None and led.best < ref + 1e-4
         solved += bool(ok)
