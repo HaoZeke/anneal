@@ -49,22 +49,42 @@
 //! `GPR_OPTIM_LIB_DIR`. Same contract as the `ira` feature.
 
 use std::os::raw::{c_int, c_void};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Condvar, Mutex, MutexGuard};
 
 /// Serialises every call into the library.
 ///
 /// Not defensive programming. `libgpr_optim` is normally built against
-/// ScaLAPACK with MPI, and it initialises MPI lazily on first use, so two
-/// threads entering the library at once abort the process with "An error
-/// occurred in MPI_Init on a NULL communicator". That is what happens when the
-/// test binary runs these tests in parallel, and it would happen to any caller
-/// holding one surrogate per thread.
-///
-/// The lock is process-wide rather than per surrogate because the state being
-/// protected is the library's, not the handle's. It costs nothing here: the
-/// model is retrained on a schedule of hundreds of hops and each seed of a
-/// campaign runs in its own process.
+/// ScaLAPACK with MPI and initialises MPI lazily on first use, so two threads
+/// entering the library at once abort the process with "An error occurred in
+/// MPI_Init on a NULL communicator". The test binary running these tests in
+/// parallel is enough to trigger it, and so is any caller holding one surrogate
+/// per thread.
 static LIBRARY: Mutex<()> = Mutex::new(());
+
+/// Whether a surrogate is currently alive, with the condition variable callers
+/// wait on.
+///
+/// # Why one model at a time, and not merely one call at a time
+///
+/// Serialising individual calls is not enough, and this is measured rather than
+/// assumed. Running the tests in this module in parallel, with every C call
+/// already under [`LIBRARY`], moved the posterior standard deviation at a
+/// structure inside the training data from 1.703e-5 to 4.237e-1, the same value
+/// it takes far outside the data. In other words the model stopped
+/// distinguishing what it had seen from what it had not. The same tests run
+/// serially reproduce 1.703e-5 exactly, run after run.
+///
+/// So the library keeps state that belongs to a model but does not live in the
+/// model handle, and interleaving two models' train-and-predict sequences
+/// corrupts both. The constraint is one live model per process, and a caller
+/// that constructs a second one blocks here until the first is dropped rather
+/// than silently getting a model that reports confidence it does not have.
+///
+/// A guard object would express this better than a flag, but a `MutexGuard`
+/// held inside the struct would make [`GpSurrogate`] `!Send`, and a campaign
+/// wants to move one between threads even though it will only ever use it from
+/// one at a time.
+static LIVE: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
 
 /// Takes the library lock, ignoring poisoning.
 ///
@@ -73,6 +93,24 @@ static LIBRARY: Mutex<()> = Mutex::new(());
 /// turns one failure into a cascade.
 fn lock() -> MutexGuard<'static, ()> {
     LIBRARY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Blocks until no surrogate is alive, then claims the slot.
+fn claim_slot() {
+    let (m, cv) = &LIVE;
+    let mut live = m.lock().unwrap_or_else(|e| e.into_inner());
+    while *live {
+        live = cv.wait(live).unwrap_or_else(|e| e.into_inner());
+    }
+    *live = true;
+}
+
+/// Releases the slot and wakes one waiter.
+fn release_slot() {
+    let (m, cv) = &LIVE;
+    let mut live = m.lock().unwrap_or_else(|e| e.into_inner());
+    *live = false;
+    cv.notify_one();
 }
 
 /// Configuration of the process, mirroring `gpr_model_config_t`.
@@ -242,9 +280,13 @@ impl GpSurrogate {
     /// happens when the atoms handle and the coordinate count disagree.
     pub fn new(n_atoms: usize, capacity: usize, config: &GpConfig) -> Option<Self> {
         assert!(capacity > 0, "a surrogate with no room holds nothing");
+        // Blocks while another surrogate is alive. See LIVE for the measured
+        // reason this is a whole-lifetime claim rather than a per-call one.
+        claim_slot();
         let _guard = lock();
         let atoms = unsafe { gpr_atoms_create_simple(n_atoms as c_int) };
         if atoms.is_null() {
+            release_slot();
             return None;
         }
         // 0 is the Gaussian process; 1 is the Student-t process, which is a
@@ -252,6 +294,7 @@ impl GpSurrogate {
         let model = unsafe { gpr_model_create(0) };
         if model.is_null() {
             unsafe { gpr_atoms_destroy(atoms) };
+            release_slot();
             return None;
         }
         if unsafe { gpr_model_init(model, config, atoms) } != 0 {
@@ -259,6 +302,7 @@ impl GpSurrogate {
                 gpr_model_destroy(model);
                 gpr_atoms_destroy(atoms);
             }
+            release_slot();
             return None;
         }
         Some(Self {
@@ -422,12 +466,71 @@ impl GpSurrogate {
 
 impl Drop for GpSurrogate {
     fn drop(&mut self) {
-        let _guard = lock();
-        unsafe {
-            gpr_model_destroy(self.model);
-            gpr_atoms_destroy(self.atoms);
+        {
+            let _guard = lock();
+            unsafe {
+                gpr_model_destroy(self.model);
+                gpr_atoms_destroy(self.atoms);
+            }
         }
+        release_slot();
     }
+}
+
+/// Which rule picks the next structure out of a candidate set.
+///
+/// # Where these come from, and why they are not taken verbatim
+///
+/// `gpr_optim` already implements this family, in `gpr/neb/AcquisitionStrategy`
+/// with `AcquisitionType::{MaxVariance, MaxForce, UCB, ThompsonSampling,
+/// IMSPE, ExpectedImprovement, PriorityCascade, TPE, PSBAX}`. Its selection
+/// machinery is the right shape, an argmax of a marginal score over a discrete
+/// set, and the rules here are its rules: UCB is its `f_norm + kappa *
+/// force_sigma`, Thompson is its "sample from the posterior, take the best
+/// draw", expected improvement is its `(mu - mu_best) Phi(z) + sigma phi(z)`.
+///
+/// What does not transfer is the quantity scored and the direction. That
+/// selector scores the NEB force magnitude at a path image, with the
+/// perpendicular force variance, and takes an argmax because it is hunting a
+/// saddle. This scores the energy at a candidate structure, with the energy
+/// variance, and hunts a minimum, so every expression is mirrored. Calling
+/// `selectNextImage` would mean handing it NEB forces and path tangents that do
+/// not exist in a basin-hopping candidate set. The arithmetic below is five
+/// lines over the posterior the library computes; the model, which is the part
+/// worth reusing, is entirely the library's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Acquisition {
+    /// Lower confidence bound, `mean - kappa * sd`.
+    ///
+    /// The default, and the one both published Gaussian-process structure
+    /// searches converged on independently: Bisbo and Hammer's GOFEE (Phys Rev
+    /// Lett 124, 086102) and Kaappa, del Rio and Jacobsen's BEACON (Phys Rev B
+    /// 103, 174114) both use it at kappa = 2. GOFEE published the sweep that
+    /// justifies the value: kappa = 1 over-exploits and stalls in a local
+    /// minimum, kappa = 4 over-explores, kappa = 2 is the compromise.
+    #[default]
+    ConfidenceBound,
+    /// Expected improvement over the incumbent.
+    ///
+    /// The Jones, Schonlau and Welch baseline (J Global Optim 13, 455). Kept
+    /// because it is what everyone reaches for first, and because the argument
+    /// against it here is a claim that should be measured rather than
+    /// asserted: the region that matters for LJ38 is the face-centred-cubic
+    /// funnel the search never reaches, where the surrogate has no
+    /// observations, the mean sits at the prior and the improvement term is
+    /// small. The confidence bound weights the standard deviation with a
+    /// coefficient the caller sets instead.
+    ExpectedImprovement,
+    /// One draw from the posterior at each candidate, then the lowest draw.
+    ///
+    /// Marginal rather than joint: the C API returns a marginal variance per
+    /// query and no candidate-to-candidate covariance, so this samples each
+    /// candidate independently. That is the same approximation the library's
+    /// own `ThompsonSampling` makes over path images, and it is worth naming,
+    /// because a joint draw is what would stop a cluster of near-duplicate
+    /// candidates from being sampled as if it were a cluster of independent
+    /// chances.
+    Thompson,
 }
 
 /// Lower confidence bound as a score to be maximised, `-(mean - kappa * sd)`.
@@ -449,6 +552,67 @@ impl Drop for GpSurrogate {
 /// prior. It is also what GOFEE uses for the same reason.
 pub fn lower_confidence_bound(mean: f64, variance: f64, kappa: f64) -> f64 {
     -(mean - kappa * variance.max(0.0).sqrt())
+}
+
+/// Expected improvement below `best`, for a minimisation.
+///
+/// `(best - mean) Phi(z) + sd phi(z)` with `z = (best - mean) / sd`. Never
+/// negative, which is what makes it comparable across candidates.
+pub fn expected_improvement(mean: f64, variance: f64, best: f64) -> f64 {
+    let sd = variance.max(0.0).sqrt();
+    if sd < 1e-12 {
+        return (best - mean).max(0.0);
+    }
+    let z = (best - mean) / sd;
+    (best - mean) * crate::funnel_bo::normal_cdf(z) + sd * crate::funnel_bo::normal_pdf(z)
+}
+
+impl GpSurrogate {
+    /// Scores every candidate and returns the index of the best, with its
+    /// score.
+    ///
+    /// `None` when the model is untrained or the candidate list is empty. An
+    /// untrained model scores every candidate identically, so returning an
+    /// index would let a caller believe a choice had been made.
+    ///
+    /// `kappa` is read only by [`Acquisition::ConfidenceBound`]; `rng` only by
+    /// [`Acquisition::Thompson`], and should return standard normal draws.
+    pub fn select(
+        &mut self,
+        candidates: &[Vec<f64>],
+        acquisition: Acquisition,
+        kappa: f64,
+        rng: &mut impl FnMut() -> f64,
+    ) -> Option<(usize, f64)> {
+        if !self.trained || candidates.is_empty() {
+            return None;
+        }
+        let best = self
+            .energies
+            .iter()
+            .copied()
+            .fold(f64::INFINITY, f64::min);
+        let mut pick = None;
+        for (i, c) in candidates.iter().enumerate() {
+            let Some((mean, _, var)) = self.predict(c) else {
+                continue;
+            };
+            let score = match acquisition {
+                Acquisition::ConfidenceBound => lower_confidence_bound(mean, var, kappa),
+                Acquisition::ExpectedImprovement => expected_improvement(mean, var, best),
+                // Negated so every rule is maximised, as with the bound.
+                Acquisition::Thompson => -(mean + var.max(0.0).sqrt() * rng()),
+            };
+            if !score.is_finite() {
+                continue;
+            }
+            match pick {
+                Some((_, s)) if score <= s => {}
+                _ => pick = Some((i, score)),
+            }
+        }
+        pick
+    }
 }
 
 #[cfg(test)]
@@ -641,6 +805,215 @@ mod tests {
         // Reported rather than asserted equal: what the two solves do to each
         // other on this covariance is the measurement, not a precondition.
         println!("solve comparison: {out:?}");
+    }
+
+    #[test]
+    fn the_acquisitions_disagree_about_which_candidate_to_take() {
+        // Three rules that always agreed would be one rule with three names,
+        // and comparing them would measure nothing. The setup is the LJ38
+        // shape in miniature: candidates close to the observed structures,
+        // where the surrogate is confident, against one far from all of them,
+        // where it is not.
+        let n = 7;
+        let base = cluster(n, 0.0, 33);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 20;
+        let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
+        for k in 0..10u64 {
+            let j = cluster(n, 0.05, 4000 + k * 7);
+            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let (e, g) = lj(&x, n);
+            gp.record(&x, e, &g);
+        }
+        assert_eq!(gp.train(), 0);
+
+        let mut cands: Vec<Vec<f64>> = Vec::new();
+        for k in 0..6u64 {
+            let j = cluster(n, 0.05, 6000 + k * 7);
+            cands.push(base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect());
+        }
+        // The far candidate, where the model has nothing to say.
+        let j = cluster(n, 0.9, 12_345);
+        cands.push(base.iter().zip(j.iter()).map(|(a, b)| a + b).collect());
+
+        for (i, c) in cands.iter().enumerate() {
+            let (m, _, v) = gp.predict(c).expect("prediction failed");
+            println!("  cand {i}: mean {m:.6} sd {:.3e} true {:.6}", v.sqrt(), lj(c, n).0);
+        }
+        let mut zero = || 0.0;
+        let (ei_pick, _) = gp
+            .select(&cands, Acquisition::ExpectedImprovement, 2.0, &mut zero)
+            .expect("no expected-improvement pick");
+        let (lcb_pick, _) = gp
+            .select(&cands, Acquisition::ConfidenceBound, 2.0, &mut zero)
+            .expect("no confidence-bound pick");
+        // At kappa zero the bound is the posterior mean, so it must be a pure
+        // exploit and cannot be the far candidate unless the mean says so.
+        let (greedy_pick, _) = gp
+            .select(&cands, Acquisition::ConfidenceBound, 0.0, &mut zero)
+            .expect("no greedy pick");
+        let far = cands.len() - 1;
+        println!(
+            "picks: ei {ei_pick}, lcb kappa 2 {lcb_pick}, lcb kappa 0 {greedy_pick}, \
+             far candidate is {far}"
+        );
+        // Exploration and exploitation land in different places, which is the
+        // only thing that makes the choice of rule a choice.
+        assert_eq!(lcb_pick, far, "the confidence bound did not explore");
+        assert_eq!(ei_pick, far, "expected improvement did not explore");
+        assert_ne!(greedy_pick, far, "kappa zero explored, so it is not greedy");
+    }
+
+    #[test]
+    fn the_posterior_is_overconfident_where_it_extrapolates() {
+        // Worth pinning as a property of this surrogate rather than a
+        // footnote. Inside the data the posterior is exact to 1e-5 with a
+        // standard deviation to match. One structure away from it, the mean is
+        // wrong by more than a whole unit of energy while the standard
+        // deviation is 0.35, so the truth sits several standard deviations
+        // outside the posterior. Any acquisition that trusts the variance as a
+        // calibrated error bar is trusting the wrong number out there, and
+        // that is the misspecification risk a stationary kernel carries into a
+        // multi-funnel landscape.
+        let n = 7;
+        let base = cluster(n, 0.0, 33);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 20;
+        let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
+        for k in 0..10u64 {
+            let j = cluster(n, 0.05, 4000 + k * 7);
+            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let (e, g) = lj(&x, n);
+            gp.record(&x, e, &g);
+        }
+        assert_eq!(gp.train(), 0);
+
+        let j = cluster(n, 0.05, 6100);
+        let near: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+        let (mn, _, vn) = gp.predict(&near).expect("prediction failed");
+        let near_z = (mn - lj(&near, n).0).abs() / vn.sqrt().max(1e-300);
+
+        let j = cluster(n, 0.9, 12_345);
+        let far: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + b).collect();
+        let (mf, _, vf) = gp.predict(&far).expect("prediction failed");
+        let far_err = (mf - lj(&far, n).0).abs();
+        println!(
+            "near: error {:.3e} sd {:.3e} ({near_z:.2} sd). far: error {far_err:.3e} sd {:.3e} \
+             ({:.2} sd)",
+            (mn - lj(&near, n).0).abs(),
+            vn.sqrt(),
+            vf.sqrt(),
+            far_err / vf.sqrt()
+        );
+        assert!(
+            vf.sqrt() > 1000.0 * vn.sqrt(),
+            "the model is no less certain away from its data: {:.3e} against {:.3e}",
+            vf.sqrt(),
+            vn.sqrt()
+        );
+        assert!(
+            far_err > 2.0 * vf.sqrt(),
+            "the extrapolation error {far_err:.3e} sits inside the posterior's own \
+             {:.3e}, so this test is not measuring overconfidence",
+            vf.sqrt()
+        );
+    }
+
+    #[test]
+    fn thompson_moves_with_its_draws_and_the_others_do_not() {
+        // The property that makes Thompson a different rule rather than a
+        // noisier confidence bound: the same posterior, different draws,
+        // different picks. The deterministic rules must be unmoved by the
+        // stream they are handed.
+        let n = 6;
+        let base = cluster(n, 0.0, 91);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 20;
+        let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
+        for k in 0..8u64 {
+            let j = cluster(n, 0.05, 200 + k * 11);
+            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let (e, g) = lj(&x, n);
+            gp.record(&x, e, &g);
+        }
+        assert_eq!(gp.train(), 0);
+        // Four candidates inside the data and four well outside it. Sampling
+        // can only move the pick where the posterior has width, and inside the
+        // data it has none: at the library's default noise of 1e-8 the
+        // standard deviation among near candidates is around 1e-5 against
+        // energy gaps of 1e-2, so a draw never flips the order. Thompson
+        // sampling degenerates to the posterior mean there, which is worth
+        // knowing before setting kappa by analogy with a published value.
+        let mut cands: Vec<Vec<f64>> = (0..4u64)
+            .map(|k| {
+                let j = cluster(n, 0.05, 700 + k * 5);
+                base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect()
+            })
+            .collect();
+        for k in 0..4u64 {
+            let j = cluster(n, 0.8, 3300 + k * 29);
+            cands.push(base.iter().zip(j.iter()).map(|(a, b)| a + b).collect());
+        }
+
+        let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+        let mut draw = || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            let u1 = ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64)
+                / (1u64 << 53) as f64;
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            let u2 = ((state.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64)
+                / (1u64 << 53) as f64;
+            (-2.0 * u1.max(1e-12).ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..60 {
+            if let Some((i, _)) = gp.select(&cands, Acquisition::Thompson, 2.0, &mut draw) {
+                seen.insert(i);
+            }
+        }
+        assert!(
+            seen.len() > 1,
+            "Thompson picked candidate {seen:?} every time, so it is not sampling"
+        );
+
+        let mut zero = || 0.0;
+        let a = gp.select(&cands, Acquisition::ConfidenceBound, 2.0, &mut zero);
+        let mut noisy = draw;
+        let b = gp.select(&cands, Acquisition::ConfidenceBound, 2.0, &mut noisy);
+        assert_eq!(a.map(|v| v.0), b.map(|v| v.0), "the bound consumed randomness");
+    }
+
+    #[test]
+    fn expected_improvement_is_non_negative_and_zero_far_below_the_incumbent() {
+        for var in [0.0, 1e-9, 4.0, 100.0] {
+            for mean in [-500.0, -400.0, -300.0] {
+                let ei = expected_improvement(mean, var, -400.0);
+                assert!(ei >= 0.0 && ei.is_finite(), "EI {ei} at mean {mean} var {var}");
+            }
+        }
+        // A candidate the model is certain is worse than the incumbent offers
+        // no improvement at all, which is what makes the quantity comparable.
+        assert!(expected_improvement(-300.0, 0.0, -400.0) < 1e-12);
+    }
+
+    #[test]
+    fn an_untrained_surrogate_selects_nothing() {
+        let cfg = GpConfig::defaults();
+        let mut gp = GpSurrogate::new(4, 8, &cfg).expect("model creation failed");
+        let cands = vec![cluster(4, 0.0, 1), cluster(4, 0.1, 2)];
+        let mut zero = || 0.0;
+        assert!(
+            gp.select(&cands, Acquisition::ConfidenceBound, 2.0, &mut zero)
+                .is_none(),
+            "an untrained model scores every candidate alike and must not pretend to choose"
+        );
     }
 
     #[test]
