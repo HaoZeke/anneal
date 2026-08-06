@@ -2134,6 +2134,7 @@ impl SuperbasinEscape {
             improvements: (self.stats.improvements, self.stats.gain),
             archived: self.store.len(),
             separability: None,
+            quotient: None,
         }
     }
 }
@@ -2187,6 +2188,8 @@ pub struct SuperbasinReport {
     pub archived: usize,
     /// Structural separability of the top-level coarse states, when asked for.
     pub separability: Option<Separability>,
+    /// What taking basin identity modulo the symmetry orbit does to the graph.
+    pub quotient: Option<QuotientReport>,
 }
 
 
@@ -2286,6 +2289,292 @@ impl SuperbasinEscape {
             points,
             per_dimension,
         })
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Quotienting the graph by the symmetry orbit
+// ---------------------------------------------------------------------------
+
+/// What quotienting the transition graph by the symmetry orbit does to it.
+///
+/// The graph's states are descriptor classes, and a sorted distance spectrum
+/// distinguishes a structure from its own relabelling and from its own
+/// point-group images. Those are one state. A chain re-entering one minimum
+/// under twenty labels therefore registers as twenty states entered once each,
+/// which is indistinguishable, in the expected-visits statistic, from a chain
+/// sweeping through twenty different minima. The two readings differ by exactly
+/// this quotient, so it is measured rather than argued.
+///
+/// Only labels the run actually visited are merged. Generating the unvisited
+/// members of an orbit from the point group would add states that were never
+/// entered, which cannot raise a visits-per-state ratio; filling the interior
+/// analytically is what an escape would want, not what this measurement needs.
+#[derive(Debug, Clone)]
+pub struct QuotientReport {
+    /// Distinct basins before quotienting.
+    pub basins_raw: usize,
+    /// Distinct basins after.
+    pub basins_quotiented: usize,
+    /// Equivalence classes holding more than one label.
+    pub orbits_nontrivial: usize,
+    /// Labels in the largest class.
+    pub largest_orbit: usize,
+    /// Structures the archive held, which bounds what could be merged.
+    pub archived: usize,
+    /// Energy buckets holding more than one structure.
+    pub energy_buckets: usize,
+    /// Shape comparisons actually run.
+    pub comparisons: usize,
+    /// Largest shape distance accepted as the same structure.
+    pub matched_max: f64,
+    /// Smallest shape distance rejected inside an energy bucket.
+    ///
+    /// With `matched_max` this is the gap the merge threshold sits in, so the
+    /// threshold is auditable rather than asserted.
+    pub rejected_min: f64,
+    /// Median and maximum expected visits per state, before quotienting.
+    pub revisits_raw: (f64, f64),
+    /// The same after quotienting. This is the number that decides it.
+    pub revisits_quotiented: (f64, f64),
+    /// Source basins the statistic was computed from.
+    pub sources: usize,
+    /// Coarse-graining depth before and after.
+    pub depth: (usize, usize),
+    /// Share of basins that joined a lump, before and after.
+    pub lumped_fraction: (f64, f64),
+}
+
+/// Expected visits per state, over a sample of starting basins.
+///
+/// The same quantity the escape's trapping test uses, computed the same way:
+/// grow the neighbourhood by residence, try sizes on a doubling ladder, take
+/// the largest ratio the source reaches. Reported as the median and maximum
+/// over sources, so one recurrent corner cannot carry the summary.
+fn revisit_profile(
+    chain: &JumpChain,
+    sources: &[usize],
+    max_states: usize,
+    elimination_cap: usize,
+    sweeps: usize,
+    min_states: usize,
+) -> (f64, f64) {
+    let mut best: Vec<f64> = Vec::new();
+    for src in sources {
+        let order = chain.neighbourhood(*src, max_states);
+        if order.len() < min_states.max(2) {
+            continue;
+        }
+        let id = chain.nodes()[*src];
+        let mut top = f64::NAN;
+        let mut k = min_states.max(2);
+        loop {
+            let take = k.min(order.len());
+            let mut set: Vec<usize> = order[..take].to_vec();
+            set.sort_unstable();
+            if let Ok(c) = Canonical::new(chain, &set) {
+                if let Some(local) = c.transient.iter().position(|t| *t == id) {
+                    let a = c.absorb_at_scale(local, elimination_cap, sweeps, 1e-10);
+                    let ratio = a.jumps / take as f64;
+                    if top.is_nan() || ratio > top {
+                        top = ratio;
+                    }
+                }
+            }
+            if take >= order.len() {
+                break;
+            }
+            k *= 2;
+        }
+        if top.is_finite() {
+            best.push(top);
+        }
+    }
+    if best.is_empty() {
+        return (f64::NAN, f64::NAN);
+    }
+    best.sort_by(|a, b| a.partial_cmp(b).expect("ratios are finite"));
+    (best[best.len() / 2], *best.last().expect("best is non-empty"))
+}
+
+/// Depth of the hierarchy and the share of states that joined a lump.
+fn lump_coverage(counts: &HopCounts, params: &LumpParams, nodes: usize) -> (usize, f64) {
+    let h = Hierarchy::build(counts, params);
+    let inside: usize = h
+        .levels
+        .first()
+        .map(|l| l.lumps.iter().map(|k| k.states.len()).sum())
+        .unwrap_or(0);
+    (h.depth(), inside as f64 / nodes.max(1) as f64)
+}
+
+/// Path compression over the label classes.
+fn find(parent: &mut BTreeMap<usize, usize>, x: usize) -> usize {
+    let mut r = x;
+    while parent[&r] != r {
+        r = parent[&r];
+    }
+    let mut c = x;
+    while parent[&c] != c {
+        let n = parent[&c];
+        parent.insert(c, r);
+        c = n;
+    }
+    r
+}
+
+impl SuperbasinEscape {
+    /// Rebuilds the graph with basin identity taken modulo the symmetry orbit,
+    /// and reports what changes.
+    ///
+    /// `distance` returns the shape distance between two archived structures,
+    /// which is zero for one structure against its own relabelling and rotation
+    /// and order one between different minima. It is only ever asked about
+    /// structures whose quenched energies already agree to `energy_tol`, and
+    /// that filter is exact rather than heuristic: an orbit is a level set of
+    /// the energy, so two structures at different energies cannot be orbit
+    /// members, and the filter removes the quadratic cost without removing a
+    /// single true pair.
+    pub fn quotient<D>(
+        &self,
+        distance: D,
+        merge_tol: f64,
+        energy_tol: f64,
+        sources: usize,
+    ) -> QuotientReport
+    where
+        D: Fn(ArrayView1<f64>, ArrayView1<f64>) -> f64,
+    {
+        let raw_chain = JumpChain::from_counts(&self.counts);
+        // Archived basins ordered by energy, so an orbit is a contiguous run.
+        let mut by_energy: Vec<(usize, f64)> =
+            self.store.iter().map(|(b, (e, _))| (*b, *e)).collect();
+        by_energy.sort_by(|a, b| a.1.partial_cmp(&b.1).expect("energies are finite"));
+
+        let mut parent: BTreeMap<usize, usize> =
+            by_energy.iter().map(|(b, _)| (*b, *b)).collect();
+        let mut comparisons = 0usize;
+        let mut buckets = 0usize;
+        let mut matched_max = 0.0_f64;
+        let mut rejected_min = f64::INFINITY;
+        let mut i = 0usize;
+        while i < by_energy.len() {
+            // A bucket runs while consecutive energies stay within the
+            // tolerance, which is how a degenerate level presents.
+            let mut j = i + 1;
+            while j < by_energy.len() && (by_energy[j].1 - by_energy[j - 1].1).abs() <= energy_tol {
+                j += 1;
+            }
+            if j - i > 1 {
+                buckets += 1;
+                for a in i..j {
+                    for b in (a + 1)..j {
+                        let (ba, bb) = (by_energy[a].0, by_energy[b].0);
+                        if find(&mut parent, ba) == find(&mut parent, bb) {
+                            continue;
+                        }
+                        comparisons += 1;
+                        let d = distance(self.store[&ba].1.view(), self.store[&bb].1.view());
+                        if d <= merge_tol {
+                            matched_max = matched_max.max(d);
+                            let ra = find(&mut parent, ba);
+                            let rb = find(&mut parent, bb);
+                            let (lo, hi) = (ra.min(rb), ra.max(rb));
+                            parent.insert(hi, lo);
+                        } else {
+                            rejected_min = rejected_min.min(d);
+                        }
+                    }
+                }
+            }
+            i = j;
+        }
+
+        let mut map: BTreeMap<usize, usize> = BTreeMap::new();
+        for b in raw_chain.nodes() {
+            let rep = if parent.contains_key(b) {
+                find(&mut parent, *b)
+            } else {
+                *b
+            };
+            map.insert(*b, rep);
+        }
+        let mut sizes: BTreeMap<usize, usize> = BTreeMap::new();
+        for rep in map.values() {
+            *sizes.entry(*rep).or_insert(0) += 1;
+        }
+
+        // The same counts under the quotient. A transition between two labels
+        // of one class becomes time spent rather than a transition, which is
+        // what it always was.
+        let mut folded = HopCounts::new();
+        for (i, tos) in &self.counts.out {
+            let ri = map[i];
+            for (j, w) in tos {
+                let rj = map.get(j).copied().unwrap_or(*j);
+                folded.observe_weighted(ri, Some(rj), *w);
+            }
+        }
+        for (i, w) in &self.counts.leak {
+            folded.observe_weighted(map[i], None, *w);
+        }
+        for (i, t) in &self.counts.time {
+            folded.add_time(map[i], *t);
+        }
+        let quot_chain = JumpChain::from_counts(&folded);
+
+        let pick = |c: &JumpChain| -> Vec<usize> {
+            let mut idx: Vec<usize> = (0..c.len()).collect();
+            idx.sort_by(|a, b| {
+                c.residence(*b)
+                    .partial_cmp(&c.residence(*a))
+                    .expect("residences are finite")
+            });
+            idx.truncate(sources);
+            idx
+        };
+        let raw_sources = pick(&raw_chain);
+        let quot_sources = pick(&quot_chain);
+        let revisits_raw = revisit_profile(
+            &raw_chain,
+            &raw_sources,
+            self.max_transient,
+            self.elimination_cap,
+            self.solve_sweeps,
+            self.params.min_states,
+        );
+        let revisits_quotiented = revisit_profile(
+            &quot_chain,
+            &quot_sources,
+            self.max_transient,
+            self.elimination_cap,
+            self.solve_sweeps,
+            self.params.min_states,
+        );
+        let (depth_raw, frac_raw) = lump_coverage(&self.counts, &self.params, raw_chain.len());
+        let (depth_q, frac_q) = lump_coverage(&folded, &self.params, quot_chain.len());
+
+        QuotientReport {
+            basins_raw: raw_chain.len(),
+            basins_quotiented: quot_chain.len(),
+            orbits_nontrivial: sizes.values().filter(|v| **v > 1).count(),
+            largest_orbit: sizes.values().copied().max().unwrap_or(0),
+            archived: self.store.len(),
+            energy_buckets: buckets,
+            comparisons,
+            matched_max,
+            rejected_min: if rejected_min.is_finite() {
+                rejected_min
+            } else {
+                f64::NAN
+            },
+            revisits_raw,
+            revisits_quotiented,
+            sources: raw_sources.len(),
+            depth: (depth_raw, depth_q),
+            lumped_fraction: (frac_raw, frac_q),
+        }
     }
 }
 
@@ -2857,6 +3146,96 @@ mod tests {
             "the raw counts differ from the reweighted ones by {d:.3}, which the \
              diagnostic must show"
         );
+    }
+
+
+    #[test]
+    fn the_default_basin_descriptor_is_already_orbit_invariant() {
+        // The premise behind quotienting the graph by the symmetry orbit is
+        // that the descriptor splits one minimum across its relabellings and
+        // its point-group images, so a recurrent chain reads as a sweeping one.
+        // For this crate's default keying that premise is false, and it is
+        // false exactly rather than approximately.
+        //
+        // The descriptor is the sorted multiset of all pairwise distances.
+        // Relabelling permutes which pair contributes which distance and leaves
+        // the multiset alone; rotation, reflection and translation leave every
+        // distance alone. So every member of an orbit has a bit-comparable
+        // descriptor, and no orbit can be split into distinct basins.
+        use crate::bias::{Fingerprint, SortedPairs};
+        use rand::seq::SliceRandom;
+
+        let n = 38usize;
+        let mut rng = StdRng::seed_from_u64(20260806);
+        // An irregular structure, so the test cannot pass by accidental
+        // symmetry of a lattice.
+        let mut x = Array1::<f64>::zeros(3 * n);
+        for v in x.iter_mut() {
+            *v = rng.random::<f64>() * 6.0 - 3.0;
+        }
+        let fp = SortedPairs { n_points: n };
+        let base = fp.describe(x.view());
+
+        // A random rotation from a QR-like construction, a reflection, a
+        // translation, and a random relabelling of the points.
+        let (a, b, c) = (
+            rng.random::<f64>() * 6.283,
+            rng.random::<f64>() * 6.283,
+            rng.random::<f64>() * 6.283,
+        );
+        let (ca, sa) = (a.cos(), a.sin());
+        let (cb, sb) = (b.cos(), b.sin());
+        let (cc, sc) = (c.cos(), c.sin());
+        let rot = [
+            [ca * cb, ca * sb * sc - sa * cc, ca * sb * cc + sa * sc],
+            [sa * cb, sa * sb * sc + ca * cc, sa * sb * cc - ca * sc],
+            [-sb, cb * sc, cb * cc],
+        ];
+        let shift = [1.7, -0.4, 2.9];
+        let mut order: Vec<usize> = (0..n).collect();
+        order.shuffle(&mut rng);
+
+        let mut y = Array1::<f64>::zeros(3 * n);
+        for (new, old) in order.iter().enumerate() {
+            let p = [x[3 * old], x[3 * old + 1], x[3 * old + 2]];
+            for d in 0..3 {
+                // The reflection is the sign on the first component, applied
+                // before the rotation, so the image is improper.
+                let q = [-p[0], p[1], p[2]];
+                y[3 * new + d] =
+                    rot[d][0] * q[0] + rot[d][1] * q[1] + rot[d][2] * q[2] + shift[d];
+            }
+        }
+        let image = fp.describe(y.view());
+
+        let gap: f64 = base
+            .iter()
+            .zip(image.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        // The merge radius the campaign runs at is 0.7, and the closest two
+        // genuinely different 75-point minima come is 0.9212.
+        assert!(
+            gap < 1e-9,
+            "an improper, rotated, translated, relabelled copy sits {gap:.3e} from the \
+             original in descriptor space; the orbit is not collapsed"
+        );
+
+        // And the same descriptor still separates a genuinely different
+        // structure, so the invariance is not bought by the descriptor being
+        // blind.
+        let mut z = x.clone();
+        z[0] += 0.9;
+        z[7] -= 0.8;
+        let other = fp.describe(z.view());
+        let far: f64 = base
+            .iter()
+            .zip(other.iter())
+            .map(|(p, q)| (p - q) * (p - q))
+            .sum::<f64>()
+            .sqrt();
+        assert!(far > 0.1, "the descriptor separates different structures: {far:.3e}");
     }
 
     #[test]

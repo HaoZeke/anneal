@@ -131,6 +131,10 @@ fn main() {
     if cfg.superbasin_escape {
         cfg.superbasin_report = true;
     }
+    cfg.superbasin_quotient = opts.contains(&"sbquot");
+    if cfg.superbasin_quotient {
+        cfg.superbasin_report = true;
+    }
     cfg.superbasin_features = opts.contains(&"sbfeat");
     if cfg.superbasin_features {
         cfg.superbasin_report = true;
@@ -350,6 +354,37 @@ fn main() {
                 sb.improvements.0,
                 sb.improvements.1
             );
+            if let Some(q) = &sb.quotient {
+                println!(
+                    "      orbit quotient: {} basins -> {} ({:.2}x), {} classes above one, \
+                     largest {}, from {} archived over {} energy buckets and {} comparisons \
+                     (matched <= {:.2e}, rejected >= {:.3})",
+                    q.basins_raw,
+                    q.basins_quotiented,
+                    q.basins_raw as f64 / q.basins_quotiented.max(1) as f64,
+                    q.orbits_nontrivial,
+                    q.largest_orbit,
+                    q.archived,
+                    q.energy_buckets,
+                    q.comparisons,
+                    q.matched_max,
+                    q.rejected_min
+                );
+                println!(
+                    "      expected visits per state over {} sources: raw {:.2} median \
+                     {:.2} max, quotiented {:.2} median {:.2} max   |   \
+                     hierarchy depth {} -> {}, lumped share {:.3} -> {:.3}",
+                    q.sources,
+                    q.revisits_raw.0,
+                    q.revisits_raw.1,
+                    q.revisits_quotiented.0,
+                    q.revisits_quotiented.1,
+                    q.depth.0,
+                    q.depth.1,
+                    q.lumped_fraction.0,
+                    q.lumped_fraction.1
+                );
+            }
             if let Some(sep) = &sb.separability {
                 println!(
                     "      structure separates the coarse states: F {:.2} over {} states, \
