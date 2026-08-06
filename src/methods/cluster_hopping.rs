@@ -1376,7 +1376,11 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut surrogate_here: Option<f64> = None;
     let mut delayed_skipped = 0usize;
     let mut pending_surrogate: Option<(f64, f64)> = None;
-    let mut pending_raw: Option<(f64, f64)> = None;
+    // The design vector the first stage was answered from, and the raw energy
+    // it was built with, held until the quench supplies the label. Carried
+    // rather than rebuilt so the model is fitted on the vector it was
+    // consulted about.
+    let mut pending_design: Option<(Array1<f64>, f64)> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
     // which is the one place a model can change what a hop reaches rather than
@@ -1602,18 +1606,31 @@ fn run_full<'g, R: Rng + ?Sized>(
             // arrive. Measured, the first stage ran 0 times in 5561 hops while
             // costing two evaluations each.
             // The gradient at the unrelaxed point, which is what says how far
-            // it will fall: in a locally quadratic basin the depth goes as
-            // |g|^2 / 2 lambda. One evaluation against the twenty-five a
-            // quench costs.
-            let gnorm = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
-                Some(v) => v.iter().fold(0.0_f64, |a, q| a + q * q).sqrt(),
-                None => 0.0,
-            };
-            pending_raw = Some((raw_y, gnorm));
+            // it will fall. One evaluation against the twenty-five a quench
+            // costs, and the whole vector is kept rather than its norm: the
+            // depth a relaxation finds is 1/2 g^T H^-1 g, which is set by how
+            // the gradient distributes over the curvature and not by its
+            // length.
+            let g = grad
+                .as_deref_mut()
+                .and_then(|g| g(ledger, trial.view()))
+                .unwrap_or_else(|| Array1::zeros(3 * n));
+            // The model Hessian turns that vector into a predicted depth and
+            // the displacement from the incumbent into its split along and
+            // across the descent direction. Both are functions of geometry the
+            // hop already holds, so neither touches the ledger.
+            let design = crate::delayed::features_with_depth(
+                trial.view(),
+                n,
+                raw_y,
+                g.view(),
+                x.view(),
+            );
+            pending_design = Some((design.clone(), raw_y));
             // The first stage speaks only where the posterior is sharp against
             // the temperature that scales the acceptance ratio.
             let tol = cfg.surrogate_tolerance * temperature;
-            match sur.predict_full(trial.view(), n, raw_y, gnorm, tol) {
+            match sur.predict_features(design.view(), raw_y, tol) {
                 None => sur.abstained += 1,
                 Some(pred_y) => {
                 let pred_x = match surrogate_here {
@@ -1722,8 +1739,8 @@ fn run_full<'g, R: Rng + ?Sized>(
         let unquenched = cfg.minima_hopping && (screened_this || returning);
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
-        if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
-            sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+        if let (Some(sur), Some((design, raw_y))) = (surrogate.as_mut(), pending_design.take()) {
+            sur.observe_features(design.view(), raw_y, e_new);
             // And the relaxed end of the same quench, whose depth is zero.
             //
             // Without it the model sees only unrelaxed structures and is asked
@@ -1737,7 +1754,20 @@ fn run_full<'g, R: Rng + ?Sized>(
             // The pair is free: it is the other end of a quench already paid
             // for, and it is what teaches the model that a vanishing gradient
             // means a vanishing depth.
-            sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
+            //
+            // Built by the same function as the trial end, with a zero
+            // gradient, because a relaxed structure has one: the gradient
+            // columns, the displacement split and the model-Hessian depth all
+            // vanish together, which is the row the model needs to see.
+            let settled = Array1::zeros(3 * n);
+            let relaxed_design = crate::delayed::features_with_depth(
+                x_new.view(),
+                n,
+                e_new,
+                settled.view(),
+                x_new.view(),
+            );
+            sur.observe_features(relaxed_design.view(), e_new, e_new);
         }
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
