@@ -2578,6 +2578,97 @@ impl SuperbasinEscape {
     }
 }
 
+
+/// The graph rebuilt with basins merged according to `map`.
+///
+/// A transition between two labels of one class becomes time spent rather than
+/// a transition, which is what it always was if the two labels are one state.
+/// Labels absent from `map` stay as themselves.
+pub fn regroup(counts: &HopCounts, map: &BTreeMap<usize, usize>) -> HopCounts {
+    let rep = |b: usize| map.get(&b).copied().unwrap_or(b);
+    let mut folded = HopCounts::new();
+    for (i, tos) in &counts.out {
+        for (j, w) in tos {
+            folded.observe_weighted(rep(*i), Some(rep(*j)), *w);
+        }
+    }
+    for (i, w) in &counts.leak {
+        folded.observe_weighted(rep(*i), None, *w);
+    }
+    for (i, t) in &counts.time {
+        folded.add_time(rep(*i), *t);
+    }
+    folded
+}
+
+/// The statistic that decides whether a graph holds a trap to escape.
+#[derive(Debug, Clone)]
+pub struct Profile {
+    /// States in the graph.
+    pub states: usize,
+    /// Median expected visits per state over the sampled sources.
+    pub revisits_median: f64,
+    /// Largest expected visits per state over the sampled sources.
+    pub revisits_max: f64,
+    /// Sources the statistic was computed from.
+    pub sources: usize,
+    /// Coarse-graining depth.
+    pub depth: usize,
+    /// Share of states that joined a lump.
+    pub lumped_fraction: f64,
+}
+
+/// Expected visits per state and lumping coverage for a graph.
+///
+/// One is the sweeping case: each state entered once on the way through. Above
+/// one the chain is returning, which is what a superbasin means and what an
+/// absorbing exit needs in order to have anything to act on.
+pub fn profile(
+    counts: &HopCounts,
+    params: &LumpParams,
+    sources: usize,
+    max_states: usize,
+    elimination_cap: usize,
+    sweeps: usize,
+) -> Profile {
+    let chain = JumpChain::from_counts(counts);
+    let mut idx: Vec<usize> = (0..chain.len()).collect();
+    idx.sort_by(|a, b| {
+        chain
+            .residence(*b)
+            .partial_cmp(&chain.residence(*a))
+            .expect("residences are finite")
+    });
+    idx.truncate(sources);
+    let (median, max) = revisit_profile(
+        &chain,
+        &idx,
+        max_states,
+        elimination_cap,
+        sweeps,
+        params.min_states,
+    );
+    let (depth, lumped_fraction) = lump_coverage(counts, params, chain.len());
+    Profile {
+        states: chain.len(),
+        revisits_median: median,
+        revisits_max: max,
+        sources: idx.len(),
+        depth,
+        lumped_fraction,
+    }
+}
+
+impl SuperbasinEscape {
+    /// The archived structures, for analysis outside the driver.
+    pub fn archive_entries(&self) -> Vec<(usize, f64, Array1<f64>)> {
+        self.store
+            .iter()
+            .map(|(b, (e, x))| (*b, *e, x.clone()))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
