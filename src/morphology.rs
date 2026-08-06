@@ -42,11 +42,65 @@
 //!   -0.042, p = 1.000. Neither is distinguishable from doing nothing, and the
 //!   manuscript's 5 of 7 for a learned SOAP projection is not reproduced.
 //!
-//! So two of the four coordinates work and two do not, and what separates them
-//! is not whether they are morphological. Q4 and Q6 are fixed functions of the
-//! structure with a known scale; the SOAP projection has to learn its own axis
-//! from the run, and the coordination estimate is a distribution whose bins
-//! were chosen for a different cluster.
+//! # What divides the coordinates that work from the ones that do not
+//!
+//! Not whether they are morphological. All four are. The division is whether
+//! the coordinate arrives with a scale someone established in advance.
+//!
+//! Q4 and Q6 are fixed functions of the structure whose values on close-packed
+//! and icosahedral environments were tabulated in 1983. Nothing in the run
+//! decides what they mean. The SOAP projection has to learn its own axis from
+//! the search it is steering, and the coordination estimate needs bin centres
+//! from somewhere. Those two are the two that do not beat the control.
+//!
+//! # THE QUALIFIER THAT HAS TO TRAVEL WITH THE 24 OF 24
+//!
+//! Handed a coordinate chosen by someone who already knew the two 38-point
+//! funnels differ in fourth-order bond order, the method reaches 24 of 24 in
+//! 39 percent of the control's evaluations. Required to find its own
+//! coordinate, it does not beat the control at all.
+//!
+//! For a system nobody has studied, nobody knows which coordinate separates
+//! the funnels. So the arms that work measure a CEILING, what is available if
+//! the answer is supplied, and the arms that fail measure the METHOD, what is
+//! available when it is not. Quoting 24 of 24 without that distinction reports
+//! the ceiling as if it were the method.
+//!
+//! This project's own record corroborates it rather than merely suggesting it.
+//! The same Q4 separates the two 75-point funnels by 0.023, thinner than any
+//! deposition width that is not also thinner than the numerical noise on the
+//! coordinate. So the coordinate that gives a perfect score at 38 points is
+//! useless at 75, and nothing in the method tells you what to reach for
+//! instead. A coordinate that has to be chosen per system, by someone who
+//! already knows the answer, is not a search procedure.
+//!
+//! The coordination arm is worth one more note, because the obvious diagnosis
+//! is wrong and it was tested rather than assumed. Its bin centres of 6 and 8
+//! were inherited from a recipe written for a different cluster, which invites
+//! the conclusion that the arm failed on a borrowed parameter, as the SOAP arm
+//! failed on a defect of its own. Deriving the bins from LJ38 refutes that.
+//!
+//! [`crate::morphology`]'s companion example `coordination_spectrum` relaxes
+//! random LJ38 clusters, splits the minima by common-neighbour analysis, and
+//! compares the two funnels' coordination distributions. Over 600 minima the
+//! largest gaps fall at 6 and 8, reproducing the recipe exactly. Over 2000
+//! they fall at 5 and 4. Nowhere do the two funnels differ by more than 0.034
+//! in share, which on 38 sites is 1.3 atoms, against a deposition width of
+//! half an atom. Measured:
+//!
+//! ```text
+//! bins                 solved  rate   vs the 14/24 control
+//! 6 and 8 (recipe)      15/24  0.625  p = 1.000
+//! 4 and 5 (derived)      8/24  0.333  p = 0.147
+//! 4 and 5, sigma 0.35   11/24  0.458  p = 0.564
+//! 5 and 12              10/24  0.417  p = 0.387
+//! ```
+//!
+//! No bin choice beats the control, and the derived bins do worse than the
+//! borrowed ones. The coordinate does not separate the LJ38 funnels at any
+//! configuration tried, so this arm measures a weak coordinate rather than a
+//! misconfigured one. That is the opposite of the SOAP result and the two
+//! should not be quoted as one kind of failure.
 //!
 //! THE BASELINE IS THE PART THAT IS EASY TO GET WRONG. The withdrawn table
 //! these arms were built to check reports 1 of 8 for its controls, a rate of

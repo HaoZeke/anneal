@@ -2967,9 +2967,30 @@ impl ClusterFingerprint {
             }
             #[cfg(not(feature = "ira"))]
             Keying::Canonical => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
-            Keying::Coordination => ClusterFingerprint::Coordination(Box::new(
-                crate::morphology::CoordinationKde::for_lj(n_points, scale),
-            )),
+            Keying::Coordination => {
+                let mut kde = crate::morphology::CoordinationKde::for_lj(n_points, scale);
+                // The bin centres are a measurement, not a setting, so they are
+                // overridable without a rebuild. See the example
+                // `coordination_spectrum`, which derives them from the
+                // coordination distributions of the two funnels.
+                if let Ok(v) = std::env::var("COORD_BINS") {
+                    let bins: Vec<f64> = v
+                        .split(',')
+                        .filter_map(|t| t.trim().parse::<f64>().ok())
+                        .collect();
+                    if !bins.is_empty() {
+                        kde.bins = bins;
+                    }
+                }
+                if let Ok(v) = std::env::var("COORD_SIGMA") {
+                    if let Ok(sg) = v.parse::<f64>() {
+                        if sg > 0.0 {
+                            kde.sigma = sg;
+                        }
+                    }
+                }
+                ClusterFingerprint::Coordination(Box::new(kde))
+            }
             #[cfg(feature = "featomic")]
             Keying::Q4 => ClusterFingerprint::Steinhardt(Box::new(
                 crate::morphology::SteinhardtQ::q4(n_points, scale),
