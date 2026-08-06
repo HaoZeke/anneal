@@ -100,6 +100,90 @@
 //! specific to Lennard-Jones or to a cluster size, and leaves the two arms
 //! matched on reach and differing only in direction, which is the comparison
 //! worth making.
+//!
+//! # What it measured
+//!
+//! LJ38 at 4e5 charged evaluations, 24 seeds an arm, Wilson 95 per cent
+//! intervals, one binary and one relaxer.
+//!
+//! | arm | proposal | solved | 95% CI | charged/hop |
+//! |-----|----------|--------|--------|-------------|
+//! | `uniform` | the five-kernel library | 14/24 | [0.39, 0.76] | 41 |
+//! | `hmc-hess` | trajectory, model Hessian | 6/24 | [0.12, 0.45] | 76 |
+//! | `hmc` | trajectory, `M = I` | 5/24 | [0.09, 0.41] | 84 |
+//! | `kick` | the uniform displacement alone | 1/24 | [0.01, 0.20] | 29 |
+//! | `hmc-diag` | trajectory, Stan's estimated diagonal | 0/24 | [0.00, 0.14] | 148 |
+//!
+//! Two comparisons, and they point opposite ways.
+//!
+//! Against the uniform displacement it was written to replace, the Hamiltonian
+//! proposal is ahead: 6/24 and 5/24 against 1/24. Neither gap clears a
+//! two-sided Fisher exact test at 24 seeds (p = 0.097 and p = 0.19), so the
+//! honest statement is that the trajectory is not worse than the kick and looks
+//! better, at 2.6 times the cost per hop.
+//!
+//! Against the library the driver actually ships, which adds surface
+//! relocation, shell rotation and symmetrisation to the kick, the trajectory
+//! loses and the loss is significant (p = 0.039 and p = 0.017). Replacing the
+//! library with Hamiltonian dynamics gives up more than the dynamics returns.
+//! That is consistent with what eleven previous mechanisms in this crate
+//! measured: what pays is changing what a hop can reach, and a trajectory
+//! matched to the kick's reach reaches exactly as far as the kick, in a better
+//! direction, while surface relocation and symmetrisation move a point to
+//! somewhere a displacement of that amplitude cannot put it.
+//!
+//! # Which parts fired, and which did not
+//!
+//! A solve count cannot tell a mechanism that works poorly from one that does
+//! not run, so each part carries its own instrument.
+//!
+//! Dual averaging works. Both the identity and model-Hessian arms froze at an
+//! acceptance statistic of 0.801 against a target of 0.800, from step sizes
+//! they found themselves, with a seed-to-seed spread of 2.1e-2 to 2.6e-2 and
+//! 4.9e-2 to 5.8e-2 respectively.
+//!
+//! The metric matters, and by the amount the theory predicts. The model Hessian
+//! carries a condition number of 1.3e2 over the structures visited
+//! ([`HopDiagnostics::metric_span`]) and buys a step 2.4 times larger at the
+//! same acceptance, which is what a preconditioner is for.
+//!
+//! The no-U-turn criterion does not fire. The depth cap bound on 99.2 per cent
+//! of identity proposals and 95.5 per cent of model-Hessian ones, and raising
+//! the cap does not help: swept from 4 to 10, the cap still bound on 87 to 99
+//! per cent at every setting, at a cost rising to 1098 charged evaluations per
+//! hop. So the trajectory length is set by the cap and not by the geometry, and
+//! the claim to have removed the trajectory-length parameter does not hold. The
+//! cause is the reach adaptation: it drives `T_traj` down as the cap rises,
+//! from 14.9 at a cap of 4 to 0.57 at a cap of 10, holding the distance
+//! covered fixed. A trajectory told to cover a fixed short distance in 114
+//! dimensions does not turn around. The two adaptive rules are in conflict and
+//! reach wins. The preconditioner does move the number in the right direction,
+//! U-turning 5.7 times more often than the unit metric, which is the expected
+//! sign: the U-turn time is set by the slowest mode and the step size by the
+//! fastest, so a metric that closes the gap makes the criterion reachable.
+//!
+//! Stan's estimated metric is worse than useless here, and the instruments say
+//! why rather than leaving it to be guessed. Its condition number reaches 1.2e3
+//! and 4.4e3 at the extreme, which is not curvature: the target is exactly
+//! invariant under permuting indistinguishable points and under rotating all of
+//! them, so its population covariance is isotropic by symmetry and every bit of
+//! that anisotropy is a finite-sample artefact of which structures the chain
+//! happened to visit. Under that mass matrix dual averaging cannot reach its
+//! target either, freezing at an acceptance of 0.934 against 0.800, the
+//! trajectory under-reaches at 1.35 against a target of 2.34, and the arm never
+//! leaves the icosahedral funnel: its deepest structure over 24 seeds is
+//! -173.134317, the second minimum, where every other arm reaches
+//! -173.928427 at least once. This is the case Stan cannot see coming, because
+//! Stan has no model of its target and therefore no way to know that the
+//! covariance it is estimating is a constant times the identity.
+//!
+//! Divergences are rare and structurally exactly where the potential says they
+//! should be: 4.0e-4 of proposals under both working metrics, at a closest pair
+//! separation of 0.67 to 0.74 of the mean spacing. That is the `r^-12` wall.
+//! The sampler cannot traverse configurations with a pair inside about
+//! three quarters of a contact distance, which is a statement about the
+//! potential and not about the integrator, and it transfers to any potential
+//! with a hard core.
 
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
@@ -245,6 +329,12 @@ pub struct HopDiagnostics {
     /// Condition number of the adapted diagonal metric, one when it carries no
     /// anisotropy.
     pub metric_condition: f64,
+    /// Sum of the metric's own condition bound, for the mean.
+    ///
+    /// One says the metric is the identity under another name. Reported for
+    /// every arm, so a metric that runs and carries nothing is identified as
+    /// such rather than read as a weak effect.
+    pub metric_span_sum: f64,
     /// Sum of rigid-free distances covered, for the mean.
     pub reach_sum: f64,
     /// Distance the reach adaptation is aiming at.
@@ -308,6 +398,15 @@ impl HopDiagnostics {
         }
     }
 
+    /// Mean condition bound of the metric the chain integrated with.
+    pub fn metric_span(&self) -> f64 {
+        if self.proposals == 0 {
+            1.0
+        } else {
+            self.metric_span_sum / self.proposals as f64
+        }
+    }
+
     /// Mean rigid-free distance a proposal covered.
     pub fn mean_reach(&self) -> f64 {
         if self.proposals == 0 {
@@ -327,7 +426,8 @@ impl HopDiagnostics {
         format!(
             "hmc {name}  proposals {}  leaves {}  depth {:.2} (cap {:.3})  \
              accept {:.3}  diverge {:.4} at sep {:.3}  eps {:.4e}  \
-             T_traj {:.4e}  reach {:.3}/{:.3}  cond {:.3}  drift {:.4}",
+             T_traj {:.4e}  reach {:.3}/{:.3}  cond {:.3}  span {:.4e}  \
+             drift {:.4}",
             self.proposals,
             self.leaves,
             self.mean_depth(),
@@ -340,6 +440,7 @@ impl HopDiagnostics {
             self.mean_reach(),
             self.reach_target,
             self.metric_condition,
+            self.metric_span(),
             self.metric_drift(),
         )
     }
@@ -479,6 +580,11 @@ impl HopChain {
         // the Hamiltonian stays separable and leapfrog stays symplectic.
         self.metric.observe(x);
         let metric = self.metric.freeze(x);
+        // How much anisotropy the metric this arm runs actually carries, which
+        // is the quantity the three-arm comparison turns on. Averaged over
+        // proposals rather than taken once, since it is a property of the
+        // structures the chain visits.
+        self.diag.metric_span_sum += metric.condition_bound();
 
         // The initial step comes from Hoffman and Gelman's reasonable-epsilon
         // search rather than from a constant, and only on the first proposal.
