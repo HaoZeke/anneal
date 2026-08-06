@@ -499,6 +499,46 @@ impl Ledger {
 /// is which pairs are offered per sweep, whether the rungs move, and, for
 /// [`LadderMode::Shipped`], whether the rung temperature reaches the
 /// acceptance rule at all.
+///
+/// # What the modes are worth
+///
+/// LJ38, 4e5 charged evaluations, 96 seeds, the bare driver, a swap every ten
+/// hops over four rungs, against a single chain at the same total budget:
+///
+/// | mode | solved | rate | 95 per cent Wilson | round trips per sweep |
+/// |------|--------|------|--------------------|------------------------|
+/// | [`LadderMode::Cyclic`] | 77/96 | 0.80 | [0.71, 0.87] | 0.69 |
+/// | single chain | 70/96 | 0.73 | [0.63, 0.81] | -- |
+/// | [`LadderMode::Reversible`] | 70/96 | 0.73 | [0.63, 0.81] | 0.11 |
+/// | [`LadderMode::Shipped`] | 68/96 | 0.71 | [0.61, 0.79] | 0.95 |
+/// | [`LadderMode::Independent`] | 67/96 | 0.70 | [0.60, 0.78] | 0 |
+/// | [`LadderMode::NonReversible`] | 45/96 | 0.47 | [0.37, 0.57] | 0.12 |
+///
+/// Nothing beats the single chain. Fisher's exact against it gives 0.31 for
+/// the best arm, which is not a difference, and 0.0004 for the worst, which is
+/// one and survives correcting for the seventeen arms compared. Running four
+/// chains instead of one changes nothing on its own, 0.70 against 0.73, so
+/// what little the best arm has comes from the exchange rather than from the
+/// chains, 0.80 against 0.70 at Fisher 0.13, and 0.13 is not a result.
+///
+/// The mechanism that costs is the adapted ladder: equalising the barrier at
+/// the classical acceptance target stretches the hot rung to a mean
+/// temperature of 61 against 3.2 for the geometric schedule, and a rung that
+/// hot holds nothing worth swapping down while still consuming a quarter of
+/// the budget. Raising the target to 0.40 and 0.60 shortens the ladder and
+/// recovers to 0.64 and 0.54, still no better than the chain it replaces.
+///
+/// The transport column is why the two questions have to be asked separately.
+/// [`LadderMode::Cyclic`] transports six times as often per sweep as
+/// [`LadderMode::Reversible`] and solves no better; the non-reversible sweep
+/// transports best per rung as rungs are added and solves worst.
+///
+/// One caveat on that column. The cyclic modes offer the pair that wraps from
+/// the hottest rung to the coldest, so an accepted swap there moves a tag
+/// across the whole ladder in one step. Their round-trip counts measure that
+/// channel and not a traversal, which is why they read near one per sweep
+/// while the even-odd schemes, which only ever move a tag one rung, read near
+/// a tenth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LadderMode {
     /// One cyclic adjacent pair per swap period, wrapping from the hottest
