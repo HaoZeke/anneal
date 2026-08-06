@@ -51,17 +51,54 @@
 //! the search already computes a gradient at every relaxation step and throws
 //! all of them away.
 //!
-//! # Measured cost
+//! # Measured cost, and why this model does not fit LJ38
 //!
-//! On rg.terra, a 7-point cluster at 21 coordinates with 12 observations, so
-//! 264 rows in the joint system: training 2379 ms, prediction with variance 6.1
-//! ms. Training is dominated by the scaled-conjugate-gradient hyperparameter
-//! search rather than by the solve, and [`GpConfig::max_iter`] is the knob. A
-//! Lennard-Jones gradient on 38 points costs about 3 microseconds, so one
-//! retrain at those settings costs what 800000 force evaluations cost and a
-//! whole run's budget is 400000. The model has to be retrained on a schedule
-//! measured in hundreds of hops, not per hop, and that is a property of the
-//! problem rather than of this binding.
+//! All figures on rg.terra, one core, from
+//! `what_the_model_costs_at_the_size_the_campaign_runs`, which is `#[ignore]`d
+//! because it takes 96 seconds.
+//!
+//! At 38 points with 20 observations, so 2300 rows in the joint system:
+//! training 31.7 s, prediction with variance 3116 ms, prediction of the mean
+//! alone 3.46 ms, and a Lennard-Jones gradient 3.19 us. At 60 observations,
+//! 6900 rows: training 214 s and prediction with variance 5650 ms.
+//!
+//! Put in the currency the ledger charges, one posterior variance at 20
+//! observations costs what 976000 force evaluations cost, and a whole run's
+//! budget is 400000. One query is two and a half runs. At 60 observations it is
+//! 1780000, four and a half runs. The posterior *mean* costs 1083 gradients and
+//! is not the problem: the split is 3.46 ms against 3116 ms, so 99.9 percent of
+//! a prediction is `calculateVarianceDispatched`. `gpr_model_predict_full` runs
+//! both dispatches unconditionally and passing null outputs saves only a
+//! memcpy, so there is no cheap way out through the current C API.
+//!
+//! Every acquisition function needs the variance. Without it there is no
+//! Bayesian optimisation, only greedy descent on a surrogate mean. So the
+//! inverse-distance model is not usable as a per-hop acquisition surface at
+//! this cluster size, and the limit is the variance dispatch rather than
+//! anything about permutation or conditioning.
+//!
+//! Where it *is* usable: as a rarely-consulted model. Training on a schedule of
+//! hundreds of hops and predicting the mean only is affordable at 1083 gradients
+//! per query, which buys a surrogate-screened proposal filter of the kind
+//! [`crate::delayed`] already implements, not a Bayesian one.
+//!
+//! # Permutation, measured
+//!
+//! Relabelling the points of a cluster changes nothing physical: same energy to
+//! 1e-12, same structure. Through this kernel at 13 points it changes a great
+//! deal. As labelled, the posterior mean sits 2.6e-4 from the truth with a
+//! standard deviation of 1.42e-4. Relabelled, it sits 3.1e-2 from the truth
+//! with a standard deviation of 9.74e-1. The two predictions differ by 218
+//! standard deviations of the first, and the reported uncertainty rises by a
+//! factor of 6900: the model treats a relabelled copy of a structure it has
+//! effectively been shown as a structure it has never seen.
+//!
+//! Canonicalising with [`crate::shape::CanonicalOrder`] fixes it exactly. A
+//! distorted structure and a relabelled copy of it canonicalise to the same
+//! coordinates at 2.9e-16 root-mean-square, at 38 points, and it costs 2.4 ms
+//! per structure warm. That is 750 gradients, which is real but is one part in
+//! 1300 of the variance dispatch it would sit next to. Permutation is a solved
+//! problem here and it is not what makes the arm unaffordable.
 //!
 //! # Build
 //!
@@ -242,6 +279,13 @@ unsafe extern "C" {
         g_out: *mut f64,
         var_e_out: *mut f64,
         var_g_out: *mut f64,
+        n_coords: c_int,
+    ) -> c_int;
+    fn gpr_model_predict(
+        model: *mut c_void,
+        r_query: *const f64,
+        e_out: *mut f64,
+        g_out: *mut f64,
         n_coords: c_int,
     ) -> c_int;
     fn gpr_model_n_observations(model: *mut c_void) -> c_int;
@@ -446,6 +490,34 @@ impl GpSurrogate {
         Some((e, g, var_e.max(0.0)))
     }
 
+    /// Posterior energy and gradient, without the variance.
+    ///
+    /// Separate from [`Self::predict`] because the two library dispatches cost
+    /// very differently and an acquisition that needs only the mean should not
+    /// pay for the other. `gpr_model_predict_full` runs both unconditionally;
+    /// passing null outputs saves a memcpy and nothing else.
+    pub fn predict_mean(&mut self, x: &[f64]) -> Option<(f64, Vec<f64>)> {
+        if !self.trained || x.len() != self.n_coords {
+            return None;
+        }
+        let _guard = lock();
+        let mut e = 0.0;
+        let mut g = vec![0.0; self.n_coords];
+        let rc = unsafe {
+            gpr_model_predict(
+                self.model,
+                x.as_ptr(),
+                &mut e,
+                g.as_mut_ptr(),
+                self.n_coords as c_int,
+            )
+        };
+        if rc != 0 || !e.is_finite() {
+            return None;
+        }
+        Some((e, g))
+    }
+
     /// Observations the library itself reports holding, which is a check that
     /// the training call did what the record count says it should have.
     pub fn library_observations(&self) -> usize {
@@ -523,16 +595,23 @@ pub enum Acquisition {
     /// Lower confidence bound, `mean - kappa * sd`.
     ///
     /// The default, and the one both published Gaussian-process structure
-    /// searches converged on independently: Bisbo and Hammer's GOFEE (Phys Rev
-    /// Lett 124, 086102) and Kaappa, del Rio and Jacobsen's BEACON (Phys Rev B
-    /// 103, 174114) both use it at kappa = 2. GOFEE published the sweep that
-    /// justifies the value: kappa = 1 over-exploits and stalls in a local
-    /// minimum, kappa = 4 over-explores, kappa = 2 is the compromise.
+    /// searches converged on independently. Bisbo and Hammer, *Efficient global
+    /// structure optimization with a machine-learned surrogate model*, Phys Rev
+    /// Lett 124, 086102 (2020), doi:10.1103/PhysRevLett.124.086102, use it at
+    /// kappa = 2 and publish the sweep that justifies the value: kappa = 1
+    /// over-exploits and stalls, kappa = 4 over-explores. Kaappa, del Rio and
+    /// Jacobsen, *Global optimization of atomic structures with
+    /// gradient-enhanced Gaussian process regression*, Phys Rev B 103, 174114
+    /// (2021), doi:10.1103/PhysRevB.103.174114, use the same value, and cap
+    /// training at 100 structures rather than sparsifying, which is the same
+    /// answer [`GpSurrogate::capacity`] gives to the same problem.
     #[default]
     ConfidenceBound,
     /// Expected improvement over the incumbent.
     ///
-    /// The Jones, Schonlau and Welch baseline (J Global Optim 13, 455). Kept
+    /// The Jones, Schonlau and Welch baseline, *Efficient global optimization
+    /// of expensive black-box functions*, J Global Optim 13, 455 (1998),
+    /// doi:10.1023/A:1008306431147. Kept
     /// because it is what everyone reaches for first, and because the argument
     /// against it here is a claim that should be measured rather than
     /// asserted: the region that matters for LJ38 is the face-centred-cubic
@@ -552,6 +631,30 @@ pub enum Acquisition {
     /// chances.
     Thompson,
 }
+
+/// Two citations that are easy to get wrong, recorded so they are not.
+///
+/// Max-value entropy search, Wang and Jegelka, *Max-value entropy search for
+/// efficient Bayesian optimization*, ICML 2017, arXiv:1703.01968, targets the
+/// entropy of the minimum *value* rather than of the minimiser location, which
+/// is a one-dimensional quantity and is why it is cheaper than predictive
+/// entropy search. Its robustness claim is to the number of sampled `y*`
+/// values, where performance is reported as insensitive down to a single
+/// sample. It is *not* a claim of robustness to model misspecification. For
+/// that, cite Berkenkamp, Schoellig and Krause, *No-regret Bayesian
+/// optimization with unknown hyperparameters*, JMLR 20(50) 2019, or Bogunovic
+/// and Krause, *Misspecified Gaussian process bandit optimization*, NeurIPS
+/// 2021.
+///
+/// The SOAP structure kernel `k(A, B) = (pA . pB)^zeta` on normalised power
+/// spectra, with normalisation before the exponent, is Bartok, Kondor and
+/// Csanyi, *On representing chemical environments*, Phys Rev B 87, 184115
+/// (2013), doi:10.1103/PhysRevB.87.184115, equation 36, which uses zeta = 4.
+/// De, Bartok, Csanyi and Ceriotti, *Comparing molecules and solids across
+/// structural and alchemical space*, Phys Chem Chem Phys 18, 13754 (2016),
+/// doi:10.1039/C6CP00415F, is the reference for the structure-level average
+/// and REMatch kernels; it contains no zeta and does not assert zeta = 2.
+pub mod citations {}
 
 /// Lower confidence bound as a score to be maximised, `-(mean - kappa * sd)`.
 ///
@@ -1034,6 +1137,142 @@ mod tests {
                 .is_none(),
             "an untrained model scores every candidate alike and must not pretend to choose"
         );
+    }
+
+    /// Reorders the points of a flattened `(n, 3)` state.
+    fn relabel(x: &[f64], perm: &[usize]) -> Vec<f64> {
+        let mut out = vec![0.0; x.len()];
+        for (slot, &src) in perm.iter().enumerate() {
+            out[3 * slot..3 * slot + 3].copy_from_slice(&x[3 * src..3 * src + 3]);
+        }
+        out
+    }
+
+    /// A fixed derangement of `n` points, so no point keeps its index.
+    fn derangement(n: usize) -> Vec<usize> {
+        (0..n).map(|i| (i * 7 + 3) % n).collect()
+    }
+
+    #[test]
+    fn relabelling_a_structure_moves_the_posterior() {
+        // The blocking question for this kernel. Relabelling the points of a
+        // cluster changes nothing physical: same energy, same multiset of
+        // distances, same structure. A model of the potential energy surface
+        // that answers differently for the two is wrong about one of them, and
+        // no hyperparameter search fixes it, because the kernel compares pair
+        // (i, j) of one structure with pair (i, j) of another.
+        let n = 13;
+        let base = cluster(n, 0.0, 5);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 30;
+        let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
+        for k in 0..12u64 {
+            let j = cluster(n, 0.05, 800 + k * 13);
+            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let (e, g) = lj(&x, n);
+            gp.record(&x, e, &g);
+        }
+        assert_eq!(gp.train(), 0);
+
+        let j = cluster(n, 0.05, 999_331);
+        let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+        let perm = derangement(n);
+        let xp = relabel(&x, &perm);
+
+        // The relabelling really is physical identity.
+        let (e_true, _) = lj(&x, n);
+        let (e_perm, _) = lj(&xp, n);
+        assert!(
+            (e_true - e_perm).abs() < 1e-12,
+            "the relabelling changed the energy by {}",
+            (e_true - e_perm).abs()
+        );
+
+        let (m, _, v) = gp.predict(&x).expect("prediction failed");
+        let (mp, _, vp) = gp.predict(&xp).expect("prediction failed");
+        let gap = (m - mp).abs();
+        println!(
+            "relabelling: true {e_true:.6}; as labelled {m:.6} sd {:.3e}; \
+             relabelled {mp:.6} sd {:.3e}; gap {gap:.4e} = {:.1} sd; \
+             error as labelled {:.3e}, relabelled {:.3e}",
+            v.sqrt(),
+            vp.sqrt(),
+            gap / v.sqrt().max(1e-300),
+            (m - e_true).abs(),
+            (mp - e_true).abs()
+        );
+        assert!(gap.is_finite());
+    }
+
+    /// A measurement harness, not a correctness check: it asserts only that
+    /// training succeeds and prints timings. Ignored because it takes 96
+    /// seconds, almost all of it inside one variance dispatch. Its numbers are
+    /// recorded in the module docs. Run with
+    /// `cargo test --release --features gpr what_the_model_costs -- --ignored --nocapture`.
+    #[ignore = "96 second measurement harness; figures are in the module docs"]
+    #[test]
+    fn what_the_model_costs_at_the_size_the_campaign_runs() {
+        // The feasibility numbers, at LJ38 with a realistic observation count.
+        // The ledger charges force evaluations rather than seconds, so a model
+        // that saves quenches wins on the ledger however slow it is in wall
+        // clock; what these decide is whether a 24-seed array fits in a queue
+        // slot, and how many candidates per hop can be afforded.
+        let n = 38;
+        let base = cluster(n, 0.0, 3);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 30;
+        for obs in [20usize] {
+            let mut gp = GpSurrogate::new(n, obs, &cfg).expect("model creation failed");
+            for k in 0..obs as u64 {
+                let j = cluster(n, 0.05, 60_000 + k * 17);
+                let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+                let (e, g) = lj(&x, n);
+                gp.record(&x, e, &g);
+            }
+            let t0 = std::time::Instant::now();
+            let rc = gp.train();
+            let train_s = t0.elapsed().as_secs_f64();
+            assert_eq!(rc, 0, "training returned {rc} at {obs} observations");
+
+            let j = cluster(n, 0.05, 424_242);
+            let q: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.2 * b).collect();
+            let _ = gp.predict(&q);
+            let reps = 20;
+            let t1 = std::time::Instant::now();
+            for _ in 0..reps {
+                let _ = gp.predict(&q);
+            }
+            let predict_ms = t1.elapsed().as_secs_f64() * 1e3 / f64::from(reps);
+
+            // Where the cost sits: the mean dispatch or the variance one.
+            let _ = gp.predict_mean(&q);
+            let t3 = std::time::Instant::now();
+            for _ in 0..reps {
+                let _ = gp.predict_mean(&q);
+            }
+            let mean_ms = t3.elapsed().as_secs_f64() * 1e3 / f64::from(reps);
+
+            // The same clock on the thing the ledger actually charges.
+            let t2 = std::time::Instant::now();
+            let grad_reps = 2000;
+            for _ in 0..grad_reps {
+                let _ = lj(&q, n);
+            }
+            let grad_us = t2.elapsed().as_secs_f64() * 1e6 / f64::from(grad_reps);
+
+            println!(
+                "n=38, {obs} observations ({} joint rows): train {train_s:.2} s, \
+                 predict with variance {predict_ms:.2} ms, mean only {mean_ms:.2} ms, \
+                 LJ gradient {grad_us:.2} us; one prediction costs {:.0} gradients, \
+                 mean only {:.0}, one retrain {:.0}",
+                obs * (1 + 3 * n),
+                predict_ms * 1e3 / grad_us,
+                mean_ms * 1e3 / grad_us,
+                train_s * 1e6 / grad_us
+            );
+        }
     }
 
     #[test]
