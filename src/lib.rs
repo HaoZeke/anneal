@@ -62,6 +62,8 @@ pub mod screen;
 pub mod twin;
 pub mod spectral;
 pub mod structure;
+/// Permutation invariants from a three-body tensor, for basin identity.
+pub mod tensor_id;
 pub mod symmetrise;
 pub mod terminate;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
