@@ -63,24 +63,32 @@ cent intervals, corrected relaxer (=src/hmc/hop.rs=, commit =844c448=):
 | kick      | the uniform displacement alone   | 1/24  | [0.01, 0.20] | 29 |
 | hmc-diag  | trajectory, Stan's sample diagonal | 0/24 | [0.00, 0.14] | 148 |
 
-Two comparisons, pointing opposite ways. Against the uniform kick it
-replaces, the Hamiltonian proposal is ahead, 6/24 and 5/24 against 1/24,
-though neither gap clears a two-sided Fisher exact test at 24 seeds
-(\(p=0.097\) and \(p=0.19\)): not worse than the kick, and looks better, at
-2.6 times the charged cost per hop. Against the library the driver runs by
-default, which adds surface relocation, shell rotation, and symmetrisation to
-the kick, the trajectory loses and the loss is significant (\(p=0.039\) and
-\(p=0.017\)). Replacing the whole move library with Hamiltonian dynamics
-gives up more than the dynamics returns; matched against only the kernel it
-was built to replace, it wins.
+Two comparisons, and only one of them settles anything. Against the uniform
+kick it replaces, the Hamiltonian proposal is ahead on the point estimate,
+6/24 and 5/24 against 1/24, but neither gap clears a two-sided Fisher exact
+test at 24 seeds (\(p=0.097\) and \(p=0.19\)), and the posterior comparison
+(paper repository's =rewrite_2026/scripts/posterior.py=, Jeffreys prior) is
+the sharper instrument for why: the model-Hessian arm reaches
+\(P(t>c)=0.982\), which reads as strong taken alone, against a Bayes factor
+of 2.16, barely worth mentioning. The two numbers disagree on purpose; the
+Bayes factor is what says 24 seeds cannot yet tell this arm from the kick,
+which the exceedance probability alone would hide. Against the library the
+driver runs by default, which adds surface relocation, shell rotation, and
+symmetrisation to the kick, the trajectory loses and the loss is
+significant (\(p=0.039\) and \(p=0.017\); posterior BF 3.74 for the
+model-Hessian arm, moderate evidence for a difference in the losing
+direction). Replacing the whole move library with Hamiltonian dynamics
+gives up more than the dynamics returns, and matched against only the
+kernel it was built to replace it is not yet a win, only not yet a loss.
 
 That divide is consistent with the pattern documented across this crate's
 other measured mechanisms (=docs/inert_mechanisms.org= in the paper
-repository catalogues thirteen; this is not one of them, nothing here fails
-to fire): what pays is changing what a hop can reach, and a trajectory
-matched to the kick's reach reaches exactly as far as the kick, in a
-better-informed direction, while surface relocation and symmetrisation
-place a point somewhere a displacement of that amplitude cannot reach at
+repository catalogues sixteen; this is not one of the first thirteen,
+nothing here fails to fire): what pays is changing what a hop can reach, and
+a trajectory matched to the kick's reach reaches exactly as far as the
+kick, in a better-informed direction, while surface relocation and
+symmetrisation place a point somewhere a displacement of that amplitude
+cannot reach at
 all.
 
 * 3. Dual averaging works; the metric matters by the amount theory predicts
