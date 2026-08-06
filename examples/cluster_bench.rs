@@ -124,6 +124,13 @@ fn main() {
     cfg.adaptive_screen = opts.contains(&"aq");
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
+    // The hierarchy is reported whenever it is recorded, escape or not, so a
+    // run says what funnel structure its own transitions imply.
+    cfg.superbasin_report = opts.contains(&"sbreport");
+    cfg.superbasin_escape = opts.contains(&"sbasin");
+    if cfg.superbasin_escape {
+        cfg.superbasin_report = true;
+    }
     cfg.reseed_moves = opts.contains(&"reseed");
     cfg.twin_moves = opts.contains(&"twin");
     cfg.delayed_acceptance = opts.contains(&"da");
@@ -300,6 +307,44 @@ fn main() {
                 "    delayed: stage1 {s1} rejected {s1r} ({:.3}), stage2 {s2} rejected {s2r} ({:.3})",
                 s1r as f64 / s1.max(1) as f64,
                 s2r as f64 / s2.max(1) as f64
+            );
+        }
+        if let Some(sb) = &out.superbasin {
+            println!(
+                "    superbasin: {} basins {} transitions, {} archived, bias distortion {:.3}",
+                sb.nodes, sb.edges, sb.archived, sb.distortion
+            );
+            for (k, (states, largest, separation)) in sb.levels.iter().enumerate() {
+                println!(
+                    "      level {}: {states} coarse states, largest lump {largest}, \
+                     separation {separation:.1}",
+                    k + 1
+                );
+            }
+            let refusals: Vec<String> = anneal_core::superbasin::Refusal::KINDS
+                .iter()
+                .zip(sb.refusals_by_kind.iter())
+                .filter(|(_, n)| **n > 0)
+                .map(|(k, n)| format!("{k} {n}"))
+                .collect();
+            println!(
+                "      top partition {:?}   jumps {} refused {} [{}] worst revisits {:.2}   \
+                 condition max {:.3e} mean {:.3e} residual {:.1e}   \
+                 solve residual {:.1e} exact {}   \
+                 hops replaced {:.0}   improved {} by {:.4}",
+                sb.top,
+                sb.jumps,
+                sb.refusals,
+                refusals.join(", "),
+                sb.mixed_ratio_max,
+                sb.condition_max,
+                sb.condition_mean,
+                sb.condition_residual_max,
+                sb.solve_residual_max,
+                sb.exact_solves,
+                sb.hops_saved,
+                sb.improvements.0,
+                sb.improvements.1
             );
         }
         for (name, draws, accepts, best) in &out.arms {
