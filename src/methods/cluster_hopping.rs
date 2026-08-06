@@ -620,6 +620,31 @@ pub struct Config {
     pub track_funnels: bool,
     /// Accepted hops between Laplacian refits / Fiedler updates.
     pub funnel_period: usize,
+    /// Report the superbasin hierarchy the run's own transitions imply.
+    ///
+    /// Costs one basin lookup per hop and no evaluations, and answers a
+    /// question no descriptor here has answered: whether the funnel
+    /// decomposition is recoverable from the transitions at all. A bond-order
+    /// parameter separates the two 75-point funnels by 0.023, sorted distances
+    /// need a merge radius on a knife edge, and a spectral partition of the
+    /// same graph gives a cut without a scale. A coarse-graining hierarchy
+    /// gives levels, sizes and a partition, and it either forms or it does not.
+    /// See [`crate::superbasin`].
+    pub superbasin_report: bool,
+    /// Jump out of a superbasin by solving the absorbing chain, on a stall.
+    ///
+    /// The chain at 98 points cycles: 401177 hops over 11366 basins is about 35
+    /// visits each. Filling those basins pushes it to neighbouring unvisited
+    /// ones in the same funnel, of which there are effectively unboundedly
+    /// many. The absorbing chain says where that cycling would eventually
+    /// deposit the chain, and this move goes there directly for no charged
+    /// evaluations, since the transition matrix and the structures are data the
+    /// run already holds.
+    ///
+    /// Turns [`Config::superbasin_report`] on with it.
+    pub superbasin_escape: bool,
+    /// Hops between escapes, on top of the stall condition.
+    pub superbasin_period: usize,
     /// Symmetrise onto the symmetry the structure nearly has, on a stall.
     ///
     /// Oakley, Johnston and Wales report the mean first encounter time for the
@@ -954,6 +979,9 @@ impl Config {
             bayes_warmup: 300,
             track_funnels: false,
             funnel_period: 20_000,
+            superbasin_report: false,
+            superbasin_escape: false,
+            superbasin_period: 2_000,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
             symmetrise_patience: 2_000,
@@ -1115,6 +1143,12 @@ pub struct Outcome {
     pub path_improvements: usize,
     /// Total depth gained from paths, in energy units.
     pub path_gain: f64,
+    /// The superbasin hierarchy the transitions imply, and what the escape did
+    /// with it.
+    ///
+    /// Present whenever the graph was recorded, escape on or off, because the
+    /// hierarchy is evidence about the landscape rather than about the move.
+    pub superbasin: Option<crate::superbasin::SuperbasinReport>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1463,6 +1497,14 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             None
         };
+    // The transition graph the absorbing-chain escape solves, and the archive
+    // it lands on. Allocated only when asked for, so a plain run pays nothing.
+    let mut superbasin = if cfg.superbasin_report || cfg.superbasin_escape {
+        Some(crate::superbasin::SuperbasinEscape::new())
+    } else {
+        None
+    };
+    let mut sb_last_jump = 0usize;
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -1798,7 +1840,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         // Where the chain stands before the acceptance test, so an accepted
         // hop can be recorded as an edge from here to there. Taken only when
         // the tracker is on, since it costs a descriptor and a lookup.
-        let here_before = if cfg.track_funnels {
+        let here_before = if cfg.track_funnels || superbasin.is_some() {
             Some(*here.get_or_insert_with(|| identity.basin_of(x.view())))
         } else {
             None
@@ -1892,6 +1934,30 @@ fn run_full<'g, R: Rng + ?Sized>(
             }) {
                 accept = false;
                 tabu_hits += 1;
+            }
+        }
+        // The transition this proposal represents for the *unbiased* chain.
+        //
+        // Recorded whether or not the biased chain took it, and weighted by the
+        // acceptance probability the chain would have had with no deposits.
+        // That is what makes the rate estimate independent of the bias: the
+        // move kernel never sees the deposits, so the proposal frequency is
+        // unchanged by them, and the only bias-dependent factor is the
+        // acceptance, which this replaces rather than corrects. Costs a basin
+        // lookup and no evaluations; the descriptor is the one the bias already
+        // computed, since the two indices carry the same fingerprint.
+        if let (Some(sb), Some(from)) = (superbasin.as_mut(), here_before) {
+            if unquenched {
+                // No quenched destination, so the hop bought time and no
+                // transition.
+                sb.observe(from, Some(from), 0.0);
+            } else {
+                let a = if e_new <= e {
+                    1.0
+                } else {
+                    (-(e_new - e) / temperature.max(1e-12)).exp()
+                };
+                sb.observe(from, identity.lookup(s_new.view()), a);
             }
         }
         if angular {
@@ -2018,16 +2084,36 @@ fn run_full<'g, R: Rng + ?Sized>(
             >= cfg
                 .escape_stall_patience
                 .max((cfg.escape_stall_factor * longest_quiet as f64) as usize);
+        // Where the chain stands after the acceptance test, computed once for
+        // every consumer that wants it. A second lookup is cheap; a second
+        // descriptor is not, and at 98 points it is 4753 entries.
+        let landed = if accept && here_before.is_some() {
+            let now = identity.basin_of(x.view());
+            here = Some(now);
+            Some(now)
+        } else {
+            None
+        };
+        if let (Some(sb), Some(from), Some(now)) = (superbasin.as_mut(), here_before, landed) {
+            sb.observe_accepted(from, now);
+            // The structure to land on if the chain ever needs to come back
+            // here. Every accepted state qualifies, not only the ones tight
+            // enough to be recorded as an answer: the chain is standing on this
+            // geometry and continuing from it, so a jump back to it is exactly
+            // as safe as the hop that produced it. Gating on the record
+            // gradient instead starves the archive, measured at 37 structures
+            // for 285 basins on a 75-point run, because 345 of 8016
+            // relaxations reach 1e-3 within the step cap.
+            if !unquenched {
+                sb.keep(now, e, x.view());
+            }
+        }
         if cfg.track_funnels {
             // Accepted hops only. A rejected proposal says the chain declined
             // to move, which is a statement about the acceptance rule rather
             // than about reachability.
-            if accept {
-                if let Some(prev) = here_before {
-                    let now = identity.basin_of(x.view());
-                    funnels.record(prev, now);
-                    here = Some(now);
-                }
+            if let (Some(prev), Some(now)) = (here_before, landed) {
+                funnels.record(prev, now);
             }
             if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
                 funnel_split = funnels.split().ok();
@@ -2167,6 +2253,42 @@ fn run_full<'g, R: Rng + ?Sized>(
                     if !cfg.minima_hopping {
                         here = None;
                     }
+                }
+            }
+        }
+
+        // Offered on a period rather than behind the energy stall the other
+        // escapes use, because this mechanism carries its own trapping test and
+        // that test is sharper. A stall detector says the chain has stopped
+        // improving; the absorbing chain says the chain revisits its own states
+        // ten times more than crossing them would need, which is the condition
+        // being escaped. Stacking the two makes the move rare for a reason
+        // unrelated to whether it applies, and this crate has one mechanism
+        // already catalogued as inert rather than ineffective for that shape of
+        // reason.
+        if cfg.superbasin_escape && hops >= sb_last_jump + cfg.superbasin_period {
+            sb_last_jump = hops;
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            if let Some(sb) = superbasin.as_mut() {
+                // Refusal is the normal outcome and is not a failure: the
+                // algebra declines when the graph is too small, too well mixed,
+                // or has no exit with a structure stored, and each of those is
+                // a case where jumping would push the chain out of a region it
+                // has not finished.
+                if let Ok(j) = sb.propose(from, rng) {
+                    quiet = 0;
+                    longest_quiet = 0;
+                    // No charged evaluations and no hop. The structure was
+                    // quenched and recorded when the run first reached it, so
+                    // the ledger has already paid for it, and counting a hop
+                    // here would make the charged-per-hop figure describe a
+                    // move that costs nothing.
+                    if j.energy < e {
+                        sb.observe_gain(e - j.energy);
+                    }
+                    e = j.energy;
+                    x = j.state;
+                    here = Some(j.basin);
                 }
             }
         }
@@ -2397,6 +2519,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         path_escapes,
         path_improvements,
         path_gain,
+        superbasin: superbasin.as_ref().map(|sb| sb.report()),
     }
 }
 

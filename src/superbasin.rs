@@ -341,6 +341,8 @@ pub struct JumpChain {
     leak: Vec<f64>,
     /// Expected hops spent in a state per jump out of it.
     hold: Vec<f64>,
+    /// Total hops observed in a state.
+    time: Vec<f64>,
 }
 
 impl JumpChain {
@@ -352,6 +354,7 @@ impl JumpChain {
         let mut adj = vec![Vec::new(); nodes.len()];
         let mut leak = vec![0.0; nodes.len()];
         let mut hold = vec![1.0; nodes.len()];
+        let mut time = vec![0.0; nodes.len()];
         for (i, b) in nodes.iter().enumerate() {
             let named: f64 = counts
                 .out
@@ -360,15 +363,16 @@ impl JumpChain {
                 .unwrap_or(0.0);
             let unnamed = counts.leak.get(b).copied().unwrap_or(0.0);
             let escape = named + unnamed;
-            let time = counts.time.get(b).copied().unwrap_or(0.0);
+            time[i] = counts.time.get(b).copied().unwrap_or(0.0);
+            let observed = time[i];
             if escape <= 0.0 {
                 // Never observed to leave. It stays a node so that it can be an
                 // absorbing target, with the whole of its observed time as a
                 // holding time.
-                hold[i] = time.max(1.0);
+                hold[i] = observed.max(1.0);
                 continue;
             }
-            hold[i] = (time / escape).max(1.0);
+            hold[i] = (observed / escape).max(1.0);
             leak[i] = unnamed / escape;
             if let Some(m) = counts.out.get(b) {
                 for (j, w) in m {
@@ -384,6 +388,7 @@ impl JumpChain {
             adj,
             leak,
             hold,
+            time,
         }
     }
 
@@ -415,6 +420,66 @@ impl JumpChain {
     /// Expected hops spent in a state per jump out of it.
     pub fn hold(&self, local: usize) -> f64 {
         self.hold[local]
+    }
+
+    /// Hops the chain has spent in a state.
+    ///
+    /// The residence the trapping test is built on. A superbasin is where the
+    /// chain keeps coming back to, and this is that quantity directly, rather
+    /// than through any one transition having been repeated.
+    pub fn residence(&self, local: usize) -> f64 {
+        self.time[local]
+    }
+
+    /// States around `local`, ordered by how much time the chain has spent in
+    /// them.
+    ///
+    /// Grown outwards one state at a time, always taking the neighbour of the
+    /// current set where the chain has spent the most hops. Two properties
+    /// matter. The set stays connected to where the chain is standing, so it
+    /// describes the region the chain occupies rather than the busiest states
+    /// anywhere. And the ordering is by residence, not by any transition
+    /// having been executed repeatedly: measured on a 75-point run at a million
+    /// evaluations, the mean reweighted mass on a transition is 2.0 with half
+    /// the edges below it, so a criterion built on repeated transitions
+    /// describes almost nothing while the chain is demonstrably revisiting
+    /// basins 25 times each.
+    ///
+    /// States never observed to leave are skipped: they cannot be transient,
+    /// since a transient state has to reach the boundary, and they make
+    /// perfectly good absorbing ones.
+    pub fn neighbourhood(&self, local: usize, max_states: usize) -> Vec<usize> {
+        if self.adj[local].is_empty() {
+            return Vec::new();
+        }
+        let mut chosen = vec![local];
+        let mut inside: BTreeSet<usize> = BTreeSet::new();
+        inside.insert(local);
+        let mut frontier: BTreeSet<usize> = BTreeSet::new();
+        let push = |frontier: &mut BTreeSet<usize>, inside: &BTreeSet<usize>, v: usize| {
+            for (t, _, _) in &self.adj[v] {
+                if !inside.contains(t) && !self.adj[*t].is_empty() {
+                    frontier.insert(*t);
+                }
+            }
+        };
+        push(&mut frontier, &inside, local);
+        while chosen.len() < max_states && !frontier.is_empty() {
+            let next = *frontier
+                .iter()
+                .max_by(|a, b| {
+                    self.time[**a]
+                        .partial_cmp(&self.time[**b])
+                        .expect("residences are finite")
+                        .then(b.cmp(a))
+                })
+                .expect("frontier is non-empty");
+            frontier.remove(&next);
+            inside.insert(next);
+            chosen.push(next);
+            push(&mut frontier, &inside, next);
+        }
+        chosen
     }
 
     /// Probability that a jump leaves towards an unnamed basin.
@@ -583,6 +648,10 @@ pub struct Absorption {
     pub hops: f64,
     /// Expected jumps before absorption, which is what the trapping test uses.
     pub jumps: f64,
+    /// Largest update of the last sweep, when the sparse solve produced this.
+    pub residual: f64,
+    /// Whether node elimination produced this, which carries no residual.
+    pub exact: bool,
 }
 
 impl Canonical {
@@ -801,6 +870,90 @@ impl Canonical {
             exit,
             hops: tau_hops[source] * inv,
             jumps: tau_jumps[source] * inv,
+            residual: 0.0,
+            exact: true,
+        }
+    }
+
+    /// The same answer by a sparse solve, for sets too large to eliminate.
+    ///
+    /// Elimination is cubic in the worst case, and the region a run cycles in
+    /// is the size of its visited set: 1200 basins at 75 points on a million
+    /// evaluations, 11366 at 98 points on twelve million. Node elimination
+    /// cannot be asked for that, and the row of `N` it would produce is
+    /// available from one sparse solve.
+    ///
+    /// Row `i` of `N` is `y` with `(I - Q)^T y = e_i`, verified symbolically,
+    /// and then `B_i = y^T R` and `t_i = y^T 1`. Gauss-Seidel on that system
+    /// from `y = 0` is monotone increasing, because `Q^T >= 0` and the
+    /// right-hand side is nonnegative, so a truncated run underestimates every
+    /// quantity it produces: the exit distribution is renormalised, the escape
+    /// time is a lower bound, and the trapping test built on it errs towards
+    /// refusing. That one-sidedness is why this is safe to truncate and the
+    /// residual is reported rather than assumed small.
+    ///
+    /// Convergence stalls in proportion to the trapping, which is the same
+    /// statement as the condition number identity.
+    pub fn absorb_sparse(&self, source: usize, max_sweeps: usize, tol: f64) -> Absorption {
+        let n = self.transient.len();
+        // Rows of Q^T: which transient states lead into each one.
+        let mut qt: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+        for (i, row) in self.q.iter().enumerate() {
+            for (j, p) in row {
+                qt[*j].push((i, *p));
+            }
+        }
+        let mut y = vec![0.0; n];
+        let mut residual = f64::INFINITY;
+        for _ in 0..max_sweeps {
+            let mut delta: f64 = 0.0;
+            for i in 0..n {
+                let mut acc = if i == source { 1.0 } else { 0.0 };
+                for (j, p) in &qt[i] {
+                    acc += p * y[*j];
+                }
+                delta = delta.max((acc - y[i]).abs());
+                y[i] = acc;
+            }
+            residual = delta;
+            if delta <= tol {
+                break;
+            }
+        }
+        let mut exit = vec![0.0; self.absorbing.len()];
+        for (i, row) in self.r.iter().enumerate() {
+            for (c, p) in row {
+                exit[*c] += y[i] * p;
+            }
+        }
+        let mass: f64 = exit.iter().sum();
+        if mass > 0.0 {
+            for v in exit.iter_mut() {
+                *v /= mass;
+            }
+        }
+        Absorption {
+            exit,
+            hops: y.iter().zip(self.hold.iter()).map(|(a, b)| a * b).sum(),
+            jumps: y.iter().sum(),
+            residual,
+            exact: false,
+        }
+    }
+
+    /// Exit distribution and escape time by whichever solver the size calls
+    /// for.
+    pub fn absorb_at_scale(
+        &self,
+        source: usize,
+        elimination_cap: usize,
+        max_sweeps: usize,
+        tol: f64,
+    ) -> Absorption {
+        if self.transient.len() <= elimination_cap {
+            self.absorb(source)
+        } else {
+            self.absorb_sparse(source, max_sweeps, tol)
         }
     }
 
@@ -1381,6 +1534,34 @@ pub enum Refusal {
     NoArchivedExit,
     /// The transient set is larger than the exact elimination is allowed to be.
     TooLarge(usize),
+    /// The canonical form could not be built.
+    Closed(CanonicalError),
+}
+
+impl Refusal {
+    /// Position of this kind in the refusal breakdown.
+    pub fn kind(&self) -> usize {
+        match self {
+            Refusal::TooFewNodes(_) => 0,
+            Refusal::Unseen(_) => 1,
+            Refusal::WellMixed(_) => 2,
+            Refusal::NoBoundary => 3,
+            Refusal::NoArchivedExit => 4,
+            Refusal::TooLarge(_) => 5,
+            Refusal::Closed(_) => 6,
+        }
+    }
+
+    /// Names of the refusal kinds, in breakdown order.
+    pub const KINDS: [&'static str; 7] = [
+        "small",
+        "unseen",
+        "mixed",
+        "no-boundary",
+        "no-exit",
+        "too-large",
+        "closed",
+    ];
 }
 
 impl std::fmt::Display for Refusal {
@@ -1392,6 +1573,7 @@ impl std::fmt::Display for Refusal {
             Refusal::NoBoundary => write!(f, "the superbasin has no observed boundary"),
             Refusal::NoArchivedExit => write!(f, "no exit basin has a stored structure"),
             Refusal::TooLarge(n) => write!(f, "{n} transient states exceeds the elimination cap"),
+            Refusal::Closed(e) => write!(f, "{e}"),
         }
     }
 }
@@ -1420,6 +1602,11 @@ pub struct Jump {
     pub condition: f64,
     /// Residual of the Gauss-Seidel run that produced the condition number.
     pub condition_residual: f64,
+    /// Residual of the solve that produced the exit distribution, zero when
+    /// node elimination produced it.
+    pub solve_residual: f64,
+    /// Whether the exit came from the exact elimination.
+    pub exact: bool,
     /// Exit mass with no named destination or no stored structure, which the
     /// sampled distribution is conditioned on excluding.
     pub conditioned_away: f64,
@@ -1432,12 +1619,25 @@ pub struct EscapeStats {
     pub jumps: usize,
     /// Escapes refused.
     pub refusals: usize,
+    /// Refusals by kind, indexed by [`Refusal::kind`].
+    pub refusals_by_kind: [usize; 7],
+    /// Largest revisits-per-state ratio a well-mixed refusal reported.
+    ///
+    /// The scientific content of a negative result: if the observed graph never
+    /// reaches the trapping threshold, the chain is not cycling inside a
+    /// superbasin at the resolution basin identity provides, and no exit
+    /// algebra applies however good the algebra is.
+    pub mixed_ratio_max: f64,
     /// Largest condition number seen.
     pub condition_max: f64,
     /// Sum of condition numbers, for the mean.
     condition_sum: f64,
     /// Largest Gauss-Seidel residual behind a reported condition number.
     pub condition_residual_max: f64,
+    /// Largest residual of a solve that produced an exit distribution.
+    pub solve_residual_max: f64,
+    /// Jumps whose exit came from the exact elimination.
+    pub exact_solves: usize,
     /// Expected hops the jumps replaced, summed.
     pub hops_saved: f64,
     /// Energy gained by jumps that landed lower than they left.
@@ -1470,13 +1670,37 @@ pub struct SuperbasinEscape {
     pub params: LumpParams,
     /// Basins the graph needs before an escape is considered.
     pub min_nodes: usize,
-    /// Transient states the exact elimination is allowed to handle.
+    /// Transient states an escape may consider.
     ///
-    /// Elimination is cubic in the worst case, so a cap keeps a rare move rare
-    /// in cost as well as in frequency. Exceeding it is not a dead end: the
-    /// hierarchy supplies a coarser level where the same region is fewer
-    /// states, which is the point of building it.
+    /// The region a run cycles in is the size of its visited set, so this is
+    /// thousands rather than tens. Sets above
+    /// [`SuperbasinEscape::elimination_cap`] are solved sparsely instead of by
+    /// elimination.
     pub max_transient: usize,
+    /// Transient states the exact node elimination is allowed to handle.
+    ///
+    /// Elimination is cubic in the worst case; above this the sparse solve
+    /// takes over, which is linear per sweep and one-sided when truncated.
+    pub elimination_cap: usize,
+    /// Sweeps the sparse solve may take before it reports what it has.
+    pub solve_sweeps: usize,
+    /// Mean visits per transient state that count as cycling rather than
+    /// exploring.
+    ///
+    /// Expected jumps to absorption divided by the size of the transient set,
+    /// which is the mean number of times each state is entered before the set
+    /// is left. One means the chain sweeps through and leaves, which is
+    /// exploration and the case where jumping would throw away a region still
+    /// being mapped. Two means every state is entered twice on average, so the
+    /// chain is demonstrably returning.
+    ///
+    /// Deliberately not [`LumpParams::min_separation`], which answers a
+    /// different question. That threshold bounds an approximation error, since
+    /// lumping is only valid under quasi-equilibrium and its error is
+    /// `O(1 / separation)`. The exit computed here involves no approximation at
+    /// any ratio, so the only thing its threshold has to decide is whether the
+    /// chain is returning at all.
+    pub min_revisits: f64,
     /// Gauss-Seidel sweeps allowed for the condition-number report.
     pub condition_sweeps: usize,
     /// Proposals between rebuilds of the hierarchy.
@@ -1507,7 +1731,10 @@ impl SuperbasinEscape {
             archive_capacity: 4096,
             params: LumpParams::default(),
             min_nodes: 24,
-            max_transient: 256,
+            max_transient: 4096,
+            elimination_cap: 384,
+            solve_sweeps: 4096,
+            min_revisits: 2.0,
             condition_sweeps: 4096,
             rebuild_every: 20_000,
             cache: None,
@@ -1594,21 +1821,25 @@ impl SuperbasinEscape {
     /// what the same algebra says would take the expected number of hops
     /// reported on the jump.
     pub fn propose<R: Rng + ?Sized>(&mut self, here: usize, rng: &mut R) -> Result<Jump, Refusal> {
-        let hierarchy = self.current_hierarchy();
+        let mut hierarchy = self.current_hierarchy();
+        if hierarchy.base.position(here).is_none() {
+            // A basin registered since the cached hierarchy was built. The
+            // chain standing somewhere the graph does not cover is a statement
+            // about the cache rather than about the landscape, so the answer is
+            // to rebuild rather than to refuse. Measured on a 75-point run,
+            // refusing here threw away 12 of 15 attempts.
+            self.cache = None;
+            hierarchy = self.current_hierarchy();
+        }
         if hierarchy.base.len() < self.min_nodes {
-            self.stats.refusals += 1;
-            return Err(Refusal::TooFewNodes(hierarchy.base.len()));
+            return Err(self.refuse(Refusal::TooFewNodes(hierarchy.base.len())));
         }
         if hierarchy.base.position(here).is_none() {
-            self.stats.refusals += 1;
-            return Err(Refusal::Unseen(here));
+            return Err(self.refuse(Refusal::Unseen(here)));
         }
         let (level, canonical, absorption) = match self.solve_at_best_level(&hierarchy, here) {
             Ok(v) => v,
-            Err(e) => {
-                self.stats.refusals += 1;
-                return Err(e);
-            }
+            Err(e) => return Err(self.refuse(e)),
         };
 
         // Exits that name a basin the archive holds. Everything else, the
@@ -1626,8 +1857,7 @@ impl SuperbasinEscape {
             }
         }
         if targets.is_empty() || !(kept > 0.0) {
-            self.stats.refusals += 1;
-            return Err(Refusal::NoArchivedExit);
+            return Err(self.refuse(Refusal::NoArchivedExit));
         }
         let mut u = rng.random::<f64>() * kept;
         let mut chosen = targets.len() - 1;
@@ -1647,6 +1877,10 @@ impl SuperbasinEscape {
         self.stats.condition_max = self.stats.condition_max.max(condition);
         self.stats.condition_residual_max =
             self.stats.condition_residual_max.max(condition_residual);
+        self.stats.solve_residual_max = self.stats.solve_residual_max.max(absorption.residual);
+        if absorption.exact {
+            self.stats.exact_solves += 1;
+        }
         self.stats.hops_saved += absorption.hops;
         Ok(Jump {
             basin,
@@ -1659,8 +1893,27 @@ impl SuperbasinEscape {
             absorbing: canonical.n_absorbing(),
             condition,
             condition_residual,
+            solve_residual: absorption.residual,
+            exact: absorption.exact,
             conditioned_away: 1.0 - kept,
         })
+    }
+
+    /// Counts a refusal by kind and hands it back.
+    ///
+    /// Kept as a breakdown rather than a total because the kinds say different
+    /// things: a graph too small is a run that has not walked far enough, a
+    /// well-mixed one is a run that is not trapped, and no archived exit is a
+    /// trap whose boundary was never entered.
+    fn refuse(&mut self, why: Refusal) -> Refusal {
+        self.stats.refusals += 1;
+        self.stats.refusals_by_kind[why.kind()] += 1;
+        if let Refusal::WellMixed(r) = why {
+            if r.is_finite() {
+                self.stats.mixed_ratio_max = self.stats.mixed_ratio_max.max(r);
+            }
+        }
+        why
     }
 
     /// Records that a jump landed lower than where it left.
@@ -1720,7 +1973,12 @@ impl SuperbasinEscape {
                 Some(s) => s,
                 None => continue,
             };
-            let absorption = canonical.absorb(source);
+            let absorption = canonical.absorb_at_scale(
+                source,
+                self.elimination_cap,
+                self.solve_sweeps,
+                1e-10,
+            );
             return Ok((level - 1, canonical, absorption));
         }
         // Flat fallback: the trapping component the chain stands in, on the
@@ -1734,53 +1992,58 @@ impl SuperbasinEscape {
         // visits per basin.
         let chain = &hierarchy.base;
         let here_local = chain.position(here).ok_or(Refusal::Unseen(here))?;
-        let mut worst_ratio = f64::NAN;
+        // The largest neighbourhood around the chain that is still trapping.
+        //
+        // Grown by residence, tested by the exact algebra. A set of m states
+        // crossed in about m jumps is being explored; one that takes ten times
+        // that to leave is being cycled in, which is the condition the exit
+        // exists for. The measured trap is 35 visits per basin.
+        //
+        // Sizes are tried on a doubling ladder rather than one at a time: each
+        // test is an elimination, and the answer wanted is an order of
+        // magnitude rather than an exact boundary.
+        let order = chain.neighbourhood(here_local, self.max_transient);
+        if order.len() < self.params.min_states.max(2) {
+            return Err(last_error);
+        }
         let mut best: Option<(Canonical, Absorption)> = None;
-        let mut seen: BTreeSet<(usize, usize)> = BTreeSet::new();
-        for tau in threshold_ladder(chain, &self.params, self.params.min_executions) {
-            for comp in chain.components(tau, self.params.min_executions) {
-                if !comp.contains(&here_local) || comp.len() < self.params.min_states.max(2) {
-                    continue;
-                }
-                if !seen.insert((comp[0], comp.len())) {
-                    continue;
-                }
-                if comp.len() > self.max_transient {
-                    last_error = Refusal::TooLarge(comp.len());
-                    continue;
-                }
-                let canonical = match Canonical::new(chain, &comp) {
-                    Ok(c) => c,
-                    Err(CanonicalError::NoBoundary) => {
-                        last_error = Refusal::NoBoundary;
-                        continue;
+        let mut best_ratio = f64::NAN;
+        let mut k = self.params.min_states.max(2);
+        loop {
+            let take = k.min(order.len());
+            let mut set: Vec<usize> = order[..take].to_vec();
+            set.sort_unstable();
+            match Canonical::new(chain, &set) {
+                Ok(canonical) => {
+                    if let Some(source) = canonical.transient.iter().position(|t| *t == here) {
+                        let absorption = canonical.absorb_at_scale(
+                            source,
+                            self.elimination_cap,
+                            self.solve_sweeps,
+                            1e-10,
+                        );
+                        let ratio = absorption.jumps / take as f64;
+                        if best_ratio.is_nan() || ratio > best_ratio {
+                            best_ratio = ratio;
+                        }
+                        if ratio >= self.min_revisits {
+                            best = Some((canonical, absorption));
+                        }
                     }
-                    Err(_) => continue,
-                };
-                let source = match canonical.transient.iter().position(|t| *t == here) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                let absorption = canonical.absorb(source);
-                let ratio = absorption.jumps / comp.len() as f64;
-                worst_ratio = if worst_ratio.is_nan() {
-                    ratio
-                } else {
-                    worst_ratio.max(ratio)
-                };
-                if ratio < self.params.min_separation {
-                    continue;
                 }
-                // Coarsest passing set, which is the last one the ladder
-                // reaches.
-                best = Some((canonical, absorption));
+                Err(CanonicalError::NoBoundary) => last_error = Refusal::NoBoundary,
+                Err(e) => last_error = Refusal::Closed(e),
             }
+            if take >= order.len() {
+                break;
+            }
+            k *= 2;
         }
         if let Some((canonical, absorption)) = best {
             return Ok((0, canonical, absorption));
         }
-        if let Refusal::WellMixed(_) = last_error {
-            last_error = Refusal::WellMixed(worst_ratio);
+        if !best_ratio.is_nan() {
+            last_error = Refusal::WellMixed(best_ratio);
         }
         Err(last_error)
     }
@@ -1837,9 +2100,13 @@ impl SuperbasinEscape {
             top,
             jumps: self.stats.jumps,
             refusals: self.stats.refusals,
+            refusals_by_kind: self.stats.refusals_by_kind,
+            mixed_ratio_max: self.stats.mixed_ratio_max,
             condition_max: self.stats.condition_max,
             condition_mean: self.stats.condition_mean(),
             condition_residual_max: self.stats.condition_residual_max,
+            solve_residual_max: self.stats.solve_residual_max,
+            exact_solves: self.stats.exact_solves,
             hops_saved: self.stats.hops_saved,
             improvements: (self.stats.improvements, self.stats.gain),
             archived: self.store.len(),
@@ -1869,12 +2136,25 @@ pub struct SuperbasinReport {
     pub jumps: usize,
     /// Escapes refused.
     pub refusals: usize,
+    /// Refusals by kind, indexed by [`Refusal::kind`].
+    pub refusals_by_kind: [usize; 7],
+    /// Largest revisits-per-state ratio a well-mixed refusal reported.
+    ///
+    /// The scientific content of a negative result: if the observed graph never
+    /// reaches the trapping threshold, the chain is not cycling inside a
+    /// superbasin at the resolution basin identity provides, and no exit
+    /// algebra applies however good the algebra is.
+    pub mixed_ratio_max: f64,
     /// Largest condition number seen on a jump.
     pub condition_max: f64,
     /// Mean condition number over the jumps.
     pub condition_mean: f64,
     /// Largest Gauss-Seidel residual behind a reported condition number.
     pub condition_residual_max: f64,
+    /// Largest residual of a solve that produced an exit distribution.
+    pub solve_residual_max: f64,
+    /// Jumps whose exit came from the exact elimination.
+    pub exact_solves: usize,
     /// Expected hops the jumps replaced, summed.
     pub hops_saved: f64,
     /// Jumps that landed lower than they left, and the depth they gained.
@@ -2007,6 +2287,43 @@ mod tests {
             );
             assert!((a.exit.iter().sum::<f64>() - 1.0).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn sparse_solve_matches_the_closed_form_and_the_elimination() {
+        // The two solvers share no code. On the symmetric walk both must give
+        // i(m - i) expected steps and the same exit distribution, and the
+        // sparse one has to report a residual that bounds its own error.
+        let m = 9;
+        let (chain, set) = birth_death(m, 0.55);
+        let canonical =
+            Canonical::new(&chain, &positions(&chain, &set)).expect("boundary exists");
+        for k in 0..canonical.n_transient() {
+            let exact = canonical.absorb(k);
+            let sparse = canonical.absorb_sparse(k, 500_000, 1e-14);
+            assert!(exact.exact && !sparse.exact);
+            assert!(sparse.residual <= 1e-13, "residual {:.2e}", sparse.residual);
+            assert!(
+                (sparse.jumps - exact.jumps).abs() < 1e-8 * exact.jumps,
+                "state {k}: sparse {} exact {}",
+                sparse.jumps,
+                exact.jumps
+            );
+            for (a, b) in sparse.exit.iter().zip(exact.exit.iter()) {
+                assert!((a - b).abs() < 1e-9, "exit {a} against {b}");
+            }
+        }
+        // Truncated, it underestimates rather than overshooting, which is what
+        // makes a capped sweep count safe to act on.
+        let short = canonical.absorb_sparse(0, 3, 0.0);
+        let exact = canonical.absorb(0);
+        assert!(
+            short.jumps < exact.jumps && short.residual > 1e-6,
+            "truncated {} against exact {} residual {:.2e}",
+            short.jumps,
+            exact.jumps,
+            short.residual
+        );
     }
 
     #[test]
