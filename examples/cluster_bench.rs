@@ -126,6 +126,7 @@ fn main() {
     cfg.track_funnels = opts.contains(&"funnel");
     cfg.reseed_moves = opts.contains(&"reseed");
     cfg.twin_moves = opts.contains(&"twin");
+    cfg.delayed_acceptance = opts.contains(&"da");
     cfg.learn_construction = opts.contains(&"learn");
     if cfg.learn_construction {
         cfg.reseed_moves = true;
@@ -294,6 +295,13 @@ fn main() {
         deepest = deepest.min(out.best);
         total_charged += ledger.spent();
         total_hops += out.hops;
+        if let Some((s1, s1r, s2, s2r)) = out.delayed {
+            println!(
+                "    delayed: stage1 {s1} rejected {s1r} ({:.3}), stage2 {s2} rejected {s2r} ({:.3})",
+                s1r as f64 / s1.max(1) as f64,
+                s2r as f64 / s2.max(1) as f64
+            );
+        }
         for (name, draws, accepts, best) in &out.arms {
             if *draws > 0 {
                 println!(
