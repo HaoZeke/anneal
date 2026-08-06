@@ -23,6 +23,26 @@
 //! the kernel no way to express that; the same choice appears in the GPR-NEB
 //! and GP dimer literature for the same reason.
 //!
+//! # What it is not invariant to
+//!
+//! Permutation, and this is worth stating plainly because the library contains
+//! machinery that looks like it handles the problem and does not.
+//! `auxiliary/Distance` carries `get_canonical_configuration`, a Hungarian
+//! assignment in `solve_assignment_problem`, and an aligned RMSD. None of them
+//! is on the kernel path: `SexpatCF` calls only `dist_at_cached_sq` and
+//! `dist_at_vec`, which are the inverse-distance metric above. The canonical
+//! ordering and the assignment live in `dist_rmsd` and `dist_emd`, which are
+//! trust-radius metrics selected by `gpr_distance_metric_t` and consumed by the
+//! dimer and NEB drivers, a separate axis from the covariance.
+//!
+//! So the kernel compares pair `(i, j)` of one structure with pair `(i, j)` of
+//! another, and relabelling the points changes the distance. Inside a
+//! basin-hopping trajectory that is usually harmless, because a structure and
+//! its own relaxed image carry the same labels. Between two independently
+//! generated structures it is not harmless at all, and it is the reason a
+//! descriptor kernel with permutation invariance built in is worth measuring
+//! against this one rather than assuming either is better.
+//!
 //! Every observation carries its gradient. `gpr_model_train` takes energies and
 //! gradients together and the posterior weight vector is
 //! `n_obs * (1 + n_coords)` long, so the joint system is the standard one:
