@@ -2964,6 +2964,80 @@ mod tests {
         assert!(out.basins >= 1, "at least the starting basin must register");
     }
 
+    /// A single chain has no ladder, so there is nothing to report about
+    /// transport and the field says so rather than reporting a zero that reads
+    /// like a ladder that failed.
+    #[test]
+    fn a_single_chain_reports_no_transport() {
+        let cfg = Config::for_cluster(6);
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 3);
+        assert!(out.transport.is_none());
+    }
+
+    /// The instrument that says whether the ladder does its job. A swap count
+    /// cannot: a ladder that shuffles one pair for the whole run and a ladder
+    /// that carries configurations from the hottest rung to the coldest report
+    /// the same swaps and the same solve count.
+    #[test]
+    fn the_ladder_reports_what_it_transported() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 4;
+        cfg.ladder_mode = LadderMode::NonReversible;
+        cfg.swap_period = 2;
+        cfg.ladder_pilot = 20;
+        let mut ledger = Ledger::new(60_000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 5);
+        let (trips, sweeps, barrier) = out.transport.expect("a ladder reports transport");
+        assert!(sweeps > 20, "only {sweeps} sweeps; the ladder never ran");
+        assert!(trips > 0, "no round trip in {sweeps} sweeps");
+        assert!(
+            (0.0..=3.0).contains(&barrier),
+            "barrier {barrier} outside [0, rungs - 1]"
+        );
+        assert_eq!(out.rungs.len(), 4);
+    }
+
+    /// The adapted ladder is placed by the run and not by the schedule, so its
+    /// rungs have to differ from the geometric ones it started at.
+    #[test]
+    fn the_adapted_ladder_leaves_the_geometric_schedule() {
+        let mut base = Config::for_cluster(6);
+        base.replicas = 4;
+        base.swap_period = 2;
+        base.ladder_pilot = 20;
+        let run = |mode: LadderMode| {
+            let mut c = base.clone();
+            c.ladder_mode = mode;
+            let mut ledger = Ledger::new(60_000);
+            let mut relax = toy_relax;
+            let out = optimize(&c, &mut ledger, &mut relax, 5);
+            out.rungs.iter().map(|(t, _, _)| *t).collect::<Vec<f64>>()
+        };
+        let geometric = run(LadderMode::Reversible);
+        let adapted = run(LadderMode::NonReversible);
+        assert!(
+            (geometric[0] - base.temperature).abs() < 1e-12
+                && (adapted[0] - base.temperature).abs() < 1e-12,
+            "the cold rung is the configured temperature under both"
+        );
+        let moved = geometric
+            .iter()
+            .zip(&adapted)
+            .any(|(g, a)| (g - a).abs() > 1e-6 * g.abs().max(1.0));
+        assert!(
+            moved,
+            "adapted ladder {adapted:?} is the geometric one {geometric:?}; \
+             nothing was derived from the run"
+        );
+        assert!(
+            adapted.windows(2).all(|w| w[1] > w[0]),
+            "adapted ladder {adapted:?} is not ordered by temperature"
+        );
+    }
+
     #[test]
     fn seeds_are_reproducible() {
         let cfg = Config::for_cluster(6);

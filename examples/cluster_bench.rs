@@ -14,7 +14,7 @@
 //! `cargo run --release --example cluster_bench -- <potential> <n> <budget> <seeds> [mechanisms]`
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
-use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger};
+use anneal_core::methods::cluster_hopping::{Config, Keying, LadderMode, Ledger};
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_search::{
     first_encounter, median_encounter, search, verify, Encounter,
@@ -161,6 +161,52 @@ fn main() {
             cfg.merge_radius = r;
         }
     }
+    // The replica ladder, one budget shared across the rungs rather than one
+    // budget each. The four names are the four arms: the ladder as it ran,
+    // the same ladder with each rung at its own temperature, whole parity
+    // classes with a coin-flipped parity, and the non-reversible sweep on a
+    // ladder placed by the barrier the run measures.
+    let ladder_mode = if opts.contains(&"nrpt") {
+        Some(LadderMode::NonReversible)
+    } else if opts.contains(&"rpt") {
+        Some(LadderMode::Reversible)
+    } else if opts.contains(&"ptt") {
+        Some(LadderMode::Cyclic)
+    } else if opts.contains(&"pt") {
+        Some(LadderMode::Shipped)
+    } else {
+        None
+    };
+    if let Some(mode) = ladder_mode {
+        cfg.replicas = std::env::var("REPLICAS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        cfg.ladder_mode = mode;
+        // The swap period is the ladder's unit of time and the budget decides
+        // how many units there are. At LJ38 with 4e5 charged evaluations a run
+        // takes about 12700 hops, so a period of 50 over four rungs buys 60
+        // sweeps, and a ladder transports nothing in 60 sweeps.
+        if let Ok(v) = std::env::var("SWAP_PERIOD") {
+            if let Ok(p) = v.parse::<usize>() {
+                cfg.swap_period = p.max(1);
+            }
+        }
+        if let Ok(v) = std::env::var("LADDER_ACCEPT") {
+            if let Ok(a) = v.parse::<f64>() {
+                cfg.ladder_target_accept = a.clamp(0.01, 0.95);
+            }
+        }
+        cfg.bias_by_rung = opts.contains(&"rungbias");
+        println!(
+            "  replica exchange: {} chains, {mode:?}, swap every {} hops, \
+             rung temperatures {}, ladder target accept {:.2}",
+            cfg.replicas,
+            cfg.swap_period,
+            mode.tempers(),
+            cfg.ladder_target_accept
+        );
+    }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
     }
@@ -295,6 +341,23 @@ fn main() {
         deepest = deepest.min(out.best);
         total_charged += ledger.spent();
         total_hops += out.hops;
+        // Transport, on every seed. A ladder can improve mixing and still not
+        // find the minimum, and a solve count reports neither half.
+        if let Some((trips, sw, barrier)) = out.transport {
+            let per_tag = if trips > 0 {
+                out.rungs.len().max(cfg.replicas) as f64 * sw as f64 / trips as f64
+            } else {
+                f64::INFINITY
+            };
+            println!(
+                "    ladder: round trips {trips} in {sw} sweeps \
+                 (rate {:.4}/sweep, {per_tag:.0} sweeps per tag), barrier {barrier:.2}",
+                trips as f64 / sw.max(1) as f64
+            );
+            for (t, b, en) in &out.rungs {
+                println!("      rung T={t:.3}  basins {b:>5}  energy {en:>11.4}");
+            }
+        }
         if let Some((s1, s1r, s2, s2r)) = out.delayed {
             println!(
                 "    delayed: stage1 {s1} rejected {s1r} ({:.3}), stage2 {s2} rejected {s2r} ({:.3})",
