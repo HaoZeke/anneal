@@ -390,9 +390,14 @@ pub fn exceedances(energies: &[f64], energy_threshold: f64) -> Vec<f64> {
 /// A Metropolis chain on quenched energies revisits a basin several times
 /// before it leaves, so consecutive exceedances are not independent draws and
 /// the raw count `k` overstates the information the tail carries. Keeping one
-/// value per excursion is the standard remedy; see Smith and Weissman,
-/// *Estimating the extremal index*, J. R. Statist. Soc. B 56 (1994) 515-528,
-/// <https://www.jstor.org/stable/2346107>.
+/// value per excursion leaves a count nearer the number of independent
+/// excursions, at the cost of the sample size the fit has to work with.
+///
+/// The heavier source of dependence at 38 points is not serial but repeated:
+/// the chain re-quenches to the *same* minimum from different directions, so
+/// the tie sits at the sample maximum rather than in a run of consecutive
+/// values. Deduplicating by energy handles that and this does not; both are
+/// available and the measured campaign used the former.
 pub fn decluster(energies: &[f64], energy_threshold: f64, gap: usize) -> Vec<f64> {
     let mut out = Vec::new();
     let mut best: Option<f64> = None;
