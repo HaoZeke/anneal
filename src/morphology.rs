@@ -20,18 +20,33 @@
 //!
 //! ```text
 //! arm       solved  rate   95% Wilson       median first encounter
-//! control    14/24  0.583  [0.388, 0.755]   301366  (10 censored)
-//! q4         20/24  0.833  [0.641, 0.933]   151385  (4 censored)
+//! control    32/48  0.667  [0.525, 0.783]   301366
+//! q4         44/48  0.917  [0.804, 0.967]   151385
 //! q4q6       24/24  1.000  [0.862, 1.000]   116756  (0 censored)
 //! coord      15/24  0.625  [0.427, 0.788]   349886  (9 censored)
+//! soap       13/24  0.542  [0.351, 0.721]   371655
 //! ```
 //!
 //! Against the control, with a Newcombe interval on the difference and Fisher
-//! exact: (Q4, Q6) is +0.417 [+0.196, +0.612] at p = 0.0006, separated. Q4
-//! alone is +0.250 [-0.008, +0.469] at p = 0.111, which is underpowered rather
-//! than absent: the interval misses zero by 0.008 and would need roughly 40
-//! seeds an arm. The coordination estimate is +0.042 at p = 1.000 and is not
-//! distinguishable from doing nothing.
+//! exact:
+//!
+//! - (Q4, Q6) +0.417 [+0.196, +0.612], p = 0.0006. Separated, and it reaches
+//!   the minimum in 39 percent of the charged evaluations the control needs
+//!   with nothing censored, which is the statistic that does not saturate at
+//!   the budget.
+//! - Q4 alone +0.250 [+0.088, +0.400], p = 0.0048 at 48 seeds a side.
+//!   Separated. At 24 seeds the same point estimate carried [-0.008, +0.469]
+//!   at p = 0.111 and could not be claimed: the effect did not change, the
+//!   power did.
+//! - The coordination estimate +0.042, p = 1.000, and the SOAP projection
+//!   -0.042, p = 1.000. Neither is distinguishable from doing nothing, and the
+//!   manuscript's 5 of 7 for a learned SOAP projection is not reproduced.
+//!
+//! So two of the four coordinates work and two do not, and what separates them
+//! is not whether they are morphological. Q4 and Q6 are fixed functions of the
+//! structure with a known scale; the SOAP projection has to learn its own axis
+//! from the run, and the coordination estimate is a distribution whose bins
+//! were chosen for a different cluster.
 //!
 //! THE BASELINE IS THE PART THAT IS EASY TO GET WRONG. The withdrawn table
 //! these arms were built to check reports 1 of 8 for its controls, a rate of
