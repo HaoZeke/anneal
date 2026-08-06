@@ -26,7 +26,7 @@ struct Trace {
     budget: usize,
     solved: bool,
     first_encounter: Option<usize>,
-    rows: Vec<(usize, usize, f64)>,
+    rows: Vec<(usize, usize, f64, bool)>,
 }
 
 fn read(path: &str) -> Option<Trace> {
@@ -47,10 +47,15 @@ fn read(path: &str) -> Option<Trace> {
             continue;
         }
         let f: Vec<&str> = line.split_whitespace().collect();
-        if f.len() != 3 {
+        if f.len() != 4 {
             continue;
         }
-        rows.push((f[0].parse().ok()?, f[1].parse().ok()?, f[2].parse().ok()?));
+        rows.push((
+            f[0].parse().ok()?,
+            f[1].parse().ok()?,
+            f[2].parse().ok()?,
+            f[3] == "1",
+        ));
     }
     Some(Trace {
         name: std::path::Path::new(path)
@@ -69,12 +74,15 @@ fn read(path: &str) -> Option<Trace> {
 /// Repeat visits are the same minimum read twice and are not a second draw
 /// from the density of states; the basin counter already in the trace
 /// separates them at no cost.
-fn prefix(t: &Trace, charged: usize, first_visit: bool) -> Vec<f64> {
+fn prefix(t: &Trace, charged: usize, first_visit: bool, converged_only: bool) -> Vec<f64> {
     let mut out = Vec::new();
     let mut seen = usize::MAX;
-    for &(c, b, e) in &t.rows {
+    for &(c, b, e, k) in &t.rows {
         if c > charged {
             break;
+        }
+        if converged_only && !k {
+            continue;
         }
         if first_visit {
             if b == seen {
@@ -242,11 +250,20 @@ fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let first_visit = std::env::var("ALL_HOPS").is_err();
+    // Off by default. The basin counter is keyed by the driver's merge radius,
+    // which at 38 points collapses about thirty hops into one registered
+    // basin, so first-visit filtering there discards most of the sample rather
+    // than deduplicating it. Serial dependence is handled by declustering,
+    // which cuts the sample by a stated factor instead.
+    let first_visit = std::env::var("FIRST_VISIT").is_ok();
+    // A relaxation that stopped at its iteration cap sits a little above the
+    // minimum it was heading for. Keeping only the gradient-verified ones
+    // removes that, at the cost of most of the sample.
+    let converged_only = std::env::var("CONVERGED_ONLY").is_ok();
     let k_min: usize = std::env::var("KMIN")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(60);
+        .unwrap_or(40);
     let quantiles: Vec<f64> = vec![0.50, 0.35, 0.25, 0.15, 0.10, 0.06, 0.04, 0.025];
     let prior = Prior::default();
     let grid = GridSpec::default();
@@ -255,7 +272,7 @@ fn main() {
     println!(
         "reference {reference:.6}, decision P(endpoint above reference) > {alpha}, \
          thresholds {quantiles:?}, k_min {k_min}, first-visit {first_visit}, \
-         decluster gap {gap}"
+         converged-only {converged_only}, decluster gap {gap}"
     );
 
     let traces: Vec<Trace> = paths.iter().filter_map(|p| read(p)).collect();
@@ -264,7 +281,8 @@ fn main() {
     // Per prefix: (failed excluding, failed usable, succeeded including,
     // succeeded usable).
     let mut tally = vec![(0usize, 0usize, 0usize, 0usize); fractions.len()];
-    let mut shape_report: Vec<(String, f64, f64)> = Vec::new();
+    #[allow(clippy::type_complexity)]
+    let mut shape_report: Vec<(String, bool, f64, f64, f64, f64, f64, f64, usize)> = Vec::new();
 
     for t in &traces {
         for (fi, &f) in fractions.iter().enumerate() {
@@ -274,8 +292,8 @@ fn main() {
             if t.solved && t.first_encounter.map(|c| cut >= c).unwrap_or(false) {
                 continue;
             }
-            let e = prefix(t, cut, first_visit);
-            if e.len() < k_min * 2 {
+            let e = prefix(t, cut, first_visit, converged_only);
+            if e.len() < k_min * 3 {
                 continue;
             }
             let rungs = ladder(&e, &quantiles, k_min, gap, &prior, &grid);
@@ -289,7 +307,17 @@ fn main() {
                 report_ladder(&t.name, &rungs, pick, reference);
             }
             if (f - 0.5).abs() < 1e-12 {
-                shape_report.push((t.name.clone(), p.xi_mean(), p.p_unbounded));
+                shape_report.push((
+                    t.name.clone(),
+                    t.solved,
+                    e.iter().copied().fold(f64::INFINITY, f64::min),
+                    p.xi_mean(),
+                    p.p_unbounded,
+                    p.endpoint_quantile(0.5),
+                    p.endpoint_quantile(0.975),
+                    pe,
+                    p.n_exceedances,
+                ));
             }
             if t.solved {
                 tally[fi].3 += 1;
@@ -305,10 +333,16 @@ fn main() {
         }
     }
 
-    println!("\nshape posterior at half budget, per run");
-    println!("  {:>28} {:>9} {:>9}", "run", "E[xi]", "P(xi>=0)");
-    for (n, x, u) in &shape_report {
-        println!("  {n:>28} {x:>9.4} {u:>9.4}");
+    println!("\nendpoint posterior at half budget, per run");
+    println!(
+        "  {:>20} {:>6} {:>7} {:>11} {:>9} {:>9} {:>11} {:>11} {:>9}",
+        "run", "solved", "k", "best so far", "E[xi]", "P(xi>=0)", "endpoint", "97.5%", "P(excl)"
+    );
+    for (n, s, b, x, u, m, h, pe, k) in &shape_report {
+        println!(
+            "  {n:>20} {:>6} {k:>7} {b:>11.4} {x:>9.4} {u:>9.4} {m:>11.4} {h:>11.4} {pe:>9.4}",
+            if *s { "yes" } else { "no" }
+        );
     }
 
     println!("\nclassifier by budget prefix");
