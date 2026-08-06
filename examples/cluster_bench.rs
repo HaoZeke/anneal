@@ -156,6 +156,16 @@ fn main() {
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
     }
+    if opts.contains(&"triplet") {
+        cfg.keying = Keying::Triplet;
+        // The descriptor is the distance spectrum with two kernel spectra
+        // appended, so its distances are larger than the default keying's by
+        // the length of the appended block. Measured on the response to a
+        // quench-scale displacement that is about a third, which is where 0.95
+        // comes from; `MERGE_RADIUS` overrides it and the sweep does.
+        cfg.merge_radius = 0.95;
+        cfg.keying_sigma *= scale;
+    }
     if let Ok(v) = std::env::var("MERGE_RADIUS") {
         if let Ok(r) = v.parse::<f64>() {
             cfg.merge_radius = r;
