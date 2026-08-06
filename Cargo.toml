@@ -76,3 +76,7 @@ harness = false
 [[example]]
 name = "rgpot_minimize"
 required-features = ["capi"]
+
+[[example]]
+name = "curvature_transport"
+required-features = ["ira"]
