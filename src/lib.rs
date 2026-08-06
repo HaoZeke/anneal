@@ -41,6 +41,9 @@ pub mod laws;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+/// Morphology collective variables: Steinhardt bond order, a SOAP projection
+/// and a coordination kernel density estimate, on featomic's descriptors.
+pub mod morphology;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
