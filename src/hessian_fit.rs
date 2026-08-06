@@ -42,18 +42,19 @@
 //! The median rather than the mean, because the harmonic form is exact only
 //! near the minimum. A perturbation large enough to change basin recovers
 //! anharmonic energy no quadratic form predicts, and on real Lennard-Jones
-//! descents a few per cent of samples sit an order of magnitude off any
-//! setting of two parameters. A least-squares objective spends both parameters
-//! chasing those; the median leaves them where they are and fits the bulk,
-//! which is also the quantity reported.
+//! descents the upper quartile of relative error runs three to four times the
+//! lower one at every perturbation size measured. A least-squares objective
+//! spends both parameters chasing that tail; the median leaves it where it is
+//! and fits the bulk, which is also the quantity reported.
 //!
 //! # Degrading safely
 //!
 //! Below `min_samples` observations the accumulator hands back
 //! [`ModelParams::default`] unchanged, so a cold run is exactly the uncalibrated
-//! behaviour and no caller needs a branch. The fit is also rejected outright if
-//! it fails to beat the defaults on the samples it was given, which makes the
-//! calibration incapable of being worse than not calibrating on its own data.
+//! behaviour and no caller needs a branch. A fit that does not beat the defaults
+//! by [`ADOPT_MARGIN`] on the samples it was given is discarded rather than
+//! adopted, which matters because the objective on real descents is nearly
+//! flat and a search will always return something nominally better.
 
 use std::collections::VecDeque;
 
@@ -66,43 +67,48 @@ use crate::model_hessian::{ModelParams, depth_with};
 ///
 /// Two parameters need enough geometries to separate them, and a fit on a
 /// handful of descents out of one basin sees one geometry. On descents
-/// generated from a known `alpha = 3.0`, twelve samples are rejected outright
-/// because no candidate beats the defaults, and sixteen recover `alpha = 3.17`;
-/// going on to ninety-six moves that to `3.21`, a further two per cent. Sixteen
-/// is where the answer arrives, not where it stops improving, because there is
-/// very little improvement left to have.
+/// generated from a known `alpha = 3.0, floor = 0.01`, eight and twelve samples
+/// are rejected because nothing in the box beats the defaults by
+/// [`ADOPT_MARGIN`], and sixteen recover `alpha = 3.005, floor = 0.00999`.
+/// Going on to ninety-six changes the third decimal place.
 pub const MIN_SAMPLES: usize = 16;
 
 /// Observations between refits.
 ///
 /// A refit is a two-dimensional search over the whole buffer, so it is not free
-/// in arithmetic even though it is free on the ledger: 136 candidate shapes,
-/// each solving every retained sample. Refitting every sample would multiply
-/// that by the interval, for constants measured to move by two per cent between
-/// a sixteen-sample and a ninety-six-sample fit.
+/// in arithmetic even though it is free on the ledger: five grids of 64 shapes,
+/// each solving every retained sample. On a full buffer that is 196 ms for a
+/// 38-point cluster and 808 ms for a 75-point one. Refitting every sample would
+/// multiply that by the interval, for constants that stop moving in the third
+/// decimal place after twenty samples.
 pub const REFIT_EVERY: usize = 16;
 
 /// Observations retained.
 ///
 /// The buffer is a ring, because a long run drifts through different regions of
 /// the landscape and the constants that matter describe where the search is
-/// now. Forty-eight rather than more: the recovered `alpha` on synthetic
-/// descents sits at 3.165, 3.176, 3.159, 3.226 and 3.214 for buffers of 16, 32,
-/// 48, 64 and 96, so the fit stops learning well before the buffer stops
-/// growing, and every extra sample is paid for in every candidate evaluation.
+/// now. Forty-eight rather than more: on synthetic descents the recovered
+/// `alpha` is 3.005 at sixteen samples and 2.991 at every count from twenty to
+/// ninety-six, so the fit stops learning long before the buffer stops growing,
+/// while the cost is linear in it. A 38-point cluster refits in 196 ms on 48
+/// samples and 408 ms on 96.
 pub const CAPACITY: usize = 48;
 
 /// Conjugate-gradient iterations inside a fit evaluation.
 ///
 /// The truncation is part of the operator being fitted, not an approximation to
 /// it: a shape fitted against one truncation and consumed at another has
-/// absorbed the difference. Measured on descents generated at forty iterations,
-/// fitting at twelve recovers `alpha = 3.30` against the matched fit's `3.25`
-/// and the floor to within sixteen per cent, while fitting at eight recovers
-/// `alpha = 2.14` and a floor 4.3 times too stiff. Twelve is the cheapest
-/// truncation that is still measuring the same operator; a consumer solving
-/// much shallower than this should fit there too.
-pub const FIT_ITERS: usize = 12;
+/// absorbed the difference, and the difference is not small. Measured against
+/// descents generated at forty iterations, a fit at twenty-four recovers the
+/// forty-iteration answer in every digit; at sixteen it returns `alpha = 3.20`
+/// where the matched fit returns `2.99`; at twelve, `3.29`; at eight, `2.76`
+/// with a floor twice too stiff; at six, `1.35` with a floor eight times too
+/// stiff and a scale seven times too soft.
+///
+/// Twenty-four is where the shape stops moving, and it doubles the refit
+/// against twelve. A consumer that solves shallower than this should fit there
+/// too, and pay less for it.
+pub const FIT_ITERS: usize = 24;
 
 /// One observed descent: where it started, the gradient there, what it recovered.
 #[derive(Clone, Debug)]
@@ -150,22 +156,63 @@ pub struct Calibration {
 
 /// Corner of the search box, in the same units as [`ModelParams`].
 const ALPHA_LO: f64 = 0.2;
-/// Upper end of the decay search. A pair force constant falling faster than
-/// this is a contact model, where only touching pairs contribute at all.
-const ALPHA_HI: f64 = 12.0;
+/// Upper end of the decay search.
+///
+/// Lennard-Jones needs the room. Scanning a sample of small perturbations of an
+/// LJ38 minimum, the spread falls monotonically from 0.158 at `alpha = 0.2`
+/// through 0.112 at 6.6 to a minimum of 0.068 at 17.9, then turns and reaches
+/// 0.15 by 29.5 and 0.25 by 48.6. A ceiling of 12, which is generous for a
+/// covalent bond, would have clipped the answer: the pair force constant of a
+/// rare-gas well falls off far faster than a bond's, and a decay of 18 in units
+/// of the spacing is what that looks like when it is written as an exponential.
+const ALPHA_HI: f64 = 30.0;
 /// Lower end of the floor search. Below this the operator is numerically
 /// singular against the transverse motions its stretch terms ignore.
 const FLOOR_LO: f64 = 1e-4;
-/// Upper end of the floor search. Above this the diagonal dominates the pair
-/// terms and the operator predicts `|g|^2 / 2 floor`, the isotropic proxy the
-/// model Hessian exists to replace.
+/// Upper end of the floor search.
+///
+/// The ceiling is a regularisation, not a range. Past a floor of about three
+/// the diagonal dominates the pair terms and the operator becomes
+/// `|g|^2 / 2 floor k0`, the isotropic proxy the model Hessian exists to
+/// replace, in which `alpha` no longer enters at all. Scanning a Lennard-Jones
+/// sample out to a floor of 300 shows the objective flattening onto that limit
+/// at a spread of 0.080 against the best 0.074 anywhere in the box: a search
+/// allowed to go there would trade a real anisotropy for a plateau it could
+/// wander along, and would report an unidentifiable `alpha` while doing it.
 const FLOOR_HI: f64 = 3.0;
-/// Points per axis on the opening grid.
+/// Relative worsening within which two shapes count as equally good.
+///
+/// The floor is unidentifiable over a wide range whenever the gradients in the
+/// sample barely excite the transverse motions the floor exists to resist: on
+/// small perturbations of an LJ38 minimum the spread is 0.1525 at every floor
+/// from 1e-9 to 2e-3, six decades wide. Somewhere on that plateau has to be
+/// picked, and the low end is the numerically singular one, so the search walks
+/// the floor up while it costs no more than this.
+///
+/// A tenth of a per cent, because the plateau it exists to resolve is flat to
+/// four decimal places across those six decades, while a floor that genuinely
+/// carries information moves the spread by whole per cent.
+const FLAT_TOL: f64 = 1e-3;
+/// Fractional reduction in spread a fit must show before it is adopted.
+///
+/// The objective on real Lennard-Jones descents is close to flat: over the
+/// whole box the spread runs between 0.074 and 0.089, so a search will always
+/// come back with something nominally better than the defaults, and successive
+/// refits on overlapping buffers settle on constants a factor of two apart
+/// while predicting the same depths to within a per cent. Requiring a five per
+/// cent reduction keeps the constants still when the data has nothing to say,
+/// and still admits the eight per cent the Lennard-Jones fit does earn.
+const ADOPT_MARGIN: f64 = 0.05;
+/// Points per axis on each grid.
 const GRID: usize = 8;
-/// Golden-section evaluations per coordinate refinement.
-const SECTION_EVALS: usize = 12;
-/// Coordinate sweeps after the grid.
-const SWEEPS: usize = 3;
+/// Grids laid down, each inside the last one's best cell.
+///
+/// Every level narrows the box to two cells about the incumbent, a factor
+/// `2 / (GRID - 1)` in each logarithm, so five levels take the decay's five
+/// log units of range down to one per cent. That resolution is far finer than
+/// the constants are identified to, and the levels are cheap next to the
+/// samples they solve.
+const LEVELS: usize = 5;
 
 /// Median of a slice, by sorting a copy. Non-finite entries are not expected.
 fn median(values: &[f64]) -> f64 {
@@ -226,52 +273,26 @@ pub fn spread_of(samples: &[Descent], alpha: f64, floor: f64, iters: usize) -> O
     })
 }
 
-/// Golden-section minimisation of `f` on `[lo, hi]`, returning the best argument.
-///
-/// Golden section rather than a derivative method because the objective is a
-/// median over samples: continuous, but with kinks wherever the sample holding
-/// the median changes. A bracketing search does not care; a gradient one does.
-fn golden(lo: f64, hi: f64, evals: usize, mut f: impl FnMut(f64) -> f64) -> f64 {
-    // 2 - phi, the fraction of the bracket the interior points sit in from each
-    // end, so that one of the two survives each contraction and is reused.
-    const R: f64 = 0.381_966_011_250_105_2;
-    let (mut a, mut b) = (lo, hi);
-    let mut c = a + R * (b - a);
-    let mut d = b - R * (b - a);
-    let (mut fc, mut fd) = (f(c), f(d));
-    for _ in 0..evals.saturating_sub(2) {
-        if fc <= fd {
-            b = d;
-            d = c;
-            fd = fc;
-            c = a + R * (b - a);
-            fc = f(c);
-        } else {
-            a = c;
-            c = d;
-            fc = fd;
-            d = b - R * (b - a);
-            fd = f(d);
-        }
-    }
-    if fc <= fd { c } else { d }
-}
-
 /// Fits `alpha` and `floor` to a sample of descents, recovering `k0` in closed form.
 ///
-/// A grid over both axes in logarithms, since the constants are scales and a
-/// linear grid would spend most of its points on the stiff end, followed by
-/// alternating golden-section refinements of each coordinate. Coordinate
-/// descent is enough because the two constants act on different parts of the
-/// operator, the pair terms and the diagonal, and the objective's valley is
-/// close to axis aligned; a coupled search bought nothing measurable on
-/// synthetic data and costs a factor of the sweep count.
+/// Nested grids in the logarithms of both constants, since the constants are
+/// scales and a linear grid would spend most of its points on the stiff end.
+/// Each level lays a `GRID x GRID` mesh over the box, then narrows the box to
+/// the cells either side of the best point and repeats.
+///
+/// Nested grids rather than coordinate descent, because the valley is not axis
+/// aligned. Alternating golden sections on `alpha` and `floor` were measured to
+/// stall on synthetic descents generated from `alpha = 2.4, floor = 0.03`,
+/// returning `alpha = 3.96, floor = 0.0083` at a spread of 0.028 where the
+/// generating shape sits at 8e-16: a stiffer decay needs a softer floor to
+/// predict the same depth, so every axial move away from the stall looks worse
+/// while the diagonal move does not exist. A grid has no such blind direction.
 ///
 /// Returns `None` when the sample is too small to constrain two parameters, or
-/// when no candidate anywhere in the box beats [`ModelParams::default`] on the
-/// sample's own spread. The second condition is what makes the calibration
-/// unable to do harm: a fit that cannot improve on the constants it replaces is
-/// discarded rather than adopted.
+/// when nothing in the box beats [`ModelParams::default`] by [`ADOPT_MARGIN`]
+/// on the sample's own spread. The second condition is what bounds the harm: a
+/// fit that cannot clearly improve on the constants it replaces is discarded
+/// rather than adopted, and on a flat objective that is the common case.
 pub fn calibrate(samples: &[Descent], iters: usize) -> Option<Calibration> {
     if samples.len() < MIN_SAMPLES {
         return None;
@@ -282,52 +303,61 @@ pub fn calibrate(samples: &[Descent], iters: usize) -> Option<Calibration> {
 
     let (la, lb) = (ALPHA_LO.ln(), ALPHA_HI.ln());
     let (lf, lg) = (FLOOR_LO.ln(), FLOOR_HI.ln());
-
+    let (mut a0, mut a1) = (la, lb);
+    let (mut f0, mut f1) = (lf, lg);
     let mut best = (f64::INFINITY, ALPHA_LO, FLOOR_LO);
-    for i in 0..GRID {
-        let alpha = (la + (lb - la) * i as f64 / (GRID - 1) as f64).exp();
-        for j in 0..GRID {
-            let floor = (lf + (lg - lf) * j as f64 / (GRID - 1) as f64).exp();
-            let v = objective(alpha, floor);
-            if v < best.0 {
-                best = (v, alpha, floor);
+
+    for _ in 0..LEVELS {
+        let step = (GRID - 1) as f64;
+        let level: Vec<(f64, f64, f64)> = (0..GRID * GRID)
+            .into_par_iter()
+            .map(|k| {
+                let alpha = (a0 + (a1 - a0) * (k / GRID) as f64 / step).exp();
+                let floor = (f0 + (f1 - f0) * (k % GRID) as f64 / step).exp();
+                (objective(alpha, floor), alpha, floor)
+            })
+            .collect();
+        for cand in level {
+            if cand.0 < best.0 {
+                best = cand;
             }
         }
-    }
-    if !best.0.is_finite() {
-        return None;
+        if !best.0.is_finite() {
+            return None;
+        }
+        // Two cells wide about the incumbent, clipped to the box the constants
+        // are physical in, so a minimum sitting on a face stays reachable.
+        let half_a = (a1 - a0) / step;
+        let half_f = (f1 - f0) / step;
+        a0 = (best.1.ln() - half_a).max(la);
+        a1 = (best.1.ln() + half_a).min(lb);
+        f0 = (best.2.ln() - half_f).max(lf);
+        f1 = (best.2.ln() + half_f).min(lg);
     }
 
-    // One grid cell either side of the incumbent, in logarithms, so the
-    // refinement searches the interval the grid actually resolved rather than
-    // the whole box a second time.
-    let alpha_cell = (lb - la) / (GRID - 1) as f64;
-    let floor_cell = (lg - lf) / (GRID - 1) as f64;
-    for _ in 0..SWEEPS {
-        let floor = best.2;
-        let a0 = (best.1.ln() - alpha_cell).max(la);
-        let a1 = (best.1.ln() + alpha_cell).min(lb);
-        let alpha = golden(a0, a1, SECTION_EVALS, |l| objective(l.exp(), floor)).exp();
-        let v = objective(alpha, floor);
-        if v < best.0 {
-            best = (v, alpha, floor);
+    // The floor is flat over decades when the sample's gradients do not excite
+    // the transverse motions. Take the stiffest floor that costs nothing, since
+    // the other end of that plateau is an operator one sample away from
+    // singular, and since a plateau minimum is otherwise decided by rounding.
+    let tolerated = best.0 * (1.0 + FLAT_TOL);
+    loop {
+        let trial = best.2 * 2.0;
+        if trial > FLOOR_HI {
+            break;
         }
-
-        let alpha = best.1;
-        let f0 = (best.2.ln() - floor_cell).max(lf);
-        let f1 = (best.2.ln() + floor_cell).min(lg);
-        let floor = golden(f0, f1, SECTION_EVALS, |l| objective(alpha, l.exp())).exp();
-        let v = objective(alpha, floor);
-        if v < best.0 {
-            best = (v, alpha, floor);
+        let v = objective(best.1, trial);
+        if v > tolerated {
+            break;
         }
+        best.2 = trial;
+        best.0 = best.0.min(v);
     }
 
     let fitted = spread_of(samples, best.1, best.2, iters)?;
     let baseline = ModelParams::default();
     let default_spread = spread_of(samples, baseline.alpha, baseline.floor, iters)
         .map_or(f64::INFINITY, |c| c.spread);
-    if !(fitted.spread < default_spread) {
+    if !(fitted.spread < (1.0 - ADOPT_MARGIN) * default_spread) {
         return None;
     }
     Some(fitted)
@@ -559,21 +589,22 @@ mod tests {
         let samples = synthetic(0xA1CE, 48, truth);
         let fit = calibrate(&samples, 40).expect("a fit on exact data was rejected");
         assert!(
-            (fit.params.alpha / truth.alpha - 1.0).abs() < 0.15,
+            (fit.params.alpha / truth.alpha - 1.0).abs() < 0.02,
             "recovered alpha {} against a true {}",
             fit.params.alpha,
             truth.alpha
         );
         assert!(
-            (fit.params.floor / truth.floor).ln().abs() < 0.5,
-            "recovered floor {} against a true {}, a factor of {:.2}",
+            (fit.params.floor / truth.floor).ln().abs() < 0.05,
+            "recovered floor {} against a true {}, a factor of {:.3}",
             fit.params.floor,
             truth.floor,
             fit.params.floor / truth.floor
         );
-        // Exact data has an exact answer, so the residual has to collapse.
+        // Exact data has an exact answer, so the residual has to collapse to
+        // the grid's own resolution rather than merely to something small.
         assert!(
-            fit.spread < 0.02,
+            fit.spread < 1e-3,
             "the fit left a log spread of {} on data with no noise",
             fit.spread
         );
@@ -591,7 +622,7 @@ mod tests {
         let samples = synthetic(0xBEEF, 40, truth);
         let fit = calibrate(&samples, 40).expect("a fit on exact data was rejected");
         assert!(
-            (fit.params.k0 / truth.k0).ln().abs() < 0.1,
+            (fit.params.k0 / truth.k0).ln().abs() < 0.01,
             "recovered a scale of {} against a true {}",
             fit.params.k0,
             truth.k0
@@ -681,37 +712,28 @@ mod tests {
         );
     }
 
-    /// What the fit pins down is the depth, not the constants.
-    ///
-    /// A stiffer decay, a softer floor and a larger overall scale trade against
-    /// each other: on descents generated from `alpha = 3.0, floor = 0.01,
-    /// k0 = 1`, the search returns `alpha = 3.17, floor = 0.0087, k0 = 1.15`,
-    /// each five to fifteen per cent out, while predicting the depths those
-    /// constants produced to better than a per cent. Anything reading the
-    /// recovered constants as physical is reading a valley floor as a point.
+    /// A stiffer decay and a softer floor predict nearly the same depths, so an
+    /// axial search has no move that improves on a point between them and stops
+    /// there. This is the case that caught alternating golden sections, which
+    /// returned `alpha = 3.96, floor = 0.0083` on data generated from `2.4` and
+    /// `0.03`, and it is the reason the search lays down grids instead.
     #[test]
-    fn the_predicted_depth_is_pinned_far_tighter_than_the_constants() {
+    fn the_search_crosses_the_valley_it_cannot_walk_along_an_axis() {
         let truth = ModelParams {
-            k0: 1.0,
-            alpha: 3.0,
-            floor: 0.01,
+            k0: 6.5,
+            alpha: 2.4,
+            floor: 0.03,
         };
-        let samples = synthetic(0x77AA, 40, truth);
+        let samples = synthetic(0xBEEF, 40, truth);
         let fit = calibrate(&samples, 40).expect("a fit on exact data was rejected");
-        let constant_error = (fit.params.floor / truth.floor).ln().abs();
+        // The point coordinate descent stalled on, as a shape the search must
+        // not settle for: it predicts these same depths a factor of 400 worse.
+        let stall = spread_of(&samples, 3.96, 0.0083, 40)
+            .expect("the stalled shape predicts no depth at all")
+            .spread;
         assert!(
-            constant_error > 0.05,
-            "the floor came back to within {constant_error} in log units, so the \
-             degeneracy this test describes is not there and the claim needs restating"
-        );
-        assert!(
-            fit.spread < 0.01,
-            "the depths were reproduced to a log spread of only {}",
-            fit.spread
-        );
-        assert!(
-            fit.spread < 0.25 * constant_error,
-            "the depth spread {} is not small against the constant error {constant_error}",
+            fit.spread < 0.05 * stall,
+            "the search left a spread of {} against the axial stall's {stall}",
             fit.spread
         );
     }
