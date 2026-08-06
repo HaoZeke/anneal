@@ -228,7 +228,24 @@ where
         Some(objective.grad(x))
     };
 
-    let out = optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed);
+    // Value and gradient in one charge, which is what a Hamiltonian leapfrog
+    // leaf needs. On a pairwise potential both come out of one pass over the
+    // pairs, so charging twice would understate the arm by a factor of two.
+    let mut energy_grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+        if !led.charge() {
+            return None;
+        }
+        Some(objective.value_and_gradient(x))
+    };
+
+    let out = crate::methods::cluster_hopping::optimize_with_energy_gradient(
+        cfg,
+        ledger,
+        &mut relax,
+        Some(&mut grad),
+        Some(&mut energy_grad),
+        seed,
+    );
     (out, stats)
 }
 
