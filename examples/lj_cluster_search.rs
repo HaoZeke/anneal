@@ -9,7 +9,7 @@
 
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_hopping::{
-    optimize_with_gradient, Config, Keying, Ledger, Outcome,
+    optimize_with_gradient, Config, Keying, LadderMode, Ledger, Outcome,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
@@ -136,13 +136,53 @@ fn main() {
         cfg.merge_radius = 0.3;
         println!("  keying on a canonical order, merge radius {}", cfg.merge_radius);
     }
-    if opts.contains(&"pt") {
-        // A ladder sharing one budget, not four budgets. The comparison is
-        // against a single chain at the same total cost.
-        cfg.replicas = 4;
+    // A ladder sharing one budget, not four budgets. The comparison is against
+    // a single chain at the same total cost. The four names are the four arms:
+    // the ladder as it ran, the same ladder with each rung actually at its own
+    // temperature, whole parity classes with a coin-flipped parity, and the
+    // non-reversible sweep on a ladder placed by the measured barrier.
+    let ladder_mode = if opts.contains(&"nrpt") {
+        Some(LadderMode::NonReversible)
+    } else if opts.contains(&"rpt") {
+        Some(LadderMode::Reversible)
+    } else if opts.contains(&"ptt") {
+        Some(LadderMode::Cyclic)
+    } else if opts.contains(&"pt") {
+        Some(LadderMode::Shipped)
+    } else {
+        None
+    };
+    if let Some(mode) = ladder_mode {
+        cfg.replicas = std::env::var("REPLICAS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(4);
+        cfg.ladder_mode = mode;
+        // The swap period is the ladder's unit of time and the budget decides
+        // how many units there are: at LJ38 with 4e5 charged evaluations a run
+        // takes about six thousand hops, so a period of 50 over four rungs
+        // buys thirty sweeps and a period of 10 buys a hundred and fifty. A
+        // ladder cannot transport anything in thirty sweeps, which is why the
+        // period is on the command line rather than fixed.
+        if let Ok(p) = std::env::var("SWAP_PERIOD") {
+            if let Ok(v) = p.parse::<usize>() {
+                cfg.swap_period = v.max(1);
+            }
+        }
+        if let Ok(a) = std::env::var("LADDER_ACCEPT") {
+            if let Ok(v) = a.parse::<f64>() {
+                cfg.ladder_target_accept = v.clamp(0.01, 0.95);
+            }
+        }
         cfg.bias_by_rung = opts.contains(&"rungbias");
-        println!("  replica exchange: {} chains, swap every {} hops, top x{}",
-                 cfg.replicas, cfg.swap_period, cfg.ladder_top);
+        println!(
+            "  replica exchange: {} chains, {mode:?}, swap every {} hops, \
+             rung temperatures {}, ladder target accept {:.2}",
+            cfg.replicas,
+            cfg.swap_period,
+            mode.tempers(),
+            cfg.ladder_target_accept
+        );
     }
     // The deposit height matters only now that basins are revisited: at 33
     // revisits a height of 0.25 accumulates to about 8, against escape gaps
@@ -207,6 +247,7 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0.5),
         mix_images: 7,
+        acquisition: std::env::var("BANK_ACQ").is_ok(),
     };
     if use_bank {
         #[cfg(not(feature = "ira"))]
@@ -402,19 +443,19 @@ fn main() {
         // only: the early ones are a descent from a random start and say
         // nothing.
         if let Some(r) = reference {
-            if let Some((h, b, e)) = out
+            if let Some((h, c, b, e)) = out
                 .improvements
                 .iter()
-                .find(|(_, _, e)| *e < r + 1e-4)
+                .find(|(_, _, _, e)| *e < r + 1e-4)
             {
                 println!(
-                    "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      crossed at hop {h} of {} ({:.1}% in), {c} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
-            } else if let Some((h, b, e)) = out.improvements.last() {
+            } else if let Some((h, c, b, e)) = out.improvements.last() {
                 println!(
-                    "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      last improvement at hop {h} of {} ({:.1}% in), {c} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
@@ -425,6 +466,22 @@ fn main() {
             for (t, b, en) in &out.rungs {
                 println!("      rung T={t:.3}  basins {b:>5}  energy {en:>11.4}");
             }
+        }
+        // Transport, on every seed, because it is the quantity the ladder is
+        // supposed to change and a solve count cannot report it. A scheme can
+        // move configurations across the ladder far better and still not find
+        // the minimum, and both halves belong in the record.
+        if let Some((trips, sw, barrier)) = out.transport {
+            let per_tag = if trips > 0 {
+                out.rungs.len() as f64 * sw as f64 / trips as f64
+            } else {
+                f64::INFINITY
+            };
+            println!(
+                "      seed {seed}: round trips {trips} in {sw} sweeps \
+                 (rate {:.4}/sweep, {per_tag:.0} sweeps per tag), barrier {barrier:.2}",
+                trips as f64 / sw.max(1) as f64
+            );
         }
         total_hops += out.hops;
         total_charged += ledger.spent();
