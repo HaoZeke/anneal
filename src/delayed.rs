@@ -103,7 +103,7 @@ use crate::screen::Screen;
 use ndarray::{Array1, ArrayView1};
 
 /// Features the surrogate regresses on.
-pub const FEATURES: usize = 5;
+pub const FEATURES: usize = 7;
 
 /// Cheap structural summary of an unrelaxed structure.
 ///
@@ -111,8 +111,25 @@ pub const FEATURES: usize = 5;
 /// structure has room to relax: a proposal with an overlapping pair has a large
 /// depth ahead of it, and a proposal already near a packing has little.
 pub fn features(x: ArrayView1<f64>, n: usize, raw: f64) -> Array1<f64> {
+    features_with_gradient(x, n, raw, 0.0)
+}
+
+/// As [`features`], with the gradient norm at the unrelaxed point.
+///
+/// The feature the first version was missing, and a free one: the evaluation
+/// the first stage already pays for computes the gradient and throws it away.
+/// In a locally quadratic basin the depth a relaxation will find goes as
+/// `|g|^2 / 2 lambda`, so the squared norm is the leading term of the quantity
+/// being predicted rather than a proxy for it, and the linear term is carried
+/// alongside because the basin is only approximately quadratic.
+pub fn features_with_gradient(
+    x: ArrayView1<f64>,
+    n: usize,
+    raw: f64,
+    gnorm: f64,
+) -> Array1<f64> {
     if n < 2 {
-        return Array1::from(vec![1.0, raw, 0.0, 0.0, 0.0]);
+        return Array1::from(vec![1.0, raw, 0.0, 0.0, 0.0, gnorm, gnorm * gnorm]);
     }
     let mut nearest = vec![f64::INFINITY; n];
     for i in 0..n {
@@ -165,6 +182,8 @@ pub fn features(x: ArrayView1<f64>, n: usize, raw: f64) -> Array1<f64> {
         mean_coord,
         closest / scale.max(1e-12),
         scale,
+        gnorm,
+        gnorm * gnorm,
     ])
 }
 
@@ -255,10 +274,22 @@ impl Surrogate {
         raw: f64,
         tolerance: f64,
     ) -> Option<f64> {
+        self.predict_full(x, n, raw, 0.0, tolerance)
+    }
+
+    /// As [`Surrogate::predict_at`], given the gradient norm at `x`.
+    pub fn predict_full(
+        &self,
+        x: ArrayView1<f64>,
+        n: usize,
+        raw: f64,
+        gnorm: f64,
+        tolerance: f64,
+    ) -> Option<f64> {
         if self.model.observations() < self.warmup {
             return None;
         }
-        let f = features(x, n, raw);
+        let f = features_with_gradient(x, n, raw, gnorm);
         let (depth, sd) = self.model.predict(f.view())?;
         if !sd.is_finite() || sd.sqrt() > tolerance {
             return None;
@@ -268,9 +299,24 @@ impl Surrogate {
 
     /// Records a quench: the structure before it and the energy after.
     pub fn observe(&mut self, x: ArrayView1<f64>, n: usize, raw: f64, quenched: f64) {
+        self.observe_full(x, n, raw, 0.0, quenched)
+    }
+
+    /// As [`Surrogate::observe`], with the gradient norm the prediction used.
+    ///
+    /// The training features must match the prediction features or the model
+    /// is fitted on one thing and consulted about another.
+    pub fn observe_full(
+        &mut self,
+        x: ArrayView1<f64>,
+        n: usize,
+        raw: f64,
+        gnorm: f64,
+        quenched: f64,
+    ) {
         let depth = quenched - raw;
         if depth.is_finite() && raw.is_finite() {
-            let f = features(x, n, raw);
+            let f = features_with_gradient(x, n, raw, gnorm);
             self.model.observe(f.view(), depth);
         }
     }

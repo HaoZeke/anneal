@@ -1376,7 +1376,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut surrogate_here: Option<f64> = None;
     let mut delayed_skipped = 0usize;
     let mut pending_surrogate: Option<(f64, f64)> = None;
-    let mut pending_raw: Option<f64> = None;
+    let mut pending_raw: Option<(f64, f64)> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
     // which is the one place a model can change what a hop reaches rather than
@@ -1601,11 +1601,19 @@ fn run_full<'g, R: Rng + ?Sized>(
             // it is used only after a warmup, and the warmup could never
             // arrive. Measured, the first stage ran 0 times in 5561 hops while
             // costing two evaluations each.
-            pending_raw = Some(raw_y);
+            // The gradient at the unrelaxed point, which is what says how far
+            // it will fall: in a locally quadratic basin the depth goes as
+            // |g|^2 / 2 lambda. One evaluation against the twenty-five a
+            // quench costs.
+            let gnorm = match grad.as_deref_mut().and_then(|g| g(ledger, trial.view())) {
+                Some(v) => v.iter().fold(0.0_f64, |a, q| a + q * q).sqrt(),
+                None => 0.0,
+            };
+            pending_raw = Some((raw_y, gnorm));
             // The first stage speaks only where the posterior is sharp against
             // the temperature that scales the acceptance ratio.
             let tol = cfg.surrogate_tolerance * temperature;
-            match sur.predict_at(trial.view(), n, raw_y, tol) {
+            match sur.predict_full(trial.view(), n, raw_y, gnorm, tol) {
                 None => sur.abstained += 1,
                 Some(pred_y) => {
                 let pred_x = match surrogate_here {
@@ -1714,8 +1722,22 @@ fn run_full<'g, R: Rng + ?Sized>(
         let unquenched = cfg.minima_hopping && (screened_this || returning);
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
-        if let (Some(sur), Some(raw_y)) = (surrogate.as_mut(), pending_raw.take()) {
-            sur.observe(trial.view(), n, raw_y, e_new);
+        if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
+            sur.observe_full(trial.view(), n, raw_y, gnorm, e_new);
+            // And the relaxed end of the same quench, whose depth is zero.
+            //
+            // Without it the model sees only unrelaxed structures and is asked
+            // about a relaxed one at every first stage, because the chain state
+            // is a quenched minimum: its true value is its own energy and its
+            // depth is zero by definition. Trained on one regime and consulted
+            // in another it extrapolated, so every acceptance ratio was formed
+            // against a meaningless incumbent estimate. Measured, the second
+            // stage rejected 98 per cent of what the first passed.
+            //
+            // The pair is free: it is the other end of a quench already paid
+            // for, and it is what teaches the model that a vanishing gradient
+            // means a vanishing depth.
+            sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
         }
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
