@@ -18,6 +18,10 @@ default = []
 # Shape matching through the IRA Fortran library. Needs libira on the link
 # path; set IRA_LIB_DIR when building.
 ira = []
+# Morphology collective variables through featomic's spherical expansion and
+# SOAP power spectrum. Off by default because featomic pulls the metatensor C
+# core, which is built from source by cmake and roughly triples a cold build.
+featomic = ["dep:featomic", "dep:metatensor"]
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
@@ -32,6 +36,16 @@ rand_distr  = "0.5"
 rayon       = "1.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
+# Spherical expansion and SOAP power spectrum. featomic carries its own
+# ndarray 0.16, so the two ndarray versions coexist and descriptor data crosses
+# the boundary as f64 slices rather than as array types.
+featomic    = { version = "0.6.0", optional = true }
+# Not called from this crate; declared to hold metatensor at the last version
+# built on ndarray 0.16. metatensor 0.2.4 moved to 0.17 while featomic 0.6.0
+# still asks for 0.16, and the two meet inside featomic, which then fails to
+# compile with "multiple different versions of crate ndarray". Lift the pin
+# when featomic publishes a release built on ndarray 0.17.
+metatensor  = { version = "=0.2.3", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
