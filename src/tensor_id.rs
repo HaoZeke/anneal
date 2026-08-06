@@ -31,8 +31,9 @@
 //! Gram matrix rather than three.
 //!
 //! 1. `G -> P G P^T` under relabelling, so `spec(G)` is exactly invariant, and
-//!    with it the mode singular values `sqrt(spec(G))`. This is the part the
-//!    descriptor is built from.
+//!    with it the mode singular values `sqrt(spec(G))`. This is the part that
+//!    can be made into a descriptor; which function of `T` the descriptor
+//!    actually takes is settled below on cost and on measured separation.
 //!
 //! 2. The mode factor matrix `U` from `G = U Lambda U^T` transforms as
 //!    `U -> P U Q`, where `Q` is block orthogonal with one block per distinct
@@ -72,8 +73,9 @@
 //!
 //! It does cost. `G` has `N^2` entries and each is a sum over `N^2` terms,
 //! `G_ab = sum_jk (A_aj A_bj) A_jk^2 (A_ak A_bk)`, with no factorisation, so
-//! [`mode_gram`] is order `N^4`: 247 us at 38 points and 10.8 ms at 98 against
-//! the 81 us and 1.0 ms of the whole descriptor. It stays as a reference the
+//! [`mode_gram`] is order `N^4`, measured at 50 times the cost from 38 points
+//! to 98 against the 44 the exponent predicts: 257 us and 12.8 ms, against the
+//! 91 us and 1.05 ms of the whole descriptor. It stays as a reference the
 //! tests check the cheap path against.
 //!
 //! The way out is to contract one mode instead of unfolding it. The mode-3
@@ -161,20 +163,22 @@
 //!
 //! | points | sorted distances | this descriptor | one gradient | hops per call |
 //! |--------|------------------|-----------------|--------------|---------------|
-//! | 38     | 5.37 us          | 80.6 us         | 2.27 us      | 1.1           |
-//! | 75     | 22.0 us          | 415 us          | 8.77 us      | 1.5           |
-//! | 98     | 38.6 us          | 1.00 ms         | 15.3 us      | 2.1           |
+//! | 38     | 5.27 us          | 91.1 us         | 2.45 us      | 1.20          |
+//! | 75     | 24.3 us          | 478 us          | 10.3 us      | 1.50          |
+//! | 98     | 45.3 us          | 1.05 ms         | 17.8 us      | 1.90          |
 //!
 //! So a hop that identifies its basin this way costs about twice a hop that
-//! does not, at 98 points, and about one and a tenth at 38. IRA shape matching
+//! does not, at 98 points, and about a fifth more at 38. IRA shape matching
 //! charges 52 evaluations against 31, which is 1.7 times the evaluations plus
-//! its own matching; this charges 1.0 times the evaluations and 2.1 times the
-//! arithmetic.
+//! its own matching; this charges 1.0 times the evaluations and 1.9 times the
+//! arithmetic, and the arithmetic is the cheap half.
 //!
 //! Cyclic Jacobi, which [`crate::spectral::symmetric_eigen`] runs and which is
 //! the right choice on the tens-of-nodes matrices the rest of the crate feeds
-//! it, puts the same two spectra at 23.1 ms at 98 points. The tridiagonal path
-//! is what makes the descriptor affordable at all.
+//! it, puts the same two spectra at 1.40 ms, 12.2 ms and 28.5 ms over the same
+//! three sizes, 17 to 28 times the tridiagonal path. That path is what makes
+//! the descriptor affordable at all: through Jacobi it would cost 52 hops at
+//! 98 points instead of 2.
 
 use ndarray::{Array1, Array2, ArrayView1, ArrayView2};
 
@@ -275,8 +279,8 @@ pub fn triangle_unfolding(a: ArrayView2<f64>) -> Array2<f64> {
 /// `T`, at order `N^4`. Supersymmetry makes the three mode Grams equal, so
 /// this one carries the whole HOSVD mode spectrum.
 ///
-/// Reference path. At 98 points it costs 10.8 ms against the 1.00 ms of the
-/// whole descriptor and the 0.47 ms of the energies a hop spends, which is why
+/// Reference path. At 98 points it costs 12.8 ms against the 1.05 ms of the
+/// whole descriptor and the 0.55 ms of the energies a hop spends, which is why
 /// the descriptor uses [`triplet_matrix`] instead; the tests are what this
 /// exists for.
 pub fn mode_gram(a: ArrayView2<f64>) -> Array2<f64> {

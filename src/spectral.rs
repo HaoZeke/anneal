@@ -125,8 +125,8 @@ pub fn symmetric_eigen(a: ArrayView2<f64>, max_sweeps: usize) -> (Array1<f64>, A
 /// Jacobi sweeps the whole matrix once per rotation and there are `n(n-1)/2`
 /// rotations per sweep, so it is order `n^3` per sweep with seven or more
 /// sweeps, while the Householder reduction is `2n^3/3` once. Measured on a
-/// 98-point cluster the two spectra a basin descriptor needs cost 23.1 ms
-/// through Jacobi and 0.66 ms through this path, against the 0.46 ms of the
+/// 98-point cluster the two spectra a basin descriptor needs cost 28.5 ms
+/// through Jacobi and 1.01 ms through this path, against the 0.55 ms of the
 /// thirty-one energy evaluations a hop already spends. That is the difference
 /// between a descriptor a search can afford per hop and one it cannot.
 ///
