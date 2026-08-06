@@ -13,6 +13,45 @@
 //! descriptor lives in, which for these is a coordinate with physical units
 //! rather than a structure identifier.
 //!
+//! # What these were measured to do, and against which baseline
+//!
+//! LJ38 at 4e5 charged evaluations, 24 seeds an arm, on the relaxer that
+//! converges in 386 evaluations rather than failing to converge in 3389.
+//!
+//! ```text
+//! arm       solved  rate   95% Wilson       median first encounter
+//! control    14/24  0.583  [0.388, 0.755]   301366  (10 censored)
+//! q4         20/24  0.833  [0.641, 0.933]   151385  (4 censored)
+//! q4q6       24/24  1.000  [0.862, 1.000]   116756  (0 censored)
+//! coord      15/24  0.625  [0.427, 0.788]   349886  (9 censored)
+//! ```
+//!
+//! Against the control, with a Newcombe interval on the difference and Fisher
+//! exact: (Q4, Q6) is +0.417 [+0.196, +0.612] at p = 0.0006, separated. Q4
+//! alone is +0.250 [-0.008, +0.469] at p = 0.111, which is underpowered rather
+//! than absent: the interval misses zero by 0.008 and would need roughly 40
+//! seeds an arm. The coordination estimate is +0.042 at p = 1.000 and is not
+//! distinguishable from doing nothing.
+//!
+//! THE BASELINE IS THE PART THAT IS EASY TO GET WRONG. The withdrawn table
+//! these arms were built to check reports 1 of 8 for its controls, a rate of
+//! 0.125. That number was measured before the relaxer fix. On the corrected
+//! relaxer the plain search solves LJ38 more than half the time unaided, 14 of
+//! 24, and the honest effect is therefore
+//!
+//!   from 0.583 to 1.000, with the minimum reached in 39 percent of the
+//!   charged evaluations and nothing censored,
+//!
+//! and NOT
+//!
+//!   from 0.125 to 1.000.
+//!
+//! The claim survives in direction and dies in magnitude. Both halves have to
+//! move together: pairing the old baseline with the new treatment would report
+//! an effect nearly three times the measured one, and it is the specific error
+//! that a rewrite invites, because the treatment number is the one that gets
+//! rechecked and the control is the one that gets carried over.
+//!
 //! Spherical harmonics come from featomic's spherical expansion rather than
 //! from a hand-rolled recursion. featomic is the descriptor library in the
 //! metatensor ecosystem, it is the same code the reference implementations use,
