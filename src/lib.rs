@@ -62,6 +62,7 @@ pub mod screen;
 pub mod twin;
 pub mod spectral;
 pub mod structure;
+pub mod sym_hessian;
 pub mod symmetrise;
 pub mod terminate;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
