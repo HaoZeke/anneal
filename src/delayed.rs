@@ -90,20 +90,63 @@
 //! against its error, so raising the bar filtered out the cases it was right
 //! about along with the ones it was wrong about.
 //!
-//! The bottleneck is now a specific and learnable quantity rather than a
-//! structural one. The features here are the raw energy, mean coordination and
-//! closest contact, and none of them describes how far a structure sits off
-//! the manifold of relaxed structures, which is what sets how far it will
-//! fall. The gradient at the unrelaxed point is computed and discarded by the
-//! evaluation the first stage already pays for, and for a locally quadratic
-//! basin the depth goes as `|g|^2 / 2 lambda`, so it is the feature the model
-//! is missing and the one that costs nothing to add.
+//! # What the second stage is actually asking for
+//!
+//! Adding the gradient, the displacement split of [`features_orthogonal`] and
+//! the model-Hessian depth of [`features_with_depth`] costs no charged
+//! evaluations and does not help. Over 8 seeds at 2e5 on 38 points, means:
+//!
+//! | design | stage-1 reject | stage-2 reject | hops | acceptance | accepted moves | solved |
+//! |--------|----------------|----------------|------|------------|----------------|--------|
+//! | screen (control) | -- | -- | 6059 | 0.567 | 3432 | 7/8 |
+//! | gradient norm only | 0.503 | 0.755 | 9704 | 0.255 | 1974 | 4/7 |
+//! | split and depth | 0.588 | 0.907 | 15128 | 0.172 | 1469 | 3/8 |
+//!
+//! The reason sits in the rows the run labels for itself. Dumping the
+//! 4676 design rows of one seed: the quenched energy of a proposal lies in
+//! `[-174, -150]` for 96.4 per cent of them, while the raw energy of the same
+//! proposals has a median of 6.3e3 and a maximum of 2.4e24, because a random
+//! displacement routinely overlaps a pair. The depth is therefore almost
+//! exactly minus the raw energy, and a model that predicts the depth to a
+//! quarter of a decade, the accuracy these features support, misses the
+//! quenched energy by thousands. The second stage needs it to within the
+//! temperature, 0.8.
+//!
+//! Fitting the quenched energy directly on a held-out half of those rows gives
+//! a median absolute error of 2.78 with the depth column and 2.77 without it,
+//! against 1.54 for predicting the training median and ignoring the structure
+//! entirely. The features are worse than a constant, and the module's own
+//! reversibility argument says what a constant surrogate does: it reduces the
+//! scheme to ordinary basin hopping, which is the control.
+//!
+//! The unbounded columns also destroy the posterior they are fitted in.
+//! Accumulated over one seed the precision matrix `V0^-1 + X'X` has entries
+//! spanning `1e110`, and its numerical rank in double precision is 1 of 11:
+//! every column except the largest is annihilated by the rounding error of that
+//! column. Both designs above measure 1 of 11, so the comparison between them
+//! is a comparison of which single column survived.
 
+use crate::model_hessian;
 use crate::screen::Screen;
 use ndarray::{Array1, ArrayView1};
 
 /// Features the surrogate regresses on.
-pub const FEATURES: usize = 10;
+///
+/// The last of them is the model-Hessian depth, which is an estimate of the
+/// regressand itself rather than a correlate of it, so it enters the design as
+/// its own column and the fit supplies the one coefficient that rescales it.
+pub const FEATURES: usize = 11;
+
+/// Conjugate-gradient iterations spent on the model-Hessian solve.
+///
+/// A solve on 38 points costs this many operator products at 703 pairs each,
+/// against the roughly 25 charged gradient evaluations of the quench it is
+/// deciding about, so the count is set by where the depth stops moving and not
+/// by what it costs. A truncated solve underestimates the depth by a factor
+/// that varies slowly with the geometry, and the surrogate regresses on the
+/// number, so what a longer solve would buy is mostly a scale the fit already
+/// supplies.
+pub const DEPTH_ITERS: usize = 12;
 
 /// Cheap structural summary of an unrelaxed structure.
 ///
@@ -158,6 +201,38 @@ pub fn features_orthogonal(
     // How much of the step descent cannot undo, which is scale free and is the
     // quantity that separates a step within a basin from one that leaves it.
     out[9] = if total > 1e-12 { perp / total } else { 0.0 };
+    out
+}
+
+/// As [`features_orthogonal`], with the depth a model Hessian predicts.
+///
+/// The feature every other column only gestures at. The others describe the
+/// structure and let the fit find the map from a description to a depth; this
+/// one is `1/2 g^T H^-1 g` computed for the geometry in hand, which is the
+/// leading term of the depth itself. See [`crate::model_hessian`] for why the
+/// operator costs no charged evaluations.
+///
+/// One builder for both ends of a quench, because the surrogate is fitted on
+/// unrelaxed structures and consulted about the relaxed one the chain stands
+/// on. Passing a zero gradient gives the relaxed end its correct features: the
+/// gradient columns vanish, the displacement split vanishes with them, and the
+/// depth is zero, which is the definition of a structure with nothing left to
+/// recover.
+///
+/// Measured on 38 points, the column carries no information the design does not
+/// already hold: against the true depth of 4676 quenches its log-log
+/// correlation is 0.9932 where the `|g|^2` column alone gives 0.9927, and a
+/// power law fitted to it leaves a residual of 0.245 decades against 0.255. The
+/// module header has what that costs the second stage.
+pub fn features_with_depth(
+    x: ArrayView1<f64>,
+    n: usize,
+    raw: f64,
+    gradient: ArrayView1<f64>,
+    from: ArrayView1<f64>,
+) -> Array1<f64> {
+    let mut out = features_orthogonal(x, n, raw, gradient, from);
+    out[10] = model_hessian::depth(x, n, gradient, DEPTH_ITERS);
     out
 }
 
@@ -589,6 +664,95 @@ mod tests {
         }
         assert!(s.predict_at(x.view(), n, 0.0, 0.0).is_none());
         assert!(s.predict_at(x.view(), n, 0.0, f64::INFINITY).is_some());
+    }
+
+    /// The depth column has to vanish exactly at a relaxed structure, since
+    /// that is the row the both-ends training supplies and the row the first
+    /// stage reads back when it prices the incumbent.
+    #[test]
+    fn the_depth_column_vanishes_for_a_relaxed_structure() {
+        let n = 8;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = (i % 2) as f64 * 1.1;
+            x[3 * i + 1] = (i / 2) as f64 * 1.1;
+        }
+        let settled = Array1::zeros(3 * n);
+        let f = features_with_depth(x.view(), n, -4.0, settled.view(), x.view());
+        assert_eq!(f.len(), FEATURES);
+        assert_eq!(f[10], 0.0, "a relaxed structure was given a depth of {}", f[10]);
+        // And the row must be the one `features` builds, or the model is
+        // fitted on relaxed structures it can never be consulted about.
+        let plain = features(x.view(), n, -4.0);
+        for i in 0..FEATURES {
+            assert_eq!(f[i], plain[i], "column {i} differs between the two builders");
+        }
+    }
+
+    /// And it has to be positive and grow with the gradient at an unrelaxed
+    /// one, or the column carries no information about how far a trial falls.
+    #[test]
+    fn the_depth_column_grows_with_the_gradient() {
+        let n = 10;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = (i % 3) as f64 * 1.1;
+            x[3 * i + 1] = ((i / 3) % 3) as f64 * 1.1;
+            x[3 * i + 2] = (i / 9) as f64 * 1.1;
+        }
+        let mut g = Array1::zeros(3 * n);
+        for i in 0..n {
+            g[3 * i + 1] = 0.1 * ((i % 5) as f64 - 2.0);
+        }
+        let from = Array1::zeros(3 * n);
+        let small = features_with_depth(x.view(), n, 0.0, g.view(), from.view())[10];
+        let big = features_with_depth(x.view(), n, 0.0, (&g * 2.0).view(), from.view())[10];
+        assert!(small > 0.0, "depth column {small} is not positive");
+        assert!(
+            (big / small - 4.0).abs() < 1e-6,
+            "doubling the gradient scaled the depth column by {}, wanted the quadratic form's 4",
+            big / small
+        );
+    }
+
+    /// The surrogate has to recover a depth that is a multiple of the model
+    /// Hessian's prediction, which is the claim the column is there to make:
+    /// the fit supplies a scale, not a shape.
+    #[test]
+    fn the_surrogate_recovers_a_depth_proportional_to_the_model_hessian() {
+        let mut rng = StdRng::seed_from_u64(918);
+        let mut s = Surrogate::new();
+        let n = 8;
+        let mut sample = |rng: &mut StdRng| {
+            let mut x = Array1::zeros(3 * n);
+            for v in x.iter_mut() {
+                *v = rng.random_range(-2.0..2.0);
+            }
+            let mut g = Array1::zeros(3 * n);
+            for v in g.iter_mut() {
+                *v = rng.random_range(-0.5..0.5);
+            }
+            (x, g)
+        };
+        let from = Array1::zeros(3 * n);
+        for _ in 0..400 {
+            let (x, g) = sample(&mut rng);
+            let raw: f64 = rng.random_range(-10.0..10.0);
+            let f = features_with_depth(x.view(), n, raw, g.view(), from.view());
+            // The truth the model is shown: the quench recovers three quarters
+            // of what the model Hessian says it will.
+            s.observe_features(f.view(), raw, raw - 0.75 * f[10]);
+        }
+        let (x, g) = sample(&mut rng);
+        let f = features_with_depth(x.view(), n, 0.0, g.view(), from.view());
+        let want = -0.75 * f[10];
+        let got = s
+            .predict_features(f.view(), 0.0, f64::INFINITY)
+            .expect("no prediction after 400 quenches");
+        assert!(
+            (got - want).abs() < 0.05 * want.abs().max(1e-3),
+            "predicted depth {got} against the {want} the model Hessian sets"
+        );
     }
 
     /// A cold surrogate must decline to predict rather than guess, so the
