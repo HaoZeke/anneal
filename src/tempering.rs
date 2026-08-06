@@ -88,10 +88,17 @@
 //! `N` under the deterministic sweep because all `N` tags travel at once.
 //! [`Ladder::mean_round_trip_time`] divides that back out to one tag, and it is
 //! the quantity whose growth separates the schemes. Measured on the idealised
-//! index process at a fixed barrier of 3 and ladder sizes 8 to 64, the per-tag
-//! time scales as `N^1.0` for the deterministic sweep, `N^1.9` for the
-//! stochastic one, and `N^3.0` for one drawn pair per sweep. This is the
-//! scaling the tests measure rather than assert; see
+//! index process at a fixed barrier of 3, in sweeps per tagged round trip:
+//!
+//! | rungs | deterministic | stochastic | one drawn pair |
+//! |-------|---------------|------------|----------------|
+//! | 8     | 99            | 197        | 675            |
+//! | 16    | 153           | 568        | 4241           |
+//! | 32    | 281           | 2175       | 36863          |
+//! | 64    | 560           | 8619       | 273792         |
+//!
+//! which fits `N^0.84`, `N^1.83` and `N^2.91`. This is the scaling the tests
+//! measure rather than assert; see
 //! [`tests::round_trip_time_is_linear_for_the_deterministic_sweep_and_quadratic_otherwise`].
 //!
 //! [`SwapScheme::StochasticEvenOdd`] offers the same pairs but draws the parity
@@ -142,6 +149,29 @@
 //! [`MetropolisWalk`] is the default and is what the shipped move set reduces
 //! to. A NUTS chain with its own dual-averaged step size and its own metric
 //! satisfies the same trait with `Chain` being the per-rung adaptation state.
+//! The shape it takes, for a chain object owning a dual-averaged step size and
+//! a metric estimate and proposing through a charged trajectory:
+//!
+//! ```text
+//! struct NutsReplica<'a> {
+//!     cfg: &'a HopConfig,                 // shared, immutable
+//!     ledger: &'a mut Ledger,             // the trajectory is charged
+//!     eval: &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>)
+//!                         -> Option<(f64, Array1<f64>)>,
+//! }
+//!
+//! impl ReplicaMove for NutsReplica<'_> {
+//!     type Point = Array1<f64>;           // moved by a swap
+//!     type Chain = HopChain;              // one per rung, never moved
+//!     fn advance<R>(&mut self, rung, temperature, point, chain, rng) -> bool {
+//!         chain.propose(self.cfg, self.ledger, point.view(), .., self.eval, rng)
+//!     }
+//! }
+//! ```
+//!
+//! The split is the whole contract: `Point` is exchanged and `Chain` is not,
+//! because a step size and a metric are adapted against a temperature and stay
+//! with the rung when the configuration standing there leaves.
 
 use rand::Rng;
 
@@ -950,6 +980,42 @@ mod tests {
         let raw = (1.0 / 0.5 - 1.0 / 2.0) * (sys.energy[0] - sys.energy[1]);
         assert!((raw - -3.0).abs() < 1e-12);
         assert!((raw - got).abs() > 1.0, "the two rules must not coincide here");
+    }
+
+    /// The four-number form the driver calls and the target form the tests
+    /// simulate have to be the same function, or the thing that is checked is
+    /// not the thing that runs.
+    #[test]
+    fn the_driver_form_and_the_target_form_agree() {
+        let sys = DiscreteSystem {
+            energy: vec![-2.0, 0.5, 3.0],
+        };
+        let v0 = BiasVector {
+            v: vec![0.0, 1.3, -0.7],
+        };
+        let v1 = BiasVector {
+            v: vec![2.2, -0.1, 0.4],
+        };
+        let temps = [0.7, 2.3];
+        let chains = [v0.clone(), v1.clone()];
+        for a in 0..3 {
+            for b in 0..3 {
+                let points = [a, b];
+                let general = swap_log_ratio(&sys, &temps, 0, 1, &points, &chains);
+                let driver = biased_swap_log_ratio(
+                    temps[0],
+                    temps[1],
+                    sys.energy[a] + v0.at(a),
+                    sys.energy[b] + v0.at(b),
+                    sys.energy[b] + v1.at(b),
+                    sys.energy[a] + v1.at(a),
+                );
+                assert!(
+                    (general - driver).abs() < 1e-12,
+                    "states ({a}, {b}): {general} against {driver}"
+                );
+            }
+        }
     }
 
     /// A biased pair exchanges at the rate the algebra predicts.
