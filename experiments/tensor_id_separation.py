@@ -97,16 +97,28 @@ def moments(X, s=SIGMA):
     return np.array([np.sign(t) * (abs(t) / n) ** (1.0 / k) for k, t in raw])
 
 
-def scramble(X, eps=JITTER):
-    Y = X + rng.normal(scale=eps, size=X.shape)
-    Y = Y[rng.permutation(len(Y))]
-    Q, _ = np.linalg.qr(rng.normal(size=(3, 3)))
+def scramble(X, r, eps=JITTER):
+    Y = X + r.normal(scale=eps, size=X.shape)
+    Y = Y[r.permutation(len(Y))]
+    Q, _ = np.linalg.qr(r.normal(size=(3, 3)))
     return Y @ Q
 
 
-def jitter_of(f, X, reps=16):
+def jitter_bank(structures, reps=24, seed=99):
+    """Perturbed copies, drawn once and shared by every descriptor.
+
+    The figure of merit divides a minimum over pairs by a maximum over
+    perturbations, and both are tail statistics, so descriptors compared on
+    independent draws differ by more than the descriptors do. These are the
+    same displacements for all of them.
+    """
+    r = np.random.default_rng(seed)
+    return [[scramble(X, r) for _ in range(reps)] for X in structures]
+
+
+def jitter_of(f, X, bank):
     b = f(X)
-    return max(np.linalg.norm(f(scramble(X)) - b) for _ in range(reps))
+    return max(np.linalg.norm(f(Y) - b) for Y in bank)
 
 
 # ---------------------------------------------------------- Lennard-Jones
@@ -162,9 +174,9 @@ def minima(n, want):
     return out
 
 
-def z_stats(f, ms, reps=16):
+def z_stats(f, ms, banks):
     v = [f(X) for X, _ in ms]
-    j = max(jitter_of(f, X, reps) for X, _ in ms)
+    j = max(jitter_of(f, X, bank) for (X, _), bank in zip(ms, banks))
     pairs = sorted(
         np.linalg.norm(v[a] - v[b])
         for a in range(len(v))
@@ -187,12 +199,13 @@ say("1. Bloom homometric pair, separation in units of the same descriptor's")
 say(f"   response to a {JITTER} jitter. Sorted distances separate by "
     f"{np.linalg.norm(sorted_pairs(HA) - sorted_pairs(HB)):.2e}.")
 say("=" * 78)
+HOM_BANK = jitter_bank([HA])[0]
 say(f"{'sigma':>6} {'spectra':>18} {'mode SV of T (N^4)':>22} {'9 traces':>18}")
 for s in [1.0, 1.4, 2.0, 2.5, 3.0, 4.0, 6.0]:
     row = f"{s:6.1f}"
     for f in (spectra, mode_sv, moments):
         sep = np.linalg.norm(f(HA, s) - f(HB, s))
-        jit = jitter_of(lambda X, f=f, s=s: f(X, s), HA)
+        jit = jitter_of(lambda X, f=f, s=s: f(X, s), HA, HOM_BANK)
         row += f" {sep:9.3e}/{sep / jit:<8.2f}"
     say(row)
 say("")
@@ -206,19 +219,43 @@ say(f"2. Lennard-Jones minima at sigma {SIGMA}, weight {WEIGHT}. Worst case and"
 say("   median over all pairs of distinct minima.")
 say("=" * 78)
 say(f"{'system':>7} {'pairs':>6} {'dist worst':>11} {'joint worst':>12} "
-    f"{'trace worst':>12} {'dist med':>9} {'joint med':>10}")
+    f"{'trace worst':>12} {'dist med':>9} {'joint med':>10} {'spec/dist jit':>14}")
+BANK, JIT = {}, {}
 for n, want in [(13, 12), (26, 18), (38, 20), (55, 14)]:
     ms = minima(n, want)
-    zd, md, jd = z_stats(sorted_pairs, ms)
-    zj, mj, _ = z_stats(joint, ms)
-    _z, _m, jt = z_stats(moments, ms)
+    banks = jitter_bank([X for X, _ in ms])
+    BANK[n], JIT[n] = ms, banks
+    zd, md, jd = z_stats(sorted_pairs, ms, banks)
+    zj, mj, _ = z_stats(joint, ms, banks)
+    _z, _m, jt = z_stats(moments, ms, banks)
+    _zs, _ms_, js = z_stats(spectra, ms, banks)
     zt, _mt, _ = z_stats(
-        lambda X, w=jd / jt: np.concatenate([sorted_pairs(X), w * moments(X)]), ms
+        lambda X, w=jd / jt: np.concatenate([sorted_pairs(X), w * moments(X)]),
+        ms,
+        banks,
     )
     npairs = len(ms) * (len(ms) - 1) // 2
     say(f"LJ{n:<5} {npairs:6d} {zd:11.2f} {zj:12.2f} {zt:12.2f} "
-        f"{md:9.2f} {mj:10.2f}")
+        f"{md:9.2f} {mj:10.2f} {js / jd:14.2f}")
 say("")
 say("A worst case below 1 means the closest pair of distinct minima is nearer")
 say("than a jittered copy of one of them, so no merge radius separates it.")
 say("The nine-trace compression is worse than having no spectral block at all.")
+say("The last column is what sets spectral_weight: its reciprocal.")
+say("")
+
+# --------------------------------------------------- 3. choosing the width
+say("=" * 78)
+say("3. Kernel width against worst-case z of the joint descriptor, weight held")
+say(f"   at {WEIGHT}. The homometric pair wants width; the clusters are flat in it.")
+say("=" * 78)
+say(f"{'sigma':>6}" + "".join(f" {'LJ' + str(n):>8}" for n in BANK) + f" {'homometric':>12}")
+for s in [1.0, 1.4, 2.0, 2.5, 3.0, 4.0]:
+    row = f"{s:6.1f}"
+    for n, ms in BANK.items():
+        z, _m, _j = z_stats(lambda X, s=s: joint(X, s), ms, JIT[n])
+        row += f" {z:8.2f}"
+    sep = np.linalg.norm(spectra(HA, s) - spectra(HB, s))
+    jit = jitter_of(lambda X, s=s: spectra(X, s), HA, HOM_BANK)
+    row += f" {sep / jit:12.2f}"
+    say(row)

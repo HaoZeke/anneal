@@ -66,9 +66,9 @@
 //! better than one contraction of it. On the homometric pair below, at the
 //! shipped kernel width 2.5, the exact mode singular values of `T` separate at
 //! 2.7 times their own jitter response where the contracted spectra reach
-//! 10.5; at width 3 the figures are 10.6 and 17.2, and the contraction leads
-//! at every width tried from 1 to 6. Unfolding a mode and keeping all of it
-//! does not pay.
+//! 10.3; at width 3 the figures are 8.6 and 21.4, and the contraction leads at
+//! every width tried from 1 to 6. Unfolding a mode and keeping all of it does
+//! not pay.
 //!
 //! It does cost. `G` has `N^2` entries and each is a sum over `N^2` terms,
 //! `G_ab = sum_jk (A_aj A_bj) A_jk^2 (A_ak A_bk)`, with no factorisation, so
@@ -99,7 +99,9 @@
 //! largest response of `f` to a 0.02 displacement plus a relabelling and a
 //! rotation. A merge radius has to sit above `j(f)` and below the closest pair
 //! of distinct minima, so the worst-case `z` over pairs is the width of the
-//! band the radius has to find, and `z` below 1 means there is no band.
+//! band the radius has to find, and `z` below 1 means there is no band. Both
+//! ends are extreme-order statistics, so the descriptors are read on one
+//! shared set of perturbations rather than on independent draws.
 //!
 //! # What it is worth, measured
 //!
@@ -108,36 +110,37 @@
 //!
 //! | system | pairs | distances worst | joint worst | distances median | joint median |
 //! |--------|-------|-----------------|-------------|------------------|--------------|
-//! | LJ13   | 66    | 1.57            | 1.63        | 3.40             | 3.79         |
-//! | LJ26   | 153   | 1.05            | 1.22        | 3.56             | 4.27         |
-//! | LJ38   | 190   | 0.99            | 1.27        | 3.12             | 3.88         |
-//! | LJ55   | 91    | 0.98            | 1.32        | 2.98             | 4.26         |
+//! | LJ13   | 66    | 1.71            | 1.70        | 3.72             | 3.96         |
+//! | LJ26   | 153   | 1.12            | 1.31        | 3.82             | 4.59         |
+//! | LJ38   | 190   | 0.85            | 1.17        | 2.69             | 3.57         |
+//! | LJ55   | 91    | 0.87            | 1.11        | 2.63             | 3.59         |
 //!
-//! At 38 and 55 points the distance descriptor's worst case is 0.99 and 0.98,
-//! which says the closest pair of distinct minima sits exactly as far apart as
-//! a jittered copy of one of them: there is no radius that separates that pair
-//! and holds a quench together, and anything coarser merges the two minima
-//! outright. That is the knife edge, read off the descriptor rather than off
-//! the seed counts. The joint descriptor lifts the worst case to 1.27 and
-//! 1.32 and the median from 3.12 to 3.88 and from 2.98 to 4.26. The band opens
-//! by roughly a third. It does not open by an order of magnitude, and at 13
-//! points, where the distance descriptor was not failing, it barely moves.
+//! At 38 and 55 points the distance descriptor's worst case is 0.85 and 0.87,
+//! below 1: the closest pair of distinct minima is nearer than a jittered copy
+//! of one of them, so no radius both separates that pair and holds a quench
+//! together, and a coarser radius merges the two minima outright. That is the
+//! knife edge, read off the descriptor rather than off the seed counts. The
+//! joint descriptor lifts the worst case past 1, to 1.17 and 1.11, and the
+//! median from 2.69 to 3.57 and from 2.63 to 3.59. The band opens by about a
+//! third. It does not open by an order of magnitude, and at 13 points, where
+//! the distance descriptor was not failing, it does not open at all: 1.70
+//! against 1.71 is a wash.
 //!
 //! On the case sorted distances provably cannot do, Bloom's homometric pair
 //! `{0, 1, 4, 10, 12, 17}` and `{0, 1, 8, 11, 13, 17}` on a line, which share
 //! the multiset `{1..13, 16, 17}` and are not congruent, sorted distances
-//! separate by exactly 0 and the spectra separate by 10.5 jitters.
+//! separate by exactly 0 and the spectra separate by 10.3 jitters.
 //!
-//! `experiments/tensor_id_separation.py` produces both tables.
+//! `experiments/tensor_id_separation.py` produces every table here.
 //!
 //! # What was tried and does not work
 //!
 //! Power traces in place of eigenvalues. Three matrix products give
 //! `tr A^2, tr A^3, tr A^4` and `tr M .. tr M^6`, nine numbers instead of
-//! `2N`, and on the homometric pair they do as well as the spectra, 10.9
-//! jitters against 10.5. On Lennard-Jones minima they are worse than having no
-//! spectral block at all: worst-case `z` of 1.05, 0.94, 0.79 and 0.62 at 13,
-//! 26, 38 and 55 points against 1.57, 1.05, 0.99 and 0.98 for the distances
+//! `2N`, and on the homometric pair they do as well as the spectra, 10.5
+//! jitters against 10.3. On Lennard-Jones minima they are worse than having no
+//! spectral block at all: worst-case `z` of 1.29, 0.81, 0.64 and 0.62 at 13,
+//! 26, 38 and 55 points against 1.71, 1.12, 0.85 and 0.87 for the distances
 //! alone. The block adds jitter faster than it adds separation, and the gap
 //! widens with system size, which is what a fixed nine-number summary of a
 //! growing spectrum should do.
@@ -361,16 +364,26 @@ fn sorted_pair_block(x: ArrayView1<f64>, n: usize) -> Vec<f64> {
     d
 }
 
-/// Sorted distances followed by the two-body and three-body kernel spectra.
+/// The two-body and three-body kernel spectra followed by the sorted
+/// distances.
 ///
-/// The descriptor is `[ d_sorted , w * spec(A) , w * spec(M) ]` with `A` the
+/// The descriptor is `[ w * spec(A) , w * spec(M) , d_sorted ]` with `A` the
 /// Gaussian kernel of [`kernel_matrix`] and `M` the triangle contraction of
-/// [`triplet_matrix`], both spectra ascending. Length `n(n-1)/2 + 2n`.
+/// [`triplet_matrix`], both spectra ascending. Length `2n + n(n-1)/2`, and the
+/// distance block is exactly what [`crate::bias::SortedPairs`] emits.
 ///
-/// Leading with the old descriptor unchanged is deliberate. Under a Euclidean
-/// metric the squared distances add, `d_new^2 = d_old^2 + w^2 d_spec^2`, so
-/// the new descriptor separates every pair the old one separated and can only
-/// add to the separation of the pairs it confused.
+/// Carrying the old descriptor entire is deliberate. Under a Euclidean metric
+/// the squared distances add, `d_new^2 = w^2 d_spec^2 + d_old^2`, so at a
+/// fixed radius the new descriptor separates every pair the old one separated
+/// and can only add to the separation of the pairs it confused.
+///
+/// The spectra lead for a reason of the scan rather than of the mathematics,
+/// the ordering being immaterial to any distance. `EuclideanMetric` stops
+/// accumulating once the partial sum passes the merge radius, and a chain that
+/// has opened twenty thousand basins pays that partial sum per centre on every
+/// miss. At 98 points the spectra are 196 entries against the distances' 4753,
+/// and they are the entries on which two different structures differ most, so
+/// a miss can be settled in the first tenth of the vector.
 pub struct TripletSpectrum {
     /// Points per state; the state length must be `3 * n_points`.
     pub n_points: usize,
@@ -387,19 +400,27 @@ impl TripletSpectrum {
     /// `sigma = 2.5` is a little over two nearest-neighbour distances, the
     /// Lennard-Jones minimum being at `2^(1/6) = 1.122`, so the kernel reaches
     /// the second and third shells and the triangles it weights are the ones
-    /// that distinguish packings. Narrower is worse in both measurements:
-    /// at `sigma = 1.4` the homometric pair separates at 0.6 jitters, which is
-    /// to say not at all, and the joint descriptor's worst-case separation
-    /// over 20 quenched 38-point minima is 1.29 jitters against 1.32 at 2.5.
-    /// Wider flattens the kernel towards the all-ones matrix, and by
-    /// `sigma = 6` a 6-point spectrum has collapsed onto one eigenvalue.
+    /// that distinguish packings.
+    ///
+    /// It is a compromise, and the two measurements pull opposite ways. The
+    /// clusters prefer narrow: worst-case `z` at 38 points runs 1.15, 1.24,
+    /// 1.20, 1.17, 1.15, 1.12 over widths 1.0, 1.4, 2.0, 2.5, 3.0, 4.0, and at
+    /// 55 points 1.53, 1.37, 1.13, 1.11, 1.14, 0.99. The homometric pair
+    /// demands width: 0.01, 0.29, 3.73, 10.26, 21.43, 20.25 on the same scan,
+    /// so anything below 2.5 leaves it inseparable. Taking 2.5 gives up about
+    /// 0.1 of cluster `z` against each system's own best width and buys the
+    /// pair that sorted distances cannot do at all. Wider still flattens the
+    /// kernel towards the all-ones matrix, and by `sigma = 6` a 6-point
+    /// spectrum has collapsed onto one eigenvalue.
     ///
     /// `spectral_weight = 2.5` puts the two blocks on one noise scale. The
-    /// spectral block responds to a 0.02 displacement at 0.37, 0.34, 0.31 and
-    /// 0.43 times the distance block's response over 13, 26, 38 and 55 points,
-    /// a ratio steady enough to fix rather than calibrate, and a merge radius
-    /// reading the concatenation unweighted would be reading the distances
-    /// alone.
+    /// spectral block responds to a 0.02 displacement at 0.32, 0.38, 0.29 and
+    /// 0.39 times the distance block's response over 13, 26, 38 and 55 points,
+    /// a ratio steady enough to fix rather than calibrate. Its reciprocal runs
+    /// 2.6 to 3.4 and 2.5 sits just under, which leaves the distance block
+    /// marginally the louder of the two: the conservative side, since that is
+    /// the block whose radius is already calibrated. Unweighted, a merge
+    /// radius reading the concatenation would be reading the distances alone.
     pub fn new(n_points: usize) -> Self {
         Self {
             n_points,
@@ -444,13 +465,12 @@ impl TripletSpectrum {
 impl Fingerprint for TripletSpectrum {
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let n = self.n_points;
-        let mut d = sorted_pair_block(x, n);
-        let s = self.spectra(x);
-        d.reserve(2 * n);
-        for v in s.iter() {
-            d.push(self.spectral_weight * v);
+        let mut out = Vec::with_capacity(2 * n + n * (n - 1) / 2);
+        for v in self.spectra(x).iter() {
+            out.push(self.spectral_weight * v);
         }
-        Array1::from(d)
+        out.extend(sorted_pair_block(x, n));
+        Array1::from(out)
     }
 }
 

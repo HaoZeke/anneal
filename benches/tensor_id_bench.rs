@@ -8,7 +8,8 @@
 
 use anneal_core::bias::{Fingerprint, SortedPairs};
 use anneal_core::potentials::PairPotential;
-use anneal_core::tensor_id::{TripletSpectrum, kernel_matrix, mode_gram};
+use anneal_core::spectral::symmetric_eigen;
+use anneal_core::tensor_id::{TripletSpectrum, kernel_matrix, mode_gram, triplet_matrix};
 use criterion::{Criterion, criterion_group, criterion_main};
 use ndarray::Array1;
 use std::hint::black_box;
@@ -46,9 +47,19 @@ fn descriptors(c: &mut Criterion) {
 
         // The exact HOSVD mode Gram, order N^4, for the cost the descriptor
         // avoids by contracting a mode instead of unfolding it.
-        let a = kernel_matrix(x.view(), n, 1.4);
+        let a = kernel_matrix(x.view(), n, tri.sigma);
         g.bench_function("mode_gram_n4", |b| {
             b.iter(|| black_box(mode_gram(a.view())))
+        });
+
+        // The same two spectra through cyclic Jacobi, in the same run as the
+        // tridiagonal path so the two are comparable.
+        let m = triplet_matrix(a.view());
+        g.bench_function("spectra_via_jacobi", |b| {
+            b.iter(|| {
+                black_box(symmetric_eigen(a.view(), 30));
+                black_box(symmetric_eigen(m.view(), 30));
+            })
         });
 
         let pot = PairPotential::lennard_jones(n);
