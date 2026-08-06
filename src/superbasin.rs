@@ -150,6 +150,29 @@
 //! paid for it. The raw accepted counts are kept alongside as a diagnostic, so
 //! the size of the distortion is visible rather than assumed away.
 //!
+//! # What it did
+//!
+//! Measured on Elja against `thompson,rscreen`, 24 seeds an arm, paired on the
+//! seed: 12/24 against 12/24 at 75 points and three million evaluations, 2/24
+//! against 0/24 at 98 points and three million, 5/24 against 6/24 at 98 points
+//! and twelve million. No pair separates.
+//!
+//! The mechanism ran. At 98 points and twelve million evaluations it took 822
+//! jumps across the arm, standing in for 3.04 million hops of diffusion by its
+//! own accounting, a third of the 9.1 million the arm spent, with 278 of them
+//! landing lower than they left. Conditioning stayed mild, a median of 214 and
+//! a maximum of 359, and every solve reached its 1e-10 tolerance. Paired, it
+//! flipped five seeds into a solve at 75 points and five out of one.
+//!
+//! The limit is the operator rather than the code. `N` exists over states that
+//! were visited, so the exit it names is a basin the run has already entered,
+//! and reaching a visited basin sooner does not enlarge what the search can
+//! reach. The coarse-graining did recover structure the descriptors here could
+//! not: every run built a hierarchy, median depth two and up to four, with
+//! lump separations of 13 to 16 typically and up to 119, and the coarse states
+//! are separable by polyhedral template fractions at F = 128 pooled. The
+//! partition is real; the move built on it is not the one that pays.
+//!
 //! # What is left out, stated
 //!
 //! A proposal landing in a basin the run has never registered contributes to

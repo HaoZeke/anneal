@@ -642,6 +642,34 @@ pub struct Config {
     /// run already holds.
     ///
     /// Turns [`Config::superbasin_report`] on with it.
+    ///
+    /// Measured against `thompson,rscreen` at 24 seeds an arm, paired on the
+    /// seed so the two chains share a random stream and diverge only at a jump:
+    ///
+    /// | system | budget | control | escape | Fisher | McNemar |
+    /// |--------|--------|---------|--------|--------|---------|
+    /// | LJ75   | 3e6    | 12/24   | 12/24  | 1.000  | 1.000   |
+    /// | LJ98   | 3e6    | 0/24    | 2/24   | 0.489  | 0.500   |
+    /// | LJ98   | 1.2e7  | 6/24    | 5/24   | 1.000  | 1.000   |
+    ///
+    /// No pair separates. The move is neither inert nor broken, which is what
+    /// makes the negative worth stating: at 98 points and twelve million
+    /// evaluations it took 822 jumps across the arm, and the absorbing chain's
+    /// own accounting says those jumps stood in for 3.04 million hops of
+    /// diffusion, a third of the 9.1 million the arm spent. 278 of them landed
+    /// lower than they left. The exits were sampled from an exactly computed
+    /// distribution: condition numbers ran to 359 with a median of 214, and
+    /// every solve reached its 1e-10 tolerance.
+    ///
+    /// The paired counts say what it did instead. At 75 points it flipped five
+    /// seeds into a solve and five out of one, which is a perturbation and not
+    /// a direction. The reason is in the algebra rather than in the
+    /// implementation: `(I - Q)^-1` exists over states that were visited, so
+    /// the exit distribution is supported on basins the run has already been
+    /// to, and arriving at one of them sooner does not enlarge what the search
+    /// can reach. Two of the three mechanisms measured to help here changed
+    /// reachability; this changes the speed of getting somewhere already
+    /// reachable.
     pub superbasin_escape: bool,
     /// Hops between escapes, on top of the stall condition.
     pub superbasin_period: usize,
