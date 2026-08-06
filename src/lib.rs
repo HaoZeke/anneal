@@ -47,6 +47,8 @@ pub mod gpr;
 /// Morphology collective variables: Steinhardt bond order, a SOAP projection
 /// and a coordination kernel density estimate, on featomic's descriptors.
 pub mod morphology;
+/// Gradient-enhanced Gaussian process over structures, with a SOAP kernel.
+pub mod soap_gp;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
