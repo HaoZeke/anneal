@@ -38,7 +38,6 @@ use crate::bias::{
     AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SiteEnergies, SortedPairs,
 };
 use crate::diversity::DiversityAnnealer;
-use crate::exchange::{Exchange, MetropolisExchange};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
@@ -652,15 +651,15 @@ pub struct Config {
     /// Replicas run on a temperature ladder, with periodic swaps.
     ///
     /// One is the plain chain. Above one, the driver runs a ladder and offers
-    /// swaps through [`crate::exchange::Exchange`], which is the crate's own
-    /// operator and satisfies detailed balance by construction.
+    /// swaps through [`crate::tempering`], whose ratio is built from each
+    /// rung's own target including the bias that rung carries.
     ///
     /// This is the standard non-local mechanism for a multi-funnel landscape
-    /// and the measurements here say why it is the right one to reach for: no
-    /// single move from the plateau reaches anything lower, so a cold chain
-    /// cannot leave it, while a hot chain crosses freely and finds nothing
-    /// precise. A swap moves a hot chain's crossing down to a cold chain that
-    /// can polish it, which neither temperature achieves alone.
+    /// and the argument for reaching for it is that no single move from the
+    /// plateau reaches anything lower, so a cold chain cannot leave it, while a
+    /// hot chain crosses freely and finds nothing precise. Measured at LJ38 the
+    /// argument does not cash: see [`LadderMode`] for the table, where four
+    /// rungs sharing a budget solve no more often than one chain spending it.
     pub replicas: usize,
     /// Hops between swap attempts.
     pub swap_period: usize,
@@ -1507,7 +1506,6 @@ fn run_full<'g, R: Rng + ?Sized>(
     // first ladder is built from.
     let mut pilot: (u64, f64, f64) = (0, 0.0, 0.0);
     let mut ladder_built = !cfg.ladder_mode.adapts();
-    let exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
     let mut rep = 0usize;
@@ -2508,9 +2506,10 @@ fn run_full<'g, R: Rng + ?Sized>(
                         //   ln a = (1/T_k)[U_k(x_k) - U_k(x_j)]
                         //        + (1/T_j)[U_j(x_j) - U_j(x_k)]
                         //
-                        // with U_k(x) = E(x) + V_k(x). It reduces to the plain
-                        // Metropolis swap when the biases are equal, which is what
-                        // Exchange supplies and what this generalises.
+                        // with U_k(x) = E(x) + V_k(x), which is what
+                        // biased_swap_log_ratio evaluates. It collapses to the
+                        // canonical swap on the shared effective energy when the
+                        // two rungs carry the same bias.
                         let (ek, xk) = (chains[k].0, chains[k].1.clone());
                         let (ej, xj) = (chains[j].0, chains[j].1.clone());
                         let vk_xk = biases[k].potential(biases[k].cv(xk.view()).view());
