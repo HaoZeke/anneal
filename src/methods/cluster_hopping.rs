@@ -845,6 +845,16 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Whether acceptance is delayed behind a learned surrogate.
+    ///
+    /// A first stage decides on a surrogate for the quenched energy, costing
+    /// one evaluation and no gradient, and only survivors are quenched; a
+    /// second stage subtracts the surrogate difference back out. The composite
+    /// step is reversible with respect to the true target for any surrogate,
+    /// so a poor one costs acceptance rate rather than correctness. This is
+    /// what the screen was reaching for and does not have. See
+    /// [`crate::delayed`].
+    pub delayed_acceptance: bool,
     /// Whether the move set includes twinning across a dense plane.
     ///
     /// The one proposal here that changes morphology without discarding the
@@ -964,6 +974,7 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            delayed_acceptance: false,
             twin_moves: false,
             learn_construction: false,
             construct_width: 4,
@@ -1071,6 +1082,10 @@ pub struct Outcome {
     pub accepted: usize,
     /// Per-arm draws, accepts and best quenched value, in library order.
     pub arms: Vec<(String, usize, usize, f64)>,
+    /// Delayed acceptance: first stages run, first-stage rejections (each a
+    /// quench not paid), second stages run, and second-stage rejections (the
+    /// surrogate's mistakes).
+    pub delayed: Option<(usize, usize, usize, usize)>,
     /// Swaps accepted.
     pub swaps_accepted: usize,
     /// Paths attempted after a stall.
@@ -1343,6 +1358,19 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut arm_draws = vec![0usize; kernels.len()];
     let mut arm_accepts = vec![0usize; kernels.len()];
     let mut arm_best = vec![f64::INFINITY; kernels.len()];
+    // Delayed acceptance: a surrogate for the quenched energy decides the
+    // first stage for one evaluation, and only survivors are quenched. The
+    // incumbent's surrogate value travels with the chain, because reversibility
+    // needs the same number on both sides of the ratio.
+    let mut surrogate = if cfg.delayed_acceptance {
+        Some(crate::delayed::Surrogate::new())
+    } else {
+        None
+    };
+    let mut surrogate_here: Option<f64> = None;
+    let mut delayed_skipped = 0usize;
+    let mut pending_surrogate: Option<(f64, f64)> = None;
+    let mut pending_raw: Option<f64> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
     // which is the one place a model can change what a hop reaches rather than
@@ -1550,6 +1578,55 @@ fn run_full<'g, R: Rng + ?Sized>(
         // less often and the basins filled at a quite different rate. The
         // screen is there to avoid paying for a full relaxation, not to remove
         // the step from the chain.
+        // First stage. One evaluation of the raw energy, one surrogate lookup,
+        // and a Metropolis test against the surrogate target. A rejection here
+        // costs the chain a hop and costs the ledger nothing beyond that
+        // evaluation, which is the whole saving: the quench is never paid.
+        let mut stage_one_reject = false;
+        pending_surrogate = None;
+        if let Some(sur) = surrogate.as_mut() {
+            // A zero-step relaxation is the raw energy for the price of the
+            // evaluation the stage is allowed.
+            let (raw_y, _) = relax(ledger, trial.view(), 0);
+            // Recorded whatever the posterior can say, because the training
+            // pair is produced by the quench this hop is about to pay for
+            // anyway. Keeping it inside the branch that consults the posterior
+            // was a deadlock: the surrogate is trained only where it is used,
+            // it is used only after a warmup, and the warmup could never
+            // arrive. Measured, the first stage ran 0 times in 5561 hops while
+            // costing two evaluations each.
+            pending_raw = Some(raw_y);
+            if let Some(pred_y) = sur.predict(trial.view(), n, raw_y) {
+                let pred_x = match surrogate_here {
+                    Some(v) => v,
+                    None => {
+                        // The incumbent has no surrogate value yet, so give it
+                        // one from its own raw energy rather than comparing
+                        // against nothing.
+                        let (raw_x, _) = relax(ledger, x.view(), 0);
+                        let v = sur.predict(x.view(), n, raw_x).unwrap_or(e);
+                        surrogate_here = Some(v);
+                        v
+                    }
+                };
+                sur.stage_one += 1;
+                let a1 = sur.stage_one_probability(pred_x, pred_y, temperature);
+                if rng.random::<f64>() >= a1 {
+                    sur.stage_one_rejected += 1;
+                    stage_one_reject = true;
+                }
+                pending_surrogate = Some((pred_y, raw_y));
+            }
+        }
+        if stage_one_reject {
+            // The chain stays. A rejected proposal still deposits on where the
+            // chain stands, exactly as a rejection through the ordinary
+            // acceptance test does, so the bias accumulates at the same rate.
+            hops += 1;
+            delayed_skipped += 1;
+            bias.deposit(x.view(), temperature);
+            continue;
+        }
         let (e_screen, x_screen) = relax(ledger, trial.view(), cfg.screen_steps);
         // Two reasons to stop before the full relaxation. The trial is going
         // nowhere useful by energy, or it is going back where the chain already
@@ -1623,6 +1700,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         // Under MH a screened structure is not a minimum; under Metropolis it
         // is still a legal chain state (cheaper step, same deposit).
         let unquenched = cfg.minima_hopping && (screened_this || returning);
+        // Every quench trains the surrogate, including the ones taken before
+        // it had an opinion. This is where its training data comes from.
+        if let (Some(sur), Some(raw_y)) = (surrogate.as_mut(), pending_raw.take()) {
+            sur.observe(trial.view(), n, raw_y, e_new);
+        }
         let improved = e_new < ledger.best - 1e-10;
         ledger.record(e_new, x_new.view());
         hops += 1;
@@ -1687,6 +1769,26 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
                 ok
             }
+        } else if let (Some(sur), Some((pred_y, raw_y))) =
+            (surrogate.as_mut(), pending_surrogate)
+        {
+            // Second stage. The surrogate difference is subtracted back out, so
+            // what is tested is the error the surrogate made on this pair, and
+            // the composite step is reversible with respect to the true target
+            // whatever that error was.
+            let pred_x = surrogate_here.unwrap_or(e);
+            sur.stage_two += 1;
+            let a2 = sur.stage_two_probability(pred_x, pred_y, e, e_new, temperature);
+            let ok = rng.random::<f64>() < a2;
+            if !ok {
+                sur.stage_two_rejected += 1;
+            } else {
+                // The accepted state carries its surrogate value forward,
+                // because the next first stage needs the same number this one
+                // used or the ratio does not telescope.
+                surrogate_here = Some(pred_y);
+            }
+            ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
@@ -2207,6 +2309,9 @@ fn run_full<'g, R: Rng + ?Sized>(
         },
         swaps_tried,
         accepted,
+        delayed: surrogate
+            .as_ref()
+            .map(|s| (s.stage_one, s.stage_one_rejected, s.stage_two, s.stage_two_rejected)),
         arms: kernels
             .iter()
             .enumerate()
