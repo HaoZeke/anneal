@@ -527,6 +527,12 @@ pub trait Fingerprint: Send + Sync {
 /// Invariant to permutation of the points and to rigid motions, which are the
 /// symmetries of a cluster energy. Sorting is what supplies permutation
 /// invariance and is also why the descriptor is cheap.
+///
+/// The invariance is incomplete, and known to be: a multiset of distances has
+/// thrown away which of them share a vertex, so homometric point sets share it
+/// without being congruent.
+/// [`crate::tensor_id::TripletSpectrum`] carries these distances unchanged and
+/// appends the part a multiset cannot hold.
 pub struct SortedPairs {
     /// Points per state; the state length must be `3 * n_points`.
     pub n_points: usize,
