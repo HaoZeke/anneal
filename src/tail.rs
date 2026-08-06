@@ -702,6 +702,82 @@ pub fn endpoint_overlap(a: &TailPosterior, b: &TailPosterior, bins: usize) -> f6
     ha.iter().zip(hb.iter()).map(|(x, y)| x.min(*y)).sum()
 }
 
+/// Mean excess over a threshold, the model-free discriminant between the two
+/// ways the tail can fail to have a floor.
+///
+/// For generalised Pareto excesses with `xi < 1`,
+///
+/// ```text
+/// E[Y - u | Y > u] = (sigma_u0 + xi (u - u_0)) / (1 - xi),
+/// ```
+///
+/// which is linear in `u` with slope `xi / (1 - xi)`. So a mean excess falling
+/// with the threshold is a negative shape and a finite endpoint; a mean excess
+/// flat in the threshold is `xi = 0`, the exponential case, where the sample
+/// lies in the Gumbel domain and no endpoint exists to estimate. This needs no
+/// fit, no prior and no quadrature, so it says whether the fitted shape is
+/// reading the data or reading the prior.
+pub fn mean_excess(energies: &[f64], energy_threshold: f64) -> Option<(usize, f64)> {
+    let ex = exceedances(energies, energy_threshold);
+    if ex.is_empty() {
+        return None;
+    }
+    Some((ex.len(), ex.iter().sum::<f64>() / ex.len() as f64))
+}
+
+/// Slope of the mean excess against the threshold, by least squares over a
+/// ladder of quantiles, with the shape it implies.
+///
+/// Returns `(slope, xi_implied)` where `xi = slope / (1 + slope)` inverts the
+/// linear relation above.
+pub fn mean_excess_slope(energies: &[f64], quantiles: &[f64], k_min: usize) -> Option<(f64, f64)> {
+    let pts: Vec<(f64, f64)> = quantiles
+        .iter()
+        .filter_map(|&q| {
+            let u = quantile_of(energies, q);
+            mean_excess(energies, u).filter(|(k, _)| *k >= k_min).map(
+                // On the negated scale the threshold is -u, and an excess is
+                // measured upward from it, so the pair is (-u, mean excess).
+                |(_, m)| (-u, m),
+            )
+        })
+        .collect();
+    if pts.len() < 3 {
+        return None;
+    }
+    let n = pts.len() as f64;
+    let (sx, sy) = (
+        pts.iter().map(|p| p.0).sum::<f64>() / n,
+        pts.iter().map(|p| p.1).sum::<f64>() / n,
+    );
+    let num: f64 = pts.iter().map(|p| (p.0 - sx) * (p.1 - sy)).sum();
+    let den: f64 = pts.iter().map(|p| (p.0 - sx).powi(2)).sum();
+    if den <= 0.0 {
+        return None;
+    }
+    let slope = num / den;
+    Some((slope, slope / (1.0 + slope)))
+}
+
+/// Endpoint implied by the first moment of the excesses at one threshold,
+/// given a shape.
+///
+/// Inverting `E[Y - u | Y > u] = sigma / (1 - xi)` for the scale and
+/// substituting into the endpoint gives, on the energy scale,
+///
+/// ```text
+/// theta_E = u - m (1 - xi) / (-xi),      xi < 0,
+/// ```
+///
+/// with `m` the mean excess and `u` the energy threshold. A moment estimate
+/// rather than a likelihood one, so it carries no support constraint and can
+/// land above a minimum already observed. That is what makes it useful: an
+/// endpoint shallower than an energy the run has reached refutes the model at
+/// the threshold it was fitted at, in one line and without a prior.
+pub fn moment_endpoint(energy_threshold: f64, mean_excess: f64, xi: f64) -> Option<f64> {
+    (xi < 0.0).then(|| energy_threshold - mean_excess * (1.0 - xi) / (-xi))
+}
+
 /// One threshold in the stability ladder, with the fit it produced.
 #[derive(Debug, Clone)]
 pub struct Rung {
@@ -711,6 +787,8 @@ pub struct Rung {
     pub posterior: TailPosterior,
     /// Overlap of this rung's endpoint posterior with the top rung's.
     pub overlap_top: f64,
+    /// Mean excess over this rung's threshold, on the negated scale.
+    pub mean_excess: f64,
 }
 
 /// Fits at a ladder of thresholds, for the stability diagnostic.
@@ -726,7 +804,7 @@ pub fn ladder(
     prior: &Prior,
     grid: &GridSpec,
 ) -> Vec<Rung> {
-    let mut fits: Vec<(f64, TailPosterior)> = Vec::new();
+    let mut fits: Vec<(f64, TailPosterior, f64)> = Vec::new();
     for &q in quantiles {
         let u = quantile_of(energies, q);
         let ex = if gap > 0 {
@@ -737,8 +815,9 @@ pub fn ladder(
         if ex.len() < k_min {
             continue;
         }
+        let me = ex.iter().sum::<f64>() / ex.len() as f64;
         if let Some(p) = fit(&ex, u, prior, grid) {
-            fits.push((q, p));
+            fits.push((q, p, me));
         }
     }
     if fits.is_empty() {
@@ -746,7 +825,7 @@ pub fn ladder(
     }
     let top = fits.len() - 1;
     let mut out = Vec::with_capacity(fits.len());
-    for (i, (q, p)) in fits.iter().enumerate() {
+    for (i, (q, p, me)) in fits.iter().enumerate() {
         let ov = if i == top {
             1.0
         } else {
@@ -756,6 +835,7 @@ pub fn ladder(
             quantile: *q,
             posterior: p.clone(),
             overlap_top: ov,
+            mean_excess: *me,
         });
     }
     out
@@ -1092,6 +1172,51 @@ mod tests {
             (0.80..=0.98).contains(&rate),
             "90 per cent intervals covered {hit}/{n} = {rate:.3}"
         );
+    }
+
+    /// The mean excess is linear in the threshold with slope `xi / (1 - xi)`,
+    /// and inverting the slope returns the shape it was drawn with.
+    ///
+    /// The diagnostic that needs no prior and no quadrature, so it says
+    /// whether a fitted shape is reading the data or reading the prior.
+    #[test]
+    fn mean_excess_slope_returns_the_shape() {
+        for &xi in &[-0.5f64, -0.3, -0.1, 0.0, 0.2] {
+            let g = Gpd::new(1.0, xi);
+            let e: Vec<f64> = draws(g, 200_000, 101 + (xi.abs() * 100.0) as u64)
+                .iter()
+                .map(|v| -v)
+                .collect();
+            let qs = [0.5f64, 0.35, 0.25, 0.15, 0.10, 0.06];
+            let (slope, got) = mean_excess_slope(&e, &qs, 100).unwrap();
+            let want = xi / (1.0 - xi);
+            assert!(
+                (slope - want).abs() < 0.03,
+                "xi {xi}: slope {slope:.4} against {want:.4}"
+            );
+            assert!(
+                (got - xi).abs() < 0.04,
+                "xi {xi}: inverted slope gave {got:.4}"
+            );
+            // And the closed form itself, at one threshold.
+            let u = quantile_of(&e, 0.25);
+            let (_, m) = mean_excess(&e, u).unwrap();
+            // Conditioning at -u above the origin leaves scale sigma + xi (-u).
+            let want_m = (g.sigma + xi * (-u)) / (1.0 - xi);
+            assert!(
+                (m / want_m - 1.0).abs() < 0.03,
+                "xi {xi}: mean excess {m:.4} against {want_m:.4}"
+            );
+            // The moment endpoint recovers the true one when the model holds.
+            if xi < 0.0 {
+                let want = -g.support_upper();
+                let got = moment_endpoint(u, m, xi).unwrap();
+                assert!(
+                    (got - want).abs() < 0.06 * want.abs().max(1.0),
+                    "xi {xi}: moment endpoint {got:.4} against {want:.4}"
+                );
+            }
+        }
     }
 
     /// Declustering keeps one value per excursion.
