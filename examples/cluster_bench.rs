@@ -156,6 +156,11 @@ fn main() {
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
     }
+    // Every quenched energy, to a file, when the caller asks for one. The
+    // charged count travels with each so a prefix of the file is what the run
+    // had seen at that point in its budget.
+    let trace_dir = std::env::var("QUENCH_TRACE").ok();
+    cfg.trace_quenched = trace_dir.is_some();
     if let Ok(v) = std::env::var("MERGE_RADIUS") {
         if let Ok(r) = v.parse::<f64>() {
             cfg.merge_radius = r;
@@ -337,6 +342,26 @@ fn main() {
         );
         if let Some(m) = morphology {
             println!("      {m}");
+        }
+        if let Some(dir) = trace_dir.as_deref() {
+            let path = format!("{dir}/{}_{n}_s{seed}.trace", spec.replace(':', ""));
+            let mut body = format!(
+                "# charged basins energy\n# budget {budget} solved {} \
+                 first_encounter {}\n",
+                hit as u8,
+                encounters
+                    .last()
+                    .filter(|e| e.found())
+                    .map(|e| e.charged().to_string())
+                    .unwrap_or_else(|| "censored".into())
+            );
+            for (c, b, e) in &out.quenched {
+                body.push_str(&format!("{c} {b} {e:.9}\n"));
+            }
+            match std::fs::write(&path, body) {
+                Ok(()) => println!("      trace {} rows -> {path}", out.quenched.len()),
+                Err(e) => eprintln!("      trace write failed: {e}"),
+            }
         }
     }
     println!(
