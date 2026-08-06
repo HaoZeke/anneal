@@ -249,11 +249,14 @@ impl FunnelModel {
     }
 }
 
-fn normal_pdf(z: f64) -> f64 {
+/// Standard normal density, shared with [`crate::gpr`] so both acquisition
+/// surfaces use one implementation.
+pub(crate) fn normal_pdf(z: f64) -> f64 {
     (-0.5 * z * z).exp() / (std::f64::consts::TAU).sqrt()
 }
 
-fn normal_cdf(z: f64) -> f64 {
+/// Standard normal distribution function.
+pub(crate) fn normal_cdf(z: f64) -> f64 {
     0.5 * (1.0 + erf(z / std::f64::consts::SQRT_2))
 }
 
