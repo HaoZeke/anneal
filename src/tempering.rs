@@ -179,20 +179,20 @@
 //! and not to the configuration that happens to be sitting there.
 //!
 //! [`MetropolisWalk`] is the default and is what the shipped move set reduces
-//! to. A NUTS chain with its own dual-averaged step size and its own metric
-//! satisfies the same trait with `Chain` being the per-rung adaptation state.
-//! The shape it takes, for a chain object owning a dual-averaged step size and
-//! a metric estimate and proposing through a charged trajectory:
+//! to. A Hamiltonian chain with its own dual-averaged step size and its own
+//! metric satisfies the same trait with `Chain` being the per-rung adaptation
+//! state. The shape it takes, for a chain object owning a dual-averaged step
+//! size and a metric estimate and proposing through a charged trajectory:
 //!
 //! ```text
-//! struct NutsReplica<'a> {
+//! struct HopReplica<'a> {
 //!     cfg: &'a HopConfig,                 // shared, immutable
 //!     ledger: &'a mut Ledger,             // the trajectory is charged
 //!     eval: &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>)
 //!                         -> Option<(f64, Array1<f64>)>,
 //! }
 //!
-//! impl ReplicaMove for NutsReplica<'_> {
+//! impl ReplicaMove for HopReplica<'_> {
 //!     type Point = Array1<f64>;           // moved by a swap
 //!     type Chain = HopChain;              // one per rung, never moved
 //!     fn advance<R>(&mut self, rung, temperature, point, chain, rng) -> bool {
@@ -204,6 +204,27 @@
 //! The split is the whole contract: `Point` is exchanged and `Chain` is not,
 //! because a step size and a metric are adapted against a temperature and stay
 //! with the rung when the configuration standing there leaves.
+//!
+//! The interface exists; the combination is measured and is not worth its cost.
+//! Both mechanisms are paid out of the same quantity, hops, and neither returns
+//! anything on whether the search finds the minimum. The Hamiltonian numbers
+//! here are measured on the `feat/hmc-hop` arms, whose sampler is
+//! `src/hmc/hop.rs` and whose per-rung chain is the `HopChain` above. A
+//! Hamiltonian rung costs 76 charged evaluations per hop against 41 for the
+//! shipped move library, and a run of 4e5 takes 5216 hops against 9781. At a
+//! swap every ten hops over four rungs that is 130 sweeps against 245, and 130
+//! is already down where sixteen displacement rungs sit, at 4.7 round trips per
+//! run. Against that cost the exchange is worth 0.10 in solve rate at Fisher
+//! 0.13, and the Hamiltonian proposal loses to the shipped library at Fisher
+//! 0.039. Two effects that are individually absent do not have a product worth
+//! a budget.
+//!
+//! Nor would a ladder recover the one thing a trajectory sampler with a U-turn
+//! criterion is built to give. The depth cap binds on 86.8 per cent of
+//! proposals under an identity metric and 78.8 per cent under a model-Hessian
+//! one even when the cap is raised to ten, so the rungs would carry effectively
+//! fixed-length trajectories and there is no variable trajectory length to
+//! trade against the sweep count.
 
 use rand::Rng;
 
