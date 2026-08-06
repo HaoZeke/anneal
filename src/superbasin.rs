@@ -2110,6 +2110,7 @@ impl SuperbasinEscape {
             hops_saved: self.stats.hops_saved,
             improvements: (self.stats.improvements, self.stats.gain),
             archived: self.store.len(),
+            separability: None,
         }
     }
 }
@@ -2161,6 +2162,108 @@ pub struct SuperbasinReport {
     pub improvements: (usize, f64),
     /// Structures held for landing on.
     pub archived: usize,
+    /// Structural separability of the top-level coarse states, when asked for.
+    pub separability: Option<Separability>,
+}
+
+
+/// How well a set of features separates the coarse states the transitions
+/// imply.
+///
+/// A one-way analysis of variance on the funnel labels, pooled over feature
+/// dimensions: between-group variance over within-group variance, with the
+/// usual degrees of freedom. It answers one question and it is the question the
+/// successor-representation framing raises.
+///
+/// `N = (I - Q)^-1` can only be formed over states that were visited, so the
+/// exit it computes is available for a superbasin already mapped and not for
+/// one never seen, and a 98-point run visits 11366 basins on a landscape whose
+/// minimum count grows like `exp(alpha N)`. Reinforcement learning went around
+/// that by approximating the same operator as a function of state features
+/// rather than tabulating it over states (successor features,
+/// doi:10.1073/pnas.1907370117). That works exactly when basins in the same
+/// coarse state look alike and basins in different ones do not.
+///
+/// `f` well above one says the transition-derived partition is structurally
+/// predictable, so an exit could be learned for basins never entered. `f` near
+/// one says it is not, and that a learned exit would have nothing to learn
+/// from these features.
+#[derive(Debug, Clone)]
+pub struct Separability {
+    /// Pooled F statistic: between-group over within-group variance.
+    pub f: f64,
+    /// Coarse states carrying at least two structures.
+    pub groups: usize,
+    /// Structures the statistic was computed on.
+    pub points: usize,
+    /// Per-dimension F, so a single informative feature is visible behind a
+    /// pooled average.
+    pub per_dimension: Vec<f64>,
+}
+
+impl SuperbasinEscape {
+    /// Structural separability of the top-level coarse states.
+    ///
+    /// `features` maps a structure to a descriptor. Returns `None` when fewer
+    /// than two coarse states carry two structures each, which is not a
+    /// negative result but an absence of one.
+    pub fn separability<F>(&self, features: F) -> Option<Separability>
+    where
+        F: Fn(ArrayView1<f64>) -> Array1<f64>,
+    {
+        let h = self.hierarchy();
+        if h.depth() == 0 {
+            return None;
+        }
+        let depth = h.depth();
+        let mut groups: BTreeMap<usize, Vec<Array1<f64>>> = BTreeMap::new();
+        for (basin, (_, state)) in &self.store {
+            if let Some(top) = h.state_at(depth, *basin) {
+                groups.entry(top).or_default().push(features(state.view()));
+            }
+        }
+        groups.retain(|_, v| v.len() >= 2);
+        if groups.len() < 2 {
+            return None;
+        }
+        let dim = groups.values().next()?.first()?.len();
+        let points: usize = groups.values().map(|v| v.len()).sum();
+        let mut per_dimension = Vec::with_capacity(dim);
+        for d in 0..dim {
+            let grand: f64 = groups
+                .values()
+                .flat_map(|v| v.iter().map(|x| x[d]))
+                .sum::<f64>()
+                / points as f64;
+            let mut between = 0.0;
+            let mut within = 0.0;
+            for v in groups.values() {
+                let mean: f64 = v.iter().map(|x| x[d]).sum::<f64>() / v.len() as f64;
+                between += v.len() as f64 * (mean - grand) * (mean - grand);
+                within += v.iter().map(|x| (x[d] - mean) * (x[d] - mean)).sum::<f64>();
+            }
+            let df_b = (groups.len() - 1) as f64;
+            let df_w = (points - groups.len()) as f64;
+            let f = if within > 0.0 && df_w > 0.0 {
+                (between / df_b) / (within / df_w)
+            } else {
+                f64::NAN
+            };
+            per_dimension.push(f);
+        }
+        let finite: Vec<f64> = per_dimension.iter().copied().filter(|v| v.is_finite()).collect();
+        let f = if finite.is_empty() {
+            f64::NAN
+        } else {
+            finite.iter().sum::<f64>() / finite.len() as f64
+        };
+        Some(Separability {
+            f,
+            groups: groups.len(),
+            points,
+            per_dimension,
+        })
+    }
 }
 
 #[cfg(test)]

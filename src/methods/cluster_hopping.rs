@@ -645,6 +645,16 @@ pub struct Config {
     pub superbasin_escape: bool,
     /// Hops between escapes, on top of the stall condition.
     pub superbasin_period: usize,
+    /// Measure whether the coarse states the transitions imply are separable by
+    /// structure.
+    ///
+    /// The exit algebra works over states that were visited, so it escapes a
+    /// superbasin already mapped and cannot reach one never seen. Whether that
+    /// limit can be lifted turns on one measurable question: do basins in the
+    /// same transition-derived coarse state look alike. This answers it with a
+    /// one-way analysis of variance on template-matching fractions over the
+    /// archived structures, at the end of the run and off the ledger.
+    pub superbasin_features: bool,
     /// Symmetrise onto the symmetry the structure nearly has, on a stall.
     ///
     /// Oakley, Johnston and Wales report the mean first encounter time for the
@@ -982,6 +992,7 @@ impl Config {
             superbasin_report: false,
             superbasin_escape: false,
             superbasin_period: 2_000,
+            superbasin_features: false,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
             symmetrise_patience: 2_000,
@@ -2519,7 +2530,17 @@ fn run_full<'g, R: Rng + ?Sized>(
         path_escapes,
         path_improvements,
         path_gain,
-        superbasin: superbasin.as_ref().map(|sb| sb.report()),
+        superbasin: superbasin.as_ref().map(|sb| {
+            let mut r = sb.report();
+            if cfg.superbasin_features {
+                // Polyhedral template fractions, the same descriptor the
+                // benchmark reports a run's morphology with, so a separability
+                // measured here and a morphology quoted there mean the same
+                // thing.
+                r.separability = sb.separability(|st| crate::structure::ptm_fractions(st, n, 0.12));
+            }
+            r
+        }),
     }
 }
 
