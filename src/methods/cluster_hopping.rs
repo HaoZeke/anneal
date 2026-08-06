@@ -2778,6 +2778,73 @@ mod tests {
         (e, cur)
     }
 
+    /// Each rung adapts its own step size and its own metric, and a swap moves
+    /// configurations without moving the adaptation.
+    ///
+    /// Asserted rather than argued in a comment, because it is the property an
+    /// exchange layer built on top of this will assume. A hot rung and a cold
+    /// rung traverse differently conditioned regions and converge to different
+    /// step sizes; one adapter shared across rungs would average them into a
+    /// step size no rung wants, and nothing in a solve count would show it.
+    #[test]
+    fn every_rung_adapts_its_own_sampler() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.replicas = 3;
+        cfg.swap_period = 5;
+        let mut h = crate::hmc::hop::HopConfig::new(6, crate::hmc::metric::MetricKind::Identity);
+        h.warmup_hops = 20;
+        h.max_depth = 2;
+        cfg.hmc = Some(h);
+        let mut ledger = Ledger::new(40_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
+        // A quadratic bowl, so the trajectory has a gradient to follow and the
+        // adaptation has something to converge to.
+        let mut eg = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+            if !led.charge() {
+                return None;
+            }
+            let e = x.iter().map(|v| v * v).sum::<f64>();
+            Some((e, x.mapv(|v| 2.0 * v)))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let start = random_cluster(6, 0.7, cfg.min_separation, &mut rng);
+        let out = run_with_energy_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            Some(&mut eg),
+            &mut rng,
+        );
+        assert_eq!(
+            out.hmc.len(),
+            3,
+            "a three-rung ladder reported {} samplers",
+            out.hmc.len()
+        );
+        for (k, d) in out.hmc.iter().enumerate() {
+            assert!(
+                d.proposals > 0,
+                "rung {k} made no proposals, so its sampler never ran"
+            );
+            assert!(
+                d.epsilon_final > 0.0 && d.epsilon_final.is_finite(),
+                "rung {k} froze at a step size of {}",
+                d.epsilon_final
+            );
+        }
+        // Independently adapted, not one adapter read three times. Rungs that
+        // saw different histories must not agree to the last bit.
+        let eps: Vec<f64> = out.hmc.iter().map(|d| d.epsilon_final).collect();
+        assert!(
+            eps.iter().any(|v| (v - eps[0]).abs() > 0.0),
+            "all three rungs froze at exactly {}, which is one adapter wearing \
+             three labels",
+            eps[0]
+        );
+    }
+
     #[test]
     fn respects_the_ledger() {
         let cfg = Config::for_cluster(6);
