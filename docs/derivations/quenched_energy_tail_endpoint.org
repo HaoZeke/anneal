@@ -3,7 +3,7 @@
 
 * Status
 
-Branch =feat/tail-endpoint=, commits =969e663= through =4a4a1b3=, not merged
+Branch =feat/tail-endpoint=, commits =969e663= through =5060ae0=, not merged
 and not pushed. =src/tail.rs= carries the construction and its sixteen tests,
 =examples/tail_classifier.rs= the retrospective measurement,
 =Outcome::quenched= and =Config::trace_quenched= the recorder. This note draws
