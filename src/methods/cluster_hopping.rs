@@ -508,6 +508,12 @@ pub struct Config {
     /// descriptor space with no physical meaning; against a shape distance it
     /// is a length.
     pub merge_radius: f64,
+    /// Kernel width for [`Keying::Triplet`], in the units of the coordinates.
+    ///
+    /// Ignored by every other keying. Defaults to the Lennard-Jones value; a
+    /// potential with a different pair minimum needs it scaled the way
+    /// `container` and `min_separation` are.
+    pub keying_sigma: f64,
     /// Design point for the budget-window temperature, as a fraction of the
     /// sphere-model descent boundary. Must lie strictly below two.
     pub theta: f64,
@@ -930,6 +936,7 @@ impl Config {
             // accumulated, an escape test was always true and a return test
             // never was. The mechanism was inert rather than ineffective.
             merge_radius: 0.7,
+            keying_sigma: 2.5,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
@@ -1307,7 +1314,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 cfg.bias_height
             };
             BasinBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_tuned(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.keying_sigma,
+                ),
                 cfg.merge_radius,
                 h,
                 cfg.bias_gamma,
@@ -1441,7 +1453,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut spectral: Option<crate::spectral::SpectralBias<ClusterFingerprint>> =
         if cfg.track_funnels {
             let mut sb = crate::spectral::SpectralBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_tuned(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.keying_sigma,
+                ),
                 cfg.merge_radius,
                 cfg.bias_height,
                 cfg.bias_gamma,
@@ -1476,7 +1493,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     // instead would break under replica exchange, where each rung owns its own
     // bias and the indices of one rung mean nothing in another.
     let mut identity = BasinIndex::new(
-        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+        ClusterFingerprint::of_tuned(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.keying_sigma,
+                ),
         cfg.merge_radius,
     );
     // Structures kept for path endpoints. Only ones far from every member are
@@ -2145,7 +2167,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 biases.insert(rep, std::mem::replace(
                     &mut bias,
                     BasinBias::new(
-                        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                        ClusterFingerprint::of_tuned(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.keying_sigma,
+                ),
                         cfg.merge_radius,
                         cfg.bias_height,
                         cfg.bias_gamma,
@@ -2718,6 +2745,9 @@ pub enum ClusterFingerprint {
     /// Sorted per-point pair energies, keying on how well each point is bound
     /// rather than on how far apart the points are.
     Sites(SiteEnergies),
+    /// Sorted distances with the two-body and three-body kernel spectra
+    /// appended, compared by Euclidean distance.
+    Triplet(Box<crate::tensor_id::TripletSpectrum>),
     /// Coordinates put in a canonical order against a fixed reference, so
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
@@ -2752,6 +2782,23 @@ pub enum Keying {
     /// Matching each structure once against a reference costs one call per hop
     /// and leaves every comparison Euclidean.
     Canonical,
+    /// Sorted distances with the kernel spectra of
+    /// [`crate::tensor_id::TripletSpectrum`] appended.
+    ///
+    /// The only keying here that is strictly richer than the default rather
+    /// than different from it: the descriptor carries the distance spectrum
+    /// entire, so at a fixed radius it separates whatever [`Keying::Distances`]
+    /// separated and can only add. What it adds is three-body, the weighted
+    /// triangle sum a multiset of distances cannot hold.
+    ///
+    /// It also needs no reference structure and no chosen coordinate, which
+    /// [`Keying::Canonical`] and a bond-order collective variable both do.
+    ///
+    /// The radius is a different number from the one [`Keying::Distances`]
+    /// uses. The descriptor is a concatenation, so its distances are larger by
+    /// the length of the appended block, measured at about a third more on the
+    /// response to a quench-scale displacement.
+    Triplet,
 }
 
 /// The keying a config asks for, honouring the older boolean.
@@ -2784,12 +2831,31 @@ impl ClusterFingerprint {
         Self::of_with(n_points, keying, &Array1::zeros(0))
     }
 
-    /// The descriptor for a named keying, against `reference`.
+    /// The descriptor for a named keying, against `reference`, with the
+    /// [`Keying::Triplet`] kernel width at its default.
     pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
+        Self::of_tuned(n_points, keying, reference, 2.5)
+    }
+
+    /// The descriptor for a named keying, against `reference`, with the kernel
+    /// width `sigma` for [`Keying::Triplet`].
+    ///
+    /// `sigma` carries the length units of the coordinates, so a potential
+    /// whose pair minimum is not the Lennard-Jones `2^(1/6)` needs it scaled
+    /// the way the container and the minimum separation are.
+    pub fn of_tuned(
+        n_points: usize,
+        keying: Keying,
+        reference: &Array1<f64>,
+        sigma: f64,
+    ) -> Self {
         match keying {
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
+            Keying::Triplet => ClusterFingerprint::Triplet(Box::new(
+                crate::tensor_id::TripletSpectrum::new(n_points).with_sigma(sigma),
+            )),
             #[cfg(feature = "ira")]
             Keying::Canonical => {
                 if reference.len() == 3 * n_points {
@@ -2813,6 +2879,7 @@ impl Fingerprint for ClusterFingerprint {
             ClusterFingerprint::Spectrum(s) => s.describe(x),
             ClusterFingerprint::Coordinates => x.to_owned(),
             ClusterFingerprint::Sites(s) => s.describe(x),
+            ClusterFingerprint::Triplet(t) => t.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
         }
