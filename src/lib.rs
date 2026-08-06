@@ -63,6 +63,8 @@ pub mod twin;
 pub mod spectral;
 pub mod structure;
 pub mod symmetrise;
+/// Endpoint of the quenched-energy distribution, by peaks over threshold.
+pub mod tail;
 pub mod terminate;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;

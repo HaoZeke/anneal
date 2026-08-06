@@ -851,6 +851,15 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Whether every quenched energy is kept, not only the improving ones.
+    ///
+    /// A run pays for one relaxation per hop and reads a number off each. The
+    /// running minimum keeps one of them; the rest are a sample from the
+    /// density of states of minima in the region the chain is in, and that
+    /// sample carries what the minimum cannot, namely whether the region has a
+    /// floor above the target. See [`crate::tail`]. Three `usize`-and-`f64`
+    /// words per hop, so a 400000-evaluation run costs about 200 kilobytes.
+    pub trace_quenched: bool,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
     ///
@@ -986,6 +995,7 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: 1e-3,
+            trace_quenched: false,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             twin_moves: false,
@@ -1053,6 +1063,14 @@ pub struct Outcome {
     /// improves ten thousand times is descending, and the tail of that is not
     /// what anyone is asking about.
     pub improvements: Vec<(usize, usize, usize, f64)>,
+    /// Every quenched energy, with the charged count and basin count at it.
+    ///
+    /// Empty unless [`Config::trace_quenched`] is set. Ordered by hop, so a
+    /// prefix of it is what the run had seen at a given point in its budget,
+    /// which is what makes a call read off it a prediction rather than a
+    /// summary. The basin count is carried so that repeat visits to one basin
+    /// can be dropped without a second descriptor pass.
+    pub quenched: Vec<(usize, usize, f64)>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -1416,6 +1434,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
+    let mut quenched: Vec<(usize, usize, f64)> = Vec::new();
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
     // Kept here rather than in a StallDetector because the threshold is not a
@@ -1782,6 +1801,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             unconverged_records += 1;
         }
         hops += 1;
+        // Taken under the same guard the ledger uses. A partial quench carries
+        // an energy above the minimum it was heading for, so it is a draw from
+        // a different distribution than the one the tail model is about, and
+        // there is no threshold high enough to keep such a draw out of the
+        // exceedances: it lands wherever the relaxation stopped.
+        if cfg.trace_quenched && recordable {
+            quenched.push((ledger.spent(), bias.n_basins(), e_new));
+        }
         if improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
         }
@@ -2338,6 +2365,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         soft_escapes,
         soft_crossed,
         improvements,
+        quenched,
         angular: (angular_tried, angular_accepted, angular_ratio),
         contextual: (contextual.picks.clone(), contextual.forced),
         screen: (
