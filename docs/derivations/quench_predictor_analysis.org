@@ -205,7 +205,7 @@ bounded away from zero, then \(\sigma\to+\infty\).
 |-------------|-----|
 | Global convergence of basin hopping | Different algorithm; requires landscape hypotheses (Wales, Hajek) |
 | False-Hopeless probability under LJ | Model misspecification; needs experiments, not a lemma |
-| Competitiveness with L-BFGS-B evaluation counts | Separate issue (=warm_lbfgs.rs= already documents ~10× gap) |
+| Competitiveness with L-BFGS-B evaluation counts | Separate issue; =warm_lbfgs_wolfe.org= now documents 386.1 evaluations per relaxation, 1.4 times a reference L-BFGS-B on LJ75 |
 | Optimality of \(c=2\), \(w=4\), \(m\) | Engineering defaults; retune with measurement |
 
 The CG_DESCENT pattern is: prove *descent of the search direction under

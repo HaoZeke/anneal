@@ -104,8 +104,8 @@ charged (budget truthfulness).
 | Not claimed | Reason |
 |-------------|--------|
 | Global convergence of L-BFGS on general \(f\) | Needs standard assumptions (Lipschitz gradient, Wolfe line search always succeeds, etc.); see Nocedal--Wright |
-| Evaluation counts competitive with L-BFGS-B | Header of =warm_lbfgs.rs= reports ~10× more evals than a reference L-BFGS-B on LJ75; open defect |
 | Descent of the L-BFGS *direction* for arbitrary memory | Only: if \(g^\top d\ge 0\), memory is discarded. No CG_DESCENT-style \(g^\top d\le -c\|g\|^2\) for the two-loop formula |
+| The retained curvature engaging across a call | Header of =warm_lbfgs.rs= reports 386.1 evaluations per relaxation on LJ75, 1.4 times a reference L-BFGS-B, converging at \(1.45\times10^{-5}\); warm and cold arms agree to the last digit because 0 of 400 relaxations start with stored curvature, so the type's own memory is never what a fresh relaxation draws on |
 
 * 5. Why this matters for the charged ledger
 
