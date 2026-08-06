@@ -63,6 +63,9 @@ pub mod twin;
 pub mod spectral;
 pub mod structure;
 pub mod symmetrise;
+/// Replica exchange: the bias-aware swap ratio, the non-reversible sweep, and
+/// a ladder placed by the communication barrier the run measures.
+pub mod tempering;
 pub mod terminate;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
@@ -97,6 +100,10 @@ pub use hmc::{
     OMELYAN_LAMBDA, OmelyanIntegrator,
 };
 pub use laws::LawViolation;
+pub use tempering::{
+    IndexProcess, Ladder, ReplicaMove, ReplicaTarget, SwapScheme, TARGET_SWAP_ACCEPT,
+    beta_step_for_acceptance, biased_swap_log_ratio, swap_log_ratio, swap_probability,
+};
 pub use methods::{
     AmsaResult, ArmStat, BayesianMixingResult, BayesianMixingSampler, DEFAULT_ALPHA, DEFAULT_BETA0,
     DEFAULT_GAMMA, DEFAULT_STEPS_PER_CONTROL, DEFAULT_TARGET_WALKERS, DmcPopulationResult,
