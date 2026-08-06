@@ -914,6 +914,16 @@ pub struct Config {
     pub container: f64,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
+    /// Cut the move library down to the uniform displacement alone.
+    ///
+    /// The control the Hamiltonian proposal has to be measured against. The
+    /// default library carries five kernels, three of which change a packing
+    /// rather than displace it, so an arm that replaces the whole library with
+    /// a trajectory and is compared against the default is being compared with
+    /// surface relocation and shell rotation as well as with the kick. That is
+    /// a fair question and a different one; this flag asks the brief's
+    /// question, which is whether Hamiltonian dynamics beats a random kick.
+    pub displacement_only: bool,
     /// Propose by a Hamiltonian trajectory instead of a displacement.
     ///
     /// The proposal runs on the underlying potential and its endpoint is
@@ -1015,6 +1025,7 @@ impl Config {
             // that relaxes after every perturbation.
             container: 0.9 * (n_points as f64).cbrt(),
             min_separation: 0.85,
+            displacement_only: false,
             hmc: None,
         }
     }
@@ -1419,7 +1430,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.twin_moves {
+    let kernels = if cfg.displacement_only {
+        vec![ClusterMove::AllPoints { step: 0.38 }]
+    } else if cfg.twin_moves {
         ClusterMove::library_with_twin(n)
     } else if cfg.learn_construction {
         ClusterMove::library_with_learned_reseed(n)
