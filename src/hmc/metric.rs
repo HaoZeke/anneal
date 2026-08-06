@@ -335,6 +335,43 @@ impl Metric {
     pub fn kinetic(&self, p: ArrayView1<f64>) -> f64 {
         0.5 * p.dot(&self.velocity(p))
     }
+
+    /// A lower bound on the condition number of `M`, from the factorisation
+    /// already in hand.
+    ///
+    /// The quantity the whole comparison turns on: a metric whose condition
+    /// number is one is the identity wearing another name, and one that is
+    /// large is carrying anisotropy the unit metric cannot. For the dense path
+    /// the squared ratio of the extreme diagonal entries of the Cholesky factor
+    /// bounds `cond(M)` below, which costs nothing beyond a pass over the
+    /// diagonal; for the diagonal path the ratio of the masses is exact.
+    ///
+    /// The rigid modes are excluded. They are given [`RIGID_MASS`] by
+    /// construction, so including them would report the constant this module
+    /// chose rather than the curvature the structure has.
+    pub fn condition_bound(&self) -> f64 {
+        let (mut lo, mut hi) = (f64::INFINITY, 0.0f64);
+        match &self.chol {
+            Some(l) => {
+                for i in 0..self.dim {
+                    let v = l[[i, i]] * l[[i, i]];
+                    if v > 0.0 && v < self.rigid_c * 0.5 {
+                        lo = lo.min(v);
+                        hi = hi.max(v);
+                    }
+                }
+            }
+            None => {
+                for v in self.diag.iter() {
+                    if *v > 0.0 {
+                        lo = lo.min(*v);
+                        hi = hi.max(*v);
+                    }
+                }
+            }
+        }
+        if lo.is_finite() && lo > 0.0 { hi / lo } else { 1.0 }
+    }
 }
 
 /// Stan's regularised running variance, and the metric choice it feeds.
