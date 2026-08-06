@@ -72,6 +72,52 @@ pub const FLOOR: f64 = 0.05;
 /// is actually resisted.
 pub const ALPHA: f64 = 1.0;
 
+/// The three constants the operator is built from, carried as a value.
+///
+/// The constants above are covalent-chemistry practice, which is the wrong
+/// regime for a Lennard-Jones or Morse cluster: covalent numbers describe bonds
+/// that break, and a rare-gas cluster is held by a well that is shallower and
+/// longer ranged. Carrying the constants as a value rather than reading them
+/// from statics is what lets [`crate::hessian_fit`] replace them with numbers
+/// measured off the run's own descents.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ModelParams {
+    /// Force-constant scale, `K0`.
+    pub k0: f64,
+    /// Decay of the force constant with separation, `ALPHA`.
+    pub alpha: f64,
+    /// Diagonal shift as a fraction of `k0`, `FLOOR`.
+    pub floor: f64,
+}
+
+impl Default for ModelParams {
+    fn default() -> Self {
+        Self {
+            k0: K0,
+            alpha: ALPHA,
+            floor: FLOOR,
+        }
+    }
+}
+
+impl ModelParams {
+    /// The operator's shape at unit scale.
+    ///
+    /// Every term carries `k0` linearly, the pair constants through
+    /// `k0 exp(...)` and the diagonal through `floor k0`, so
+    /// `H(k0, alpha, floor) = k0 H(1, alpha, floor)` exactly and the depth
+    /// `1/2 g^T H^-1 g` goes as `1/k0`. A fit over the shape therefore never
+    /// varies `k0`: it recovers it afterwards in closed form, as the one factor
+    /// that lines the predicted depths up with the observed ones.
+    pub fn unit_scale(alpha: f64, floor: f64) -> Self {
+        Self {
+            k0: 1.0,
+            alpha,
+            floor,
+        }
+    }
+}
+
 /// Mean nearest-neighbour distance, which sets the scale everything is in.
 pub fn spacing(x: ArrayView1<f64>, n: usize) -> f64 {
     if n < 2 {
@@ -102,6 +148,20 @@ pub fn spacing(x: ArrayView1<f64>, n: usize) -> f64 {
 /// Matrix free: each pair contributes a rank-one term along its own direction,
 /// so nothing is stored and a product is one pass over the pairs.
 pub fn apply(x: ArrayView1<f64>, n: usize, v: ArrayView1<f64>, scale: f64) -> Array1<f64> {
+    apply_with(x, n, v, scale, ModelParams::default())
+}
+
+/// Applies the model Hessian to `v` with the constants given by `p`.
+///
+/// The same one pass over the pairs as [`apply`], with the three constants read
+/// from a value instead of from statics, so a calibration can sweep them.
+pub fn apply_with(
+    x: ArrayView1<f64>,
+    n: usize,
+    v: ArrayView1<f64>,
+    scale: f64,
+    p: ModelParams,
+) -> Array1<f64> {
     let mut out = Array1::zeros(3 * n);
     for i in 0..n {
         for j in (i + 1)..n {
@@ -120,7 +180,7 @@ pub fn apply(x: ArrayView1<f64>, n: usize, v: ArrayView1<f64>, scale: f64) -> Ar
             }
             // Exponential falloff in units of the structure's own spacing, so
             // the operator carries no length of its own.
-            let k_ij = K0 * (-ALPHA * (r / scale - 1.0)).exp();
+            let k_ij = p.k0 * (-p.alpha * (r / scale - 1.0)).exp();
             // Relative displacement projected on the pair direction: only the
             // stretching part of the motion is resisted.
             let mut du = 0.0;
@@ -136,7 +196,7 @@ pub fn apply(x: ArrayView1<f64>, n: usize, v: ArrayView1<f64>, scale: f64) -> Ar
     }
     // The bending the stretch terms do not carry.
     for k in 0..(3 * n) {
-        out[k] += FLOOR * K0 * v[k];
+        out[k] += p.floor * p.k0 * v[k];
     }
     out
 }
@@ -172,6 +232,21 @@ fn deflate(v: &mut Array1<f64>, n: usize) {
 /// decision rather than a step, and the surrogate that consumes it regresses
 /// away any systematic bias a truncated solve leaves.
 pub fn depth(x: ArrayView1<f64>, n: usize, gradient: ArrayView1<f64>, iters: usize) -> f64 {
+    depth_with(x, n, gradient, iters, ModelParams::default())
+}
+
+/// Predicted depth with the constants given by `p`.
+///
+/// The solve [`depth`] runs, with the operator's three constants read from a
+/// value. A calibration evaluates this once per candidate per sample, so the
+/// cost of a refit is `grid points x samples x iters` products.
+pub fn depth_with(
+    x: ArrayView1<f64>,
+    n: usize,
+    gradient: ArrayView1<f64>,
+    iters: usize,
+    p: ModelParams,
+) -> f64 {
     if n < 2 || gradient.len() != 3 * n {
         return 0.0;
     }
@@ -180,15 +255,15 @@ pub fn depth(x: ArrayView1<f64>, n: usize, gradient: ArrayView1<f64>, iters: usi
     deflate(&mut b, n);
     let mut d = Array1::<f64>::zeros(3 * n);
     let mut r = b.clone();
-    let mut p = r.clone();
+    let mut p_dir = r.clone();
     let mut rr = r.dot(&r);
     if rr <= 0.0 {
         return 0.0;
     }
     for _ in 0..iters.max(1) {
-        let mut ap = apply(x, n, p.view(), scale);
+        let mut ap = apply_with(x, n, p_dir.view(), scale, p);
         deflate(&mut ap, n);
-        let pap = p.dot(&ap);
+        let pap = p_dir.dot(&ap);
         // A non-positive curvature means the truncated operator has run out of
         // usable information in this direction, which for a semidefinite
         // operator means the residual has entered its nullspace.
@@ -196,14 +271,14 @@ pub fn depth(x: ArrayView1<f64>, n: usize, gradient: ArrayView1<f64>, iters: usi
             break;
         }
         let alpha = rr / pap;
-        d.scaled_add(alpha, &p);
+        d.scaled_add(alpha, &p_dir);
         r.scaled_add(-alpha, &ap);
         let rr_new = r.dot(&r);
         if rr_new <= 1e-24 * rr {
             break;
         }
         let beta = rr_new / rr;
-        p = &r + &(p.mapv(|v| v * beta));
+        p_dir = &r + &(p_dir.mapv(|v| v * beta));
         rr = rr_new;
     }
     0.5 * b.dot(&d)
@@ -319,6 +394,51 @@ mod tests {
         assert!(
             big > 4.0 * small,
             "tripling the gradient moved the depth from {small} to {big}, which is not quadratic"
+        );
+    }
+
+    /// The scale enters the depth as a pure reciprocal, which is the identity a
+    /// calibration relies on when it fits the shape at `k0 = 1` and recovers the
+    /// scale in closed form afterwards. If this fails, the shape and the scale
+    /// are entangled and a two-parameter search is not enough.
+    #[test]
+    fn the_depth_goes_as_the_reciprocal_of_the_force_constant_scale() {
+        let n = 10;
+        let x = blob(n);
+        let mut g = Array1::zeros(3 * n);
+        for i in 0..n {
+            g[3 * i] = 0.07 * ((i % 4) as f64 - 1.5);
+            g[3 * i + 2] = 0.03 * ((i % 3) as f64 - 1.0);
+        }
+        let unit = ModelParams::unit_scale(1.7, 0.02);
+        let scaled = ModelParams {
+            k0: 8.0,
+            ..unit
+        };
+        let a = depth_with(x.view(), n, g.view(), 40, unit);
+        let b = depth_with(x.view(), n, g.view(), 40, scaled);
+        assert!(
+            (a / (8.0 * b) - 1.0).abs() < 1e-9,
+            "eightfold stiffer gave depth {b} against {a}, not an eighth"
+        );
+    }
+
+    /// The parametrised entry points have to reproduce the constants exactly,
+    /// or the calibration is fitting a different operator than the one the
+    /// depth consumer runs.
+    #[test]
+    fn the_defaults_reproduce_the_fixed_constants() {
+        let n = 9;
+        let x = blob(n);
+        let mut g = Array1::zeros(3 * n);
+        for i in 0..n {
+            g[3 * i + 1] = 0.11 * ((i % 5) as f64 - 2.0);
+        }
+        let fixed = depth(x.view(), n, g.view(), 25);
+        let parametrised = depth_with(x.view(), n, g.view(), 25, ModelParams::default());
+        assert_eq!(
+            fixed, parametrised,
+            "the parametrised solve disagreed with the fixed one"
         );
     }
 
