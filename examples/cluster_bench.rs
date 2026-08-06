@@ -151,6 +151,9 @@ fn main() {
     // Symmetrise onto the structure's own approximate symmetry when stuck.
     cfg.symmetrise_on_stall = opts.contains(&"sym");
     cfg.budget_window = opts.contains(&"bfwt");
+    // The like-for-like control for the Hamiltonian arms: the kick alone,
+    // without the three packing-changing kernels the default library carries.
+    cfg.displacement_only = opts.contains(&"kick");
     if opts.contains(&"sites") {
         cfg.keying = Keying::Sites;
     }
