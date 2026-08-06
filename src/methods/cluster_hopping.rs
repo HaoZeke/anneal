@@ -673,6 +673,21 @@ pub struct Config {
     pub superbasin_escape: bool,
     /// Hops between escapes, on top of the stall condition.
     pub superbasin_period: usize,
+    /// Rebuild the transition graph with basin identity taken modulo the
+    /// symmetry orbit, and report what changes.
+    ///
+    /// The graph's states are descriptor classes, and the sorted distance
+    /// spectrum calls a structure and its own relabelling two different
+    /// basins. A chain re-entering one minimum under twenty labels then looks
+    /// exactly like a chain sweeping through twenty minima once each, and the
+    /// expected-visits statistic that decides whether there is a superbasin to
+    /// escape cannot tell them apart. This measures the difference instead of
+    /// arguing it: shape distance through IRA, restricted to structures whose
+    /// quenched energies already agree, which is exact because an orbit is a
+    /// level set of the energy.
+    ///
+    /// Needs the `ira` feature. Off the ledger and at the end of the run.
+    pub superbasin_quotient: bool,
     /// Measure whether the coarse states the transitions imply are separable by
     /// structure.
     ///
@@ -1020,6 +1035,7 @@ impl Config {
             superbasin_report: false,
             superbasin_escape: false,
             superbasin_period: 2_000,
+            superbasin_quotient: false,
             superbasin_features: false,
             symmetrise_on_stall: false,
             symmetry_tolerance: 0.35,
@@ -2560,6 +2576,42 @@ fn run_full<'g, R: Rng + ?Sized>(
         path_gain,
         superbasin: superbasin.as_ref().map(|sb| {
             let mut r = sb.report();
+            if cfg.superbasin_quotient {
+                #[cfg(feature = "ira")]
+                {
+                    // Zero for a structure against its own relabelling and
+                    // rotation, order one between different minima: measured
+                    // 2.7e-16 for a relabelled copy at 13 points and 2.9e-16 at
+                    // 38, against 1.58 for a different basin. The threshold sits
+                    // in a gap of fifteen orders of magnitude, and the report
+                    // carries the largest accepted and smallest rejected
+                    // distance so it can be checked rather than trusted.
+                    let metric = crate::shape::IraMetric::default();
+                    // The energy filter is wide on purpose. An orbit is a
+                    // level set of the energy for exact minima, but the archive
+                    // holds accepted chain states and 181 of 12287 relaxations
+                    // reach a gradient of 1e-3 within the step cap, so two
+                    // members of one orbit can sit further apart in energy than
+                    // a converged pair would. 1e-2 is fifty times below the
+                    // 0.5 spacing between distinct minima on this landscape, so
+                    // it cannot miss a true pair, and the shape distance does
+                    // the discriminating.
+                    r.quotient = Some(sb.quotient(
+                        |a, b| metric.distance(a, b),
+                        1e-3,
+                        1e-2,
+                        16,
+                    ));
+                }
+                #[cfg(not(feature = "ira"))]
+                {
+                    // Without a shape distance the only usable test is exact
+                    // energy degeneracy, which merges accidental degeneracies
+                    // along with real orbits. Refused rather than reported as
+                    // if it were the same measurement.
+                    r.quotient = None;
+                }
+            }
             if cfg.superbasin_features {
                 // Polyhedral template fractions, the same descriptor the
                 // benchmark reports a run's morphology with, so a separability
