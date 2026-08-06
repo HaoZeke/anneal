@@ -1,0 +1,179 @@
+#+TITLE: Why Stan's mass-matrix adaptation fails on a cluster target, structurally
+#+OPTIONS: toc:2 num:t
+
+* Status
+
+Branch =feat/hmc-hop=, six commits =3584888..eadd09c=, not merged and not
+pushed. =src/hmc/{metric,dual_average,hop}.rs= carry the full derivation and
+measurement in their module documentation; this note draws the argument out
+of three files into one place and adds nothing the source does not already
+state. Placement question addressed in Section 6.
+
+* Abstract
+
+Hamiltonian Monte Carlo replaces basin hopping's uniform kick with a
+trajectory: direction from the gradient, step size from dual averaging
+against a target acceptance, trajectory length from the no-U-turn
+criterion. What is left for a human to choose is the mass matrix, and this
+branch measures three choices on the hopping chain rather than picking
+one by hand. The result is not that HMC loses to the crate's own move
+library, though it does. It is *why* Stan's own adaptation, sample-covariance
+estimation of
+the metric, fails on this class of target, and the reason is structural
+rather than a matter of more data: a cluster potential is invariant under
+permuting indistinguishable atoms and under global rotation, so its
+population covariance is isotropic by symmetry, and a sample estimate of an
+isotropic quantity is estimating nothing but its own noise.
+
+* 1. The structural argument
+
+A cluster potential's value depends on the point set only through pairwise
+distances. Two consequences follow exactly, not approximately: relabelling
+identical atoms leaves the potential unchanged, and rotating every
+coordinate about the centre of mass leaves it unchanged. Both are exact
+symmetries of the target density, not properties of one structure, so the
+population covariance of the target inherits them and is isotropic, a
+scalar times the identity.
+
+Stan's Euclidean metric (Stan reference manual, MCMC chapter, "Euclidean
+metric") estimates the inverse mass matrix from the regularised sample
+covariance of the draws taken so far. That estimator is built for targets
+whose coordinates carry different scales from each other, and it is the
+wrong tool here: whatever anisotropy it reports on a cluster target is a
+finite-sample artefact of which structures the chain happened to visit,
+never a property of the target it estimates. More samples do not fix this,
+because the quantity being estimated does not have the shape the estimator
+requires.
+
+The crate has an alternative the general-purpose sampler does not: a model
+Hessian (=src/model_hessian.rs=) read off the current geometry at zero cost
+on the evaluation ledger, giving a mass matrix with the target's own
+curvature instead of an estimate of noise.
+
+* 2. What was measured
+
+LJ38 at \(4\times10^5\) charged evaluations, 24 seeds an arm, Wilson 95 per
+cent intervals, corrected relaxer (=src/hmc/hop.rs=, commit =844c448=):
+
+| arm | proposal | solved | 95% CI | charged/hop |
+|-----------+----------------------------------+--------+-------------+------|
+| uniform   | the crate's five-kernel library  | 14/24 | [0.39, 0.76] | 41 |
+| hmc-hess  | trajectory, model Hessian metric | 6/24  | [0.12, 0.45] | 76 |
+| hmc       | trajectory, \(M = I\)            | 5/24  | [0.09, 0.41] | 84 |
+| kick      | the uniform displacement alone   | 1/24  | [0.01, 0.20] | 29 |
+| hmc-diag  | trajectory, Stan's sample diagonal | 0/24 | [0.00, 0.14] | 148 |
+
+Two comparisons, pointing opposite ways. Against the uniform kick it
+replaces, the Hamiltonian proposal is ahead, 6/24 and 5/24 against 1/24,
+though neither gap clears a two-sided Fisher exact test at 24 seeds
+(\(p=0.097\) and \(p=0.19\)): not worse than the kick, and looks better, at
+2.6 times the charged cost per hop. Against the library the driver runs by
+default, which adds surface relocation, shell rotation, and symmetrisation to
+the kick, the trajectory loses and the loss is significant (\(p=0.039\) and
+\(p=0.017\)). Replacing the whole move library with Hamiltonian dynamics
+gives up more than the dynamics returns; matched against only the kernel it
+was built to replace, it wins.
+
+That divide is consistent with the pattern documented across this crate's
+other measured mechanisms (=docs/inert_mechanisms.org= in the paper
+repository catalogues thirteen; this is not one of them, nothing here fails
+to fire): what pays is changing what a hop can reach, and a trajectory
+matched to the kick's reach reaches exactly as far as the kick, in a
+better-informed direction, while surface relocation and symmetrisation
+place a point somewhere a displacement of that amplitude cannot reach at
+all.
+
+* 3. Dual averaging works; the metric matters by the amount theory predicts
+
+Both the identity and model-Hessian arms froze at an acceptance statistic
+of 0.801 against a target of 0.800, from step sizes found without a human
+sweep, with seed-to-seed spread of 2.1e-2 to 2.6e-2 (identity) and 4.9e-2 to
+5.8e-2 (model Hessian). Dual averaging (Hoffman and Gelman, "The No-U-Turn
+Sampler", JMLR 15 (2014) 1593-1623, algorithms 5 and 6) does what it is
+built to do.
+
+The model Hessian carries a condition number of 1.3e2 over the structures
+visited and reaches a step 2.4 times larger at the same acceptance target,
+a preconditioner's job. Stan's estimated diagonal carries a
+condition number reaching 1.2e3, and 4.4e3 at the extreme: not curvature,
+by the argument in Section 1, but finite-sample noise around an isotropic
+target. Under that mass matrix dual averaging cannot reach its target
+either, freezing at an acceptance of 0.934 against 0.800, the trajectory
+under-reaches at 1.35 against a target of 2.34, and the arm never leaves
+the icosahedral funnel across 24 seeds: deepest structure -173.134317, the
+second minimum, where every other arm reaches -173.928427 at least once.
+Stan cannot see this coming, because Stan carries no model of its target
+and so has no way to know the covariance it is estimating is a constant
+times the identity.
+
+* 4. The no-U-turn criterion does not fire
+
+The depth cap (=HopConfig::max_depth=, default 5, 31 leaves) bound on 99.2
+per cent of identity proposals and 95.5 per cent of model-Hessian ones.
+Raising it does not help: swept from 4 to 10, the cap still bound on 87 to
+99 per cent of proposals at every setting, at a cost rising to 1098 charged
+evaluations per hop. The trajectory length is set by the cap, not by the
+geometry the no-U-turn criterion is supposed to read, so the claim to have
+removed the trajectory-length parameter does not hold: the reach adaptation
+(Section 5 below) drives the trajectory time down as the cap rises, from
+14.9 at a cap of 4 to 0.57 at a cap of 10, holding the distance covered
+fixed, and a trajectory told to cover a fixed short distance in a
+114-dimensional space does not turn around on its own. The two adaptive
+rules are in conflict, and reach wins.
+
+The preconditioner does move the number in the right direction: the
+model-Hessian metric U-turns 5.7 times more often than the identity, which
+is the sign theory predicts, since the U-turn time is set by the slowest
+mode and the step size by the fastest, and a metric that closes the gap
+between them makes the criterion reachable more often.
+
+* 5. Momentum is matched on reach, not on energy
+
+Neither of the two obvious ways to set the trajectory's energy scale
+\(T_{\mathrm{traj}}\) works. The chain's own Metropolis temperature is
+wrong by two orders of magnitude in the direction that destroys the
+structure: 0.8, a threshold meant for differences between minima, injects
+45.6 units of kinetic energy into a 38-point cluster against a pair well
+depth of 1, which evaporates it rather than perturbing it. Matching the
+energy the control's kick injects is also wrong: measured on a relaxed
+13-point cluster at the library's half-width of 0.38, a uniform kick raises
+the energy by a median of 3.3e3 and a mean of 1.4e5, driven by pairs pushed
+onto the \(r^{-12}\) wall, which a quench absorbs and a trajectory cannot.
+
+What the two proposals have in common, and what the whole campaign is
+about, is how far they move the structure. \(T_{\mathrm{traj}}\) is
+therefore adapted so the trajectory's rigid-mode-free displacement matches
+the kick's, \(h\sqrt{\mathrm{dim}/3}\) for a uniform half-width \(h\),
+by a damped Newton step in \(\log T_{\mathrm{traj}}\) run during warmup
+alongside dual averaging. It charges nothing, is specific to no potential
+or size, and is what lets Section 2's comparison be about direction rather
+than about which arm happened to get a larger step.
+
+* 6. Divergences are exactly where the potential says they should be
+
+Rare, 4.0e-4 of proposals under both working metrics, and structural: they
+occur at a closest-pair separation of 0.67 to 0.74 of the mean spacing,
+which is the \(r^{-12}\) wall. A trajectory cannot cross a configuration
+with a pair inside about three quarters of a contact distance; that is a
+statement about the potential, transfers to any potential with a hard
+core, and is not a statement about the integrator.
+
+* 7. Placement
+
+Not manuscript material yet. The branch sits unmerged and unpushed, and a
+manuscript that claims a deposited reproduction pipeline regenerates its
+tables should not cite a kernel that is not in the tagged source. The
+module documentation for =hop.rs= also states plainly that the no-U-turn
+criterion does not fire under the current reach-adaptation rule, Section 4
+above, so calling this arm "NUTS" in a manuscript would report an
+implementation as adaptive when it runs fixed-length HMC under that name;
+that conflict wants resolving before the method is named in public.
+
+The finding, once the branch merges and the cap/reach conflict is settled
+one way or the other, is squarely on the paper's thesis: a domain-specific
+mass matrix built at zero ledger cost beats a general-purpose sampler's own
+adaptation on a target class where that adaptation is structurally blind,
+and it does so for a stated, checked reason rather than an empirical one.
+That argument does not depend on the implementation's remaining defects;
+the comparison against the crate's own library and the plain accounting of
+where the trajectory-length claim does not hold both do.
