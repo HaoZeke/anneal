@@ -914,6 +914,19 @@ pub struct Config {
     pub container: f64,
     /// Closest approach enforced before a trial is relaxed.
     pub min_separation: f64,
+    /// Propose by a Hamiltonian trajectory instead of a displacement.
+    ///
+    /// The proposal runs on the underlying potential and its endpoint is
+    /// quenched, so the acceptance test is unchanged: what changes is where the
+    /// trial comes from. Requires the caller to supply value and gradient
+    /// together through [`run_with_energy_gradient`], because each leapfrog
+    /// leaf is one charged evaluation and splitting the two would double it.
+    ///
+    /// Every parameter a displacement would need is adapted rather than set:
+    /// the step size by dual averaging, the trajectory length by the no-U-turn
+    /// criterion, the momentum scale against the control's reach. See
+    /// [`crate::hmc::hop`].
+    pub hmc: Option<crate::hmc::hop::HopConfig>,
 }
 
 impl Config {
@@ -1002,6 +1015,7 @@ impl Config {
             // that relaxes after every perturbation.
             container: 0.9 * (n_points as f64).cbrt(),
             min_separation: 0.85,
+            hmc: None,
         }
     }
 }
@@ -1115,6 +1129,15 @@ pub struct Outcome {
     pub path_improvements: usize,
     /// Total depth gained from paths, in energy units.
     pub path_gain: f64,
+    /// Sampler diagnostics per rung, when the Hamiltonian proposal is used.
+    ///
+    /// One entry per replica, because each rung adapts its own step size and
+    /// its own metric. The counters are the result rather than an error path:
+    /// a divergence rate says which configurations the sampler cannot traverse,
+    /// a cap rate near one says the no-U-turn criterion is being truncated, and
+    /// a metric condition near one says an adapted metric is carrying no
+    /// anisotropy at all.
+    pub hmc: Vec<crate::hmc::hop::HopDiagnostics>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -1129,6 +1152,16 @@ pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (
 /// Optional because only the soft-mode escape needs it: everything else in this
 /// driver works from relaxations alone.
 pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>> + 'g;
+
+/// Value and gradient together, charged to the ledger by the caller.
+///
+/// Separate from [`GradFn`] because the Hamiltonian proposal needs both at
+/// every leapfrog leaf and, on a pairwise potential, both come out of one pass
+/// over the pairs. Charging twice for one pass would make the arm look half as
+/// efficient as it is, which is exactly the kind of miscalibrated comparison
+/// this campaign has already made once.
+pub type EnergyGradFn<'g> =
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'g;
 
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
@@ -1236,7 +1269,24 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Outcome {
-    run_full(cfg, start, ledger, relax, grad, None, rng)
+    run_full(cfg, start, ledger, relax, grad, None, None, rng)
+}
+
+/// As [`run_with_gradient`], with value and gradient together, which is what
+/// [`Config::hmc`] needs.
+///
+/// Without this the Hamiltonian proposal has no way to evaluate a leapfrog leaf
+/// for one charge, and [`Config::hmc`] is ignored.
+pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    rng: &mut R,
+) -> Outcome {
+    run_full(cfg, start, ledger, relax, grad, energy_grad, None, rng)
 }
 
 /// As [`run_with_gradient`], with a bias supplied by the caller and left
@@ -1266,15 +1316,17 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         "a shared bias and a replica ladder are different things: \
          each rung owns its own bias"
     );
-    run_full(cfg, start, ledger, relax, grad, Some(bias), rng)
+    run_full(cfg, start, ledger, relax, grad, None, Some(bias), rng)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_full<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
+    mut energy_grad: Option<&mut EnergyGradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     rng: &mut R,
 ) -> Outcome {
@@ -1341,6 +1393,21 @@ fn run_full<'g, R: Rng + ?Sized>(
         None => (biases.remove(0), None),
     };
     let mut chains: Vec<(f64, Array1<f64>)> = Vec::new();
+    // One sampler per rung, parked and taken alongside the bias.
+    //
+    // Per chain and not global. A hot rung crosses barriers a cold rung cannot
+    // and its trajectories see a differently conditioned region, so the two
+    // converge to different step sizes and different metric estimates. A swap
+    // moves configurations between rungs; the adaptation stays with the
+    // temperature it was learned at, which is why this is parked with the bias
+    // rather than carried with the state.
+    let mut hop_parked: Vec<crate::hmc::hop::HopChain> = Vec::new();
+    let mut hop = cfg.hmc.as_ref().map(crate::hmc::hop::HopChain::new);
+    if cfg.hmc.is_some() {
+        for _ in 1..n_rep {
+            hop_parked.push(crate::hmc::hop::HopChain::new(cfg.hmc.as_ref().unwrap()));
+        }
+    }
     #[cfg(feature = "ira")]
     if cfg.shape_keyed {
         bias = bias.with_metric(Box::new(crate::shape::IraMetric::default()));
@@ -1564,7 +1631,29 @@ fn run_full<'g, R: Rng + ?Sized>(
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = if angular {
+        // The Hamiltonian proposal replaces the displacement rather than
+        // competing with it as one arm among many, because the comparison the
+        // campaign makes is between a trajectory and a kick at equal charge.
+        // An allocator mixing the two would measure the mixture.
+        let hamiltonian = cfg.hmc.is_some() && energy_grad.is_some() && !angular;
+        let mut hmc_trial: Option<Array1<f64>> = None;
+        if hamiltonian {
+            let hc = cfg.hmc.as_ref().unwrap();
+            let chain = hop.as_mut().unwrap();
+            let eg = energy_grad.as_deref_mut().unwrap();
+            let mut eg_ref: crate::hmc::hop::Energy<'_> = eg;
+            hmc_trial = chain
+                .propose(hc, ledger, x.view(), e, &mut eg_ref, rng)
+                .map(|p| p.x);
+            if hmc_trial.is_none() {
+                // The ledger ran out inside the trajectory, which is the
+                // ordinary way a run ends.
+                break;
+            }
+        }
+        let mut trial = if let Some(t) = hmc_trial {
+            t
+        } else if angular {
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
             angular_tried += 1;
@@ -2191,6 +2280,13 @@ fn run_full<'g, R: Rng + ?Sized>(
                         cfg.bias_gamma,
                     ),
                 ));
+                if let (Some(h), Some(hc)) = (hop.take(), cfg.hmc.as_ref()) {
+                    hop_parked.insert(rep, h);
+                    // A placeholder, replaced below by the destination rung's
+                    // own sampler. The adaptation does not travel with the
+                    // state.
+                    hop = Some(crate::hmc::hop::HopChain::new(hc));
+                }
                 let k = rep;
                 let j = (rep + 1) % n_rep;
                 if k != j {
@@ -2233,6 +2329,9 @@ fn run_full<'g, R: Rng + ?Sized>(
                 e = ne;
                 x = nx;
                 bias = biases.remove(rep);
+                if cfg.hmc.is_some() && rep < hop_parked.len() {
+                    hop = Some(hop_parked.remove(rep));
+                }
             }
         }
 
@@ -2318,6 +2417,16 @@ fn run_full<'g, R: Rng + ?Sized>(
     }
 
     let n_basins = bias.n_basins();
+    // Per-rung sampler diagnostics, with the active rung put back at its own
+    // index so the report reads in ladder order.
+    let hmc_diag: Vec<crate::hmc::hop::HopDiagnostics> = match hop {
+        Some(active) => {
+            let mut v: Vec<_> = hop_parked.iter().map(|h| h.diag.clone()).collect();
+            v.insert(rep.min(v.len()), active.diag.clone());
+            v
+        }
+        None => Vec::new(),
+    };
     let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
         // Handed back so the next chain inherits what this one learned.
@@ -2346,6 +2455,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             screen.explored,
             screen.observations(),
         ),
+        hmc: hmc_diag,
         tabu: (tabu.len(), tabu_hits),
         funnel: funnel_split.as_ref().map(|p| {
             let (a, b) = p.sizes();
@@ -2453,6 +2563,21 @@ pub fn optimize_with_gradient<'g>(
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
+}
+
+/// As [`optimize_with_gradient`], with value and gradient together for
+/// [`Config::hmc`].
+pub fn optimize_with_energy_gradient<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    seed: u64,
+) -> Outcome {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_energy_gradient(cfg, start.view(), ledger, relax, grad, energy_grad, &mut rng)
 }
 
 #[cfg(test)]
