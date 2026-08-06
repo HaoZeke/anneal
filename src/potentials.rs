@@ -83,6 +83,47 @@ impl PairKind {
             }
         }
     }
+
+    /// `d2V/dr2` and `(dV/dr) / r` at squared separation `r2`.
+    ///
+    /// The two numbers a second-derivative block needs and nothing else. For a
+    /// pair term the exact Hessian of `V(|x_i - x_j|)` is
+    ///
+    /// ```text
+    /// A = V''(r) u u^T + (V'(r)/r) (I - u u^T),   H = [[A, -A], [-A, A]]
+    /// ```
+    ///
+    /// so the radial curvature acts along the pair and the transverse curvature,
+    /// which is what a rigid rotation of the pair costs, is set by the tension
+    /// `V'(r)/r` alone. That second piece is exactly what the stretch-only model
+    /// operator in [`crate::model_hessian`] leaves out.
+    ///
+    /// Lennard-Jones: `V'' = r^-2 (624 r^-12 - 168 r^-6)`, which is written in
+    /// inverse powers so the routine takes no square root.
+    ///
+    /// Morse: with `a = e^{rho (1 - r)}`, `V'' = 2 rho^2 (2 a^2 - a)`.
+    #[inline]
+    pub fn pair_curvature(&self, r2: f64) -> (f64, f64) {
+        match self {
+            PairKind::LennardJones => {
+                let inv2 = 1.0 / r2;
+                let inv6 = inv2 * inv2 * inv2;
+                let inv12 = inv6 * inv6;
+                (
+                    inv2 * (624.0 * inv12 - 168.0 * inv6),
+                    -24.0 * inv2 * (2.0 * inv12 - inv6),
+                )
+            }
+            PairKind::Morse { rho } => {
+                let r = r2.sqrt();
+                let a = (rho * (1.0 - r)).exp();
+                (
+                    2.0 * rho * rho * (2.0 * a * a - a),
+                    2.0 * rho * (a - a * a) / r,
+                )
+            }
+        }
+    }
 }
 
 impl PairPotential {
