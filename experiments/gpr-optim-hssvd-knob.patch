@@ -1,0 +1,124 @@
+From 3f36469f08535138ae2f9db8077f92d09d5ee13b Mon Sep 17 00:00:00 2001
+From: Rohit Goswami <rgoswami@ieee.org>
+Date: Thu, 6 Aug 2026 08:09:12 -0500
+Subject: [PATCH] feat(capi): let a C caller pick the solver backend
+
+The HS-SVD eigen-form solve is already the default inside
+GaussianProcessRegression and the C API had no way to reach the Cholesky
+baseline, so a C or Fortran or Rust caller could use the conditioned solve
+but could not measure what it was worth. Measuring it needs both solves
+reachable from one caller on one build.
+
+use_hssvd_backend is appended to gpr_model_config_t, so callers compiled
+against the previous layout keep their field offsets, and defaults to 1,
+which is what the C++ default already was. gpr_model_set_hssvd_backend and
+gpr_model_get_hssvd_backend expose the same knob after initialisation.
+---
+ gpr/capi/gpr_optim_c.cpp | 31 +++++++++++++++++++++++++++++++
+ gpr/capi/gpr_optim_c.h   | 27 +++++++++++++++++++++++++++
+ 2 files changed, 58 insertions(+)
+
+diff --git a/gpr/capi/gpr_optim_c.cpp b/gpr/capi/gpr_optim_c.cpp
+index 5da438a0..13712cee 100644
+--- a/gpr/capi/gpr_optim_c.cpp
++++ b/gpr/capi/gpr_optim_c.cpp
+@@ -276,6 +276,9 @@ gpr_model_config_t gpr_model_config_defaults(void)
+     c.tp_hyperprior_a = 1e-20;
+     c.tp_hyperprior_b = 1e-20;
+     c.use_zbl_prior_mean = 0;
++    // Matches GaussianProcessRegression's own default, so a C caller that
++    // leaves this alone gets the same conditioned solve the C++ callers get.
++    c.use_hssvd_backend = 1;
+     return c;
+ }
+ 
+@@ -578,6 +581,7 @@ int gpr_model_init(gpr_model_t model, const gpr_model_config_t* config,
+ 
+     model->model->initialize(params, model->atoms_config);
+     model->model->setUseZBLPriorMean(config->use_zbl_prior_mean != 0);
++    model->model->setHssvdBackend(config->use_hssvd_backend != 0);
+     model->initialized = true;
+     model->trained = false;
+ 
+@@ -878,6 +882,33 @@ int gpr_model_get_jitter(gpr_model_t model, double* out)
+     GPR_CATCH
+ }
+ 
++int gpr_model_set_hssvd_backend(gpr_model_t model, int enabled)
++{
++    GPR_TRY
++    if (!model) return GPR_ERR_NULL_HANDLE;
++    if (!model->initialized) {
++        set_error("model not initialized; call gpr_model_init first");
++        return GPR_ERR_INVALID_ARG;
++    }
++    model->model->setHssvdBackend(enabled != 0);
++    return GPR_SUCCESS;
++    GPR_CATCH
++}
++
++int gpr_model_get_hssvd_backend(gpr_model_t model, int* out)
++{
++    GPR_TRY
++    if (!model) return GPR_ERR_NULL_HANDLE;
++    if (!out) return GPR_ERR_INVALID_ARG;
++    if (!model->initialized) {
++        set_error("model not initialized; call gpr_model_init first");
++        return GPR_ERR_INVALID_ARG;
++    }
++    *out = model->model->getHssvdBackend() ? 1 : 0;
++    return GPR_SUCCESS;
++    GPR_CATCH
++}
++
+ int gpr_model_n_observations(gpr_model_t model)
+ {
+     if (!model || !model->trained) return 0;
+diff --git a/gpr/capi/gpr_optim_c.h b/gpr/capi/gpr_optim_c.h
+index 01b16cb5..ebb68ea4 100644
+--- a/gpr/capi/gpr_optim_c.h
++++ b/gpr/capi/gpr_optim_c.h
+@@ -199,6 +199,22 @@ typedef struct {
+     double tp_hyperprior_a; /**< TP inverse-gamma shape. Default: 1e-20 */
+     double tp_hyperprior_b; /**< TP inverse-gamma scale. Default: 1e-20 */
+     int use_zbl_prior_mean; /**< Residual ZBL GP prior mean. Default: 0 */
++    /**
++     * HS-SVD eigen-form solver backend (#87). Default: 1 (on), which matches
++     * GaussianProcessRegression's own default rather than changing it.
++     *
++     * The gradient-enhanced covariance is severely ill-conditioned, so the
++     * posterior solve runs in the stable basis K = Psi diag(S^2) Psi^T, where
++     * cond(Psi) = 1, instead of a Cholesky-plus-jitter ladder on the raw
++     * kernel. Set to 0 to opt into the Cholesky baseline. That is the only
++     * reason this is a knob: measuring what the conditioned solve is worth
++     * needs both solves reachable from one caller, and a C API that can only
++     * reach the good one cannot make the comparison.
++     *
++     * Appended at the end of the struct so callers compiled against the
++     * previous layout keep their field offsets.
++     */
++    int use_hssvd_backend;
+ } gpr_model_config_t;
+ 
+ gpr_model_config_t gpr_model_config_defaults(void);
+@@ -617,6 +633,17 @@ int gpr_model_set_sigma2(gpr_model_t model, double value);
+ /** Get jitter value. */
+ int gpr_model_get_jitter(gpr_model_t model, double* out);
+ 
++/**
++ * Select the HS-SVD eigen-form solver backend, or the Cholesky baseline.
++ *
++ * Takes effect on the next train() call. The C equivalent of
++ * GaussianProcessRegression::setHssvdBackend.
++ */
++int gpr_model_set_hssvd_backend(gpr_model_t model, int enabled);
++
++/** Which solver backend is active; 1 for HS-SVD, 0 for Cholesky. */
++int gpr_model_get_hssvd_backend(gpr_model_t model, int* out);
++
+ /** Number of training observations currently stored. */
+ int gpr_model_n_observations(gpr_model_t model);
+ 
+-- 
+2.54.0
+
