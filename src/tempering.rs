@@ -101,6 +101,27 @@
 //! measure rather than assert; see
 //! [`tests::round_trip_time_is_linear_for_the_deterministic_sweep_and_quadratic_otherwise`].
 //!
+//! The same measurement inside the cluster driver, where the rungs share one
+//! budget instead of each having their own, says the scaling is real and says
+//! why it does not rescue the method. LJ38 at 4e5 charged evaluations, a swap
+//! every ten hops, 24 seeds, round trips completed per run:
+//!
+//! | rungs | sweeps the budget buys | stochastic | deterministic |
+//! |-------|------------------------|------------|---------------|
+//! | 4     | 270                    | 29.0       | 34.0          |
+//! | 8     | 139                    | 7.1        | 17.5          |
+//! | 16    | 69                     | 0.4        | 4.7           |
+//! | 32    | 35                     | 0.0        | 0.0           |
+//!
+//! The deterministic sweep is ahead by a factor of 2.5 at eight rungs and 12 at
+//! sixteen, which is the advantage the scaling predicts. It is fought by the
+//! first column: a run of fixed cost divides its hops among the rungs, so the
+//! sweeps it can afford fall as `1/N` while the per-tag round-trip time rises
+//! as `N`. Round trips per run therefore fall as `1/N^2` for the deterministic
+//! sweep and `1/N^3` for the reversible one, and by 32 rungs neither completes
+//! any. A longer ladder is not available to a fixed-budget optimiser whatever
+//! the sweep does.
+//!
 //! [`SwapScheme::StochasticEvenOdd`] offers the same pairs but draws the parity
 //! from a coin, which makes the sweep reversible and the index process
 //! diffusive again. It is the honest reversible control for the comparison: it
