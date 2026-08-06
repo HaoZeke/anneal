@@ -207,6 +207,10 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(0.5),
         mix_images: 7,
+        // Off unless asked for, which is what `BankConfig::default` carries, so
+        // the bank arm keeps round-robin selection by default. `BANK_ACQ=1`
+        // switches to expected improvement over morphology.
+        acquisition: std::env::var("BANK_ACQ").map(|v| v != "0").unwrap_or(false),
     };
     if use_bank {
         #[cfg(not(feature = "ira"))]
@@ -402,19 +406,23 @@ fn main() {
         // only: the early ones are a descent from a random start and say
         // nothing.
         if let Some(r) = reference {
-            if let Some((h, b, e)) = out
+            // A record carries the hop, the evaluations charged by then, the
+            // basins open and the energy. The spend is what the budget is
+            // denominated in, so it is printed alongside the hop rather than
+            // dropped.
+            if let Some((h, spent, b, e)) = out
                 .improvements
                 .iter()
-                .find(|(_, _, e)| *e < r + 1e-4)
+                .find(|(_, _, _, e)| *e < r + 1e-4)
             {
                 println!(
-                    "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      crossed at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
-            } else if let Some((h, b, e)) = out.improvements.last() {
+            } else if let Some((h, spent, b, e)) = out.improvements.last() {
                 println!(
-                    "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
+                    "      last improvement at hop {h} of {} ({:.1}% in), {spent} charged, {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
