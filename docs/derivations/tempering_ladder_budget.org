@@ -100,8 +100,12 @@ The adapted ladder, the one that pursues the classical communication-barrier
 target, is the only arm whose interval separates from the single chain,
 and it separates downward: Fisher's exact gives 0.0004, which survives
 Bonferroni correction over the seventeen arms this campaign has compared.
-Morse at \(\rho=6\), same budget, 48 seeds, agrees on the sign though not
-the ranking among the other arms (=inert_mechanisms.org= again).
+Posterior comparison (paper repository's =rewrite_2026/scripts/posterior.py=,
+Jeffreys prior) agrees at a different order of confidence: \(P(t>c)=0.0001\),
+diff \(-0.258\) [-0.388,-0.123], Bayes factor 110.7, strong evidence for a
+difference and the difference is the harmful direction. Morse at
+\(\rho=6\), same budget, 48 seeds, agrees on the sign though not the
+ranking among the other arms (=inert_mechanisms.org= again).
 
 The mechanism is direct. Equalising the barrier at 0.23 stretches the hot
 rung to a mean temperature of 61 against 3.2 for a plain geometric
