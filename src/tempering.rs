@@ -131,6 +131,17 @@
 //! equal rejection, which is the same condition as equal round-trip
 //! contribution from every rung. [`Ladder::equalise`] is that step.
 //!
+//! Moving the rungs makes the chain adaptive, and the adaptation here is not
+//! diminishing: the windows are a fixed length, so the ladder keeps moving for
+//! as long as the run lasts. Each fixed ladder is stationary for its own
+//! product measure, which is what the tests check; the sequence of them is not,
+//! and no claim is made that it is. What this component is scored on is whether
+//! the search reaches the published minimum, not on the quality of the samples
+//! it produces along the way. A run that needs exact stationarity should stop
+//! adapting, which is
+//! [`crate::methods::cluster_hopping::LadderMode::Reversible`] with the rungs
+//! fixed.
+//!
 //! The hot endpoint is the one thing the barrier estimator cannot place, since
 //! it is the edge of the measured range. [`Ladder::retune_top`] moves it by a
 //! multiplicative controller on the mean rejection, so a ladder whose pairs
