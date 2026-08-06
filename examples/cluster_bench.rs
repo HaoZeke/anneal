@@ -131,6 +131,10 @@ fn main() {
     if cfg.superbasin_escape {
         cfg.superbasin_report = true;
     }
+    cfg.superbasin_features = opts.contains(&"sbfeat");
+    if cfg.superbasin_features {
+        cfg.superbasin_report = true;
+    }
     cfg.reseed_moves = opts.contains(&"reseed");
     cfg.twin_moves = opts.contains(&"twin");
     cfg.delayed_acceptance = opts.contains(&"da");
@@ -346,6 +350,19 @@ fn main() {
                 sb.improvements.0,
                 sb.improvements.1
             );
+            if let Some(sep) = &sb.separability {
+                println!(
+                    "      structure separates the coarse states: F {:.2} over {} states, \
+                     {} structures, per template {:?}",
+                    sep.f,
+                    sep.groups,
+                    sep.points,
+                    sep.per_dimension
+                        .iter()
+                        .map(|v| format!("{v:.2}"))
+                        .collect::<Vec<_>>()
+                );
+            }
         }
         for (name, draws, accepts, best) in &out.arms {
             if *draws > 0 {
