@@ -49,6 +49,31 @@
 //! `GPR_OPTIM_LIB_DIR`. Same contract as the `ira` feature.
 
 use std::os::raw::{c_int, c_void};
+use std::sync::{Mutex, MutexGuard};
+
+/// Serialises every call into the library.
+///
+/// Not defensive programming. `libgpr_optim` is normally built against
+/// ScaLAPACK with MPI, and it initialises MPI lazily on first use, so two
+/// threads entering the library at once abort the process with "An error
+/// occurred in MPI_Init on a NULL communicator". That is what happens when the
+/// test binary runs these tests in parallel, and it would happen to any caller
+/// holding one surrogate per thread.
+///
+/// The lock is process-wide rather than per surrogate because the state being
+/// protected is the library's, not the handle's. It costs nothing here: the
+/// model is retrained on a schedule of hundreds of hops and each seed of a
+/// campaign runs in its own process.
+static LIBRARY: Mutex<()> = Mutex::new(());
+
+/// Takes the library lock, ignoring poisoning.
+///
+/// A panic in one caller says nothing about whether the library's own state is
+/// consistent, and refusing every later call because an unrelated test failed
+/// turns one failure into a cascade.
+fn lock() -> MutexGuard<'static, ()> {
+    LIBRARY.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Configuration of the process, mirroring `gpr_model_config_t`.
 ///
@@ -87,6 +112,53 @@ pub struct GpConfig {
     pub tp_hyperprior_b: f64,
     /// Whether to use a residual screened-Coulomb prior mean.
     pub use_zbl_prior_mean: c_int,
+    /// Solver backend: 1 for the HS-SVD stable basis, 0 for Cholesky.
+    ///
+    /// See [`Solve`] for what the two are and why both are reachable.
+    pub use_hssvd_backend: c_int,
+}
+
+/// Which linear solve the posterior is computed through.
+///
+/// # Why both are here
+///
+/// The gradient-enhanced covariance is severely ill-conditioned. A Cholesky
+/// factorisation of the raw kernel plus a jitter ladder produces posterior
+/// weights that move for numerical rather than physical reasons, and a
+/// surrogate whose predictions move that way is indistinguishable, from the
+/// outside, from a surrogate that models the wrong thing. This crate has the
+/// failure on record: the delayed-acceptance surrogate died on a design matrix
+/// at condition 1.6e71 with numerical rank 2 of 11, and read as a modelling
+/// failure until the conditioning was looked at.
+///
+/// [`Solve::StableBasis`] rewrites the kernel as `K = Psi diag(S^2) Psi^T` with
+/// `Psi^T Psi = I` and applies the noisy inverse analytically in that basis,
+/// `Psi diag(1/(S^2 + s2)) Psi^T y + (1/s2)(y - Psi Psi^T y)`, so the working
+/// basis has condition number 1 whatever the nugget. It is `gpr_optim`'s
+/// default and the construction is Fasshauer and McCourt's stable Gaussian RBF
+/// basis (doi:10.1137/110824784) specialised to the gradient-enhanced dual
+/// kernel.
+///
+/// Running only the stable solve would make a null result unreadable: it could
+/// not be told from a conditioning artefact. Running only the Cholesky solve
+/// would measure the artefact. Both arms are the measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Solve {
+    /// HS-SVD eigenbasis, the conditioned route.
+    #[default]
+    StableBasis,
+    /// Cholesky of the raw kernel with a jitter ladder, the baseline.
+    Cholesky,
+}
+
+impl Solve {
+    /// The flag the C API wants.
+    fn flag(self) -> c_int {
+        match self {
+            Solve::StableBasis => 1,
+            Solve::Cholesky => 0,
+        }
+    }
 }
 
 unsafe extern "C" {
@@ -115,10 +187,13 @@ unsafe extern "C" {
         n_coords: c_int,
     ) -> c_int;
     fn gpr_model_n_observations(model: *mut c_void) -> c_int;
+    fn gpr_model_set_hssvd_backend(model: *mut c_void, enabled: c_int) -> c_int;
+    fn gpr_model_get_hssvd_backend(model: *mut c_void, out: *mut c_int) -> c_int;
 }
 
 /// Version of the linked `gpr_optim`, as `(major, minor, patch)`.
 pub fn version() -> (i32, i32, i32) {
+    let _guard = lock();
     let (mut a, mut b, mut c) = (0, 0, 0);
     unsafe { gpr_version_components(&mut a, &mut b, &mut c) };
     (a, b, c)
@@ -127,6 +202,7 @@ pub fn version() -> (i32, i32, i32) {
 impl GpConfig {
     /// The library's defaults.
     pub fn defaults() -> Self {
+        let _guard = lock();
         unsafe { gpr_model_config_defaults() }
     }
 }
@@ -166,6 +242,7 @@ impl GpSurrogate {
     /// happens when the atoms handle and the coordinate count disagree.
     pub fn new(n_atoms: usize, capacity: usize, config: &GpConfig) -> Option<Self> {
         assert!(capacity > 0, "a surrogate with no room holds nothing");
+        let _guard = lock();
         let atoms = unsafe { gpr_atoms_create_simple(n_atoms as c_int) };
         if atoms.is_null() {
             return None;
@@ -259,6 +336,7 @@ impl GpSurrogate {
         if self.energies.is_empty() {
             return -1;
         }
+        let _guard = lock();
         let rc = unsafe {
             gpr_model_train(
                 self.model,
@@ -282,6 +360,7 @@ impl GpSurrogate {
         if !self.trained || x.len() != self.n_coords {
             return None;
         }
+        let _guard = lock();
         let mut e = 0.0;
         let mut g = vec![0.0; self.n_coords];
         let mut var_e = 0.0;
@@ -306,12 +385,44 @@ impl GpSurrogate {
     /// Observations the library itself reports holding, which is a check that
     /// the training call did what the record count says it should have.
     pub fn library_observations(&self) -> usize {
+        let _guard = lock();
         unsafe { gpr_model_n_observations(self.model) }.max(0) as usize
+    }
+
+    /// Switches the posterior solve. Takes effect on the next [`Self::train`].
+    ///
+    /// Returns the library's status code, zero on success.
+    pub fn set_solve(&mut self, solve: Solve) -> i32 {
+        let _guard = lock();
+        let rc = unsafe { gpr_model_set_hssvd_backend(self.model, solve.flag()) };
+        if rc == 0 {
+            self.trained = false;
+        }
+        rc
+    }
+
+    /// Which solve the library reports it will use.
+    ///
+    /// Read back from the library rather than remembered here, because a
+    /// two-arm measurement whose arm label comes from the caller's own
+    /// bookkeeping proves nothing about which code ran.
+    pub fn solve(&self) -> Option<Solve> {
+        let _guard = lock();
+        let mut v: c_int = -1;
+        if unsafe { gpr_model_get_hssvd_backend(self.model, &mut v) } != 0 {
+            return None;
+        }
+        Some(if v != 0 {
+            Solve::StableBasis
+        } else {
+            Solve::Cholesky
+        })
     }
 }
 
 impl Drop for GpSurrogate {
     fn drop(&mut self) {
+        let _guard = lock();
         unsafe {
             gpr_model_destroy(self.model);
             gpr_atoms_destroy(self.atoms);
@@ -479,6 +590,57 @@ mod tests {
         gp.record(&x, f64::NAN, &vec![0.0; 12]);
         gp.record(&x, -1.0, &vec![f64::INFINITY; 12]);
         assert!(gp.is_empty(), "a non-finite observation was accepted");
+    }
+
+    #[test]
+    fn the_default_solve_is_the_conditioned_one_and_both_are_reachable() {
+        // The arm label has to come from the library, not from this crate's
+        // own bookkeeping: a two-solve comparison whose labels are asserted
+        // rather than read back measures nothing.
+        let cfg = GpConfig::defaults();
+        assert_eq!(cfg.use_hssvd_backend, 1, "the C default is not HS-SVD");
+        let mut gp = GpSurrogate::new(5, 8, &cfg).expect("model creation failed");
+        assert_eq!(gp.solve(), Some(Solve::StableBasis));
+        assert_eq!(gp.set_solve(Solve::Cholesky), 0);
+        assert_eq!(gp.solve(), Some(Solve::Cholesky));
+        assert_eq!(gp.set_solve(Solve::StableBasis), 0);
+        assert_eq!(gp.solve(), Some(Solve::StableBasis));
+    }
+
+    #[test]
+    fn both_solves_train_and_predict_on_the_same_observations() {
+        // Not that they agree, which on an ill-conditioned covariance is
+        // exactly the open question, but that both arms run to completion on
+        // identical data so a difference between them is a difference in the
+        // solve rather than in what each was shown.
+        let n = 7;
+        let base = cluster(n, 0.0, 21);
+        let mut cfg = GpConfig::defaults();
+        cfg.report_level = 0;
+        cfg.max_iter = 20;
+
+        let mut out = Vec::new();
+        for solve in [Solve::StableBasis, Solve::Cholesky] {
+            let mut gp = GpSurrogate::new(n, 32, &cfg).expect("model creation failed");
+            assert_eq!(gp.set_solve(solve), 0);
+            for k in 0..10u64 {
+                let j = cluster(n, 0.06, 500 + k * 13);
+                let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.3 * b).collect();
+                let (e, g) = lj(&x, n);
+                gp.record(&x, e, &g);
+            }
+            let rc = gp.train();
+            assert_eq!(rc, 0, "{solve:?} training returned {rc}");
+            assert_eq!(gp.solve(), Some(solve), "the library changed arms");
+            let j = cluster(n, 0.06, 77_777);
+            let x: Vec<f64> = base.iter().zip(j.iter()).map(|(a, b)| a + 0.3 * b).collect();
+            let (e, _, var) = gp.predict(&x).expect("prediction failed");
+            assert!(e.is_finite() && var.is_finite(), "{solve:?} gave {e} {var}");
+            out.push((solve, e, var));
+        }
+        // Reported rather than asserted equal: what the two solves do to each
+        // other on this covariance is the measurement, not a precondition.
+        println!("solve comparison: {out:?}");
     }
 
     #[test]
