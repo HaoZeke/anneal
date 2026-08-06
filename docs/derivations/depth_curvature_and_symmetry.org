@@ -1,0 +1,144 @@
+#+TITLE: What curvature and symmetry buy the quench-depth predictor, and what they do not
+#+OPTIONS: toc:2 num:t
+
+* Abstract
+
+The delayed-acceptance first stage (=src/delayed.rs=) regresses the depth a
+quench recovers, \(1/2\, g^\top H^{-1} g\) to leading order, and the model
+Hessian in =src/model_hessian.rs= stands in for \(H\) because the true
+Hessian is not on the ledger. Three questions follow: does the exact
+Hessian predict depth better than the model does; does carrying curvature
+across a hop by symmetry pay for itself; and does calibrating the model
+online, from the descents a search already generates, close any of the
+gap. Measured on branches =feat/sym-hessian= (commit =be4c868=) and
+=feat/hessian-fit= (commit =9ae6076=), against the corrected relaxer. All
+three answers are no, yes-but-not-worth-it, and only at short steps,
+respectively, and each rests on a measurement rather than a premise taken
+on faith.
+
+* 1. The anharmonicity ceiling
+
+=src/sym_hessian.rs= (=be4c868=) scores four depth predictors against 240
+targets sampled around a relaxed LJ38 minimum, after the one global force
+constant scale the downstream regression absorbs in every case:
+
+| predictor | median relative depth error | Spearman rank correlation |
+|-----------+------------------------------+----------------------------|
+| exact Hessian at the target | 0.103 | 0.991 |
+| free model Hessian | 0.159 | 0.999 |
+| \(1/2\lvert g\rvert^2\) | 0.189 | 0.999 |
+| exact Hessian, transported | 0.557 | -- |
+
+The exact Hessian improves median error by 0.06 over the free model and *loses*
+rank correlation doing it, 0.991 against 0.999. A predictor built from the
+true second derivative should not lose to a stretch-only model with a
+diagonal floor standing in for the terms it omits, and the reason is where
+the two operators differ, not by how much.
+
+Off the three translations, which is all the depth solve deflates, the
+softest four eigenvalues of the exact Hessian at the LJ38 reference are
+\(-4.3\times10^{-8},\ 3.1\times10^{-8},\ 1.1\times10^{-7},\ 3.3\): the three
+rigid rotations survive undamped, so the operator the solve inverts is
+numerically singular in that subspace. The model's corresponding four are
+\(0.05,\ 0.05,\ 0.05,\ 1.1\), the first three being =FLOOR * K0= exactly,
+the diagonal shift that stands in for the bending terms a stretch-only
+force constant omits. The shift the model was given for a different reason,
+because it has no angular response, is what keeps its inverse away from a
+near-singular direction the exact operator walks straight into.
+
+The reading is that depth prediction is limited by anharmonicity and not by
+the curvature model: a Hessian with zero transport error still misses by
+0.103 relative, and no operator built from a single evaluation point closes
+that, because the quench travels through terrain the local quadratic form
+does not see. A better second-derivative operator has nothing to win here.
+
+* 2. Two negatives, pinned as tests
+
+Same commit, two uses of symmetry for the depth solve, both built, both
+measured, and both correct without paying.
+
+** Block-diagonalisation
+
+Site symmetries of a structure give an orthogonal representation the model
+Hessian commutes with, so the operator splits by irreducible representation
+and the class sums reach the isotypic decomposition without building a
+character table. Depths recombine to the plain depth to \(7\times10^{-14}\).
+Serial cost is unchanged on an icosahedron and a centred cuboctahedron and
+1.33 times worse on a truncated octahedron; the critical path falls 4.5 to
+5.0 times, which needs a core per block on a search that already spends its
+cores on thousands of independent hops rather than on parallelising one.
+Worst-block condition number is 93 against 150 for the whole operator. A
+\(C_1\) control gets one block and the same iteration count, bitwise.
+
+** Curvature transport by correspondence
+
+A permutation and rotation carrying a target onto a reference transports the
+curvature as \(M^\top H_A M\), exactly: \(3\times10^{-16}\) onto a
+relabelled copy. Over 240 targets around the same LJ38 minimum, operator
+transfer error runs 0.016 at an IRA match distance of 0.003 and saturates
+near 0.9 past a distance of 0.15, beating rebuilding the model at every
+distance measured (0.98).
+
+That curve is also what prices the correspondence out. Below an IRA
+distance of 0.17 the transported and the identity correspondences agree to
+three decimal places, because a small perturbation leaves IRA returning the
+identity permutation and a near-identity rotation: the correspondence
+contributes nothing exactly where transport works. Past a distance of 1.6,
+where it does contribute, it moves the operator error from 0.820 to 0.725
+on an operator that is already three quarters wrong. At 0.41 ms a call,
+against a measured 52 charged evaluations per hop for IRA where the cheap
+descriptor costs 31, that is a cost with nothing behind it at either end.
+
+Both results are pinned as tests on =feat/sym-hessian= so they fail loudly
+if either stops being true.
+
+* 3. Online calibration helps only where the harmonic form applies
+
+=examples/hessian_fit_lj.rs= (=feat/hessian-fit=, commit =9ae6076=) fits
+the model's force-constant decay and bending floor on the first 120
+descents of a perturbed relaxed cluster and scores median relative depth
+error on the next 120, both arms carrying their own fitted scale so the
+comparison is shape against shape rather than shape against a scale
+mismatch:
+
+| step | LJ38 default | LJ38 fitted | improvement | LJ75 default | LJ75 fitted | improvement |
+|------+---------------+-------------+-------------+---------------+-------------+-------------|
+| 0.08 |         0.175 |       0.075 | 2.33 times  |         0.145 |       0.048 | 3.00 times  |
+| 0.15 |         0.174 |       0.148 | 1.18 times  |         0.114 |       0.091 | 1.26 times  |
+| 0.25 |         0.090 |       0.072 | 1.25 times  |         0.058 |       0.048 | 1.19 times  |
+| 0.35 |         0.081 |       0.066 | 1.23 times  |         0.047 |       0.038 | 1.22 times  |
+
+The improvement concentrates where the harmonic form has something to fit:
+at step 0.08 the fit returns a force-constant decay near 15 on LJ38 and near
+20 on LJ75 against a default of 1, close to what a Lennard-Jones pair force
+constant looks like written as an exponential, falling off far faster than
+a covalent bond's and passing through zero at the well's inflection point.
+
+The search does not run at step 0.08; it runs at 0.25 to 0.35, where the
+improvement is about 1.2 times. At that step the descent recovers
+anharmonic energy no quadratic form accounts for, the true objective over
+the whole search box runs 0.074 to 0.089 regardless of the fitted
+constants, and calibration correctly reports that no shape helps much once
+the surface is that flat.
+
+An online accumulator, fed the same training half one descent at a time and
+holding only its last 48, comes within a few per cent of the batch fit
+everywhere and beats it on LJ75 at step 0.08, 0.0454 against 0.0482. Where
+the objective is flat it settles on different constants for the same
+held-out error, LJ38 at 0.25 giving decay 5.6 and floor 2.3 online against
+1.8 and 1.2 in batch, both scoring 0.072: the fit is not unique where the
+descent no longer constrains it. Every descent scored is one the search
+already generates for its own reasons, so the calibration charges nothing
+on the ledger.
+
+* 4. What this means for the delayed-acceptance surrogate
+
+Section 1 bounds what any curvature-based depth feature can improve in the
+first stage in =src/delayed.rs=, independent of the design-matrix fault the
+scaled raw-energy column produces (the eleventh case in the campaign notes
+kept in the paper repository, =simmAnnealTeX/rewrite_2026/docs/inert_mechanisms.org=):
+even a design that could carry information would still face a 0.103
+relative-error floor from anharmonicity, before any question of how the
+surrogate is fitted. Sections 2 and 3 are why the exact Hessian and
+structural symmetry stay out of the depth solve, correct and priced and
+not worth carrying.
