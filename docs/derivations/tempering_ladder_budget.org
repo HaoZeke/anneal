@@ -1,0 +1,147 @@
+#+TITLE: The classical replica-exchange target is wrong under a fixed budget
+#+OPTIONS: toc:2 num:t
+
+* Status
+
+Branch =feat/tempering-nrpt=, commits =35e3da9= through =368c69e=, not
+merged and not pushed. =src/tempering.rs= and the =LadderMode= doc in
+=src/methods/cluster_hopping.rs= carry the full derivation and measurement;
+this note draws them into one place. Placement addressed in Section 5.
+
+* Abstract
+
+Classical parallel tempering places rungs by fixing the temperature range
+an application needs and equalising the communication barrier between
+neighbours, free to add as many rungs as that equalisation calls for. A
+fixed-budget optimiser cannot add rungs without paying for them: every rung is a chain
+paid for out of the same charged-evaluation budget as every other. Under
+that constraint the derivation that motivates the classical target still
+holds exactly, and the conclusion it is normally read to license, that a
+longer ladder is better, reverses: adding rungs divides a fixed number of
+sweeps among more chains faster than the added rungs shorten the walk each
+tagged configuration has to make, so round trips per run fall rather than
+rise. The ladder that pursues the classical target measurably costs solve
+rate at fixed budget rather than buying it, and the corrected non-adaptive
+alternative gains nothing either. Neither result is a bug in the ladder; both
+are what the classical target's own derivation predicts once its free
+variable is exchanged for a fixed one.
+
+* 1. What the classical target takes as given, and what a fixed budget fixes instead
+
+The communication-barrier construction (=Ladder::equalise=,
+=beta_step_for_acceptance=, =TARGET_SWAP_ACCEPT = 0.23=) places rungs so
+neighbouring pairs share one rejection rate, the acceptance target the
+literature calls optimal for round-trip time per sweep. That derivation
+takes the temperature range as given and the rung count as the thing being
+solved for: however many rungs equalising the barrier calls for, the
+ladder gets. A campaign under a charged-evaluation ledger has the opposite
+free variable. The budget is fixed, the rung count is a choice charged
+against it, and every rung added is a chain the budget now divides its
+hops among instead of a chain added on top.
+
+The same identity that gives the round-trip time its favourable scaling in
+rung count, measured on the idealised index process at a fixed barrier of
+3 (=src/tempering.rs=, =IndexProcess=, sweeps per tagged round trip):
+
+| rungs | deterministic sweep | stochastic sweep | one drawn pair |
+|-------+----------------------+-------------------+-----------------|
+|     8 |                   99 |               197 |             675 |
+|    16 |                  153 |               568 |            4241 |
+|    32 |                  281 |              2175 |           36863 |
+|    64 |                  560 |              8619 |          273792 |
+
+which fits \(N^{0.84}\), \(N^{1.83}\) and \(N^{2.91}\), reproducing the
+published separation between a deterministic even-odd sweep (Syed,
+Bouchard-Cote, Deligiannidis and Doucet) and the classical drawn-pair
+scheme at roughly \(O(N)\) against \(O(N^2)\). Nothing about that scaling
+is wrong. It answers "how many sweeps does one round trip need," which is
+the right question when sweeps are free. They are not free here.
+
+* 2. Inside the driver, where sweeps are not free
+
+The same measurement repeated where the rungs share one fixed budget
+instead of each having its own, LJ38 at \(4\times10^5\) charged
+evaluations, a swap every ten hops, 24 seeds, round trips completed per
+run:
+
+| rungs | sweeps the budget affords | stochastic | deterministic |
+|-------+--------------------------+-------------+------------------|
+|     4 |                      270 |        29.0 |             34.0 |
+|     8 |                      139 |         7.1 |             17.5 |
+|    16 |                       69 |         0.4 |              4.7 |
+|    32 |                       35 |         0.0 |              0.0 |
+
+The deterministic sweep still leads, by a factor of 2.5 at eight rungs and
+12 at sixteen, exactly what the scaling in Section 1 predicts. The lead
+does not survive contact with the budget. A run of fixed cost divides its
+hops among the rungs, so the sweeps it can afford fall as \(1/N\) while the
+per-tag round-trip time rises as \(N\) (Section 1's near-linear fit).
+Round trips per run therefore fall as \(1/N^2\) for the deterministic
+sweep and \(1/N^3\) for the reversible one, and by 32 rungs neither
+completes a single round trip. A longer ladder is not available to a
+fixed-budget optimiser whatever the sweep scheme does with the sweeps it
+gets.
+
+* 3. Measured cost: the adapted ladder costs solve rate, past merely wasting it
+
+LJ38 at \(4\times10^5\) charged evaluations, 96 seeds, four rungs, a swap
+every ten hops, against a single chain at the same budget (full table and
+sourcing in the paper repository's =inert_mechanisms.org=, entries
+fourteen and fifteen):
+
+| mode | solved | 95% Wilson |
+|------+--------+------------|
+| Cyclic (exchange, own temperatures) | 77/96 | [0.71,0.87] |
+| single chain | 70/96 | [0.63,0.81] |
+| Independent (own temperatures, no exchange) | 67/96 | [0.60,0.78] |
+| NonReversible (adapted to the classical 0.23 target) | 45/96 | [0.37,0.57] |
+
+The adapted ladder, the one that pursues the classical communication-barrier
+target, is the only arm whose interval separates from the single chain,
+and it separates downward: Fisher's exact gives 0.0004, which survives
+Bonferroni correction over the seventeen arms this campaign has compared.
+Morse at \(\rho=6\), same budget, 48 seeds, agrees on the sign though not
+the ranking among the other arms (=inert_mechanisms.org= again).
+
+The mechanism is direct. Equalising the barrier at 0.23 stretches the hot
+rung to a mean temperature of 61 against 3.2 for a plain geometric
+schedule at the same rung count, and a rung that hot holds nothing worth
+swapping down while still consuming a quarter of the fixed budget on
+sweeps that cannot cross to a useful configuration. Raising the target to
+0.40 and 0.60 shortens the ladder and recovers the solve rate to 0.64 and
+0.54, still no better than the single chain it replaces: less harmful, not
+helpful. The target the classical derivation optimises for, round-trip
+time per sweep at an unconstrained rung count, is not the quantity a
+fixed-budget optimiser needs minimised.
+
+* 4. The ladder does not rescue a Hamiltonian rung either
+
+A related question this branch also measured and closed: whether pairing
+the ladder with the Hamiltonian trajectory proposal of =feat/hmc-hop=
+(=anneal/docs/derivations/hmc_stan_metric_isotropy.org=) combines two
+partial mechanisms into one that pays. It does not, for the same budget
+reason. A Hamiltonian rung costs 76 charged evaluations per hop against 41
+for the crate's own move library, so a run of \(4\times10^5\) takes 5216 hops
+against 9781; at a swap every ten hops over four rungs that is 130 sweeps
+against 245, already down where sixteen displacement rungs sit at 4.7
+round trips per run (Section 2). The depth cap binds on 86.8 per cent of
+proposals under the identity metric and 78.8 per cent under the model
+Hessian even at a cap of ten, so a Hamiltonian rung on this ladder would
+carry an effectively fixed-length trajectory with no U-turn-driven length
+to trade against the reduced sweep count. Two mechanisms that are
+individually absent from the outcome, Section 3 here and
+=hmc_stan_metric_isotropy.org= Section 2 there, do not have a product
+worth a budget line.
+
+* 5. Placement
+
+Not manuscript material yet: the branch is unmerged and unpushed, matching
+the HMC note's reasoning in its own Section 7. The result is stated here in
+full because, unlike the HMC finding, nothing about the implementation is
+in question; the classical-target derivation and the code both do exactly
+what they are supposed to, and the finding is that the quantity the
+classical target optimises is the wrong one for this constraint. That
+makes it, once landed, a companion result to the screening-pass finding
+already in the manuscript's Table~tbl:reference: another instance of a
+published tuning target built on a resource this campaign does not have
+without paying for it.
