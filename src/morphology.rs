@@ -468,6 +468,179 @@ mod featomic_cv {
         }
     }
 
+    /// A structure-level SOAP descriptor with its derivative in the
+    /// coordinates.
+    ///
+    /// The pair a gradient-enhanced Gaussian process over structures needs: the
+    /// descriptor that goes in the kernel, and the Jacobian that carries a
+    /// Cartesian gradient into descriptor space by the chain rule.
+    pub struct SoapDescriptor {
+        /// Normalised structure descriptor, length `D`.
+        pub p: Vec<f64>,
+        /// `d p / d x`, row-major `(D, 3N)`, present only when asked for.
+        ///
+        /// Of the *normalised* descriptor: the projection
+        /// `(I - p p^T) / ||p||` is already applied, so a caller does not have
+        /// to remember to.
+        pub jacobian: Option<Vec<f64>>,
+    }
+
+    /// SOAP power spectrum with position derivatives, for a kernel over
+    /// structures.
+    ///
+    /// # Why this sits next to [`SoapProjection`]
+    ///
+    /// [`SoapProjection`] compresses the power spectrum to one number for use
+    /// as a bias coordinate. This keeps the whole vector, because a kernel
+    /// `k(A, B) = (pA . pB)^zeta` needs it, and adds the derivative, because
+    /// conditioning a process on the gradients the quench already computes
+    /// needs the chain rule from coordinates into descriptor space.
+    ///
+    /// # Why a descriptor kernel rather than the coordinate one
+    ///
+    /// Two measurements, both in [`crate::gpr`].
+    ///
+    /// The inverse-distance kernel there is not invariant to relabelling the
+    /// points. On 13 points a relabelling that changes nothing physical moved
+    /// the posterior mean by 218 standard deviations and raised the reported
+    /// standard deviation from 1.42e-4 to 9.74e-1. SOAP is invariant to
+    /// permutation, rotation and translation by construction, so the question
+    /// does not arise and the 2.4 ms per structure that canonicalisation costs
+    /// is not paid.
+    ///
+    /// And the variance. That library spends 3116 ms of a 3116 ms prediction
+    /// inside its variance dispatch at 38 points, which is 976000 force
+    /// evaluations against a whole run budget of 400000. A kernel written here
+    /// computes `k(x, x) - ||L^-1 k*||^2` in time quadratic in the row count,
+    /// microseconds at these sizes.
+    pub struct SoapFeatures {
+        /// Points per state; the state length must be `3 * n_points`.
+        pub n_points: usize,
+        /// featomic hyperparameters, built once at construction.
+        hypers: String,
+    }
+
+    impl SoapFeatures {
+        /// A power spectrum at a length scale of `scale`, matching the cutoff
+        /// and density of [`SoapProjection::new`] so the two describe the same
+        /// neighbourhoods.
+        pub fn new(n_points: usize, scale: f64) -> Self {
+            let cutoff = 1.5 * scale;
+            let width = 0.3 * scale;
+            let sigma = 0.3 * scale;
+            let hypers = format!(
+                "{{\"cutoff\": {{\"radius\": {cutoff}, \
+                   \"smoothing\": {{\"type\": \"ShiftedCosine\", \"width\": {width}}}}}, \
+                   \"density\": {{\"type\": \"Gaussian\", \"width\": {sigma}, \
+                   \"center_atom_weight\": 0.0}}, \
+                   \"basis\": {{\"type\": \"TensorProduct\", \"max_angular\": 4, \
+                   \"radial\": {{\"type\": \"Gto\", \"max_radial\": 3}}}}}}"
+            );
+            Self { n_points, hypers }
+        }
+
+        /// The descriptor, and its Jacobian when `with_jacobian`.
+        ///
+        /// The unnormalised structure descriptor is the per-site power spectrum
+        /// averaged over sites; the returned one is that divided by its length.
+        /// The Jacobian of the normalisation is
+        /// `d(p / ||p||) / dx = (I - p p^T) / ||p|| dp/dx`, applied here so the
+        /// caller receives the derivative of what the kernel consumes.
+        pub fn describe(&self, x: ArrayView1<f64>, with_jacobian: bool) -> SoapDescriptor {
+            let n = self.n_points;
+            let m = 3 * n;
+            let mut systems = system_of(x, n);
+            let grads: &[&str] = if with_jacobian { &["positions"] } else { &[] };
+            let options = CalculationOptions {
+                gradients: grads,
+                ..Default::default()
+            };
+            let out = with_calculator("soap_power_spectrum", &self.hypers, |calc| {
+                calc.compute(&mut systems, options)
+                    .expect("SOAP power spectrum failed")
+            });
+
+            let mut raw: Vec<f64> = Vec::new();
+            let mut jac: Vec<f64> = Vec::new();
+            for idx in 0..out.keys().count() {
+                let block = out.block_by_id(idx);
+                let array = block.values().to_array();
+                let shape = array.shape().to_vec();
+                let flat: Vec<f64> = array.iter().copied().collect();
+                let (n_s, n_f) = (shape[0], shape[shape.len() - 1]);
+                let base = raw.len();
+                raw.resize(base + n_f, 0.0);
+                for row in 0..n_s {
+                    for f in 0..n_f {
+                        raw[base + f] += flat[row * n_f + f];
+                    }
+                }
+                if n > 0 {
+                    for f in 0..n_f {
+                        raw[base + f] /= n as f64;
+                    }
+                }
+
+                if !with_jacobian {
+                    continue;
+                }
+                jac.resize(raw.len() * m, 0.0);
+                let Some(g) = block.gradient("positions") else {
+                    continue;
+                };
+                let garray = g.values().to_array();
+                let gshape = garray.shape().to_vec();
+                let gflat: Vec<f64> = garray.iter().copied().collect();
+                // Gradient samples are ("sample", "system", "atom") with
+                // components [xyz], so the layout is (rows, 3, n_f) and "atom"
+                // is the point being moved rather than the centre of the
+                // environment.
+                let (g_rows, g_dirs, g_f) = (gshape[0], gshape[1], gshape[2]);
+                let samples = g.samples();
+                for row in 0..g_rows {
+                    let atom = samples[row][2].usize();
+                    if atom >= n {
+                        continue;
+                    }
+                    for d in 0..g_dirs {
+                        for f in 0..g_f {
+                            let v = gflat[(row * g_dirs + d) * g_f + f];
+                            jac[(base + f) * m + 3 * atom + d] += v / n as f64;
+                        }
+                    }
+                }
+            }
+
+            let norm = raw.iter().map(|a| a * a).sum::<f64>().sqrt();
+            if norm <= 1e-12 {
+                return SoapDescriptor {
+                    p: raw,
+                    jacobian: with_jacobian.then(Vec::new),
+                };
+            }
+            let p: Vec<f64> = raw.iter().map(|a| a / norm).collect();
+            if !with_jacobian {
+                return SoapDescriptor { p, jacobian: None };
+            }
+            // (I - p p^T) J / ||p||, column by column.
+            let d = p.len();
+            let mut out_j = vec![0.0_f64; d * m];
+            for k in 0..m {
+                let mut dot = 0.0;
+                for f in 0..d {
+                    dot += p[f] * jac[f * m + k];
+                }
+                for f in 0..d {
+                    out_j[f * m + k] = (jac[f * m + k] - p[f] * dot) / norm;
+                }
+            }
+            SoapDescriptor {
+                p,
+                jacobian: Some(out_j),
+            }
+        }
+    }
+
     /// State of the projection basis, fitted online.
     #[derive(Default)]
     struct Projector {
@@ -699,7 +872,7 @@ mod featomic_cv {
 }
 
 #[cfg(feature = "featomic")]
-pub use featomic_cv::{SoapProjection, SteinhardtQ};
+pub use featomic_cv::{SoapDescriptor, SoapFeatures, SoapProjection, SteinhardtQ};
 
 #[cfg(test)]
 mod tests {
@@ -859,7 +1032,7 @@ mod featomic_tests {
     use super::tests::{
         fcc_shell, hcp_shell, icosahedron, jitter, permute, rotate, simple_cubic_shell,
     };
-    use super::{ideal, SteinhardtQ};
+    use super::{ideal, SoapFeatures, SteinhardtQ};
     use crate::bias::Fingerprint;
     use ndarray::Array1;
 
@@ -945,4 +1118,50 @@ mod featomic_tests {
              {ico_smear:.4} and {fcc_smear:.4}"
         );
     }
+    #[test]
+    fn the_soap_jacobian_matches_a_finite_difference() {
+        // The part most likely to be silently wrong. featomic returns gradient
+        // rows keyed by which point is being moved rather than by which
+        // environment is being described, and the structure descriptor is an
+        // average over environments, so a wrong axis or a missed accumulation
+        // still produces a plausible-looking matrix. A central difference on
+        // the normalised descriptor catches all of it.
+        let n = 8;
+        let f = SoapFeatures::new(n, 1.0);
+        let base = icosahedron();
+        // Eight points from the thirteen, jittered off the ideal so no
+        // symmetry accidentally zeroes a component.
+        let mut x: Vec<f64> = base[..3 * n].to_vec();
+        for (i, v) in x.iter_mut().enumerate() {
+            *v += 0.03 * ((i as f64 * 7.3).sin());
+        }
+        let xa = Array1::from(x.clone());
+        let d = f.describe(xa.view(), true);
+        let jac = d.jacobian.as_ref().expect("no jacobian");
+        let dim = d.p.len();
+        assert_eq!(jac.len(), dim * 3 * n, "jacobian shape");
+
+        let h = 1e-6;
+        let mut worst = 0.0_f64;
+        let mut scale = 0.0_f64;
+        for k in 0..(3 * n) {
+            let mut xp = x.clone();
+            xp[k] += h;
+            let mut xm = x.clone();
+            xm[k] -= h;
+            let pp = f.describe(Array1::from(xp).view(), false).p;
+            let pm = f.describe(Array1::from(xm).view(), false).p;
+            for fi in 0..dim {
+                let numeric = (pp[fi] - pm[fi]) / (2.0 * h);
+                worst = worst.max((numeric - jac[fi * 3 * n + k]).abs());
+                scale = scale.max(numeric.abs());
+            }
+        }
+        assert!(
+            worst < 1e-6 * scale.max(1.0),
+            "jacobian disagrees with a central difference by {worst:.3e} \
+             on a scale of {scale:.3e}"
+        );
+    }
+
 }
