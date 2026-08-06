@@ -343,6 +343,19 @@ impl HopDiagnostics {
             self.metric_drift(),
         )
     }
+
+    /// The depth distribution, as counts per depth.
+    ///
+    /// A mean depth and a cap rate do not say whether the trajectory length is
+    /// varying at all. This does: a histogram piled on the cap is fixed-length
+    /// HMC, and a spread one is the no-U-turn criterion choosing.
+    pub fn depth_report(&self) -> String {
+        let mut s = String::from("depths");
+        for (d, c) in self.depth_histogram.iter().enumerate() {
+            s.push_str(&format!(" {d}:{c}"));
+        }
+        s
+    }
 }
 
 /// Value and gradient of the underlying potential, charged to the ledger.

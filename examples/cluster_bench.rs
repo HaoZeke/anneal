@@ -387,6 +387,7 @@ fn main() {
         for (k, d) in out.hmc.iter().enumerate() {
             if d.proposals > 0 {
                 println!("      rung {k} {}", d.report(""));
+                println!("      rung {k} {}", d.depth_report());
             }
         }
     }
