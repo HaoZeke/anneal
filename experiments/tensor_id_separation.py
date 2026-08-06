@@ -24,8 +24,6 @@ import sys
 
 import numpy as np
 
-rng = np.random.default_rng(11)
-
 # Matches TripletSpectrum::new.
 SIGMA = 2.5
 WEIGHT = 2.5
@@ -84,7 +82,10 @@ def moments(X, s=SIGMA):
     A2 = A @ A
     M = A * A2 * (n / np.trace(A2))
     M2, M3 = M @ M, (M @ M) @ M
-    fr = lambda P, Q: float((P * Q).sum())
+
+    def fr(P, Q):
+        return float((P * Q).sum())
+
     raw = [(2, fr(A, A)), (3, fr(A2, A)), (4, fr(A2, A2))]
     raw += [
         (1, float(np.trace(M))),
