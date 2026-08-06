@@ -845,6 +845,12 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Gradient below which a structure may be recorded as the run's best.
+    ///
+    /// Loose enough that a genuine minimum passes, since a quenched cluster
+    /// comes back near 1e-6, and tight enough to bar a partial quench, which
+    /// comes back near 1e-1 or worse.
+    pub record_gradient: f64,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
     ///
@@ -979,6 +985,7 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            record_gradient: 1e-3,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             twin_moves: false,
@@ -1086,6 +1093,8 @@ pub struct Outcome {
     pub swaps_tried: usize,
     /// Hops the acceptance rule took, before any veto.
     pub accepted: usize,
+    /// Structures barred from the ledger for not being minima.
+    pub unconverged_records: usize,
     /// Per-arm draws, accepts and best quenched value, in library order.
     pub arms: Vec<(String, usize, usize, f64)>,
     /// Delayed acceptance: first stages run, first-stage rejections (each a
@@ -1375,6 +1384,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     };
     let mut surrogate_here: Option<f64> = None;
     let mut delayed_skipped = 0usize;
+    let mut unconverged_records = 0usize;
     let mut pending_surrogate: Option<(f64, f64)> = None;
     let mut pending_raw: Option<(f64, f64)> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
@@ -1740,7 +1750,37 @@ fn run_full<'g, R: Rng + ?Sized>(
             sur.observe_full(x_new.view(), n, e_new, 0.0, e_new);
         }
         let improved = e_new < ledger.best - 1e-10;
-        ledger.record(e_new, x_new.view());
+        // A structure the ledger records can be reported as the run's answer,
+        // so it has to be a minimum. Two paths reach here with one that is not.
+        //
+        // A trial leaving through the screen carries a 25-step partial quench.
+        // The posterior screen guards against recording one, by refusing to
+        // screen anything already below the incumbent; the return screen has no
+        // such guard and is on in every arm measured. Instrumenting the record
+        // sites on a failing seed found three successive new bests tagged as
+        // returning, at maximum absolute gradients of 1.23, 0.87 and 0.87.
+        //
+        // The full relaxation is not safe either. It stops on its iteration cap
+        // or on a line-search failure, and the driver takes the result
+        // regardless: one recorded best came back at 2.02e-1, where re-relaxing
+        // the same structure for 4000 steps reaches 1.7e-6 at an energy 1.1e-3
+        // lower.
+        //
+        // Both are guarded here rather than at either branch, so a path added
+        // later inherits the guarantee. Anything not converged still moves the
+        // chain and still deposits bias; it is only barred from being recorded
+        // as an answer, which is the one thing it cannot be.
+        let recordable = !unquenched
+            && grad
+                .as_deref_mut()
+                .and_then(|g| g(ledger, x_new.view()))
+                .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
+                .unwrap_or(true);
+        if recordable {
+            ledger.record(e_new, x_new.view());
+        } else {
+            unconverged_records += 1;
+        }
         hops += 1;
         if improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
@@ -2343,6 +2383,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         },
         swaps_tried,
         accepted,
+        unconverged_records,
         delayed: surrogate
             .as_ref()
             .map(|s| (s.stage_one, s.stage_one_rejected, s.stage_two, s.stage_two_rejected)),
