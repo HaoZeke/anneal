@@ -521,6 +521,13 @@ impl Ledger {
 /// what little the best arm has comes from the exchange rather than from the
 /// chains, 0.80 against 0.70 at Fisher 0.13, and 0.13 is not a result.
 ///
+/// The component is written against energies, so it transfers, and so does the
+/// verdict. Morse at rho = 6 and 38 points, same budget, 48 seeds: the single
+/// chain solves 18/48 and no ladder arm beats it, with the arm that led on
+/// Lennard-Jones second from bottom at 10/48. Two potentials disagreeing about
+/// which ladder arm is best while agreeing that none beats one chain is what a
+/// difference of 0.07 at Fisher 0.31 looks like from the other side.
+///
 /// The mechanism that costs is the adapted ladder: equalising the barrier at
 /// the classical acceptance target stretches the hot rung to a mean
 /// temperature of 61 against 3.2 for the geometric schedule, and a rung that
