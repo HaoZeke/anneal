@@ -47,6 +47,46 @@
 //! spends both parameters chasing that tail; the median leaves it where it is
 //! and fits the bulk, which is also the quantity reported.
 //!
+//! # What it buys on Lennard-Jones
+//!
+//! Measured by `examples/hessian_fit_lj.rs`: perturb a relaxed cluster, record
+//! the gradient, quench with the crate's warm L-BFGS, fit on the first 120
+//! descents and score the median relative depth error on the next 120. Both
+//! arms carry their own scale, matched on the training half, so what is
+//! compared is the shape and not a free multiplier.
+//!
+//! ```text
+//! step   LJ38 default -> fitted        LJ75 default -> fitted
+//! 0.08   0.175 -> 0.075   2.33x        0.145 -> 0.048   3.00x
+//! 0.15   0.174 -> 0.148   1.18x        0.114 -> 0.091   1.26x
+//! 0.25   0.090 -> 0.072   1.25x        0.058 -> 0.048   1.19x
+//! 0.35   0.081 -> 0.066   1.23x        0.047 -> 0.038   1.22x
+//! ```
+//!
+//! The gain lands where the harmonic form is worth having. A quarter-sigma
+//! perturbation recovers energy no quadratic form accounts for, and both arms
+//! are then limited by that rather than by the operator: the objective over the
+//! whole search box runs 0.074 to 0.089 for LJ38 at a step of 0.25, so no shape
+//! does much better than any other and the fit reports as much. At a step of
+//! 0.08 the descent really is a harmonic fall, the box spans 0.068 to 0.158,
+//! and the covalent constants are three times worse than the fitted ones.
+//!
+//! The fitted constants say why. At a step of 0.08 the fit returns `alpha` near
+//! 15 on LJ38 and near 20 on LJ75 against a default of 1: the Lennard-Jones pair
+//! force constant falls off with separation far faster than a covalent bond's,
+//! and passes through zero at the well's inflection point. At the larger steps
+//! the recovered `alpha` falls to between 2 and 5 and the floor rises to the
+//! order of one, which is the fit reporting that the anisotropy has stopped
+//! carrying information.
+//!
+//! The accumulator, fed the same training half one descent at a time and
+//! holding only its last 48, lands within a few per cent of the batch fit at
+//! every point above and below it on LJ75 at a step of 0.08, 0.0454 against
+//! 0.0482. Where the objective is flat it settles on quite different constants
+//! for the same held-out error, which is the flatness showing through rather
+//! than a failure: LJ38 at a step of 0.25 gives `alpha = 5.6, floor = 2.3`
+//! online against `1.8` and `1.2` in batch, both scoring 0.072.
+//!
 //! # Degrading safely
 //!
 //! Below `min_samples` observations the accumulator hands back
@@ -174,7 +214,7 @@ const FLOOR_LO: f64 = 1e-4;
 /// The ceiling is a regularisation, not a range. Past a floor of about three
 /// the diagonal dominates the pair terms and the operator becomes
 /// `|g|^2 / 2 floor k0`, the isotropic proxy the model Hessian exists to
-/// replace, in which `alpha` no longer enters at all. Scanning a Lennard-Jones
+/// replace, in which `alpha` does not enter at all. Scanning a Lennard-Jones
 /// sample out to a floor of 300 shows the objective flattening onto that limit
 /// at a spread of 0.080 against the best 0.074 anywhere in the box: a search
 /// allowed to go there would trade a real anisotropy for a plateau it could
@@ -202,7 +242,7 @@ const FLAT_TOL: f64 = 1e-3;
 /// while predicting the same depths to within a per cent. Requiring a five per
 /// cent reduction keeps the constants still when the data has nothing to say,
 /// and still admits the eight per cent the Lennard-Jones fit does earn.
-const ADOPT_MARGIN: f64 = 0.05;
+pub const ADOPT_MARGIN: f64 = 0.05;
 /// Points per axis on each grid.
 const GRID: usize = 8;
 /// Grids laid down, each inside the last one's best cell.
@@ -222,7 +262,7 @@ fn median(values: &[f64]) -> f64 {
     let mut v = values.to_vec();
     v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let m = v.len() / 2;
-    if v.len() % 2 == 0 {
+    if v.len().is_multiple_of(2) {
         0.5 * (v[m - 1] + v[m])
     } else {
         v[m]
@@ -409,7 +449,12 @@ impl HessianFit {
     /// log without having to track the schedule itself. Unusable triples are
     /// dropped rather than fitted around: a descent that recovered nothing
     /// carries no ratio.
-    pub fn observe(&mut self, x: ArrayView1<f64>, gradient: ArrayView1<f64>, observed: f64) -> bool {
+    pub fn observe(
+        &mut self,
+        x: ArrayView1<f64>,
+        gradient: ArrayView1<f64>,
+        observed: f64,
+    ) -> bool {
         let sample = Descent {
             x: x.to_owned(),
             gradient: gradient.to_owned(),
@@ -672,7 +717,10 @@ mod tests {
         for s in &samples {
             acc.observe(s.x.view(), s.gradient.view(), s.observed);
         }
-        assert!(!acc.is_calibrated(), "the accumulator claimed a calibration");
+        assert!(
+            !acc.is_calibrated(),
+            "the accumulator claimed a calibration"
+        );
         assert_eq!(
             acc.params(),
             ModelParams::default(),
@@ -703,7 +751,10 @@ mod tests {
             vec![MIN_SAMPLES, MIN_SAMPLES + REFIT_EVERY],
             "the schedule fired at {at:?}"
         );
-        assert!(acc.is_calibrated(), "enough data arrived and nothing fitted");
+        assert!(
+            acc.is_calibrated(),
+            "enough data arrived and nothing fitted"
+        );
         assert!(
             (acc.params().alpha / truth.alpha - 1.0).abs() < 0.15,
             "the accumulator settled on alpha {} against a true {}",
@@ -745,7 +796,10 @@ mod tests {
         let mut acc = HessianFit::new();
         let x = structure(&mut Rng(1), 8);
         let g = Array1::from(vec![0.1; 24]);
-        assert!(!acc.observe(x.view(), g.view(), 0.0), "a zero depth entered");
+        assert!(
+            !acc.observe(x.view(), g.view(), 0.0),
+            "a zero depth entered"
+        );
         assert!(
             !acc.observe(x.view(), g.view(), -1.0),
             "a negative depth entered"
@@ -772,12 +826,16 @@ mod tests {
         for s in &samples {
             acc.observe(s.x.view(), s.gradient.view(), s.observed);
         }
-        assert_eq!(acc.len(), 10, "the ring held {} against a cap of 10", acc.len());
+        assert_eq!(
+            acc.len(),
+            10,
+            "the ring held {} against a cap of 10",
+            acc.len()
+        );
         assert_eq!(acc.seen(), 40, "the run counted {} descents", acc.seen());
         let last = acc.samples().back().expect("an empty ring after 40 pushes");
         assert_eq!(
-            last.observed,
-            samples[39].observed,
+            last.observed, samples[39].observed,
             "the newest observation is not the one at the back"
         );
     }
