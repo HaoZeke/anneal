@@ -143,6 +143,12 @@ fn main() {
     if let Ok(v) = std::env::var("QUENCH_CONF") {
         cfg.quench_confidence = v.parse().unwrap_or(2.0);
     }
+    // Above the energy range the screen never refuses, so every hop pays a
+    // full relaxation and the quenched sample is untruncated. The comparator
+    // for what the screen's own truncation does to a tail fit.
+    if let Ok(v) = std::env::var("SCREEN_MARGIN") {
+        cfg.screen_margin = v.parse().unwrap_or(2.0);
+    }
     cfg.contextual_moves = opts.contains(&"ctx");
     cfg.bayes_screen = opts.contains(&"bayes");
     cfg.angular_moves = opts.contains(&"angular");
@@ -346,17 +352,18 @@ fn main() {
         if let Some(dir) = trace_dir.as_deref() {
             let path = format!("{dir}/{}_{n}_s{seed}.trace", spec.replace(':', ""));
             let mut body = format!(
-                "# charged basins energy\n# budget {budget} solved {} \
-                 first_encounter {}\n",
+                "# charged basins energy converged\n# budget {budget} solved {} \
+                 first_encounter {} screen_margin {}\n",
                 hit as u8,
                 encounters
                     .last()
                     .filter(|e| e.found())
                     .map(|e| e.charged().to_string())
-                    .unwrap_or_else(|| "censored".into())
+                    .unwrap_or_else(|| "censored".into()),
+                cfg.screen_margin
             );
-            for (c, b, e) in &out.quenched {
-                body.push_str(&format!("{c} {b} {e:.9}\n"));
+            for (c, b, e, k) in &out.quenched {
+                body.push_str(&format!("{c} {b} {e:.9} {}\n", *k as u8));
             }
             match std::fs::write(&path, body) {
                 Ok(()) => println!("      trace {} rows -> {path}", out.quenched.len()),

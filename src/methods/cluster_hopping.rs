@@ -853,12 +853,22 @@ pub struct Config {
     pub record_gradient: f64,
     /// Whether every quenched energy is kept, not only the improving ones.
     ///
-    /// A run pays for one relaxation per hop and reads a number off each. The
+    /// A run pays for a relaxation per hop and reads a number off each. The
     /// running minimum keeps one of them; the rest are a sample from the
     /// density of states of minima in the region the chain is in, and that
     /// sample carries what the minimum cannot, namely whether the region has a
-    /// floor above the target. See [`crate::tail`]. Three `usize`-and-`f64`
-    /// words per hop, so a 400000-evaluation run costs about 200 kilobytes.
+    /// floor above the target. See [`crate::tail`] and [`Outcome::quenched`].
+    /// Four words per full relaxation, so a 400000-evaluation run at 38 points
+    /// costs about 60 kilobytes.
+    ///
+    /// The sample it produces is truncated by [`Config::screen_margin`]: the
+    /// full relaxation runs only where the 25-step partial energy sits within
+    /// the margin of the incumbent, so minima the partial descent misjudged
+    /// are absent. The truncation is on a noisy proxy for the quantity being
+    /// modelled, and it removes deep minima reached from poor starts, which
+    /// pushes a fitted endpoint upward. Setting the margin above the energy
+    /// range turns the screen off and gives an untruncated sample at about six
+    /// times the cost per hop; both were measured.
     pub trace_quenched: bool,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
@@ -1063,14 +1073,28 @@ pub struct Outcome {
     /// improves ten thousand times is descending, and the tail of that is not
     /// what anyone is asking about.
     pub improvements: Vec<(usize, usize, usize, f64)>,
-    /// Every quenched energy, with the charged count and basin count at it.
+    /// Charged count, basin count, energy and convergence flag at every hop
+    /// that ran a full relaxation.
     ///
     /// Empty unless [`Config::trace_quenched`] is set. Ordered by hop, so a
     /// prefix of it is what the run had seen at a given point in its budget,
     /// which is what makes a call read off it a prediction rather than a
-    /// summary. The basin count is carried so that repeat visits to one basin
-    /// can be dropped without a second descriptor pass.
-    pub quenched: Vec<(usize, usize, f64)>,
+    /// summary.
+    ///
+    /// Hops the screen or the return test stopped are absent, because their
+    /// energy comes off a 25-step partial descent and is not a draw from the
+    /// distribution of minima at all; no threshold keeps such a value out of
+    /// the exceedances, since it lands wherever the descent stopped. That
+    /// exclusion is itself a selection on energy, since the screen refuses
+    /// exactly the trials whose partial energy sits above `best +
+    /// screen_margin`, and the note on [`Config::trace_quenched`] says what
+    /// that costs.
+    ///
+    /// The flag is the gradient guard the ledger records under. False means
+    /// the relaxation stopped at its iteration cap, which leaves the energy a
+    /// little above the minimum it was heading for rather than somewhere else
+    /// entirely.
+    pub quenched: Vec<(usize, usize, f64, bool)>,
     /// Merge radius at the end of the run, calibrated or as configured.
     pub merge_radius: f64,
     /// Mean accepted-hop step length, which the radius is a quantile of.
@@ -1434,7 +1458,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         .with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
-    let mut quenched: Vec<(usize, usize, f64)> = Vec::new();
+    let mut quenched: Vec<(usize, usize, f64, bool)> = Vec::new();
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
     // Kept here rather than in a StallDetector because the threshold is not a
@@ -1801,13 +1825,13 @@ fn run_full<'g, R: Rng + ?Sized>(
             unconverged_records += 1;
         }
         hops += 1;
-        // Taken under the same guard the ledger uses. A partial quench carries
-        // an energy above the minimum it was heading for, so it is a draw from
-        // a different distribution than the one the tail model is about, and
-        // there is no threshold high enough to keep such a draw out of the
-        // exceedances: it lands wherever the relaxation stopped.
-        if cfg.trace_quenched && recordable {
-            quenched.push((ledger.spent(), bias.n_basins(), e_new));
+        // Only where a full relaxation actually ran. A screened or returning
+        // trial carries the energy of a 25-step partial descent, which is a
+        // draw from a different distribution than the one the tail model is
+        // about, and no threshold keeps such a draw out of the exceedances:
+        // it lands wherever the descent stopped.
+        if cfg.trace_quenched && !unquenched && !screened_this && !returning {
+            quenched.push((ledger.spent(), bias.n_basins(), e_new, recordable));
         }
         if improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
