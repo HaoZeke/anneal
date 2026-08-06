@@ -56,6 +56,7 @@ pub mod runner;
 pub mod construct;
 pub mod delayed;
 pub mod lattice;
+pub mod model_hessian;
 pub mod quench;
 pub mod screen;
 pub mod twin;

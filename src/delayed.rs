@@ -103,7 +103,7 @@ use crate::screen::Screen;
 use ndarray::{Array1, ArrayView1};
 
 /// Features the surrogate regresses on.
-pub const FEATURES: usize = 7;
+pub const FEATURES: usize = 10;
 
 /// Cheap structural summary of an unrelaxed structure.
 ///
@@ -112,6 +112,53 @@ pub const FEATURES: usize = 7;
 /// depth ahead of it, and a proposal already near a packing has little.
 pub fn features(x: ArrayView1<f64>, n: usize, raw: f64) -> Array1<f64> {
     features_with_gradient(x, n, raw, 0.0)
+}
+
+/// As [`features_with_gradient`], splitting the displacement from the
+/// incumbent along and across the descent direction.
+///
+/// A single gradient norm collapses an anisotropic quantity to one number. The
+/// depth a relaxation finds is `1/2 g^T H^-1 g`, so it is set by how the
+/// displacement distributes over the curvature, not by its length. The split
+/// recovers the part of that which costs nothing: the component of `d = y - x`
+/// along the gradient is what simple descent undoes and predicts how much
+/// energy comes back, while the orthogonal component is the part descent does
+/// not remove and is what decides which basin the trial lands in.
+///
+/// This is the orthogonal-deviation reading used to visualise how far a band
+/// wanders off a reaction path, applied to a quench rather than a path: the
+/// descent direction plays the role of the path tangent.
+pub fn features_orthogonal(
+    x: ArrayView1<f64>,
+    n: usize,
+    raw: f64,
+    gradient: ArrayView1<f64>,
+    from: ArrayView1<f64>,
+) -> Array1<f64> {
+    let gnorm = gradient.iter().fold(0.0_f64, |a, q| a + q * q).sqrt();
+    let mut base = features_with_gradient(x, n, raw, gnorm);
+    // Displacement from the structure the trial was proposed from, split by
+    // the descent direction at the trial.
+    let (mut along, mut dsq) = (0.0_f64, 0.0_f64);
+    if from.len() == x.len() && gnorm > 1e-12 {
+        for i in 0..x.len() {
+            let d = x[i] - from[i];
+            along += d * (gradient[i] / gnorm);
+            dsq += d * d;
+        }
+    }
+    let perp = (dsq - along * along).max(0.0).sqrt();
+    let total = dsq.sqrt();
+    let mut out = Array1::zeros(FEATURES);
+    for (i, v) in base.iter_mut().enumerate() {
+        out[i] = *v;
+    }
+    out[7] = along.abs();
+    out[8] = perp;
+    // How much of the step descent cannot undo, which is scale free and is the
+    // quantity that separates a step within a basin from one that leaves it.
+    out[9] = if total > 1e-12 { perp / total } else { 0.0 };
+    out
 }
 
 /// As [`features`], with the gradient norm at the unrelaxed point.
@@ -129,7 +176,12 @@ pub fn features_with_gradient(
     gnorm: f64,
 ) -> Array1<f64> {
     if n < 2 {
-        return Array1::from(vec![1.0, raw, 0.0, 0.0, 0.0, gnorm, gnorm * gnorm]);
+        let mut v = Array1::zeros(FEATURES);
+        v[0] = 1.0;
+        v[1] = raw;
+        v[5] = gnorm;
+        v[6] = gnorm * gnorm;
+        return v;
     }
     let mut nearest = vec![f64::INFINITY; n];
     for i in 0..n {
@@ -176,15 +228,15 @@ pub fn features_with_gradient(
     // The raw energy is the strongest single predictor and costs the one
     // evaluation the stage is allowed. The rest describe how much room the
     // structure has to fall.
-    Array1::from(vec![
-        1.0,
-        raw,
-        mean_coord,
-        closest / scale.max(1e-12),
-        scale,
-        gnorm,
-        gnorm * gnorm,
-    ])
+    let mut v = Array1::zeros(FEATURES);
+    v[0] = 1.0;
+    v[1] = raw;
+    v[2] = mean_coord;
+    v[3] = closest / scale.max(1e-12);
+    v[4] = scale;
+    v[5] = gnorm;
+    v[6] = gnorm * gnorm;
+    v
 }
 
 /// A learned stand-in for the quenched energy, with its own uncertainty.
@@ -286,15 +338,33 @@ impl Surrogate {
         gnorm: f64,
         tolerance: f64,
     ) -> Option<f64> {
+        self.predict_features(features_with_gradient(x, n, raw, gnorm).view(), raw, tolerance)
+    }
+
+    /// Prediction from a feature vector the caller built, which is how the
+    /// orthogonal split is supplied.
+    pub fn predict_features(
+        &self,
+        f: ArrayView1<f64>,
+        raw: f64,
+        tolerance: f64,
+    ) -> Option<f64> {
         if self.model.observations() < self.warmup {
             return None;
         }
-        let f = features_with_gradient(x, n, raw, gnorm);
-        let (depth, sd) = self.model.predict(f.view())?;
+        let (depth, sd) = self.model.predict(f)?;
         if !sd.is_finite() || sd.sqrt() > tolerance {
             return None;
         }
         Some(raw + depth)
+    }
+
+    /// Records a quench from a feature vector the caller built.
+    pub fn observe_features(&mut self, f: ArrayView1<f64>, raw: f64, quenched: f64) {
+        let depth = quenched - raw;
+        if depth.is_finite() && raw.is_finite() {
+            self.model.observe(f, depth);
+        }
     }
 
     /// Records a quench: the structure before it and the energy after.
