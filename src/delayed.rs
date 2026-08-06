@@ -70,6 +70,34 @@
 //! Depth rather than energy because the raw energy carries most of the signal
 //! already and is available for one evaluation; asking the model only for what
 //! the relaxation adds is asking it for the part that is actually hard.
+//!
+//! # Measured, and not yet paying
+//!
+//! The scheme is exact and the saving is real; the surrogate is not good
+//! enough for the saving to be worth what it costs. On 38 points at 2e5:
+//!
+//! | variant | stage-1 reject | stage-2 reject | hops | acceptance | accepted moves |
+//! |---------|----------------|----------------|------|------------|----------------|
+//! | screen (control) | -- | -- | 5561 | 0.560 | 3114 |
+//! | delayed, no abstention | 0.485 | 0.571 | 10058 | 0.223 | 2243 |
+//! | delayed, abstention at 0.5 T | 0.868 | 0.960 | 21138 | 0.014 | 296 |
+//!
+//! Nearly half of all proposals avoid a quench and the hop count nearly
+//! doubles, which is the mechanism working. What it buys is spent again at the
+//! second stage, where the surrogate's error rejects more moves than the extra
+//! proposals supply, and abstention on the predictive spread makes it worse
+//! rather than better: the posterior's own uncertainty is not calibrated
+//! against its error, so raising the bar filtered out the cases it was right
+//! about along with the ones it was wrong about.
+//!
+//! The bottleneck is now a specific and learnable quantity rather than a
+//! structural one. The features here are the raw energy, mean coordination and
+//! closest contact, and none of them describes how far a structure sits off
+//! the manifold of relaxed structures, which is what sets how far it will
+//! fall. The gradient at the unrelaxed point is computed and discarded by the
+//! evaluation the first stage already pays for, and for a locally quadratic
+//! basin the depth goes as `|g|^2 / 2 lambda`, so it is the feature the model
+//! is missing and the one that costs nothing to add.
 
 use crate::screen::Screen;
 use ndarray::{Array1, ArrayView1};
@@ -157,6 +185,11 @@ pub struct Surrogate {
     pub stage_one: usize,
     /// First-stage rejections, each of which saved a quench.
     pub stage_one_rejected: usize,
+    /// First stages skipped because the posterior was too uncertain to speak.
+    ///
+    /// An abstention pays the quench the run would have paid anyway, so it is
+    /// the cheap way of being unsure.
+    pub abstained: usize,
     /// Second-stage tests run.
     pub stage_two: usize,
     /// Second-stage rejections, which are the surrogate's mistakes.
@@ -179,6 +212,7 @@ impl Surrogate {
             // has not started making.
             model: Screen::new(FEATURES, 64, 0.0, 0.5),
             warmup: 64,
+            abstained: 0,
             stage_one: 0,
             stage_one_rejected: 0,
             stage_two: 0,
@@ -197,11 +231,38 @@ impl Surrogate {
     /// `raw` is the structure's own energy, which the caller has already paid
     /// for and which the model corrects rather than replaces.
     pub fn predict(&self, x: ArrayView1<f64>, n: usize, raw: f64) -> Option<f64> {
+        self.predict_at(x, n, raw, f64::INFINITY)
+    }
+
+    /// As [`Surrogate::predict`], abstaining when the predictive spread exceeds
+    /// `tolerance`.
+    ///
+    /// Abstention is what an uncertainty is for here. The two ways of being
+    /// wrong do not cost the same: abstaining pays one quench, which is what
+    /// the run would have paid anyway, while guessing wrongly passes a proposal
+    /// the second stage then rejects, and that costs an accepted move. So the
+    /// first stage should only speak where the posterior is sharp relative to
+    /// the temperature that scales the acceptance ratio.
+    ///
+    /// Measured without it, the second stage rejected 57 per cent of what the
+    /// first passed, and composite acceptance fell from 0.56 to 0.223: the
+    /// surrogate was confidently wrong often enough to lose more moves than
+    /// the extra proposals bought.
+    pub fn predict_at(
+        &self,
+        x: ArrayView1<f64>,
+        n: usize,
+        raw: f64,
+        tolerance: f64,
+    ) -> Option<f64> {
         if self.model.observations() < self.warmup {
             return None;
         }
         let f = features(x, n, raw);
-        let (depth, _sd) = self.model.predict(f.view())?;
+        let (depth, sd) = self.model.predict(f.view())?;
+        if !sd.is_finite() || sd.sqrt() > tolerance {
+            return None;
+        }
         Some(raw + depth)
     }
 
@@ -388,6 +449,30 @@ mod tests {
         }
         let p = s.predict(x.view(), n, 0.0).expect("no prediction after 300 quenches");
         assert!(p < 0.0, "predicted quenched energy {p} is not below the raw energy");
+    }
+
+    /// Abstention has to actually abstain: a tolerance of zero means the
+    /// first stage never speaks, whatever the posterior holds.
+    #[test]
+    fn a_zero_tolerance_abstains_always() {
+        let mut rng = StdRng::seed_from_u64(17);
+        let mut s = Surrogate::new();
+        let n = 8;
+        for _ in 0..300 {
+            let mut x = Array1::zeros(3 * n);
+            for v in x.iter_mut() {
+                *v = rng.random_range(-2.0..2.0);
+            }
+            let raw: f64 = rng.random_range(-10.0..10.0);
+            let f = features(x.view(), n, raw);
+            s.observe(x.view(), n, raw, raw - 2.0 * f[2]);
+        }
+        let mut x = Array1::zeros(3 * n);
+        for v in x.iter_mut() {
+            *v = rng.random_range(-2.0..2.0);
+        }
+        assert!(s.predict_at(x.view(), n, 0.0, 0.0).is_none());
+        assert!(s.predict_at(x.view(), n, 0.0, f64::INFINITY).is_some());
     }
 
     /// A cold surrogate must decline to predict rather than guess, so the

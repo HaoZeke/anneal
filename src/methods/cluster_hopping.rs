@@ -845,6 +845,11 @@ pub struct Config {
     /// and failed; this one changes what a hop costs, which is the axis the
     /// only successful mechanism so far, the return screen, also moved.
     pub adaptive_screen: bool,
+    /// Predictive spread, in units of the temperature, above which the first
+    /// stage abstains rather than deciding.
+    ///
+    /// See [`crate::delayed::Surrogate::predict_at`].
+    pub surrogate_tolerance: f64,
     /// Whether acceptance is delayed behind a learned surrogate.
     ///
     /// A first stage decides on a surrogate for the quenched energy, costing
@@ -974,6 +979,7 @@ impl Config {
             screen_margin: 2.0,
             screen_steps: 25,
             adaptive_screen: false,
+            surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             twin_moves: false,
             learn_construction: false,
@@ -1596,7 +1602,12 @@ fn run_full<'g, R: Rng + ?Sized>(
             // arrive. Measured, the first stage ran 0 times in 5561 hops while
             // costing two evaluations each.
             pending_raw = Some(raw_y);
-            if let Some(pred_y) = sur.predict(trial.view(), n, raw_y) {
+            // The first stage speaks only where the posterior is sharp against
+            // the temperature that scales the acceptance ratio.
+            let tol = cfg.surrogate_tolerance * temperature;
+            match sur.predict_at(trial.view(), n, raw_y, tol) {
+                None => sur.abstained += 1,
+                Some(pred_y) => {
                 let pred_x = match surrogate_here {
                     Some(v) => v,
                     None => {
@@ -1616,6 +1627,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     stage_one_reject = true;
                 }
                 pending_surrogate = Some((pred_y, raw_y));
+                }
             }
         }
         if stage_one_reject {
