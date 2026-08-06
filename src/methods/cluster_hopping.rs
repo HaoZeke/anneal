@@ -1204,6 +1204,14 @@ pub struct Outcome {
     /// Present whenever the graph was recorded, escape on or off, because the
     /// hierarchy is evidence about the landscape rather than about the move.
     pub superbasin: Option<crate::superbasin::SuperbasinReport>,
+    /// The recorded transition counts, when the quotient analysis is asked for.
+    ///
+    /// Handed out because deciding whether two basins are one structure needs
+    /// the objective, to re-quench a stored state, and needs structural
+    /// descriptors, and neither belongs in the driver.
+    pub superbasin_counts: Option<crate::superbasin::HopCounts>,
+    /// The archived structures, as `(basin, energy, state)`.
+    pub superbasin_archive: Option<Vec<(usize, f64, Array1<f64>)>>,
 }
 
 /// Relaxes `x`, charging every evaluation, and stopping when the budget ends.
@@ -2574,6 +2582,14 @@ fn run_full<'g, R: Rng + ?Sized>(
         path_escapes,
         path_improvements,
         path_gain,
+        superbasin_counts: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.counts.clone()),
+        superbasin_archive: superbasin
+            .as_ref()
+            .filter(|_| cfg.superbasin_quotient)
+            .map(|sb| sb.archive_entries()),
         superbasin: superbasin.as_ref().map(|sb| {
             let mut r = sb.report();
             if cfg.superbasin_quotient {
