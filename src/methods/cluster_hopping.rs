@@ -667,6 +667,13 @@ pub struct Config {
     /// Takes precedence over `shape_keyed`, which stays for callers that only
     /// need the two-way choice.
     pub keying: Keying,
+    /// Length scale of the potential, as `r_min / 2^(1/6)`.
+    ///
+    /// 1 for Lennard-Jones. Only the morphology keyings read it, and they need
+    /// it because their cutoffs sit between the first and second neighbour
+    /// shells: at Morse rho = 14 the first shell is at 1 against 1.12 for
+    /// Lennard-Jones, so a cutoff carried across counts the wrong neighbours.
+    pub morphology_scale: f64,
     /// Choose the move from where the chain is standing.
     ///
     /// The allocator learns one success rate per move, which is the right model
@@ -946,6 +953,7 @@ impl Config {
             swap_period: 50,
             bias_by_rung: false,
             keying: Keying::Distances,
+            morphology_scale: 1.0,
             contextual_moves: false,
             contextual_floor: 0.1,
             bayes_screen: false,
@@ -1316,7 +1324,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 cfg.bias_height
             };
             BasinBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_scaled(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.morphology_scale,
+                ),
                 cfg.merge_radius,
                 h,
                 cfg.bias_gamma,
@@ -1451,7 +1464,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut spectral: Option<crate::spectral::SpectralBias<ClusterFingerprint>> =
         if cfg.track_funnels {
             let mut sb = crate::spectral::SpectralBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_scaled(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.morphology_scale,
+                ),
                 cfg.merge_radius,
                 cfg.bias_height,
                 cfg.bias_gamma,
@@ -1486,7 +1504,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     // instead would break under replica exchange, where each rung owns its own
     // bias and the indices of one rung mean nothing in another.
     let mut identity = BasinIndex::new(
-        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+        ClusterFingerprint::of_scaled(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.morphology_scale,
+                ),
         cfg.merge_radius,
     );
     // Structures kept for path endpoints. Only ones far from every member are
@@ -2185,7 +2208,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 biases.insert(rep, std::mem::replace(
                     &mut bias,
                     BasinBias::new(
-                        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                        ClusterFingerprint::of_scaled(
+                    n,
+                    effective_keying(cfg),
+                    &canonical_reference,
+                    cfg.morphology_scale,
+                ),
                         cfg.merge_radius,
                         cfg.bias_height,
                         cfg.bias_gamma,
@@ -2763,6 +2791,14 @@ pub enum ClusterFingerprint {
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
     Canonical(Box<crate::shape::CanonicalOrder>),
+    /// Per-site coordination numbers, smoothed into a kernel density estimate.
+    Coordination(Box<crate::morphology::CoordinationKde>),
+    /// Steinhardt bond-order parameters of the whole cluster.
+    #[cfg(feature = "featomic")]
+    Steinhardt(Box<crate::morphology::SteinhardtQ>),
+    /// Leading principal component of the SOAP power spectrum, fitted online.
+    #[cfg(feature = "featomic")]
+    SoapProjection(Box<crate::morphology::SoapProjection>),
 }
 
 /// Which descriptor a run keys basins on.
@@ -2793,6 +2829,71 @@ pub enum Keying {
     /// Matching each structure once against a reference costs one call per hop
     /// and leaves every comparison Euclidean.
     Canonical,
+    /// Steinhardt Q4 of the whole cluster.
+    ///
+    /// # A different kind of key
+    ///
+    /// Every keying above answers "have I been in this structure before". The
+    /// four here answer "what shape is this", so a bias on them deposits on a
+    /// morphology coordinate rather than on basin identity. That is what the
+    /// enhanced-sampling literature does for Lennard-Jones clusters, and what
+    /// this crate previously had no way to express.
+    ///
+    /// The merge radius changes meaning with them. On a distance spectrum it is
+    /// a threshold with no physical units; on Q4 it is a deposition width in
+    /// bond-order units, and the scale is set by the gap the coordinate has to
+    /// resolve. Global Q4 separates the icosahedral and face-centred-cubic
+    /// funnels of LJ38 by about 0.15, so a width of 0.01 puts roughly fifteen
+    /// bins between them. See [`Keying::default_merge_radius`].
+    Q4,
+    /// Steinhardt Q4 and Q6 as a two-component coordinate.
+    ///
+    /// Q6 is high for both icosahedral and close-packed order, so it reads as
+    /// general solidity; Q4 is what separates the two packings. The pair
+    /// carries both, which is why it is the standard choice rather than either
+    /// alone.
+    Q4Q6,
+    /// Leading principal component of the SOAP power spectrum, fitted online
+    /// from the structures the run has already visited and from nothing else.
+    Soap,
+    /// Kernel density estimate over per-site coordination numbers.
+    ///
+    /// The one morphology coordinate here that is not a scalar summary. It is a
+    /// distribution, and the 38-point face-centred-cubic truncated octahedron
+    /// and its icosahedral competitor differ in their coordination populations
+    /// directly rather than through a projection.
+    Coordination,
+}
+
+impl Keying {
+    /// Whether this keying deposits on morphology rather than on basin
+    /// identity.
+    pub fn is_morphology(self) -> bool {
+        matches!(
+            self,
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap | Keying::Coordination
+        )
+    }
+
+    /// The deposition width these coordinates want, in their own units.
+    ///
+    /// Supplied rather than left to the caller because a merge radius carried
+    /// over from the distance spectrum, where it is 0.7, would put an entire
+    /// run into one bin on a coordinate that lives in `[0, 1]`, and the run
+    /// would look like an unbiased control that happened to cost more.
+    pub fn default_merge_radius(self) -> Option<f64> {
+        match self {
+            // Fifteen bins across the LJ38 funnel gap of about 0.15.
+            Keying::Q4 | Keying::Q4Q6 => Some(0.01),
+            // The projection is standardised to unit variance over its fitting
+            // sample, so this is a quarter of a standard deviation of the
+            // structures the run has seen.
+            Keying::Soap => Some(0.25),
+            // In units of atoms: half a site moving between coordination bins.
+            Keying::Coordination => Some(0.5),
+            _ => None,
+        }
+    }
 }
 
 /// The keying a config asks for, honouring the older boolean.
@@ -2826,7 +2927,29 @@ impl ClusterFingerprint {
     }
 
     /// The descriptor for a named keying, against `reference`.
+    ///
+    /// Morphology keyings get a length scale of 1, which is Lennard-Jones. Use
+    /// [`ClusterFingerprint::of_scaled`] for a potential whose first shell sits
+    /// somewhere else.
     pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
+        Self::of_scaled(n_points, keying, reference, 1.0)
+    }
+
+    /// The descriptor for a named keying, against `reference`, at a length
+    /// scale of `scale`.
+    ///
+    /// `scale` is the potential's `r_min` divided by `2^(1/6)`: 1 for
+    /// Lennard-Jones, and it moves the neighbour shells for Morse. The
+    /// morphology descriptors need it because their cutoffs sit between the
+    /// first and second shells, and a cutoff carried over from another
+    /// potential either counts the second shell as neighbours or misses the
+    /// first.
+    pub fn of_scaled(
+        n_points: usize,
+        keying: Keying,
+        reference: &Array1<f64>,
+        scale: f64,
+    ) -> Self {
         match keying {
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
@@ -2844,6 +2967,29 @@ impl ClusterFingerprint {
             }
             #[cfg(not(feature = "ira"))]
             Keying::Canonical => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
+            Keying::Coordination => ClusterFingerprint::Coordination(Box::new(
+                crate::morphology::CoordinationKde::for_lj(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Q4 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Q4Q6 => ClusterFingerprint::Steinhardt(Box::new(
+                crate::morphology::SteinhardtQ::q4q6(n_points, scale),
+            )),
+            #[cfg(feature = "featomic")]
+            Keying::Soap => ClusterFingerprint::SoapProjection(Box::new(
+                crate::morphology::SoapProjection::new(n_points, scale),
+            )),
+            // Without featomic there is no spherical expansion and so no
+            // bond-order coordinate. Falling back to the distance spectrum
+            // would run an arm that reports itself as a Q4 bias and is not one,
+            // which is worse than refusing.
+            #[cfg(not(feature = "featomic"))]
+            Keying::Q4 | Keying::Q4Q6 | Keying::Soap => {
+                panic!("keying {keying:?} needs the `featomic` feature")
+            }
         }
     }
 }
@@ -2856,6 +3002,11 @@ impl Fingerprint for ClusterFingerprint {
             ClusterFingerprint::Sites(s) => s.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
+            ClusterFingerprint::Coordination(c) => c.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::Steinhardt(s) => s.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::SoapProjection(s) => s.describe(x),
         }
     }
 }

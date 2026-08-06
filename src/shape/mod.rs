@@ -244,16 +244,34 @@ impl crate::bias::Fingerprint for CanonicalOrder {
     /// caller has established that matching succeeds for every structure it
     /// will see.
     ///
-    /// A note here previously said matching fails on a structure and a
-    /// relabelled copy of itself, against libira at 3cb0c29, with the
-    /// permutation coming back non-bijective. That is not what the library on
-    /// this machine does now:
-    /// [`tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`]
-    /// canonicalises a jittered cluster and a relabelled copy of it to the same
-    /// coordinates at 2.7e-16 root-mean-square on 13 points and 2.9e-16 on 38,
-    /// costing 2.4 ms per structure warm. Whether the earlier observation was a
-    /// different libira or a different input shape is not established, so the
-    /// `None` path stays and callers should still handle it.
+    /// # An inherited claim and a measured one, kept apart
+    ///
+    /// INHERITED, not reproduced here: a note in this position said that
+    /// against libira at 3cb0c29 the permutation comes back non-bijective even
+    /// for a structure matched to a relabelled copy of itself. That claim is
+    /// part of why IRA has been treated as unreliable in this crate, so it is
+    /// recorded as something once observed rather than deleted.
+    ///
+    /// MEASURED, on the libira in use now, across two cases that are not the
+    /// same question:
+    ///
+    /// - A relabelling of the *reference itself*, in
+    ///   [`tests::a_canonical_order_absorbs_relabelling`]. The easy case: the
+    ///   structure being matched is the one the order is defined against.
+    /// - A relabelling of a structure that *differs from the reference by a
+    ///   real distortion*, in
+    ///   [`tests::canonicalising_a_relabelled_copy_of_a_distorted_structure`].
+    ///   This is what a search actually produces and the only case that bears
+    ///   on whether a coordinate-space model can be trusted. A jittered cluster
+    ///   and a relabelled copy of it canonicalise to the same coordinates at
+    ///   2.7e-16 root-mean-square on 13 points and 2.9e-16 on 38, costing 2.4
+    ///   ms per structure warm.
+    ///
+    /// Only the first case was covered before. The hard case succeeds to
+    /// machine precision here. Whether the inherited observation came from a
+    /// different libira, a different input shape or a different call is not
+    /// established, and nothing here establishes it, so the `None` path stays
+    /// and callers should still handle it.
     fn describe(&self, x: ArrayView1<f64>) -> Array1<f64> {
         // Scaled by 1/sqrt(n), so Euclidean distance between two descriptors is
         // a root-mean-square displacement per point rather than a total.
