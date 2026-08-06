@@ -516,6 +516,16 @@ pub enum LadderMode {
     /// temperature. The geometric schedule and [`Config::ladder_top`] still
     /// place the rungs.
     Cyclic,
+    /// Rungs at their own temperatures on the geometric schedule, sharing the
+    /// budget in the same slices, and never exchanging.
+    ///
+    /// The control the question names. A ladder differs from a single chain in
+    /// two ways at once: it runs several chains on a shared budget, and it
+    /// exchanges between them. Scored against one chain, an improvement could
+    /// be either. This arm is the ladder with the exchange removed and nothing
+    /// else changed, so the difference between it and [`LadderMode::Cyclic`]
+    /// is the exchange and nothing else.
+    Independent,
     /// Whole parity classes offered per sweep with the parity drawn from a
     /// coin, each rung at its own temperature, geometric schedule.
     ///
@@ -552,6 +562,11 @@ impl LadderMode {
     /// pair.
     pub fn sweeps(&self) -> bool {
         matches!(self, LadderMode::Reversible | LadderMode::NonReversible)
+    }
+
+    /// Whether any exchange is offered at all.
+    pub fn exchanges(&self) -> bool {
+        !matches!(self, LadderMode::Independent)
     }
 }
 
@@ -2428,7 +2443,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 } else {
                     let k = rep;
                     let j = (rep + 1) % n_rep;
-                    if k != j {
+                    if k != j && cfg.ladder_mode.exchanges() {
                         swaps_tried += 1;
                         // Bias exchange, not plain parallel tempering.
                         //

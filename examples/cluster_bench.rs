@@ -166,7 +166,9 @@ fn main() {
     // the same ladder with each rung at its own temperature, whole parity
     // classes with a coin-flipped parity, and the non-reversible sweep on a
     // ladder placed by the barrier the run measures.
-    let ladder_mode = if opts.contains(&"nrpt") {
+    let ladder_mode = if opts.contains(&"indep") {
+        Some(LadderMode::Independent)
+    } else if opts.contains(&"nrpt") {
         Some(LadderMode::NonReversible)
     } else if opts.contains(&"rpt") {
         Some(LadderMode::Reversible)
