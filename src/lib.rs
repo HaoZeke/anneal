@@ -41,6 +41,9 @@ pub mod laws;
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+/// The gradient-enhanced Gaussian process of gpr_optim, over its C API.
+#[cfg(feature = "gpr")]
+pub mod gpr;
 /// Morphology collective variables: Steinhardt bond order, a SOAP projection
 /// and a coordination kernel density estimate, on featomic's descriptors.
 pub mod morphology;
