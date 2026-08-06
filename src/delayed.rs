@@ -61,15 +61,18 @@
 //!
 //! # What the surrogate is
 //!
-//! The run labels its own training data. Every quench it pays produces a pair
-//! of an unrelaxed structure and the energy it relaxed to, and a 38-point run
-//! produces about twelve thousand of them. The surrogate regresses the quench
-//! depth `E~(x) - E(x)` on features of the unrelaxed structure, so the
-//! prediction needs one energy evaluation and no gradient.
+//! The run labels its own rows. Every quench it pays produces a pair of an
+//! unrelaxed structure and the energy it relaxed to, and a 38-point run
+//! produces about twelve thousand of them. The surrogate regresses the quenched
+//! energy `E(Q(x))` on features of the unrelaxed structure, so the prediction
+//! needs one energy evaluation and one gradient.
 //!
-//! Depth rather than energy because the raw energy carries most of the signal
-//! already and is available for one evaluation; asking the model only for what
-//! the relaxation adds is asking it for the part that is actually hard.
+//! Energy rather than depth, because the depth is the difference of a bounded
+//! quantity and an unbounded one. Over one seed the quenched energy stays
+//! inside `[-174, -150]` for 96.4 per cent of the rows while the raw energy
+//! reaches 2.4e24, so the depth inherits the divergence, and a model asked for
+//! the depth has to hit four significant digits for the sum to land inside the
+//! temperature. The numbers this cost are below.
 //!
 //! # Measured, and not yet paying
 //!
@@ -125,6 +128,59 @@
 //! every column except the largest is annihilated by the rounding error of that
 //! column. Both designs above measure 1 of 11, so the comparison between them
 //! is a comparison of which single column survived.
+//!
+//! # Bounding the design, and what it settles
+//!
+//! Both faults have a fix and the fixes work. [`squash`] maps every column that
+//! a repulsive wall drives into a bounded one, and the prediction is the
+//! quenched energy itself rather than a depth added back to an energy of median
+//! 6.5e3. Over four seeds, `V0^-1 + X'X` on the trial rows of a run:
+//!
+//! | design | condition number | numerical rank | diagonal spread |
+//! |--------|------------------|----------------|-----------------|
+//! | linear columns | 1.6e71 | 2 of 11 | 1.9e70 |
+//! | bounded | 9.4e6 | 11 of 11 | 1.3e3 |
+//! | bounded and standardised | 6.9e5 | 11 of 11 | 1.0 |
+//!
+//! Held out on half the rows of each of four seeds, median absolute error in
+//! the quenched energy, against the constant that predicts the training median
+//! and looks at no structure at all:
+//!
+//! | predictor | temporal split | random split |
+//! |-----------|----------------|--------------|
+//! | depth added to the raw energy, linear columns | 6.9e5 | 4.9e5 |
+//! | quenched energy, bounded and standardised | 1.85 | 1.34 |
+//! | the training median | 1.96 | 1.32 |
+//!
+//! A factor of 3.7e5 of the error was parametrisation and conditioning, on both
+//! splits, and it is gone. What remains is a dead heat with a constant: the bounded
+//! model wins 1 of 4 seeds on the temporal split and 2 of 4 on the random one.
+//! A surrogate that ties a constant is a constant for the purposes of this
+//! scheme, and the reversibility argument above says what a constant does. It
+//! reduces the composite kernel to ordinary basin hopping.
+//!
+//! The search says the same thing twice. Over 8 seeds at 2e5 on 38 points:
+//!
+//! | arm | stage-1 reject | stage-2 reject | hops | acceptance | accepted moves | solved |
+//! |-----|----------------|----------------|------|------------|----------------|--------|
+//! | screen (control) | -- | -- | 6059 | 0.567 | 3432 | 7/8 |
+//! | delayed, linear columns, depth | 0.503 | 0.755 | 9704 | 0.255 | 1974 | 4/7 |
+//! | delayed, bounded, abstaining at 0.5 T | -- | -- | 5527 | 0.568 | 3140 | 7/8 |
+//! | delayed, bounded, never abstaining | 0.865 | 0.671 | 26599 | 0.046 | 1153 | 3/7 |
+//!
+//! At the tolerance the driver configures, the first stage runs zero times in
+//! 5527 hops. That is the calibration working rather than failing: the
+//! posterior's predictive spread never falls below `0.4`, because its own
+//! held-out error is 1.3 to 1.9, so it declines to speak and the run is the
+//! control minus the evaluations the abstentions paid for. Forced to speak it
+//! rejects 86.5 per cent of proposals at the first stage and 67.1 per cent of
+//! the survivors at the second, and acceptance falls to 0.046.
+//!
+//! So the ceiling is the feature set. A first stage needs the quenched energy
+//! to within the temperature, `0.8`; coordination, contact, spacing, gradient,
+//! displacement split and a model-Hessian depth give 1.3 to 1.9, which a
+//! constant also gives. Nothing about the encoding is left to try: the design
+//! has full rank, the target is the bounded one, and the error did not move.
 
 use crate::model_hessian;
 use crate::screen::Screen;
@@ -147,6 +203,27 @@ pub const FEATURES: usize = 11;
 /// number, so what a longer solve would buy is mostly a scale the fit already
 /// supplies.
 pub const DEPTH_ITERS: usize = 12;
+
+/// Bounded image of a column that is not bounded on the sampled distribution.
+///
+/// `sign(v) ln(1 + |v|)`, which is odd, monotone, smooth at zero and agrees
+/// with the identity to first order there, so a column that never leaves the
+/// ordinary range is barely touched while one that runs away is compressed.
+///
+/// The columns that need it are the ones a repulsive wall drives. A single
+/// Lennard-Jones pair at 0.4 of the mean spacing already contributes 6.1e4 and
+/// the `r^-12` term diverges below that, so over one seed the raw energy column
+/// reaches 2.4e24 and the `|g|^2` column 1.5e55. A Gram matrix holding both
+/// those and an intercept spans 1e110 and has numerical rank 1 of 11 in double
+/// precision: every other column is annihilated by the rounding error of the
+/// largest. Under this map the same columns reach 56 and 127, and the rank is
+/// the full 11.
+///
+/// Rank is what the map buys, not accuracy. The prediction it supports is in
+/// the module header.
+pub fn squash(v: f64) -> f64 {
+    v.signum() * v.abs().ln_1p()
+}
 
 /// Cheap structural summary of an unrelaxed structure.
 ///
@@ -232,18 +309,25 @@ pub fn features_with_depth(
     from: ArrayView1<f64>,
 ) -> Array1<f64> {
     let mut out = features_orthogonal(x, n, raw, gradient, from);
-    out[10] = model_hessian::depth(x, n, gradient, DEPTH_ITERS);
+    // Bounded, for the same reason the gradient columns are: the depth inherits
+    // the divergence of the gradient it is a quadratic form in, and reaches
+    // 9.0e53 over one seed.
+    out[10] = squash(model_hessian::depth(x, n, gradient, DEPTH_ITERS));
     out
 }
 
 /// As [`features`], with the gradient norm at the unrelaxed point.
 ///
-/// The feature the first version was missing, and a free one: the evaluation
-/// the first stage already pays for computes the gradient and throws it away.
-/// In a locally quadratic basin the depth a relaxation will find goes as
-/// `|g|^2 / 2 lambda`, so the squared norm is the leading term of the quantity
-/// being predicted rather than a proxy for it, and the linear term is carried
-/// alongside because the basin is only approximately quadratic.
+/// A free feature: the evaluation the first stage already pays for computes the
+/// gradient and throws it away. In a locally quadratic basin the depth a
+/// relaxation will find goes as `|g|^2 / 2 lambda`, so the squared norm is the
+/// leading term of the quantity being predicted rather than a proxy for it, and
+/// the linear term is carried alongside because the basin is only approximately
+/// quadratic.
+///
+/// The energy and both gradient columns go in through [`squash`]. All three
+/// diverge on a proposal that overlaps a pair, and a design carrying them
+/// linearly has numerical rank 1 whatever else is in it.
 pub fn features_with_gradient(
     x: ArrayView1<f64>,
     n: usize,
@@ -253,9 +337,9 @@ pub fn features_with_gradient(
     if n < 2 {
         let mut v = Array1::zeros(FEATURES);
         v[0] = 1.0;
-        v[1] = raw;
-        v[5] = gnorm;
-        v[6] = gnorm * gnorm;
+        v[1] = squash(raw);
+        v[5] = squash(gnorm);
+        v[6] = squash(gnorm * gnorm);
         return v;
     }
     let mut nearest = vec![f64::INFINITY; n];
@@ -305,19 +389,91 @@ pub fn features_with_gradient(
     // structure has to fall.
     let mut v = Array1::zeros(FEATURES);
     v[0] = 1.0;
-    v[1] = raw;
+    v[1] = squash(raw);
     v[2] = mean_coord;
     v[3] = closest / scale.max(1e-12);
     v[4] = scale;
-    v[5] = gnorm;
-    v[6] = gnorm * gnorm;
+    v[5] = squash(gnorm);
+    v[6] = squash(gnorm * gnorm);
     v
+}
+
+/// Running mean and spread of each column, for standardising the design.
+///
+/// [`Screen`] holds a conjugate Normal-Inverse-Gamma posterior with a prior
+/// precision of `1e-3 I`, which is one ridge for every column whatever its
+/// units. Under such a prior a column measured in thousands and a column
+/// measured in tenths are not shrunk by the same amount, and the ridge that
+/// regularises one leaves the other unconstrained. Standardising is what makes
+/// the single prior mean the same thing for all of them.
+///
+/// Kept beside the model rather than inside the feature builders, which are
+/// pure functions of one structure and cannot hold the statistics of a stream.
+///
+/// The statistics drift as the chain moves, so a row folded in early was
+/// standardised against different numbers from a row folded in late. Welford
+/// over the whole stream makes that drift slow, order `1/n` after the warmup,
+/// and the alternative, refitting the posterior whenever the statistics move,
+/// costs the storage the conjugate form exists to avoid.
+#[derive(Debug, Clone)]
+struct Columns {
+    n: usize,
+    mean: Vec<f64>,
+    m2: Vec<f64>,
+}
+
+impl Columns {
+    fn new(d: usize) -> Self {
+        Self {
+            n: 0,
+            mean: vec![0.0; d],
+            m2: vec![0.0; d],
+        }
+    }
+
+    /// Folds a row in, by Welford, which is the stable way to accumulate a
+    /// variance in one pass.
+    fn observe(&mut self, f: ArrayView1<f64>) {
+        if f.len() != self.mean.len() {
+            return;
+        }
+        self.n += 1;
+        for j in 0..self.mean.len() {
+            let d = f[j] - self.mean[j];
+            self.mean[j] += d / self.n as f64;
+            self.m2[j] += d * (f[j] - self.mean[j]);
+        }
+    }
+
+    /// Standard deviation of a column, or one where there is not yet a spread
+    /// to speak of.
+    fn spread(&self, j: usize) -> f64 {
+        if self.n < 2 {
+            return 1.0;
+        }
+        let v = (self.m2[j] / (self.n - 1) as f64).sqrt();
+        if v > 1e-12 { v } else { 1.0 }
+    }
+
+    /// The row as the model sees it. Column zero is the intercept and is left
+    /// alone: it has no spread, and centring it would remove the only column
+    /// that can carry the mean of the target.
+    fn standardise(&self, f: ArrayView1<f64>) -> Array1<f64> {
+        let mut out = Array1::zeros(f.len());
+        out[0] = f[0];
+        for j in 1..f.len() {
+            out[j] = (f[j] - self.mean[j]) / self.spread(j);
+        }
+        out
+    }
 }
 
 /// A learned stand-in for the quenched energy, with its own uncertainty.
 #[derive(Debug)]
 pub struct Surrogate {
     model: Screen,
+    /// Per-column statistics the design is standardised against.
+    columns: Columns,
     /// Quenches required before the first stage is allowed to reject.
     ///
     /// Enforced here rather than left to the model: `Screen::predict` answers
@@ -357,6 +513,7 @@ impl Surrogate {
             // scheme is exact either way, so waiting costs only the savings it
             // has not started making.
             model: Screen::new(FEATURES, 64, 0.0, 0.5),
+            columns: Columns::new(FEATURES),
             warmup: 64,
             abstained: 0,
             stage_one: 0,
@@ -375,7 +532,7 @@ impl Surrogate {
     /// posterior has too little evidence to be worth consulting.
     ///
     /// `raw` is the structure's own energy, which the caller has already paid
-    /// for and which the model corrects rather than replaces.
+    /// for and which enters the design through [`squash`].
     pub fn predict(&self, x: ArrayView1<f64>, n: usize, raw: f64) -> Option<f64> {
         self.predict_at(x, n, raw, f64::INFINITY)
     }
@@ -413,33 +570,41 @@ impl Surrogate {
         gnorm: f64,
         tolerance: f64,
     ) -> Option<f64> {
-        self.predict_features(features_with_gradient(x, n, raw, gnorm).view(), raw, tolerance)
+        self.predict_features(features_with_gradient(x, n, raw, gnorm).view(), tolerance)
     }
 
     /// Prediction from a feature vector the caller built, which is how the
     /// orthogonal split is supplied.
-    pub fn predict_features(
-        &self,
-        f: ArrayView1<f64>,
-        raw: f64,
-        tolerance: f64,
-    ) -> Option<f64> {
+    ///
+    /// The number returned is the quenched energy, not a correction to be added
+    /// to anything. Regressing the difference `E(Q(y)) - E(y)` and adding `E(y)`
+    /// back asks the model for a quantity of median 6.5e3 accurately enough to
+    /// leave the sum inside the temperature, 0.8, which is four significant
+    /// digits. The quenched energy itself lies in `[-174, -150]` for 96.4 per
+    /// cent of the rows a 38-point run labels, so predicting it directly is
+    /// asking for the number that is actually bounded.
+    pub fn predict_features(&self, f: ArrayView1<f64>, tolerance: f64) -> Option<f64> {
         if self.model.observations() < self.warmup {
             return None;
         }
-        let (depth, sd) = self.model.predict(f)?;
+        let (quenched, sd) = self.model.predict(self.columns.standardise(f).view())?;
         if !sd.is_finite() || sd.sqrt() > tolerance {
             return None;
         }
-        Some(raw + depth)
+        Some(quenched)
     }
 
     /// Records a quench from a feature vector the caller built.
-    pub fn observe_features(&mut self, f: ArrayView1<f64>, raw: f64, quenched: f64) {
-        let depth = quenched - raw;
-        if depth.is_finite() && raw.is_finite() {
-            self.model.observe(f, depth);
+    ///
+    /// The row updates the column statistics before it is standardised, so a
+    /// surrogate that has seen one row has a spread to divide by.
+    pub fn observe_features(&mut self, f: ArrayView1<f64>, quenched: f64) {
+        if !quenched.is_finite() || f.iter().any(|v| !v.is_finite()) {
+            return;
         }
+        self.columns.observe(f);
+        let z = self.columns.standardise(f);
+        self.model.observe(z.view(), quenched);
     }
 
     /// Records a quench: the structure before it and the energy after.
@@ -459,11 +624,8 @@ impl Surrogate {
         gnorm: f64,
         quenched: f64,
     ) {
-        let depth = quenched - raw;
-        if depth.is_finite() && raw.is_finite() {
-            let f = features_with_gradient(x, n, raw, gnorm);
-            self.model.observe(f.view(), depth);
-        }
+        let f = features_with_gradient(x, n, raw, gnorm);
+        self.observe_features(f.view(), quenched);
     }
 
     /// First-stage acceptance probability for a symmetric proposal.
@@ -615,31 +777,37 @@ mod tests {
         assert!((p - (-0.7f64 / t).exp()).abs() < 1e-12, "got {p}");
     }
 
-    /// The surrogate has to learn a depth relationship it is shown, or the
-    /// first stage never rejects anything and the scheme saves nothing.
+    /// The surrogate has to learn a quenched energy it is shown, and learn it
+    /// as a function of the structure rather than of the raw energy it is
+    /// handed alongside, since a relaxation lands where the structure says.
     #[test]
-    fn the_surrogate_learns_a_depth_it_is_shown() {
+    fn the_surrogate_learns_a_quenched_energy_it_is_shown() {
         let mut rng = StdRng::seed_from_u64(5);
         let mut s = Surrogate::new();
         let n = 8;
+        let truth = |f: &Array1<f64>| -5.0 - 2.0 * f[2];
         for _ in 0..300 {
             let mut x = Array1::zeros(3 * n);
             for v in x.iter_mut() {
                 *v = rng.random_range(-2.0..2.0);
             }
+            // The raw energy carries no information about where the structure
+            // relaxes to, which is the case the design has to survive.
             let raw: f64 = rng.random_range(-10.0..10.0);
-            // Depth falls with mean coordination, which is feature 2.
             let f = features(x.view(), n, raw);
-            let quenched = raw - 2.0 * f[2];
-            s.observe(x.view(), n, raw, quenched);
+            s.observe(x.view(), n, raw, truth(&f));
         }
         assert!(s.seen() >= 200, "only {} observations", s.seen());
         let mut x = Array1::zeros(3 * n);
         for v in x.iter_mut() {
             *v = rng.random_range(-2.0..2.0);
         }
-        let p = s.predict(x.view(), n, 0.0).expect("no prediction after 300 quenches");
-        assert!(p < 0.0, "predicted quenched energy {p} is not below the raw energy");
+        let want = truth(&features(x.view(), n, 0.0));
+        let got = s.predict(x.view(), n, 0.0).expect("no prediction after 300 quenches");
+        assert!(
+            (got - want).abs() < 0.2,
+            "predicted quenched energy {got} against the {want} the structure sets"
+        );
     }
 
     /// Abstention has to actually abstain: a tolerance of zero means the
@@ -656,7 +824,7 @@ mod tests {
             }
             let raw: f64 = rng.random_range(-10.0..10.0);
             let f = features(x.view(), n, raw);
-            s.observe(x.view(), n, raw, raw - 2.0 * f[2]);
+            s.observe(x.view(), n, raw, -5.0 - 2.0 * f[2]);
         }
         let mut x = Array1::zeros(3 * n);
         for v in x.iter_mut() {
@@ -664,6 +832,81 @@ mod tests {
         }
         assert!(s.predict_at(x.view(), n, 0.0, 0.0).is_none());
         assert!(s.predict_at(x.view(), n, 0.0, f64::INFINITY).is_some());
+    }
+
+    /// Every column has to stay bounded over the range a Lennard-Jones
+    /// proposal actually reaches, which is what keeps the Gram matrix in the
+    /// range double precision can hold.
+    #[test]
+    fn the_design_stays_bounded_over_twenty_four_decades() {
+        let n = 8;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = (i % 2) as f64 * 1.1;
+            x[3 * i + 1] = (i / 2) as f64 * 1.1;
+        }
+        let mut worst_squashed: f64 = 0.0;
+        let mut worst_plain: f64 = 0.0;
+        for p in 0..25 {
+            let raw = 10f64.powi(p);
+            let gnorm = 10f64.powi(p + 2);
+            let f = features_with_gradient(x.view(), n, raw, gnorm);
+            for v in f.iter() {
+                assert!(v.is_finite(), "column ran to {v} at raw {raw:e}");
+                worst_squashed = worst_squashed.max(v.abs());
+            }
+            worst_plain = worst_plain.max(gnorm * gnorm);
+        }
+        // A design carrying these columns linearly reaches 1e54, and its Gram
+        // matrix the square of that, which is where the rank goes.
+        assert!(
+            worst_plain > 1e50,
+            "the test did not reach the range that breaks the design: {worst_plain:e}"
+        );
+        assert!(
+            worst_squashed < 200.0,
+            "largest design entry {worst_squashed} over 24 decades of energy"
+        );
+    }
+
+    /// And the spread of `X'X` has to follow, since that is the matrix the
+    /// posterior is solved in.
+    #[test]
+    fn the_gram_diagonal_spread_stays_within_double_precision() {
+        let n = 8;
+        let mut x = Array1::zeros(3 * n);
+        for i in 0..n {
+            x[3 * i] = (i % 2) as f64 * 1.1;
+            x[3 * i + 1] = (i / 2) as f64 * 1.1;
+            x[3 * i + 2] = (i % 3) as f64 * 0.9;
+        }
+        let mut diag = vec![0.0f64; FEATURES];
+        let mut plain = vec![0.0f64; FEATURES];
+        for p in 0..25 {
+            let raw = 10f64.powi(p);
+            let gnorm = 10f64.powi(p + 2);
+            let f = features_with_gradient(x.view(), n, raw, gnorm);
+            for j in 0..FEATURES {
+                diag[j] += f[j] * f[j];
+            }
+            // The same design without the bounding map, for the columns the
+            // map acts on.
+            plain[1] += raw * raw;
+            plain[6] += (gnorm * gnorm) * (gnorm * gnorm);
+        }
+        let live: Vec<f64> = diag.iter().cloned().filter(|v| *v > 0.0).collect();
+        let hi = live.iter().cloned().fold(0.0f64, f64::max);
+        let lo = live.iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!(
+            hi / lo < 1e8,
+            "bounded Gram diagonal spans {:e}, which a single ridge cannot regularise",
+            hi / lo
+        );
+        assert!(
+            plain[6] / plain[1] > 1e50,
+            "the unbounded comparison did not reach the range that breaks it: {:e}",
+            plain[6] / plain[1]
+        );
     }
 
     /// The depth column has to vanish exactly at a relaxed structure, since
@@ -691,6 +934,8 @@ mod tests {
 
     /// And it has to be positive and grow with the gradient at an unrelaxed
     /// one, or the column carries no information about how far a trial falls.
+    /// The quadratic scaling lives under the bounding map, so the check undoes
+    /// the map first: what the column holds is `ln(1 + 1/2 g^T H^-1 g)`.
     #[test]
     fn the_depth_column_grows_with_the_gradient() {
         let n = 10;
@@ -708,18 +953,20 @@ mod tests {
         let small = features_with_depth(x.view(), n, 0.0, g.view(), from.view())[10];
         let big = features_with_depth(x.view(), n, 0.0, (&g * 2.0).view(), from.view())[10];
         assert!(small > 0.0, "depth column {small} is not positive");
+        assert!(big > small, "doubling the gradient did not raise the column");
+        let (a, b) = (small.exp_m1(), big.exp_m1());
         assert!(
-            (big / small - 4.0).abs() < 1e-6,
-            "doubling the gradient scaled the depth column by {}, wanted the quadratic form's 4",
-            big / small
+            (b / a - 4.0).abs() < 1e-6,
+            "under the bounding map, doubling the gradient scaled the depth by {}, wanted the quadratic form's 4",
+            b / a
         );
     }
 
-    /// The surrogate has to recover a depth that is a multiple of the model
-    /// Hessian's prediction, which is the claim the column is there to make:
-    /// the fit supplies a scale, not a shape.
+    /// The surrogate has to recover a quenched energy set by the model-Hessian
+    /// column, which is the claim the column is there to make: the fit supplies
+    /// a scale, not a shape.
     #[test]
-    fn the_surrogate_recovers_a_depth_proportional_to_the_model_hessian() {
+    fn the_surrogate_recovers_an_energy_set_by_the_model_hessian() {
         let mut rng = StdRng::seed_from_u64(918);
         let mut s = Surrogate::new();
         let n = 8;
@@ -735,23 +982,32 @@ mod tests {
             (x, g)
         };
         let from = Array1::zeros(3 * n);
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
         for _ in 0..400 {
             let (x, g) = sample(&mut rng);
             let raw: f64 = rng.random_range(-10.0..10.0);
             let f = features_with_depth(x.view(), n, raw, g.view(), from.view());
-            // The truth the model is shown: the quench recovers three quarters
-            // of what the model Hessian says it will.
-            s.observe_features(f.view(), raw, raw - 0.75 * f[10]);
+            // The truth the model is shown: a minimum near -170, deeper where
+            // the model Hessian says more energy is available.
+            let y = -170.0 - 0.75 * f[10];
+            lo = lo.min(y);
+            hi = hi.max(y);
+            s.observe_features(f.view(), y);
         }
         let (x, g) = sample(&mut rng);
         let f = features_with_depth(x.view(), n, 0.0, g.view(), from.view());
-        let want = -0.75 * f[10];
+        let want = -170.0 - 0.75 * f[10];
         let got = s
-            .predict_features(f.view(), 0.0, f64::INFINITY)
+            .predict_features(f.view(), f64::INFINITY)
             .expect("no prediction after 400 quenches");
+        // Against the spread of the quantity, not against its magnitude: the
+        // intercept carries the -170 and says nothing about whether the column
+        // was used.
+        let spread = hi - lo;
         assert!(
-            (got - want).abs() < 0.05 * want.abs().max(1e-3),
-            "predicted depth {got} against the {want} the model Hessian sets"
+            (got - want).abs() < 0.05 * spread,
+            "predicted quenched energy {got} against {want}, an error of {} over a signal spread of {spread}",
+            (got - want).abs()
         );
     }
 
