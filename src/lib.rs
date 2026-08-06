@@ -54,6 +54,7 @@ pub mod potentials;
 pub mod runner;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
+pub mod delayed;
 pub mod lattice;
 pub mod quench;
 pub mod screen;
