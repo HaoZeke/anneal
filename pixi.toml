@@ -148,6 +148,7 @@ pip = "*"
 matplotlib = "*"
 scipy = "*"
 cmcrameri = "*"
+click = "*"
 
 [feature.chem.pypi-dependencies]
 featomic = "*"
