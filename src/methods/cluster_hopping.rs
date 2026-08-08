@@ -1952,7 +1952,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 match dos.as_mut() {
                     Some(d) => {
                         d.refresh();
-                        flat_weight = Some(d.draw(&mut rng));
+                        flat_weight = Some(d.draw(rng));
                     }
                     None => {
                         // The window comes from the energies the first sweep
@@ -1976,7 +1976,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                                 d.observe(*v);
                             }
                             d.refresh();
-                            flat_weight = Some(d.draw(&mut rng));
+                            flat_weight = Some(d.draw(rng));
                             dos = Some(d);
                         }
                         flat_seen.clear();
