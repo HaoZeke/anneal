@@ -1,0 +1,59 @@
+#+TITLE: The perturbation in the Hessian metric
+#+OPTIONS: toc:2
+
+* Why isotropic perturbations are mostly wasted
+
+The measured fact this responds to: every funnel crossing observed arrives in a
+single perturbation followed by a single quench, and no reweighting of which
+draws are kept moves the crossing probability. The remaining freedom is the
+draw itself.
+
+Expand the energy at a minimum, \(E(x_0 + d) \approx E_0 + \tfrac12 d^T H d\),
+with eigenpairs \((\lambda_i, v_i)\) of the projected Hessian. An isotropic draw
+\(d\) spreads its squared norm evenly over all \(3n - 6\) directions. The quench
+that follows relaxes every component back down its own parabola; a component
+survives, in the sense of carrying the chain over a ridge, only where the rise
+it bought is comparable to a barrier. Along a stiff mode the same displacement
+buys \(\lambda_{\text{stiff}} / \lambda_{\text{soft}}\) times the energy, which
+for a Lennard-Jones minimum spans two orders of magnitude, so stiff components
+are spent on energy that the screen rejects or the quench reabsorbs.
+
+The draw that spends the same energy budget in every direction it uses is
+\(c_i \sim N(0, T / \lambda_i)\): equipartition in the quadratic model, the
+local Gaussian \(N(0, T H^{-1})\). Truncated to the \(k\) softest non-rigid
+modes it concentrates the whole step where displacement is cheap, and the
+truncation error is the modes whose thermal amplitude was negligible anyway.
+
+* The linear algebra
+
+The subspace comes from the crate's shifted Lanczos: one pass to bound the
+spectrum, a second on \(\sigma I - H\) so the softest end converges first, full
+reorthogonalisation, rigid modes projected out of the operator and the Krylov
+vectors both. Hessian action by central difference of the gradient, two charged
+evaluations per product; the six translation and rotation modes never enter.
+`curvature::soft_subspace` returns the \(k\) softest Ritz pairs, tested
+against a dense projected reference.
+
+Eigenvalues are floored at 0.05 in the amplitude so a shoulder, where
+\(\lambda \to 0\), proposes a finite step rather than a blow-up.
+
+* What separates this from the arms already refuted
+
+The single softest mode as a displacement was measured in this crate and
+failed: 6494 of 6550 trials died in the screen, because one parabola climbed at
+fixed amplitude is all rise. The subspace draw is a different object: \(k\)
+modes at thermal amplitudes, expected rise \(k T / 2\), comparable to an
+ordinary accepted hop.
+
+Against the oracle arms: nothing here mentions a morphology. The subspace is
+the incumbent structure's own curvature, recomputed when the chain moves and
+cached while it stands still, and the identical machinery runs on any system
+with a gradient.
+
+* Cost, honestly
+
+A subspace at 30 Lanczos steps costs about 120 charged evaluations, four
+ordinary hops. Measured in the smoke run the arm roughly halves the hop count
+at fixed budget. The bet is the same one the screen calibration already
+settled in the other direction: whether fewer, better-aimed draws beat more,
+blind ones. That is what the campaign measures.
