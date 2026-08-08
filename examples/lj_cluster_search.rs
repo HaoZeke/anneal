@@ -181,6 +181,12 @@ fn main() {
     // Local order and global twinning together, the source under a posterior.
     // Arms rewarded by depth reached rather than by acceptance.
     cfg.depth_reward = opts.contains(&"depth");
+    // Arm selection has to be under an allocator at all before the reward rule
+    // matters: without this the arm is drawn uniformly and both allocators are
+    // inert.
+    if cfg.depth_reward {
+        cfg.allocate_moves = true;
+    }
     if opts.contains(&"gtwin") {
         cfg.growth_and_twin = true;
         cfg.learn_construction = true;
