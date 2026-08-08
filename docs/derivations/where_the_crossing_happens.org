@@ -258,3 +258,27 @@ That is the difference from every disqualified arm above. The full template
 library solves 38 points by carrying the answer's packing and is worse
 elsewhere; this library carries a structural vocabulary rather than a
 morphology, and improves both systems at once without being told which.
+
+** And it fails on the third morphology
+
+98 points, whose global minimum is a tetrahedral face-centred cubic fragment,
+at four million evaluations and 48 seeds: the control solves 5 and the pair
+solves *0*, reaching -541.895 against -543.665. Difference -0.102
+[-0.206, -0.023], BF 4.21 against.
+
+So the pair is not general either. It improves two morphologies and destroys the
+third, and the third is the one whose answer growth alone should suit.
+
+The mechanism is arm dilution, which is the prediction that was made before this
+campaign and that 38 and 75 points appeared to refute. A posterior over arms
+needs successes to learn from, and at 98 points the control succeeds in 5 runs of
+48. Over a single run there are almost no improvement events to allocate on, so
+the twin arm is never switched off, and it takes draws from the growth arm that
+the system actually needs. Where the control succeeds often, as at 38 and 75
+points, the posterior has signal and selects well; where it succeeds rarely the
+posterior is inert and the extra arm is pure cost.
+
+That also explains why the effect looked general across two systems: both had
+enough successes for the allocator to work with. Generality of the vocabulary
+and generality of the *learning* are different claims, and only the first
+survives.
