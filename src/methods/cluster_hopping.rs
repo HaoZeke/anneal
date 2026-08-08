@@ -1344,6 +1344,12 @@ pub struct Config {
     pub species: Option<Vec<u32>>,
     /// Bond-matrix tolerance on the covalent radii sum.
     pub bond_tolerance: f64,
+    /// Frozen mask, one flag per point. A frozen point is environment: groups
+    /// made entirely of frozen points never enter the move library, and the
+    /// structure is not recentred or contained, since the frozen frame IS the
+    /// frame. The caller's objective is expected to return zero force on
+    /// frozen points so the quench leaves them where they stand.
+    pub frozen: Option<Vec<bool>>,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1651,6 +1657,7 @@ impl Config {
             covalent_cutoff: 1.3,
             species: None,
             bond_tolerance: 1.25,
+            frozen: None,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -2332,8 +2339,15 @@ fn run_full<'g, R: Rng + ?Sized>(
                 Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
                 None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
             };
-            if fresh.len() >= 2 {
-                kernels = ClusterMove::library_molecular(fresh, cfg.group_cutoff);
+            let movable: Vec<Vec<usize>> = match cfg.frozen.as_ref() {
+                Some(f) => fresh
+                    .into_iter()
+                    .filter(|g| g.iter().any(|&a| !f.get(a).copied().unwrap_or(false)))
+                    .collect(),
+                None => fresh,
+            };
+            if !movable.is_empty() {
+                kernels = ClusterMove::library_molecular(movable, cfg.group_cutoff);
             }
         }
         let k = match (&context, cfg.allocate_moves) {
@@ -2459,8 +2473,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
             }
         }
-        recentre(&mut trial, n);
-        contain(&mut trial, n, cfg.container);
+        // A frozen frame is the frame: recentring or containing would drag
+        // the free atoms relative to the substrate they sit on.
+        if cfg.frozen.is_none() {
+            recentre(&mut trial, n);
+            contain(&mut trial, n, cfg.container);
+        }
 
         // Screen cheaply, then carry on regardless. A screened trial does not
         // leave the chain: it goes through the acceptance test on its screened
