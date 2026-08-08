@@ -231,3 +231,30 @@ coordination shell and cannot reach morphologies defined by a global
 arrangement. It also predicts which systems each arm will flatter, which is why
 38 points, whose answer is a face-centred cubic truncated octahedron, reads as a
 triumph and 75 points does not.
+
+* Growth and twinning together
+
+Growth from local order and twinning are the two kinds of structural order a
+cluster has, and each alone fails on the system the other one covers. Put both
+in the library and let the posterior choose:
+
+| arm                             |         LJ38 | LJ75, 4e6 |
+|---------------------------------+--------------+-----------|
+| control                         | 55/72, 34/48 |      4/48 |
+| growth under a posterior        |        48/48 |      2/48 |
+| growth and twinning, posterior  |        48/48 |     21/48 |
+
+At 38 points, +0.286 [+0.163, +0.422], BF 6244.62. At 75 points, +0.347
+[+0.186, +0.504], BF 707.71.
+
+The pair is what carries it, and the arms say so separately. Growth alone is
+*below* the control at 75 points, at 2 of 48 against 4, because no local order
+builds a Marks decahedron. Twinning is the operation that joins close-packed
+fragments across a plane, which is what a decahedron is. Neither arm is
+configured per system: the same library runs on both and the posterior decides
+which order the system in front of it wants.
+
+That is the difference from every disqualified arm above. The full template
+library solves 38 points by carrying the answer's packing and is worse
+elsewhere; this library carries a structural vocabulary rather than a
+morphology, and improves both systems at once without being told which.
