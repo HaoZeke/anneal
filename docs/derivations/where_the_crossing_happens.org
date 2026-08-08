@@ -351,3 +351,28 @@ a factor of three.
 The depth-rewarded Thompson bandit is the other live positive (64/72, 10/48,
 7/48; every sign positive, no single BF decisive; confirmation seeds running).
 Nested search as configured is refuted: 12/72, 0/48, 3/48.
+
+* The unexploited factor: move locality in the quench
+
+Every measured-productive move changes one atom. Every trial nonetheless pays
+a full-system screening relaxation at full-evaluation prices: 33 charged per
+hop, dominated by descending coordinates the move never touched. A
+single-particle move's energy change is n pair terms against n^2/2 for the
+full system, so the honest price of a frozen-environment descent of the moved
+atom alone is about 2/n of an evaluation; even charged at the full unit rate
+it filters trials an order of magnitude cheaper than the current screen.
+
+Since the budget is the only variable that predicts success, this converts
+directly: a local pre-screen that relaxes the moved atom in the frozen field,
+promotes survivors to the ordinary screen, and charges conservatively at full
+rate, multiplies the draws the same budget buys. The design is standard
+Monte Carlo economics (incremental evaluation) applied to the quenched
+landscape, where it has not been: the screen, the burst composition and the
+one-atom completion all act on the same few coordinates.
+
+Implementation: the objective lives with the caller, so the local descent
+enters as a callback beside `relax` (a `settle` closure: coordinates of one
+atom, frozen environment, few iterations), used by the driver's screen path
+for the arms whose moves are local. Charged at the full unit rate first, so
+any win is understated rather than manufactured; fractional charging is a
+later refinement with its own audit.
