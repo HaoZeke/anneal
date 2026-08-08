@@ -6,6 +6,9 @@ Public API:
   - Gsa(t_init, q_v, q_a): Tsallis cooling + Tsallis visit + Tsallis accept.
   - run(obj_fn, low, high, preset, n_epochs, steps_per_epoch, seed): SA loop.
   - History, EpochLine: returned by `run`.
+  - Config.recommended(n) / Config.for_cluster(n), Ledger(budget),
+    cluster_search(obj_fn, grad_fn, n, budget, seed, recommended): measured
+    cluster-search layer.
 
 The IISE-manuscript composition laws L1-L4 are enforced inside the Rust
 SaVariant::checked constructor; preset constructors call it under the hood.
@@ -17,12 +20,15 @@ from anneal._core import (
     BasinBias,
     Boltzmann,
     Bounds,
+    Config,
     EpochLine,
     Fast,
     Gsa,
     History,
+    Ledger,
     PyObjective,
     __version__,
+    cluster_search as _core_cluster_search,
     low_discrepancy_points as _core_low_discrepancy_points,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
@@ -58,6 +64,33 @@ from anneal.tvm_ffi import (
     tvm_ffi_tensor_metadata,
     tvm_ffi_tensors_from_history,
 )
+
+
+def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommended: bool = True):
+    """Run the measured cluster-search layer.
+
+    Args:
+      obj_fn: callable ``f(numpy.ndarray) -> float``.
+      grad_fn: callable ``g(x) -> numpy.ndarray``.
+      n: number of points (state length is ``3 * n``).
+      budget: charged objective and gradient evaluations.
+      seed: RNG seed.
+      recommended: ``Config.recommended(n)`` when true, else
+        ``Config.for_cluster(n)``.
+
+    Returns a dict with ``best`` (flat ``3n`` coordinates), ``best_energy``,
+    and ``hops``.
+    """
+    out = _core_cluster_search(
+        obj_fn,
+        grad_fn,
+        int(n),
+        int(budget),
+        int(seed),
+        bool(recommended),
+    )
+    out["best"] = np.asarray(out["best"], dtype=np.float64)
+    return out
 
 
 def low_discrepancy_points(low, high, n: int, skip: int = 1):
@@ -730,13 +763,16 @@ __all__ = [
     "BasinBias",
     "Boltzmann",
     "Bounds",
+    "Config",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
     "Fast",
     "Gsa",
     "History",
+    "Ledger",
     "PyObjective",
+    "cluster_search",
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",

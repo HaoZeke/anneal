@@ -2070,6 +2070,252 @@ fn osa_acceptance_rate(
 }
 
 // ---------------------------------------------------------------------------
+// Measured cluster-search layer.
+// ---------------------------------------------------------------------------
+
+/// Driver settings for the cluster-search layer.
+///
+/// Construct with [`Config.recommended`] or [`Config.for_cluster`]. The
+/// recommended stack is the measured default: composed surface relocations,
+/// depth-rewarded move allocation, and tabu on stall.
+#[pyclass(name = "Config")]
+#[derive(Clone)]
+pub struct PyClusterConfig {
+    inner: crate::methods::cluster_hopping::Config,
+    recommended: bool,
+}
+
+#[pymethods]
+impl PyClusterConfig {
+    /// Measured configuration for `n` points.
+    #[staticmethod]
+    fn recommended(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::recommended(n),
+            recommended: true,
+        })
+    }
+
+    /// Plain Wales-Doye protocol for `n` points (comparison baseline).
+    #[staticmethod]
+    fn for_cluster(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::for_cluster(n),
+            recommended: false,
+        })
+    }
+
+    /// Points in a state; the state length is `3 * n_points`.
+    #[getter]
+    fn n_points(&self) -> usize {
+        self.inner.n_points
+    }
+
+    /// Composed surface-relocation burst arm.
+    #[getter]
+    fn burst_moves(&self) -> bool {
+        self.inner.burst_moves
+    }
+
+    /// Discounted Thompson allocation over move arms.
+    #[getter]
+    fn allocate_moves(&self) -> bool {
+        self.inner.allocate_moves
+    }
+
+    /// Reward move arms by the depth they reach.
+    #[getter]
+    fn depth_reward(&self) -> bool {
+        self.inner.depth_reward
+    }
+
+    /// Quarantine the stalled funnel.
+    #[getter]
+    fn tabu_on_stall(&self) -> bool {
+        self.inner.tabu_on_stall
+    }
+
+    fn __repr__(&self) -> String {
+        if self.recommended {
+            format!("Config.recommended({})", self.inner.n_points)
+        } else {
+            format!("Config.for_cluster({})", self.inner.n_points)
+        }
+    }
+}
+
+/// Work ledger: every objective or gradient evaluation is one charged unit.
+#[pyclass(name = "Ledger")]
+pub struct PyLedger {
+    inner: crate::methods::cluster_hopping::Ledger,
+}
+
+#[pymethods]
+impl PyLedger {
+    /// Creates a ledger with `budget` charged evaluations.
+    #[new]
+    fn new(budget: usize) -> Self {
+        Self {
+            inner: crate::methods::cluster_hopping::Ledger::new(budget),
+        }
+    }
+
+    /// Charged evaluations the ledger was created with.
+    #[getter]
+    fn budget(&self) -> usize {
+        self.inner.budget()
+    }
+
+    /// Charged evaluations spent.
+    #[getter]
+    fn spent(&self) -> usize {
+        self.inner.spent()
+    }
+
+    /// Charged evaluations remaining.
+    #[getter]
+    fn remaining(&self) -> usize {
+        self.inner.remaining()
+    }
+
+    /// Lowest objective value seen, or `+inf` if none.
+    #[getter]
+    fn best(&self) -> f64 {
+        self.inner.best
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Ledger(budget={}, spent={}, best={:?})",
+            self.inner.budget(),
+            self.inner.spent(),
+            self.inner.best
+        )
+    }
+}
+
+/// Combined Python energy plus gradient, for the cluster-search driver.
+struct CallableDiffObjective {
+    fn_: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    bounds: Bounds<f64>,
+}
+
+impl Objective<f64> for CallableDiffObjective {
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        &self.bounds
+    }
+
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        Python::attach(|py| {
+            let owned: Vec<f64> = x.iter().copied().collect();
+            let py_arr = PyArray1::from_vec(py, owned);
+            match self.fn_.call1(py, (py_arr,)) {
+                Ok(r) => r.extract::<f64>(py).unwrap_or(f64::INFINITY),
+                Err(_) => f64::INFINITY,
+            }
+        })
+    }
+}
+
+impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        Python::attach(|py| {
+            let owned: Vec<f64> = x.iter().copied().collect();
+            let py_arr = PyArray1::from_vec(py, owned);
+            match self.grad_fn.call1(py, (py_arr,)) {
+                Ok(r) => {
+                    if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
+                        Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
+                    } else {
+                        Array1::zeros(Objective::dim(self))
+                    }
+                }
+                Err(_) => Array1::zeros(Objective::dim(self)),
+            }
+        })
+    }
+
+    fn dim(&self) -> usize {
+        self.bounds.dims
+    }
+}
+
+fn cluster_bounds(n: usize) -> Bounds<f64> {
+    let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt();
+    let dim = 3 * n;
+    Bounds::new(
+        Array1::from_elem(dim, -extent),
+        Array1::from_elem(dim, extent),
+        0.0,
+    )
+}
+
+/// Runs the measured cluster-search layer on a user energy and gradient.
+///
+/// `recommended=True` uses `Config.recommended(n)`; otherwise
+/// `Config.for_cluster(n)`. Every objective or gradient evaluation is charged
+/// to a ledger of `budget` units. Returns `{best, best_energy, hops}`.
+///
+/// Args:
+///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
+///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray`.
+///   n: number of points; the state is a flat `3n` vector.
+///   budget: charged evaluations.
+///   seed: RNG seed.
+///   recommended: measured stack when true, Wales-Doye baseline when false.
+#[pyfunction]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true))]
+fn cluster_search(
+    py: Python<'_>,
+    obj_fn: Py<PyAny>,
+    grad_fn: Py<PyAny>,
+    n: usize,
+    budget: usize,
+    seed: u64,
+    recommended: bool,
+) -> PyResult<Py<PyDict>> {
+    if n < 2 {
+        return Err(PyValueError::new_err("n must be at least 2"));
+    }
+    if budget < 1 {
+        return Err(PyValueError::new_err("budget must be positive"));
+    }
+    let cfg = if recommended {
+        crate::methods::cluster_hopping::Config::recommended(n)
+    } else {
+        crate::methods::cluster_hopping::Config::for_cluster(n)
+    };
+    let mut ledger = crate::methods::cluster_hopping::Ledger::new(budget);
+    let obj = CallableDiffObjective {
+        fn_: obj_fn,
+        grad_fn,
+        bounds: cluster_bounds(n),
+    };
+    let (out, _) = crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed);
+    let dim = 3 * n;
+    let best = out
+        .best_state
+        .map(|a| a.to_vec())
+        .unwrap_or_else(|| vec![0.0; dim]);
+    let dict = PyDict::new(py);
+    dict.set_item("best", PyArray1::from_vec(py, best))?;
+    dict.set_item("best_energy", out.best)?;
+    dict.set_item("hops", out.hops)?;
+    Ok(dict.into())
+}
+
+// ---------------------------------------------------------------------------
 // Module entry point.
 // ---------------------------------------------------------------------------
 
@@ -2083,8 +2329,11 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGsa>()?;
     m.add_class::<PyEpochLine>()?;
     m.add_class::<PyHistory>()?;
+    m.add_class::<PyClusterConfig>()?;
+    m.add_class::<PyLedger>()?;
     m.add_class::<EindirPyBounds>()?;
     m.add_class::<PyObjective>()?;
+    m.add_function(wrap_pyfunction!(cluster_search, m)?)?;
     m.add_function(wrap_pyfunction!(low_discrepancy_points, m)?)?;
     m.add_function(wrap_pyfunction!(osa_acceptance_rate, m)?)?;
     m.add_function(wrap_pyfunction!(pilot_draws_qmc, m)?)?;

@@ -10,6 +10,9 @@
 - Burst move, depth-rewarded allocator, tabu composition; PT-over-comb
   measured equivalent to comb+tabu at LJ98 and not recommended (replica
   cost without ceiling gain).
+- Python: `Config.recommended` / `Config.for_cluster`, `Ledger(budget)`,
+  and `cluster_search(obj_fn, grad_fn, n, budget, seed, recommended)`
+  returning `{best, best_energy, hops}`.
 
 ## Infrastructure
 
