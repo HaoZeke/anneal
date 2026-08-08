@@ -1,10 +1,10 @@
 //! A posterior over the density of minima, and acceptance by entropy.
 //!
-//! *Measured negative.* This module is kept as the reproducibility record of
-//! a mechanism that was built, measured against paired controls, and refuted;
-//! the numbers and the mechanism of failure are in `docs/derivations/`. It is
-//! not part of the recommended configuration and ships as evidence, not as
-//! advice.
+//! *Measured negative as an acceptance rule.* Flat-histogram acceptance built
+//! on this estimator was refuted against paired controls (numbers and
+//! mechanism in `docs/derivations/`), and no acceptance rule here is part of
+//! the recommended configuration. The joint multi-sweep estimator itself
+//! stands, with its tests, as a density-of-states tool.
 //!
 //! # Why the acceptance rule is the trap
 //!
