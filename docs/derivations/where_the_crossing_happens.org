@@ -165,3 +165,37 @@ exploration, it buys nothing: the quench's precision is load bearing, and effort
 diverted from converging is lost rather than spent. Together with the screen
 sweep, where 120 steps is worse than 25 while 25, 50 and 80 are one rate, the
 quench has an accuracy it must reach and no benefit past it.
+
+* Regrowth from observed order, and the limit of the compactness prior
+
+Dropping every named packing from the reseeding library leaves one arm that
+regrows the cluster from the local order it already stands on, carrying nothing
+external. At 38 points it solves *68 of 72* against 55, BF 19.85, difference
++0.178 [+0.069, +0.292]. It is the only non-oracle arm in this file that beats
+the control.
+
+It does not transfer. Measured where the control has room to move:
+
+| system, budget | control | self-reseed |
+|----------------+---------+-------------|
+| LJ75, 1e6      |    1/72 |        0/72 |
+| LJ98, 1e6      |    2/72 |        1/72 |
+| LJ75, 4e6      |    4/48 |        1/48 |
+
+Three measurements, all the same sign, none decisive alone; pooled they are
+2 of 192 against 7, BF 0.36 and a difference of -0.026 [-0.060, +0.004]. The
+honest reading is that the arm is mildly harmful off 38 points, and certainly
+not general.
+
+The mechanism explains both halves. Growth by coordination peel embeds a
+compactness prior, which is Wulff physics rather than knowledge of any answer,
+and a compact prior predicts the 38-point answer, a face-centred cubic truncated
+octahedron. It does not predict a Marks decahedron, and 75 points is where it
+fails. The prior transfers exactly as far as compactness predicts the
+morphology, which is a bounded claim about a structural prior and not a search
+method.
+
+So the arm belongs with the oracles in what it licenses, even though it encodes
+no template: it works where its prior happens to agree with the answer. The
+difference from the full reseeding library is one of degree, not of kind, and
+the 68 of 72 should not be reported as a general result.
