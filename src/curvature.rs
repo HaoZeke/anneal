@@ -81,7 +81,7 @@ pub struct CurvatureFeatures {
 /// are not. The residue survives as a near-zero eigenvalue of the projected
 /// operator, so the reported softest curvature is a leftover rotation rather
 /// than a property of the structure.
-fn rigid_basis(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
+pub fn rigid_basis(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
     let dim = x.len();
     let n = dim / 3;
     if n == 0 {
@@ -156,7 +156,7 @@ fn rigid_basis(x: ArrayView1<f64>) -> Vec<Array1<f64>> {
 }
 
 /// Removes the rigid motions in `basis` from `v`, in place.
-fn project_rigid_with(v: &mut Array1<f64>, basis: &[Array1<f64>]) {
+pub fn project_rigid_with(v: &mut Array1<f64>, basis: &[Array1<f64>]) {
     for b in basis {
         let dot: f64 = v.iter().zip(b.iter()).map(|(a, c)| a * c).sum();
         for i in 0..v.len() {

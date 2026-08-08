@@ -830,6 +830,20 @@ pub struct Config {
     pub soft_modes: usize,
     /// Lanczos steps per subspace computation.
     pub soft_steps: usize,
+    /// Perturb from a covariance learned from this run's accepted moves.
+    ///
+    /// The soft-subspace arm computes the directions that matter from the
+    /// Hessian and pays charged evaluations for them. This arm learns the same
+    /// object free: accepted minimum-to-minimum displacements concentrate in
+    /// the directions basins actually connect along, so their shrunk empirical
+    /// covariance, `(1 - gamma) sigma0^2 I + gamma S`, is a proposal fitted to
+    /// the run's own successes. Shrinkage toward isotropy covers the cold
+    /// start, and the weight ramps with evidence, which is the Ledoit-Wolf
+    /// compromise rather than a schedule. Sampling needs no factorisation:
+    /// `sqrt(1-gamma) sigma0 z0 + sqrt(gamma/m) sum z_i d_i` has exactly the
+    /// mixture covariance. Nothing morphological enters; the buffer is this
+    /// run's history.
+    pub cov_perturb: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1104,6 +1118,7 @@ impl Config {
             soft_perturb: false,
             soft_modes: 6,
             soft_steps: 30,
+            cov_perturb: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1655,6 +1670,10 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut ebias: Option<crate::dos::EnergyBias> = None;
     let mut stat_temp_sum = 0.0_f64;
     let mut soft_cache: Option<(f64, Vec<f64>, Vec<Array1<f64>>)> = None;
+    // Ring buffer of accepted quenched displacements for the learned proposal.
+    let mut cov_buf: Vec<Array1<f64>> = Vec::new();
+    let mut cov_next = 0usize;
+    let mut cov_fired = 0usize;
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
     let mut stat_temp_n = 0usize;
@@ -1764,6 +1783,10 @@ fn run_full<'g, R: Rng + ?Sized>(
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
+        // The learned-covariance arm competes uniformly like the others.
+        let cov_fire = cfg.cov_perturb
+            && !angular
+            && rng.random_range(0..kernels.len() + 1) == 0;
         let soft_fire = cfg.soft_perturb
             && !angular
             && grad.is_some()
@@ -1791,7 +1814,35 @@ fn run_full<'g, R: Rng + ?Sized>(
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = if soft_fire && soft_cache.is_some() {
+        let mut trial = if cov_fire {
+            cov_fired += 1;
+            let dim = x.len();
+            let m = cov_buf.len();
+            // Evidence weight: nothing at a cold start, most of the draw once
+            // the buffer holds a history.
+            let gamma = m as f64 / (m as f64 + 8.0);
+            let sigma0 = 0.22 * escape;
+            let mut t = x.to_owned();
+            let mut gauss = || {
+                let u1: f64 = rng.random::<f64>().max(1e-12);
+                let u2: f64 = rng.random::<f64>();
+                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            };
+            let iso = (1.0 - gamma).sqrt() * sigma0;
+            for i in 0..dim {
+                t[i] += iso * gauss();
+            }
+            if m > 0 {
+                let w = (gamma / m as f64).sqrt();
+                for d in cov_buf.iter() {
+                    let z = gauss();
+                    for i in 0..dim {
+                        t[i] += w * z * d[i];
+                    }
+                }
+            }
+            t
+        } else if soft_fire && soft_cache.is_some() {
             let (_, lambdas, modes) = soft_cache.as_ref().expect("checked");
             soft_fired += 1;
             let mut t = x.to_owned();
@@ -2354,6 +2405,24 @@ fn run_full<'g, R: Rng + ?Sized>(
             // Stated here because "plain basin hopping" is ambiguous without
             // it, and a baseline that is quietly the weaker operator flatters
             // everything measured against it.
+            if cfg.cov_perturb {
+                // The displacement that was actually accepted, minimum to
+                // minimum, with the incumbent's rigid components projected out
+                // so net drift of the free cluster does not masquerade as a
+                // useful direction.
+                let mut d = &x_new - &x;
+                let rb = crate::curvature::rigid_basis(x.view());
+                crate::curvature::project_rigid_with(&mut d, &rb);
+                let norm: f64 = d.iter().map(|v| v * v).sum::<f64>().sqrt();
+                if norm > 1e-9 {
+                    if cov_buf.len() < 32 {
+                        cov_buf.push(d);
+                    } else {
+                        cov_buf[cov_next] = d;
+                        cov_next = (cov_next + 1) % 32;
+                    }
+                }
+            }
             e = e_new;
             x = x_new;
         } else if cfg.budget_window {
