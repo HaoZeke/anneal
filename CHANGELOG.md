@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.8.0](https://github.com/HaoZeke/anneal/tree/0.8.0) - 2026-08-08
+
+### Added
+
+- Exact basin identity by canonical contact-graph labelling through nauty,
+  vertex-coloured with per-species-pair cutoffs (``graphkey`` feature);
+  vesin cell lists compiled from upstream as the neighbour backend
+  (``vesin-nl``); Franzblau primitive-ring profiles; the diffusion-map
+  direction of the minima archive with Nystrom extension; a joint
+  multi-sweep multinomial estimator for the density of minima; and
+  fractional evaluation pricing through ``Ledger::charge_frac`` with the
+  staged-quench ``Settle`` hook.
+- Molecular clusters: rigid group moves (shake, relocation of the
+  least-bound group by inter-group contacts, composed bursts), with groups
+  derived each hop from the structure's own connectivity under the
+  bond-matrix rule over Cordero covalent radii, so a reactive event
+  regroups the moves instead of stranding the walker. Frozen substrates,
+  dynamic active regions that follow the adsorbate through neighbour
+  shells, and con-file geometries through readcon; engines attach through
+  the rgpot RPC server, so the driver holds no engine code.
+- Python bindings for the measured cluster-search layer: ``Config.recommended`` /
+  ``Config.for_cluster``, ``Ledger`` with a charged budget, and
+  ``cluster_search(obj_fn, grad_fn, n, budget, seed, recommended)`` returning
+  ``{best, best_energy, hops}``.
+- ``Config::recommended(n)``: the measured cluster-search configuration.
+  Composed surface relocations paying one acceptance test per excursion,
+  Normal-Gamma Thompson allocation over move arms rewarded by depth, and
+  tabu on stall, each layer confirmed against paired controls across four
+  Lennard-Jones morphologies with Beta-Binomial posterior comparisons.
+  Reference GMIN at matched potential-call budgets does not reach the 75-
+  and 98-point systems this stack solves. ``Config::for_cluster(n)`` stays
+  the plain Wales-Doye comparison baseline.
+
+### Miscellaneous
+
+- Mechanisms that measured null or harmful against paired controls ship as
+  reproducibility evidence with explicit banners, not as advice:
+  flat-histogram acceptance, statistical temperature, well-tempered energy
+  bias, soft-subspace and learned-covariance perturbations, nested search
+  as configured, archive-discovery acquisition, committor population, and
+  the early-gated screen.
+
+
 ## [0.7.2](https://github.com/HaoZeke/anneal/tree/0.7.2) - 2026-08-01
 
 ### Changed
