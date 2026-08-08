@@ -154,6 +154,7 @@ click = "*"
 featomic = "*"
 agox = "*"
 chemparseplot = ">=1.9"
+xyzrender = ">=0.3"
 
 [environments]
 default = { solve-group = "default" }
