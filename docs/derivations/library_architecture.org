@@ -1,0 +1,39 @@
+#+TITLE: ELPA-shaped restructuring of the anneal primitives
+
+The measured campaigns are the profile; this is the kernel work they demand.
+System-independent throughout: every item multiplies throughput for any
+objective, any move stack, any driver.
+
+* Two-stage quench (full -> banded -> tridiagonal analogue)
+
+The quench becomes a pipeline of stages with contracts, replacing the
+screen-steps constant: stage 1 the existing partial screen, stage 2 a
+constrained settle of the moved atoms only (RATTLE-style: unmoved bond
+network as holonomic constraints), stage 3 full polish for survivors.
+Honest cost: a k-atom settle is k/n pair terms per evaluation, charged
+fractionally with an audited cost model. Every productive move is one to
+three atoms; stage 2 is where the order of magnitude lives.
+
+* Blocked proposals over shared structure
+
+Every kernel recomputes O(n^2) structure per call: SurfaceRelocate its
+coordination counts, the graph key its distances, ring profiles their
+adjacency. One incremental NeighborTable per incumbent, updated in O(k)
+after a k-atom move and shared by kernels, keys, rings and settle, is the
+blocked-kernel analogue: compute shared structure once, use it across the
+batch. This is the single largest constant-factor item in the library.
+
+* Composable driver stages
+
+cluster_hopping is a monolith of flags. The primitives it hides -- propose,
+screen, settle, polish, identify, deposit, allocate, exchange -- become
+traits with contracts, so basin hopping, tempering and any population
+driver compose the same audited kernels instead of reimplementing them.
+The eindir component algebra already does this for accept/cool/move at the
+SA layer; the cluster layer gets the same treatment.
+
+* Status
+
+Spec committed as the working plan; NeighborTable and the staged quench are
+the implementation order, with the fractional-charge audit before any
+measurement that uses it.
