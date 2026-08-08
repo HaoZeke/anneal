@@ -145,8 +145,12 @@ numpy = "*"
 cp2k = "<2025"
 libint = "<2.10"
 pip = "*"
-featomic = "*"
 matplotlib = "*"
+scipy = "*"
+cmcrameri = "*"
+
+[feature.chem.pypi-dependencies]
+featomic = "*"
 
 [environments]
 default = { solve-group = "default" }
