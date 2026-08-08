@@ -199,3 +199,35 @@ So the arm belongs with the oracles in what it licenses, even though it encodes
 no template: it works where its prior happens to agree with the answer. The
 difference from the full reseeding library is one of degree, not of kind, and
 the 68 of 72 should not be reported as a general result.
+
+* The growth family, and the order it cannot reach
+
+Three arms build a candidate by regrowing the cluster rather than displacing it,
+and all three behave the same way.
+
+| arm                              | LJ38          | LJ75, 4e6 |
+|----------------------------------+---------------+-----------|
+| control                          | 55/72, 34/48  |      4/48 |
+| reseed, full template library    | 72/72         |      0/48 |
+| reseed from observed order only  | 68/72         |      1/48 |
+| growth source under a posterior  | 48/48         |      2/48 |
+
+Every one of them is far above the control at 38 points and below it at 75. The
+posterior version is the sharpest case: it solves every seed at 38 points, so
+the allocator is selecting well rather than diluting, and it still loses at 75.
+Learning which arm to use cannot help when no arm builds the thing wanted.
+
+The template set is face-centred cubic, hexagonal close packed, icosahedral and
+simple cubic, and the reason decahedral is missing is not an oversight that
+could be repaired by adding an entry. *Decahedral order is not local.* A Marks
+decahedron is face-centred cubic tetrahedra joined across twin planes; every
+first coordination shell in it is close packed, and the five-fold character
+lives in the joins. There is no local order to grow from, so no growth arm
+reaches it however its source is chosen.
+
+That is the general statement the three arms measure between them: growth from
+local order reaches morphologies whose defining order sits in the first
+coordination shell and cannot reach morphologies defined by a global
+arrangement. It also predicts which systems each arm will flatter, which is why
+38 points, whose answer is a face-centred cubic truncated octahedron, reads as a
+triumph and 75 points does not.
