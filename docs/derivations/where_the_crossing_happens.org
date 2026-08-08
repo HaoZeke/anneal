@@ -251,8 +251,25 @@ The pair is what carries it, and the arms say so separately. Growth alone is
 *below* the control at 75 points, at 2 of 48 against 4, because no local order
 builds a Marks decahedron. Twinning is the operation that joins close-packed
 fragments across a plane, which is what a decahedron is. Neither arm is
-configured per system: the same library runs on both and the posterior decides
-which order the system in front of it wants.
+configured per system: the same library runs on both.
+
+*No posterior is involved in these numbers, and an earlier version of this note
+said there was.* Arm selection reads
+
+: match (&context, cfg.allocate_moves) { (None, true) => allocator.select(..),
+:                                        (None, false) => rng.random_range(..) }
+
+and none of the arms above sets `allocate_moves`, so the kernel is drawn
+uniformly. `learn_construction` chooses the growth *source* inside the reseed
+arm and not which arm fires. What these campaigns measure is the composition of
+the move library under uniform sampling. The depth-rewarded allocator sat behind
+the same gate and never executed: with it nominally on, all three systems
+returned results identical to the uniform runs down to the sixth decimal of the
+deepest energy, which is what a flag that does nothing looks like.
+
+That also withdraws the account given for 98 points below. Attributing 0 of 48
+to a posterior failing to learn cannot be right when no posterior was
+running.
 
 That is the difference from every disqualified arm above. The full template
 library solves 38 points by carrying the answer's packing and is worse
