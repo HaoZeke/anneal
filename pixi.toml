@@ -152,6 +152,7 @@ click = "*"
 
 [feature.chem.pypi-dependencies]
 featomic = "*"
+agox = "*"
 
 [environments]
 default = { solve-group = "default" }
