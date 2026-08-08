@@ -123,6 +123,8 @@ fn main() {
     cfg.bayes_screen = opts.contains(&"bayes");
     // Acceptance against the density of minima rather than against the energy.
     cfg.flat_histogram = opts.contains(&"flat");
+    // The temperature taken from the entropy the run measures for itself.
+    cfg.statistical_temperature = opts.contains(&"stemp");
     if let Ok(v) = std::env::var("FLAT_QUANTILE") {
         if let Ok(q) = v.parse::<f64>() {
             cfg.flat_quantile = q;

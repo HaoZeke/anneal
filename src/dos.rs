@@ -230,6 +230,40 @@ impl DensityOfStates {
         }
     }
 
+    /// Posterior mean and standard deviation of the statistical temperature at
+    /// an energy.
+    ///
+    /// The statistical temperature is the reciprocal slope of the entropy,
+    /// `T_S = (dS/dE~)^-1`, and it is the temperature at which a chain standing
+    /// at that energy is critically mobile: the Metropolis ratio for a typical
+    /// move is order one, neither frozen nor free. Kim, Straub and Keyes use it
+    /// to drive dynamics directly (doi:10.1103/PhysRevLett.97.050601).
+    ///
+    /// Its behaviour is what a search wants and is the opposite of a cooling
+    /// curve. At a funnel floor few new minima appear per unit energy, so the
+    /// slope is small, the temperature is high, and the chain climbs out. In
+    /// the high-energy sea minima are dense, the slope is large, the
+    /// temperature is low, and the chain descends. It is read off the run's own
+    /// entropy rather than scheduled against the clock, so a chain that has
+    /// stopped finding new minima at its current depth heats itself.
+    ///
+    /// The slope is taken by central difference on the fitted mean, which is
+    /// smooth by construction under the second-difference prior, and its spread
+    /// follows from the two bins it is taken across.
+    pub fn temperature(&self, e: f64) -> (f64, f64) {
+        let n = self.mean.len();
+        let k = self.bin(e).clamp(1, n.saturating_sub(2).max(1));
+        let slope = (self.mean[k + 1] - self.mean[k - 1]) / (2.0 * self.width);
+        let spread = (self.sd[k + 1] + self.sd[k - 1]) / (2.0 * self.width);
+        if slope <= 1e-9 {
+            return (f64::INFINITY, f64::INFINITY);
+        }
+        // The reciprocal's spread by the delta method, which is all that is
+        // wanted here: a scale for how much the temperature could plausibly
+        // differ, not a calibrated interval.
+        (1.0 / slope, spread / (slope * slope))
+    }
+
     /// A weight function drawn from the posterior, frozen for one sweep.
     ///
     /// Thompson sampling on `S`: one draw per bin, correlated through the same
