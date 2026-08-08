@@ -299,3 +299,31 @@ That also explains why the effect looked general across two systems: both had
 enough successes for the allocator to work with. Generality of the vocabulary
 and generality of the *learning* are different claims, and only the first
 survives.
+
+
+* Twinning is an oracle, and that closes the structural line
+
+A decahedron *is* a twinned structure: face-centred cubic tetrahedra joined
+across twin planes. A move that mirrors a structure across one of its dense
+planes is therefore the construction of the answer at 75 points, in the same way
+that a face-centred cubic template is the construction of the answer at 38. The
+75-point result of 21 of 48 against 4 is withdrawn on that ground and the growth
+and twinning line is closed.
+
+That decides the whole structural family the same way, and the pattern is worth
+stating plainly because it is the session's result:
+
+- Every move that measurably improves a system encodes the morphology of that
+  system's answer. Face-centred cubic growth at 38 points, twinning at 75.
+- Every move that encodes no morphology measures at the control. Heavy-tailed
+  visiting steps, restarts, quench noise, and every acceptance-level and
+  bias-level mechanism in the table above.
+- Regrowth from observed order sits between the two and fails for the same
+  reason: its compactness prior is a weak morphological commitment, so it helps
+  at 38 points and hurts at 75 and 98.
+
+So on this landscape the leverage that exists lives in move design, and move
+design that works is chemistry knowledge about the target rather than search.
+That is a statement about where basin hopping's power on clusters actually comes
+from, and it is the opposite of the premise that better statistics on the
+acceptance step is what has been missing.
