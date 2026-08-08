@@ -604,85 +604,117 @@ mod tests {
         assert!(up > 0.0 && up < 1e-6, "uphill acceptance {up}");
     }
 
-    /// The mechanism, on a landscape with the pathology and nothing else.
+    /// The double funnel, reduced to the part that matters and nothing else.
     ///
-    /// Two funnels. The wide one holds thousands of states at moderate energy;
-    /// the narrow one holds a handful and contains the lowest state. Moves are
-    /// symmetric and both rules see the same ones. Metropolis at any
-    /// temperature that keeps the chain moving sits in the wide funnel because
-    /// that is where the states are, and the flat-histogram rule does not,
-    /// because it is not weighting by how many there are.
-    #[test]
-    fn flat_sampling_finds_the_rare_deep_state_and_metropolis_does_not() {
-        // State i in 0..W is wide-funnel, energy 1.0 + small spread.
-        // State W+j for j in 0..N is narrow-funnel, energy falling to 0.
+    /// Two funnels joined by a single high-energy bridge, which is the only
+    /// state a proposal can use to cross. The wide funnel holds four thousand
+    /// states around the same moderate energy; the narrow one holds a dozen and
+    /// bottoms out below anything in the wide one. Proposals are symmetric,
+    /// mostly stay in the funnel the chain is in, and both rules are handed the
+    /// same ones from the same generator.
+    ///
+    /// The crossing rate is what separates the rules. Metropolis has to pay
+    /// `exp(-dE / T)` for the rise onto the bridge. Accepting against `1 / g`
+    /// pays nothing for it, because the bridge is a *rarer* energy than the
+    /// wide funnel's floor and moving toward rare is the direction this rule
+    /// takes for free. The barrier is thermodynamically invisible to it.
+    fn two_funnels<R: Rng>(rng: &mut R, flat: bool, steps: usize, temp: f64) -> bool {
         const W: usize = 4000;
         const N: usize = 12;
+        let bridge = W;
+        let target = W + N;
         let energy = |i: usize| -> f64 {
             if i < W {
-                1.0 + (i % 7) as f64 * 0.05
+                0.9 + 0.5 * (i as f64 / W as f64)
+            } else if i == bridge {
+                3.5
             } else {
-                let j = i - W;
-                0.9 - 0.08 * j as f64
+                0.9 - 0.075 * (i - bridge) as f64
             }
         };
-        let target = W + N - 1;
-        let steps = 60000;
-
-        // Metropolis on energy at the temperature that keeps it moving.
-        let mut rng = StdRng::seed_from_u64(11);
-        let mut hits_metro = 0usize;
-        for _ in 0..8 {
-            let mut cur = 0usize;
-            let mut found = false;
+        // The wide funnel is a sea: a proposal lands anywhere in it. The narrow
+        // funnel has to be walked down one step at a time, which is what makes
+        // a temperature high enough to cross the bridge too high to hold the
+        // descent. Only the narrow funnel's top rung sees the bridge.
+        let propose = |rng: &mut R, cur: usize| -> usize {
+            if cur == bridge {
+                if rng.random::<bool>() {
+                    rng.random_range(0..W)
+                } else {
+                    bridge + 1
+                }
+            } else if cur < W {
+                if rng.random::<f64>() < 0.001 {
+                    bridge
+                } else {
+                    rng.random_range(0..W)
+                }
+            } else if cur == bridge + 1 && rng.random::<f64>() < 0.5 {
+                bridge
+            } else if cur == target || rng.random::<bool>() {
+                cur - 1
+            } else {
+                cur + 1
+            }
+        };
+        let mut cur = W - 1;
+        if !flat {
             for _ in 0..steps {
-                let prop = rng.random_range(0..W + N);
+                let prop = propose(rng, cur);
                 let de = energy(prop) - energy(cur);
-                if de <= 0.0 || rng.random::<f64>() < (-de / 0.25).exp() {
+                if de <= 0.0 || rng.random::<f64>() < (-de / temp).exp() {
                     cur = prop;
                 }
                 if cur == target {
-                    found = true;
-                    break;
+                    return true;
                 }
             }
-            if found {
-                hits_metro += 1;
-            }
+            return false;
         }
-
-        // The same chain accepting against a learned entropy.
-        let mut hits_dos = 0usize;
-        for seed in 0..8u64 {
-            let mut rng = StdRng::seed_from_u64(101 + seed);
-            let mut d = DensityOfStates::new(-0.3, 1.5, 48);
-            let mut cur = 0usize;
-            let mut found = false;
-            let mut used = 0usize;
-            'outer: while used < steps {
-                let w = d.draw(&mut rng);
-                for _ in 0..1500 {
-                    used += 1;
-                    let prop = rng.random_range(0..W + N);
-                    if rng.random::<f64>() < w.accept_prob(energy(cur), energy(prop)) {
-                        cur = prop;
-                    }
-                    d.observe(energy(cur));
-                    if cur == target {
-                        found = true;
-                        break 'outer;
-                    }
+        let mut d = DensityOfStates::new(-0.2, 2.4, 48);
+        let mut used = 0usize;
+        while used < steps {
+            let w = d.draw(rng);
+            for _ in 0..500 {
+                used += 1;
+                let prop = propose(rng, cur);
+                if rng.random::<f64>() < w.accept_prob(energy(cur), energy(prop)) {
+                    cur = prop;
                 }
-                d.refresh();
+                d.observe(energy(cur));
+                if cur == target {
+                    return true;
+                }
             }
-            if found {
-                hits_dos += 1;
+            d.refresh();
+        }
+        false
+    }
+
+    #[test]
+    fn flat_sampling_crosses_the_funnel_barrier_and_metropolis_does_not() {
+        let steps = 30000;
+        // Metropolis is given the best of a temperature sweep rather than one
+        // guess, so the comparison is against the rule at its own optimum.
+        let mut best_metro = 0usize;
+        let mut best_temp = 0.0;
+        for t in [0.1, 0.2, 0.3, 0.5, 0.8, 1.2, 2.0] {
+            let mut rng = StdRng::seed_from_u64(11);
+            let hits = (0..8)
+                .filter(|_| two_funnels(&mut rng, false, steps, t))
+                .count();
+            if hits > best_metro {
+                best_metro = hits;
+                best_temp = t;
             }
         }
-
+        let mut rng = StdRng::seed_from_u64(101);
+        let hits_dos = (0..8)
+            .filter(|_| two_funnels(&mut rng, true, steps, 0.0))
+            .count();
         assert!(
-            hits_dos > hits_metro,
-            "flat sampling {hits_dos}/8, metropolis {hits_metro}/8: the mechanism did not separate"
+            hits_dos > best_metro,
+            "flat {hits_dos}/8, metropolis {best_metro}/8 at its best temperature {best_temp}"
         );
     }
 }
