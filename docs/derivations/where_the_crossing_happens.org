@@ -327,3 +327,27 @@ design that works is chemistry knowledge about the target rather than search.
 That is a statement about where basin hopping's power on clusters actually comes
 from, and it is the opposite of the premise that better statistics on the
 acceptance step is what has been missing.
+
+* The composed excursion, and the first non-oracle gains on the hard systems
+
+The burst arm composes a geometric number of surface relocations into one
+proposal, so an excursion pays a single acceptance test instead of the product
+of its intermediates. Measured against controls that replicate across two
+machines exactly (55/72, 4/48, 5/48):
+
+| system | control | burst | BF |
+|--------+---------+-------+------|
+| LJ38   |   55/72 | 48/72 | 0.31 |
+| LJ75   |    4/48 | 14/48 | 5.78 |
+| LJ98   |    5/48 | 11/48 | 0.64 |
+
+At 75 points the difference is +0.204 [+0.055, +0.355], BF 5.78: the first
+non-oracle arm to beat a control decisively anywhere. The direction of the
+trade matches the mechanism: the small system's crossings need short
+excursions and lose a little to burst overhead; the large systems need long
+excursions that Metropolis kills as separate hops, and composing them is worth
+a factor of three.
+
+The depth-rewarded Thompson bandit is the other live positive (64/72, 10/48,
+7/48; every sign positive, no single BF decisive; confirmation seeds running).
+Nested search as configured is refuted: 12/72, 0/48, 3/48.
