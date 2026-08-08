@@ -711,6 +711,13 @@ pub struct Config {
     /// what this replaces is the one hand-set number they sit on. See
     /// [`crate::dos::DensityOfStates::temperature`].
     pub statistical_temperature: bool,
+    /// Deposit a well-tempered bias in quenched energy.
+    ///
+    /// The per-basin bias fills the basin the chain stands in, and the trap is
+    /// a funnel holding exponentially many basins. Energy separates the funnel
+    /// where a coordinate length cannot. All scales come from the run's own
+    /// quenched-energy distribution. See [`crate::dos::EnergyBias`].
+    pub energy_bias: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -977,6 +984,7 @@ impl Config {
             flat_sweep: 400,
             flat_quantile: 0.5,
             statistical_temperature: false,
+            energy_bias: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1512,6 +1520,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut flat_seen: Vec<f64> = Vec::new();
     let mut flat_since = 0usize;
     let flat_sweep = cfg.flat_sweep.max(32);
+    let mut ebias: Option<crate::dos::EnergyBias> = None;
     let mut stat_temp_sum = 0.0_f64;
     let mut stat_temp_n = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
@@ -1942,7 +1951,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             };
             ok
         } else {
-            delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
+            // The energy bias enters the exponent alongside the per-basin one,
+            // so the two compose rather than one replacing the other.
+            let eb = ebias
+                .as_ref()
+                .map(|b| b.delta(e, e_new, temperature))
+                .unwrap_or(0.0);
+            let d = delta / temperature.max(1e-12) + eb;
+            d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
         // Counted before the tabu veto, so the figure describes the acceptance
         // rule rather than the rule plus whatever the veto happens to remove.
@@ -1970,6 +1986,25 @@ fn run_full<'g, R: Rng + ?Sized>(
             }) {
                 accept = false;
                 tabu_hits += 1;
+            }
+        }
+        if cfg.energy_bias {
+            let occupied = if accept { e_new } else { e };
+            if occupied.is_finite() {
+                match ebias.as_mut() {
+                    Some(b) => b.deposit(occupied, temperature),
+                    None => {
+                        flat_seen.push(occupied);
+                        if flat_seen.len() >= flat_sweep {
+                            ebias = crate::dos::EnergyBias::from_sample(
+                                &flat_seen,
+                                temperature,
+                                crate::dos::BINS,
+                            );
+                            flat_seen.clear();
+                        }
+                    }
+                }
             }
         }
         if cfg.flat_histogram || cfg.statistical_temperature {
