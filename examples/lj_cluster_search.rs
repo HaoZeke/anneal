@@ -177,6 +177,21 @@ fn main() {
                     Some(lj(v))
                 });
                 relaxes += 1;
+                if let Ok(prefix) = std::env::var("ANNEAL_MIN_DUMP") {
+                    use std::io::Write as _;
+                    if let Ok(mut fh) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&prefix)
+                    {
+                        let mut line = format!("{e:.8}");
+                        for v in _xr.iter() {
+                            line.push_str(&format!(" {v:.6}"));
+                        }
+                        line.push('\n');
+                        let _ = fh.write_all(line.as_bytes());
+                    }
+                }
                 if e < best {
                     best = e;
                 }
