@@ -1,5 +1,11 @@
 //! A population resampled by estimated probability of improvement.
 //!
+//! *Measured negative.* This module is kept as the reproducibility record of
+//! a mechanism that was built, measured against paired controls, and refuted;
+//! the numbers and the mechanism of failure are in `docs/derivations/`. It is
+//! not part of the recommended configuration and ships as evidence, not as
+//! advice.
+//!
 //! The committor of rare-event theory is the probability that a trajectory
 //! from a state reaches the product before returning to the reactant. Without
 //! naming any product, the search-facing analogue is the probability that a

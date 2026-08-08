@@ -1,5 +1,11 @@
 //! Archive-ratcheted exploration of the minima network.
 //!
+//! *Measured negative.* This module is kept as the reproducibility record of
+//! a mechanism that was built, measured against paired controls, and refuted;
+//! the numbers and the mechanism of failure are in `docs/derivations/`. It is
+//! not part of the recommended configuration and ships as evidence, not as
+//! advice.
+//!
 //! Forward flux sampling (Allen, Warren and ten Wolde,
 //! doi:10.1103/PhysRevLett.94.018104) stores every configuration that makes
 //! partial progress and fires continuations from the stored frontier, so no
