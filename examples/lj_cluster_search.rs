@@ -53,6 +53,47 @@ fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
     Some(lj(x))
 }
 
+/// The objective with isotropic noise on the gradient, for the screening pass.
+///
+/// The basin of attraction of a starting point is a property of the minimiser,
+/// not of the landscape alone, so perturbing the descent sends the same
+/// starting point to a different minimum. That is the one factor in
+/// "perturbation then quench" that no acceptance rule, sampling weight,
+/// temperature or bias reaches, and measurement puts the funnel crossing
+/// squarely inside it: every crossing observed arrives in a single quench.
+///
+/// The noise is isotropic and scaled to the gradient's own magnitude, so it
+/// carries no information about any structure and cannot encode an answer the
+/// way a template library does. It is also dimensionless: `eta` is a fraction
+/// of the local gradient, so nothing here is a length or an energy belonging to
+/// a particular system.
+///
+/// Applied to the screening pass only. The full relaxation stays clean, because
+/// the driver puts its output into the chain and every mechanism above assumes
+/// the chain stands on a minimum.
+fn charged_noisy<R: rand::Rng + ?Sized>(
+    led: &mut Ledger,
+    x: ArrayView1<f64>,
+    eta: f64,
+    rng: &mut R,
+) -> Option<(f64, Array1<f64>)> {
+    if !led.charge() {
+        return None;
+    }
+    let (e, mut g) = lj(x);
+    let norm = g.iter().fold(0.0_f64, |a, v| a + v * v).sqrt();
+    if norm > 0.0 && eta > 0.0 {
+        let scale = eta * norm / (g.len() as f64).sqrt();
+        for v in g.iter_mut() {
+            let u1: f64 = rng.random::<f64>().max(1e-12);
+            let u2: f64 = rng.random::<f64>();
+            let z = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+            *v += scale * z;
+        }
+    }
+    Some((e, g))
+}
+
 /// Published global minima, for reporting only; nothing steers by these.
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
@@ -272,6 +313,15 @@ fn main() {
         let mut capped = 0usize;
         let mut opt = WarmLbfgs::default();
         let screen_steps = cfg.screen_steps;
+        // Noise on the screening descent, as a fraction of the local gradient.
+        // Zero reproduces the clean quench exactly.
+        let noise_eta: f64 = std::env::var("QUENCH_NOISE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0.0);
+        let mut qrng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
+            seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
+        );
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
             // Curvature is not carried between relaxations: measured on this
             // problem, retaining it across a structural change costs more than
@@ -309,7 +359,11 @@ fn main() {
                 capped += 1;
                 return (f, cur);
             }
-            let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+            let (f, xr, _) = if noise_eta > 0.0 && iters <= screen_steps {
+                opt.minimize(x, iters, |v| charged_noisy(led, v, noise_eta, &mut qrng))
+            } else {
+                opt.minimize(x, iters, |v| charged(led, v))
+            };
             let (_, g) = lj(xr.view());
             if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
                 converged += 1;

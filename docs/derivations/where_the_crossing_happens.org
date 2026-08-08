@@ -137,3 +137,31 @@ Adding the heavy-tailed visiting move alongside the reseed gives 58 of 72, down
 from 72: an arm proposing noise takes draws from an arm proposing structure. The
 consistent reading across every arm in this file is that what a proposal
 contains matters and how large it is does not.
+
+* Noise inside the quench, and why precision is load bearing
+
+The basin of attraction of a starting point belongs to the minimiser, not to the
+landscape alone, so perturbing the descent should send the same starting point
+to a different minimum. That is the one factor in "perturbation then quench" no
+acceptance rule, weight, temperature or bias reaches, and unlike a template
+library isotropic gradient noise cannot encode an answer.
+
+Noise scaled to a fraction `eta` of the local gradient, applied to the screening
+descent only, 72 seeds:
+
+| eta  | solved |
+|------+--------|
+| 0    |  55/72 |
+| 0.25 |  46/72 |
+| 0.50 |  43/72 |
+| 1.00 |   5/72 |
+
+Monotone and severe. At `eta = 0` the arm reproduces the control hop for hop, so
+the switch is a true no-op and the gradient is the mechanism rather than an
+artefact.
+
+The reading is the opposite of the hypothesis. A sloppier minimiser does not buy
+exploration, it buys nothing: the quench's precision is load bearing, and effort
+diverted from converging is lost rather than spent. Together with the screen
+sweep, where 120 steps is worse than 25 while 25, 50 and 80 are one rate, the
+quench has an accuracy it must reach and no benefit past it.
