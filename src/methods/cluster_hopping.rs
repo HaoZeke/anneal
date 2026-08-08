@@ -704,6 +704,13 @@ pub struct Config {
     /// target is flat. Lower is greedier: the flat region shrinks toward the
     /// deepest energies the chain has reached.
     pub flat_quantile: f64,
+    /// Take the temperature from the entropy's own slope rather than from a
+    /// constant.
+    ///
+    /// The Metropolis rule and the basin bias both measure well and both stand;
+    /// what this replaces is the one hand-set number they sit on. See
+    /// [`crate::dos::DensityOfStates::temperature`].
+    pub statistical_temperature: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -969,6 +976,7 @@ impl Config {
             flat_histogram: false,
             flat_sweep: 400,
             flat_quantile: 0.5,
+            statistical_temperature: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1504,6 +1512,8 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut flat_seen: Vec<f64> = Vec::new();
     let mut flat_since = 0usize;
     let flat_sweep = cfg.flat_sweep.max(32);
+    let mut stat_temp_sum = 0.0_f64;
+    let mut stat_temp_n = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
     // A rejected trial leaves the chain where it was, so keying "same" on the
     // previous quench counts a rejected excursion as a departure and the
@@ -1546,11 +1556,28 @@ fn run_full<'g, R: Rng + ?Sized>(
         }
         // Gap to the incumbent, which is what the law scales the window by.
         let gap = (e - ledger.best).abs().max(1e-12);
-        let temperature = if cfg.budget_window {
+        let mut temperature = if cfg.budget_window {
             law.temperature(gap, ledger.remaining())
         } else {
             cfg.temperature
         };
+        // The entropy's slope where the chain stands, clamped to a band around
+        // the configured value so a slope estimated from few counts cannot
+        // freeze the chain or boil it. The band is wide enough that the
+        // adaptation has somewhere to go and narrow enough that a bad estimate
+        // is survivable.
+        if cfg.statistical_temperature {
+            if let Some(d) = dos.as_ref() {
+                if d.refreshes > 0 {
+                    let (t, _) = d.temperature(e);
+                    if t.is_finite() && t > 0.0 {
+                        temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
+                        stat_temp_sum += temperature;
+                        stat_temp_n += 1;
+                    }
+                }
+            }
+        }
 
         if cfg.anneal_diversity {
             let progress = 1.0 - (ledger.remaining() as f64 / ledger.budget() as f64);
@@ -1913,13 +1940,6 @@ fn run_full<'g, R: Rng + ?Sized>(
                 // its energies are what set the window.
                 None => delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp(),
             };
-            // Before the window exists this is the only record of what
-            // energies the problem occupies. Once it exists the occupancy
-            // below is the record, and pushing here as well would count the
-            // proposal and the state it led to as two observations.
-            if dos.is_none() && e_new.is_finite() {
-                flat_seen.push(e_new);
-            }
             ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
@@ -1952,15 +1972,17 @@ fn run_full<'g, R: Rng + ?Sized>(
                 tabu_hits += 1;
             }
         }
-        if cfg.flat_histogram {
+        if cfg.flat_histogram || cfg.statistical_temperature {
             // The histogram is over where the chain *stands*, so a rejected
             // trial records the state it stayed in. Recording the proposal
             // instead would measure the move library rather than the
             // occupancy, and the occupancy is what the weight has to flatten.
             let occupied = if accept { e_new } else { e };
+            if occupied.is_finite() {
+                flat_seen.push(occupied);
+            }
             if let Some(d) = dos.as_mut() {
                 d.observe(occupied);
-                flat_seen.push(occupied);
             }
             flat_since += 1;
             if flat_since >= flat_sweep {
