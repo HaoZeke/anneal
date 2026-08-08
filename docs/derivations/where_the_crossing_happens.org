@@ -427,3 +427,24 @@ falls to 24/72 at 38 points against 55 without it, so the gating the staged
 quench needs cannot be this gate. The settle-plus-early interaction at 75
 points (28/72 against 3) says the pieces interact strongly and the staged
 premise remains open rather than closed.
+
+* The external baseline: GMIN itself, at matched potential-call budgets
+
+Serial GMIN built from the Wales group's GPL tarball (gnu12/12.4.0, cmake,
+gfortran), default LJ protocol from its manual (STEP 0.36 0.4, TEMPERATURE
+0.8, SLOPPYCONV 0.01, TIGHTCONV 1e-3, MAXIT 250 500, CENTRE, SORT), budgets
+enforced through MAX_NPCALL with measured call counts landing within 0.1% of
+the target, 48 seeds per system:
+
+| system | GMIN     | this library, control | composite stack        |
+|--------+----------+-----------------------+------------------------|
+| LJ38   | 37/48    | 55/72                 | comb 55/72             |
+| LJ75   | 0/48     | 4/48                  | comb 49/144, BF 3104   |
+| LJ98   | 0/48     | 5/48                  | combtabu 40/72         |
+
+Two validations in one table. GMIN's 77% at 38 points matches the control's
+76%, so the in-repo Wales-Doye protocol is a faithful stand-in for the real
+implementation. And at matched budgets GMIN reaches neither hard system:
+its LJ38 misses sit on the -173.134 trap, LJ75 stalls at -396.282 and LJ98
+at -543.643, 0.022 above the answer. The composite stack's gains are
+against the actual reference code, not against a reimplementation.
