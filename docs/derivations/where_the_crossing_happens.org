@@ -1,0 +1,83 @@
+#+TITLE: The funnel crossing is done by the quench, not by the acceptance
+#+OPTIONS: toc:2
+
+All figures: 38-point Lennard-Jones, 400000 charged evaluations, one seed per
+run, arms differing only in the named mechanism.
+
+* The measurement that decides it
+
+Every solved run's improvement ladder was dumped and the step that first reaches
+the global minimum inspected. Across 22 solved runs of 32:
+
+- *All 22 crossings arrive in a single improvement.* No run approaches the
+  global minimum through a sequence of smaller gains.
+- The step sizes run from 0.676 to 4.145, and the energies immediately before it
+  from -169.783 to -173.252, median -172.716.
+- Only 4 of 22 crossed from the icosahedral floor at -173.252378. Eight crossed
+  from -173.134317 and the rest from higher.
+
+One perturbation, one relaxation, and the chain is in the other funnel from
+wherever it happened to be standing. The Monte Carlo does not walk there.
+
+* Why that explains six failed mechanisms
+
+Every intervention tried acts on where the chain sits or on how it accepts, and
+none acts on the operator that crosses.
+
+| mechanism                       | result                | evidence            |
+|---------------------------------+-----------------------+---------------------|
+| flat-histogram acceptance       | harmful               | BF 56.89 against    |
+| flat below a descending cut     | harmful               | 3-5 of 24           |
+| statistical temperature         | harmful               | 9 of 24             |
+| well-tempered bias in energy    | null                  | 35 vs 34 of 48      |
+| screen length 25 / 50 / 80      | one rate              | BF 0.16, 0.13       |
+| screen length 120               | harmful               | BF 98.51            |
+| merge radius 0.7 -> 1.2 -> 2.0  | harmful               | 55 -> 31 -> 24 of 72 |
+| restart on stall                | null                  | 52 vs 55 of 72      |
+
+The control is Metropolis with the per-basin bias, 55 of 72.
+
+* Two supporting facts
+
+** Only the budget predicts the outcome
+
+At a fixed 400000 evaluations, a 25-step screen gives 11029 hops and 551 full
+relaxations; an 80-step screen gives 3782 hops and 908. Both solve 55 of 72.
+Neither the number of trials nor the number of minima reached predicts success.
+A search limited by how much it samples cannot be indifferent to a threefold
+change in how much it samples.
+
+** Coordinate distance cannot see a funnel
+
+Coarsening the basin metric to funnel scale destroys the landscape before it
+merges a funnel: radius 0.7 registers 365 basins and solves 55, radius 1.2
+registers 46 and solves 31, radius 2.0 registers 7 and solves 24. A single
+isotropic length has no setting where basins correspond to funnels.
+
+* A statistic that looks informative and is not
+
+Failing runs spend a median 66% of their budget after their last improvement,
+which reads as a stall worth restarting from. It is not. Once a chain reaches
+-173.252378, the second-lowest minimum, the only remaining event that registers
+as an improvement is the global minimum itself. A run showing no improvements is
+searching normally.
+
+The data says so directly: solved runs have a nearly identical last-improvement
+distribution to failed ones, median 26.3% against 33.9%. The statistic does not
+separate the two populations, so no detector built on it can either, and the
+restart arm measured accordingly.
+
+This was predicted at 41 of 48 before the run on exactly that misreading. The
+prediction was wrong because the premise was, and the arm landed at 52 of 72.
+
+* What follows
+
+The crossing is a rare event whose rate is a property of the perturbation and
+the quench that follows it, and whose expected count scales with the evaluation
+budget rather than with the number of trials. Interventions on the acceptance
+rule, on the sampling weight, on the temperature and on the basin bias are
+acting downstream of it, which is what the eight measurements above say
+collectively rather than one at a time.
+
+The leverage is in the move and the relaxation. That is where a mechanism has to
+act to change this number, and nothing in this file acts there.

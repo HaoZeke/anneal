@@ -1992,7 +1992,12 @@ fn run_full<'g, R: Rng + ?Sized>(
             let occupied = if accept { e_new } else { e };
             if occupied.is_finite() {
                 match ebias.as_mut() {
-                    Some(b) => b.deposit(occupied, temperature),
+                    Some(b) => {
+                        b.deposit(occupied, temperature);
+                        if std::env::var("EBIAS_TRACE").is_ok() && b.deposits % 200 == 0 {
+                            eprintln!("ebias deposits {} peak {:.4}", b.deposits, b.peak());
+                        }
+                    }
                     None => {
                         flat_seen.push(occupied);
                         if flat_seen.len() >= flat_sweep {
