@@ -24,6 +24,9 @@ pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
 /// than by energy.
 pub mod dos;
+/// Exact basin identity by canonical contact-graph labelling (nauty).
+#[cfg(feature = "graphkey")]
+pub mod graphkey;
 /// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
