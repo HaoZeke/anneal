@@ -34,6 +34,7 @@ none acts on the operator that crosses.
 | screen length 120               | harmful               | BF 98.51            |
 | merge radius 0.7 -> 1.2 -> 2.0  | harmful               | 55 -> 31 -> 24 of 72 |
 | restart on stall                | null                  | 52 vs 55 of 72      |
+| heavy-tailed visiting move      | null                  | 58 vs 55 of 72, BF 0.16 |
 
 The control is Metropolis with the per-basin bias, 55 of 72.
 
@@ -80,4 +81,23 @@ acting downstream of it, which is what the eight measurements above say
 collectively rather than one at a time.
 
 The leverage is in the move and the relaxation. That is where a mechanism has to
-act to change this number, and nothing in this file acts there.
+act to change this number.
+
+The one arm that does act there was tried. The crate already carried a Tsallis
+visiting distribution, unused by this driver, whose whole point is a scale-free
+tail that supplies large excursions without a chosen step length. Adding it to
+the library gives 58 of 72 against 55, a Bayes factor of 0.16, which is evidence
+for one shared rate rather than for a gain.
+
+That is the eighth null and the honest reading of the set is not that the next
+mechanism will work. A difference of +0.04 needs on the order of eighteen
+hundred seeds an arm to resolve, so an effect this size is not the thing being
+looked for even if it is real. Two arms landing on exactly +3 of 72 with the
+same Bayes factor is what a null looks like sampled twice, and combining them to
+chase an additive gain would be mining the noise.
+
+What the measurements support is a statement about the problem rather than a
+method: at this budget the outcome is set by how many perturbation-and-quench
+draws the budget buys and by the probability that one of them lands across the
+funnel boundary, and that probability did not move under any reweighting of
+which draws get kept.
