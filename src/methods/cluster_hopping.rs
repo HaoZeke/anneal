@@ -3229,6 +3229,25 @@ fn run_full<'g, R: Rng + ?Sized>(
                 };
                 eprintln!("ACCTRACE hop {hops} e {e_new:.6} arm {arm} ord {fcc}/{hcp}/{ico}");
             }
+            // Every accepted minimum, appended as one line of energy then
+            // flat coordinates, for landscape projections. A campaign sets
+            // ANNEAL_MIN_DUMP to a path prefix; the driver never reads it
+            // back.
+            if let Ok(prefix) = std::env::var("ANNEAL_MIN_DUMP") {
+                use std::io::Write as _;
+                if let Ok(mut fh) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&prefix)
+                {
+                    let mut line = format!("{e_new:.8}");
+                    for v in x_new.iter() {
+                        line.push_str(&format!(" {v:.6}"));
+                    }
+                    line.push('\n');
+                    let _ = fh.write_all(line.as_bytes());
+                }
+            }
             e = e_new;
             x = x_new;
         } else if cfg.budget_window {
