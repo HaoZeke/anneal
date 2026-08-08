@@ -93,6 +93,7 @@ def make_calculator():
             print_level="LOW",
             basis_set="DZVP-MOLOPT-SR-GTH",
             pseudo_potential="GTH-PBE",
+            max_scf=200,
         )
     raise SystemExit(f"unknown ASE_ENGINE {engine!r}")
 
@@ -123,10 +124,11 @@ def main():
 
                 atoms = Atoms(symbols=symbols, positions=positions)
                 if os.environ.get("ASE_ENGINE") == "cp2k":
-                    # CP2K is periodic: a vacuum cell around the cluster, and
-                    # a fixed generous one so the box does not change between
-                    # evaluations of the same structure.
-                    atoms.center(vacuum=6.0)
+                    # CP2K needs a cell. Resize-every-call (center(vacuum=...))
+                    # changes the Poisson grid between hops and the restart
+                    # guess then fails to converge, aborting the shell.
+                    atoms.set_cell([24.0, 24.0, 24.0])
+                    atoms.center()
                 atoms.calc = calc
                 energy = atoms.get_potential_energy()
                 forces = atoms.get_forces()
@@ -137,6 +139,13 @@ def main():
             out.write(f"FAIL {exc.__class__.__name__}\n")
             for _ in range(n):
                 out.write("0 0 0\n")
+            if os.environ.get("ASE_ENGINE") == "cp2k":
+                # An unconverged SCF aborts cp2k_shell. Recreate so later
+                # evaluations are not counted as failures of a dead engine.
+                try:
+                    calc = make_calculator()
+                except Exception:
+                    pass
         out.write("DONE\n")
         out.flush()
 
