@@ -413,3 +413,17 @@ concentrates. The lesson matches the flat-histogram failure: rewarding
 discovery of states, like rewarding residence at energies, spends the budget
 on abundance. What pays, in every positive result in this file, is spending
 it on descent while removing the tax on excursions.
+
+* Tabu composes; the early-gated screen does not
+
+Tabu over the composite, paired at 72 seeds against comb on the same seeds:
+56/72 against 55 at 38 points, 20/72 against 25 at 75, and *40/72 against 20*
+at 98, the strongest number measured there. Hard exclusion of the funnel the
+chain stalls in composes with the excursion stack exactly where revisiting
+is the failure mode. Tabu alone: 53/72, 5/72, 17/72.
+
+The early-terminated screen is refuted with this stack: comb with early
+falls to 24/72 at 38 points against 55 without it, so the gating the staged
+quench needs cannot be this gate. The settle-plus-early interaction at 75
+points (28/72 against 3) says the pieces interact strongly and the staged
+premise remains open rather than closed.
