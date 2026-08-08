@@ -386,6 +386,94 @@ fn group_relocate<R: Rng + ?Sized>(
     out
 }
 
+/// Connected components of the contact graph at `cutoff`: the molecules the
+/// structure actually contains, read off its own bonding rather than declared.
+///
+/// The declared-group defect this replaces: a walker whose quench formed a new
+/// covalent bond kept moving under groups that no longer matched its bonding,
+/// so every rigid move proposed tearing a real bond, and the walker froze for
+/// the rest of its run at the reacted species. Deriving the groups from the
+/// current structure keeps the move library consistent with whatever chemistry
+/// the surface has produced.
+pub fn connectivity_groups(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec<usize>> {
+    let table = crate::neighbors::NeighborTable::build(x, n, cutoff);
+    components(n, |a| table.neighbors(a).to_vec())
+}
+
+/// Covalent radius in Angstrom by atomic number, Cordero and coworkers
+/// (doi:10.1039/B801115J); zero for numbers outside the table, which makes an
+/// unknown species bond to nothing rather than to everything.
+pub fn covalent_radius(z: u32) -> f64 {
+    const R: [f64; 37] = [
+        0.0, 0.31, 0.28, 1.28, 0.96, 0.84, 0.76, 0.71, 0.66, 0.57, 0.58,
+        1.66, 1.41, 1.21, 1.11, 1.07, 1.05, 1.02, 1.06, 2.03, 1.76,
+        1.70, 1.60, 1.53, 1.39, 1.39, 1.32, 1.26, 1.24, 1.32, 1.22,
+        1.22, 1.20, 1.19, 1.20, 1.20, 1.16,
+    ];
+    if (z as usize) < R.len() { R[z as usize] } else { 0.0 }
+}
+
+/// Connected components under the bond-matrix rule: two atoms bond when their
+/// separation is below `tolerance` times the sum of their covalent radii, the
+/// species-aware connectivity of the Berny and reaction-network lineage. A
+/// single length cannot serve a system holding both hydrogen and copper; the
+/// radii sums can.
+pub fn connectivity_groups_z(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    tolerance: f64,
+) -> Vec<Vec<usize>> {
+    let n = species.len().min(x.len() / 3);
+    components(n, |a| {
+        let mut nb = Vec::new();
+        let ra = covalent_radius(species[a]);
+        for b in 0..n {
+            if b == a {
+                continue;
+            }
+            let cut = tolerance * (ra + covalent_radius(species[b]));
+            if cut <= 0.0 {
+                continue;
+            }
+            let d2: f64 = (0..3)
+                .map(|k| {
+                    let d = x[3 * a + k] - x[3 * b + k];
+                    d * d
+                })
+                .sum();
+            if d2.sqrt() < cut {
+                nb.push(b);
+            }
+        }
+        nb
+    })
+}
+
+fn components(n: usize, neighbours: impl Fn(usize) -> Vec<usize>) -> Vec<Vec<usize>> {
+    let mut seen = vec![false; n];
+    let mut groups = Vec::new();
+    for start in 0..n {
+        if seen[start] {
+            continue;
+        }
+        let mut comp = vec![start];
+        seen[start] = true;
+        let mut queue = vec![start];
+        while let Some(a) = queue.pop() {
+            for b in neighbours(a) {
+                if !seen[b] {
+                    seen[b] = true;
+                    comp.push(b);
+                    queue.push(b);
+                }
+            }
+        }
+        comp.sort_unstable();
+        groups.push(comp);
+    }
+    groups
+}
+
 /// Centroid of one group.
 fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
     let n = x.len() / 3;
@@ -1245,6 +1333,17 @@ pub struct Config {
     pub molecular_groups: Option<Vec<Vec<usize>>>,
     /// Inter-group contact cutoff for the molecular library.
     pub group_cutoff: f64,
+    /// Bonding cutoff below which two atoms are one molecule, for deriving
+    /// the groups from the structure's own connectivity each hop. Used only
+    /// when no species are declared; with species the bond-matrix rule over
+    /// covalent radii replaces it.
+    pub covalent_cutoff: f64,
+    /// Atomic numbers, one per point. With these set the connectivity uses
+    /// the species-aware bond matrix, which a single length cannot replace on
+    /// a system holding more than one element.
+    pub species: Option<Vec<u32>>,
+    /// Bond-matrix tolerance on the covalent radii sum.
+    pub bond_tolerance: f64,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1549,6 +1648,9 @@ impl Config {
             settle_iters: 20,
             molecular_groups: None,
             group_cutoff: 3.4,
+            covalent_cutoff: 1.3,
+            species: None,
+            bond_tolerance: 1.25,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1978,7 +2080,7 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if let Some(groups) = cfg.molecular_groups.clone() {
+    let mut kernels = if let Some(groups) = cfg.molecular_groups.clone() {
         ClusterMove::library_molecular(groups, cfg.group_cutoff)
     } else if cfg.burst_moves {
         ClusterMove::library_lean_burst(n)
@@ -2222,6 +2324,18 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             None
         };
+        // The molecules the incumbent actually contains, re-read each hop.
+        // A quench that changed the bond graph changes the groups, and the
+        // move library follows the structure rather than the declaration.
+        if cfg.molecular_groups.is_some() {
+            let fresh = match cfg.species.as_ref() {
+                Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
+                None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
+            };
+            if fresh.len() >= 2 {
+                kernels = ClusterMove::library_molecular(fresh, cfg.group_cutoff);
+            }
+        }
         let k = match (&context, cfg.allocate_moves) {
             (Some(c), _) => contextual.select(c.view(), rng),
             (None, true) if cfg.depth_reward => depth_allocator.select(rng),
@@ -3480,6 +3594,58 @@ pub fn optimize_with_gradient<'g>(
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
+}
+
+#[cfg(test)]
+mod bond_matrix_tests {
+    use super::*;
+
+    /// One length cannot serve hydrogen and copper together; the radii-sum
+    /// rule must bond H-H at 0.75, Cu-Cu at 2.5 and keep a 2.0 separation
+    /// between two hydrogens unbonded, all under one tolerance.
+    #[test]
+    fn radii_sums_bond_what_a_single_length_cannot() {
+        // H2 at 0.75, a Cu pair at 2.5, far apart; and a stray H at 2.0 from
+        // the molecule.
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 0.75, 0.0, 0.0,
+            10.0, 0.0, 0.0, 12.5, 0.0, 0.0,
+            2.75, 0.0, 0.0,
+        ]);
+        let z = [1u32, 1, 29, 29, 1];
+        let g = connectivity_groups_z(x.view(), &z, 1.25);
+        assert_eq!(g, vec![vec![0, 1], vec![2, 3], vec![4]]);
+        // A flat cutoff wide enough for the copper bond swallows the stray
+        // hydrogen into the molecule: the failure the species rule removes.
+        let flat = connectivity_groups(x.view(), 5, 2.6);
+        assert_ne!(flat, g);
+    }
+}
+
+#[cfg(test)]
+mod connectivity_tests {
+    use super::*;
+
+    /// Two intact triatomics read as two groups; after an atom migrates to
+    /// bond with the other molecule, the groups must follow the new bond
+    /// graph. This is the defect that stranded a reacted walker: moves kept
+    /// the declared molecules while the structure had different ones.
+    #[test]
+    fn groups_follow_the_bond_graph() {
+        // O at origin with two H at 1.0; second molecule 4.0 away.
+        let intact = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0,
+            4.0, 0.0, 0.0, 5.0, 0.0, 0.0, 3.2, 0.0, 0.0,
+        ]);
+        let g = connectivity_groups(intact.view(), 6, 1.3);
+        assert_eq!(g, vec![vec![0, 1, 2], vec![3, 4, 5]]);
+        // Atom 1 migrates next to atom 3: the bond graph now joins it to the
+        // second molecule, leaving the first as a diatomic.
+        let mut reacted = intact.clone();
+        reacted[3] = 3.6;
+        let g2 = connectivity_groups(reacted.view(), 6, 1.3);
+        assert_eq!(g2, vec![vec![0, 2], vec![1, 3, 4, 5]]);
+    }
 }
 
 #[cfg(test)]
