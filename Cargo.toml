@@ -48,6 +48,7 @@ trybuild  = "1.0"
 # the same registry eindir-core + dlpk versions, so one eindir-core compilation
 # backs both.
 rgpot-core = { version = "2.2.0", features = ["rpc"] }
+readcon-core = "0.14"
 
 [build-dependencies]
 cbindgen = "0.29"
