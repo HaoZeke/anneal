@@ -624,3 +624,165 @@ mod tests {
         assert!(bias.potential(s.view()) > 0.0);
     }
 }
+
+/// The leading diffusion direction of an archive of minima, with a Nystrom
+/// extension for proposing from any structure.
+///
+/// The archive of visited minima is a point cloud on the landscape's
+/// low-dimensional backbone. Its diffusion map (Coifman and Lafon,
+/// doi:10.1016/j.acha.2006.04.006) is the spectral embedding of the
+/// row-normalised kernel; the leading nontrivial eigenvector orders the
+/// archive along its principal connectivity direction, the same object the
+/// sketch-map literature draws for these landscapes, computed here by power
+/// iteration on the small dense kernel. The Nystrom extension evaluates that
+/// coordinate at a structure outside the archive, so a proposal can step
+/// along the backbone rather than isotropically. Rational spectral filtering
+/// over the sparse kernel replaces the dense pass when the archive outgrows
+/// it; at the archive sizes a charged run accumulates, dense is exact and
+/// cheaper.
+pub struct DiffusionDirection {
+    /// Archive descriptors, one sorted-distance spectrum per minimum.
+    anchors: Vec<Vec<f64>>,
+    /// Leading nontrivial eigenvector entries per anchor.
+    psi: Vec<f64>,
+    /// Kernel bandwidth, the median pairwise distance of the archive.
+    bandwidth: f64,
+}
+
+/// Sorted pairwise-distance spectrum: permutation and rotation invariant.
+fn distance_spectrum(x: &[f64]) -> Vec<f64> {
+    let n = x.len() / 3;
+    let mut d = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            d.push(
+                (0..3)
+                    .map(|k| (x[3 * i + k] - x[3 * j + k]).powi(2))
+                    .sum::<f64>()
+                    .sqrt(),
+            );
+        }
+    }
+    d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    d
+}
+
+fn euclid(a: &[f64], b: &[f64]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(p, q)| (p - q) * (p - q))
+        .sum::<f64>()
+        .sqrt()
+}
+
+impl DiffusionDirection {
+    /// Fits the leading diffusion coordinate of `structures`.
+    ///
+    /// Returns `None` below four anchors, where a direction is not defined.
+    pub fn fit(structures: &[Vec<f64>]) -> Option<Self> {
+        let m = structures.len();
+        if m < 4 {
+            return None;
+        }
+        let anchors: Vec<Vec<f64>> = structures.iter().map(|s| distance_spectrum(s)).collect();
+        let mut dists = Vec::new();
+        for i in 0..m {
+            for j in (i + 1)..m {
+                dists.push(euclid(&anchors[i], &anchors[j]));
+            }
+        }
+        dists.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let bandwidth = dists[dists.len() / 2].max(1e-9);
+        // Row-normalised kernel: the diffusion operator.
+        let mut k = vec![vec![0.0; m]; m];
+        for i in 0..m {
+            let mut row = 0.0;
+            for j in 0..m {
+                let v = (-euclid(&anchors[i], &anchors[j]).powi(2)
+                    / (2.0 * bandwidth * bandwidth))
+                    .exp();
+                k[i][j] = v;
+                row += v;
+            }
+            for j in 0..m {
+                k[i][j] /= row;
+            }
+        }
+        // Power iteration deflated against the trivial constant eigenvector.
+        let mut psi: Vec<f64> = (0..m).map(|i| (i as f64).sin() + 0.01).collect();
+        for _ in 0..200 {
+            let mean = psi.iter().sum::<f64>() / m as f64;
+            for v in psi.iter_mut() {
+                *v -= mean;
+            }
+            let mut next = vec![0.0; m];
+            for i in 0..m {
+                for j in 0..m {
+                    next[i] += k[i][j] * psi[j];
+                }
+            }
+            let norm = next.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-300);
+            for v in next.iter_mut() {
+                *v /= norm;
+            }
+            psi = next;
+        }
+        Some(Self {
+            anchors,
+            psi,
+            bandwidth,
+        })
+    }
+
+    /// The diffusion coordinate of an arbitrary structure, by the Nystrom
+    /// extension: the kernel-weighted average of the anchor coordinates.
+    pub fn coordinate(&self, x: &[f64]) -> f64 {
+        let s = distance_spectrum(x);
+        let mut num = 0.0;
+        let mut den = 0.0;
+        for (a, p) in self.anchors.iter().zip(self.psi.iter()) {
+            let w = (-euclid(&s, a).powi(2) / (2.0 * self.bandwidth * self.bandwidth)).exp();
+            num += w * p;
+            den += w;
+        }
+        if den > 1e-300 { num / den } else { 0.0 }
+    }
+}
+
+#[cfg(test)]
+mod diffusion_tests {
+    use super::*;
+
+    /// An archive lying along a curve has to come back ordered by the leading
+    /// diffusion coordinate, and the Nystrom extension has to place a held-out
+    /// point between its neighbours. That is the whole claim: the embedding
+    /// recovers the backbone.
+    #[test]
+    fn the_backbone_is_recovered_and_extended() {
+        // Twelve four-point structures along a one-parameter stretch.
+        let make = |t: f64| -> Vec<f64> {
+            vec![
+                0.0, 0.0, 0.0,
+                1.0 + t, 0.0, 0.0,
+                0.0, 1.0 + 0.5 * t, 0.0,
+                0.0, 0.0, 1.0 + 0.25 * t,
+            ]
+        };
+        let arch: Vec<Vec<f64>> = (0..12).map(|i| make(i as f64 * 0.1)).collect();
+        let d = DiffusionDirection::fit(&arch).expect("no direction");
+        let coords: Vec<f64> = arch.iter().map(|s| d.coordinate(s)).collect();
+        let increasing = coords.windows(2).all(|w| w[1] > w[0]);
+        let decreasing = coords.windows(2).all(|w| w[1] < w[0]);
+        assert!(
+            increasing || decreasing,
+            "diffusion coordinate does not order the backbone: {coords:?}"
+        );
+        let held = make(0.55);
+        let c = d.coordinate(&held);
+        let (lo, hi) = (coords[5].min(coords[6]), coords[5].max(coords[6]));
+        assert!(
+            c > lo && c < hi,
+            "held-out point at {c} not between its neighbours [{lo}, {hi}]"
+        );
+    }
+}

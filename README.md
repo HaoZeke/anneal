@@ -18,18 +18,24 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 
 ## Cluster search: the measured configuration
 
-For atomic-cluster global minimisation, `Config::recommended(n)` is the
-configuration whose every layer beat or matched its paired control across
-four Lennard-Jones morphologies (38, 55, 75, 98 points), reported as
-Beta-Binomial posterior comparisons with Bayes factors: composed surface
-relocations paying one acceptance test, Normal-Gamma Thompson allocation
-over move arms rewarded by the depth reached, and tabu on stall. Reference
-GMIN at matched potential-call budgets solves 37/48, 0/48 and 0/48 on the
-38-, 75- and 98-point systems; this stack measures 55/72, 49/144 (Bayes
-factor 3104 against its own baseline) and 40/72. `Config::for_cluster(n)`
-keeps the plain Wales-Doye protocol as the comparison baseline. Every
-mechanism that measured null or harmful along the way is recorded with its
-mechanism in `docs/derivations/`; none of them ships as a default.
+`Config::recommended(n)` is the measured configuration for cluster global
+minimisation: composed surface relocations paying one acceptance test for a
+whole excursion, Normal-Gamma Thompson allocation over move arms rewarded
+by the depth reached, and tabu on stall. The algorithm is the contribution;
+its generality is measured, not assumed: one configuration across four
+Lennard-Jones morphologies and, with the rigid-group move library, across
+molecular clusters under tight-binding and machine-learned potentials,
+where an engine swap reproduces the known functional ordering of the water
+hexamer with nothing about water in the search. Accuracy means reaching the
+literature global minima, which it does on every solved run to 1e-6.
+Efficiency is reported under evaluation-matched comparisons as the honest
+protocol: against reference GMIN under its own documented settings, this
+stack solves the 75- and 98-point double-funnel systems that the reference
+does not reach at the same number of potential calls, with Beta-Binomial
+posterior comparisons and Bayes factors throughout.
+`Config::for_cluster(n)` keeps the plain Wales-Doye protocol as the
+comparison baseline, and every mechanism that measured null or harmful is
+recorded with its failure mechanism rather than shipped.
 
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
