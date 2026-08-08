@@ -24,6 +24,8 @@ pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
 /// than by energy.
 pub mod dos;
+/// Incremental neighbour table shared across the hop.
+pub mod neighbors;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;

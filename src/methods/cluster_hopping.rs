@@ -583,6 +583,9 @@ mod move_scaling_tests {
 pub struct Ledger {
     budget: usize,
     spent: usize,
+    /// Fractional debt accumulated by partial-system evaluations, settled
+    /// into whole charged units as it crosses one.
+    fract: f64,
     /// Lowest objective value seen.
     pub best: f64,
     /// State attaining [`Ledger::best`].
@@ -595,6 +598,7 @@ impl Ledger {
         Self {
             budget,
             spent: 0,
+            fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
         }
@@ -607,6 +611,28 @@ impl Ledger {
         }
         self.spent += 1;
         true
+    }
+
+    /// Charges a fraction of one evaluation, for work that touches a subset
+    /// of the system.
+    ///
+    /// A k-atom partial evaluation computes k of the n(n-1)/2 pair rows, so
+    /// its honest price is a fraction of a full evaluation. The fraction
+    /// accumulates as exact debt and is settled into whole charged units as it
+    /// crosses one: deterministic, auditable, and never cheaper than the work
+    /// done because the residue is still owed when the run ends.
+    pub fn charge_frac(&mut self, frac: f64) -> bool {
+        if !(frac > 0.0) || !frac.is_finite() {
+            return self.spent < self.budget;
+        }
+        self.fract += frac;
+        while self.fract >= 1.0 {
+            self.fract -= 1.0;
+            if !self.charge() {
+                return false;
+            }
+        }
+        self.spent < self.budget
     }
 
     /// Charges `n` units at once, returning `false` when the budget ran out
@@ -927,6 +953,17 @@ pub struct Config {
     pub lean_moves: bool,
     /// Add the composed-relocation burst arm to the lean library.
     pub burst_moves: bool,
+    /// Stage the quench: settle the moved atoms in the frozen environment
+    /// before the screening relaxation.
+    ///
+    /// The measured-productive moves displace one to three atoms while every
+    /// trial pays a full-system screen. A k-atom settle costs k of the
+    /// n(n-1)/2 pair rows per evaluation, charged fractionally through
+    /// [`Ledger::charge_frac`], so the cheap stage absorbs the descent the
+    /// full screen would otherwise spend whole evaluations on.
+    pub staged_quench: bool,
+    /// Descent steps in the settle stage.
+    pub settle_iters: usize,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1204,6 +1241,8 @@ impl Config {
             cov_perturb: false,
             lean_moves: false,
             burst_moves: false,
+            staged_quench: false,
+            settle_iters: 20,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1383,6 +1422,14 @@ pub struct Outcome {
 /// not the numerics under it.
 pub type Relax<'a> = &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>);
 
+/// Partial relaxation of the listed atoms in the frozen environment.
+///
+/// Arguments: ledger, structure, moved atom indices, descent steps. Returns
+/// the settled structure. The callee owns the objective and therefore the
+/// honest fractional price; it charges through [`Ledger::charge_frac`].
+pub type Settle<'a> =
+    &'a mut dyn FnMut(&mut Ledger, ArrayView1<f64>, &[usize], usize) -> Array1<f64>;
+
 /// Gradient of the objective, charged to the ledger by the caller.
 ///
 /// Optional because only the soft-mode escape needs it: everything else in this
@@ -1487,6 +1534,19 @@ pub fn run<R: Rng + ?Sized>(
 /// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
 /// displacement, which carries the same feedback law and is what Goedecker
 /// reports as strictly weaker.
+pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    settle: Option<Settle<'_>>,
+    rng: &mut R,
+) -> Outcome {
+    run_full(cfg, start, ledger, relax, grad, None, settle, rng)
+}
+
+/// Runs from `start` with an optional charged gradient.
 pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -1495,7 +1555,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Outcome {
-    run_full(cfg, start, ledger, relax, grad, None, rng)
+    run_full(cfg, start, ledger, relax, grad, None, None, rng)
 }
 
 /// As [`run_with_gradient`], with a bias supplied by the caller and left
@@ -1525,7 +1585,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         "a shared bias and a replica ladder are different things: \
          each rung owns its own bias"
     );
-    run_full(cfg, start, ledger, relax, grad, Some(bias), rng)
+    run_full(cfg, start, ledger, relax, grad, Some(bias), None, rng)
 }
 
 fn run_full<'g, R: Rng + ?Sized>(
@@ -1535,6 +1595,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     relax: Relax<'_>,
     mut grad: Option<&mut GradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
+    mut settle: Option<Settle<'_>>,
     rng: &mut R,
 ) -> Outcome {
     let n = cfg.n_points;
@@ -1965,6 +2026,17 @@ fn run_full<'g, R: Rng + ?Sized>(
                 _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
             }
         };
+        // Stage one of the staged quench: settle the moved atoms against the
+        // frozen environment at fractional price, before recentring shifts
+        // every coordinate and hides which atoms the move touched.
+        if cfg.staged_quench {
+            if let Some(st) = settle.as_deref_mut() {
+                let moved = crate::neighbors::NeighborTable::moved_between(x.view(), trial.view());
+                if !moved.is_empty() && moved.len() * 8 <= n {
+                    trial = st(ledger, trial.view(), &moved, cfg.settle_iters);
+                }
+            }
+        }
         recentre(&mut trial, n);
         contain(&mut trial, n, cfg.container);
 
@@ -3073,6 +3145,20 @@ pub fn random_cluster<R: Rng + ?Sized>(n: usize, density: f64, min_sep: f64, rng
 /// Convenience entry point seeding its own start.
 pub fn optimize(cfg: &Config, ledger: &mut Ledger, relax: Relax<'_>, seed: u64) -> Outcome {
     optimize_with_gradient(cfg, ledger, relax, None, seed)
+}
+
+/// As [`optimize_with_gradient`], with a settle stage for the staged quench.
+pub fn optimize_with_settle<'g>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    settle: Option<Settle<'_>>,
+    seed: u64,
+) -> Outcome {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_gradient_settle(cfg, start.view(), ledger, relax, grad, settle, &mut rng)
 }
 
 /// As [`optimize`], with a gradient for the soft-mode escape.

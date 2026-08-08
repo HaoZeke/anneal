@@ -94,6 +94,38 @@ fn charged_noisy<R: rand::Rng + ?Sized>(
     Some((e, g))
 }
 
+/// Gradient of the pair energy with respect to the listed atoms only.
+///
+/// Computes the k rows of the interaction that involve a moved atom: k*n pair
+/// terms against n(n-1)/2 for the full system, which is the fraction charged.
+/// Frozen atoms contribute forces to the moved ones; their own entries stay
+/// zero, which is the frozen-environment constraint.
+fn lj_partial_grad(x: ndarray::ArrayView1<f64>, moved: &[usize]) -> Array1<f64> {
+    let n = x.len() / 3;
+    let mut g = Array1::zeros(x.len());
+    for &i in moved {
+        for j in 0..n {
+            if j == i {
+                continue;
+            }
+            let d = [
+                x[3 * i] - x[3 * j],
+                x[3 * i + 1] - x[3 * j + 1],
+                x[3 * i + 2] - x[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            let inv2 = 1.0 / r2;
+            let inv6 = inv2 * inv2 * inv2;
+            let inv12 = inv6 * inv6;
+            let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
+            for k in 0..3 {
+                g[3 * i + k] -= coef * d[k];
+            }
+        }
+    }
+    g
+}
+
 /// Published global minima, for reporting only; nothing steers by these.
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
@@ -280,6 +312,8 @@ fn main() {
     cfg.lean_moves = opts.contains(&"lean");
     // Composed surface relocations paying one acceptance test.
     cfg.burst_moves = opts.contains(&"burst");
+    // Settle moved atoms at fractional price before the full-system screen.
+    cfg.staged_quench = opts.contains(&"staged");
     // Arm selection has to be under an allocator at all before the reward rule
     // matters: without this the arm is drawn uniformly and both allocators are
     // inert.
@@ -545,17 +579,74 @@ fn main() {
                 unreachable!("bank requires ira; checked at startup")
             }
         } else {
-            optimize_with_gradient(
-                &cfg,
-                &mut ledger,
-                &mut relax,
-                if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
-                    Some(&mut grad)
-                } else {
-                    None
-                },
-                seed,
-            )
+            {
+                // The settle stage: steepest descent of the moved atoms in the
+                // frozen field, charged at the exact fraction of a full
+                // evaluation the partial rows represent. Audited on the first
+                // call against the full gradient when AUDIT_SETTLE is set.
+                let mut audited = false;
+                let mut settle = |led: &mut Ledger,
+                                  x: ArrayView1<f64>,
+                                  moved: &[usize],
+                                  iters: usize|
+                 -> Array1<f64> {
+                    let np = x.len() / 3;
+                    let frac =
+                        (2.0 * moved.len() as f64) / ((np.max(2) - 1) as f64);
+                    if std::env::var("AUDIT_SETTLE").is_ok() && !audited {
+                        audited = true;
+                        let (_, full) = lj(x);
+                        let part = lj_partial_grad(x, moved);
+                        for &m in moved {
+                            for k in 0..3 {
+                                assert!(
+                                    (full[3 * m + k] - part[3 * m + k]).abs() < 1e-9,
+                                    "partial gradient diverges from full at atom {m}"
+                                );
+                            }
+                        }
+                        println!("  settle audit passed: partial rows match the full gradient");
+                    }
+                    let mut cur = x.to_owned();
+                    for _ in 0..iters {
+                        if !led.charge_frac(frac) {
+                            break;
+                        }
+                        let g = lj_partial_grad(cur.view(), moved);
+                        let mut gmax = 0.0_f64;
+                        for &m in moved {
+                            for k in 0..3 {
+                                gmax = gmax.max(g[3 * m + k].abs());
+                            }
+                        }
+                        if gmax < 1e-4 {
+                            break;
+                        }
+                        // A conservative step against the stiffest component,
+                        // enough to drain the worst of the overlap the move
+                        // created; the full screen finishes the job.
+                        let step = 0.05 / gmax.max(1.0);
+                        for &m in moved {
+                            for k in 0..3 {
+                                cur[3 * m + k] -= step * g[3 * m + k];
+                            }
+                        }
+                    }
+                    cur
+                };
+                anneal_core::methods::cluster_hopping::optimize_with_settle(
+                    &cfg,
+                    &mut ledger,
+                    &mut relax,
+                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
+                        Some(&mut grad)
+                    } else {
+                        None
+                    },
+                    if cfg.staged_quench { Some(&mut settle) } else { None },
+                    seed,
+                )
+            }
         };
 
         // The reported value is checked against a fresh evaluation of the

@@ -32,6 +32,17 @@ driver compose the same audited kernels instead of reimplementing them.
 The eindir component algebra already does this for accept/cool/move at the
 SA layer; the cluster layer gets the same treatment.
 
+* Spectral embedding of the archive by rational filtering
+
+The SOAP vectors of the archive are long and sparse and the edge graph over
+the minima network needs only a spectral window of its Laplacian, not a full
+diagonalisation. That is the FEAST shape (Polizzi,
+doi:10.1103/PhysRevB.79.115112): a rational filter selects the eigenspace in
+a chosen interval from sparse matrix-vector products alone, and refreshing
+the subspace as the archive grows reuses the previous subspace as the
+starting basis. The embedding then supplies coordinates for aggressive
+inter-cluster proposals along the network's principal directions.
+
 * Status
 
 Spec committed as the working plan; NeighborTable and the staged quench are
