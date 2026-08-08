@@ -48,3 +48,15 @@ inter-cluster proposals along the network's principal directions.
 Spec committed as the working plan; NeighborTable and the staged quench are
 the implementation order, with the fractional-charge audit before any
 measurement that uses it.
+
+* Staged quench, first measurement: the fixed screen keeps its price
+
+Paired at 72 seeds per system, comb against comb plus settle: 42/72 against
+55 at 38 points, 33/72 against 25 at 75, 16/72 against 20 at 98, with hop
+counts equal (119566 against 125948 at 75 points). The settle did not
+multiply throughput because the screening relaxation runs its fixed 25 steps
+whatever the start, so the stage adds its fractional price and shifts which
+basin the screen lands in without making any trial cheaper. The two-stage
+premise requires the downstream stage to be convergence-gated so a settled
+trial exits early; the early-termination machinery exists and the composed
+arm (staged plus early) is the measurement that decides it.
