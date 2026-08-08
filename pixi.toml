@@ -130,14 +130,23 @@ bgsa-rosenbrock = "python -m experiments.scripts.demo_bgsa --objective rosenbroc
 bgsa-schwefel   = "python -m experiments.scripts.demo_bgsa --objective schwefel_20d --seeds 8 --n-epochs 100 --k-per-epoch 200 --n-pilot 20 --pilot-steps 80 --n-chains 4 --out data/bgsa_schwefel.csv"
 bgsa-cross-plot = { cmd = "python -m experiments.scripts.plot_cross_landscape --rastrigin data/bgsa_rastrigin.csv --rosenbrock data/bgsa_rosenbrock.csv --schwefel data/bgsa_schwefel.csv --out-dir data/figs", depends-on = ["bgsa-rastrigin", "bgsa-rosenbrock", "bgsa-schwefel"] }
 
+[feature.chem]
+platforms = ["linux-64"]
+
 [feature.chem.dependencies]
-# The molecular-cluster example's engines: GFN2-xTB and the ASE bridge the
-# piped helper drives. CP2K stays a cluster module; the helper only needs
-# ASE's calculator interface to reach it.
+# The molecular example's engines and the campaign figure stack. cp2k from
+# conda-forge (pinned below 2025 for the glibc of the cluster login nodes,
+# libint pinned to the SONAME that build links); featomic and matplotlib for
+# the sketch-map projections; pip for the agox baseline.
 ase = ">=3.22"
 xtb = ">=6.6"
 xtb-python = ">=22.1"
 numpy = "*"
+cp2k = "<2025"
+libint = "<2.10"
+pip = "*"
+featomic = "*"
+matplotlib = "*"
 
 [environments]
 default = { solve-group = "default" }
