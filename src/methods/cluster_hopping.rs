@@ -814,6 +814,22 @@ pub struct Config {
     ///
     /// See [`crate::allocate::DepthAllocator`].
     pub depth_reward: bool,
+    /// Perturb in the soft subspace of the incumbent's own curvature.
+    ///
+    /// An isotropic step in `3n` dimensions puts nearly all of its norm on
+    /// stiff directions, and the quench relaxes those components straight back
+    /// into the basin they came from: only the projection onto the
+    /// low-curvature subspace survives. Confining the draw to that subspace
+    /// with per-mode thermal amplitudes is the local Gaussian `N(0, T H^{-1})`
+    /// truncated to the modes that carry displacement at `T`, computed
+    /// matrix-free by shifted Lanczos and charged to the ledger like any other
+    /// work. Nothing here mentions a morphology: the subspace is the
+    /// structure's own.
+    pub soft_perturb: bool,
+    /// Soft modes kept in the subspace.
+    pub soft_modes: usize,
+    /// Lanczos steps per subspace computation.
+    pub soft_steps: usize,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1085,6 +1101,9 @@ impl Config {
             self_reseed: false,
             growth_and_twin: false,
             depth_reward: false,
+            soft_perturb: false,
+            soft_modes: 6,
+            soft_steps: 30,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1165,6 +1184,10 @@ pub struct Outcome {
     pub escape_threshold: f64,
     /// Quenches classified as a return, a known basin and a new one.
     pub visit_counts: (usize, usize, usize),
+    /// Soft-subspace perturbations proposed.
+    pub soft_perturbs: usize,
+    /// Soft-subspace recomputations paid for.
+    pub soft_subspaces: usize,
     /// Proposals made along the softest mode.
     pub soft_escapes: usize,
     /// Of those, the ones whose climb reached a saddle.
@@ -1631,6 +1654,9 @@ fn run_full<'g, R: Rng + ?Sized>(
     let flat_sweep = cfg.flat_sweep.max(32);
     let mut ebias: Option<crate::dos::EnergyBias> = None;
     let mut stat_temp_sum = 0.0_f64;
+    let mut soft_cache: Option<(f64, Vec<f64>, Vec<Array1<f64>>)> = None;
+    let mut soft_fired = 0usize;
+    let mut soft_recomputes = 0usize;
     let mut stat_temp_n = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
     // A rejected trial leaves the chain where it was, so keying "same" on the
@@ -1735,12 +1761,56 @@ fn run_full<'g, R: Rng + ?Sized>(
         // The angular move takes the step when a point is loose enough for the
         // criterion to fire, whatever the allocator picked.
         let angular = cfg.angular_moves && worst_bound(x.view(), n, angular_ratio).is_some();
+        // The soft-subspace arm competes uniformly with the library's arms.
+        // The subspace is cached per incumbent and recomputed when the chain
+        // moves, since it is a property of the point the chain stands on.
+        let soft_fire = cfg.soft_perturb
+            && !angular
+            && grad.is_some()
+            && rng.random_range(0..kernels.len() + 1) == 0;
+        if soft_fire {
+            let stale = soft_cache.as_ref().map(|(ce, _, _)| *ce != e).unwrap_or(true);
+            if stale {
+                if let Some(g) = grad.as_deref_mut() {
+                    let got = crate::curvature::soft_subspace(
+                        x.view(),
+                        |p| g(ledger, p),
+                        cfg.soft_steps,
+                        1e-4,
+                        cfg.soft_modes,
+                    );
+                    if let Some((l, v, _ev)) = got {
+                        soft_recomputes += 1;
+                        soft_cache = Some((e, l, v));
+                    }
+                }
+            }
+        }
         let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
-        let mut trial = if angular {
+        let mut trial = if soft_fire && soft_cache.is_some() {
+            let (_, lambdas, modes) = soft_cache.as_ref().expect("checked");
+            soft_fired += 1;
+            let mut t = x.to_owned();
+            for (lam, mode) in lambdas.iter().zip(modes.iter()) {
+                // Thermal amplitude in the quadratic model: c ~ N(0, T/lambda),
+                // floored where a shoulder sends an eigenvalue to zero, so the
+                // draw is the truncated N(0, T H^{-1}) rather than a blow-up.
+                let z = {
+                    let u1: f64 = rng.random::<f64>().max(1e-12);
+                    let u2: f64 = rng.random::<f64>();
+                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                };
+                let c = z * (cfg.temperature / lam.max(0.05)).sqrt() * escape;
+                for i in 0..t.len() {
+                    t[i] += c * mode[i];
+                }
+            }
+            t
+        } else if angular {
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
             angular_tried += 1;
@@ -2639,6 +2709,8 @@ fn run_full<'g, R: Rng + ?Sized>(
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
+        soft_perturbs: soft_fired,
+        soft_subspaces: soft_recomputes,
         soft_escapes,
         soft_crossed,
         improvements,

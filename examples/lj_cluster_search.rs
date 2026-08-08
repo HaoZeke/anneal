@@ -181,6 +181,8 @@ fn main() {
     // Local order and global twinning together, the source under a posterior.
     // Arms rewarded by depth reached rather than by acceptance.
     cfg.depth_reward = opts.contains(&"depth");
+    // Perturbation drawn in the soft subspace of the incumbent's curvature.
+    cfg.soft_perturb = opts.contains(&"softsub");
     // Arm selection has to be under an allocator at all before the reward rule
     // matters: without this the arm is drawn uniformly and both allocators are
     // inert.
@@ -411,7 +413,7 @@ fn main() {
                     &bank_cfg,
                     &mut ledger,
                     &mut relax,
-                    if cfg.minima_hopping || cfg.escape_on_stall {
+                    if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
                         Some(&mut grad)
                     } else {
                         None
@@ -450,7 +452,7 @@ fn main() {
                 &cfg,
                 &mut ledger,
                 &mut relax,
-                if cfg.minima_hopping || cfg.escape_on_stall {
+                if cfg.minima_hopping || cfg.escape_on_stall || cfg.soft_perturb {
                     Some(&mut grad)
                 } else {
                     None
@@ -535,7 +537,7 @@ fn main() {
             "  seed {seed}: best {:.6}  hops {}  screened {}  charged {}  \
              basins {} ({:.1} hops each)  returned {}  \
              swaps {}/{}  paths {} improved {} gain {:.3}  \
-             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
+             escape {:.3} thr {:.4} same/known/new {}/{}/{} soft {}/{} sub {}/{} lmin {:.4} climbs {} gain {:.2} radius {:.3} step {:.3} restarts {} angular {}/{} R {:.3} tabu {} vetoed {} screen {}/{} expl {} obs {} ctx {:?}  \
              relaxed {converged}/{} converged  early {early_stopped} saved {early_saved}  \
              verified {}{}",
             out.best,
@@ -557,6 +559,8 @@ fn main() {
             out.visit_counts.2,
             out.soft_crossed,
             out.soft_escapes,
+            out.soft_perturbs,
+            out.soft_subspaces,
             out.soft_lambda,
             out.stall_escapes,
             out.stall_escape_gain,
