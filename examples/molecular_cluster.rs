@@ -225,6 +225,10 @@ fn main() {
         // Water oxygen-oxygen contacts sit near 2.8 A; the group contact
         // cutoff has to see them.
         cfg.molecular_groups = Some(groups.clone());
+        // Species drive the bond-matrix connectivity: groups follow the
+        // structure's own bonding each hop, so a reactive event regroups the
+        // moves instead of stranding the walker.
+        cfg.species = Some((0..m).flat_map(|_| [8u32, 1, 1]).collect());
         cfg.group_cutoff = 3.4;
         // Screen at DFT prices: a handful of relaxation steps decides.
         cfg.screen_steps = 6;
