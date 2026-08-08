@@ -141,7 +141,7 @@ platforms = ["linux-64"]
 ase = ">=3.29"
 xtb = ">=6.6"
 xtb-python = ">=22.1"
-numpy = "*"
+numpy = "<2.3"
 cp2k = "<2025"
 libint = "<2.10"
 pip = "*"
