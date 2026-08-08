@@ -361,3 +361,201 @@ mod tests {
         );
     }
 }
+
+/// Thompson sampling over arms by the depth they reach, not by whether they are
+/// accepted.
+///
+/// The Beta-Bernoulli allocator above is rewarded with `improved || accept`.
+/// Beating the run's best is rare -- at 98 points a run registers about five
+/// such events in ten thousand hops -- so the reward is carried almost entirely
+/// by acceptance, and acceptance does not separate a move that produces deep
+/// structures from one that is merely plausible. Measured, that is how a twin
+/// arm survives on a system it does not suit: it is accepted readily, never
+/// switched off, and takes draws from the arm the system needs.
+///
+/// Depth is dense and informative at once. Every hop yields a number, and its
+/// magnitude says how close the arm brought the chain to the best it knows.
+///
+/// Each arm carries a Normal-Gamma posterior over that reward with unknown mean
+/// and unknown precision, so no scale has to be supplied and a system whose
+/// energies run in hundreds is handled the same as one running in tens. A draw
+/// is taken from the posterior predictive, which is Student-t, and the best draw
+/// wins.
+#[derive(Debug, Clone)]
+pub struct DepthAllocator {
+    /// Prior and posterior mean per arm.
+    mu: Vec<f64>,
+    /// Pseudo-observations behind the mean.
+    kappa: Vec<f64>,
+    /// Shape of the precision posterior.
+    alpha: Vec<f64>,
+    /// Rate of the precision posterior.
+    beta: Vec<f64>,
+    /// Draws per arm, for reporting.
+    pub draws: Vec<usize>,
+}
+
+impl DepthAllocator {
+    /// An allocator over `n_arms`, uninformative until fed.
+    pub fn new(n_arms: usize) -> Self {
+        Self {
+            mu: vec![0.0; n_arms],
+            kappa: vec![1e-6; n_arms],
+            alpha: vec![1.0; n_arms],
+            beta: vec![1.0; n_arms],
+            draws: vec![0; n_arms],
+        }
+    }
+
+    /// Number of arms.
+    pub fn arms(&self) -> usize {
+        self.mu.len()
+    }
+
+    /// Records the depth an arm reached.
+    ///
+    /// The conjugate Normal-Gamma update for one observation.
+    pub fn update(&mut self, arm: usize, reward: f64) {
+        if arm >= self.mu.len() || !reward.is_finite() {
+            return;
+        }
+        let k = self.kappa[arm];
+        let m = self.mu[arm];
+        self.kappa[arm] = k + 1.0;
+        self.mu[arm] = (k * m + reward) / (k + 1.0);
+        self.alpha[arm] += 0.5;
+        self.beta[arm] += 0.5 * k / (k + 1.0) * (reward - m) * (reward - m);
+        self.draws[arm] += 1;
+    }
+
+    /// Draws an arm by Thompson sampling on the posterior predictive.
+    pub fn select<R: Rng + ?Sized>(&self, rng: &mut R) -> usize {
+        let mut best = 0usize;
+        let mut best_v = f64::NEG_INFINITY;
+        for k in 0..self.mu.len() {
+            // Predictive is Student-t with 2 alpha degrees of freedom, centred
+            // at mu, scaled by beta (kappa + 1) / (alpha kappa). An arm with no
+            // evidence has a very small kappa and so an enormous spread, which
+            // is what makes it get tried.
+            let scale =
+                (self.beta[k] * (self.kappa[k] + 1.0) / (self.alpha[k] * self.kappa[k])).sqrt();
+            let v = self.mu[k] + scale * student_t(2.0 * self.alpha[k], rng);
+            if v > best_v {
+                best_v = v;
+                best = k;
+            }
+        }
+        best
+    }
+
+    /// Posterior mean reward per arm, so a run can report what it learned.
+    pub fn means(&self) -> Vec<f64> {
+        self.mu.clone()
+    }
+}
+
+/// A Student-t draw with `nu` degrees of freedom, as a normal scaled by a
+/// chi-square, which needs no special functions.
+fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
+    let z = {
+        let u1: f64 = rng.random::<f64>().max(1e-12);
+        let u2: f64 = rng.random::<f64>();
+        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    };
+    // Chi-square with nu degrees of freedom is Gamma(nu/2, 2).
+    let g = sample_gamma(nu * 0.5, rng) * 2.0;
+    if g <= 0.0 {
+        return z;
+    }
+    z / (g / nu).sqrt()
+}
+
+#[cfg(test)]
+mod depth_allocator_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    /// The allocator has to find the arm that reaches deeper, which is the
+    /// whole point of rewarding depth instead of acceptance.
+    #[test]
+    fn the_deeper_arm_is_found() {
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut a = DepthAllocator::new(3);
+        for _ in 0..600 {
+            let k = a.select(&mut rng);
+            // Arm 1 reaches deeper on average; the others are shallower.
+            let r = match k {
+                1 => -1.0,
+                _ => -3.0,
+            } + 0.3
+                * {
+                    let u1: f64 = rng.random::<f64>().max(1e-12);
+                    let u2: f64 = rng.random::<f64>();
+                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+                };
+            a.update(k, r);
+        }
+        assert!(
+            a.draws[1] > a.draws[0] && a.draws[1] > a.draws[2],
+            "draws {:?}, means {:?}",
+            a.draws,
+            a.means()
+        );
+    }
+
+    /// An arm that is frequently rewarded but shallow must lose to a rarely
+    /// rewarded deep one, which is exactly the case the Bernoulli allocator
+    /// gets wrong.
+    #[test]
+    fn frequent_and_shallow_loses_to_deep() {
+        let mut rng = StdRng::seed_from_u64(5);
+        let mut a = DepthAllocator::new(2);
+        for _ in 0..800 {
+            let k = a.select(&mut rng);
+            // Arm 0 always lands a little way above the best; arm 1 usually
+            // lands at the same place but occasionally much deeper, so its mean
+            // depth is better.
+            let r = if k == 0 {
+                -2.0
+            } else if rng.random::<f64>() < 0.1 {
+                -0.1
+            } else {
+                -2.1
+            };
+            a.update(k, r);
+        }
+        assert!(
+            a.draws[1] > a.draws[0],
+            "draws {:?}, means {:?}",
+            a.draws,
+            a.means()
+        );
+    }
+
+    /// A scale change must not change which arm wins, since one system's
+    /// energies run in tens and another's in hundreds.
+    #[test]
+    fn the_choice_is_invariant_to_the_energy_scale() {
+        let run = |scale: f64, seed: u64| {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let mut a = DepthAllocator::new(3);
+            for _ in 0..500 {
+                let k = a.select(&mut rng);
+                let r = scale * match k {
+                    2 => -1.0,
+                    _ => -4.0,
+                };
+                a.update(k, r);
+            }
+            a.draws
+        };
+        let small = run(1.0, 9);
+        let large = run(100.0, 9);
+        assert_eq!(
+            small.iter().enumerate().max_by_key(|(_, v)| **v).map(|(i, _)| i),
+            large.iter().enumerate().max_by_key(|(_, v)| **v).map(|(i, _)| i),
+            "scale changed the winner: {small:?} against {large:?}"
+        );
+    }
+}

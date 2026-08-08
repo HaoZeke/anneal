@@ -179,6 +179,8 @@ fn main() {
     // does not pay on this system is switched off by evidence.
     cfg.learn_construction = opts.contains(&"learncon");
     // Local order and global twinning together, the source under a posterior.
+    // Arms rewarded by depth reached rather than by acceptance.
+    cfg.depth_reward = opts.contains(&"depth");
     if opts.contains(&"gtwin") {
         cfg.growth_and_twin = true;
         cfg.learn_construction = true;

@@ -810,6 +810,10 @@ pub struct Config {
     ///
     /// See [`ClusterMove::library_with_growth_and_twin`].
     pub growth_and_twin: bool,
+    /// Reward move arms by the depth they reach, not by acceptance.
+    ///
+    /// See [`crate::allocate::DepthAllocator`].
+    pub depth_reward: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1080,6 +1084,7 @@ impl Config {
             visit_moves: false,
             self_reseed: false,
             growth_and_twin: false,
+            depth_reward: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1502,6 +1507,9 @@ fn run_full<'g, R: Rng + ?Sized>(
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
     let mut allocator = FlooredThompson::new(kernels.len());
+    // Rewarded by the depth a move reaches rather than by whether it was
+    // accepted. See [`crate::allocate::DepthAllocator`].
+    let mut depth_allocator = crate::allocate::DepthAllocator::new(kernels.len());
     // Per-arm draws and accepts. The crate's own methods note says a solve
     // count cannot tell a mechanism that works poorly from one that does not
     // run, and a move set is exactly where that applies: an arm the allocator
@@ -1713,6 +1721,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         };
         let k = match (&context, cfg.allocate_moves) {
             (Some(c), _) => contextual.select(c.view(), rng),
+            (None, true) if cfg.depth_reward => depth_allocator.select(rng),
             (None, true) => allocator.select(rng),
             (None, false) => rng.random_range(0..kernels.len()),
         };
@@ -2220,6 +2229,12 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
+            if cfg.depth_reward {
+                // How close the move brought the chain to the best it knows.
+                // Dense, because every hop produces one, and informative,
+                // because its size says how deep rather than merely whether.
+                depth_allocator.update(k, -(e_new - ledger.best));
+            }
             allocator.update(k, improved || accept);
             arm_draws[k] += 1;
             if accept {
