@@ -448,3 +448,13 @@ implementation. And at matched budgets GMIN reaches neither hard system:
 its LJ38 misses sit on the -173.134 trap, LJ75 stalls at -396.282 and LJ98
 at -543.643, 0.022 above the answer. The composite stack's gains are
 against the actual reference code, not against a reimplementation.
+
+* The third layer settled: tabu and tempering are redundant escapes
+
+At 98 points on seeds 0-71: comb 20/72, ptc 32/72, pttabu 35/72, combtabu
+40/72. ptc replicates its first batch exactly (44% both). Tabu over comb
+adds +20/72; tabu over ptc adds +3/72 (BF 0.15): the hot replica already
+leaves the stalls tabu excludes, so the two mechanisms buy the same escape
+and compose sublinearly. combtabu against pttabu is BF 0.19. The
+recommended stack stays comb plus tabu: the same ceiling as the replica
+ladder without paying for one.
