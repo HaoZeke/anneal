@@ -152,6 +152,47 @@ fn main() {
         .unwrap_or(0);
 
     let reference = reference(n);
+    // Random structure search: the evaluation-matched baseline. Random starts,
+    // full quenches, nothing else, so every stack above it is measured against
+    // what pure sampling buys at the same number of charged evaluations.
+    if std::env::args().nth(4).map(|v| v.contains("rss")).unwrap_or(false) {
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
+                seed.wrapping_mul(0x9E3779B9).wrapping_add(7),
+            );
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut best = f64::INFINITY;
+            let mut relaxes = 0usize;
+            while ledger.remaining() > 0 {
+                let x0 = anneal_core::methods::cluster_hopping::random_cluster(
+                    n, 0.7, 0.5, &mut rng,
+                );
+                opt.forget();
+                let (e, _xr, _) = opt.minimize(x0.view(), 500, |v| {
+                    if !ledger.charge() {
+                        return None;
+                    }
+                    Some(lj(v))
+                });
+                relaxes += 1;
+                if e < best {
+                    best = e;
+                }
+            }
+            let hit = reference.map(|r| best < r + 1e-4).unwrap_or(false);
+            if hit {
+                solved += 1;
+            }
+            println!(
+                "  seed {seed}: best {best:.6}  relaxes {relaxes}{}",
+                if hit { "  SOLVED" } else { "" }
+            );
+        }
+        println!("{solved}/{seeds} solved (rss)");
+        return;
+    }
     // Archive-ratchet mode: the minima network explored from a permanent
     // keyed archive, launches by discovery posterior.
     #[cfg(feature = "graphkey")]

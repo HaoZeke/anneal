@@ -83,13 +83,16 @@ def make_calculator():
     if engine == "cp2k":
         from ase.calculators.cp2k import CP2K
 
+        if "CP2K_DATA_DIR" not in os.environ and "CONDA_PREFIX" in os.environ:
+            os.environ["CP2K_DATA_DIR"] = os.path.join(
+                os.environ["CONDA_PREFIX"], "share", "cp2k", "data"
+            )
         return CP2K(
-            command=os.environ.get("ASE_CP2K_COMMAND", "cp2k_shell.psmp"),
+            command=os.environ.get("ASE_CP2K_COMMAND", "cp2k.ssmp --shell"),
             xc="PBE",
-            cutoff=400 * 13.605693,  # 400 Ry in eV, ASE takes eV
+            print_level="LOW",
             basis_set="DZVP-MOLOPT-SR-GTH",
             pseudo_potential="GTH-PBE",
-            stress_tensor=False,
         )
     raise SystemExit(f"unknown ASE_ENGINE {engine!r}")
 
@@ -119,6 +122,11 @@ def main():
                 from ase import Atoms
 
                 atoms = Atoms(symbols=symbols, positions=positions)
+                if os.environ.get("ASE_ENGINE") == "cp2k":
+                    # CP2K is periodic: a vacuum cell around the cluster, and
+                    # a fixed generous one so the box does not change between
+                    # evaluations of the same structure.
+                    atoms.center(vacuum=6.0)
                 atoms.calc = calc
                 energy = atoms.get_potential_energy()
                 forces = atoms.get_forces()

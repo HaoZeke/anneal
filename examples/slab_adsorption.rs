@@ -141,11 +141,21 @@ fn main() {
         }
         println!("{con}: {n} atoms, {} free seeds, {shells} active shells, budget {budget}, seed {seed}",
                  free_seeds.len());
-        let mut cfg = Config::recommended(n);
+        // STACK=base runs the plain protocol; ATOMIC=1 keeps the atomic move
+        // library for free mixed clusters instead of the grouped molecular one.
+        let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
+        let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
+        let mut cfg = if base_stack {
+            Config::for_cluster(n)
+        } else {
+            Config::recommended(n)
+        };
         cfg.burst_moves = false;
-        cfg.molecular_groups = Some(vec![(0..n).collect()]);
         cfg.species = Some(species.clone());
-        cfg.active_region = Some((free_seeds.clone(), shells));
+        if !atomic {
+            cfg.molecular_groups = Some(vec![(0..n).collect()]);
+            cfg.active_region = Some((free_seeds.clone(), shells));
+        }
         cfg.group_cutoff = 3.4;
         cfg.screen_steps = 10;
         cfg.relax_steps = 150;
