@@ -1,0 +1,45 @@
+#+TITLE: Cluster Search
+#+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil ^:nil
+
+#+begin_export rst
+=============
+Cluster Search
+=============
+#+end_export
+
+Install the package, then run a 38-point Lennard-Jones search with the measured configuration.
+
+#+begin_src bash
+pip install anneal
+#+end_src
+
+#+begin_src python
+import numpy as np
+from anneal import Config, cluster_search
+
+def lj(x):
+    p = x.reshape(-1, 3)
+    d = p[:, None] - p
+    r2 = (d * d).sum(-1)
+    iu = np.triu_indices(len(p), 1)
+    inv6 = (1.0 / r2[iu]) ** 3
+    return float(4.0 * np.sum(inv6 * inv6 - inv6))
+
+def lj_g(x):
+    p = x.reshape(-1, 3)
+    d = p[:, None] - p
+    r2 = (d * d).sum(-1)
+    np.fill_diagonal(r2, np.inf)
+    inv2 = 1.0 / r2
+    inv6 = inv2 ** 3
+    c = 24.0 * inv2 * (2.0 * inv6 * inv6 - inv6)
+    return np.einsum("ij,ijk->ik", c, d).ravel()
+
+cfg = Config.recommended(38)
+out = cluster_search(lj, lj_g, cfg.n_points, 4000, seed=0, recommended=True)
+print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
+#+end_src
+
+Expected output (seed 0)::
+
+    PLACEHOLDER

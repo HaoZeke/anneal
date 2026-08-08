@@ -57,6 +57,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
 
    quickstart
    tutorials/classical-and-presets
+   tutorials/cluster-search
    tutorials/bayesian-pilot-mixer
    tutorials/gle-colored-noise
    tutorials/polish-device-scale
