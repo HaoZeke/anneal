@@ -127,6 +127,8 @@ fn main() {
     cfg.statistical_temperature = opts.contains(&"stemp");
     // A well-tempered bias in quenched energy, scales from the run itself.
     cfg.energy_bias = opts.contains(&"ebias");
+    // The heavy-tailed visiting distribution of generalised annealing.
+    cfg.visit_moves = opts.contains(&"visit");
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
     if let Ok(v) = std::env::var("SCREEN_STEPS") {

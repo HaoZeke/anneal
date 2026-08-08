@@ -41,7 +41,7 @@ use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::path::{interpolate_path, StallDetector};
-use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
+use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
 
 /// The move library, dispatched by value.
 ///
@@ -61,6 +61,29 @@ pub enum ClusterMove {
         n_points: usize,
         /// Half-width of the displacement.
         step: f64,
+    },
+    /// Displace every point by a draw from the Tsallis visiting distribution.
+    ///
+    /// The heavy-tailed proposal of generalised simulated annealing (Tsallis
+    /// and Stariolo, doi:10.1016/S0378-4371(96)00271-3), which is where that
+    /// method's power over classical annealing sits: the acceptance rule is a
+    /// detail beside the visiting distribution. Most draws are small and a rare
+    /// one is enormous, so the move produces its own large excursions without
+    /// anyone choosing a step length, which is the property the rest of this
+    /// library lacks. Every other kernel here is bounded by a scale set by
+    /// hand.
+    ///
+    /// This matters because the crossing between funnels is a single
+    /// perturbation followed by a single relaxation, not a walk: all 22
+    /// crossings measured in 32 runs arrived in one improvement. The operator
+    /// that crosses is this one, and it had no heavy tail available.
+    ///
+    /// Large draws are bounded by the container the driver already applies, so
+    /// the tail reads as "scatter a point to the far side of the cluster"
+    /// rather than as an unbounded coordinate.
+    Visit {
+        /// Tsallis visiting index; the literature default is 2.7.
+        q_v: f64,
     },
     /// Relocate the least-coordinated point onto the surface.
     SurfaceRelocate(SurfaceRelocate),
@@ -215,6 +238,13 @@ impl ClusterMove {
         ]
     }
 
+    /// The library with the heavy-tailed visiting move added.
+    pub fn library_with_visit(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library(n);
+        v.push(ClusterMove::Visit { q_v: 2.7 });
+        v
+    }
+
     /// The library with the twin move added.
     ///
     /// Separate from the reseeding library because the two are different bets.
@@ -268,6 +298,7 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
+            ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
@@ -365,6 +396,9 @@ impl ClusterMove {
                 y[3 * i + 1] = c[1] + rmax * sin_t * phi.sin();
                 y[3 * i + 2] = c[2] + rmax * cos_t;
                 y
+            }
+            ClusterMove::Visit { q_v } => {
+                crate::movekernel::TsallisVisit::new(*q_v).propose(x, t, rng)
             }
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
@@ -718,6 +752,11 @@ pub struct Config {
     /// where a coordinate length cannot. All scales come from the run's own
     /// quenched-energy distribution. See [`crate::dos::EnergyBias`].
     pub energy_bias: bool,
+    /// Add the heavy-tailed Tsallis visiting move to the library.
+    ///
+    /// Every other kernel is bounded by a scale set by hand, so none can make a
+    /// rare large excursion. See [`ClusterMove::Visit`].
+    pub visit_moves: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -985,6 +1024,7 @@ impl Config {
             flat_quantile: 0.5,
             statistical_temperature: false,
             energy_bias: false,
+            visit_moves: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1388,7 +1428,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.twin_moves {
+    let kernels = if cfg.visit_moves {
+        ClusterMove::library_with_visit(n)
+    } else if cfg.twin_moves {
         ClusterMove::library_with_twin(n)
     } else if cfg.learn_construction {
         ClusterMove::library_with_learned_reseed(n)
