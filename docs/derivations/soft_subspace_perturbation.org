@@ -57,3 +57,32 @@ ordinary hops. Measured in the smoke run the arm roughly halves the hop count
 at fixed budget. The bet is the same one the screen calibration already
 settled in the other direction: whether fewer, better-aimed draws beat more,
 blind ones. That is what the campaign measures.
+
+* Measured: harmful, and not only through its cost
+
+72 seeds at 38 points, 48 at each gate, identical seeds and budgets to the
+control:
+
+| system | control | soft subspace |
+|--------+---------+---------------|
+| LJ38   |   55/72 |         32/72 |
+| LJ75   |    4/48 |          1/48 |
+| LJ98   |    5/48 |          1/48 |
+
+The cost is real: 977 subspace computations per run at about 120 evaluations
+each is 29% of the budget, and the hop count falls 39%. But the loss exceeds
+the cost. By the crossing distribution measured earlier, diverting 29% of the
+budget predicts roughly 42 to 47 of 72; the arm lands at 32. The aimed draws
+are not crossing better than blind ones, they are crossing worse, while a
+sixth of all proposals are spent on them.
+
+The physical reading: the soft modes of a Lennard-Jones minimum are surface
+rearrangements and collective distortions *within* the funnel. The interfunnel
+rearrangement at 38 points is not a soft harmonic direction of the incumbent;
+it is a large discrete rearrangement whose direction at the minimum is stiff.
+Equipartition in the local quadratic model aims the step at exactly the
+transitions that stay inside the funnel, which is worse than not aiming.
+
+The learned-covariance arm tests the same hypothesis at zero evaluation cost:
+if it also fails at 38 points, aimed local perturbations do not cross however
+the aim is obtained.
