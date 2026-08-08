@@ -19,9 +19,12 @@ pub mod cool;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
 pub mod curvature;
-/// Error variants returned by `anneal-core`.
 /// Annealing the distance at which two solutions count as one.
 pub mod diversity;
+/// A posterior over the density of minima, and acceptance by entropy rather
+/// than by energy.
+pub mod dos;
+/// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;
