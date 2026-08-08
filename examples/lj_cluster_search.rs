@@ -198,6 +198,7 @@ fn main() {
     let capacity = env("BANK_CAPACITY", 30);
     let bank_cfg = BankConfig {
         capacity,
+        acquisition: opts.contains(&"acq"),
         slice: env("BANK_SLICE", 3_000),
         seeding: capacity,
         dcut_floor: std::env::var("BANK_DCUT_FLOOR")
@@ -404,17 +405,17 @@ fn main() {
         // only: the early ones are a descent from a random start and say
         // nothing.
         if let Some(r) = reference {
-            if let Some((h, b, e)) = out
+            if let Some((h, _, b, e)) = out
                 .improvements
                 .iter()
-                .find(|(_, _, e)| *e < r + 1e-4)
+                .find(|(_, _, _, e)| *e < r + 1e-4)
             {
                 println!(
                     "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
                     out.hops,
                     100.0 * *h as f64 / out.hops.max(1) as f64
                 );
-            } else if let Some((h, b, e)) = out.improvements.last() {
+            } else if let Some((h, _, b, e)) = out.improvements.last() {
                 println!(
                     "      last improvement at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
                     out.hops,
