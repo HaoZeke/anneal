@@ -138,7 +138,7 @@ platforms = ["linux-64"]
 # conda-forge (pinned below 2025 for the glibc of the cluster login nodes,
 # libint pinned to the SONAME that build links); featomic and matplotlib for
 # the sketch-map projections; pip for the agox baseline.
-ase = ">=3.22"
+ase = ">=3.29"
 xtb = ">=6.6"
 xtb-python = ">=22.1"
 numpy = "*"
