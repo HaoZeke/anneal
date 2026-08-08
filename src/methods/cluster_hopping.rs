@@ -687,6 +687,19 @@ pub struct Config {
     /// uncertainty about a quantity not yet computed, and a constant is a poor
     /// way to make it. See [`crate::screen`].
     pub bayes_screen: bool,
+    /// Accept against the density of minima rather than against the energy.
+    ///
+    /// The Metropolis rule targets `g(E~) exp(-E~ / T)` in quenched energy, and
+    /// on a multi-funnel landscape `g` decides the outcome: the chain sits in
+    /// whichever funnel holds the most minima. Weighting by `1 / g` makes the
+    /// sampled energy histogram flat, so the deep and rare energies get the
+    /// same share of the run as the shallow and abundant ones. See
+    /// [`crate::dos`].
+    pub flat_histogram: bool,
+    /// Trials between weight refreshes. The weight is frozen across a sweep so
+    /// each sweep is an exact chain for its own target rather than an adaptive
+    /// one whose invariance has to be argued.
+    pub flat_sweep: usize,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -949,6 +962,8 @@ impl Config {
             contextual_moves: false,
             contextual_floor: 0.1,
             bayes_screen: false,
+            flat_histogram: false,
+            flat_sweep: 400,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1474,6 +1489,16 @@ fn run_full<'g, R: Rng + ?Sized>(
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
     let mut feedback = EscapeFeedback::new(1.0, cfg.temperature.max(1e-6));
+    // The entropy the chain accepts against, and the weight frozen for the
+    // sweep in progress. Both stay empty until the first sweep has said what
+    // range of quenched energies this problem occupies: the window is read off
+    // the run rather than supplied, so nothing here is specific to Lennard-Jones
+    // or to a cluster size.
+    let mut dos: Option<crate::dos::DensityOfStates> = None;
+    let mut flat_weight: Option<crate::dos::Weight> = None;
+    let mut flat_seen: Vec<f64> = Vec::new();
+    let mut flat_since = 0usize;
+    let flat_sweep = cfg.flat_sweep.max(32);
     // The basin the *chain* stands in, not the one the last quench produced.
     // A rejected trial leaves the chain where it was, so keying "same" on the
     // previous quench counts a rejected excursion as a departure and the
@@ -1863,6 +1888,24 @@ fn run_full<'g, R: Rng + ?Sized>(
                 surrogate_here = Some(pred_y);
             }
             ok
+        } else if cfg.flat_histogram {
+            // Metropolis against 1/g rather than against exp(-E~/T). The bias
+            // deposits still enter, so a mechanism that pushes the chain out of
+            // a basin it has already paid for keeps working; what changes is
+            // that the multiplicity of the destination no longer decides.
+            let ok = match flat_weight.as_ref() {
+                Some(w) => {
+                    rng.random::<f64>() < w.accept_prob(e + v_old, e_new + v_new)
+                }
+                // Before the window exists there is no entropy to accept
+                // against, so the first sweep runs the rule it is replacing and
+                // its energies are what set the window.
+                None => delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp(),
+            };
+            if e_new.is_finite() {
+                flat_seen.push(e_new + v_new);
+            }
+            ok
         } else {
             delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
         };
@@ -1892,6 +1935,53 @@ fn run_full<'g, R: Rng + ?Sized>(
             }) {
                 accept = false;
                 tabu_hits += 1;
+            }
+        }
+        if cfg.flat_histogram {
+            // The histogram is over where the chain *stands*, so a rejected
+            // trial records the state it stayed in. Recording the proposal
+            // instead would measure the move library rather than the
+            // occupancy, and the occupancy is what the weight has to flatten.
+            let occupied = if accept { e_new + v_new } else { e + v_old };
+            if let Some(d) = dos.as_mut() {
+                d.observe(occupied);
+            }
+            flat_since += 1;
+            if flat_since >= flat_sweep {
+                flat_since = 0;
+                match dos.as_mut() {
+                    Some(d) => {
+                        d.refresh();
+                        flat_weight = Some(d.draw(&mut rng));
+                    }
+                    None => {
+                        // The window comes from the energies the first sweep
+                        // reached, padded below by the range it covered so the
+                        // chain has somewhere to go that it has not yet been.
+                        // Anything past the padding is handled by the linear
+                        // extrapolation rather than by clamping.
+                        let lo = flat_seen.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let hi = flat_seen
+                            .iter()
+                            .cloned()
+                            .fold(f64::NEG_INFINITY, f64::max);
+                        if lo.is_finite() && hi > lo {
+                            let span = hi - lo;
+                            let mut d = crate::dos::DensityOfStates::new(
+                                lo - span,
+                                hi + 0.3 * span,
+                                crate::dos::BINS,
+                            );
+                            for v in flat_seen.iter() {
+                                d.observe(*v);
+                            }
+                            d.refresh();
+                            flat_weight = Some(d.draw(&mut rng));
+                            dos = Some(d);
+                        }
+                        flat_seen.clear();
+                    }
+                }
             }
         }
         if angular {
