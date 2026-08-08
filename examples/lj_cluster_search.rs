@@ -175,6 +175,14 @@ fn main() {
     cfg.reseed_moves = opts.contains(&"reseed");
     // Regrow from the structure's own order, carrying no named packing.
     cfg.self_reseed = opts.contains(&"selfseed");
+    // The growth source chosen by a posterior rather than fixed, so an arm that
+    // does not pay on this system is switched off by evidence.
+    cfg.learn_construction = opts.contains(&"learncon");
+    // Local order and global twinning together, the source under a posterior.
+    if opts.contains(&"gtwin") {
+        cfg.growth_and_twin = true;
+        cfg.learn_construction = true;
+    }
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
     if let Ok(v) = std::env::var("SCREEN_STEPS") {

@@ -297,6 +297,28 @@ impl ClusterMove {
         v
     }
 
+    /// Growth arms and a twin arm together, with the source chosen by a
+    /// posterior.
+    ///
+    /// Growth from a local order reaches a morphology whose defining order sits
+    /// in the first coordination shell, which is what face-centred cubic and
+    /// icosahedral packings are. It cannot reach one defined by a global
+    /// arrangement: a Marks decahedron is face-centred cubic tetrahedra joined
+    /// across twin planes, locally close packed everywhere, with the five-fold
+    /// character living in the joins. No local template expresses that, and
+    /// measurement says so -- every growth-only arm scores far above the
+    /// control at 38 points, whose answer is a face-centred cubic truncated
+    /// octahedron, and below it at 75 points, whose answer is decahedral.
+    ///
+    /// The twin move supplies the missing kind of order. The two together span
+    /// the morphologies clusters actually adopt, and the posterior decides
+    /// which the system in front of it wants rather than the caller.
+    pub fn library_with_growth_and_twin(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library_with_learned_reseed(n);
+        v.push(ClusterMove::Twin { n_points: n });
+        v
+    }
+
     /// The library with a single growth arm, for when a posterior picks the
     /// construction.
     ///
@@ -784,6 +806,10 @@ pub struct Config {
     ///
     /// See [`ClusterMove::library_with_self_reseed`].
     pub self_reseed: bool,
+    /// Growth and twinning together, the source chosen by a posterior.
+    ///
+    /// See [`ClusterMove::library_with_growth_and_twin`].
+    pub growth_and_twin: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1053,6 +1079,7 @@ impl Config {
             energy_bias: false,
             visit_moves: false,
             self_reseed: false,
+            growth_and_twin: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1456,7 +1483,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.self_reseed {
+    let kernels = if cfg.growth_and_twin {
+        ClusterMove::library_with_growth_and_twin(n)
+    } else if cfg.self_reseed {
         ClusterMove::library_with_self_reseed(n)
     } else if cfg.visit_moves {
         ClusterMove::library_with_visit(n)
