@@ -938,3 +938,220 @@ mod tests {
         );
     }
 }
+
+/// A well-tempered bias deposited in quenched energy.
+///
+/// The per-basin bias this crate carries fills the basin the chain stands in.
+/// Measured at 38 points, that is not the shape of the trap: of 17 failing
+/// seeds, 12 end at exactly -173.252378 and 4 at -173.134317, the floor of the
+/// icosahedral funnel. A funnel holds exponentially many basins, so filling
+/// them one at a time cannot fill it, and coarsening the basin metric does not
+/// help because a single length in coordinate space cannot tell a funnel's
+/// variants from a different funnel: at a radius of 0.7 the run registers 365
+/// basins and solves 55 of 72, at 2.0 it registers 7 and solves 24.
+///
+/// Energy separates what the length cannot. The funnel floor is an energy the
+/// chain returns to, so depositing there fills the funnel rather than one of
+/// its basins, and the coordinate costs nothing because every hop computes it.
+///
+/// Deposits are well tempered (Barducci, Bussi and Parrinello,
+/// doi:10.1103/PhysRevLett.100.020603): height falls as `exp(-V/((gamma-1) T))`
+/// where the bias already stands, so the sum converges instead of growing
+/// without bound, and the sampled distribution is the well-tempered ensemble of
+/// Bonomi and Parrinello (doi:10.1103/PhysRevLett.104.190601) rather than a
+/// flat one. This is the part the flat-histogram acceptance got wrong: it
+/// forced every energy to an equal share, where tempering only broadens what
+/// the chain already samples.
+#[derive(Debug, Clone)]
+pub struct EnergyBias {
+    lo: f64,
+    width: f64,
+    v: Array1<f64>,
+    /// Initial deposit height.
+    pub w0: f64,
+    /// Tempering factor. One is no bias; large is untempered metadynamics.
+    pub gamma: f64,
+    /// Width of a deposit, in bins.
+    pub sigma_bins: f64,
+    /// Deposits made.
+    pub deposits: usize,
+}
+
+impl EnergyBias {
+    /// The number of deposits that fill a well one standard deviation deep.
+    ///
+    /// The one free number in this construction, and it is dimensionless: every
+    /// other scale is taken from the run's own quenched-energy distribution, so
+    /// nothing here carries units of a particular system's energy and nothing
+    /// is set per system.
+    pub const FILL_DEPOSITS: f64 = 100.0;
+
+    /// A bias whose scales come from a sample of quenched energies.
+    ///
+    /// The tempering factor is set by `(gamma - 1) T = sigma`, so the bias
+    /// broadens the energy distribution by about its own width, and the deposit
+    /// height by `w0 = sigma / FILL_DEPOSITS`, so a well one standard deviation
+    /// deep fills in a fixed number of deposits whatever the system's energy
+    /// scale. The window spans the sample padded by a standard deviation on
+    /// each side.
+    ///
+    /// Returns `None` when the sample is too small or degenerate to set a
+    /// scale, which is the honest answer rather than a default.
+    pub fn from_sample(seen: &[f64], temp: f64, bins: usize) -> Option<Self> {
+        let v: Vec<f64> = seen.iter().cloned().filter(|x| x.is_finite()).collect();
+        if v.len() < 32 {
+            return None;
+        }
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        let var = v.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>() / v.len() as f64;
+        let sigma = var.sqrt();
+        if !(sigma > 0.0) || !sigma.is_finite() {
+            return None;
+        }
+        let lo = v.iter().cloned().fold(f64::INFINITY, f64::min) - sigma;
+        let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + sigma;
+        let gamma = 1.0 + sigma / temp.max(1e-12);
+        Some(Self::new(
+            lo,
+            hi,
+            bins,
+            sigma / Self::FILL_DEPOSITS,
+            gamma,
+        ))
+    }
+
+    /// A bias over `[lo, hi]`, empty until something is deposited.
+    pub fn new(lo: f64, hi: f64, bins: usize, w0: f64, gamma: f64) -> Self {
+        let bins = bins.max(8);
+        Self {
+            lo,
+            width: ((hi - lo) / bins as f64).max(1e-9),
+            v: Array1::zeros(bins),
+            w0,
+            gamma: gamma.max(1.0 + 1e-9),
+            sigma_bins: 1.5,
+            deposits: 0,
+        }
+    }
+
+    /// The bias at an energy, held flat outside the binned window so a chain
+    /// that leaves the range is neither pushed back nor pulled out.
+    pub fn at(&self, e: f64) -> f64 {
+        let n = self.v.len();
+        let k = ((e - self.lo) / self.width).floor();
+        if k < 0.0 {
+            return self.v[0];
+        }
+        if k >= n as f64 {
+            return self.v[n - 1];
+        }
+        self.v[k as usize]
+    }
+
+    /// Deposits at an energy, at the well-tempered height for the bias already
+    /// standing there.
+    pub fn deposit(&mut self, e: f64, temp: f64) {
+        if !e.is_finite() {
+            return;
+        }
+        let n = self.v.len();
+        let centre = (e - self.lo) / self.width;
+        let h = self.w0 * (-self.at(e) / ((self.gamma - 1.0) * temp.max(1e-12))).exp();
+        if !h.is_finite() || h <= 0.0 {
+            return;
+        }
+        let reach = (3.0 * self.sigma_bins).ceil() as isize;
+        let c = centre.floor() as isize;
+        for d in -reach..=reach {
+            let k = c + d;
+            if k < 0 || k >= n as isize {
+                continue;
+            }
+            let dx = (k as f64 + 0.5 - centre) / self.sigma_bins;
+            self.v[k as usize] += h * (-0.5 * dx * dx).exp();
+        }
+        self.deposits += 1;
+    }
+
+    /// The bias difference a move carries, in units of temperature, ready to be
+    /// added to a Metropolis exponent.
+    pub fn delta(&self, e_old: f64, e_new: f64, temp: f64) -> f64 {
+        (self.at(e_new) - self.at(e_old)) / temp.max(1e-12)
+    }
+
+    /// Largest bias standing anywhere, for reporting how filled the range is.
+    pub fn peak(&self) -> f64 {
+        self.v.iter().cloned().fold(0.0_f64, f64::max)
+    }
+}
+
+#[cfg(test)]
+mod energy_bias_tests {
+    use super::*;
+
+    /// A deposit has to raise the energy it was made at, or the bias does
+    /// nothing.
+    #[test]
+    fn a_deposit_raises_where_it_lands() {
+        let mut b = EnergyBias::new(-180.0, -140.0, 64, 0.1, 5.0);
+        let before = b.at(-173.25);
+        b.deposit(-173.25, 0.8);
+        assert!(b.at(-173.25) > before);
+    }
+
+    /// Well tempering has to make the bias grow as `(gamma - 1) T ln t` at an
+    /// energy that keeps being deposited into, which is the result that makes
+    /// the sum converge in the sense that matters: the *rate* falls to zero, so
+    /// a funnel fills and then stops deepening, where an untempered deposit
+    /// would keep pushing forever.
+    ///
+    /// Checked against the law rather than against a tolerance on the value,
+    /// since the value genuinely does keep rising.
+    #[test]
+    fn the_bias_grows_by_the_well_tempered_law() {
+        let gamma = 5.0;
+        let temp = 0.8;
+        let mut b = EnergyBias::new(-180.0, -140.0, 64, 0.1, gamma);
+        for _ in 0..20000 {
+            b.deposit(-173.25, temp);
+        }
+        let v1 = b.at(-173.25);
+        for _ in 0..40000 {
+            b.deposit(-173.25, temp);
+        }
+        let v2 = b.at(-173.25);
+        let want = (gamma - 1.0) * temp * 3.0_f64.ln();
+        assert!(
+            ((v2 - v1) - want).abs() < 0.1 * want,
+            "tripling the deposits raised the bias by {}, law says {want}",
+            v2 - v1
+        );
+    }
+
+    /// The trap the bias exists to break: a chain pinned at one energy has to
+    /// find that energy uphill of a neighbour once enough has been deposited.
+    #[test]
+    fn filling_a_floor_makes_leaving_it_downhill() {
+        let mut b = EnergyBias::new(-180.0, -140.0, 64, 0.1, 5.0);
+        let floor = -173.25;
+        let out = -171.0;
+        for _ in 0..5000 {
+            b.deposit(floor, 0.8);
+        }
+        assert!(
+            b.delta(floor, out, 0.8) < 0.0,
+            "leaving the filled floor still costs {}",
+            b.delta(floor, out, 0.8)
+        );
+    }
+
+    /// Outside the window the bias is flat, so a chain that escapes the range
+    /// is neither pushed back nor pulled out.
+    #[test]
+    fn the_bias_is_flat_outside_the_window() {
+        let mut b = EnergyBias::new(-180.0, -140.0, 64, 0.1, 5.0);
+        b.deposit(-179.0, 0.8);
+        assert_eq!(b.at(-200.0), b.at(-179.9));
+        assert_eq!(b.at(-100.0), b.at(-140.1));
+    }
+}

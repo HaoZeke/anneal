@@ -125,6 +125,16 @@ fn main() {
     cfg.flat_histogram = opts.contains(&"flat");
     // The temperature taken from the entropy the run measures for itself.
     cfg.statistical_temperature = opts.contains(&"stemp");
+    // A well-tempered bias in quenched energy, scales from the run itself.
+    cfg.energy_bias = opts.contains(&"ebias");
+    // The screening pass is the quench, so its length is the one number that
+    // decides whether the chain moves on the transformed landscape at all.
+    if let Ok(v) = std::env::var("SCREEN_STEPS") {
+        if let Ok(k) = v.parse::<usize>() {
+            cfg.screen_steps = k;
+            println!("  screen steps {k}");
+        }
+    }
     if let Ok(v) = std::env::var("FLAT_QUANTILE") {
         if let Ok(q) = v.parse::<f64>() {
             cfg.flat_quantile = q;
