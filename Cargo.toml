@@ -20,12 +20,15 @@ default = []
 ira = []
 # Exact basin identity by canonical contact-graph labelling through nauty.
 graphkey = ["dep:petgraph", "dep:nauty-pet"]
+# Neighbour construction through the vesin cell lists.
+vesin-nl = []
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
 [dependencies]
 petgraph = { version = "0.8", optional = true }
 nauty-pet = { version = "0.14", optional = true }
+
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
@@ -48,6 +51,7 @@ rgpot-core = { version = "2.2.0" }
 
 [build-dependencies]
 cbindgen = "0.29"
+cc = "1"
 
 [package.metadata.capi]
 min_version = "0.10.17"
