@@ -29,21 +29,6 @@ use rgpot_core::tensor::{
 };
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
-/// Atomic number by symbol, the elements the con files of this campaign use.
-fn z_of(symbol: &str) -> u32 {
-    match symbol {
-        "H" => 1,
-        "C" => 6,
-        "N" => 7,
-        "O" => 8,
-        "Cu" => 29,
-        "Pt" => 78,
-        "Pd" => 46,
-        "Au" => 79,
-        _ => 0,
-    }
-}
-
 /// Reads the first frame of a con file: coordinates, species, and the free
 /// seeds (the atoms the file does not mark fixed).
 fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>) {
@@ -54,7 +39,7 @@ fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>) {
     let mut seeds = Vec::new();
     for (i, a) in frame.atom_data.iter().enumerate() {
         pos.extend_from_slice(&[a.x, a.y, a.z]);
-        species.push(z_of(&a.symbol));
+        species.push(readcon_core::helpers::symbol_to_atomic_number(&a.symbol) as u32);
         if !a.is_fixed() {
             seeds.push(i);
         }
