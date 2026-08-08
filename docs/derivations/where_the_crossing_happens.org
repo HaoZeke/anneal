@@ -376,3 +376,13 @@ atom, frozen environment, few iterations), used by the driver's screen path
 for the arms whose moves are local. Charged at the full unit rate first, so
 any win is understated rather than manufactured; fractional charging is a
 later refinement with its own audit.
+
+* The composite holds on all three
+
+burst + depth-rewarded Thompson, one configuration, nothing per system:
+LJ38 55/72 against control 55/72; LJ75 13/48 against 4/48; LJ98 16/48
+against 5/48. The bandit recovers burst's small-system deficit entirely and
+extends its large-system gain. Confirmation seeds: tdep alone confirms at 38
+points (115/144 against 101/144) and is null on the hard systems, so the
+allocation pays exactly when the library holds an arm worth allocating to,
+which is the composed excursion.
