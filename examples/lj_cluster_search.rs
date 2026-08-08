@@ -129,6 +129,9 @@ fn main() {
     cfg.energy_bias = opts.contains(&"ebias");
     // The heavy-tailed visiting distribution of generalised annealing.
     cfg.visit_moves = opts.contains(&"visit");
+    // Rebuild the cluster from a library of local orders rather than displacing
+    // it. Acts on the operator that crosses funnels.
+    cfg.reseed_moves = opts.contains(&"reseed");
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
     if let Ok(v) = std::env::var("SCREEN_STEPS") {

@@ -101,3 +101,39 @@ method: at this budget the outcome is set by how many perturbation-and-quench
 draws the budget buys and by the probability that one of them lands across the
 funnel boundary, and that probability did not move under any reweighting of
 which draws get kept.
+
+* The structural reseed is an oracle, and the transfer test says so
+
+The crate carries a reseed move, never wired into this driver, which keeps a
+fraction of the current structure and regrows the rest with a local order drawn
+from a library: the structure's own observed order, face-centred cubic,
+hexagonal close packed, icosahedral, simple cubic.
+
+Switched on at 38 points it solves *72 of 72* against a control of 55, a Bayes
+factor of 38478. The global minimum of the 38-point cluster is a face-centred
+cubic truncated octahedron, and face-centred cubic is in the library.
+
+The library holds no decahedral and no tetrahedral entry, which are the
+morphologies of the 75- and 98-point global minima, so those two systems test
+whether the move searches or matches. At a million charged evaluations, 48 seeds:
+
+| system | control | reseed | deepest, control | deepest, reseed |
+|--------+---------+--------+------------------+-----------------|
+| LJ75   |    0/48 |   0/48 |        -396.2822 |       -394.6373 |
+| LJ98   |    2/48 |   0/48 |        -543.6654 |       -539.5701 |
+
+It does not merely fail to transfer, it is worse on both systems by both
+measures, losing the two solves the control finds at 98 points and reaching a
+shallower energy at both sizes. The move builds the answer where the answer is
+in its library and spends the budget badly where it is not.
+
+*72 of 72 is therefore an oracle result and belongs with the Steinhardt-order
+and twinning arms rather than with the measurements.* A Bayes factor of 38478 on
+an arm that presupposes the answer is worth nothing, which is the reason the
+transfer test was named as the deciding one before the 72 of 72 was seen rather
+than after.
+
+Adding the heavy-tailed visiting move alongside the reseed gives 58 of 72, down
+from 72: an arm proposing noise takes draws from an arm proposing structure. The
+consistent reading across every arm in this file is that what a proposal
+contains matters and how large it is does not.
