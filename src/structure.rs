@@ -759,3 +759,121 @@ mod tests {
         assert!((s - 1.0).abs() < 1e-12, "fractions summed to {s}");
     }
 }
+
+/// Primitive-ring profile of the contact graph: counts of 3-, 4- and 5-rings.
+///
+/// The shortest-path ring criterion of Franzblau
+/// (doi:10.1103/PhysRevB.44.4925), the primitive of seams-core's network
+/// analysis: a cycle counts only when no chord shortcuts it, so two fused
+/// triangles do not masquerade as a square. Ring statistics separate packing
+/// families by topology rather than by any order parameter, and cost nothing
+/// but graph walks.
+pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize, usize) {
+    let adj = adjacency(x, n, cutoff);
+    let nb: Vec<Vec<usize>> = (0..n)
+        .map(|i| (0..n).filter(|&j| adj[i][j]).collect())
+        .collect();
+    let mut tri = 0usize;
+    let mut sq = 0usize;
+    let mut pent = 0usize;
+    for a in 0..n {
+        for &b in nb[a].iter().filter(|&&b| b > a) {
+            for &c in nb[b].iter().filter(|&&c| c > a && c != a) {
+                if adj[a][c] {
+                    if b < c {
+                        tri += 1;
+                    }
+                    continue;
+                }
+                // a-b-c open: close with one more step for a square, two for a
+                // pentagon, requiring primitivity (no chord).
+                for &d in nb[c].iter().filter(|&&d| d != b && d != a) {
+                    if adj[a][d] && d > a && !adj[b][d] {
+                        if b < d {
+                            sq += 1;
+                        }
+                        continue;
+                    }
+                    if adj[a][d] || d <= a {
+                        continue;
+                    }
+                    for &e in nb[d].iter() {
+                        if e > a
+                            && adj[a][e]
+                            && e != b
+                            && e != c
+                            && !adj[b][d]
+                            && !adj[b][e]
+                            && !adj[c][e]
+                            && b < e
+                        {
+                            pent += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Each square is found once per traversal direction, each pentagon from
+    // both end orderings; triangles are already unique by ordering.
+    (tri, sq / 2, pent / 2)
+}
+
+#[cfg(test)]
+mod ring_tests {
+    use super::*;
+    use ndarray::Array1;
+
+    fn ico13() -> Array1<f64> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut v = vec![[0.0, 0.0, 0.0]];
+        for s in [1.0_f64, -1.0] {
+            for t in [phi, -phi] {
+                v.push([0.0, s, t]);
+                v.push([s, t, 0.0]);
+                v.push([t, 0.0, s]);
+            }
+        }
+        let mut x = Array1::zeros(39);
+        for (i, p) in v.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = p[k] * 0.55;
+            }
+        }
+        x
+    }
+
+    fn fcc13() -> Array1<f64> {
+        let pts = [
+            [0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [-1.0, 1.0, 0.0], [-1.0, -1.0, 0.0],
+            [1.0, 0.0, 1.0], [1.0, 0.0, -1.0], [-1.0, 0.0, 1.0], [-1.0, 0.0, -1.0],
+            [0.0, 1.0, 1.0], [0.0, 1.0, -1.0], [0.0, -1.0, 1.0], [0.0, -1.0, -1.0],
+        ];
+        let mut x = Array1::zeros(39);
+        for (i, p) in pts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * i + k] = p[k] * 0.75;
+            }
+        }
+        x
+    }
+
+    /// The profile has to separate the two thirteen-point packings by
+    /// topology and survive a permutation unchanged.
+    #[test]
+    fn rings_separate_packings_and_ignore_labelling() {
+        let a = ring_profile(ico13().view(), 13, 1.2);
+        let b = ring_profile(fcc13().view(), 13, 1.2);
+        assert_ne!(a, b, "ico and fcc thirteen-point profiles agree: {a:?}");
+        let x = ico13();
+        let mut y = Array1::zeros(x.len());
+        let perm = [4usize, 9, 1, 12, 0, 7, 3, 11, 2, 8, 10, 5, 6];
+        for (i, p) in perm.iter().enumerate() {
+            for k in 0..3 {
+                y[3 * i + k] = x[3 * p + k];
+            }
+        }
+        assert_eq!(a, ring_profile(y.view(), 13, 1.2));
+    }
+}
