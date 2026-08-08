@@ -20,6 +20,88 @@ use rand::{Rng, SeedableRng};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 
+use rgpot_core::rpc::client::RpcClient;
+use rgpot_core::tensor::{
+    rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
+    rgpot_tensor_data, rgpot_tensor_free,
+};
+use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
+
+/// The rgpot route: energy and forces over Cap'n Proto from an rgpot server,
+/// which hosts whatever backend it was started with. `Metatomic:<model.pt>`
+/// serves a metatomic model such as PET-MAD; the same server ABI carries the
+/// quantum-chemistry backends. One charged unit per calculate call, exactly as
+/// for the piped helper, and no engine code in this driver at all.
+struct RgpotEngine {
+    client: RpcClient,
+    atmnrs: Vec<i32>,
+    box_: [f64; 9],
+    /// Calls the server refused.
+    failures: usize,
+}
+
+impl RgpotEngine {
+    fn connect(m: usize) -> Self {
+        let host = std::env::var("RGPOT_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+        let port: u16 = std::env::var("RGPOT_PORT")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(9999);
+        let mut atmnrs = Vec::new();
+        for _ in 0..m {
+            atmnrs.extend_from_slice(&[8, 1, 1]);
+        }
+        Self {
+            client: RpcClient::new(&host, port).expect("rgpot client"),
+            atmnrs,
+            box_: [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
+            failures: 0,
+        }
+    }
+
+    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        let n = x.len() / 3;
+        let mut pos: Vec<f64> = x.iter().cloned().collect();
+        let input = unsafe {
+            rgpot_force_input_t {
+                positions: rgpot_tensor_cpu_f64_2d(pos.as_mut_ptr(), n as i64, 3),
+                atomic_numbers: rgpot_tensor_cpu_i32_1d(self.atmnrs.as_mut_ptr(), n as i64),
+                box_matrix: rgpot_tensor_cpu_f64_matrix3(self.box_.as_mut_ptr()),
+            }
+        };
+        let mut out = rgpot_force_out_t {
+            forces: std::ptr::null_mut(),
+            energy: 0.0,
+            variance: 0.0,
+        };
+        let res = self.client.calculate(&input, &mut out);
+        unsafe {
+            rgpot_tensor_free(input.positions);
+            rgpot_tensor_free(input.atomic_numbers);
+            rgpot_tensor_free(input.box_matrix);
+        }
+        match res {
+            Ok(()) => {
+                let mut g = Array1::zeros(3 * n);
+                if !out.forces.is_null() {
+                    let data = unsafe { rgpot_tensor_data(out.forces) } as *const f64;
+                    if !data.is_null() {
+                        for i in 0..3 * n {
+                            g[i] = -unsafe { *data.add(i) };
+                        }
+                    }
+                    unsafe { rgpot_tensor_free(out.forces) };
+                }
+                Some((out.energy, g))
+            }
+            Err(_) => {
+                self.failures += 1;
+                None
+            }
+        }
+    }
+}
+
 /// One rigid water template, in Angstrom.
 const WATER: [[f64; 3]; 3] = [
     [0.0, 0.0, 0.0],
@@ -125,7 +207,16 @@ fn main() {
 
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
     for seed in seed0..(seed0 + seeds) {
-        let mut eng = start_engine(m, &engine);
+        let mut rg_eng = if engine == "rgpot" {
+            Some(RgpotEngine::connect(m))
+        } else {
+            None
+        };
+        let mut eng = if engine == "rgpot" {
+            None
+        } else {
+            Some(start_engine(m, &engine))
+        };
         let mut ledger = Ledger::new(budget);
         // The recommended stack's allocator over the molecular library.
         let mut cfg = Config::recommended(n);
@@ -146,7 +237,11 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                eng.eval(v)
+                match (&mut rg_eng, &mut eng) {
+                    (Some(r), _) => r.eval(v),
+                    (_, Some(p)) => p.eval(v),
+                    _ => None,
+                }
             });
             (f, xr)
         };
@@ -165,9 +260,14 @@ fn main() {
             }
         }
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
+        let failures = rg_eng
+            .as_ref()
+            .map(|r| r.failures)
+            .or_else(|| eng.as_ref().map(|p| p.failures))
+            .unwrap_or(0);
         println!(
-            "  seed {seed}: best {:.6} eV  hops {}  scf failures {}",
-            out.best, out.hops, eng.failures
+            "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
+            out.best, out.hops, failures
         );
         if let Some(bx) = out.best_state {
             let path = format!("best_h2o{m}_{engine}_s{seed}.xyz");
@@ -186,6 +286,8 @@ fn main() {
             }
             println!("  wrote {path}");
         }
-        let _ = eng.child.kill();
+        if let Some(p) = eng.as_mut() {
+            let _ = p.child.kill();
+        }
     }
 }
