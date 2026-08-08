@@ -700,6 +700,10 @@ pub struct Config {
     /// each sweep is an exact chain for its own target rather than an adaptive
     /// one whose invariance has to be argued.
     pub flat_sweep: usize,
+    /// Quantile of a sweep's visited energies that sets the cut below which the
+    /// target is flat. Lower is greedier: the flat region shrinks toward the
+    /// deepest energies the chain has reached.
+    pub flat_quantile: f64,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -964,6 +968,7 @@ impl Config {
             bayes_screen: false,
             flat_histogram: false,
             flat_sweep: 400,
+            flat_quantile: 0.5,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1495,7 +1500,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // the run rather than supplied, so nothing here is specific to Lennard-Jones
     // or to a cluster size.
     let mut dos: Option<crate::dos::DensityOfStates> = None;
-    let mut flat_weight: Option<crate::dos::Weight> = None;
+    let mut flat_weight: Option<crate::dos::CutWeight> = None;
     let mut flat_seen: Vec<f64> = Vec::new();
     let mut flat_since = 0usize;
     let flat_sweep = cfg.flat_sweep.max(32);
@@ -1893,17 +1898,27 @@ fn run_full<'g, R: Rng + ?Sized>(
             // deposits still enter, so a mechanism that pushes the chain out of
             // a basin it has already paid for keeps working; what changes is
             // that the multiplicity of the destination no longer decides.
+            // The density of states is held over the bare quenched energy.
+            // Binning the biased energy instead puts the histogram on a
+            // coordinate that drifts as deposits accumulate, so the bias enters
+            // the exponent additively the way it does under Metropolis rather
+            // than moving the axis.
             let ok = match flat_weight.as_ref() {
                 Some(w) => {
-                    rng.random::<f64>() < w.accept_prob(e + v_old, e_new + v_new)
+                    let bias_delta = (v_new - v_old) / temperature.max(1e-12);
+                    rng.random::<f64>() < w.accept_prob(e, e_new, bias_delta)
                 }
                 // Before the window exists there is no entropy to accept
                 // against, so the first sweep runs the rule it is replacing and
                 // its energies are what set the window.
                 None => delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp(),
             };
-            if e_new.is_finite() {
-                flat_seen.push(e_new + v_new);
+            // Before the window exists this is the only record of what
+            // energies the problem occupies. Once it exists the occupancy
+            // below is the record, and pushing here as well would count the
+            // proposal and the state it led to as two observations.
+            if dos.is_none() && e_new.is_finite() {
+                flat_seen.push(e_new);
             }
             ok
         } else {
@@ -1942,9 +1957,10 @@ fn run_full<'g, R: Rng + ?Sized>(
             // trial records the state it stayed in. Recording the proposal
             // instead would measure the move library rather than the
             // occupancy, and the occupancy is what the weight has to flatten.
-            let occupied = if accept { e_new + v_new } else { e + v_old };
+            let occupied = if accept { e_new } else { e };
             if let Some(d) = dos.as_mut() {
                 d.observe(occupied);
+                flat_seen.push(occupied);
             }
             flat_since += 1;
             if flat_since >= flat_sweep {
@@ -1952,7 +1968,19 @@ fn run_full<'g, R: Rng + ?Sized>(
                 match dos.as_mut() {
                     Some(d) => {
                         d.refresh();
-                        flat_weight = Some(d.draw(rng));
+                        // The cut walks down with the energies this sweep
+                        // actually reached, so the schedule follows the run's
+                        // own progress rather than a cooling curve.
+                        if let Some((cut, width)) =
+                            crate::dos::cut_from(&flat_seen, cfg.flat_quantile)
+                        {
+                            flat_weight = Some(crate::dos::CutWeight {
+                                weight: d.draw(rng),
+                                cut,
+                                width,
+                            });
+                        }
+                        flat_seen.clear();
                     }
                     None => {
                         // The window comes from the energies the first sweep
@@ -1976,7 +2004,15 @@ fn run_full<'g, R: Rng + ?Sized>(
                                 d.observe(*v);
                             }
                             d.refresh();
-                            flat_weight = Some(d.draw(rng));
+                            if let Some((cut, width)) =
+                                crate::dos::cut_from(&flat_seen, cfg.flat_quantile)
+                            {
+                                flat_weight = Some(crate::dos::CutWeight {
+                                    weight: d.draw(rng),
+                                    cut,
+                                    width,
+                                });
+                            }
                             dos = Some(d);
                         }
                         flat_seen.clear();

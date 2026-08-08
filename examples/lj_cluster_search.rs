@@ -123,6 +123,12 @@ fn main() {
     cfg.bayes_screen = opts.contains(&"bayes");
     // Acceptance against the density of minima rather than against the energy.
     cfg.flat_histogram = opts.contains(&"flat");
+    if let Ok(v) = std::env::var("FLAT_QUANTILE") {
+        if let Ok(q) = v.parse::<f64>() {
+            cfg.flat_quantile = q;
+            println!("  flat below the {q} quantile of each sweep");
+        }
+    }
     // The move chosen from the structure the chain is standing on.
     cfg.contextual_moves = opts.contains(&"ctx");
     // Basins keyed on how well each point is bound.
