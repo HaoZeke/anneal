@@ -238,6 +238,34 @@ impl ClusterMove {
         ]
     }
 
+    /// The library without the arms measured to produce nothing.
+    ///
+    /// Traced over 72 runs at 38 points, every one of 55 funnel crossings and
+    /// 617 of 634 ordinary improvements came from surface relocation, the
+    /// single-point move and symmetrisation. The all-point isotropic move, the
+    /// canonical basin-hopping perturbation, produced 8 improvements and no
+    /// crossing from a fifth of the proposals; the shell rotation 9 and none.
+    /// The realised crossing displacement has participation about 1/n: one
+    /// atom carries it. Dropping the two inert arms reallocates two fifths of
+    /// the proposal budget to the moves that do the work.
+    pub fn library_lean(n: usize) -> Vec<ClusterMove> {
+        vec![
+            ClusterMove::SinglePoint {
+                n_points: n,
+                step: 1.0,
+            },
+            ClusterMove::SurfaceRelocate(SurfaceRelocate {
+                n_points: n,
+                neighbour_cutoff: 1.6,
+            }),
+            ClusterMove::Symmetrise(Symmetrise {
+                n_points: n,
+                orders: vec![2, 3, 4, 5, 6],
+                pair_cutoff: 2.5,
+            }),
+        ]
+    }
+
     /// The library with the heavy-tailed visiting move added.
     pub fn library_with_visit(n: usize) -> Vec<ClusterMove> {
         let mut v = Self::library(n);
@@ -844,6 +872,10 @@ pub struct Config {
     /// mixture covariance. Nothing morphological enters; the buffer is this
     /// run's history.
     pub cov_perturb: bool,
+    /// Drop the move arms measured to produce nothing.
+    ///
+    /// See [`ClusterMove::library_lean`].
+    pub lean_moves: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1119,6 +1151,7 @@ impl Config {
             soft_modes: 6,
             soft_steps: 30,
             cov_perturb: false,
+            lean_moves: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1526,7 +1559,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.growth_and_twin {
+    let kernels = if cfg.lean_moves {
+        ClusterMove::library_lean(n)
+    } else if cfg.growth_and_twin {
         ClusterMove::library_with_growth_and_twin(n)
     } else if cfg.self_reseed {
         ClusterMove::library_with_self_reseed(n)
@@ -2081,6 +2116,56 @@ fn run_full<'g, R: Rng + ?Sized>(
         hops += 1;
         if improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
+            // The anatomy of the draw that produced a new best, for the
+            // question no mechanism arm has answered: what does a crossing
+            // perturbation look like? Written to stderr under an environment
+            // switch so a campaign can collect it without an API change.
+            if std::env::var("ANNEAL_IMP_TRACE").is_ok() {
+                let pnorm: f64 = trial
+                    .iter()
+                    .zip(x.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt();
+                let dnorm: f64 = x_new
+                    .iter()
+                    .zip(x.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt();
+                // Participation of the realised displacement over atoms: one
+                // when every atom moves equally, 1/n when one atom carries it.
+                let n_at = x.len() / 3;
+                let mut tot = 0.0_f64;
+                let mut p2 = 0.0_f64;
+                for i in 0..n_at {
+                    let a = (0..3)
+                        .map(|c| {
+                            let d = x_new[3 * i + c] - x[3 * i + c];
+                            d * d
+                        })
+                        .sum::<f64>();
+                    tot += a;
+                    p2 += a * a;
+                }
+                let part = if tot > 0.0 {
+                    tot * tot / (n_at as f64 * p2)
+                } else {
+                    0.0
+                };
+                let arm = if soft_fire {
+                    "soft".to_string()
+                } else if cov_fire {
+                    "cov".to_string()
+                } else if angular {
+                    "angular".to_string()
+                } else {
+                    kernels[k].name()
+                };
+                eprintln!(
+                    "IMPTRACE hop {hops} e {e_new:.6} arm {arm} pnorm {pnorm:.4} dnorm {dnorm:.4} part {part:.4}"
+                );
+            }
         }
         // Kept before the acceptance branch, which may move `x_new` into the
         // chain. The archive wants the structure this hop produced whether or

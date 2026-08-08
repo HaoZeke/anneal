@@ -185,6 +185,8 @@ fn main() {
     cfg.soft_perturb = opts.contains(&"softsub");
     // Proposal covariance learned from the run's accepted displacements.
     cfg.cov_perturb = opts.contains(&"covper");
+    // The library without the arms measured to produce nothing.
+    cfg.lean_moves = opts.contains(&"lean");
     // Arm selection has to be under an allocator at all before the reward rule
     // matters: without this the arm is drawn uniformly and both allocators are
     // inert.
