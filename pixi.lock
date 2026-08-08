@@ -237,7 +237,7 @@ environments:
       - pypi: https://files.pythonhosted.org/packages/44/0d/f494a2ec62ab56ffd44da4f236db374421fe0cd1e39d9ebc9785751eb432/periodictable-2.1.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/4c/85/9b31b44296cfa3bb56cddb35e6a0f6578bab0b490c0806c0245e32c6110c/platformdirs-4.11.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl
-      - pypi: https://files.pythonhosted.org/packages/5e/54/080429c9dd1461e6040e77c3279169132a901af6c46d2488cf16e3381fd2/chemparseplot-1.9.17-py3-none-any.whl
+      - pypi: https://files.pythonhosted.org/packages/56/90/69816d3fbab4e76c12d87500de816079d32ad5e204fd87e4b97444f80d5e/chemparseplot-1.10.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/5f/97/2aab507d3d00ca626e8e57c1eac6a79e4e5fbcc63eb99733ff55d1717f65/pydantic_core-2.46.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
       - pypi: https://files.pythonhosted.org/packages/60/45/c7b5c3168458db837e8ceab06dc77824e18202679d0463f0e8f002143a97/tinycss2-1.5.1-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/60/97/891a0971e1e4a8c5d2b20bbe0e524dc04548d2307fee33cdeba148fd4fc7/comm-0.2.3-py3-none-any.whl
@@ -9644,10 +9644,10 @@ packages:
   requires_dist:
   - wcwidth>=0.1.4
   requires_python: '>=3.10'
-- pypi: https://files.pythonhosted.org/packages/5e/54/080429c9dd1461e6040e77c3279169132a901af6c46d2488cf16e3381fd2/chemparseplot-1.9.17-py3-none-any.whl
+- pypi: https://files.pythonhosted.org/packages/56/90/69816d3fbab4e76c12d87500de816079d32ad5e204fd87e4b97444f80d5e/chemparseplot-1.10.0-py3-none-any.whl
   name: chemparseplot
-  version: 1.9.17
-  sha256: 9b8c7793bc1211fca498ecf8a89e6c33c694122c26888d4d8eac592d0717137a
+  version: 1.10.0
+  sha256: 9e1ff426c13fc923f01d97f056e1afafc511220bb973a0c1bc02bb305102cbcf
   requires_dist:
   - numpy>=1.26.2
   - pint>=0.22
