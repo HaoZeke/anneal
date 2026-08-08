@@ -85,6 +85,26 @@ pub enum ClusterMove {
         /// Tsallis visiting index; the literature default is 2.7.
         q_v: f64,
     },
+    /// Several surface relocations composed into one proposal.
+    ///
+    /// Measured at 38 points, the crossing into the funnel that holds the
+    /// answer completes from precursor structures the chain reaches through
+    /// accepted moves *worse than its best*, and the draw that completes it is
+    /// a single relocation. Run as separate hops, every intermediate state of
+    /// that excursion must survive its own Metropolis test, so the excursion
+    /// survives with the product of its acceptance probabilities. Composed
+    /// into one proposal it pays one test on the final state only.
+    ///
+    /// `k` is geometric with mean about three, so most bursts are short and no
+    /// scale is tuned. Each relocation acts on the structure the previous one
+    /// produced, and nothing here reads any order parameter or morphology: the
+    /// operator is the library's own relocation, repeated.
+    Burst {
+        /// Points in a state.
+        n_points: usize,
+        /// Separation below which two points count as neighbours.
+        neighbour_cutoff: f64,
+    },
     /// Relocate the least-coordinated point onto the surface.
     SurfaceRelocate(SurfaceRelocate),
     /// Rotate the outer shell against the core.
@@ -248,6 +268,16 @@ impl ClusterMove {
     /// The realised crossing displacement has participation about 1/n: one
     /// atom carries it. Dropping the two inert arms reallocates two fifths of
     /// the proposal budget to the moves that do the work.
+    /// The lean library with the burst arm added.
+    pub fn library_lean_burst(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library_lean(n);
+        v.push(ClusterMove::Burst {
+            n_points: n,
+            neighbour_cutoff: 1.6,
+        });
+        v
+    }
+
     pub fn library_lean(n: usize) -> Vec<ClusterMove> {
         vec![
             ClusterMove::SinglePoint {
@@ -369,6 +399,7 @@ impl ClusterMove {
             ClusterMove::AllPoints { .. } => "all".into(),
             ClusterMove::SinglePoint { .. } => "single".into(),
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
+            ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
             ClusterMove::Visit { .. } => "visit".into(),
@@ -472,6 +503,24 @@ impl ClusterMove {
             }
             ClusterMove::Visit { q_v } => {
                 crate::movekernel::TsallisVisit::new(*q_v).propose(x, t, rng)
+            }
+            ClusterMove::Burst {
+                n_points,
+                neighbour_cutoff,
+            } => {
+                let kernel = SurfaceRelocate {
+                    n_points: *n_points,
+                    neighbour_cutoff: *neighbour_cutoff,
+                };
+                let mut cur = kernel.propose(x, t, rng);
+                // Geometric continuation at 2/3: mean three relocations,
+                // capped so a long tail cannot spend a whole structure.
+                let mut hops = 1;
+                while hops < 8 && rng.random::<f64>() < 2.0 / 3.0 {
+                    cur = kernel.propose(cur.view(), t, rng);
+                    hops += 1;
+                }
+                cur
             }
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
@@ -876,6 +925,8 @@ pub struct Config {
     ///
     /// See [`ClusterMove::library_lean`].
     pub lean_moves: bool,
+    /// Add the composed-relocation burst arm to the lean library.
+    pub burst_moves: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1152,6 +1203,7 @@ impl Config {
             soft_steps: 30,
             cov_perturb: false,
             lean_moves: false,
+            burst_moves: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1559,7 +1611,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.lean_moves {
+    let kernels = if cfg.burst_moves {
+        ClusterMove::library_lean_burst(n)
+    } else if cfg.lean_moves {
         ClusterMove::library_lean(n)
     } else if cfg.growth_and_twin {
         ClusterMove::library_with_growth_and_twin(n)
@@ -2162,8 +2216,30 @@ fn run_full<'g, R: Rng + ?Sized>(
                 } else {
                     kernels[k].name()
                 };
+                // Local order of the structure this improvement produced and
+                // of the incumbent it came from, so the trace shows where in
+                // the improvement chain a funnel entry actually happens rather
+                // than only the finishing step. Classification only: nothing
+                // downstream steers by it.
+                let count = |v: ArrayView1<f64>| {
+                    let m = crate::structure::ptm(v, n, 0.12);
+                    let mut fcc = 0usize;
+                    let mut hcp = 0usize;
+                    let mut ico = 0usize;
+                    for t in &m {
+                        match t.template {
+                            crate::structure::Template::FaceCentredCubic => fcc += 1,
+                            crate::structure::Template::HexagonalClosePacked => hcp += 1,
+                            crate::structure::Template::Icosahedral => ico += 1,
+                            _ => {}
+                        }
+                    }
+                    (fcc, hcp, ico)
+                };
+                let (f_new, h_new, i_new) = count(x_new.view());
+                let (f_old, h_old, i_old) = count(x.view());
                 eprintln!(
-                    "IMPTRACE hop {hops} e {e_new:.6} arm {arm} pnorm {pnorm:.4} dnorm {dnorm:.4} part {part:.4}"
+                    "IMPTRACE hop {hops} e {e_new:.6} arm {arm} pnorm {pnorm:.4} dnorm {dnorm:.4} part {part:.4} new {f_new}/{h_new}/{i_new} old {f_old}/{h_old}/{i_old}"
                 );
             }
         }
@@ -2507,6 +2583,33 @@ fn run_full<'g, R: Rng + ?Sized>(
                         cov_next = (cov_next + 1) % 32;
                     }
                 }
+            }
+            // The chain's own trajectory, not only its record: funnel entry
+            // happens through accepted moves that are worse than the best so
+            // far, which the improvement trace cannot see.
+            if std::env::var("ANNEAL_ACC_TRACE").is_ok() {
+                let m = crate::structure::ptm(x_new.view(), n, 0.12);
+                let mut fcc = 0usize;
+                let mut hcp = 0usize;
+                let mut ico = 0usize;
+                for t in &m {
+                    match t.template {
+                        crate::structure::Template::FaceCentredCubic => fcc += 1,
+                        crate::structure::Template::HexagonalClosePacked => hcp += 1,
+                        crate::structure::Template::Icosahedral => ico += 1,
+                        _ => {}
+                    }
+                }
+                let arm = if soft_fire {
+                    "soft".to_string()
+                } else if cov_fire {
+                    "cov".to_string()
+                } else if angular {
+                    "angular".to_string()
+                } else {
+                    kernels[k].name()
+                };
+                eprintln!("ACCTRACE hop {hops} e {e_new:.6} arm {arm} ord {fcc}/{hcp}/{ico}");
             }
             e = e_new;
             x = x_new;

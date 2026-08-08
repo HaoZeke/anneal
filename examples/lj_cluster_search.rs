@@ -187,6 +187,8 @@ fn main() {
     cfg.cov_perturb = opts.contains(&"covper");
     // The library without the arms measured to produce nothing.
     cfg.lean_moves = opts.contains(&"lean");
+    // Composed surface relocations paying one acceptance test.
+    cfg.burst_moves = opts.contains(&"burst");
     // Arm selection has to be under an allocator at all before the reward rule
     // matters: without this the arm is drawn uniformly and both allocators are
     // inert.
