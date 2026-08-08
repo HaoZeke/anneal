@@ -1,0 +1,129 @@
+#+TITLE: Accepting by entropy: the diagnosis holds, the cure is refuted
+#+OPTIONS: toc:2
+
+* The claim under test
+
+Basin hopping samples minima from \(\pi(m) \propto e^{-\tilde E_m/T}\). Marginalised
+onto energy that is \(p(\tilde E) \propto g(\tilde E)\,e^{-\tilde E/T}\), with \(g\) the
+density of minima. On a multi-funnel landscape \(g\) is exponentially larger in
+the wide funnel than in the one holding the global minimum, so at a temperature
+loose enough to keep the chain moving the multiplicity decides where it sits,
+and at a temperature tight enough for energy to win the chain stops moving.
+
+The proposed cure weights states by \(1/g\) instead. The marginal in energy
+becomes flat, the deep and rare energies take the same share of the run as the
+shallow and abundant ones, and with \(S = \ln g\) the acceptance is Metropolis
+with entropy in place of energy,
+
+\[ a = \min\left(1,\ e^{-[S(\tilde E_{\text{new}}) - S(\tilde E_{\text{old}})]}\right). \]
+
+* The mechanism is real in isolation
+
+On a landscape built to contain the obstruction and nothing else -- two funnels
+joined by a single high-energy bridge, the narrow one walked down a rung at a
+time, and leaving the bridge landing in a funnel in proportion to how many
+states it holds -- the rule solves 8 of 8 where Metropolis solves 0 of 8 at
+every temperature in a seven-point sweep from 0.1 to 2.0.
+
+That number is the weakest evidence here, not the strongest. The landscape was
+written by the same hand testing the hypothesis, and it reached total separation
+only on the third attempt: the first version let a uniform proposal reach the
+target directly, the second omitted the entropic pull-back, and an intermediate
+version passed for the wrong reason entirely (see below). A landscape tuned
+until it separates cannot falsify anything. It shows the mechanism /can/ work.
+
+* Three defects found by that test, each of which alone inverts it
+
+** The estimator was Wang-Landau in disguise
+
+Refitting against the newest sweep and adding the residual to a running mean is
+the Wang-Landau recursion, and it carries the Wang-Landau defect
+(Belardinelli and Pereyra, doi:10.1103/PhysRevE.75.046701): 400 samples over 96
+bins is four per bin, so each update injects about half a nat and the curve
+random-walks by more than the structure it estimates. \(S\) is now fitted against
+every recorded sweep at once, each with the curve it ran under, by a multinomial
+likelihood that profiles out the per-sweep constant.
+
+Correcting this turned the toy from 8/8 to 3/8. *The first pass had been won by
+the estimator's noise, not by the mechanism.* A result banked as confirmation
+was an artifact, and only the correction found it.
+
+** Extrapolating multiplicity upward charges for barrier crossing
+
+The second-difference prior carried the observed trend up through never-visited
+bins, asserting that unobserved high energies hold ever more states. That
+charges the chain for exactly the rise it must make to leave a funnel, which
+rebuilds the trap the target exists to dissolve. Above the highest bin ever
+visited the curve is held flat: no evidence there supports anything else.
+Downward extrapolation stays, being both the useful direction and the safe one
+to be wrong in. This took the toy from 3/8 to 7/8, and capping at the highest
+/visited/ bin rather than at the window edge took it to 8/8.
+
+** The density of states was binned on the biased energy
+
+Deposits accumulate during a run, so the histogram sat on a coordinate drifting
+underneath it. It is over bare quenched energy now, with the bias additive in
+the exponent as under Metropolis.
+
+* On the real landscape it is refuted
+
+38 points, 400000 charged evaluations, 24 seeds per arm, identical moves, seeds
+and budget across arms.
+
+| arm                              | solved | note                       |
+|----------------------------------+--------+----------------------------|
+| Metropolis + basin bias          |  15/24 | the control                |
+| flat, no cut                     |   3/24 |                            |
+| flat, cut at q95 / q50 / q10     | 4/3/3  | corrected estimator        |
+| flat, cut at q50 / q25 / q10     | 3/1/5  | pre-correction             |
+| Metropolis, bias off             |   6/24 |                            |
+| flat, bias off                   |   0/24 |                            |
+
+Posterior comparison, Beta-Binomial under a Jeffreys prior:
+
+| comparison               | P(treat > ctrl) | difference          |    BF |
+|--------------------------+-----------------+---------------------+-------|
+| flat vs control, bias on |          0.0004 | -0.440 [-0.663, -0.189] | 56.89 |
+| flat vs control, bias off |          0.0020 | -0.240 [-0.430, -0.078] | 15.89 |
+
+Five configurations across three campaigns, every one between 0/24 and 5/24.
+The consistency is itself the evidence.
+
+* Why, and it is not about entropy
+
+At equal charged budget the bias-off arms ran *12409 hops (flat) against 5700
+(Metropolis)*. The flat arm bought more than twice as many hops with the same
+evaluations, and solved nothing.
+
+Flat sampling delivers exactly what it promises: equal residence at every
+energy. The unstated premise is that a unit of residence costs the same
+everywhere, and on this problem it does not. A high-energy trial is killed by
+the screen after a partial descent; a low-energy one has to be relaxed to
+convergence. Cost per state falls with energy by more than a factor of two, so
+*flat in energy is, under a fixed evaluation budget, a policy that prefers cheap
+shallow states* -- and it prefers them in proportion to how useless they are.
+
+The multicanonical construction of Berg and Neuhaus
+(doi:10.1016/0370-2693(91)90256-P) was built to compute thermodynamics across an
+energy range, where equal residence is the goal and every sample costs the same.
+Neither premise holds for a search under a budget.
+
+* What the control says
+
+Turning off the basin bias takes Metropolis from 15/24 to 6/24
+(P = 0.996, difference +0.360 [+0.097, +0.597], BF 7.65). The deposits are
+carrying a large part of the search, and depositing into visited basins is
+itself an entropy-defeating device: it fills the funnel the chain is trapped in.
+
+So the diagnosis survives and the cure does not. The landscape is entropically
+trapped, this driver already answers that with a mechanism measured at BF 7.65,
+and replacing the acceptance rule removes something that works in favour of
+something that spends the budget on the cheapest states available.
+
+* Status
+
+Refuted as a search rule at 38 points. The module stands, its six tests pass,
+and the estimator is correct in a way the sweep-by-sweep recursion is not; what
+is refuted is the claim that flat-in-energy acceptance finds minima under a
+fixed evaluation budget. No stopping rule and no default follows from it, and
+the arm is off unless asked for.
