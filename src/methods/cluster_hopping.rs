@@ -274,6 +274,29 @@ impl ClusterMove {
         v
     }
 
+    /// The library with one growth arm that regrows the structure from the
+    /// local order it already has.
+    ///
+    /// The full reseeding library carries four named packings alongside this
+    /// one, and on a system whose global minimum is one of those packings the
+    /// move can build the answer rather than search for it: at 38 points the
+    /// full library solves 72 of 72, and on 75 and 98 points, whose
+    /// morphologies it does not carry, it is worse than no reseeding at all.
+    ///
+    /// This arm carries no packing. [`crate::lattice::Source::Observed`] reads
+    /// the local order out of the structure the chain is standing on and
+    /// regrows from that, so nothing external enters and no answer can be
+    /// encoded. It isolates whether the effect belongs to rebuilding
+    /// coherently or to holding the right template.
+    pub fn library_with_self_reseed(n: usize) -> Vec<ClusterMove> {
+        let mut v = Self::library(n);
+        v.push(ClusterMove::Reseed {
+            n_points: n,
+            source: crate::lattice::Source::Observed,
+        });
+        v
+    }
+
     /// The library with a single growth arm, for when a posterior picks the
     /// construction.
     ///
@@ -757,6 +780,10 @@ pub struct Config {
     /// Every other kernel is bounded by a scale set by hand, so none can make a
     /// rare large excursion. See [`ClusterMove::Visit`].
     pub visit_moves: bool,
+    /// Regrow from the structure's own local order, with no named packing.
+    ///
+    /// See [`ClusterMove::library_with_self_reseed`].
+    pub self_reseed: bool,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1025,6 +1052,7 @@ impl Config {
             statistical_temperature: false,
             energy_bias: false,
             visit_moves: false,
+            self_reseed: false,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1428,7 +1456,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.visit_moves {
+    let kernels = if cfg.self_reseed {
+        ClusterMove::library_with_self_reseed(n)
+    } else if cfg.visit_moves {
         ClusterMove::library_with_visit(n)
     } else if cfg.twin_moves {
         ClusterMove::library_with_twin(n)
