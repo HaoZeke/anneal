@@ -18,10 +18,14 @@ default = []
 # Shape matching through the IRA Fortran library. Needs libira on the link
 # path; set IRA_LIB_DIR when building.
 ira = []
+# Exact basin identity by canonical contact-graph labelling through nauty.
+graphkey = ["dep:petgraph", "dep:nauty-pet"]
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
 [dependencies]
+petgraph = { version = "0.8", optional = true }
+nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
