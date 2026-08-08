@@ -403,6 +403,114 @@ where
     })
 }
 
+/// The `k` softest non-rigid eigenpairs at a point.
+///
+/// The same two-pass shifted Lanczos as [`curvature_features`], returning the
+/// subspace rather than the softest vector alone. A single soft mode is a poor
+/// displacement -- measured here, 6494 of 6550 single-mode trials failed the
+/// energy screen -- because one parabola climbed at fixed amplitude is all
+/// rise. A draw over the soft *subspace* with per-mode thermal amplitudes is a
+/// different object: it is the local Gaussian `N(0, T H^{-1})` truncated to
+/// the modes that carry displacement at temperature `T`, the correct
+/// preconditioned perturbation in the Hessian metric.
+pub fn soft_subspace<G>(
+    x: ArrayView1<f64>,
+    mut grad: G,
+    steps: usize,
+    epsilon: f64,
+    k: usize,
+) -> Option<(Vec<f64>, Vec<Array1<f64>>, usize)>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let dim = x.len();
+    if dim < 6 || steps < 2 || k == 0 {
+        return None;
+    }
+    let mut evaluations = 0usize;
+    let rigid = rigid_basis(x);
+    let mut hv = |v: &Array1<f64>, evaluations: &mut usize| -> Option<Array1<f64>> {
+        let mut d = v.clone();
+        project_rigid_with(&mut d, &rigid);
+        let mut xp = x.to_owned();
+        let mut xm = x.to_owned();
+        for i in 0..dim {
+            xp[i] += epsilon * d[i];
+            xm[i] -= epsilon * d[i];
+        }
+        let gp = grad(xp.view())?;
+        let gm = grad(xm.view())?;
+        *evaluations += 2;
+        let mut out = Array1::zeros(dim);
+        for i in 0..dim {
+            out[i] = (gp[i] - gm[i]) / (2.0 * epsilon);
+        }
+        project_rigid_with(&mut out, &rigid);
+        Some(out)
+    };
+    let mut q0 = Array1::from_shape_fn(dim, |i| ((i % 7) as f64 - 3.0) + 0.5);
+    project_rigid_with(&mut q0, &rigid);
+    let n0: f64 = q0.iter().map(|z| z * z).sum::<f64>().sqrt();
+    if n0 <= 1e-12 {
+        return None;
+    }
+    q0 /= n0;
+    let project = |w: &mut Array1<f64>| project_rigid_with(w, &rigid);
+    let (alphas, betas, _) =
+        lanczos_tridiag(&q0, steps, &mut |v| hv(v, &mut evaluations), &project)?;
+    let (top, _) = ritz(&alphas, &betas)?;
+    let sigma = top[top.len() - 1] * 1.05 + 1.0;
+    let (alphas, betas, basis) = lanczos_tridiag(
+        &q0,
+        steps,
+        &mut |v| {
+            let mut vp = v.clone();
+            project_rigid_with(&mut vp, &rigid);
+            let h = hv(&vp, &mut evaluations)?;
+            let mut out = Array1::zeros(dim);
+            for i in 0..dim {
+                out[i] = sigma * vp[i] - h[i];
+            }
+            project_rigid_with(&mut out, &rigid);
+            Some(out)
+        },
+        &project,
+    )?;
+    let (mu, vecs) = ritz(&alphas, &betas)?;
+    let m = mu.len();
+    let take = k.min(m.saturating_sub(1));
+    if take == 0 {
+        return None;
+    }
+    let mut lambdas = Vec::with_capacity(take);
+    let mut modes = Vec::with_capacity(take);
+    // Ascending in mu is descending in the eigenvalue of H, so the softest
+    // eigenpairs of H sit at the top of mu.
+    for j in 0..take {
+        let col = m - 1 - j;
+        lambdas.push(sigma - mu[col]);
+        let mut mode = Array1::<f64>::zeros(dim);
+        for (row, b) in basis.iter().enumerate().take(m) {
+            let c = vecs[[row, col]];
+            for i in 0..dim {
+                mode[i] += c * b[i];
+            }
+        }
+        project_rigid_with(&mut mode, &rigid);
+        let norm: f64 = mode.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if norm <= 1e-12 {
+            continue;
+        }
+        mode /= norm;
+        modes.push(mode);
+    }
+    if modes.is_empty() {
+        return None;
+    }
+    lambdas.truncate(modes.len());
+    Some((lambdas, modes, evaluations))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,5 +760,36 @@ mod tests {
             1e-4,
         );
         assert!(out.is_none(), "an exhausted budget must not yield features");
+    }
+
+    /// The subspace has to recover the low end of a known spectrum, pairwise
+    /// orthonormal, in ascending order.
+    #[test]
+    fn the_soft_subspace_matches_a_known_spectrum() {
+        let x = scattered(20);
+        let scales: Vec<f64> = (0..60).map(|i| 0.5 + 0.25 * i as f64).collect();
+        let g = quadratic_grad(&scales);
+        let (l, v, _ev) =
+            soft_subspace(x.view(), |p| g(p), 40, 1e-4, 4).expect("no subspace");
+        assert!(l.len() >= 3, "only {} modes", l.len());
+        for j in 1..l.len() {
+            assert!(l[j] >= l[j - 1] - 1e-8, "not ascending: {l:?}");
+        }
+        for a in 0..v.len() {
+            for b in 0..a {
+                let dot: f64 = v[a].iter().zip(v[b].iter()).map(|(p, q)| p * q).sum();
+                assert!(dot.abs() < 1e-6, "modes {a},{b} not orthogonal: {dot}");
+            }
+            let n: f64 = v[a].iter().map(|z| z * z).sum::<f64>();
+            assert!((n - 1.0).abs() < 1e-8, "mode {a} not unit: {n}");
+        }
+        // The reference: dense projected eigenvalues of the same operator.
+        let (lo, _hi) = dense_projected(x.view(), &scales, 1e-4);
+        assert!(
+            (l[0] - lo).abs() < 0.05 * lo.abs().max(1.0),
+            "softest {} against dense {}",
+            l[0],
+            lo
+        );
     }
 }
