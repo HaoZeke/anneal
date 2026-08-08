@@ -422,6 +422,11 @@ fn main() {
         // Where the run got its answer. Printed for the last few improvements
         // only: the early ones are a descent from a random start and say
         // nothing.
+        if std::env::var("DUMP_IMPROVEMENTS").is_ok() {
+            for (h, sp, b, en) in out.improvements.iter() {
+                println!("IMP hop {h} spend {sp} basins {b} energy {en:.6}");
+            }
+        }
         if let Some(r) = reference {
             if let Some((h, _, b, e)) = out
                 .improvements
