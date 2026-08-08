@@ -253,7 +253,12 @@ fn main() {
     // The temperature and step come from Wales and Doye's protocol for basin
     // hopping on the quenched surface, a reduced temperature of 0.8 and a step
     // between 0.36 and 0.40, rather than from tuning here.
-    let mut cfg = Config::for_cluster(n);
+    let mut cfg = if args.get(4).map(|v| v.contains("rec")).unwrap_or(false) {
+        println!("  recommended configuration");
+        Config::recommended(n)
+    } else {
+        Config::for_cluster(n)
+    };
     // Keying on shape rather than on the descriptor, so the merge threshold is
     // a length. Enabled by the fourth argument so both are measurable.
     // Mechanisms named on the command line, so each is measurable against the
@@ -268,7 +273,7 @@ fn main() {
     }
     cfg.shape_keyed = opts.contains(&"shape");
     cfg.budget_window = opts.contains(&"bfwt");
-    cfg.allocate_moves = opts.contains(&"thompson");
+    cfg.allocate_moves = cfg.allocate_moves || opts.contains(&"thompson");
     cfg.adaptive_height = opts.contains(&"height");
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
@@ -282,7 +287,7 @@ fn main() {
     // Wales and Doye's angular move on the worst-bound point.
     cfg.angular_moves = opts.contains(&"angular");
     // The funnel forbidden rather than penalised.
-    cfg.tabu_on_stall = opts.contains(&"tabu");
+    cfg.tabu_on_stall = cfg.tabu_on_stall || opts.contains(&"tabu");
     // The relaxation decision taken under a posterior.
     cfg.bayes_screen = opts.contains(&"bayes");
     // Acceptance against the density of minima rather than against the energy.
@@ -303,7 +308,7 @@ fn main() {
     cfg.learn_construction = opts.contains(&"learncon");
     // Local order and global twinning together, the source under a posterior.
     // Arms rewarded by depth reached rather than by acceptance.
-    cfg.depth_reward = opts.contains(&"depth");
+    cfg.depth_reward = cfg.depth_reward || opts.contains(&"depth");
     // Perturbation drawn in the soft subspace of the incumbent's curvature.
     cfg.soft_perturb = opts.contains(&"softsub");
     // Proposal covariance learned from the run's accepted displacements.
@@ -311,7 +316,7 @@ fn main() {
     // The library without the arms measured to produce nothing.
     cfg.lean_moves = opts.contains(&"lean");
     // Composed surface relocations paying one acceptance test.
-    cfg.burst_moves = opts.contains(&"burst");
+    cfg.burst_moves = cfg.burst_moves || opts.contains(&"burst");
     // Settle moved atoms at fractional price before the full-system screen.
     cfg.staged_quench = opts.contains(&"staged");
     // Arm selection has to be under an allocator at all before the reward rule
