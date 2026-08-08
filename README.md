@@ -16,6 +16,29 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 | Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672621](https://doi.org/10.5281/zenodo.20672621) |
 | History | Continuous development since **2023-02** (see git log); multi-author `CITATION.cff` |
 
+## Cluster search: the measured configuration
+
+For atomic-cluster global minimisation, `Config::recommended(n)` is the
+configuration whose every layer beat or matched its paired control across
+four Lennard-Jones morphologies (38, 55, 75, 98 points), reported as
+Beta-Binomial posterior comparisons with Bayes factors: composed surface
+relocations paying one acceptance test, Normal-Gamma Thompson allocation
+over move arms rewarded by the depth reached, and tabu on stall. Reference
+GMIN at matched potential-call budgets solves 37/48, 0/48 and 0/48 on the
+38-, 75- and 98-point systems; this stack measures 55/72, 49/144 (Bayes
+factor 3104 against its own baseline) and 40/72. `Config::for_cluster(n)`
+keeps the plain Wales-Doye protocol as the comparison baseline. Every
+mechanism that measured null or harmful along the way is recorded with its
+mechanism in `docs/derivations/`; none of them ships as a default.
+
+```rust
+use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
+
+let cfg = Config::recommended(38);
+let mut ledger = Ledger::new(400_000);
+// supply `relax` closing over your objective; see examples/lj_cluster_search.rs
+```
+
 ## Install
 
 ```bash
