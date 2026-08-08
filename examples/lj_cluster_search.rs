@@ -173,6 +173,8 @@ fn main() {
     // Rebuild the cluster from a library of local orders rather than displacing
     // it. Acts on the operator that crosses funnels.
     cfg.reseed_moves = opts.contains(&"reseed");
+    // Regrow from the structure's own order, carrying no named packing.
+    cfg.self_reseed = opts.contains(&"selfseed");
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
     if let Ok(v) = std::env::var("SCREEN_STEPS") {
