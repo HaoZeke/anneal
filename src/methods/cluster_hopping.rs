@@ -1195,6 +1195,29 @@ pub struct Config {
 
 impl Config {
     /// Settings for `n_points` at the campaign's measured defaults.
+    /// The measured configuration: the stack every layer of which beat or
+    /// matched its paired control across four cluster morphologies.
+    ///
+    /// Composed surface relocations paying one acceptance test (LJ75 49/144
+    /// against 17/144, Bayes factor 3104 with the arm allocator), Normal-Gamma
+    /// Thompson allocation rewarded by depth, and tabu on stall (LJ98 40/72
+    /// against 20/72, Bayes factor 43.8). Neutral where its mechanisms are not
+    /// needed: 55/72 against 55/72 on the 38-point double funnel and 47-48 of
+    /// 48 on the 55-point single funnel. Reference GMIN at matched
+    /// potential-call budgets: 37/48, 0/48, 0/48.
+    ///
+    /// [`Config::for_cluster`] remains the plain Wales-Doye protocol, kept as
+    /// the comparison baseline; this is what a caller who wants answers should
+    /// start from.
+    pub fn recommended(n_points: usize) -> Self {
+        let mut cfg = Self::for_cluster(n_points);
+        cfg.burst_moves = true;
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg
+    }
+
     pub fn for_cluster(n_points: usize) -> Self {
         Self {
             n_points,
