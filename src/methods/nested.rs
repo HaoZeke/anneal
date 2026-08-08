@@ -1,5 +1,11 @@
 //! Nested search: the quenched landscape under a descending ceiling.
 //!
+//! *Measured negative.* This module is kept as the reproducibility record of
+//! a mechanism that was built, measured against paired controls, and refuted;
+//! the numbers and the mechanism of failure are in `docs/derivations/`. It is
+//! not part of the recommended configuration and ships as evidence, not as
+//! advice.
+//!
 //! # Where this comes from
 //!
 //! The eigensolver lineage splits hard spectra into windows and solves inside

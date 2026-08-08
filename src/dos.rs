@@ -1,5 +1,11 @@
 //! A posterior over the density of minima, and acceptance by entropy.
 //!
+//! *Measured negative.* This module is kept as the reproducibility record of
+//! a mechanism that was built, measured against paired controls, and refuted;
+//! the numbers and the mechanism of failure are in `docs/derivations/`. It is
+//! not part of the recommended configuration and ships as evidence, not as
+//! advice.
+//!
 //! # Why the acceptance rule is the trap
 //!
 //! Basin hopping samples minima from `pi(m) ∝ exp(-E~_m / T)` on the quenched
