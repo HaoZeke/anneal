@@ -105,6 +105,44 @@ pub enum ClusterMove {
         /// Separation below which two points count as neighbours.
         neighbour_cutoff: f64,
     },
+    /// Rigidly relocate the least-bound group onto the cluster surface.
+    ///
+    /// The molecular analogue of the measured-productive operator. Atomic
+    /// surface relocation tears a bonded molecule apart, so for molecular
+    /// clusters the unit that moves is the group: the least-bound group,
+    /// judged by its count of inter-group contacts, is translated to a
+    /// random point on the cluster's surface shell and given a random rigid
+    /// rotation about its own centroid. Intra-group geometry is preserved
+    /// exactly, which is the constraint the quench would otherwise pay to
+    /// restore, and nothing here reads species or morphology: the groups are
+    /// the caller's declaration.
+    GroupRelocate {
+        /// Atom indices of each rigid group.
+        groups: Vec<Vec<usize>>,
+        /// Separation below which two atoms of different groups count as a
+        /// contact.
+        neighbour_cutoff: f64,
+    },
+    /// Several group relocations composed into one proposal: the burst
+    /// analogue for molecular clusters, paying one acceptance test for a
+    /// composed excursion.
+    GroupBurst {
+        /// Atom indices of each rigid group.
+        groups: Vec<Vec<usize>>,
+        /// Separation below which two atoms of different groups count as a
+        /// contact.
+        neighbour_cutoff: f64,
+    },
+    /// Small rigid displacement and rotation of one random group: the
+    /// workhorse move of a molecular cluster, bond-preserving by
+    /// construction where an atomic displacement pays the quench to restore
+    /// every bond it stretched.
+    GroupShake {
+        /// Atom indices of each rigid group.
+        groups: Vec<Vec<usize>>,
+        /// Translation scale.
+        amplitude: f64,
+    },
     /// Relocate the least-coordinated point onto the surface.
     SurfaceRelocate(SurfaceRelocate),
     /// Rotate the outer shell against the core.
@@ -228,6 +266,145 @@ pub fn worst_bound(x: ArrayView1<f64>, n: usize, ratio: f64) -> Option<usize> {
     }
 }
 
+/// Rigidly relocates the least-bound group of a molecular cluster.
+///
+/// Contacts are counted between atoms of different groups only, so a tightly
+/// bonded molecule does not read as well-bound by its own bonds. The chosen
+/// group is translated so its centroid lands on a random direction at the
+/// cluster's surface radius and rotated rigidly about its centroid by a
+/// uniform random rotation, preserving intra-group geometry exactly.
+fn group_relocate<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    neighbour_cutoff: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut out = x.to_owned();
+    if groups.len() < 2 {
+        return out;
+    }
+    let n = x.len() / 3;
+    let mut owner = vec![usize::MAX; n];
+    for (g, atoms) in groups.iter().enumerate() {
+        for &a in atoms {
+            if a < n {
+                owner[a] = g;
+            }
+        }
+    }
+    // Inter-group contacts per group.
+    let cut2 = neighbour_cutoff * neighbour_cutoff;
+    let mut contacts = vec![0usize; groups.len()];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if owner[i] == owner[j] || owner[i] == usize::MAX || owner[j] == usize::MAX {
+                continue;
+            }
+            let d2: f64 = (0..3)
+                .map(|k| {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    d * d
+                })
+                .sum();
+            if d2 < cut2 {
+                contacts[owner[i]] += 1;
+                contacts[owner[j]] += 1;
+            }
+        }
+    }
+    let worst = (0..groups.len())
+        .min_by_key(|&g| contacts[g])
+        .unwrap_or(0);
+    // Cluster centroid and surface radius from group centroids.
+    let mut cc = [0.0_f64; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            cc[k] += x[3 * i + k];
+        }
+    }
+    for v in cc.iter_mut() {
+        *v /= n.max(1) as f64;
+    }
+    let mut rmax = 0.0_f64;
+    for atoms in groups.iter() {
+        let gc = group_centroid(x, atoms);
+        let r: f64 = (0..3).map(|k| (gc[k] - cc[k]) * (gc[k] - cc[k])).sum::<f64>().sqrt();
+        rmax = rmax.max(r);
+    }
+    // Random direction on the sphere, random rigid rotation.
+    let dir = {
+        let mut v;
+        loop {
+            v = [
+                rng.random::<f64>() * 2.0 - 1.0,
+                rng.random::<f64>() * 2.0 - 1.0,
+                rng.random::<f64>() * 2.0 - 1.0,
+            ];
+            let n2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+            if n2 > 1e-6 && n2 <= 1.0 {
+                let nn = n2.sqrt();
+                v = [v[0] / nn, v[1] / nn, v[2] / nn];
+                break;
+            }
+        }
+        v
+    };
+    let target = [
+        cc[0] + dir[0] * rmax,
+        cc[1] + dir[1] * rmax,
+        cc[2] + dir[2] * rmax,
+    ];
+    let atoms = &groups[worst];
+    let gc = group_centroid(x, atoms);
+    // Uniform random rotation from three uniform angles is biased; a rotation
+    // about a uniform random axis by a uniform angle is enough for a proposal
+    // and keeps the code free of quaternion machinery.
+    let axis = dir;
+    let angle = rng.random::<f64>() * std::f64::consts::TAU;
+    let (sa, ca) = angle.sin_cos();
+    for &a in atoms {
+        if a >= n {
+            continue;
+        }
+        let p = [
+            x[3 * a] - gc[0],
+            x[3 * a + 1] - gc[1],
+            x[3 * a + 2] - gc[2],
+        ];
+        // Rodrigues rotation about `axis`.
+        let dot = p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2];
+        let cross = [
+            axis[1] * p[2] - axis[2] * p[1],
+            axis[2] * p[0] - axis[0] * p[2],
+            axis[0] * p[1] - axis[1] * p[0],
+        ];
+        for k in 0..3 {
+            let rot = p[k] * ca + cross[k] * sa + axis[k] * dot * (1.0 - ca);
+            out[3 * a + k] = target[k] + rot;
+        }
+    }
+    out
+}
+
+/// Centroid of one group.
+fn group_centroid(x: ArrayView1<f64>, atoms: &[usize]) -> [f64; 3] {
+    let n = x.len() / 3;
+    let mut c = [0.0_f64; 3];
+    let mut m = 0usize;
+    for &a in atoms {
+        if a < n {
+            for k in 0..3 {
+                c[k] += x[3 * a + k];
+            }
+            m += 1;
+        }
+    }
+    for v in c.iter_mut() {
+        *v /= m.max(1) as f64;
+    }
+    c
+}
+
 impl ClusterMove {
     /// The move library, configured for `n` points.
     ///
@@ -293,6 +470,26 @@ impl ClusterMove {
                 orders: vec![2, 3, 4, 5, 6],
                 pair_cutoff: 2.5,
             }),
+        ]
+    }
+
+    /// The move library for a molecular cluster: every arm rigid on the
+    /// caller's groups. Shake as the workhorse, relocation as the crossing
+    /// operator, the composed burst as the excursion.
+    pub fn library_molecular(groups: Vec<Vec<usize>>, neighbour_cutoff: f64) -> Vec<ClusterMove> {
+        vec![
+            ClusterMove::GroupShake {
+                groups: groups.clone(),
+                amplitude: 0.3,
+            },
+            ClusterMove::GroupRelocate {
+                groups: groups.clone(),
+                neighbour_cutoff,
+            },
+            ClusterMove::GroupBurst {
+                groups,
+                neighbour_cutoff,
+            },
         ]
     }
 
@@ -399,6 +596,9 @@ impl ClusterMove {
             ClusterMove::AllPoints { .. } => "all".into(),
             ClusterMove::SinglePoint { .. } => "single".into(),
             ClusterMove::SurfaceRelocate(_) => "surface".into(),
+            ClusterMove::GroupRelocate { .. } => "gsurface".into(),
+            ClusterMove::GroupShake { .. } => "gshake".into(),
+            ClusterMove::GroupBurst { .. } => "gburst".into(),
             ClusterMove::Burst { .. } => "burst".into(),
             ClusterMove::ShellRotate(_) => "shell".into(),
             ClusterMove::Symmetrise(_) => "sym".into(),
@@ -503,6 +703,82 @@ impl ClusterMove {
             }
             ClusterMove::Visit { q_v } => {
                 crate::movekernel::TsallisVisit::new(*q_v).propose(x, t, rng)
+            }
+            ClusterMove::GroupRelocate {
+                groups,
+                neighbour_cutoff,
+            } => group_relocate(x, groups, *neighbour_cutoff, rng),
+            ClusterMove::GroupShake { groups, amplitude } => {
+                let mut out = x.to_owned();
+                if groups.is_empty() {
+                    return out;
+                }
+                let g = rng.random_range(0..groups.len());
+                let atoms = &groups[g];
+                let gc = group_centroid(x, atoms);
+                let mut shift = [0.0_f64; 3];
+                for v in shift.iter_mut() {
+                    let u1: f64 = rng.random::<f64>().max(1e-12);
+                    let u2: f64 = rng.random::<f64>();
+                    *v = amplitude
+                        * (-2.0 * u1.ln()).sqrt()
+                        * (std::f64::consts::TAU * u2).cos();
+                }
+                let axis = {
+                    let mut v;
+                    loop {
+                        v = [
+                            rng.random::<f64>() * 2.0 - 1.0,
+                            rng.random::<f64>() * 2.0 - 1.0,
+                            rng.random::<f64>() * 2.0 - 1.0,
+                        ];
+                        let n2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+                        if n2 > 1e-6 && n2 <= 1.0 {
+                            let nn = n2.sqrt();
+                            v = [v[0] / nn, v[1] / nn, v[2] / nn];
+                            break;
+                        }
+                    }
+                    v
+                };
+                // A modest rotation, half a radian at most, so the shake stays
+                // a shake rather than a relocation.
+                let angle = (rng.random::<f64>() - 0.5);
+                let (sa, ca) = angle.sin_cos();
+                let n = x.len() / 3;
+                for &a in atoms {
+                    if a >= n {
+                        continue;
+                    }
+                    let pvec = [
+                        x[3 * a] - gc[0],
+                        x[3 * a + 1] - gc[1],
+                        x[3 * a + 2] - gc[2],
+                    ];
+                    let dot = pvec[0] * axis[0] + pvec[1] * axis[1] + pvec[2] * axis[2];
+                    let cross = [
+                        axis[1] * pvec[2] - axis[2] * pvec[1],
+                        axis[2] * pvec[0] - axis[0] * pvec[2],
+                        axis[0] * pvec[1] - axis[1] * pvec[0],
+                    ];
+                    for k in 0..3 {
+                        let rot = pvec[k] * ca + cross[k] * sa + axis[k] * dot * (1.0 - ca);
+                        out[3 * a + k] = gc[k] + shift[k] + rot;
+                    }
+                }
+                out
+            }
+            ClusterMove::GroupBurst {
+                groups,
+                neighbour_cutoff,
+            } => {
+                let mut cur = group_relocate(x, groups, *neighbour_cutoff, rng);
+                let mut hops = 1;
+                while hops < 8 && rng.random::<f64>() < 2.0 / 3.0 {
+                    cur = group_relocate(cur.view(), groups, *neighbour_cutoff, rng);
+                    hops += 1;
+                }
+                cur
             }
             ClusterMove::Burst {
                 n_points,
@@ -964,6 +1240,11 @@ pub struct Config {
     pub staged_quench: bool,
     /// Descent steps in the settle stage.
     pub settle_iters: usize,
+    /// Rigid groups of a molecular cluster. When set, the move library is the
+    /// molecular one: every arm rigid on these groups.
+    pub molecular_groups: Option<Vec<Vec<usize>>>,
+    /// Inter-group contact cutoff for the molecular library.
+    pub group_cutoff: f64,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1266,6 +1547,8 @@ impl Config {
             burst_moves: false,
             staged_quench: false,
             settle_iters: 20,
+            molecular_groups: None,
+            group_cutoff: 3.4,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -1695,7 +1978,9 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let kernels = if cfg.burst_moves {
+    let kernels = if let Some(groups) = cfg.molecular_groups.clone() {
+        ClusterMove::library_molecular(groups, cfg.group_cutoff)
+    } else if cfg.burst_moves {
         ClusterMove::library_lean_burst(n)
     } else if cfg.lean_moves {
         ClusterMove::library_lean(n)
@@ -3195,6 +3480,70 @@ pub fn optimize_with_gradient<'g>(
     let mut rng = StdRng::seed_from_u64(seed);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
+}
+
+#[cfg(test)]
+mod group_move_tests {
+    use super::*;
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+
+    /// Six rigid three-atom groups in a blob.
+    fn waterish() -> (Array1<f64>, Vec<Vec<usize>>) {
+        let mut x = Array1::zeros(3 * 18);
+        let mut groups = Vec::new();
+        for g in 0..6 {
+            let base = [
+                (g % 3) as f64 * 2.0,
+                (g / 3) as f64 * 2.0,
+                (g % 2) as f64 * 1.5,
+            ];
+            let local = [[0.0, 0.0, 0.0], [0.76, 0.59, 0.0], [-0.76, 0.59, 0.0]];
+            let mut idx = Vec::new();
+            for (a, l) in local.iter().enumerate() {
+                let i = 3 * g + a;
+                idx.push(i);
+                for k in 0..3 {
+                    x[3 * i + k] = base[k] + l[k];
+                }
+            }
+            groups.push(idx);
+        }
+        (x, groups)
+    }
+
+    /// The move must preserve every intra-group distance exactly and move
+    /// exactly one group.
+    #[test]
+    fn the_group_moves_rigidly_and_alone() {
+        let (x, groups) = waterish();
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = group_relocate(x.view(), &groups, 1.6, &mut rng);
+        let d = |v: &Array1<f64>, a: usize, b: usize| -> f64 {
+            (0..3)
+                .map(|k| (v[3 * a + k] - v[3 * b + k]).powi(2))
+                .sum::<f64>()
+                .sqrt()
+        };
+        let mut moved_groups = 0;
+        for atoms in &groups {
+            let moved = atoms
+                .iter()
+                .any(|&a| (0..3).any(|k| (x[3 * a + k] - y[3 * a + k]).abs() > 1e-9));
+            if moved {
+                moved_groups += 1;
+            }
+            for i in 0..atoms.len() {
+                for j in (i + 1)..atoms.len() {
+                    assert!(
+                        (d(&x, atoms[i], atoms[j]) - d(&y, atoms[i], atoms[j])).abs() < 1e-9,
+                        "intra-group distance changed"
+                    );
+                }
+            }
+        }
+        assert_eq!(moved_groups, 1, "moved {moved_groups} groups, wanted 1");
+    }
 }
 
 #[cfg(test)]
