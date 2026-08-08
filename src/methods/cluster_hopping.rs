@@ -400,6 +400,60 @@ pub fn connectivity_groups(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<Vec
     components(n, |a| table.neighbors(a).to_vec())
 }
 
+/// Which atoms are active around the seed set: the seeds themselves plus
+/// everything within `shells` bond-matrix neighbour shells of them, computed
+/// from the current coordinates.
+///
+/// The surface-search shape this serves: the adsorbate is the seed, the
+/// substrate atoms it currently touches respond, and the far substrate stands
+/// still, with the active region following the adsorbate as it moves. The
+/// shell rule is the nearest-neighbour bound; a descriptor-deviation bound
+/// over the same neighbourhoods is its refinement, not its replacement.
+pub fn active_mask(
+    x: ArrayView1<f64>,
+    species: &[u32],
+    seeds: &[usize],
+    shells: usize,
+    tolerance: f64,
+) -> Vec<bool> {
+    let n = species.len().min(x.len() / 3);
+    let mut active = vec![false; n];
+    let mut frontier: Vec<usize> = seeds.iter().copied().filter(|&a| a < n).collect();
+    for &a in &frontier {
+        active[a] = true;
+    }
+    for _ in 0..shells {
+        let mut next = Vec::new();
+        for &a in &frontier {
+            let ra = covalent_radius(species[a]);
+            for b in 0..n {
+                if active[b] {
+                    continue;
+                }
+                let cut = tolerance * (ra + covalent_radius(species[b]));
+                if cut <= 0.0 {
+                    continue;
+                }
+                let d2: f64 = (0..3)
+                    .map(|k| {
+                        let d = x[3 * a + k] - x[3 * b + k];
+                        d * d
+                    })
+                    .sum();
+                if d2.sqrt() < cut {
+                    active[b] = true;
+                    next.push(b);
+                }
+            }
+        }
+        frontier = next;
+        if frontier.is_empty() {
+            break;
+        }
+    }
+    active
+}
+
 /// Covalent radius in Angstrom by atomic number, Cordero and coworkers
 /// (doi:10.1039/B801115J); zero for numbers outside the table, which makes an
 /// unknown species bond to nothing rather than to everything.
@@ -1350,6 +1404,12 @@ pub struct Config {
     /// frame. The caller's objective is expected to return zero force on
     /// frozen points so the quench leaves them where they stand.
     pub frozen: Option<Vec<bool>>,
+    /// Dynamic active region: seed atoms and the number of bond-matrix
+    /// neighbour shells around them that stay mobile, recomputed from the
+    /// current structure each hop. Everything outside the region is treated
+    /// as frozen for that hop, so the mobile patch follows the seeds.
+    /// Requires `species`.
+    pub active_region: Option<(Vec<usize>, usize)>,
     /// Trials relaxed regardless of the posterior, to keep the model's training
     /// set from being censored by the rule it trains.
     pub bayes_exploration: f64,
@@ -1658,6 +1718,7 @@ impl Config {
             species: None,
             bond_tolerance: 1.25,
             frozen: None,
+            active_region: None,
             bayes_exploration: 0.1,
             bayes_threshold: 0.05,
             bayes_warmup: 300,
@@ -2334,15 +2395,31 @@ fn run_full<'g, R: Rng + ?Sized>(
         // The molecules the incumbent actually contains, re-read each hop.
         // A quench that changed the bond graph changes the groups, and the
         // move library follows the structure rather than the declaration.
+        // The frozen frame this hop: the static mask, or its dynamic form,
+        // everything outside the active region around the seeds.
+        let hop_frozen: Option<Vec<bool>> = match (&cfg.active_region, &cfg.species) {
+            (Some((seeds, shells)), Some(z)) => Some(
+                active_mask(x.view(), z, seeds, *shells, cfg.bond_tolerance)
+                    .into_iter()
+                    .map(|a| !a)
+                    .collect(),
+            ),
+            _ => cfg.frozen.clone(),
+        };
         if cfg.molecular_groups.is_some() {
             let fresh = match cfg.species.as_ref() {
                 Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
                 None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
             };
-            let movable: Vec<Vec<usize>> = match cfg.frozen.as_ref() {
+            let movable: Vec<Vec<usize>> = match hop_frozen.as_ref() {
                 Some(f) => fresh
                     .into_iter()
-                    .filter(|g| g.iter().any(|&a| !f.get(a).copied().unwrap_or(false)))
+                    .map(|g| {
+                        g.into_iter()
+                            .filter(|&a| !f.get(a).copied().unwrap_or(false))
+                            .collect::<Vec<usize>>()
+                    })
+                    .filter(|g: &Vec<usize>| !g.is_empty())
                     .collect(),
                 None => fresh,
             };
@@ -2473,11 +2550,40 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
             }
         }
-        // A frozen frame is the frame: recentring or containing would drag
-        // the free atoms relative to the substrate they sit on.
-        if cfg.frozen.is_none() {
-            recentre(&mut trial, n);
-            contain(&mut trial, n, cfg.container);
+        // A frozen frame is the frame: no recentring, since that drags the
+        // free atoms relative to the substrate. Containment stays, taken
+        // relative to the frozen atoms' bounding box: without it a desorbed
+        // molecule drifts into the infinite flat region where every energy is
+        // the separated limit, and the run measured exactly that, an intact
+        // H2 four billion Angstrom above its slab. The free atoms are clamped
+        // to within `container` of the frame.
+        match cfg.frozen.as_ref() {
+            None => {
+                recentre(&mut trial, n);
+                contain(&mut trial, n, cfg.container);
+            }
+            Some(f) => {
+                let mut lo = [f64::INFINITY; 3];
+                let mut hi = [f64::NEG_INFINITY; 3];
+                for i in 0..n {
+                    if f.get(i).copied().unwrap_or(false) {
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(trial[3 * i + k]);
+                            hi[k] = hi[k].max(trial[3 * i + k]);
+                        }
+                    }
+                }
+                if lo[0].is_finite() {
+                    for i in 0..n {
+                        if !f.get(i).copied().unwrap_or(false) {
+                            for k in 0..3 {
+                                trial[3 * i + k] = trial[3 * i + k]
+                                    .clamp(lo[k] - cfg.container, hi[k] + cfg.container);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Screen cheaply, then carry on regardless. A screened trial does not
