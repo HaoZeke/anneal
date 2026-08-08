@@ -458,3 +458,34 @@ leaves the stalls tabu excludes, so the two mechanisms buy the same escape
 and compose sublinearly. combtabu against pttabu is BF 0.19. The
 recommended stack stays comb plus tabu: the same ceiling as the replica
 ladder without paying for one.
+
+* Beyond Lennard-Jones: the water hexamer through two engines
+
+The molecular stack, rigid group moves under the recommended allocator, run
+against two engines with the same driver, budget (4000 charged evaluations)
+and seeds, through the rgpot Cap'n Proto server so the driver holds no
+engine code:
+
+| engine              | isomers (8 seeds)  | best isomer | spread (eV) |
+|---------------------+--------------------+-------------+-------------|
+| GFN2-xTB            | 6 cage, 2 prism    | prism       | 0.060       |
+| PET-MAD v1.1.0      | 5 book, 3 cage     | book        | 0.056       |
+
+Isomers classified by oxygen-oxygen contact count, a label-free hydrogen
+bond census (ring 6, book 7, cage 8, prism 9). The engine swap flips the
+distribution exactly as the water-hexamer literature says it should: the
+tight-binding model favours the compact prism and cage, and the PBE-trained
+model favours the book, PBE being known to underbind the prism. The search
+reproduces the functional dependence of the hexamer ordering without being
+told anything about water.
+
+One PET-MAD seed of eight ended 4 eV above the rest with a 1.42 Angstrom
+oxygen-oxygen distance: a covalent O-O bond. The rigid group moves preserve
+molecules but the quench is unconstrained, and the learned potential
+permitted a reactive event the search then could not leave. Constraining
+the quench, or gating on a molecular-identity check through the coloured
+graph keys, is the corresponding library item.
+
+Engine robustness: thirty-two thousand PET-MAD evaluations over eight
+tasks, each with its own server, zero failed calls; GFN2 refused 30 of
+32000, each handled as a refused evaluation.
