@@ -191,6 +191,11 @@ impl FlooredThompson {
 }
 
 /// A Beta draw from two Gamma draws, since the crate carries no Beta sampler.
+/// A Beta draw, public for posteriors held outside this module.
+pub fn beta_draw<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
+    sample_beta(a, b, rng)
+}
+
 fn sample_beta<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
     let x = sample_gamma(a, rng);
     let y = sample_gamma(b, rng);

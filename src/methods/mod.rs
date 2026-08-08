@@ -21,6 +21,11 @@ pub mod csa_cluster;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
+/// Population resampled by estimated probability of improvement.
+pub mod committor_pop;
+/// Archive-ratcheted exploration of the minima network.
+#[cfg(feature = "graphkey")]
+pub mod ffs;
 /// Quasi-Newton relaxation whose curvature persists between calls.
 pub mod warm_lbfgs;
 pub mod additive_independence;

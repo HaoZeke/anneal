@@ -120,6 +120,64 @@ fn main() {
         .unwrap_or(0);
 
     let reference = reference(n);
+    // Archive-ratchet mode: the minima network explored from a permanent
+    // keyed archive, launches by discovery posterior.
+    #[cfg(feature = "graphkey")]
+    if std::env::args().nth(4).map(|v| v.contains("archive")).unwrap_or(false) {
+        use anneal_core::methods::ffs::{ffs_descent, FfsConfig};
+        let fcfg = FfsConfig::for_cluster(n);
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let out = ffs_descent(&fcfg, &mut ledger, &mut relax, seed);
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit { solved += 1; }
+            println!(
+                "  seed {seed}: best {:.6}  archive {} inserts {} launches {} barren {}{}",
+                out.best, out.descents, out.stored, out.continuations, out.returns,
+                if hit { "  SOLVED" } else { "" }
+            );
+        }
+        println!("{solved}/{seeds} solved (archive)");
+        return;
+    }
+    // Committor-population mode: short chains of the configured stack,
+    // resampled by improvement posterior.
+    if std::env::args().nth(4).map(|v| v.contains("committor")).unwrap_or(false) {
+        use anneal_core::methods::committor_pop::committor_population;
+        let mut ccfg = Config::for_cluster(n);
+        ccfg.burst_moves = true;
+        ccfg.allocate_moves = true;
+        ccfg.depth_reward = true;
+        let walkers = 6usize;
+        let seg = (budget / (walkers * 6)).max(20_000);
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let out = committor_population(&ccfg, walkers, seg, &mut ledger, &mut relax, seed);
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit { solved += 1; }
+            println!(
+                "  seed {seed}: best {:.6}  segments {} improvements {} resamples {}{}",
+                out.best, out.segments, out.improvements, out.resamples,
+                if hit { "  SOLVED" } else { "" }
+            );
+        }
+        println!("{solved}/{seeds} solved (committor)");
+        return;
+    }
     // Nested mode replaces the chain entirely: population under a descending
     // ceiling, stopping by the run's own volume curve.
     if std::env::args().nth(4).map(|v| v.contains("nested")).unwrap_or(false) {
