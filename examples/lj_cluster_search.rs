@@ -120,6 +120,39 @@ fn main() {
         .unwrap_or(0);
 
     let reference = reference(n);
+    // Nested mode replaces the chain entirely: population under a descending
+    // ceiling, stopping by the run's own volume curve.
+    if std::env::args().nth(4).map(|v| v.contains("nested")).unwrap_or(false) {
+        use anneal_core::methods::nested::{nested_search, NestedConfig};
+        let ncfg = NestedConfig::for_cluster(n);
+        let mut solved = 0usize;
+        for seed in seed0..(seed0 + seeds) {
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let out = nested_search(&ncfg, &mut ledger, &mut relax, seed);
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit {
+                solved += 1;
+            }
+            println!(
+                "  seed {seed}: best {:.6}  replacements {}  steps {}  taken {}  ceiling {:.4}  repop {}{}",
+                out.best,
+                out.replacements,
+                out.steps,
+                out.taken,
+                out.final_ceiling,
+                out.repopulations,
+                if hit { "  SOLVED" } else { "" }
+            );
+        }
+        println!("{solved}/{seeds} solved (nested)");
+        return;
+    }
     println!(
         "LJ{n}, budget {budget} charged evaluations, {seeds} seeds{}",
         reference
