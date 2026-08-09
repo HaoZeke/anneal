@@ -225,6 +225,9 @@ fn main() {
         // Water oxygen-oxygen contacts sit near 2.8 A; the group contact
         // cutoff has to see them.
         cfg.molecular_groups = Some(groups.clone());
+        // REACTIVE=1 keeps the atomic arms in the pool alongside the rigid
+        // ones, for engines that can describe bond breaking.
+        cfg.reactive_moves = std::env::var("REACTIVE").map(|v| v == "1").unwrap_or(false);
         // Species drive the bond-matrix connectivity: groups follow the
         // structure's own bonding each hop, so a reactive event regroups the
         // moves instead of stranding the walker.
