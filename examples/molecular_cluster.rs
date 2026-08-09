@@ -192,6 +192,97 @@ impl Engine {
     }
 }
 
+
+/// The in-process NWChem engine: dlopen of the split libnwchemc C ABI.
+/// One session per process; positions in per call as plain arrays, energy
+/// and forces back in Hartree and Hartree/Bohr, converted here to eV and
+/// eV/Angstrom. NWCHEMC_LIBRARY names the shared object, NWCHEMC_PARAMS
+/// a serialized NWChemParams message (capnp encode output); without the
+/// blob the schema defaults apply through an empty message.
+struct NwchemcEngine {
+    _lib: libloading::Library,
+    session: *mut std::ffi::c_void,
+    calc: unsafe extern "C" fn(
+        *mut std::ffi::c_void,
+        i32,
+        *const f64,
+        *const i32,
+        *mut f64,
+    ) -> NWChemCResult,
+    atmnrs: Vec<i32>,
+    failures: usize,
+}
+
+#[repr(C)]
+struct NWChemCResult {
+    ok: i32,
+    energy_h: f64,
+    message: [u8; 512],
+}
+
+const HARTREE_EV: f64 = 27.211386245988;
+const BOHR_ANG: f64 = 0.529177210903;
+
+impl NwchemcEngine {
+    fn load(m: usize) -> Self {
+        let path = std::env::var("NWCHEMC_LIBRARY").expect("NWCHEMC_LIBRARY");
+        let lib = unsafe { libloading::Library::new(&path) }.expect("dlopen libnwchemc");
+        let params = match std::env::var("NWCHEMC_PARAMS") {
+            Ok(p) => std::fs::read(p).expect("params blob"),
+            // A minimal flat message: one empty segment table entry and an
+            // all-default root struct, which the reader treats as defaults.
+            Err(_) => vec![0u8; 8],
+        };
+        let session = unsafe {
+            let create: libloading::Symbol<
+                unsafe extern "C" fn(*const std::ffi::c_void, usize) -> *mut std::ffi::c_void,
+            > = lib.get(b"nwchemc_session_create").expect("session_create");
+            create(params.as_ptr() as *const _, params.len())
+        };
+        assert!(!session.is_null(), "nwchemc session creation failed");
+        let calc = unsafe {
+            let s: libloading::Symbol<
+                unsafe extern "C" fn(
+                    *mut std::ffi::c_void,
+                    i32,
+                    *const f64,
+                    *const i32,
+                    *mut f64,
+                ) -> NWChemCResult,
+            > = lib.get(b"nwchemc_session_energy_forces").expect("energy_forces");
+            *s
+        };
+        let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
+        Self { _lib: lib, session, calc, atmnrs, failures: 0 }
+    }
+
+    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        let na = self.atmnrs.len();
+        let pos: Vec<f64> = x.iter().cloned().collect();
+        let mut forces = vec![0f64; 3 * na];
+        let res = unsafe {
+            (self.calc)(
+                self.session,
+                na as i32,
+                pos.as_ptr(),
+                self.atmnrs.as_ptr(),
+                forces.as_mut_ptr(),
+            )
+        };
+        if res.ok == 0 {
+            self.failures += 1;
+            return None;
+        }
+        let g = Array1::from(
+            forces
+                .iter()
+                .map(|f| -f * HARTREE_EV / BOHR_ANG)
+                .collect::<Vec<f64>>(),
+        );
+        Some((res.energy_h * HARTREE_EV, g))
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(6);
@@ -212,7 +303,12 @@ fn main() {
         } else {
             None
         };
-        let mut eng = if engine == "rgpot" {
+        let mut nw_eng = if engine == "nwchemc" {
+            Some(NwchemcEngine::load(m))
+        } else {
+            None
+        };
+        let mut eng = if engine == "rgpot" || engine == "nwchemc" {
             None
         } else {
             Some(start_engine(m, &engine))
@@ -244,9 +340,10 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                match (&mut rg_eng, &mut eng) {
-                    (Some(r), _) => r.eval(v),
-                    (_, Some(p)) => p.eval(v),
+                match (&mut rg_eng, &mut nw_eng, &mut eng) {
+                    (Some(r), _, _) => r.eval(v),
+                    (_, Some(nwe), _) => nwe.eval(v),
+                    (_, _, Some(p)) => p.eval(v),
                     _ => None,
                 }
             });
@@ -270,6 +367,7 @@ fn main() {
         let failures = rg_eng
             .as_ref()
             .map(|r| r.failures)
+            .or_else(|| nw_eng.as_ref().map(|e| e.failures))
             .or_else(|| eng.as_ref().map(|p| p.failures))
             .unwrap_or(0);
         println!(
