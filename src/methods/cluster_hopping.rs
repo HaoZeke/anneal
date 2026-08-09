@@ -635,6 +635,33 @@ impl ClusterMove {
         ]
     }
 
+    /// The combined reactive library: the rigid-group arms carry molecular
+    /// transport, the atomic arms keep bond breaking and forming reachable.
+    /// The allocator owns the split, so a rigid system starves the atomic
+    /// arms and a reactive event revives them. The atomic arms share the
+    /// inter-group cutoff: on a molecular system the surface is defined by
+    /// contacts at that scale, not at the bonded scale.
+    pub fn library_combined(
+        n: usize,
+        groups: Vec<Vec<usize>>,
+        neighbour_cutoff: f64,
+    ) -> Vec<ClusterMove> {
+        let mut v = Self::library_molecular(groups, neighbour_cutoff);
+        v.push(ClusterMove::SinglePoint {
+            n_points: n,
+            step: 1.0,
+        });
+        v.push(ClusterMove::SurfaceRelocate(SurfaceRelocate {
+            n_points: n,
+            neighbour_cutoff,
+        }));
+        v.push(ClusterMove::Burst {
+            n_points: n,
+            neighbour_cutoff,
+        });
+        v
+    }
+
     /// The library with the heavy-tailed visiting move added.
     pub fn library_with_visit(n: usize) -> Vec<ClusterMove> {
         let mut v = Self::library(n);
@@ -1385,6 +1412,12 @@ pub struct Config {
     /// Rigid groups of a molecular cluster. When set, the move library is the
     /// molecular one: every arm rigid on these groups.
     pub molecular_groups: Option<Vec<Vec<usize>>>,
+    /// With molecular groups set, also keep the atomic arms in the pool.
+    /// Rigid arms carry molecular transport; atomic arms keep bond breaking
+    /// and forming reachable on a reactive surface, and the allocator owns
+    /// the split. Off, the pool is rigid-only, the right choice when the
+    /// engine cannot describe dissociation anyway.
+    pub reactive_moves: bool,
     /// Inter-group contact cutoff for the molecular library.
     pub group_cutoff: f64,
     /// Bonding cutoff below which two atoms are one molecule, for deriving
@@ -1710,6 +1743,7 @@ impl Config {
             cov_perturb: false,
             lean_moves: false,
             burst_moves: false,
+            reactive_moves: false,
             staged_quench: false,
             settle_iters: 20,
             molecular_groups: None,
@@ -2149,7 +2183,11 @@ fn run_full<'g, R: Rng + ?Sized>(
     );
 
     let mut kernels = if let Some(groups) = cfg.molecular_groups.clone() {
-        ClusterMove::library_molecular(groups, cfg.group_cutoff)
+        if cfg.reactive_moves {
+            ClusterMove::library_combined(n, groups, cfg.group_cutoff)
+        } else {
+            ClusterMove::library_molecular(groups, cfg.group_cutoff)
+        }
     } else if cfg.burst_moves {
         ClusterMove::library_lean_burst(n)
     } else if cfg.lean_moves {
@@ -2424,7 +2462,13 @@ fn run_full<'g, R: Rng + ?Sized>(
                 None => fresh,
             };
             if !movable.is_empty() {
-                kernels = ClusterMove::library_molecular(movable, cfg.group_cutoff);
+                // Same shape as the initial pool: the allocator's arm
+                // statistics stay aligned across the per-hop rebuild.
+                kernels = if cfg.reactive_moves {
+                    ClusterMove::library_combined(n, movable, cfg.group_cutoff)
+                } else {
+                    ClusterMove::library_molecular(movable, cfg.group_cutoff)
+                };
             }
         }
         let k = match (&context, cfg.allocate_moves) {
@@ -3246,6 +3290,19 @@ fn run_full<'g, R: Rng + ?Sized>(
                     }
                     line.push('\n');
                     let _ = fh.write_all(line.as_bytes());
+                }
+            }
+            // Convergence curves: charged evaluations against the accepted
+            // energy, one line per accept; the reader takes the running
+            // minimum. ANNEAL_CURVE names the file.
+            if let Ok(path) = std::env::var("ANNEAL_CURVE") {
+                use std::io::Write as _;
+                if let Ok(mut fh) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    let _ = writeln!(fh, "{} {e_new:.8}", ledger.spent());
                 }
             }
             e = e_new;
