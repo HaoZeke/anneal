@@ -153,7 +153,7 @@ click = "*"
 [feature.chem.pypi-dependencies]
 featomic = "*"
 agox = "*"
-chemparseplot = ">=1.10.1"
+chemparseplot = ">=1.10.2"
 xyzrender = ">=0.3"
 
 [environments]
