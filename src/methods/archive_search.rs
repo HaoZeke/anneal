@@ -116,6 +116,42 @@ struct HopAcc {
     basins: usize,
 }
 
+/// Push a near-miss onto its approximate point group and quench.
+fn symmetry_polish(
+    cfg: &Config,
+    x: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+) -> Option<(f64, Array1<f64>)> {
+    if ledger.remaining() < cfg.relax_steps {
+        return None;
+    }
+    let n = x.len() / 3;
+    let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
+    for order in [2usize, 3, 4, 5, 6] {
+        if let Some(c) =
+            crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance)
+        {
+            cands.push(c);
+        }
+    }
+    let group = crate::symmetrise::generate_group(&cands, 60);
+    let y = if group.len() > 1 {
+        crate::symmetrise::symmetrise_group(x, n, &group, cfg.merge_radius.max(0.5))
+    } else {
+        crate::symmetrise::symmetrise_detected(
+            x,
+            n,
+            &[2, 3, 4, 5, 6],
+            cfg.symmetry_tolerance,
+            cfg.merge_radius.max(0.5),
+        )
+        .map(|(s, _)| s)?
+    };
+    let (e, xs) = relax(ledger, y.view(), cfg.relax_steps);
+    if e.is_finite() { Some((e, xs)) } else { None }
+}
+
 /// A later hop's start: redraw the adsorbate, or re-place rigid groups.
 fn residual_start<R: Rng + ?Sized>(
     start: ArrayView1<f64>,
@@ -277,20 +313,67 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
+                // Keep 3 quenches to push a leftover cage onto its point group.
+                let polish = (cfg.relax_steps * 3).min(rest / 4).max(cfg.relax_steps);
+                let hop2_cap = rest.saturating_sub(polish).max(1);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(rest);
+                let mut led2 = Ledger::new(hop2_cap);
                 let hop2 =
                     run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
-                let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
-                    (hop2.best, hop2.best_state, at2, hop2.basins)
-                } else if hop1.best < hop2.best - 1e-12 {
-                    (hop1.best, hop1.best_state, at1, hop1.basins)
-                } else {
-                    (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
-                };
+                let (mut best, mut best_state, mut best_at, basins) =
+                    if hop2.best < hop1.best - 1e-12 {
+                        (hop2.best, hop2.best_state, at2, hop2.basins)
+                    } else if hop1.best < hop2.best - 1e-12 {
+                        (hop1.best, hop1.best_state, at1, hop1.basins)
+                    } else {
+                        (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
+                    };
+                let mut artn = hop1.symmetrised.0
+                    + hop2.symmetrised.0
+                    + hop1.stall_escapes
+                    + hop2.stall_escapes
+                    + hop1.restarts
+                    + hop2.restarts;
+                if let Some(ref x) = best_state.clone() {
+                    if let Some((e, xs)) = symmetry_polish(cfg, x.view(), ledger, relax) {
+                        artn += 1;
+                        if e < best - 1e-12 {
+                            best = e;
+                            best_state = Some(xs);
+                            best_at = ledger.spent();
+                        }
+                    }
+                }
+                if hop2.best.is_finite() {
+                    if let Some(ref x) = hop2.best_state {
+                        if best_state
+                            .as_ref()
+                            .map(|b| {
+                                b.iter()
+                                    .zip(x.iter())
+                                    .map(|(p, q)| (p - q) * (p - q))
+                                    .sum::<f64>()
+                                    .sqrt()
+                                    > 0.2
+                            })
+                            .unwrap_or(true)
+                        {
+                            if let Some((e, xs)) =
+                                symmetry_polish(cfg, x.view(), ledger, relax)
+                            {
+                                artn += 1;
+                                if e < best - 1e-12 {
+                                    best = e;
+                                    best_state = Some(xs);
+                                    best_at = ledger.spent();
+                                }
+                            }
+                        }
+                    }
+                }
                 HopAcc {
                     best,
                     best_state,
@@ -298,12 +381,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     screens: hop1.screened_out + hop2.screened_out,
                     full: hop1.hops + hop2.hops,
                     returned: hop1.returned + hop2.returned,
-                    artn: hop1.symmetrised.0
-                        + hop2.symmetrised.0
-                        + hop1.stall_escapes
-                        + hop2.stall_escapes
-                        + hop1.restarts
-                        + hop2.restarts,
+                    artn,
                     basins,
                 }
             } else {
@@ -643,6 +721,22 @@ mod tests {
         assert_eq!(rec.escape_stall_patience, 5_000);
         assert!(out.charged <= 200);
         assert!(out.best.is_finite());
+    }
+
+    #[test]
+    fn symmetry_polish_does_not_mutate_the_caller_config() {
+        let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let before = format!("{rec:?}");
+        let mut rng = StdRng::seed_from_u64(4);
+        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
+        let mut ledger = Ledger::new(rec.relax_steps + 8);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
+        let _ = symmetry_polish(&rec, start.view(), &mut ledger, &mut relax);
+        assert_eq!(format!("{rec:?}"), before);
+        assert!(!rec.return_screen);
+        assert_eq!(rec.return_polish, 0);
+        assert!(ledger.spent() <= rec.relax_steps + 8);
     }
 
     #[test]
