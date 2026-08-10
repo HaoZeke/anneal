@@ -1006,44 +1006,10 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             target[i * dim + t] = mu[k][t];
         }
     }
-    // A Dirac SOAP cloud and a flat ν=3 cloud make the leftover
-    // vanish. That is not a reason to sit still: the leftover is any
-    // direction that leaves the occupied point. A random unit in the
-    // observed p-space is not a packing prototype. Either way the
-    // Cartesian length is the caller's cap.
-    let mut dp2 = 0.0;
-    for i in 0..n_at {
-        if !keep[i] {
-            continue;
-        }
-        for t in 0..dim {
-            let d = target[i * dim + t] - loc[[i, t]];
-            dp2 += d * d;
-        }
-    }
-    if dp2.sqrt() < 1e-4 {
-        dp2 = 0.0;
-        for i in 0..n_at {
-            if !keep[i] {
-                continue;
-            }
-            for t in 0..dim {
-                let u = rng.random::<f64>() * 2.0 - 1.0;
-                target[i * dim + t] = loc[[i, t]] + u;
-                dp2 += u * u;
-            }
-        }
-    }
-    let nrm = dp2.sqrt().max(1e-15);
-    for i in 0..n_at {
-        if !keep[i] {
-            continue;
-        }
-        for t in 0..dim {
-            let u = target[i * dim + t] - loc[[i, t]];
-            target[i * dim + t] = loc[[i, t]] + u / nrm;
-        }
-    }
+    // The leftover is the observed residual, not a unit vector. A
+    // near-Dirac cloud pulls back to a near-identity. Amplifying that
+    // noise to the caller's cap spends the quench on a scramble.
+    let _ = rng;
     let _ = groups;
     let dr = pullback_nu3(x, target.view(), spec, species, mobile);
     apply_cap(x, dr, rmsd)
