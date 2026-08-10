@@ -279,17 +279,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             if !e_sc.is_finite() {
                 continue;
             }
-            let sc_coords = key_coords(x_sc.view(), cfg);
-            let sc_key = contact_key(sc_coords.view(), LOCAL_CUTOFF);
-            if is_return(
-                sc_key,
-                here_key,
-                sc_key,
-                here_key,
-                e_sc,
-                e,
-                cfg.screen_margin,
-            ) {
+            // Energy-only return test on the screen path. Contact-key NAUTY
+            // here made a 400k pair seed slower than recommended.
+            if (e_sc - e).abs() < 1e-4 {
                 out.returned += 1;
                 returned_streak = returned_streak.saturating_add(1);
                 last_screen = Some((e_sc, x_sc, here, k));
