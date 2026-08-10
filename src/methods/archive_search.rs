@@ -243,6 +243,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let max_tries = ((ledger.remaining() / s_steps).max(1)).min(cap);
         let mut found = None;
         let mut last_screen: Option<(f64, Array1<f64>, Option<usize>, usize)> = None;
+        let mut last_nonreturn: Option<(f64, Array1<f64>, Option<usize>, usize)> = None;
         let mut saw_nonreturn = false;
 
         for _ in 0..max_tries {
@@ -284,17 +285,23 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 continue;
             }
             last_screen = Some((e_sc, x_sc.clone(), landed, k));
-            if should_buy(archive, landed, tau, ledger.best) {
+            last_nonreturn = Some((e_sc, x_sc.clone(), landed, k));
+            if should_buy(archive, landed, hat, ledger.best) {
                 found = Some((e_sc, x_sc, landed, k));
                 break;
             }
             out.same_floor += 1;
         }
 
-        if found.is_none() && !archive.drop.calibrated() {
-            // Starve gate: an uncalibrated drop model is not allowed to sit
-            // on screens. Buy the last finite screen so the model sees a pair.
-            found = last_screen.take();
+        if found.is_none() {
+            // A non-return is a new attractor. Buying it is the residual
+            // loop; refusing it because the drop model assigned the ico
+            // floor is the starve that spends the ledger on screens.
+            if let Some(nr) = last_nonreturn.take() {
+                found = Some(nr);
+            } else if !archive.drop.calibrated() {
+                found = last_screen.take();
+            }
         }
 
         if let Some((e_sc, x_sc, landed, arm)) = found {
@@ -356,20 +363,28 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     out
 }
 
-fn should_buy(archive: &Archive, landed: Option<usize>, tau: f64, e_star: f64) -> bool {
+fn should_buy(archive: &Archive, landed: Option<usize>, hat: f64, e_star: f64) -> bool {
+    // `FloorBook::saturated` trips at n=2 under the cost-asymmetric tau, which
+    // is the wrong purchase veto: two ico isomers must not block a Marks
+    // screen the drop model still assigns to that floor. Skip only a class
+    // that cannot undercut E_star and whose predicted full energy does not.
     if !archive.drop.calibrated() {
+        return true;
+    }
+    if hat < e_star {
         return true;
     }
     match landed {
         None => true,
         Some(id) => {
-            let live = archive
+            let dead = archive
                 .floors
                 .get(id)
-                .map(|f| !f.saturated(tau, e_star))
-                .unwrap_or(true);
-            let residual_u = archive.residual.score(id) >= 0.5 * archive.residual.residual_score();
-            live || residual_u
+                .is_some_and(|f| !f.can_beat(e_star));
+            if !dead {
+                return true;
+            }
+            archive.residual.score(id) >= 0.5 * archive.residual.residual_score()
         }
     }
 }
