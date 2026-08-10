@@ -313,50 +313,111 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
-                let half = (rest / 2).max(1);
+                // 700 to find a cage from a new packing; 400 from that
+                // best with reactive moves to open the prism.
+                let hunt = ((rest * 7) / 10).max(1);
                 let x2 = residual_start(start, cfg, rng);
-                let acc2 = hops_from_start(
-                    &c2,
-                    x2.view(),
-                    ledger,
-                    relax,
-                    grad.as_deref_mut(),
-                    rng,
-                    &[half, rest.saturating_sub(half).max(1)],
-                    true,
-                );
-                let (mut best, mut best_state, mut best_at, basins) =
-                    if acc2.best < hop1.best - 1e-12 {
-                        (
-                            acc2.best,
-                            acc2.best_state,
-                            used1.saturating_add(acc2.best_at),
-                            acc2.basins,
-                        )
-                    } else if hop1.best < acc2.best - 1e-12 {
-                        (hop1.best, hop1.best_state, at1, hop1.basins)
-                    } else {
-                        (hop1.best, hop1.best_state, at1, hop1.basins)
-                    };
-                let mut artn =
-                    hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts + acc2.artn;
-                if let Some(ref x) = best_state.clone() {
-                    if let Some((e, xs)) = symmetry_polish(cfg, x.view(), ledger, relax) {
-                        artn += 1;
-                        if e < best - 1e-12 {
-                            best = e;
-                            best_state = Some(xs);
-                            best_at = ledger.spent();
-                        }
+                let mut led2 = Ledger::new(hunt.min(rest));
+                let hop2 =
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                let used2 = led2.spent();
+                let _ = ledger.charge_many(used2);
+                let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
+                let rest3 = ledger.remaining();
+                let hop3 = if rest3 > 0 {
+                    let mut c3 = c2.clone();
+                    if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                        groups,
+                        ..
+                    } = &cfg.move_library
+                    {
+                        c3.move_library = crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                            groups: groups.clone(),
+                            reactive: true,
+                        };
                     }
-                }
+                    let x3 = hop2
+                        .best_state
+                        .as_ref()
+                        .filter(|_| hop2.best < hop1.best - 0.015)
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| residual_start(start, cfg, rng));
+                    let mut led3 = Ledger::new(rest3);
+                    let h = run_with_gradient(
+                        &c3,
+                        x3.view(),
+                        &mut led3,
+                        relax,
+                        grad.as_deref_mut(),
+                        rng,
+                    );
+                    let _ = ledger.charge_many(led3.spent());
+                    Some(h)
+                } else {
+                    None
+                };
+                let (best, best_state, best_at, basins, screens, full, returned, artn) =
+                    match hop3 {
+                        Some(ref h3) => {
+                            let at3 = used1
+                                .saturating_add(used2)
+                                .saturating_add(hop_best_at(h3, rest3));
+                            let (b, s, a, n) = if h3.best < hop2.best.min(hop1.best) - 1e-12 {
+                                (h3.best, h3.best_state.clone(), at3, h3.basins)
+                            } else if hop2.best < hop1.best - 1e-12 {
+                                (hop2.best, hop2.best_state.clone(), at2, hop2.basins)
+                            } else {
+                                (hop1.best, hop1.best_state.clone(), at1, hop1.basins)
+                            };
+                            (
+                                b,
+                                s,
+                                a,
+                                n,
+                                hop1.screened_out + hop2.screened_out + h3.screened_out,
+                                hop1.hops + hop2.hops + h3.hops,
+                                hop1.returned + hop2.returned + h3.returned,
+                                hop1.symmetrised.0
+                                    + hop2.symmetrised.0
+                                    + h3.symmetrised.0
+                                    + hop1.stall_escapes
+                                    + hop2.stall_escapes
+                                    + h3.stall_escapes
+                                    + hop1.restarts
+                                    + hop2.restarts
+                                    + h3.restarts,
+                            )
+                        }
+                        None => {
+                            let (b, s, a, n) = if hop2.best < hop1.best - 1e-12 {
+                                (hop2.best, hop2.best_state.clone(), at2, hop2.basins)
+                            } else {
+                                (hop1.best, hop1.best_state.clone(), at1, hop1.basins)
+                            };
+                            (
+                                b,
+                                s,
+                                a,
+                                n,
+                                hop1.screened_out + hop2.screened_out,
+                                hop1.hops + hop2.hops,
+                                hop1.returned + hop2.returned,
+                                hop1.symmetrised.0
+                                    + hop2.symmetrised.0
+                                    + hop1.stall_escapes
+                                    + hop2.stall_escapes
+                                    + hop1.restarts
+                                    + hop2.restarts,
+                            )
+                        }
+                    };
                 HopAcc {
                     best,
                     best_state,
                     best_at,
-                    screens: hop1.screened_out + acc2.screens,
-                    full: hop1.hops + acc2.full,
-                    returned: hop1.returned + acc2.returned,
+                    screens,
+                    full,
+                    returned,
                     artn,
                     basins,
                 }
