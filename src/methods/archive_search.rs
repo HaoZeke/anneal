@@ -240,22 +240,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         }
 
         archive.note_bag(&here_keys);
-        // Recycle is a free topology hop, not a ledger-free outer continue:
-        // apply the known landing and then hunt from there.
-        let keys_now = here_keys.clone();
-        let _ = try_recycle(
-            cfg,
-            archive,
-            &keys_now,
-            &mut x,
-            &mut e,
-            &mut here,
-            &mut here_coords,
-            &mut here_key,
-            &mut here_keys,
-            &mut here_bag,
-            rng,
-        );
 
         let cap = if archive.drop.calibrated() {
             MAX_REDRAW
