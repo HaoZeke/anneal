@@ -131,6 +131,45 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     rng: &mut R,
 ) -> ArchiveOutcome {
     let cap = ledger.remaining();
+    // Molecular / slab budgets are a few thousand evaluations. A 30 %
+    // skip-return slice is then too short to be a hop, so they run one
+    // pass. LJ campaigns (400k) keep the two-pass split.
+    if cap < 50_000 {
+        let mut c = cfg.clone();
+        c.return_screen = true;
+        c.symmetrise_on_stall = true;
+        // Water at screen 6 / relax 60 does ~30 hops in 2000 evaluations.
+        // The default stall patience is 5000 hops, so tabu and symmetrise
+        // never fire. Bring them inside a molecular campaign. A slab keeps
+        // the skip-return hop that already beat rec on CuH2 seed 2.
+        let molecular = cfg.species.is_some() && cfg.active_region.is_none();
+        if molecular {
+            c.return_polish = (cfg.relax_steps / 4).max(1);
+            c.escape_stall_patience = 8;
+            c.escape_stall_factor = 1.0;
+        } else {
+            c.return_polish = 0;
+        }
+        let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
+        if hop.best.is_finite() {
+            if let Some(ref x) = hop.best_state {
+                record_best(archive, cfg, hop.best, x.view());
+            }
+        }
+        return ArchiveOutcome {
+            best: hop.best,
+            best_state: hop.best_state,
+            screens: hop.screened_out,
+            full: hop.hops,
+            returned: hop.returned,
+            same_floor: 0,
+            floors: archive.floors.len().max(hop.basins),
+            events: archive.catalog.event_count(),
+            artn: hop.symmetrised.0 + hop.stall_escapes,
+            charged: ledger.spent(),
+            best_at: hop_best_at(&hop, ledger.spent()),
+        };
+    }
     // 30 % skip-return: enough for the ico GM on LJ55 (hits by ~120k of 400k).
     let p1 = ((cap * 3) / 10).max(1).min(cap);
 
@@ -381,6 +420,42 @@ mod tests {
         assert!(out.charged <= 400);
         assert!(out.best.is_finite());
         assert!(out.floors >= 1);
+    }
+
+    #[test]
+    fn small_budget_does_not_mutate_molecular_defaults() {
+        let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let before = format!("{rec:?}");
+        assert!(!rec.return_screen);
+        assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.escape_stall_patience, 5_000);
+        assert!(!rec.symmetrise_on_stall);
+
+        let mut rng = StdRng::seed_from_u64(3);
+        let start = random_cluster(3, 0.7, rec.min_separation, &mut rng);
+        let mut ledger = Ledger::new(200);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
+        let mut archive = Archive::new();
+        let out = archive_search(
+            &rec,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        assert_eq!(
+            format!("{rec:?}"),
+            before,
+            "archive_search mutated recommended_molecular"
+        );
+        assert!(!rec.return_screen);
+        assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.escape_stall_patience, 5_000);
+        assert!(out.charged <= 200);
+        assert!(out.best.is_finite());
     }
 
     #[test]
