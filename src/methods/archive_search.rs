@@ -1,8 +1,8 @@
 //! Residual archive search: two measured hops on one budget.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! A skip-return prefix covers the ico GM (LJ55). After half the budget
-//! the same chain polishes returning trials (LJ75 Marks; LJ38).
+//! One hop polishes every returning trial (LJ75 Marks). Small-budget
+//! molecular and slab walks stay on their own branch.
 //! Shared [`Archive`] state is filled from the better hop best.
 
 use crate::catalog::Catalog;
@@ -275,9 +275,8 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// One hop on a clone of `cfg`: skip-return until half the budget, then
-/// polish returning trials on the same chain (LJ55 then LJ75). The caller's
-/// recommended defaults are not written.
+/// One hop on a clone of `cfg` that polishes every returning trial.
+/// The caller's recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -495,13 +494,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    // One chain: skip-return until half the budget, then polish. That is
-    // the walk that hit LJ75 at 234437. Splitting into two hops rebuilds
-    // the bias and misses the Marks funnel.
+    // One chain, polish every return. That is b30caa5: LJ75 seed 4 hits
+    // -397.492331 at 234437. Gating polish until half the ledger (444b206)
+    // changes the walk and misses Marks.
     let mut c = cfg.clone();
     c.return_screen = true;
     c.return_polish = (cfg.relax_steps / 4).max(1);
-    c.return_polish_after = cap / 2;
+    c.return_polish_after = 0;
     c.symmetrise_on_stall = true;
     let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
     let best_at = hop_best_at(&hop, hop.charged);
