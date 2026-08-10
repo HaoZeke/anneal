@@ -170,12 +170,12 @@ fn residual_start<R: Rng + ?Sized>(
         return y;
     }
     if let Some(groups) = cfg.move_library.declared_groups() {
-        let r0 = 2.5 + rng.random::<f64>() * 2.0;
         for (g, atoms) in groups.iter().enumerate() {
             if atoms.is_empty() {
                 continue;
             }
-            let r = r0 + (g as f64) * 0.15;
+            // Same sphere the molecular example uses for its start.
+            let r = 3.0 + (g as f64) * 0.1;
             let th = rng.random::<f64>() * std::f64::consts::TAU;
             let ct = 2.0 * rng.random::<f64>() - 1.0;
             let st = (1.0 - ct * ct).sqrt();
@@ -313,31 +313,33 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
-                // Keep 3 quenches to push a leftover cage onto its point group.
-                let polish = (cfg.relax_steps * 3).min(rest / 4).max(cfg.relax_steps);
-                let hop2_cap = rest.saturating_sub(polish).max(1);
+                let half = (rest / 2).max(1);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(hop2_cap);
-                let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
-                let used2 = led2.spent();
-                let _ = ledger.charge_many(used2);
-                let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
-                let hop2_state = hop2.best_state.clone();
+                let acc2 = hops_from_start(
+                    &c2,
+                    x2.view(),
+                    ledger,
+                    relax,
+                    grad.as_deref_mut(),
+                    rng,
+                    &[half, rest.saturating_sub(half).max(1)],
+                    true,
+                );
                 let (mut best, mut best_state, mut best_at, basins) =
-                    if hop2.best < hop1.best - 1e-12 {
-                        (hop2.best, hop2.best_state, at2, hop2.basins)
-                    } else if hop1.best < hop2.best - 1e-12 {
+                    if acc2.best < hop1.best - 1e-12 {
+                        (
+                            acc2.best,
+                            acc2.best_state,
+                            used1.saturating_add(acc2.best_at),
+                            acc2.basins,
+                        )
+                    } else if hop1.best < acc2.best - 1e-12 {
                         (hop1.best, hop1.best_state, at1, hop1.basins)
                     } else {
-                        (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
+                        (hop1.best, hop1.best_state, at1, hop1.basins)
                     };
-                let mut artn = hop1.symmetrised.0
-                    + hop2.symmetrised.0
-                    + hop1.stall_escapes
-                    + hop2.stall_escapes
-                    + hop1.restarts
-                    + hop2.restarts;
+                let mut artn =
+                    hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts + acc2.artn;
                 if let Some(ref x) = best_state.clone() {
                     if let Some((e, xs)) = symmetry_polish(cfg, x.view(), ledger, relax) {
                         artn += 1;
@@ -348,40 +350,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                         }
                     }
                 }
-                if hop2.best.is_finite() {
-                    if let Some(ref x) = hop2_state {
-                        if best_state
-                            .as_ref()
-                            .map(|b| {
-                                b.iter()
-                                    .zip(x.iter())
-                                    .map(|(p, q)| (p - q) * (p - q))
-                                    .sum::<f64>()
-                                    .sqrt()
-                                    > 0.2
-                            })
-                            .unwrap_or(true)
-                        {
-                            if let Some((e, xs)) =
-                                symmetry_polish(cfg, x.view(), ledger, relax)
-                            {
-                                artn += 1;
-                                if e < best - 1e-12 {
-                                    best = e;
-                                    best_state = Some(xs);
-                                    best_at = ledger.spent();
-                                }
-                            }
-                        }
-                    }
-                }
                 HopAcc {
                     best,
                     best_state,
                     best_at,
-                    screens: hop1.screened_out + hop2.screened_out,
-                    full: hop1.hops + hop2.hops,
-                    returned: hop1.returned + hop2.returned,
+                    screens: hop1.screened_out + acc2.screens,
+                    full: hop1.hops + acc2.full,
+                    returned: hop1.returned + acc2.returned,
                     artn,
                     basins,
                 }
