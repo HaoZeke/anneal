@@ -90,3 +90,27 @@ fn symmetry_and_rigid_repacking_follow_the_declared_length_scale() {
         assert!((physical_coordinate - 2.5 * reduced_coordinate).abs() < 1e-12);
     }
 }
+
+#[test]
+fn soap_pullback_follows_the_declared_length_scale() {
+    fn soap_scales(cfg: &Config) -> (f64, f64) {
+        cfg.move_library
+            .kernels(cfg)
+            .into_iter()
+            .find_map(|kernel| match kernel {
+                ClusterMove::Soap { rmsd, cutoff } => Some((rmsd, cutoff)),
+                _ => None,
+            })
+            .expect("LeanBurst must include its SOAP pullback")
+    }
+
+    let mut reduced = Config::with_scales(13, 1.0, 1.0);
+    reduced.move_library = MoveLibrary::LeanBurst;
+    let mut physical = Config::with_scales(13, 2.5, 1.0);
+    physical.move_library = MoveLibrary::LeanBurst;
+
+    let (reduced_rmsd, reduced_cutoff) = soap_scales(&reduced);
+    let (physical_rmsd, physical_cutoff) = soap_scales(&physical);
+    assert!((physical_rmsd / reduced_rmsd - 2.5).abs() < 1e-12);
+    assert!((physical_cutoff / reduced_cutoff - 2.5).abs() < 1e-12);
+}
