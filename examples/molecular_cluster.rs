@@ -114,6 +114,12 @@ const WATER: [[f64; 3]; 3] = [
 ];
 const SYMBOLS: [&str; 3] = ["O", "H", "H"];
 
+fn log_line(msg: &str) {
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "{msg}");
+    let _ = out.flush();
+}
+
 /// The piped engine: one child process, many evaluations.
 struct Engine {
     child: Child,
@@ -123,11 +129,26 @@ struct Engine {
     failures: usize,
 }
 
+impl Drop for Engine {
+    fn drop(&mut self) {
+        // Close stdin so the helper's read loop sees EOF and exits after
+        // finishing any in-flight write. Killing first closes the pipe
+        // under that write and the helper reports BrokenPipe.
+        drop(self.child.stdin.take());
+        let _ = self.child.wait();
+    }
+}
+
 fn start_engine(m: usize, engine: &str) -> Engine {
     let helper = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/ase_objective.py");
+    // One OpenMP team per xtb-cli call: the driver is already serial, and
+    // inheriting the host's default (all cores) oversubscribes every EVAL.
+    let omp = std::env::var("OMP_NUM_THREADS").unwrap_or_else(|_| "1".into());
     let mut child = Command::new("python3")
         .arg(helper)
         .env("ASE_ENGINE", engine)
+        .env("PYTHONUNBUFFERED", "1")
+        .env("OMP_NUM_THREADS", omp)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -164,7 +185,10 @@ impl Engine {
         stdin.write_all(msg.as_bytes()).ok()?;
         stdin.flush().ok()?;
         let mut line = String::new();
-        self.reader.read_line(&mut line).ok()?;
+        let nread = self.reader.read_line(&mut line).ok()?;
+        if nread == 0 {
+            return None;
+        }
         let failed = line.starts_with("FAIL");
         let energy: f64 = if failed {
             f64::INFINITY
@@ -305,7 +329,9 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let n = 3 * m;
-    println!("(H2O){m} through {engine}, {budget} charged evaluations, {seeds} seeds");
+    log_line(&format!(
+        "(H2O){m} through {engine}, {budget} charged evaluations, {seeds} seeds"
+    ));
 
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
     for seed in seed0..(seed0 + seeds) {
@@ -389,12 +415,12 @@ fn main() {
                 None,
                 &mut rng,
             );
-            println!(
+            log_line(&format!(
                 "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
                 rec.best,
                 ledger_rec.spent(),
                 rec.hops
-            );
+            ));
         }
         #[cfg(feature = "graphkey")]
         let out = if ras {
@@ -409,10 +435,10 @@ fn main() {
                 &mut rng,
             );
             if pair {
-                println!(
+                log_line(&format!(
                     "  seed {seed} ras: best {:.6} eV  charged {}  hit_at {}  floors {} returned {} same_floor {}",
                     a.best, a.charged, a.best_at, a.floors, a.returned, a.same_floor
-                );
+                ));
             }
             anneal_core::methods::cluster_hopping::Outcome {
                 best: a.best,
@@ -431,10 +457,10 @@ fn main() {
             .or_else(|| nw_eng.as_ref().map(|e| e.failures))
             .or_else(|| eng.as_ref().map(|p| p.failures))
             .unwrap_or(0);
-        println!(
+        log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
             out.best, out.hops, failures
-        );
+        ));
         if let Some(bx) = out.best_state {
             let path = format!("best_h2o{m}_{engine}_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");
@@ -450,10 +476,7 @@ fn main() {
                 )
                 .ok();
             }
-            println!("  wrote {path}");
-        }
-        if let Some(p) = eng.as_mut() {
-            let _ = p.child.kill();
+            log_line(&format!("  wrote {path}"));
         }
     }
 }
