@@ -1239,10 +1239,206 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// The leftover is stacked `[SOAP; volume; angular 3-product]`.
-/// Every block pulls toward the species-cloud mean: a fivefold core
-/// is a defect against the observed cloud. `groups` is accepted for
-/// call-site compatibility and is not a post-hoc rigid projection.
+/// Length above which the chain is no longer in the fivefold funnel.
+const FIVEFOLD_GATE: f64 = 0.55;
+
+fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
+    [
+        r[0] * p[0] + r[1] * p[1] + r[2] * p[2],
+        r[3] * p[0] + r[4] * p[1] + r[5] * p[2],
+        r[6] * p[0] + r[7] * p[1] + r[8] * p[2],
+    ]
+}
+
+fn rotation_about(axis: [f64; 3], angle: f64) -> [f64; 9] {
+    let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let [x, y, z] = [axis[0] / n, axis[1] / n, axis[2] / n];
+    let (s, c) = angle.sin_cos();
+    let t = 1.0 - c;
+    [
+        t * x * x + c,
+        t * x * y - s * z,
+        t * x * z + s * y,
+        t * x * y + s * z,
+        t * y * y + c,
+        t * y * z - s * x,
+        t * x * z - s * y,
+        t * y * z + s * x,
+        t * z * z + c,
+    ]
+}
+
+fn ico_axes() -> [[f64; 3]; 6] {
+    let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+    [
+        [0.0, 1.0, p],
+        [0.0, 1.0, -p],
+        [1.0, p, 0.0],
+        [-1.0, p, 0.0],
+        [p, 0.0, 1.0],
+        [p, 0.0, -1.0],
+    ]
+}
+
+fn nearest_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
+    let n = x.len() / 3;
+    let mut used = vec![false; n];
+    let mut perm = vec![0usize; n];
+    for i in 0..n {
+        let mut best = 0usize;
+        let mut best_d = f64::INFINITY;
+        for j in 0..n {
+            if used[j] {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for a in 0..3 {
+                let d = x[3 * i + a] - y[3 * j + a];
+                d2 += d * d;
+            }
+            if d2 < best_d {
+                best_d = d2;
+                best = j;
+            }
+        }
+        used[best] = true;
+        perm[i] = best;
+    }
+    perm
+}
+
+/// Residual `x − R_5 x` under the best fivefold axis, and that axis's
+/// deviation length. SOFI/IRA when linked; greedy assignment otherwise.
+fn fivefold_residual(x: ArrayView1<f64>) -> (f64, [f64; 3], Array1<f64>) {
+    let n = x.len() / 3;
+    let mut best_d = f64::INFINITY;
+    let mut best_ax = [0.0, 0.0, 1.0];
+    let mut best_dr = Array1::zeros(x.len());
+    let angle = 2.0 * PI / 5.0;
+    for ax in ico_axes() {
+        let rmat = rotation_about(ax, angle);
+        #[cfg(feature = "ira")]
+        let (d5, perm, y) = {
+            match crate::shape::symmetry_pair(x, &rmat) {
+                Ok((dh, perm)) => {
+                    let mut y = vec![0.0; x.len()];
+                    for i in 0..n {
+                        if perm[i] >= n {
+                            continue;
+                        }
+                        let p = [x[3 * perm[i]], x[3 * perm[i] + 1], x[3 * perm[i] + 2]];
+                        let q = rot_apply(&rmat, p);
+                        y[3 * i] = q[0];
+                        y[3 * i + 1] = q[1];
+                        y[3 * i + 2] = q[2];
+                    }
+                    (dh, perm, y)
+                }
+                Err(_) => continue,
+            }
+        };
+        #[cfg(not(feature = "ira"))]
+        let (d5, perm, y) = {
+            let mut y = vec![0.0; x.len()];
+            for i in 0..n {
+                let q = rot_apply(&rmat, [x[3 * i], x[3 * i + 1], x[3 * i + 2]]);
+                y[3 * i] = q[0];
+                y[3 * i + 1] = q[1];
+                y[3 * i + 2] = q[2];
+            }
+            let perm = nearest_perm(x, &y);
+            let mut d2 = 0.0;
+            let mut y_m = vec![0.0; x.len()];
+            for i in 0..n {
+                for a in 0..3 {
+                    y_m[3 * i + a] = y[3 * perm[i] + a];
+                    let d = x[3 * i + a] - y_m[3 * i + a];
+                    d2 += d * d;
+                }
+            }
+            ((d2 / n.max(1) as f64).sqrt(), perm, y_m)
+        };
+        let _ = perm;
+        if d5 < best_d {
+            best_d = d5;
+            best_ax = ax;
+            let mut dr = Array1::zeros(x.len());
+            for i in 0..n {
+                for a in 0..3 {
+                    dr[3 * i + a] = x[3 * i + a] - y[3 * i + a];
+                }
+            }
+            best_dr = dr;
+        }
+    }
+    (best_d, best_ax, best_dr)
+}
+
+fn pentagon_break(x: ArrayView1<f64>, axis: [f64; 3]) -> Array1<f64> {
+    let n = x.len() / 3;
+    let mut dr = Array1::zeros(x.len());
+    if n == 0 {
+        return dr;
+    }
+    let an = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+    let ax = [axis[0] / an, axis[1] / an, axis[2] / an];
+    let mut best_i = 0usize;
+    let mut best_c = -1.0;
+    for i in 0..n {
+        let r = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        let cross = [
+            ax[1] * r[2] - ax[2] * r[1],
+            ax[2] * r[0] - ax[0] * r[2],
+            ax[0] * r[1] - ax[1] * r[0],
+        ];
+        let c = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
+        if c > best_c {
+            best_c = c;
+            best_i = i;
+        }
+    }
+    let r = [x[3 * best_i], x[3 * best_i + 1], x[3 * best_i + 2]];
+    let mut u = [
+        ax[1] * r[2] - ax[2] * r[1],
+        ax[2] * r[0] - ax[0] * r[2],
+        ax[0] * r[1] - ax[1] * r[0],
+    ];
+    let un = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+    if un < 1e-15 {
+        u = [1.0, 0.0, 0.0];
+    } else {
+        u[0] /= un;
+        u[1] /= un;
+        u[2] /= un;
+    }
+    dr[3 * best_i] = u[0];
+    dr[3 * best_i + 1] = u[1];
+    dr[3 * best_i + 2] = u[2];
+    dr
+}
+
+/// Leave the fivefold funnel: amplify the SOFI C5 residual, or break
+/// a perfect pentagon. Yields when the fivefold length is already large.
+pub fn step_away_fivefold(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    let (d5, axis, mut dr) = fivefold_residual(x);
+    if d5 > FIVEFOLD_GATE {
+        return x.to_owned();
+    }
+    let n = (x.len() / 3).max(1) as f64;
+    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+    if cur < 1e-8 {
+        dr = pentagon_break(x, axis);
+    }
+    scale_to_cap(x, dr, rmsd)
+}
+
+/// Observed-cloud residual, partitioned by observed atomic number and
+/// restricted to the mobile set. Frozen atoms are neighbours, not movers.
+///
+/// On a packing cluster the hop is the SOFI fivefold residual: it
+/// fires only while the fivefold length is small and the step
+/// increases that length. Molecules and slabs keep the ACE leftover.
+/// `groups` is accepted for call-site compatibility.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1252,6 +1448,12 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    let packing = species.is_none() && mobile.is_none();
+    if packing {
+        let _ = spec;
+        let _ = rng;
+        return step_away_fivefold(x, rmsd);
+    }
     let loc = local_nu3_z(x, spec, species);
     let n_at = loc.nrows();
     let dim = loc.ncols();
@@ -2508,6 +2710,31 @@ mod tests {
             (atom_rms - 0.4).abs() < 1e-9,
             "gated leftover hop rms {atom_rms}, want the 0.4 cap"
         );
+    }
+
+    #[test]
+    fn fivefold_hop_moves_ico_and_yields_on_cuboct() {
+        let mut ico = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in ico.iter_mut() {
+            *v *= nn;
+        }
+        let y = step_away_fivefold(ico.view(), 0.4);
+        let mut d2 = 0.0;
+        for i in 0..ico.len() {
+            let d = y[i] - ico[i];
+            d2 += d * d;
+        }
+        let atom_rms = (d2 / 13.0).sqrt();
+        assert!(
+            (atom_rms - 0.4).abs() < 1e-8,
+            "fivefold hop rms {atom_rms}"
+        );
+        let cub = cuboct13();
+        let z = step_away_fivefold(cub.view(), 0.4);
+        for i in 0..cub.len() {
+            assert_eq!(z[i], cub[i], "cuboct fivefold hop was not a yield");
+        }
     }
 
     #[test]

@@ -735,6 +735,56 @@ pub fn symmetry_deviation(coords: ArrayView1<f64>, matrix: &[f64; 9]) -> Result<
     Ok(dh)
 }
 
+/// Hausdorff deviation and the permutation realising the image.
+///
+/// `perm[i]` is the point that `matrix` sends onto `i` when the library
+/// returns a bijection. The residual `x[i] − R x[perm[i]]` is the
+/// Cartesian leftover of that symmetry.
+pub fn symmetry_pair(
+    coords: ArrayView1<f64>,
+    matrix: &[f64; 9],
+) -> Result<(f64, Vec<usize>), ShapeError> {
+    if coords.len() % 3 != 0 {
+        return Err(ShapeError::NotThreeDimensional(coords.len()));
+    }
+    let n = coords.len() / 3;
+    if n == 0 {
+        return Err(ShapeError::Empty);
+    }
+    let owned: Vec<f64> = coords.iter().copied().collect();
+    let types = vec![1_i32; n];
+    let mut perm_i = vec![0_i32; n];
+    let mut dh: c_double = 0.0;
+    unsafe {
+        libira_try_mat(
+            n as c_int,
+            types.as_ptr(),
+            owned.as_ptr(),
+            matrix.as_ptr(),
+            &mut dh,
+            &perm_i.as_mut_ptr(),
+        );
+    }
+    if !dh.is_finite() || dh < 0.0 {
+        return Err(ShapeError::Library(-1));
+    }
+    let perm: Vec<usize> = perm_i.iter().map(|&p| p.max(0) as usize).collect();
+    let mut seen = vec![false; n];
+    let ok = perm.len() == n
+        && perm.iter().all(|&q| {
+            if q >= n || seen[q] {
+                false
+            } else {
+                seen[q] = true;
+                true
+            }
+        });
+    if !ok {
+        return Err(ShapeError::NonBijectivePermutation);
+    }
+    Ok((dh, perm))
+}
+
 /// Rotation by `angle` about a unit `axis`, row-major, for [`symmetry_deviation`].
 pub fn rotation_matrix(axis: [f64; 3], angle: f64) -> [f64; 9] {
     let norm = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
