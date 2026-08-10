@@ -322,6 +322,15 @@ mod tests {
         assert_eq!(energy, -12.75);
         assert_eq!(gradient.as_slice().unwrap(), [-1.0, 2.0, -3.0]);
     }
+
+    #[test]
+    fn molecular_profile_request_has_no_simulation_cell() {
+        let positions = [0.0, 0.0, 0.0];
+        let atomic_numbers = [8];
+        let request = molecular_profile_request(&positions, &atomic_numbers);
+
+        assert!(request.box_matrix.is_none());
+    }
 }
 
 fn main() {
