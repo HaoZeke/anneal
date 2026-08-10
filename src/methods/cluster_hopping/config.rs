@@ -426,6 +426,8 @@ pub struct Config {
     /// relaxation, returns and escapes separate cleanly: 0.160 against 1.846
     /// with 97 per cent of pairs ordered correctly at thirty iterations.
     pub return_screen: bool,
+    /// SOAP hop uses the class residual (555 toward 421). Off is `2p − μ`.
+    pub soap_class_residual: bool,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
     /// Zero (the recommended default) skips the full quench entirely, which is
@@ -706,6 +708,7 @@ impl Config {
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
             return_screen: false,
+            soap_class_residual: true,
             return_polish: 0,
             return_polish_after: 0,
             path_on_stall: false,

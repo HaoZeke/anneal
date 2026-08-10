@@ -512,6 +512,10 @@ fn main() {
     if opts.contains(&"rscreen") {
         cfg.return_screen = true;
     }
+    if opts.contains(&"soapmean") {
+        cfg.soap_class_residual = false;
+        println!("  SOAP residual: mean (2p-mu)");
+    }
     cfg.minima_hopping = opts.contains(&"mh");
     cfg.escape_on_stall = opts.contains(&"climb");
     // The radius read off the search's own step length rather than swept.

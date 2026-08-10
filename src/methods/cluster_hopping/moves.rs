@@ -75,6 +75,7 @@ impl MoveLibrary {
                 kernels.push(ClusterMove::Soap {
                     rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
                     cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+                    class: cfg.soap_class_residual,
                 });
                 kernels
             }
@@ -334,6 +335,8 @@ pub enum ClusterMove {
         rmsd: f64,
         /// Fixed SOAP cutoff in the same coordinate units as the state.
         cutoff: f64,
+        /// Class residual (555 toward 421). False is the mean residual.
+        class: bool,
     },
 }
 
@@ -779,6 +782,7 @@ impl ClusterMove {
         v.push(ClusterMove::Soap {
             rmsd: LennardJonesPreset::SOAP_RMSD * LennardJonesPreset::REDUCED_SCALE,
             cutoff: LennardJonesPreset::SOAP_CUTOFF * LennardJonesPreset::REDUCED_SCALE,
+            class: true,
         });
         v
     }
@@ -1187,12 +1191,20 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
-            ClusterMove::Soap { rmsd, cutoff } => {
+            ClusterMove::Soap {
+                rmsd,
+                cutoff,
+                class,
+            } => {
                 let spec = crate::soap::SoapSpec {
                     rcut_nn: *cutoff,
                     ..Default::default()
                 };
-                crate::soap::step_away(x, &[], spec, *rmsd, rng)
+                if *class {
+                    crate::soap::step_away(x, &[], spec, *rmsd, rng)
+                } else {
+                    crate::soap::step_away_mean(x, spec, *rmsd, rng)
+                }
             }
         }
     }
@@ -1279,6 +1291,7 @@ mod move_scaling_tests {
         let mv = ClusterMove::Soap {
             rmsd: 0.45,
             cutoff: 3.5,
+            class: true,
         };
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
@@ -1312,6 +1325,14 @@ mod move_scaling_tests {
         assert!(
             names.iter().any(|n| n == "soap"),
             "recommended LeanBurst missing soap: {names:?}"
+        );
+        assert!(rec.soap_class_residual);
+        assert!(
+            rec.move_library.kernels(&rec).iter().any(|k| matches!(
+                k,
+                ClusterMove::Soap { class: true, .. }
+            )),
+            "recommended SOAP arm is not class-conditioned"
         );
     }
 
