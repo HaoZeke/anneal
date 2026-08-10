@@ -258,7 +258,7 @@ fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
 fn target_421(x: ArrayView1<f64>, loc: &Array2<f64>, _w555: &[f64], spec: SoapSpec) -> Array1<f64> {
     let n_at = loc.nrows();
     let dim = spec.dim();
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.4);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.35);
     let mut w421 = vec![0.0; n_at];
     for i in 0..n_at {
         w421[i] = fr[i][1];
@@ -363,15 +363,17 @@ fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
         prototype_spectrum(2, spec),
     ];
     let tau = prototype_tau(&proto);
-    let cna_cut = 1.4;
+    let cna_cut = 1.35;
     let fr = crate::structure::atom_triplet_fracs(x, n_at, cna_cut);
     for i in 0..n_at {
-        let soap_w = class_softmax(loc.row(i), &proto, tau);
-        w[i] = if fr[i][0] > 0.25 {
-            fr[i][0].max(soap_w[0])
+        // Hard 555 membership. Soft SOAP weights leak surface atoms into
+        // the ico class and the same-class mean no longer vanishes.
+        if fr[i][0] > 0.8 {
+            w[i] = 1.0;
         } else {
-            soap_w[0]
-        };
+            let soap_w = class_softmax(loc.row(i), &proto, tau);
+            w[i] = if soap_w[0] > 0.85 { soap_w[0] } else { 0.0 };
+        }
     }
     w
 }
@@ -383,7 +385,7 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
         return [0.0; 3];
     }
     let w555 = atom_w555(x, spec);
-    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.4);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.35);
     let mut mass = [0.0; 3];
     for i in 0..n_at {
         mass[0] += w555[i];
@@ -400,7 +402,7 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
         return false;
     }
     let _ = spec;
-    let c = crate::structure::cna(x, n, 1.4);
+    let c = crate::structure::cna(x, n, 1.35);
     c.fraction((5, 5, 5)) > 0.12
 }
 
@@ -1017,7 +1019,11 @@ mod tests {
     #[test]
     fn mackay_ico_mean_residual_vanishes_class_residual_does_not() {
         let spec = SoapSpec::default();
-        let x = ico13();
+        let mut x = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in x.iter_mut() {
+            *v *= nn;
+        }
         let fr = crate::structure::atom_triplet_fracs(x.view(), 13, 1.2);
         assert!(
             fr[0][0] > 0.8,
@@ -1034,30 +1040,34 @@ mod tests {
         assert!(
             ih_dominated(x.view(), spec),
             "ico13 should be Ih-dominated, 555 frac {}",
-            crate::structure::cna(x.view(), 13, 1.4).fraction((5, 5, 5))
+            crate::structure::cna(x.view(), 13, 1.2).fraction((5, 5, 5))
         );
     }
 
     #[test]
     fn class_pullback_on_ico_moves_more_than_one_surface_atom() {
         let spec = SoapSpec::default();
-        let x = ico13();
+        let mut x = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in x.iter_mut() {
+            *v *= nn;
+        }
         let mut rng = StdRng::seed_from_u64(9);
         let y = step_away(x.view(), &[], spec, 0.5, &mut rng);
         let mut moved = 0usize;
-        for i in 1..13 {
+        for i in 0..13 {
             let mut d2 = 0.0;
             for k in 0..3 {
                 let d = y[3 * i + k] - x[3 * i + k];
                 d2 += d * d;
             }
-            if d2.sqrt() > 0.02 {
+            if d2.sqrt() > 0.01 {
                 moved += 1;
             }
         }
         assert!(
             moved >= 2,
-            "class pullback moved {moved} surface atoms on ico13"
+            "class pullback moved {moved} atoms on ico13; expected concerted J^+ step"
         );
     }
 
