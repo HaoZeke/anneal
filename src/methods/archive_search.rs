@@ -331,20 +331,16 @@ fn soap_hole<R: Rng + ?Sized>(
     if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
         return residual_start(start, cfg, rng);
     }
-    let seed = archive
-        .reps
-        .iter()
-        .find(|r| !r.is_empty() && r.len() == start.len())
-        .map(|r| r.view())
-        .unwrap_or(start);
     let spec = crate::soap::SoapSpec::default();
     let observed: Vec<_> = archive
         .reps
         .iter()
-        .filter(|r| !r.is_empty() && r.len() == seed.len())
+        .filter(|r| !r.is_empty() && r.len() == start.len())
         .map(|r| crate::soap::power_spectrum(r.view(), spec))
         .collect();
-    crate::soap::step_away(seed, &observed, spec, 0.55, rng)
+    // Pull back the unused start, not the incumbent packing: J at a
+    // packed ico is a kick out of a funnel the explore hop already paid for.
+    crate::soap::step_away(start, &observed, spec, 0.55, rng)
 }
 
 /// Shake atoms that carry `key` so the residual hop leaves that topology.
