@@ -225,7 +225,6 @@ impl Engine {
 struct ProfileEngine {
     session: ProfileSession,
     atmnrs: Vec<i32>,
-    box_: [f64; 9],
     failures: usize,
 }
 
@@ -245,6 +244,19 @@ fn optimizer_value_gradient(evaluation: ProfileEvaluation) -> (f64, Array1<f64>)
             .collect::<Vec<_>>(),
     );
     (evaluation.energy, gradient)
+}
+
+fn molecular_profile_request<'a>(
+    positions: &'a [f64],
+    atomic_numbers: &'a [i32],
+) -> ProfileRequest<'a> {
+    ProfileRequest {
+        positions,
+        atomic_numbers,
+        box_matrix: None,
+        length_unit: "angstrom",
+        energy_unit: "eV",
+    }
 }
 
 impl ProfileEngine {
@@ -274,20 +286,13 @@ impl ProfileEngine {
         Self {
             session,
             atmnrs,
-            box_: [0.0; 9],
             failures: 0,
         }
     }
 
     fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
         let positions = x.iter().copied().collect::<Vec<_>>();
-        let request = ProfileRequest {
-            positions: &positions,
-            atomic_numbers: &self.atmnrs,
-            box_matrix: &self.box_,
-            length_unit: "angstrom",
-            energy_unit: "eV",
-        };
+        let request = molecular_profile_request(&positions, &self.atmnrs);
         match self.session.evaluate(&request) {
             Ok(evaluation) => Some(optimizer_value_gradient(evaluation)),
             Err(_) => {
