@@ -383,6 +383,14 @@ mod tests {
 
         assert_eq!(LIFECYCLE_STEP.load(Ordering::SeqCst), 2);
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn nwchemc_plugin_loads_mpi_dependencies_eagerly_and_globally() {
+        use libloading::os::unix::{RTLD_GLOBAL, RTLD_NOW};
+
+        assert_eq!(nwchemc_dlopen_flags(), RTLD_NOW | RTLD_GLOBAL);
+    }
 }
 
 fn main() {
