@@ -263,15 +263,14 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c.symmetrise_on_stall = true;
         c.return_polish = 0;
         let slices: Vec<usize> = if molecular {
-            // Rec finds the GFN2 prism in the last 200 of a 2000-eval
-            // 60-step walk, so a 90 % prefix of that walk misses it.
-            // Two 1000-eval walks at 40-step quench plus a re-placed
-            // second packing buy more hops and a second start.
+            // Progress inside the hop is remaining/budget, so a short
+            // first ledger is not a prefix of rec. One 2000-eval walk
+            // at 40-step quench plus angular moves buys more hops at
+            // the same budget. Rec hit_at on the prism is 1074 and 1780.
             c.return_screen = false;
             c.relax_steps = (cfg.relax_steps * 2 / 3).max(1);
             c.angular_moves = true;
-            let a = (cap / 2).max(1);
-            vec![a, cap.saturating_sub(a).max(1)]
+            vec![cap]
         } else if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
             // different draw from the same start, not a longer grind.
@@ -290,7 +289,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             grad.as_deref_mut(),
             rng,
             &slices,
-            molecular || slab,
+            slab,
         );
         if acc.best.is_finite() {
             if let Some(ref x) = acc.best_state {
