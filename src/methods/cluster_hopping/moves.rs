@@ -72,7 +72,10 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                kernels.push(ClusterMove::Soap { rmsd: 0.35 });
+                kernels.push(ClusterMove::Soap {
+                    rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
+                    cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+                });
                 kernels
             }
             Self::Visit => {
@@ -329,6 +332,8 @@ pub enum ClusterMove {
     Soap {
         /// Cartesian RMSD of the pulled-back step.
         rmsd: f64,
+        /// Fixed SOAP cutoff in the same coordinate units as the state.
+        cutoff: f64,
     },
 }
 
@@ -771,7 +776,10 @@ impl ClusterMove {
             n_points: n,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF,
         });
-        v.push(ClusterMove::Soap { rmsd: 0.35 });
+        v.push(ClusterMove::Soap {
+            rmsd: LennardJonesPreset::SOAP_RMSD * LennardJonesPreset::REDUCED_SCALE,
+            cutoff: LennardJonesPreset::SOAP_CUTOFF * LennardJonesPreset::REDUCED_SCALE,
+        });
         v
     }
 
@@ -1179,8 +1187,11 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
-            ClusterMove::Soap { rmsd } => {
-                let spec = crate::soap::SoapSpec::default();
+            ClusterMove::Soap { rmsd, cutoff } => {
+                let spec = crate::soap::SoapSpec {
+                    rcut_nn: *cutoff,
+                    ..Default::default()
+                };
                 crate::soap::step_away(x, &[], spec, *rmsd, rng)
             }
         }
@@ -1265,7 +1276,10 @@ mod move_scaling_tests {
 
     #[test]
     fn soap_pullback_proposal_moves_more_than_one_atom() {
-        let mv = ClusterMove::Soap { rmsd: 0.45 };
+        let mv = ClusterMove::Soap {
+            rmsd: 0.45,
+            cutoff: 3.5,
+        };
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
         ]);
