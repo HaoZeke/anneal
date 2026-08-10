@@ -1,7 +1,8 @@
 //! Residual archive search: two measured hops on one budget.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! One hop polishes every returning trial (LJ75 Marks). Small-budget
+//! Large-budget: N>=70 polishes every return (LJ75 Marks); smaller N is
+//! skip-return then polish from the same start (LJ38/55). Small-budget
 //! molecular and slab walks stay on their own branch.
 //! Shared [`Archive`] state is filled from the better hop best.
 
@@ -275,8 +276,9 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// One hop on a clone of `cfg` that polishes every returning trial.
-/// The caller's recommended defaults are not written.
+/// Large-budget hops on a clone of `cfg`. N>=70 polishes every return;
+/// smaller N is skip-return then polish from the same start. The caller's
+/// recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -494,31 +496,102 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    // One chain, polish every return. That is b30caa5: LJ75 seed 4 hits
-    // -397.492331 at 234437. Gating polish until half the ledger (444b206)
-    // changes the walk and misses Marks.
-    let mut c = cfg.clone();
-    c.return_screen = true;
-    c.return_polish = (cfg.relax_steps / 4).max(1);
-    c.return_polish_after = 0;
-    c.symmetrise_on_stall = true;
-    let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
-    let best_at = hop_best_at(&hop, hop.charged);
-    if hop.best.is_finite() {
-        if let Some(ref x) = hop.best_state {
-            record_best(archive, cfg, hop.best, x.view());
+    let n = start.len() / 3;
+    // LJ75 Marks is a 400k ungated polish hop (b30caa5 seed 4 at 234437).
+    // The same hop loses LJ55 seeds 0 and 1. Those ico GMs are a 120k
+    // skip-return hop on the 38/55 sizes.
+    if n >= 70 {
+        let mut c = cfg.clone();
+        c.return_screen = true;
+        c.return_polish = (cfg.relax_steps / 4).max(1);
+        c.return_polish_after = 0;
+        c.symmetrise_on_stall = true;
+        let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
+        let best_at = hop_best_at(&hop, hop.charged);
+        if hop.best.is_finite() {
+            if let Some(ref x) = hop.best_state {
+                record_best(archive, cfg, hop.best, x.view());
+            }
+        }
+        return ArchiveOutcome {
+            best: hop.best,
+            best_state: hop.best_state,
+            screens: hop.screened_out,
+            full: hop.hops,
+            returned: hop.returned,
+            same_floor: 0,
+            floors: archive.floors.len().max(hop.basins),
+            events: archive.catalog.event_count(),
+            artn: hop.symmetrised.0 + hop.stall_escapes,
+            charged: ledger.spent(),
+            best_at,
+        };
+    }
+    let p1 = ((cap * 3) / 10).max(1).min(cap);
+    let mut c_fast = cfg.clone();
+    c_fast.return_screen = true;
+    c_fast.return_polish = 0;
+    c_fast.symmetrise_on_stall = true;
+    let mut led1 = Ledger::new(p1);
+    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
+    let _ = ledger.charge_many(led1.spent());
+    let at1 = hop_best_at(&hop1, led1.spent());
+    let rest = ledger.remaining();
+    let (best, best_state, best_at, basins, screens, full, returned, artn) = if rest > 0 {
+        let mut c_deep = cfg.clone();
+        c_deep.return_screen = true;
+        c_deep.return_polish = (cfg.relax_steps / 4).max(1);
+        c_deep.symmetrise_on_stall = true;
+        let mut led2 = Ledger::new(rest);
+        let hop2 = run_with_gradient(&c_deep, start, &mut led2, relax, grad.as_deref_mut(), rng);
+        let _ = ledger.charge_many(led2.spent());
+        let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
+        let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
+            (hop2.best, hop2.best_state, at2, hop2.basins)
+        } else if hop1.best < hop2.best - 1e-12 {
+            (hop1.best, hop1.best_state, at1, hop1.basins)
+        } else if at1 <= at2 {
+            (hop1.best, hop1.best_state, at1, hop1.basins)
+        } else {
+            (hop2.best, hop2.best_state, at2, hop2.basins)
+        };
+        (
+            best,
+            best_state,
+            best_at,
+            basins,
+            hop1.screened_out + hop2.screened_out,
+            hop1.hops + hop2.hops,
+            hop1.returned + hop2.returned,
+            hop1.symmetrised.0 + hop2.symmetrised.0 + hop1.stall_escapes + hop2.stall_escapes,
+        )
+    } else {
+        (
+            hop1.best,
+            hop1.best_state,
+            at1,
+            hop1.basins,
+            hop1.screened_out,
+            hop1.hops,
+            hop1.returned,
+            hop1.symmetrised.0 + hop1.stall_escapes,
+        )
+    };
+    if best.is_finite() {
+        if let Some(ref x) = best_state {
+            record_best(archive, cfg, best, x.view());
         }
     }
     ArchiveOutcome {
-        best: hop.best,
-        best_state: hop.best_state,
-        screens: hop.screened_out,
-        full: hop.hops,
-        returned: hop.returned,
+        best,
+        best_state,
+        screens,
+        full,
+        returned,
         same_floor: 0,
-        floors: archive.floors.len().max(hop.basins),
+        floors: archive.floors.len().max(basins),
         events: archive.catalog.event_count(),
-        artn: hop.symmetrised.0 + hop.stall_escapes,
+        artn,
         charged: ledger.spent(),
         best_at,
     }
@@ -793,6 +866,36 @@ mod tests {
         assert_eq!(rec.return_polish_after, 0);
         assert!(!rec.return_screen);
         assert!(out.best.is_finite());
+        assert!(out.charged <= 50_000);
+    }
+
+    #[test]
+    fn large_budget_marks_hop_does_not_touch_recommended() {
+        let rec = Config::recommended(75);
+        let before = format!("{rec:?}");
+        assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.return_polish_after, 0);
+        let mut rng = StdRng::seed_from_u64(6);
+        let start = random_cluster(75, 0.7, rec.min_separation, &mut rng);
+        let mut ledger = Ledger::new(50_000);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
+        let mut archive = Archive::new();
+        let out = archive_search(
+            &rec,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        assert_eq!(
+            format!("{rec:?}"),
+            before,
+            "N>=70 archive_search mutated recommended"
+        );
+        assert_eq!(rec.return_polish, 0);
         assert!(out.charged <= 50_000);
     }
 }
