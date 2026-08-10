@@ -64,9 +64,7 @@ fn cluster_moves_are_general_move_kernels() {
 fn symmetry_and_rigid_repacking_follow_the_declared_length_scale() {
     let reduced = Config::with_scales(2, 1.0, 1.0);
     let physical = Config::with_scales(2, 2.5, 1.0);
-    assert!(
-        (physical.symmetry_merge_radius / reduced.symmetry_merge_radius - 2.5).abs() < 1e-12
-    );
+    assert!((physical.symmetry_merge_radius / reduced.symmetry_merge_radius - 2.5).abs() < 1e-12);
 
     let groups = vec![vec![0], vec![1]];
     let reduced_template = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);

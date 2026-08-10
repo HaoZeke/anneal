@@ -2119,8 +2119,7 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         if atoms.is_empty() {
             continue;
         }
-        let r = r0
-            + (g as f64) * preset::MolecularPreset::REPACK_GROUP_SPACING * length_scale;
+        let r = r0 + (g as f64) * preset::MolecularPreset::REPACK_GROUP_SPACING * length_scale;
         let th = rng.random::<f64>() * std::f64::consts::TAU;
         let ct = 2.0 * rng.random::<f64>() - 1.0;
         let st = (1.0 - ct * ct).sqrt();

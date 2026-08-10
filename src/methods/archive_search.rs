@@ -130,9 +130,7 @@ fn symmetry_polish(
     let n = x.len() / 3;
     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
     for order in [2usize, 3, 4, 5, 6] {
-        if let Some(c) =
-            crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance)
-        {
+        if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
             cands.push(c);
         }
     }
@@ -325,10 +323,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
                 let (best, best_state, best_at, basins, screens, full, returned, artn) =
-                    if rest3 > 0
-                        && hop2.best < hop1.best - 0.015
-                        && hop2.best_state.is_some()
-                    {
+                    if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
                         let mut c3 = c2.clone();
                         if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
                             groups,
