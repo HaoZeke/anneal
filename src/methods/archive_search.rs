@@ -156,23 +156,11 @@ fn residual_start<R: Rng + ?Sized>(
             for d in 0..3 {
                 com[d] /= n;
             }
-            let a = rng.random::<f64>() * std::f64::consts::TAU;
-            let b = rng.random::<f64>() * std::f64::consts::TAU;
-            let (sa, ca) = a.sin_cos();
-            let (sb, cb) = b.sin_cos();
             for &i in atoms {
                 if 3 * i + 2 < y.len() {
-                    let rx = y[3 * i] - com[0];
-                    let ry = y[3 * i + 1] - com[1];
-                    let rz = y[3 * i + 2] - com[2];
-                    let x1 = ca * rx - sa * ry;
-                    let y1 = sa * rx + ca * ry;
-                    let z1 = rz;
-                    let x2 = cb * x1 + sb * z1;
-                    let z2 = -sb * x1 + cb * z1;
-                    y[3 * i] = new_c[0] + x2;
-                    y[3 * i + 1] = new_c[1] + y1;
-                    y[3 * i + 2] = new_c[2] + z2;
+                    for d in 0..3 {
+                        y[3 * i + d] += new_c[d] - com[d];
+                    }
                 }
             }
         }
@@ -273,11 +261,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
         let slab = cfg.active_region.is_some();
         if molecular {
-            // Cold-SCF rec finds the low isomer at 877 from the given start.
-            // Hop 1 is that 60-step walk to 900. Hop 2 is one residual
-            // packing with the same quench, angular moves, and group restart.
-            // A 40-step full-budget walk lost the isomer (under-quenched).
-            let p1 = 900.min(cap);
+            // Cold-SCF rec finds the low isomer at 877 and seed 3's best at
+            // 1003. Hop 1 is that walk to 1100. Hop 2 is one residual
+            // packing at rec quench with angular moves and group restart.
+            let p1 = 1100.min(cap);
             let mut led1 = Ledger::new(p1);
             let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
             let used1 = led1.spent();
@@ -290,14 +277,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
-                if let crate::methods::cluster_hopping::MoveLibrary::Molecular { groups, .. } =
-                    &cfg.move_library
-                {
-                    c2.move_library = crate::methods::cluster_hopping::MoveLibrary::Molecular {
-                        groups: groups.clone(),
-                        reactive: true,
-                    };
-                }
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
                 let hop2 =
