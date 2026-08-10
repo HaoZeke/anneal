@@ -323,6 +323,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
+                let hop2_state = hop2.best_state.clone();
                 let (mut best, mut best_state, mut best_at, basins) =
                     if hop2.best < hop1.best - 1e-12 {
                         (hop2.best, hop2.best_state, at2, hop2.basins)
