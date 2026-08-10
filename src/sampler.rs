@@ -68,7 +68,10 @@ pub struct HoppingSampler<C, M, A, Q> {
     quench: Mutex<Q>,
 }
 
-impl<C, M, A, Q> HoppingSampler<C, M, A, Q> {
+impl<C, M, A, Q> HoppingSampler<C, M, A, Q>
+where
+    Q: for<'a> FnMut(ArrayView1<'a, f64>, usize) -> FPair<f64> + Send,
+{
     /// Constructs a basin-hopping sampler from general sampler components.
     pub fn new(
         initial_position: Array1<f64>,
