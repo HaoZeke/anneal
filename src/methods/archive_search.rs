@@ -170,11 +170,12 @@ fn residual_start<R: Rng + ?Sized>(
         return y;
     }
     if let Some(groups) = cfg.move_library.declared_groups() {
+        let r0 = 2.5 + rng.random::<f64>() * 2.0;
         for (g, atoms) in groups.iter().enumerate() {
             if atoms.is_empty() {
                 continue;
             }
-            let r = 3.0 + (g as f64) * 0.1;
+            let r = r0 + (g as f64) * 0.15;
             let th = rng.random::<f64>() * std::f64::consts::TAU;
             let ct = 2.0 * rng.random::<f64>() - 1.0;
             let st = (1.0 - ct * ct).sqrt();
@@ -307,36 +308,119 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             let at1 = hop_best_at(&hop1, used1);
             let rest = ledger.remaining();
             let acc = if rest > 0 {
-                // Angular leftover walks find the cage, 9 meV above the
-                // prism. A second recommended walk from a new packing
-                // uses the same quench that hit the prism at 877.
+                // 850-eval angular hunt finds the cage (~696 on seed 1).
+                // The rest continues from that cage with reactive moves.
+                let mut c2 = cfg.clone();
+                c2.angular_moves = true;
+                c2.escape_stall_patience = 8;
+                c2.escape_stall_factor = 1.0;
+                c2.symmetrise_on_stall = true;
+                let hunt = 850.min(rest);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(rest);
+                let mut led2 = Ledger::new(hunt);
                 let hop2 =
-                    run_with_gradient(cfg, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
-                let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
-                    (hop2.best, hop2.best_state, at2, hop2.basins)
-                } else if hop1.best < hop2.best - 1e-12 {
-                    (hop1.best, hop1.best_state, at1, hop1.basins)
-                } else {
-                    (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
-                };
+                let rest3 = ledger.remaining();
+                let (best, best_state, best_at, basins, screens, full, returned, artn) =
+                    if rest3 > 0
+                        && hop2.best < hop1.best - 0.015
+                        && hop2.best_state.is_some()
+                    {
+                        let mut c3 = c2.clone();
+                        if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                            groups,
+                            ..
+                        } = &cfg.move_library
+                        {
+                            c3.move_library =
+                                crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                                    groups: groups.clone(),
+                                    reactive: true,
+                                };
+                        }
+                        let x3 = hop2.best_state.clone().unwrap();
+                        let mut led3 = Ledger::new(rest3);
+                        let hop3 = run_with_gradient(
+                            &c3,
+                            x3.view(),
+                            &mut led3,
+                            relax,
+                            grad.as_deref_mut(),
+                            rng,
+                        );
+                        let _ = ledger.charge_many(led3.spent());
+                        let at3 = used1
+                            .saturating_add(used2)
+                            .saturating_add(hop_best_at(&hop3, led3.spent()));
+                        let (b, s, a, n) = if hop3.best < hop2.best.min(hop1.best) - 1e-12 {
+                            (hop3.best, hop3.best_state, at3, hop3.basins)
+                        } else if hop2.best < hop1.best - 1e-12 {
+                            (hop2.best, hop2.best_state, at2, hop2.basins)
+                        } else {
+                            (hop1.best, hop1.best_state, at1, hop1.basins)
+                        };
+                        (
+                            b,
+                            s,
+                            a,
+                            n,
+                            hop1.screened_out + hop2.screened_out + hop3.screened_out,
+                            hop1.hops + hop2.hops + hop3.hops,
+                            hop1.returned + hop2.returned + hop3.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop3.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop3.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts
+                                + hop3.restarts,
+                        )
+                    } else if hop2.best < hop1.best - 1e-12 {
+                        (
+                            hop2.best,
+                            hop2.best_state,
+                            at2,
+                            hop2.basins,
+                            hop1.screened_out + hop2.screened_out,
+                            hop1.hops + hop2.hops,
+                            hop1.returned + hop2.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts,
+                        )
+                    } else {
+                        (
+                            hop1.best,
+                            hop1.best_state,
+                            at1,
+                            hop1.basins,
+                            hop1.screened_out + hop2.screened_out,
+                            hop1.hops + hop2.hops,
+                            hop1.returned + hop2.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts,
+                        )
+                    };
                 HopAcc {
                     best,
                     best_state,
                     best_at,
-                    screens: hop1.screened_out + hop2.screened_out,
-                    full: hop1.hops + hop2.hops,
-                    returned: hop1.returned + hop2.returned,
-                    artn: hop1.symmetrised.0
-                        + hop2.symmetrised.0
-                        + hop1.stall_escapes
-                        + hop2.stall_escapes
-                        + hop1.restarts
-                        + hop2.restarts,
+                    screens,
+                    full,
+                    returned,
+                    artn,
                     basins,
                 }
             } else {
