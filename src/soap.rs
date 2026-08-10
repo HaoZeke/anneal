@@ -19,9 +19,10 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian: SOAP explores (`2p − μ`), the 4-body block corrects
-//! (`χ → μ`). Amplifying `χ − μ` deepens a fivefold core. The
-//! 555→421 / fcc-prototype residual is an oracle. Opt-in, cluster only.
+//! Jacobian. The 4-body block is the two invariants of a neighbor
+//! triple that SOAP cannot see: squared volume and the product of
+//! pairwise dots. Leftover is `μ` on that block. The 555→421 /
+//! fcc-prototype residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -61,11 +62,15 @@ impl SoapSpec {
         self.dim() * neighbor_channels(species).len()
     }
 
-    /// Extra 4-body (ν=3) scalars per atom: weighted neighbor-triple
-    /// volumes. The power spectrum is three-body and is degenerate on
-    /// 555 vs 421; this term sees the common-neighbor prism.
+    /// Extra 4-body scalars per atom: two invariants per radial
+    /// channel. Three neighbor directions have three rotationally
+    /// invariant coordinates. SOAP already has the pairwise dots
+    /// (they collapse to |Σ û|²). The remaining two are the squared
+    /// triple product and the product of the three pairwise dots.
+    /// Those are the ACE ν=3 / λ-SOAP scalars the power spectrum
+    /// cannot see.
     pub fn nu3_dim(self) -> usize {
-        self.n_max
+        2 * self.n_max
     }
 }
 
@@ -157,12 +162,13 @@ pub fn local_spectra_z(
     out
 }
 
-/// SOAP power spectrum concatenated with the ν=3 triple-volume invariants.
+/// SOAP power spectrum concatenated with the two 4-body triple invariants.
 ///
-/// featomic's next layer after the power spectrum is a CG product of two
-/// spherical expansions (λ-SOAP / ACE ν=3). The invariant piece of that
-/// is a 4-body correlation. Here it is the weighted squared scalar
-/// triple product of neighbor directions, one scalar per radial channel.
+/// Three unit directions have three rotational invariants. Pairwise
+/// dots collapse into the SOAP l=1 power. The other two are
+/// `[û_j·(û_k×û_p)]²` and `(û_j·û_k)(û_k·û_p)(û_p·û_j)`. featomic's
+/// λ-SOAP / ACE ν=3 is the CG contraction that produces the same
+/// scalars from the spherical expansion.
 pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
     local_nu3_z(x, spec, None)
 }
@@ -225,9 +231,13 @@ fn dweight_n(n: usize, r: f64, rcut: f64) -> f64 {
     dradial(n, r, rcut) * fcut(r, rcut) + radial(n, r, rcut) * dfcut(r, rcut)
 }
 
+fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f64> {
     let neigh = gather_neigh(x, i, n_at, spec.rcut_nn);
-    let mut acc = vec![0.0; spec.n_max];
+    let mut acc = vec![0.0; spec.nu3_dim()];
     let m = neigh.len();
     if m < 3 {
         return acc;
@@ -237,11 +247,16 @@ fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f
             for c in (b + 1)..m {
                 let vol = triple(neigh[a].u, neigh[b].u, neigh[c].u);
                 let vol2 = vol * vol;
+                let ab = dot(neigh[a].u, neigh[b].u);
+                let bc = dot(neigh[b].u, neigh[c].u);
+                let ca = dot(neigh[c].u, neigh[a].u);
+                let ang = ab * bc * ca;
                 for n in 0..spec.n_max {
-                    acc[n] += weight_n(n, neigh[a].r, spec.rcut_nn)
+                    let w = weight_n(n, neigh[a].r, spec.rcut_nn)
                         * weight_n(n, neigh[b].r, spec.rcut_nn)
-                        * weight_n(n, neigh[c].r, spec.rcut_nn)
-                        * vol2;
+                        * weight_n(n, neigh[c].r, spec.rcut_nn);
+                    acc[2 * n] += w * vol2;
+                    acc[2 * n + 1] += w * ang;
                 }
             }
         }
@@ -263,7 +278,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// Analytic Jacobian of the ν=3 triple-volume, shape `(N n_max, 3N)`.
+/// Analytic Jacobian of the two 4-body triple invariants, shape `(N · nu3_dim, 3N)`.
 pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
     let n_at = x.len() / 3;
     let d1 = spec.nu3_dim();
@@ -288,6 +303,25 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                     let dva = cross(ub, uc);
                     let dvb = cross(uc, ua);
                     let dvc = cross(ua, ub);
+                    let ab = dot(ua, ub);
+                    let bc = dot(ub, uc);
+                    let ca = dot(uc, ua);
+                    let ang = ab * bc * ca;
+                    let da_ang = [
+                        ub[0] * bc * ca + uc[0] * ab * bc,
+                        ub[1] * bc * ca + uc[1] * ab * bc,
+                        ub[2] * bc * ca + uc[2] * ab * bc,
+                    ];
+                    let db_ang = [
+                        ua[0] * bc * ca + uc[0] * ab * ca,
+                        ua[1] * bc * ca + uc[1] * ab * ca,
+                        ua[2] * bc * ca + uc[2] * ab * ca,
+                    ];
+                    let dc_ang = [
+                        ub[0] * ab * ca + ua[0] * ab * bc,
+                        ub[1] * ab * ca + ua[1] * ab * bc,
+                        ub[2] * ab * ca + ua[2] * ab * bc,
+                    ];
                     for n in 0..spec.n_max {
                         let wa = weight_n(n, neigh[a].r, rcut);
                         let wb = weight_n(n, neigh[b].r, rcut);
@@ -295,40 +329,74 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                         let dwa = dweight_n(n, neigh[a].r, rcut);
                         let dwb = dweight_n(n, neigh[b].r, rcut);
                         let dwc = dweight_n(n, neigh[c].r, rcut);
-                        let row = i * d1 + n;
-                        // ∂(W vol²)/∂coord for each of the three neighbors and the centre.
+                        let w = wa * wb * wc;
+                        let row_v = i * d1 + 2 * n;
+                        let row_a = row_v + 1;
                         accum_four(
                             &mut j,
-                            row,
+                            row_v,
                             i,
                             neigh[a].idx,
                             neigh[a].r,
                             ua,
                             dwa * wb * wc * vol * vol,
-                            wa * wb * wc * 2.0 * vol,
+                            w * 2.0 * vol,
                             dva,
                         );
                         accum_four(
                             &mut j,
-                            row,
+                            row_v,
                             i,
                             neigh[b].idx,
                             neigh[b].r,
                             ub,
                             dwb * wa * wc * vol * vol,
-                            wa * wb * wc * 2.0 * vol,
+                            w * 2.0 * vol,
                             dvb,
                         );
                         accum_four(
                             &mut j,
-                            row,
+                            row_v,
                             i,
                             neigh[c].idx,
                             neigh[c].r,
                             uc,
                             dwc * wa * wb * vol * vol,
-                            wa * wb * wc * 2.0 * vol,
+                            w * 2.0 * vol,
                             dvc,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a,
+                            i,
+                            neigh[a].idx,
+                            neigh[a].r,
+                            ua,
+                            dwa * wb * wc * ang,
+                            w,
+                            da_ang,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a,
+                            i,
+                            neigh[b].idx,
+                            neigh[b].r,
+                            ub,
+                            dwb * wa * wc * ang,
+                            w,
+                            db_ang,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a,
+                            i,
+                            neigh[c].idx,
+                            neigh[c].r,
+                            uc,
+                            dwc * wa * wb * ang,
+                            w,
+                            dc_ang,
                         );
                     }
                 }
@@ -940,11 +1008,9 @@ pub fn step_away<R: Rng + ?Sized>(
     apply_cap(x, pullback(x, target.view(), spec), rmsd)
 }
 
-/// Observed-cloud residual on the stacked SOAP+ν=3 cloud.
+/// Observed-cloud residual on the stacked SOAP+4-body cloud.
 ///
-/// SOAP uses `2p − μ`. The ν=3 block uses `μ`: fivefold cores are a
-/// defect against the observed cloud. A Dirac SOAP cloud is not a
-/// Dirac ν=3 cloud.
+/// The hop is `μ` on every block. A Dirac 4-body cloud yields.
 pub fn step_away_mean<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -957,11 +1023,10 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// The leftover is stacked `[SOAP; ν=3]` and the Cartesian step is
-/// `J⁺` of that block. SOAP uses `2p − μ`. The ν=3 block uses `μ`:
-/// a high-χ fivefold core is a defect against the observed cloud, not
-/// a direction to amplify. `groups` is accepted for call-site
-/// compatibility and is not a post-hoc rigid projection.
+/// The leftover is stacked `[SOAP; volume; angular 3-product]`.
+/// Every block pulls toward the species-cloud mean: a fivefold core
+/// is a defect against the observed cloud. `groups` is accepted for
+/// call-site compatibility and is not a post-hoc rigid projection.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1017,17 +1082,13 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             continue;
         }
         let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-        let d0 = dim - spec.nu3_dim();
-        for t in 0..d0 {
-            target[i * dim + t] = 2.0 * loc[[i, t]] - mu[k][t];
-        }
-        for t in d0..dim {
+        for t in 0..dim {
             target[i * dim + t] = mu[k][t];
         }
     }
-    // Gate on the ν=3 leftover, not on SOAP. Core-versus-surface SOAP
-    // is always there and is not a reason to take a full hop. A
-    // fivefold core off the χ cloud is. Below the floor, yield.
+    // Gate on the 4-body leftover. SOAP core-versus-surface is always
+    // there. Volume and the angular 3-product are not: they fire on a
+    // fivefold core and yield on an equivalent tetrahedron.
     let d0 = dim - spec.nu3_dim();
     let mut nu32 = 0.0;
     let mut nnu = 0.0;
@@ -1613,13 +1674,65 @@ mod tests {
     }
 
     #[test]
-    fn nu3_adds_one_scalar_per_radial_channel() {
+    fn nu3_adds_two_scalars_per_radial_channel() {
         let spec = SoapSpec::default();
+        assert_eq!(spec.nu3_dim(), 2 * spec.n_max);
         let x = tetra();
         let p = local_spectra(x.view(), spec);
         let n3 = local_nu3(x.view(), spec);
         assert_eq!(n3.ncols(), p.ncols() + spec.nu3_dim());
         assert_eq!(n3.nrows(), p.nrows());
+    }
+
+    fn cuboct13() -> Array1<f64> {
+        let pts = crate::structure::Template::FaceCentredCubic.points();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        let mut x = Array1::<f64>::zeros(3 * 13);
+        for (i, p) in pts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * (i + 1) + k] = p[k] * nn;
+            }
+        }
+        x
+    }
+
+    #[test]
+    fn angular_triple_separates_ico_from_cuboct() {
+        let spec = SoapSpec::default();
+        let mut ico = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in ico.iter_mut() {
+            *v *= nn;
+        }
+        let cub = cuboct13();
+        let bi = four_body(ico.view(), 0, 13, spec);
+        let bc = four_body(cub.view(), 0, 13, spec);
+        let mut d2 = 0.0;
+        for n in 0..spec.n_max {
+            let d = bi[2 * n + 1] - bc[2 * n + 1];
+            d2 += d * d;
+        }
+        assert!(
+            d2.sqrt() > 1e-3,
+            "angular 3-product is the same on ico and cuboct: ico {bi:?} cuboct {bc:?}"
+        );
+    }
+
+    #[test]
+    fn four_body_is_invariant_to_rotation() {
+        let spec = SoapSpec::default();
+        let a = squashed();
+        let b = rotate_z(a.view(), 0.9);
+        let fa = four_body(a.view(), 0, a.len() / 3, spec);
+        let fb = four_body(b.view(), 0, b.len() / 3, spec);
+        for t in 0..fa.len() {
+            assert!(
+                (fa[t] - fb[t]).abs() < 1e-9,
+                "4-body moved under rotation at {t}: {} vs {}",
+                fa[t],
+                fb[t]
+            );
+        }
     }
 
     #[test]
