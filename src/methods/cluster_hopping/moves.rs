@@ -1268,7 +1268,7 @@ mod move_scaling_tests {
     fn soap_pullback_proposal_moves_more_than_one_atom() {
         let mv = ClusterMove::Soap { rmsd: 0.45 };
         let x = Array1::from_vec(vec![
-            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
         ]);
         let mut rng = StdRng::seed_from_u64(4);
         let y = mv.propose(x.view(), 0.8, &mut rng);

@@ -1,15 +1,18 @@
 //! SOAP power spectrum and the Cartesian pullback through its Jacobian.
 //!
-//! The density expansion coefficients are
-//! `c_{nlm}(i) = Σ_{j≠i} g_n(r_{ij}) Y_{lm}(hat r_{ij}) f_cut(r_{ij})`.
-//! The rotationally invariant power spectrum is
-//! `p_{nn'l}(i) = Σ_m c_{nlm}(i) c_{n'lm}(i)`, averaged over atoms.
+//! Local fingerprints are per-atom power spectra
+//! `p_{nn'l}(i) = Σ_m c_{nlm}(i) c_{n'lm}(i)` with
+//! `c_{nlm}(i) = Σ_{j≠i} w_n(r_{ij}) Y_{lm}(hat r_{ij})`.
+//! The map is `R^{3N} → R^{N n_feat}`. Its Jacobian is analytic: each pair
+//! contributes `∂w/∂r` and `∂Y/∂r̂` through the projector
+//! `(I − r̂ r̂ᵀ)/r`. Finite differences are not that map — they cost `O(N)`
+//! SOAP evals, they jump at the cutoff, and a 24-D *global* average has
+//! rank at most 24 in `R^{3N}`, so it cannot see which atoms carry
+//! icosahedral versus fivefold-join environments.
 //!
-//! A step `Δp` in that space is pulled back by Tikhonov
-//! `ΔR = argmin ||J ΔR − Δp||² + λ||ΔR||²` with `J = ∂p/∂R` from
-//! central differences. That is a concerted multi-atom move. It is not a
-//! one-atom hop and it is not a Marks/CSA oracle: `Δp` is a residual
-//! direction in the observed SOAP span.
+//! A residual step takes `Δp_i = p_i − μ` (local environments away from
+//! the mean) and `ΔR = argmin ||J ΔR − Δp||² + λ||ΔR||²`, then strips
+//! the rigid kernel of `J`. Not a one-atom hop and not a Marks/CSA oracle.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -22,7 +25,8 @@ pub struct SoapSpec {
     pub n_max: usize,
     /// Angular momentum `l = 0..l_max`.
     pub l_max: usize,
-    /// Cutoff as a multiple of the structure's median nearest-neighbour distance.
+    /// Cutoff in coordinate units. Fixed: a moving median-NN cutoff is
+    /// not a map `R^{3N} → p` and has no Jacobian.
     pub rcut_nn: f64,
 }
 
@@ -31,7 +35,7 @@ impl Default for SoapSpec {
         Self {
             n_max: 3,
             l_max: 3,
-            rcut_nn: 2.5,
+            rcut_nn: 3.5,
         }
     }
 }
@@ -46,23 +50,220 @@ impl SoapSpec {
 
 /// Packed average SOAP of `x` (flattened 3N).
 pub fn power_spectrum(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
-    let n_at = x.len() / 3;
+    let loc = local_spectra(x, spec);
+    let n = loc.nrows();
     let mut acc = Array1::<f64>::zeros(spec.dim());
-    if n_at < 2 {
+    if n == 0 {
         return acc;
     }
-    let rcut = spec.rcut_nn * median_nn(x);
-    if !(rcut > 0.0) {
-        return acc;
+    for i in 0..n {
+        for t in 0..spec.dim() {
+            acc[t] += loc[[i, t]];
+        }
     }
-    for i in 0..n_at {
-        let p = atom_soap(x, i, n_at, rcut, spec);
-        acc += &p;
-    }
-    acc / n_at as f64
+    acc / n as f64
 }
 
-/// Central-difference Jacobian `∂p/∂R`, shape `(dim, 3N)`.
+/// Per-atom power spectra, shape `(N, dim)`.
+pub fn local_spectra(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    let n_at = x.len() / 3;
+    let dim = spec.dim();
+    let mut out = Array2::<f64>::zeros((n_at, dim));
+    if n_at < 2 {
+        return out;
+    }
+    let rcut = spec.rcut_nn;
+    if !(rcut > 0.0) {
+        return out;
+    }
+    for i in 0..n_at {
+        let (p, _) = atom_expand(x, i, n_at, rcut, spec);
+        for t in 0..dim {
+            out[[i, t]] = p[t];
+        }
+    }
+    out
+}
+
+/// Analytic Jacobian of the *stacked* local spectra, shape `(N dim, 3N)`.
+pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    let n_at = x.len() / 3;
+    let dim = spec.dim();
+    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
+    if n_at < 2 {
+        return j;
+    }
+    let rcut = spec.rcut_nn;
+    if !(rcut > 0.0) {
+        return j;
+    }
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let mut c = vec![vec![0.0; spec.n_max * n_lm]; n_at];
+    for i in 0..n_at {
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec);
+        c[i] = ci;
+    }
+    for i in 0..n_at {
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for jj in 0..n_at {
+            if jj == i {
+                continue;
+            }
+            let d = [
+                x[3 * jj] - xi[0],
+                x[3 * jj + 1] - xi[1],
+                x[3 * jj + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= rcut || r < 1e-12 {
+                continue;
+            }
+            let u = [d[0] / r, d[1] / r, d[2] / r];
+            let (ylm, dylm) = tesseral(u, spec.l_max);
+            let fc = fcut(r, rcut);
+            let dfc = dfcut(r, rcut);
+            for n in 0..spec.n_max {
+                let g = radial(n, r, rcut);
+                let dg = dradial(n, r, rcut);
+                let w = g * fc;
+                let dw = dg * fc + g * dfc;
+                for lm in 0..n_lm {
+                    let y = ylm[lm];
+                    for a in 0..3 {
+                        let dy = {
+                            let mut s = 0.0;
+                            for b in 0..3 {
+                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                                s += dylm[lm][b] * proj;
+                            }
+                            s / r
+                        };
+                        let dc_j = dw * u[a] * y + w * dy;
+                        accumulate_dp(&mut j, i, dim, spec, n_lm, &c[i], n, lm, dc_j, 3 * jj + a);
+                        accumulate_dp(&mut j, i, dim, spec, n_lm, &c[i], n, lm, -dc_j, 3 * i + a);
+                    }
+                }
+            }
+        }
+    }
+    j
+}
+
+fn accumulate_dp(
+    j: &mut Array2<f64>,
+    i: usize,
+    dim: usize,
+    spec: SoapSpec,
+    n_lm: usize,
+    c: &[f64],
+    n: usize,
+    lm: usize,
+    dc: f64,
+    col: usize,
+) {
+    // p_{n n' l} = Σ_m c_{n lm} c_{n' lm}. lm here is the packed (l,m) index.
+    let l = lm_to_l(lm);
+    let mut t = 0usize;
+    for na in 0..spec.n_max {
+        for np in na..spec.n_max {
+            for ll in 0..=spec.l_max {
+                if ll == l {
+                    let c_n = c[na * n_lm + lm];
+                    let c_np = c[np * n_lm + lm];
+                    let d = if na == n && np == n {
+                        2.0 * c_n * dc
+                    } else if na == n {
+                        dc * c_np
+                    } else if np == n {
+                        c_n * dc
+                    } else {
+                        0.0
+                    };
+                    j[[i * dim + t, col]] += d;
+                }
+                t += 1;
+            }
+        }
+    }
+}
+
+fn lm_to_l(lm: usize) -> usize {
+    // lm = l^2 + (m+l), so l = floor(sqrt(lm))
+    let mut l = 0usize;
+    while (l + 1) * (l + 1) <= lm {
+        l += 1;
+    }
+    l
+}
+
+/// Cartesian displacement that realises a SOAP residual through analytic `J`.
+pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
+    let loc = local_spectra(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    let mut dp = Array1::zeros(n_at * dim);
+    if target.len() == dim {
+        let p = power_spectrum(x, spec);
+        for i in 0..n_at {
+            for t in 0..dim {
+                dp[i * dim + t] = (target[t] - p[t]) / n_at.max(1) as f64;
+            }
+        }
+    } else if target.len() == n_at * dim {
+        for i in 0..n_at {
+            for t in 0..dim {
+                dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+            }
+        }
+    } else {
+        return Array1::zeros(x.len());
+    }
+    let j = jacobian(x, spec);
+    let mut dr = tikhonov_jtj(&j, dp.view(), 1e-3);
+    strip_rigid(x, &mut dr);
+    dr
+}
+
+/// Residual step: local environments move away from their mean, pulled
+/// back by analytic `J`. `rmsd` is a cap, not a rescaling of a null FD.
+pub fn step_away<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    _observed: &[Array1<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+    _rng: &mut R,
+) -> Array1<f64> {
+    let loc = local_spectra(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    if n_at == 0 || dim == 0 {
+        return x.to_owned();
+    }
+    let mut mu = vec![0.0; dim];
+    for i in 0..n_at {
+        for t in 0..dim {
+            mu[t] += loc[[i, t]] / n_at as f64;
+        }
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            // p_i + (p_i − μ) = 2 p_i − μ: walk away from the mean environment.
+            target[i * dim + t] = 2.0 * loc[[i, t]] - mu[t];
+        }
+    }
+    let mut dr = pullback(x, target.view(), spec);
+    let cap = rmsd.max(1e-6);
+    let n = n_at.max(1) as f64;
+    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+    if cur > cap {
+        dr *= cap / cur;
+    }
+    &x.to_owned() + &dr
+}
+
+/// Finite-difference Jacobian of the *global* average, test-only.
+#[cfg(test)]
 pub fn jacobian_fd(x: ArrayView1<f64>, spec: SoapSpec, eps: f64) -> Array2<f64> {
     let dim = spec.dim();
     let n = x.len();
@@ -84,84 +285,13 @@ pub fn jacobian_fd(x: ArrayView1<f64>, spec: SoapSpec, eps: f64) -> Array2<f64> 
     j
 }
 
-/// Cartesian displacement that realises `target − p(x)` in SOAP space.
-pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
-    let p = power_spectrum(x, spec);
-    let mut dp = Array1::zeros(p.len());
-    for i in 0..p.len() {
-        dp[i] = target.get(i).copied().unwrap_or(0.0) - p[i];
-    }
-    let j = jacobian_fd(x, spec, 1e-4);
-    tikhonov(&j, dp.view(), 1e-4)
-}
-
-/// A residual SOAP step from `x`: direction orthogonal to the span of
-/// `observed` power spectra (or a random direction if that span is full),
-/// pulled back and scaled to Cartesian RMSD `rmsd`.
-pub fn step_away<R: Rng + ?Sized>(
+fn atom_expand(
     x: ArrayView1<f64>,
-    observed: &[Array1<f64>],
+    i: usize,
+    n_at: usize,
+    rcut: f64,
     spec: SoapSpec,
-    rmsd: f64,
-    rng: &mut R,
-) -> Array1<f64> {
-    let p = power_spectrum(x, spec);
-    let dim = p.len();
-    if dim == 0 || x.len() < 3 {
-        return x.to_owned();
-    }
-    let u = residual_direction(&p, observed, rng);
-    let step = 0.2 * p.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-3);
-    let target = &p + &(u * step);
-    let mut dr = pullback(x, target.view(), spec);
-    let n_at = (x.len() / 3).max(1) as f64;
-    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n_at).sqrt();
-    let want = rmsd.max(1e-6);
-    if cur > 1e-12 {
-        dr *= want / cur;
-    }
-    &x.to_owned() + &dr
-}
-
-fn residual_direction<R: Rng + ?Sized>(
-    p: &Array1<f64>,
-    observed: &[Array1<f64>],
-    rng: &mut R,
-) -> Array1<f64> {
-    let dim = p.len();
-    let mut u = Array1::from_vec((0..dim).map(|_| rng.random::<f64>() - 0.5).collect());
-    // Deflate directions already present in the archive mean and the
-    // incumbent SOAP. What remains is the residual cell in p-space.
-    if !observed.is_empty() {
-        let mut mu = Array1::<f64>::zeros(dim);
-        let mut n = 0.0;
-        for q in observed {
-            if q.len() != dim {
-                continue;
-            }
-            mu = mu + q;
-            n += 1.0;
-        }
-        if n > 0.0 {
-            mu /= n;
-            let d = p - &mu;
-            let dn = d.iter().map(|v| v * v).sum::<f64>().sqrt();
-            if dn > 1e-12 {
-                // Walk *away* from the observed mean, then remove that
-                // component from the random draw so U is not the ico axis.
-                let proj = u.iter().zip(d.iter()).map(|(a, b)| a * b).sum::<f64>() / (dn * dn);
-                for i in 0..dim {
-                    u[i] -= proj * d[i];
-                }
-                u = u + &(&d / dn);
-            }
-        }
-    }
-    let nn = u.iter().map(|v| v * v).sum::<f64>().sqrt().max(1e-12);
-    u / nn
-}
-
-fn atom_soap(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64, spec: SoapSpec) -> Array1<f64> {
+) -> (Array1<f64>, Vec<f64>) {
     let n_max = spec.n_max;
     let l_max = spec.l_max;
     let n_lm = (l_max + 1) * (l_max + 1);
@@ -176,13 +306,14 @@ fn atom_soap(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64, spec: SoapSpe
         if r >= rcut || r < 1e-12 {
             continue;
         }
+        let u = [d[0] / r, d[1] / r, d[2] / r];
+        let (ylm, _) = tesseral(u, l_max);
         let fc = fcut(r, rcut);
-        let ylm = real_ylm_all(d, l_max);
         for n in 0..n_max {
-            let gn = radial(n, r, rcut) * fc;
+            let w = radial(n, r, rcut) * fc;
             let base = n * n_lm;
             for (lm, &y) in ylm.iter().enumerate() {
-                c[base + lm] += gn * y;
+                c[base + lm] += w * y;
             }
         }
     }
@@ -201,12 +332,24 @@ fn atom_soap(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64, spec: SoapSpe
             }
         }
     }
-    p
+    (p, c)
 }
 
 fn radial(n: usize, r: f64, rcut: f64) -> f64 {
+    if r <= 0.0 {
+        return if n == 0 { 1.0 } else { 0.0 };
+    }
     let u = (r / rcut).clamp(0.0, 1.0);
     u.powi(n as i32) * (-0.5 * (r / (rcut / 3.0)).powi(2)).exp()
+}
+
+fn dradial(n: usize, r: f64, rcut: f64) -> f64 {
+    if r <= 1e-15 {
+        return 0.0;
+    }
+    let g = radial(n, r, rcut);
+    let sigma = rcut / 3.0;
+    g * (n as f64 / r - r / (sigma * sigma))
 }
 
 fn fcut(r: f64, rcut: f64) -> f64 {
@@ -217,136 +360,209 @@ fn fcut(r: f64, rcut: f64) -> f64 {
     }
 }
 
+fn dfcut(r: f64, rcut: f64) -> f64 {
+    if r >= rcut || r <= 0.0 {
+        0.0
+    } else {
+        -0.5 * (PI / rcut) * (PI * r / rcut).sin()
+    }
+}
+
 fn lm_index(l: usize, m: i32) -> usize {
     l * l + (m + l as i32) as usize
 }
 
-fn real_ylm_all(d: [f64; 3], l_max: usize) -> Vec<f64> {
-    let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt().max(1e-15);
-    let x = d[0] / r;
-    let y = d[1] / r;
-    let z = d[2] / r;
-    let ct = z.clamp(-1.0, 1.0);
-    let st = (1.0 - ct * ct).sqrt();
-    let phi = y.atan2(x);
+/// Real tesseral Y_lm(u) and ∂Y/∂u of the harmonic polynomial, |u|=1.
+fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
     let n_lm = (l_max + 1) * (l_max + 1);
-    let mut out = vec![0.0; n_lm];
-    for l in 0..=l_max {
-        for m in -(l as i32)..=(l as i32) {
-            out[lm_index(l, m)] = real_ylm(l, m, ct, st, phi);
-        }
+    let mut y = vec![0.0; n_lm];
+    let mut dy = vec![[0.0; 3]; n_lm];
+    let (x, yy, z) = (u[0], u[1], u[2]);
+    let s = (4.0 * PI).sqrt();
+    // l = 0
+    y[0] = 1.0 / s;
+    if l_max == 0 {
+        return (y, dy);
     }
-    out
+    let n1 = (3.0 / (4.0 * PI)).sqrt();
+    y[lm_index(1, -1)] = n1 * yy;
+    dy[lm_index(1, -1)] = [0.0, n1, 0.0];
+    y[lm_index(1, 0)] = n1 * z;
+    dy[lm_index(1, 0)] = [0.0, 0.0, n1];
+    y[lm_index(1, 1)] = n1 * x;
+    dy[lm_index(1, 1)] = [n1, 0.0, 0.0];
+    if l_max == 1 {
+        return (y, dy);
+    }
+    let n2m = (15.0 / (4.0 * PI)).sqrt();
+    let n20 = (5.0 / (16.0 * PI)).sqrt();
+    let n22 = (15.0 / (16.0 * PI)).sqrt();
+    y[lm_index(2, -2)] = n2m * x * yy;
+    dy[lm_index(2, -2)] = [n2m * yy, n2m * x, 0.0];
+    y[lm_index(2, -1)] = n2m * yy * z;
+    dy[lm_index(2, -1)] = [0.0, n2m * z, n2m * yy];
+    // 3z^2-1 = 2z^2-x^2-y^2 on the sphere
+    y[lm_index(2, 0)] = n20 * (2.0 * z * z - x * x - yy * yy);
+    dy[lm_index(2, 0)] = [n20 * (-2.0 * x), n20 * (-2.0 * yy), n20 * 4.0 * z];
+    y[lm_index(2, 1)] = n2m * x * z;
+    dy[lm_index(2, 1)] = [n2m * z, 0.0, n2m * x];
+    y[lm_index(2, 2)] = n22 * (x * x - yy * yy);
+    dy[lm_index(2, 2)] = [n22 * 2.0 * x, n22 * (-2.0 * yy), 0.0];
+    if l_max == 2 {
+        return (y, dy);
+    }
+    let n33 = (35.0 / (32.0 * PI)).sqrt();
+    let n32 = (105.0 / (4.0 * PI)).sqrt();
+    let n31 = (21.0 / (32.0 * PI)).sqrt();
+    let n30 = (7.0 / (16.0 * PI)).sqrt();
+    let n32z = (105.0 / (16.0 * PI)).sqrt();
+    y[lm_index(3, -3)] = n33 * yy * (3.0 * x * x - yy * yy);
+    dy[lm_index(3, -3)] = [n33 * yy * 6.0 * x, n33 * (3.0 * x * x - 3.0 * yy * yy), 0.0];
+    y[lm_index(3, -2)] = n32 * x * yy * z;
+    dy[lm_index(3, -2)] = [n32 * yy * z, n32 * x * z, n32 * x * yy];
+    // y(5z^2-1) = y(4z^2-x^2-y^2)
+    y[lm_index(3, -1)] = n31 * yy * (4.0 * z * z - x * x - yy * yy);
+    dy[lm_index(3, -1)] = [
+        n31 * yy * (-2.0 * x),
+        n31 * (4.0 * z * z - x * x - 3.0 * yy * yy),
+        n31 * yy * 8.0 * z,
+    ];
+    // z(5z^2-3) = z(2z^2-3x^2-3y^2)
+    y[lm_index(3, 0)] = n30 * z * (2.0 * z * z - 3.0 * x * x - 3.0 * yy * yy);
+    dy[lm_index(3, 0)] = [
+        n30 * (-6.0 * x * z),
+        n30 * (-6.0 * yy * z),
+        n30 * (6.0 * z * z - 3.0 * x * x - 3.0 * yy * yy),
+    ];
+    y[lm_index(3, 1)] = n31 * x * (4.0 * z * z - x * x - yy * yy);
+    dy[lm_index(3, 1)] = [
+        n31 * (4.0 * z * z - 3.0 * x * x - yy * yy),
+        n31 * x * (-2.0 * yy),
+        n31 * x * 8.0 * z,
+    ];
+    y[lm_index(3, 2)] = n32z * z * (x * x - yy * yy);
+    dy[lm_index(3, 2)] = [
+        n32z * z * 2.0 * x,
+        n32z * z * (-2.0 * yy),
+        n32z * (x * x - yy * yy),
+    ];
+    y[lm_index(3, 3)] = n33 * x * (x * x - 3.0 * yy * yy);
+    dy[lm_index(3, 3)] = [
+        n33 * (3.0 * x * x - 3.0 * yy * yy),
+        n33 * x * (-6.0 * yy),
+        0.0,
+    ];
+    let _ = l_max;
+    (y, dy)
 }
 
-fn real_ylm(l: usize, m: i32, ct: f64, st: f64, phi: f64) -> f64 {
-    let ma = m.unsigned_abs() as usize;
-    let p = assoc_legendre(l, ma, ct, st);
-    let nrm = sph_norm(l, ma);
-    if m == 0 {
-        nrm * p
-    } else if m > 0 {
-        std::f64::consts::SQRT_2 * nrm * p * (ma as f64 * phi).cos()
-    } else {
-        std::f64::consts::SQRT_2 * nrm * p * (ma as f64 * phi).sin()
-    }
-}
-
-fn sph_norm(l: usize, m: usize) -> f64 {
-    // sqrt((2l+1)/4π · (l-m)!/(l+m)!)
-    let mut f = (2 * l + 1) as f64 / (4.0 * PI);
-    for k in 0..(2 * m) {
-        f /= (l - m + 1 + k) as f64;
-    }
-    f.sqrt()
-}
-
-/// Ferrers `P_l^m(cos θ)` with `(sin θ)^m` factored as `st^m`.
-fn assoc_legendre(l: usize, m: usize, ct: f64, st: f64) -> f64 {
-    if m > l {
-        return 0.0;
-    }
-    // P_m^m = (-1)^m (2m-1)!! st^m
-    let mut pmm = 1.0;
-    if m > 0 {
-        let mut odd = 1.0;
-        for k in 1..=m {
-            pmm *= -odd * st;
-            odd += 2.0;
-        }
-    }
-    if l == m {
-        return pmm;
-    }
-    let mut pmmp1 = ct * (2 * m + 1) as f64 * pmm;
-    if l == m + 1 {
-        return pmmp1;
-    }
-    let mut pll = 0.0;
-    for ll in (m + 2)..=l {
-        pll = (ct * (2 * ll - 1) as f64 * pmmp1 - (ll + m - 1) as f64 * pmm) / (ll - m) as f64;
-        pmm = pmmp1;
-        pmmp1 = pll;
-    }
-    pll
-}
-
-fn median_nn(x: ArrayView1<f64>) -> f64 {
+fn strip_rigid(x: ArrayView1<f64>, dr: &mut Array1<f64>) {
     let n = x.len() / 3;
-    if n < 2 {
-        return 1.0;
+    if n == 0 {
+        return;
     }
-    let mut nn = Vec::with_capacity(n);
+    let mut com = [0.0; 3];
+    let mut mean_dr = [0.0; 3];
     for i in 0..n {
-        let mut best = f64::INFINITY;
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let d2: f64 = (0..3)
-                .map(|k| {
-                    let d = x[3 * i + k] - x[3 * j + k];
-                    d * d
-                })
-                .sum();
-            if d2 < best {
-                best = d2;
+        for a in 0..3 {
+            com[a] += x[3 * i + a];
+            mean_dr[a] += dr[3 * i + a];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for a in 0..3 {
+        com[a] *= inv;
+        mean_dr[a] *= inv;
+    }
+    for i in 0..n {
+        for a in 0..3 {
+            dr[3 * i + a] -= mean_dr[a];
+        }
+    }
+    // Least-squares ω: I ω = Σ r × dr
+    let mut inertia = [[0.0; 3]; 3];
+    let mut rhs = [0.0; 3];
+    for i in 0..n {
+        let r = [
+            x[3 * i] - com[0],
+            x[3 * i + 1] - com[1],
+            x[3 * i + 2] - com[2],
+        ];
+        let v = [dr[3 * i], dr[3 * i + 1], dr[3 * i + 2]];
+        rhs[0] += r[1] * v[2] - r[2] * v[1];
+        rhs[1] += r[2] * v[0] - r[0] * v[2];
+        rhs[2] += r[0] * v[1] - r[1] * v[0];
+        let r2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        for a in 0..3 {
+            inertia[a][a] += r2;
+            for b in 0..3 {
+                inertia[a][b] -= r[a] * r[b];
             }
         }
-        nn.push(best.sqrt());
     }
-    nn.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    nn[n / 2]
+    for a in 0..3 {
+        inertia[a][a] += 1e-9;
+    }
+    if let Some(w) = solve3(inertia, rhs) {
+        for i in 0..n {
+            let r = [
+                x[3 * i] - com[0],
+                x[3 * i + 1] - com[1],
+                x[3 * i + 2] - com[2],
+            ];
+            dr[3 * i] -= w[1] * r[2] - w[2] * r[1];
+            dr[3 * i + 1] -= w[2] * r[0] - w[0] * r[2];
+            dr[3 * i + 2] -= w[0] * r[1] - w[1] * r[0];
+        }
+    }
 }
 
-/// Solve `(J J^T + λ I) μ = dp`, return `J^T μ`.
-fn tikhonov(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
+fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
+    let det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+        - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+        + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    if det.abs() < 1e-18 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let mut c = [[0.0; 3]; 3];
+    c[0][0] = (a[1][1] * a[2][2] - a[1][2] * a[2][1]) * inv;
+    c[0][1] = (a[0][2] * a[2][1] - a[0][1] * a[2][2]) * inv;
+    c[0][2] = (a[0][1] * a[1][2] - a[0][2] * a[1][1]) * inv;
+    c[1][0] = (a[1][2] * a[2][0] - a[1][0] * a[2][2]) * inv;
+    c[1][1] = (a[0][0] * a[2][2] - a[0][2] * a[2][0]) * inv;
+    c[1][2] = (a[0][2] * a[1][0] - a[0][0] * a[1][2]) * inv;
+    c[2][0] = (a[1][0] * a[2][1] - a[1][1] * a[2][0]) * inv;
+    c[2][1] = (a[0][1] * a[2][0] - a[0][0] * a[2][1]) * inv;
+    c[2][2] = (a[0][0] * a[1][1] - a[0][1] * a[1][0]) * inv;
+    Some([
+        c[0][0] * b[0] + c[0][1] * b[1] + c[0][2] * b[2],
+        c[1][0] * b[0] + c[1][1] * b[1] + c[1][2] * b[2],
+        c[2][0] * b[0] + c[2][1] * b[1] + c[2][2] * b[2],
+    ])
+}
+
+/// Solve `(J^T J + λ I) dr = J^T dp`.
+fn tikhonov_jtj(j: &Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
     let nfeat = j.nrows();
     let ncoord = j.ncols();
-    let mut a = Array2::<f64>::zeros((nfeat, nfeat));
-    for i in 0..nfeat {
-        for k in 0..nfeat {
-            let mut s = 0.0;
-            for c in 0..ncoord {
-                s += j[[i, c]] * j[[k, c]];
-            }
-            a[[i, k]] = s;
-        }
-        a[[i, i]] += lambda.max(1e-12);
-    }
-    let mu = match chol_solve(&a, &dp.to_owned()) {
-        Some(v) => v,
-        None => return Array1::zeros(ncoord),
-    };
-    let mut dr = Array1::<f64>::zeros(ncoord);
+    let mut a = Array2::<f64>::zeros((ncoord, ncoord));
+    let mut rhs = Array1::<f64>::zeros(ncoord);
     for c in 0..ncoord {
-        let mut s = 0.0;
         for i in 0..nfeat {
-            s += j[[i, c]] * mu[i];
+            rhs[c] += j[[i, c]] * dp[i];
         }
-        dr[c] = s;
+        for d in 0..=c {
+            let mut s = 0.0;
+            for i in 0..nfeat {
+                s += j[[i, c]] * j[[i, d]];
+            }
+            a[[c, d]] = s;
+            a[[d, c]] = s;
+        }
+        a[[c, c]] += lambda.max(1e-12);
     }
-    dr
+    chol_solve(&a, &rhs).unwrap_or_else(|| Array1::zeros(ncoord))
 }
 
 fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
@@ -394,9 +610,15 @@ mod tests {
     use rand::rngs::StdRng;
 
     fn tetra() -> Array1<f64> {
-        // Regular tetrahedron, edge ~√2.
+        // Regular tetrahedron, edge ~√8.
         Array1::from_vec(vec![
             1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ])
+    }
+
+    fn squashed() -> Array1<f64> {
+        Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
         ])
     }
 
@@ -429,9 +651,7 @@ mod tests {
     fn distinct_shapes_have_distinct_soap() {
         let spec = SoapSpec::default();
         let a = tetra();
-        let mut b = tetra();
-        b[0] += 1.4;
-        b[4] -= 0.8;
+        let b = squashed();
         let pa = power_spectrum(a.view(), spec);
         let pb = power_spectrum(b.view(), spec);
         let d: f64 = pa
@@ -468,15 +688,11 @@ mod tests {
     #[test]
     fn pullback_reduces_soap_distance_to_the_target() {
         let spec = SoapSpec::default();
-        let mut x = tetra();
-        x[0] += 0.45;
-        x[5] -= 0.30;
+        let x = squashed();
         let p0 = power_spectrum(x.view(), spec);
-        // Target is the SOAP of a nearby Cartesian point, so it lies in
-        // the range of J rather than in a symmetry-null direction.
         let mut x_tgt = x.clone();
-        x_tgt[1] += 0.08;
-        x_tgt[6] -= 0.06;
+        x_tgt[1] += 0.12;
+        x_tgt[6] -= 0.10;
         let target = power_spectrum(x_tgt.view(), spec);
         let y = &x + &pullback(x.view(), target.view(), spec);
         let p1 = power_spectrum(y.view(), spec);
@@ -499,7 +715,7 @@ mod tests {
     #[test]
     fn step_away_moves_more_than_one_atom() {
         let spec = SoapSpec::default();
-        let x = tetra();
+        let x = squashed();
         let p = power_spectrum(x.view(), spec);
         let mut rng = StdRng::seed_from_u64(2);
         let y = step_away(x.view(), &[p], spec, 0.5, &mut rng);
@@ -519,5 +735,73 @@ mod tests {
             moved >= 2,
             "SOAP pullback moved {moved} atoms; expected a concerted step"
         );
+    }
+
+    #[test]
+    fn analytic_j_matches_fd_inside_the_cutoff() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 3,
+            rcut_nn: 4.0,
+        };
+        let mut x = tetra();
+        x[0] += 0.35;
+        x[4] -= 0.22;
+        x[8] += 0.18;
+        let ja = global_from_local(x.view(), spec);
+        let jf = jacobian_fd(x.view(), spec, 1e-5);
+        let mut max_a = 0.0_f64;
+        let mut max_d = 0.0_f64;
+        for t in 0..ja.nrows() {
+            for k in 0..ja.ncols() {
+                max_a = max_a.max(jf[[t, k]].abs());
+                max_d = max_d.max((ja[[t, k]] - jf[[t, k]]).abs());
+            }
+        }
+        assert!(
+            max_d < 1e-4 * max_a.max(1e-6_f64) + 1e-6,
+            "analytic J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
+        );
+    }
+
+    #[test]
+    fn global_soap_j_annihilates_translations() {
+        let spec = SoapSpec::default();
+        let mut x = tetra();
+        x[1] += 0.2;
+        let j = global_from_local(x.view(), spec);
+        for a in 0..3 {
+            let mut nrm = 0.0;
+            for t in 0..j.nrows() {
+                let mut s = 0.0;
+                for i in 0..x.len() / 3 {
+                    s += j[[t, 3 * i + a]];
+                }
+                nrm += s * s;
+            }
+            assert!(
+                nrm.sqrt() < 1e-7,
+                "translation {a} is not in ker J: {}",
+                nrm.sqrt()
+            );
+        }
+    }
+
+    fn global_from_local(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+        let jl = jacobian(x, spec);
+        let n = x.len() / 3;
+        let dim = spec.dim();
+        let mut g = Array2::<f64>::zeros((dim, 3 * n));
+        if n == 0 {
+            return g;
+        }
+        for i in 0..n {
+            for t in 0..dim {
+                for k in 0..3 * n {
+                    g[[t, k]] += jl[[i * dim + t, k]] / n as f64;
+                }
+            }
+        }
+        g
     }
 }
