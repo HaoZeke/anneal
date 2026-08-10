@@ -11,7 +11,7 @@ use crate::catalog::{Catalog, Event};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    active_mask, run_with_gradient, Config, GradFn, Ledger, Relax,
+    Config, GradFn, Ledger, Relax, active_mask, run_with_gradient,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -146,11 +146,7 @@ fn symmetry_polish(
         .map(|(s, _)| s)?
     };
     let (e, xs) = relax(ledger, y.view(), cfg.relax_steps);
-    if e.is_finite() {
-        Some((e, xs))
-    } else {
-        None
-    }
+    if e.is_finite() { Some((e, xs)) } else { None }
 }
 
 /// A later hop's start: redraw the adsorbate, or re-place rigid groups.
@@ -318,17 +314,37 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 }
 
 /// A start that can open a new energy class: redraw the adsorbate or the
-/// rigid groups when those exist, otherwise a fresh random cluster.
+/// rigid groups when those exist, otherwise a SOAP pullback from a packed rep.
 fn cluster_hole<R: Rng + ?Sized>(start: ArrayView1<f64>, cfg: &Config, rng: &mut R) -> Array1<f64> {
     if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
         return residual_start(start, cfg, rng);
     }
-    let n = if cfg.n_points > 0 {
-        cfg.n_points
-    } else {
-        start.len() / 3
-    };
-    crate::methods::cluster_hopping::random_cluster(n, 0.7, cfg.min_separation, rng)
+    soap_hole(&Archive::new(), start, cfg, rng)
+}
+
+fn soap_hole<R: Rng + ?Sized>(
+    archive: &Archive,
+    start: ArrayView1<f64>,
+    cfg: &Config,
+    rng: &mut R,
+) -> Array1<f64> {
+    if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
+        return residual_start(start, cfg, rng);
+    }
+    let seed = archive
+        .reps
+        .iter()
+        .find(|r| !r.is_empty() && r.len() == start.len())
+        .map(|r| r.view())
+        .unwrap_or(start);
+    let spec = crate::soap::SoapSpec::default();
+    let observed: Vec<_> = archive
+        .reps
+        .iter()
+        .filter(|r| !r.is_empty() && r.len() == seed.len())
+        .map(|r| crate::soap::power_spectrum(r.view(), spec))
+        .collect();
+    crate::soap::step_away(seed, &observed, spec, 0.55, rng)
 }
 
 /// Shake atoms that carry `key` so the residual hop leaves that topology.
@@ -371,9 +387,10 @@ fn residual_origin<R: Rng + ?Sized>(
             return (Some(k), residual_from_key(x.view(), k, rng));
         }
     }
-    // Residual cell U outranks mapped floors: a new draw opens a class.
+    // Residual cell U: a SOAP-space step pulled back through J, not a
+    // one-atom shake and not a CSA splice.
     if archive.residual.best_node().is_none() {
-        let x0 = cluster_hole(start, cfg, rng);
+        let x0 = soap_hole(archive, start, cfg, rng);
         let keys = local_keys(key_coords(x0.view(), cfg).view(), LOCAL_CUTOFF);
         return (keys.first().copied(), x0);
     }
@@ -394,7 +411,7 @@ fn residual_origin<R: Rng + ?Sized>(
         if let Some(x) = archive.key_reps.get(&k) {
             return (Some(k), residual_from_key(x.view(), k, rng));
         }
-        return (Some(k), cluster_hole(start, cfg, rng));
+        return (Some(k), soap_hole(archive, start, cfg, rng));
     }
     let seed = archive
         .reps
@@ -402,7 +419,7 @@ fn residual_origin<R: Rng + ?Sized>(
         .find(|r| !r.is_empty())
         .map(|r| r.view())
         .unwrap_or(start);
-    (None, cluster_hole(seed, cfg, rng))
+    (None, soap_hole(archive, seed, cfg, rng))
 }
 
 fn fold_hop(acc: &mut HopAcc, hop: &crate::methods::cluster_hopping::Outcome, at: usize) {
@@ -773,8 +790,8 @@ fn key_coords(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
 mod tests {
     use super::*;
     use crate::methods::cluster_hopping::random_cluster;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn lj(x: ArrayView1<f64>) -> f64 {
         let n = x.len() / 3;
@@ -1062,17 +1079,23 @@ mod tests {
             "incumbent keys are still due; that is the trap the hole must beat"
         );
         let (_from, x0) = residual_origin(&archive, &rec, start.view(), &mut rng);
-        // A due_key polish moves each coordinate by at most 0.8. A hole
-        // that opens a new class is a new draw, so some coordinate leaves
-        // that box.
-        let max_shift = start
-            .iter()
-            .zip(x0.iter())
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0_f64, f64::max);
+        // A SOAP pullback is concerted: more than one atom leaves its site.
+        // A due_key 1.6-shake of one local key can move a single atom only.
+        let n = start.len() / 3;
+        let mut moved = 0usize;
+        for i in 0..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x0[3 * i + k] - start[3 * i + k];
+                d2 += d * d;
+            }
+            if d2.sqrt() > 0.05 {
+                moved += 1;
+            }
+        }
         assert!(
-            max_shift > 0.81,
-            "residual origin stayed on the incumbent (max_shift={max_shift}); due_key polish does not open a floor"
+            moved >= 2,
+            "residual origin was not a SOAP pullback (moved {moved} atoms)"
         );
     }
 
