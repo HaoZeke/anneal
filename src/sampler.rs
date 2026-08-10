@@ -8,7 +8,7 @@
 //! type bound and a single dispatch point.
 
 use eindir_core::{Bounds, FPair};
-use ndarray::Array1;
+use ndarray::{Array1, ArrayView1};
 use num_traits::Float;
 use rand::Rng;
 use std::sync::Mutex;
