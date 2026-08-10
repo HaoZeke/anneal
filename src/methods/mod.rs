@@ -26,6 +26,11 @@ pub mod committor_pop;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
+/// Residual archive search: local events, floors, cheap novelty loop.
+#[cfg(feature = "graphkey")]
+pub mod archive_search;
+#[cfg(feature = "graphkey")]
+pub use archive_search::{archive_search, Archive, ArchiveOutcome};
 /// Quasi-Newton relaxation whose curvature persists between calls.
 pub mod warm_lbfgs;
 pub mod additive_independence;
