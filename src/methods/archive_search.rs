@@ -9,7 +9,7 @@ use crate::catalog::Catalog;
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    active_mask, run_with_gradient, Config, GradFn, Ledger, MoveLibrary, Relax,
+    active_mask, run_with_gradient, Config, GradFn, Ledger, Relax,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -260,12 +260,11 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
         let slab = cfg.active_region.is_some();
         if molecular {
-            // Hop 1 is the recommended molecular walk on a 90 % slice so
-            // rec's prism (hit_at 1074 and 1780) is still inside the hop.
-            // The leftover is a reactive walk from a re-placed packing.
-            // Rec seed 1's last improvement sits at 1806 of 2000.
-            // Leave three 60-step quenches for residual packings.
-            let p1 = cap.saturating_sub(180).max(1);
+            // Cold-SCF rec hits the low isomer (-829.8477 eV) at 877 on
+            // seed 0. Hop 1 is that recommended walk just past 877; the
+            // leftover is two rec-quality walks from re-placed packings.
+            // Three 60-step quenches never left that isomer.
+            let p1 = 900.min(cap);
             let mut led1 = Ledger::new(p1);
             let hop1 = run_with_gradient(
                 cfg,
@@ -280,23 +279,15 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             let at1 = hop_best_at(&hop1, used1);
             let rest = ledger.remaining();
             let acc = if rest > 0 {
-                let mut c2 = cfg.clone();
-                if let MoveLibrary::Molecular { groups, .. } = &cfg.move_library {
-                    c2.move_library = MoveLibrary::Molecular {
-                        groups: groups.clone(),
-                        reactive: true,
-                    };
-                }
-                c2.symmetrise_on_stall = true;
-                let q = (rest / 3).max(1);
+                let half = (rest / 2).max(1);
                 let acc2 = hops_from_start(
-                    &c2,
+                    cfg,
                     start,
                     ledger,
                     relax,
                     grad.as_deref_mut(),
                     rng,
-                    &[q, q, rest.saturating_sub(2 * q).max(1)],
+                    &[half, rest.saturating_sub(half).max(1)],
                     true,
                 );
                 let (best, best_state, best_at, basins) = if acc2.best < hop1.best - 1e-12 {
