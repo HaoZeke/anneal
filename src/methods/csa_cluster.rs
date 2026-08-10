@@ -19,13 +19,13 @@
 //! nothing.
 
 use crate::bias::{BasinBias, Fingerprint, SortedPairs};
-use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::diversity::DiversityAnnealer;
 use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
+use crate::methods::cluster_hopping::ClusterFingerprint;
+use crate::methods::cluster_hopping::{Config, GradFn, Ledger, Outcome, Relax, random_cluster};
+use crate::methods::splice::cut_and_splice;
 use crate::structure::cna_descriptor;
-use crate::path::interpolate_path;
-use crate::methods::cluster_hopping::{random_cluster, Config, GradFn, Ledger, Outcome, Relax};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -54,15 +54,15 @@ pub struct BankConfig {
     /// icosahedral structures, each shape-distinct under the threshold and all
     /// in the same funnel, because each member's chain descends on its own and
     /// nothing ever puts two of them together. The published method mixes by
-    /// cutting one solution and splicing in part of another.
-    ///
-    /// What mixes here instead is a path. Two minima are interpolated and the
-    /// images between them are relaxed, which is the crate's own
-    /// [`crate::path`] and carries a physical reading a splice does not: the
-    /// images are structures on the way from one minimum to the other, and a
-    /// third funnel entered from that route is a real neighbour of both.
+    /// cutting one solution and splicing in part of another; that is
+    /// [`crate::methods::splice`], and it is the mix used when this fraction
+    /// fires. The trial is not a minimum: the caller quenches it and offers
+    /// the relaxed structure to the bank.
     pub mix_fraction: f64,
-    /// Images relaxed along a mixing path.
+    /// Independent splice trials drawn from one pair in a mixing round.
+    ///
+    /// Each trial is a different plane and a separate quench, so one mix can
+    /// offer several children without starting a chain slice for each.
     pub mix_images: usize,
     /// Choose the next member to search from by expected improvement over
     /// morphology, rather than by which has been used least.
@@ -249,8 +249,16 @@ where
             break;
         }
         let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
-        let (out, spent_before) =
-            slice_run(cfg, ledger, relax, &mut grad, &mut bias, start.view(), bank_cfg.slice, &mut rng);
+        let (out, spent_before) = slice_run(
+            cfg,
+            ledger,
+            relax,
+            &mut grad,
+            &mut bias,
+            start.view(),
+            bank_cfg.slice,
+            &mut rng,
+        );
         // Offset each slice's counts by what the campaign had already spent,
         // since a slice keeps its own sub-ledger and starts from zero.
         for &(h, c, b, e) in &out.improvements {
@@ -264,7 +272,10 @@ where
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(), out.best);
+                funnel.observe(
+                    cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(),
+                    out.best,
+                );
             }
             bank.seed(s.view(), out.best);
         }
@@ -312,7 +323,9 @@ where
         };
         bank.mark_used(i);
 
-        // A mixing round: relax the images between this member and another.
+        // A mixing round: cut-and-splice this member with another, quench the
+        // trial, and offer what comes back. One quench per trial, charged on
+        // the shared ledger, so a bank of k does not spend k times the budget.
         if bank.len() >= 2 && rng.random::<f64>() < bank_cfg.mix_fraction {
             // The partner comes from the working bank or from the first bank,
             // as in Lee, Lee and Scheraga. Drawing only from the working bank
@@ -334,31 +347,24 @@ where
             };
             let a = bank.members()[i].state.clone();
             let ea = bank.members()[i].energy;
-            let path = interpolate_path(
-                a.view(),
-                b.view(),
-                bank_cfg.mix_images,
-                |y| {
-                    if ledger.remaining() == 0 {
-                        return None;
-                    }
-                    let (e, x) = relax(ledger, y, cfg.relax_steps);
-                    ledger.record(e, x.view());
-                    Some((e, x))
-                },
-                // Every image is offered, so nothing has to be judged as an
-                // escape here: the bank's own rule decides what it is.
-                |_| false,
-            );
+            let species = cfg.species.as_deref();
+            let n_trials = bank_cfg.mix_images.max(1);
             mixes += 1;
-            for pt in &path.points {
+            for _ in 0..n_trials {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let trial =
+                    cut_and_splice(a.view(), b.view(), species, cfg.min_separation, &mut rng);
+                let (e, x) = relax(ledger, trial.view(), cfg.relax_steps);
+                ledger.record(e, x.view());
                 if !matches!(
-                    bank.offer(pt.state.view(), pt.energy, &mut distance),
+                    bank.offer(x.view(), e, &mut distance),
                     Admission::Duplicate(_) | Admission::Rejected
                 ) {
                     mix_admitted += 1;
                 }
-                if pt.energy < ea.min(eb) {
+                if e < ea.min(eb) {
                     mix_below_both += 1;
                 }
             }
@@ -374,8 +380,16 @@ where
             *v += rng.random_range(-0.15..0.15);
         }
 
-        let (out, spent_before) =
-            slice_run(cfg, ledger, relax, &mut grad, &mut bias, kick.view(), bank_cfg.slice, &mut rng);
+        let (out, spent_before) = slice_run(
+            cfg,
+            ledger,
+            relax,
+            &mut grad,
+            &mut bias,
+            kick.view(),
+            bank_cfg.slice,
+            &mut rng,
+        );
         // Offset each slice's counts by what the campaign had already spent,
         // since a slice keeps its own sub-ledger and starts from zero.
         for &(h, c, b, e) in &out.improvements {
@@ -389,7 +403,10 @@ where
         basins += out.basins;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(), out.best);
+                funnel.observe(
+                    cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(),
+                    out.best,
+                );
             }
             match bank.offer(s.view(), out.best, &mut distance) {
                 Admission::Improved(_) => improved += 1,
@@ -469,8 +486,7 @@ mod tests {
                 break;
             }
             for v in cur.iter_mut() {
-                let g = 2.0 * std::f64::consts::PI
-                    * (2.0 * std::f64::consts::PI * *v).sin()
+                let g = 2.0 * std::f64::consts::PI * (2.0 * std::f64::consts::PI * *v).sin()
                     + 0.02 * *v;
                 *v -= 0.02 * g;
             }
@@ -547,7 +563,7 @@ mod tests {
     /// Mixing has to actually run and actually offer what it finds, or the
     /// bank holds variants of one region rather than distinct regions.
     #[test]
-    fn mixing_rounds_offer_the_images_between_two_members() {
+    fn mixing_rounds_offer_spliced_children() {
         let cfg = small_config(8);
         let bank_cfg = BankConfig {
             capacity: 6,
