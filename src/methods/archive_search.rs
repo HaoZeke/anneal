@@ -281,13 +281,11 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             }
             let sc_coords = key_coords(x_sc.view(), cfg);
             let sc_key = contact_key(sc_coords.view(), LOCAL_CUTOFF);
-            let sc_keys = local_keys(sc_coords.view(), LOCAL_CUTOFF);
-            let sc_bag = bag_key(&sc_keys);
             if is_return(
                 sc_key,
                 here_key,
-                sc_bag,
-                here_bag,
+                sc_key,
+                here_key,
                 e_sc,
                 e,
                 cfg.screen_margin,
