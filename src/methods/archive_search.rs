@@ -114,6 +114,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
 ) -> ArchiveOutcome {
     let mut c = cfg.clone();
     c.return_screen = true;
+    c.return_polish = (cfg.relax_steps / 4).max(1);
     c.symmetrise_on_stall = true;
     let hop = run_with_gradient(&c, start, ledger, relax, grad, rng);
     if hop.best.is_finite() {
@@ -272,6 +273,7 @@ mod tests {
             "archive_search mutated the caller's recommended config"
         );
         assert!(!rec.return_screen);
+        assert_eq!(rec.return_polish, 0);
         assert!(!rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 200);
