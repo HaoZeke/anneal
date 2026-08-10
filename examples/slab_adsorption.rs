@@ -246,8 +246,8 @@ fn main() {
         box_,
         failures: 0,
     });
-    let mut profile_eng = profile_prefix(engine)
-        .map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
+    let mut profile_eng =
+        profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
 
     for seed in seed0..(seed0 + seeds) {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
@@ -288,13 +288,7 @@ fn main() {
                     return None;
                 }
                 let (energy, mut gradient) = profile_eng.as_mut()?.eval(v)?;
-                let active = active_mask(
-                    v,
-                    &species,
-                    &free_seeds,
-                    shells,
-                    cfg.bond_tolerance,
-                );
+                let active = active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
                 for (atom, is_active) in active.into_iter().enumerate() {
                     if !is_active {
                         for axis in 0..3 {

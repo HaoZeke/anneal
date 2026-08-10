@@ -22,9 +22,7 @@ pub(crate) fn profile_request<'a>(
     }
 }
 
-pub(crate) fn optimizer_value_gradient(
-    evaluation: ProfileEvaluation,
-) -> (f64, Array1<f64>) {
+pub(crate) fn optimizer_value_gradient(evaluation: ProfileEvaluation) -> (f64, Array1<f64>) {
     let gradient = Array1::from(
         evaluation
             .forces
@@ -81,11 +79,7 @@ impl ProfileEngine {
 
     pub(crate) fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
         let positions = x.iter().copied().collect::<Vec<_>>();
-        let request = profile_request(
-            &positions,
-            &self.atomic_numbers,
-            self.box_matrix.as_ref(),
-        );
+        let request = profile_request(&positions, &self.atomic_numbers, self.box_matrix.as_ref());
         match self.session.evaluate(&request) {
             Ok(evaluation) => Some(optimizer_value_gradient(evaluation)),
             Err(error) => {

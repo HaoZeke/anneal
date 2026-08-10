@@ -287,8 +287,8 @@ fn main() {
         None
     };
     let profile_atomic_numbers: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
-    let mut profile_eng = embed_prefix
-        .map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
+    let mut profile_eng =
+        embed_prefix.map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
     let mut eng = if engine == "rgpot" || embed_prefix.is_some() {
         None
     } else {
