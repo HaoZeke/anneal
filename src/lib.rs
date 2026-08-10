@@ -29,6 +29,15 @@ pub mod neighbors;
 /// Exact basin identity by canonical contact-graph labelling (nauty).
 #[cfg(feature = "graphkey")]
 pub mod graphkey;
+/// Local two-shell topology keys (k-ART).
+#[cfg(feature = "graphkey")]
+pub mod localkey;
+/// Event catalogue keyed by local topology.
+pub mod catalog;
+/// Energy-floor flicker components and record EI.
+pub mod floors;
+/// GMRF residual intensity on the class graph.
+pub mod residual_field;
 /// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.

@@ -212,6 +212,56 @@ impl Screen {
     }
 }
 
+/// Remaining drop `D = E_sc - E_full` of a purchased quench.
+///
+/// Features are an intercept and the screened energy. The predicted landing
+/// is `E_sc - E[D | E_sc]`. A trial whose landing sits on a known floor is
+/// refused by the caller; this type only predicts the drop.
+#[derive(Debug, Clone)]
+pub struct DropModel {
+    inner: Screen,
+}
+
+impl DropModel {
+    /// Weak prior, no exploration floor: the caller decides whether to buy.
+    pub fn new() -> Self {
+        Self {
+            inner: Screen::new(2, 2, 0.0, 0.5),
+        }
+    }
+
+    /// Fold in one purchased pair.
+    pub fn observe(&mut self, e_sc: f64, e_full: f64) {
+        if !e_sc.is_finite() || !e_full.is_finite() {
+            return;
+        }
+        let d = e_sc - e_full;
+        self.inner.observe(Array1::from(vec![1.0, e_sc]).view(), d);
+    }
+
+    /// Predictive remaining drop at `e_sc`.
+    pub fn predict_drop(&self, e_sc: f64) -> Option<(f64, f64)> {
+        self.inner.predict(Array1::from(vec![1.0, e_sc]).view())
+    }
+
+    /// Predicted full-quench energy.
+    pub fn predicted_full(&self, e_sc: f64) -> Option<f64> {
+        let (d, _) = self.predict_drop(e_sc)?;
+        Some(e_sc - d)
+    }
+
+    /// Observations folded in.
+    pub fn observations(&self) -> usize {
+        self.inner.observations()
+    }
+}
+
+impl Default for DropModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Solves `a z = b` for small symmetric positive-definite `a`, by Cholesky.
 fn solve(a: ndarray::ArrayView2<f64>, b: ArrayView1<f64>) -> Option<Array1<f64>> {
     let n = b.len();
@@ -411,5 +461,18 @@ mod tests {
         s.observe(feat(f64::NAN, 0.0).view(), 1.0);
         s.observe(feat(1.0, 0.0).view(), f64::INFINITY);
         assert_eq!(s.observations(), 0);
+    }
+
+    #[test]
+    fn drop_model_predicts_a_constant_descent() {
+        let mut d = DropModel::new();
+        for e_sc in [0.0, 1.0, 2.0, 3.0, 4.0] {
+            d.observe(e_sc, e_sc - 0.5);
+        }
+        let hat = d.predicted_full(10.0).unwrap();
+        assert!(
+            (hat - 9.5).abs() < 0.2,
+            "predicted landing {hat}, expected about 9.5"
+        );
     }
 }
