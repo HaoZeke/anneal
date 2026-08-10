@@ -31,9 +31,10 @@ use rgpot_core::tensor::{
 };
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
-/// Reads the first frame of a con file: coordinates, species, and the free
-/// seeds (the atoms the file does not mark fixed).
-fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>) {
+/// Reads the first frame of a con file: coordinates, species, the free
+/// seeds (the atoms the file does not mark fixed), and the orthogonal
+/// box matrix from the file header.
+fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     let frame = readcon_core::iterators::read_first_frame(Path::new(path))
         .expect("failed to read the con file");
     let mut pos = Vec::new();
@@ -46,10 +47,22 @@ fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>) {
             seeds.push(i);
         }
     }
-    (Array1::from(pos), species, seeds)
+    let boxl = frame.header.boxl;
+    let box_ = [
+        boxl[0], 0.0, 0.0, 0.0, boxl[1], 0.0, 0.0, 0.0, boxl[2],
+    ];
+    (Array1::from(pos), species, seeds, box_)
+}
+
+fn log_line(msg: &str) {
+    let mut out = std::io::stdout();
+    let _ = writeln!(out, "{msg}");
+    let _ = out.flush();
 }
 
 struct Engine {
+    host: String,
+    port: u16,
     client: RpcClient,
     atmnrs: Vec<i32>,
     species: Vec<u32>,
@@ -106,8 +119,21 @@ impl Engine {
                 }
                 Some((out.energy, g))
             }
-            Err(_) => {
+            Err(e) => {
                 self.failures += 1;
+                if self.failures == 1 || self.failures % 500 == 0 {
+                    eprintln!("  engine failure {}: {e}", self.failures);
+                }
+                // Connection errors mean potserv died or reset. Rebuild the
+                // client; calculate already opens a fresh TCP session, but a
+                // dead runtime/socket pair stays dead without this.
+                if (e.contains("connection failed") || e.contains("RPC call failed"))
+                    && (self.failures == 1 || self.failures % 20 == 0)
+                {
+                    if let Ok(c) = RpcClient::new(&self.host, self.port) {
+                        self.client = c;
+                    }
+                }
                 None
             }
         }
@@ -138,7 +164,7 @@ fn main() {
 
     for seed in seed0..(seed0 + seeds) {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
-        let (mut x0, species, free_seeds) = read_system(&con);
+        let (mut x0, species, free_seeds, box_) = read_system(&con);
         let n = species.len();
         // Different seeds start the adsorbate at different lateral offsets;
         // the substrate stays as the file placed it.
@@ -147,8 +173,13 @@ fn main() {
             x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
             x0[3 * a + 2] += rng.random::<f64>() * 1.0;
         }
-        println!("{con}: {n} atoms, {} free seeds, {shells} active shells, budget {budget}, seed {seed}",
-                 free_seeds.len());
+        log_line(&format!(
+            "{con}: {n} atoms, {} free seeds, {shells} active shells, budget {budget}, seed {seed}, box {:.4} {:.4} {:.4}",
+            free_seeds.len(),
+            box_[0],
+            box_[4],
+            box_[8]
+        ));
         // STACK=base runs the plain protocol; ATOMIC=1 keeps the atomic move
         // library for free mixed clusters instead of the grouped molecular one.
         let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
@@ -167,13 +198,15 @@ fn main() {
         cfg.screen_steps = 10;
         cfg.relax_steps = 150;
         let mut eng = Engine {
+            host: host.clone(),
+            port,
             client: RpcClient::new(&host, port).expect("rgpot client"),
             atmnrs: species.iter().map(|&z| z as i32).collect(),
             species: species.clone(),
             seeds: free_seeds.clone(),
             shells,
             tolerance: cfg.bond_tolerance,
-            box_: [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
+            box_,
             failures: 0,
         };
         let mut ledger = Ledger::new(budget);
@@ -199,12 +232,12 @@ fn main() {
                 None,
                 &mut rng,
             );
-            println!(
+            log_line(&format!(
                 "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
                 rec.best,
                 ledger_rec.spent(),
                 rec.hops
-            );
+            ));
         }
         #[cfg(feature = "graphkey")]
         let out = if ras {
@@ -218,10 +251,10 @@ fn main() {
                 &mut archive,
                 &mut rng,
             );
-            println!(
+            log_line(&format!(
                 "  seed {seed} ras: best {:.6} eV  charged {}  hit_at {}  floors {} returned {} same_floor {}",
                 a.best, a.charged, a.best_at, a.floors, a.returned, a.same_floor
-            );
+            ));
             anneal_core::methods::cluster_hopping::Outcome {
                 best: a.best,
                 best_state: a.best_state,
@@ -233,10 +266,10 @@ fn main() {
         };
         #[cfg(not(feature = "graphkey"))]
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
-        println!(
+        log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
             out.best, out.hops, eng.failures
-        );
+        ));
         if let Some(bx) = out.best_state {
             let path = format!("best_cuh2_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");
@@ -252,7 +285,7 @@ fn main() {
                 )
                 .ok();
             }
-            println!("  wrote {path}");
+            log_line(&format!("  wrote {path}"));
         }
     }
 }

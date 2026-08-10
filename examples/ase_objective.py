@@ -37,6 +37,8 @@ class XtbCli:
             f.write(f"{len(symbols)}\n\n")
             for s, p in zip(symbols, positions):
                 f.write(f"{s} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}\n")
+        env = os.environ.copy()
+        env.setdefault("OMP_NUM_THREADS", "1")
         subprocess.run(
             [self.exe, "geo.xyz", "--grad", "--gfn", "2"],
             cwd=self.dir,
@@ -44,6 +46,7 @@ class XtbCli:
             stderr=subprocess.DEVNULL,
             check=True,
             timeout=300,
+            env=env,
         )
         grad_path = os.path.join(self.dir, "gradient")
         energy = None
@@ -135,10 +138,15 @@ def main():
             out.write(f"E {energy:.10f}\n")
             for f in forces:
                 out.write(f"{f[0]:.10f} {f[1]:.10f} {f[2]:.10f}\n")
+        except BrokenPipeError:
+            return
         except Exception as exc:  # a failed SCF is a refused evaluation
-            out.write(f"FAIL {exc.__class__.__name__}\n")
-            for _ in range(n):
-                out.write("0 0 0\n")
+            try:
+                out.write(f"FAIL {exc.__class__.__name__}\n")
+                for _ in range(n):
+                    out.write("0 0 0\n")
+            except BrokenPipeError:
+                return
             if os.environ.get("ASE_ENGINE") == "cp2k":
                 # An unconverged SCF aborts cp2k_shell. Recreate so later
                 # evaluations are not counted as failures of a dead engine.
@@ -146,8 +154,11 @@ def main():
                     calc = make_calculator()
                 except Exception:
                     pass
-        out.write("DONE\n")
-        out.flush()
+        try:
+            out.write("DONE\n")
+            out.flush()
+        except BrokenPipeError:
+            return
 
 
 if __name__ == "__main__":
