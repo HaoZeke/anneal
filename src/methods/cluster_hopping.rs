@@ -1697,6 +1697,22 @@ impl Config {
         cfg
     }
 
+    /// Recommended flags, with the two hand-set scalars replaced by
+    /// derived ones: budget-window temperature (`θ = 1/2` inside the
+    /// descent window) and the cost-asymmetric Bayes screen
+    /// `τ = (R-S)/(2R-S)` from [`crate::screen::cost_asymmetric_threshold`].
+    ///
+    /// This is not the measured `recommended` configuration. Hit rates
+    /// for this stack are not claimed until a campaign records them.
+    pub fn derived(n_points: usize) -> Self {
+        let mut cfg = Self::recommended(n_points);
+        cfg.budget_window = true;
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
+    }
+
     pub fn for_cluster(n_points: usize) -> Self {
         Self {
             n_points,
@@ -3915,6 +3931,20 @@ mod group_move_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derived_replaces_the_two_hand_set_scalars() {
+        let rec = Config::recommended(13);
+        let der = Config::derived(13);
+        assert!(der.burst_moves && der.allocate_moves && der.depth_reward && der.tabu_on_stall);
+        assert!(der.budget_window);
+        assert!(der.bayes_screen);
+        assert!(!rec.budget_window);
+        assert!(!rec.bayes_screen);
+        let want = crate::screen::cost_asymmetric_threshold(der.screen_steps, der.relax_steps);
+        assert!((der.bayes_threshold - want).abs() < 1e-12);
+        assert!((der.bayes_threshold - 7.0 / 15.0).abs() < 1e-12);
+    }
 
     /// The claim the bank rests on: a bias handed to one chain and then to the
     /// next carries what the first one learned. Without this each chain starts
