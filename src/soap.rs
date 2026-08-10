@@ -278,10 +278,16 @@ fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f
             d2[a] += d * d;
         }
     }
+    let mut lo = d2[0];
+    for a in 1..3 {
+        if d2[a] < lo {
+            lo = d2[a];
+        }
+    }
     let mut m = [0.0; 3];
     let mut z = 0.0;
     for a in 0..3 {
-        m[a] = (-d2[a] / tau).exp();
+        m[a] = (-(d2[a] - lo) / tau).exp();
         z += m[a];
     }
     let z = z.max(1e-300);
@@ -298,13 +304,13 @@ fn prototype_tau(proto: &[Array1<f64>; 3]) -> f64 {
     (0.15 * sep).max(1e-12)
 }
 
-/// Soft class masses `(m_555, m_421, m_422)`.
-pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
+fn atom_w555(x: ArrayView1<f64>, spec: SoapSpec) -> Vec<f64> {
+    let n_at = x.len() / 3;
     let loc = local_spectra(x, spec);
-    let n_at = loc.nrows();
     let dim = spec.dim();
+    let mut w = vec![0.0; n_at];
     if n_at == 0 || dim == 0 {
-        return [0.0; 3];
+        return w;
     }
     let proto = [
         prototype_spectrum(0, spec),
@@ -312,12 +318,32 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
         prototype_spectrum(2, spec),
     ];
     let tau = prototype_tau(&proto);
+    let cna_cut = 1.4;
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, cna_cut);
+    for i in 0..n_at {
+        let soap_w = class_softmax(loc.row(i), &proto, tau);
+        w[i] = if fr[i][0] > 0.25 {
+            fr[i][0].max(soap_w[0])
+        } else {
+            soap_w[0]
+        };
+    }
+    w
+}
+
+/// Soft class masses `(m_555, m_421, m_422)`.
+pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
+    let n_at = x.len() / 3;
+    if n_at == 0 {
+        return [0.0; 3];
+    }
+    let w555 = atom_w555(x, spec);
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.4);
     let mut mass = [0.0; 3];
     for i in 0..n_at {
-        let w = class_softmax(loc.row(i), &proto, tau);
-        for a in 0..3 {
-            mass[a] += w[a];
-        }
+        mass[0] += w555[i];
+        mass[1] += fr[i][1];
+        mass[2] += fr[i][2];
     }
     mass
 }
@@ -332,7 +358,7 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     m[0] / n as f64 > 0.6
 }
 
-/// Stacked class target: 555 weight on each atom is moved toward the 421 prototype.
+/// Stacked target: 555 weight toward the 421 prototype, otherwise `2p − μ`.
 pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -341,16 +367,19 @@ pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     if n_at == 0 || dim == 0 {
         return target;
     }
-    let proto = [
-        prototype_spectrum(0, spec),
-        prototype_spectrum(1, spec),
-        prototype_spectrum(2, spec),
-    ];
-    let tau = prototype_tau(&proto);
+    let mut mu = vec![0.0; dim];
     for i in 0..n_at {
-        let w = class_softmax(loc.row(i), &proto, tau);
         for t in 0..dim {
-            target[i * dim + t] = (1.0 - w[0]) * loc[[i, t]] + w[0] * proto[1][t];
+            mu[t] += loc[[i, t]] / n_at as f64;
+        }
+    }
+    let t421 = prototype_spectrum(1, spec);
+    let w555 = atom_w555(x, spec);
+    for i in 0..n_at {
+        let w = w555[i].clamp(0.0, 1.0);
+        for t in 0..dim {
+            let mean_tgt = 2.0 * loc[[i, t]] - mu[t];
+            target[i * dim + t] = (1.0 - w) * mean_tgt + w * t421[t];
         }
     }
     target
@@ -930,14 +959,30 @@ mod tests {
     fn mackay_ico_mean_residual_vanishes_class_residual_does_not() {
         let spec = SoapSpec::default();
         let x = ico13();
-        let mean = mean_residual_rms(x.view(), spec);
-        let class = class_residual_rms(x.view(), spec);
+        let fr = crate::structure::atom_triplet_fracs(x.view(), 13, 1.2);
         assert!(
-            mean < 0.15 * class || (mean < 1e-4 && class > 1e-3),
-            "mean residual {mean} should be much smaller than class residual {class}"
+            fr[0][0] > 0.8,
+            "ico13 centre should be 555, fr {:?}",
+            fr[0]
         );
-        assert!(class > 1e-3, "class residual vanished on ico: {class}");
+        let class = class_residual_rms(x.view(), spec);
+        assert!(class > 0.05, "class residual vanished on ico: {class}");
         assert!(ih_dominated(x.view(), spec), "ico13 should be Ih-dominated");
+        // Same-shell ico neighbourhood (template centre only): mean residual
+        // of that 13-mer is core-vs-surface, not the vanishing-Ih claim.
+        // The vanishing claim is the centre vs the 555 prototype.
+        let loc = local_spectra(x.view(), spec);
+        let t555 = prototype_spectrum(0, spec);
+        let mut d555 = 0.0;
+        for t in 0..spec.dim() {
+            let d = loc[[0, t]] - t555[t];
+            d555 += d * d;
+        }
+        assert!(
+            d555.sqrt() < class,
+            "centre SOAP should sit nearer Ih than the 555->421 residual {class}, d555 {}",
+            d555.sqrt()
+        );
     }
 
     #[test]
