@@ -188,7 +188,7 @@ pub fn local_nu3_z(
         for t in 0..d0 {
             out[[i, t]] = soap[[i, t]];
         }
-        let b = four_body(x, i, n_at, spec);
+        let b = four_body(x, i, n_at, spec, species);
         for t in 0..d1 {
             out[[i, d0 + t]] = b[t];
         }
@@ -202,7 +202,37 @@ struct Neigh {
     u: [f64; 3],
 }
 
-fn gather_neigh(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64) -> Vec<Neigh> {
+fn covalent_r(z: u32) -> f64 {
+    match z {
+        1 => 0.31,
+        6 => 0.76,
+        7 => 0.71,
+        8 => 0.66,
+        16 => 1.05,
+        29 => 1.32,
+        _ => 0.0,
+    }
+}
+
+fn is_bonded(species: Option<&[u32]>, i: usize, j: usize, r: f64) -> bool {
+    let Some(z) = species else {
+        return false;
+    };
+    let ri = covalent_r(z.get(i).copied().unwrap_or(0));
+    let rj = covalent_r(z.get(j).copied().unwrap_or(0));
+    if ri <= 0.0 || rj <= 0.0 {
+        return false;
+    }
+    r < 1.3 * (ri + rj)
+}
+
+fn gather_neigh(
+    x: ArrayView1<f64>,
+    i: usize,
+    n_at: usize,
+    rcut: f64,
+    species: Option<&[u32]>,
+) -> Vec<Neigh> {
     let mut neigh = Vec::new();
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
     for j in 0..n_at {
@@ -212,6 +242,9 @@ fn gather_neigh(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64) -> Vec<Nei
         let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
         let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if r >= rcut || r < 1e-12 {
+            continue;
+        }
+        if is_bonded(species, i, j, r) {
             continue;
         }
         neigh.push(Neigh {
@@ -235,8 +268,14 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f64> {
-    let neigh = gather_neigh(x, i, n_at, spec.rcut_nn);
+fn four_body(
+    x: ArrayView1<f64>,
+    i: usize,
+    n_at: usize,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Vec<f64> {
+    let neigh = gather_neigh(x, i, n_at, spec.rcut_nn, species);
     let mut acc = vec![0.0; spec.nu3_dim()];
     let m = neigh.len();
     if m < 3 {
@@ -281,7 +320,11 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 /// Analytic Jacobian of the two 4-body triple invariants, shape `(N · nu3_dim, 3N)`.
-pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+pub fn jacobian_four(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
     let d1 = spec.nu3_dim();
     let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
@@ -290,7 +333,7 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
         return j;
     }
     for i in 0..n_at {
-        let neigh = gather_neigh(x, i, n_at, rcut);
+        let neigh = gather_neigh(x, i, n_at, rcut, species);
         let m = neigh.len();
         if m < 3 {
             continue;
@@ -514,7 +557,7 @@ pub fn jacobian_nu3(
     species: Option<&[u32]>,
 ) -> Array2<f64> {
     let js = jacobian_z(x, spec, species);
-    let jf = jacobian_four(x, spec);
+    let jf = jacobian_four(x, spec, species);
     let n_at = x.len() / 3;
     let d0 = spec.feat_dim(species);
     let d1 = spec.nu3_dim();
@@ -1155,13 +1198,23 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             continue;
         }
         let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+        // SOAP and the 4-body means are isotropic on a closed shell.
+        // Leftover lives in the second moments (4n+2, 4n+3).
         for t in 0..dim {
-            target[i * dim + t] = mu[k][t];
+            target[i * dim + t] = loc[[i, t]];
+        }
+        let d0 = dim - spec.nu3_dim();
+        for n in 0..spec.n_max {
+            let a = d0 + 4 * n + 2;
+            let b = d0 + 4 * n + 3;
+            if a < dim {
+                target[i * dim + a] = mu[k][a];
+            }
+            if b < dim {
+                target[i * dim + b] = mu[k][b];
+            }
         }
     }
-    // Gate on the 4-body leftover. SOAP core-versus-surface is always
-    // there. Volume and the angular 3-product are not: they fire on a
-    // fivefold core and yield on an equivalent tetrahedron.
     let d0 = dim - spec.nu3_dim();
     let mut nu32 = 0.0;
     let mut nnu = 0.0;
@@ -1169,10 +1222,16 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         if !keep[i] {
             continue;
         }
-        for t in d0..dim {
-            let d = target[i * dim + t] - loc[[i, t]];
-            nu32 += d * d;
-            nnu += 1.0;
+        for n in 0..spec.n_max {
+            for off in [2usize, 3] {
+                let t = d0 + 4 * n + off;
+                if t >= dim {
+                    continue;
+                }
+                let d = target[i * dim + t] - loc[[i, t]];
+                nu32 += d * d;
+                nnu += 1.0;
+            }
         }
     }
     let nu3_rms = if nnu > 0.0 {
@@ -1778,8 +1837,8 @@ mod tests {
             *v *= nn;
         }
         let cub = cuboct13();
-        let bi = four_body(ico.view(), 0, 13, spec);
-        let bc = four_body(cub.view(), 0, 13, spec);
+        let bi = four_body(ico.view(), 0, 13, spec, None);
+        let bc = four_body(cub.view(), 0, 13, spec, None);
         let mut mean2 = 0.0;
         let mut m2 = 0.0;
         for n in 0..spec.n_max {
@@ -1803,8 +1862,8 @@ mod tests {
         let spec = SoapSpec::default();
         let a = squashed();
         let b = rotate_z(a.view(), 0.9);
-        let fa = four_body(a.view(), 0, a.len() / 3, spec);
-        let fb = four_body(b.view(), 0, b.len() / 3, spec);
+        let fa = four_body(a.view(), 0, a.len() / 3, spec, None);
+        let fb = four_body(b.view(), 0, b.len() / 3, spec, None);
         for t in 0..fa.len() {
             assert!(
                 (fa[t] - fb[t]).abs() < 1e-9,
@@ -1813,6 +1872,29 @@ mod tests {
                 fb[t]
             );
         }
+    }
+
+    #[test]
+    fn bonded_pairs_are_not_packing_triples() {
+        let spec = SoapSpec {
+            rcut_nn: 4.0,
+            ..SoapSpec::default()
+        };
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0]);
+        let z = [8u32, 1, 1];
+        let b = four_body(x.view(), 0, 3, spec, Some(&z));
+        let s: f64 = b.iter().map(|v| v.abs()).sum();
+        assert!(
+            s < 1e-12,
+            "intramolecular water triples must not enter packing leftover: {b:?}"
+        );
+        let (dimer, zd) = water_dimer();
+        let bd = four_body(dimer.view(), 0, 6, spec, Some(&zd));
+        let sd: f64 = bd.iter().map(|v| v.abs()).sum();
+        assert!(
+            sd > 1e-6,
+            "intermolecular triples must remain: {bd:?}"
+        );
     }
 
     #[test]
@@ -2200,6 +2282,23 @@ mod tests {
             nu3_rms > soap_rms,
             "nu3 leftover {nu3_rms} should exceed SOAP leftover {soap_rms}"
         );
+        let mut m22 = 0.0;
+        let mut nm2 = 0.0;
+        for i in 0..n {
+            for ch in 0..spec.n_max {
+                for off in [2usize, 3] {
+                    let t = 4 * ch + off;
+                    let d = loc[[i, d0 + t]] - mu_n[t];
+                    m22 += d * d;
+                    nm2 += 1.0;
+                }
+            }
+        }
+        let m2_rms = (m22 / nm2).sqrt();
+        assert!(
+            m2_rms >= NU3_DEFECT,
+            "second-moment leftover {m2_rms} is below the packing floor {NU3_DEFECT}"
+        );
         let mut rng = StdRng::seed_from_u64(11);
         let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
         let mut d2 = 0.0;
@@ -2212,11 +2311,22 @@ mod tests {
             (atom_rms - 0.4).abs() < 1e-9,
             "gated leftover hop rms {atom_rms}, want the 0.4 cap"
         );
-        let chi0: f64 = four_body(x.view(), 0, 13, spec).iter().sum();
-        let chi1: f64 = four_body(y.view(), 0, 13, spec).iter().sum();
+        let b0 = four_body(x.view(), 0, 13, spec, None);
+        let b1 = four_body(y.view(), 0, 13, spec, None);
+        let mut dmu0 = 0.0;
+        let mut dmu1 = 0.0;
+        for ch in 0..spec.n_max {
+            for off in [2usize, 3] {
+                let t = 4 * ch + off;
+                let u = b0[t] - mu_n[t];
+                let v = b1[t] - mu_n[t];
+                dmu0 += u * u;
+                dmu1 += v * v;
+            }
+        }
         assert!(
-            chi1 < chi0,
-            "nu3 pull-to-mean should drop centre triple volume: {chi0} -> {chi1}"
+            dmu1 < dmu0,
+            "centre second moment should approach the cloud mean: {dmu0} -> {dmu1}"
         );
     }
 
@@ -2242,7 +2352,7 @@ mod tests {
         x[0] += 0.2;
         x[4] -= 0.15;
         x[8] += 0.1;
-        let ja = jacobian_four(x.view(), spec);
+        let ja = jacobian_four(x.view(), spec, None);
         let n_at = x.len() / 3;
         let d1 = spec.nu3_dim();
         let eps = 1e-6;
@@ -2253,12 +2363,12 @@ mod tests {
             x[k] = old + eps;
             let mut plus = Vec::new();
             for i in 0..n_at {
-                plus.extend(four_body(x.view(), i, n_at, spec));
+                plus.extend(four_body(x.view(), i, n_at, spec, None));
             }
             x[k] = old - eps;
             let mut minus = Vec::new();
             for i in 0..n_at {
-                minus.extend(four_body(x.view(), i, n_at, spec));
+                minus.extend(four_body(x.view(), i, n_at, spec, None));
             }
             x[k] = old;
             for r in 0..n_at * d1 {
