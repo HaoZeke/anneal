@@ -98,7 +98,7 @@ fn soap_pullback_follows_the_declared_length_scale() {
             .kernels(cfg)
             .into_iter()
             .find_map(|kernel| match kernel {
-                ClusterMove::Soap { rmsd, cutoff } => Some((rmsd, cutoff)),
+                ClusterMove::Soap { rmsd, cutoff, .. } => Some((rmsd, cutoff)),
                 _ => None,
             })
             .expect("LeanBurst must include its SOAP pullback")

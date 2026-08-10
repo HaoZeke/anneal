@@ -1697,6 +1697,14 @@ fn run_full<'g, R: Rng + ?Sized>(
             }
         }
         if cfg.symmetrise_on_stall && stuck {
+            let soap_spec = crate::soap::SoapSpec {
+                rcut_nn: 3.5 * cfg.length_scale,
+                ..Default::default()
+            };
+            if crate::soap::ih_dominated(x.view(), soap_spec) {
+                quiet = 0;
+                longest_quiet = 0;
+            } else {
             // The stall counter is cleared here, not only in the escape
             // branches below. Without it a stuck chain satisfies the condition
             // on every subsequent hop and symmetrises on every one: measured at
@@ -1752,6 +1760,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     x = xs;
                     here = None;
                 }
+            }
             }
         }
         if cfg.tabu_on_stall && stuck {

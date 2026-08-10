@@ -10,9 +10,10 @@
 //! rank at most 24 in `R^{3N}`, so it cannot see which atoms carry
 //! icosahedral versus fivefold-join environments.
 //!
-//! A residual step takes `Δp_i = p_i − μ` (local environments away from
-//! the mean) and `ΔR = argmin ||J ΔR − Δp||² + λ||ΔR||²`, then strips
-//! the rigid kernel of `J`. Not a one-atom hop and not a Marks/CSA oracle.
+//! A residual step is a direction on the *cloud* of local spectra, not the
+//! mean. On a Mackay icosahedron `p_i − μ` vanishes; the class residual
+//! pushes 555-like atoms toward a 421 (fcc) prototype and pulls back
+//! through the same analytic `J`. Not a Marks/CSA oracle.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -224,11 +225,181 @@ pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> 
     dr
 }
 
-/// Residual step: local environments move away from their mean, pulled
-/// back by analytic `J`. `rmsd` is a cap, not a rescaling of a null FD.
+/// RMS of local SOAP from the cluster mean. Near zero on a Mackay ico.
+pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
+    let loc = local_spectra(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    if n_at == 0 || dim == 0 {
+        return 0.0;
+    }
+    let mut mu = vec![0.0; dim];
+    for i in 0..n_at {
+        for t in 0..dim {
+            mu[t] += loc[[i, t]] / n_at as f64;
+        }
+    }
+    let mut s = 0.0;
+    for i in 0..n_at {
+        for t in 0..dim {
+            let d = loc[[i, t]] - mu[t];
+            s += d * d;
+        }
+    }
+    (s / n_at as f64).sqrt()
+}
+
+/// SOAP of the centre atom of an ideal neighbourhood template.
+///
+/// 0 = icosahedral (555), 1 = fcc cuboctahedron (421), 2 = hcp (422).
+pub fn prototype_spectrum(kind: usize, spec: SoapSpec) -> Array1<f64> {
+    let pts = match kind {
+        1 => crate::structure::Template::FaceCentredCubic.points(),
+        2 => crate::structure::Template::HexagonalClosePacked.points(),
+        _ => crate::structure::Template::Icosahedral.points(),
+    };
+    let n = 1 + pts.len();
+    let mut x = Array1::zeros(3 * n);
+    for (i, p) in pts.iter().enumerate() {
+        x[3 * (i + 1)] = p[0];
+        x[3 * (i + 1) + 1] = p[1];
+        x[3 * (i + 1) + 2] = p[2];
+    }
+    let loc = local_spectra(x.view(), spec);
+    loc.row(0).to_owned()
+}
+
+fn class_softmax(phi: ArrayView1<f64>, proto: &[Array1<f64>; 3], tau: f64) -> [f64; 3] {
+    let dim = phi.len();
+    let mut d2 = [0.0; 3];
+    for a in 0..3 {
+        for t in 0..dim {
+            let d = phi[t] - proto[a][t];
+            d2[a] += d * d;
+        }
+    }
+    let mut m = [0.0; 3];
+    let mut z = 0.0;
+    for a in 0..3 {
+        m[a] = (-d2[a] / tau).exp();
+        z += m[a];
+    }
+    let z = z.max(1e-300);
+    [m[0] / z, m[1] / z, m[2] / z]
+}
+
+fn prototype_tau(proto: &[Array1<f64>; 3]) -> f64 {
+    let dim = proto[0].len();
+    let mut sep = 0.0;
+    for t in 0..dim {
+        let d = proto[0][t] - proto[1][t];
+        sep += d * d;
+    }
+    (0.15 * sep).max(1e-12)
+}
+
+/// Soft class masses `(m_555, m_421, m_422)`.
+pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
+    let loc = local_spectra(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    if n_at == 0 || dim == 0 {
+        return [0.0; 3];
+    }
+    let proto = [
+        prototype_spectrum(0, spec),
+        prototype_spectrum(1, spec),
+        prototype_spectrum(2, spec),
+    ];
+    let tau = prototype_tau(&proto);
+    let mut mass = [0.0; 3];
+    for i in 0..n_at {
+        let w = class_softmax(loc.row(i), &proto, tau);
+        for a in 0..3 {
+            mass[a] += w[a];
+        }
+    }
+    mass
+}
+
+/// True when most atoms sit on the icosahedral prototype.
+pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
+    let n = x.len() / 3;
+    if n == 0 {
+        return false;
+    }
+    let m = class_masses(x, spec);
+    m[0] / n as f64 > 0.6
+}
+
+/// Stacked class target: 555 weight on each atom is moved toward the 421 prototype.
+pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
+    let loc = local_spectra(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    let mut target = Array1::zeros(n_at * dim);
+    if n_at == 0 || dim == 0 {
+        return target;
+    }
+    let proto = [
+        prototype_spectrum(0, spec),
+        prototype_spectrum(1, spec),
+        prototype_spectrum(2, spec),
+    ];
+    let tau = prototype_tau(&proto);
+    for i in 0..n_at {
+        let w = class_softmax(loc.row(i), &proto, tau);
+        for t in 0..dim {
+            target[i * dim + t] = (1.0 - w[0]) * loc[[i, t]] + w[0] * proto[1][t];
+        }
+    }
+    target
+}
+
+/// RMS of the class residual. O(1) on a Mackay ico where the mean residual is ~0.
+pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
+    let loc = local_spectra(x, spec);
+    let tgt = class_target(x, spec);
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    if n_at == 0 || dim == 0 {
+        return 0.0;
+    }
+    let mut s = 0.0;
+    for i in 0..n_at {
+        for t in 0..dim {
+            let d = tgt[i * dim + t] - loc[[i, t]];
+            s += d * d;
+        }
+    }
+    (s / n_at as f64).sqrt()
+}
+
+fn apply_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> {
+    let n = (x.len() / 3).max(1) as f64;
+    let cap = rmsd.max(1e-6);
+    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+    if cur > cap {
+        dr *= cap / cur;
+    }
+    &x.to_owned() + &dr
+}
+
+/// Residual step: class-conditioned cloud direction, pulled back by analytic `J`.
 pub fn step_away<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     _observed: &[Array1<f64>],
+    spec: SoapSpec,
+    rmsd: f64,
+    _rng: &mut R,
+) -> Array1<f64> {
+    let target = class_target(x, spec);
+    apply_cap(x, pullback(x, target.view(), spec), rmsd)
+}
+
+/// Mean residual `2p − μ`. Diagnostic control; not the recommended hop.
+pub fn step_away_mean<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
     spec: SoapSpec,
     rmsd: f64,
     _rng: &mut R,
@@ -248,18 +419,10 @@ pub fn step_away<R: Rng + ?Sized>(
     let mut target = Array1::zeros(n_at * dim);
     for i in 0..n_at {
         for t in 0..dim {
-            // p_i + (p_i − μ) = 2 p_i − μ: walk away from the mean environment.
             target[i * dim + t] = 2.0 * loc[[i, t]] - mu[t];
         }
     }
-    let mut dr = pullback(x, target.view(), spec);
-    let cap = rmsd.max(1e-6);
-    let n = n_at.max(1) as f64;
-    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
-    if cur > cap {
-        dr *= cap / cur;
-    }
-    &x.to_owned() + &dr
+    apply_cap(x, pullback(x, target.view(), spec), rmsd)
 }
 
 /// Finite-difference Jacobian of the *global* average, test-only.
@@ -622,6 +785,32 @@ mod tests {
         ])
     }
 
+    fn ico13() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, p],
+            [0.0, 1.0, -p],
+            [0.0, -1.0, p],
+            [0.0, -1.0, -p],
+            [1.0, p, 0.0],
+            [1.0, -p, 0.0],
+            [-1.0, p, 0.0],
+            [-1.0, -p, 0.0],
+            [p, 0.0, 1.0],
+            [-p, 0.0, 1.0],
+            [p, 0.0, -1.0],
+            [-p, 0.0, -1.0],
+        ];
+        let s = 1.0 / (1.0 + p * p).sqrt();
+        let mut x = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * (i + 1) + k] = s * v[k];
+            }
+        }
+        x
+    }
+
     fn rotate_z(x: ArrayView1<f64>, ang: f64) -> Array1<f64> {
         let c = ang.cos();
         let s = ang.sin();
@@ -734,6 +923,43 @@ mod tests {
         assert!(
             moved >= 2,
             "SOAP pullback moved {moved} atoms; expected a concerted step"
+        );
+    }
+
+    #[test]
+    fn mackay_ico_mean_residual_vanishes_class_residual_does_not() {
+        let spec = SoapSpec::default();
+        let x = ico13();
+        let mean = mean_residual_rms(x.view(), spec);
+        let class = class_residual_rms(x.view(), spec);
+        assert!(
+            mean < 0.15 * class || (mean < 1e-4 && class > 1e-3),
+            "mean residual {mean} should be much smaller than class residual {class}"
+        );
+        assert!(class > 1e-3, "class residual vanished on ico: {class}");
+        assert!(ih_dominated(x.view(), spec), "ico13 should be Ih-dominated");
+    }
+
+    #[test]
+    fn class_pullback_on_ico_moves_more_than_one_surface_atom() {
+        let spec = SoapSpec::default();
+        let x = ico13();
+        let mut rng = StdRng::seed_from_u64(9);
+        let y = step_away(x.view(), &[], spec, 0.5, &mut rng);
+        let mut moved = 0usize;
+        for i in 1..13 {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = y[3 * i + k] - x[3 * i + k];
+                d2 += d * d;
+            }
+            if d2.sqrt() > 0.02 {
+                moved += 1;
+            }
+        }
+        assert!(
+            moved >= 2,
+            "class pullback moved {moved} surface atoms on ico13"
         );
     }
 
