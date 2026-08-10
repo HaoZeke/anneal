@@ -125,13 +125,53 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(50);
     let raw = ico_sites(n);
-    let (e, x) = relax(raw.view(), 2000);
+    let (mut e, mut x) = relax(raw.view(), 2000);
+    // LJ75 ico competitor is -396.282249. Lattice grow alone sits much higher.
+    if n >= 75 {
+        let plateau = -396.282249;
+        let mut rng = RngWalk(20260810);
+        let (mut be, mut bx) = (e, x.clone());
+        for _ in 0..8000 {
+            let mut t = x.clone();
+            for v in t.iter_mut() {
+                *v += rng.uniform(-0.38, 0.38);
+            }
+            let (e2, x2) = relax(t.view(), 200);
+            if e2 < e || rng.next() < ((e - e2) / 0.8).exp() {
+                e = e2;
+                x = x2;
+            }
+            if e < be {
+                be = e;
+                bx = x.clone();
+            }
+            if be <= plateau + 1e-3 {
+                break;
+            }
+        }
+        e = be;
+        x = bx;
+        println!("LJ{n} hop-to-plateau {e:.6} (target {plateau})");
+    }
     println!(
-        "LJ{n} ico-grow quenched {e:.6}  mean_rms {:.6}  class_rms {:.6}  ih {}",
+        "LJ{n} start {e:.6}  mean_rms {:.6}  class_rms {:.6}  ih {}",
         mean_residual_rms(x.view(), spec),
         class_residual_rms(x.view(), spec),
         ih_dominated(x.view(), spec)
     );
     escape_table(&format!("LJ{n}"), x.view(), trials, false);
     escape_table(&format!("LJ{n}"), x.view(), trials, true);
+}
+
+struct RngWalk(u64);
+impl RngWalk {
+    fn next(&mut self) -> f64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+    fn uniform(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next()
+    }
 }
