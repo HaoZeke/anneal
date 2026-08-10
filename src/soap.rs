@@ -302,6 +302,7 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                     let ub = neigh[b].u;
                     let uc = neigh[c].u;
                     let vol = triple(ua, ub, uc);
+                    let vol2 = vol * vol;
                     let dva = cross(ub, uc);
                     let dvb = cross(uc, ua);
                     let dvc = cross(ua, ub);
