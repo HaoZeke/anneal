@@ -72,11 +72,7 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                kernels.push(ClusterMove::Soap {
-                    rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
-                    cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
-                    class: cfg.soap_class_residual,
-                });
+                kernels.push(soap_arm(cfg, None));
                 kernels
             }
             Self::Visit => {
@@ -121,7 +117,7 @@ impl MoveLibrary {
                 kernels
             }
             Self::Molecular { groups, reactive } => {
-                if *reactive {
+                let mut kernels = if *reactive {
                     ClusterMove::library_combined_scaled(
                         cfg.n_points,
                         groups.clone(),
@@ -134,7 +130,15 @@ impl MoveLibrary {
                         cfg.group_cutoff,
                         cfg.length_scale,
                     )
-                }
+                };
+                let mobile: Vec<usize> = groups.iter().flatten().copied().collect();
+                let mobile = if mobile.len() == cfg.n_points {
+                    None
+                } else {
+                    Some(mobile)
+                };
+                kernels.push(soap_arm(cfg, mobile));
+                kernels
             }
         }
     }
@@ -329,8 +333,9 @@ pub enum ClusterMove {
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
     /// Concerted, not a one-atom hop. The recommended target is the
-    /// observed-cloud residual `2p − μ`. `class` turns on the 555→421 /
-    /// fcc-prototype oracle.
+    /// observed-cloud residual `2p − μ`, partitioned by `species` and
+    /// restricted to `mobile`. `class` turns on the 555→421 / fcc
+    /// prototype, cluster-only.
     Soap {
         /// Cartesian RMSD of the pulled-back step.
         rmsd: f64,
@@ -338,7 +343,22 @@ pub enum ClusterMove {
         cutoff: f64,
         /// Oracle residual (555 toward 421 / fcc). False is `2p − μ`.
         class: bool,
+        /// Observed atomic numbers, one per point. Partitions the residual.
+        species: Option<Vec<u32>>,
+        /// Mobile atom indices. `None` is all atoms. Frozen stay as neighbours.
+        mobile: Option<Vec<usize>>,
     },
+}
+
+fn soap_arm(cfg: &Config, mobile: Option<Vec<usize>>) -> ClusterMove {
+    let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
+    ClusterMove::Soap {
+        rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
+        cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
+        class: cfg.soap_class_residual && packing,
+        species: cfg.species.clone(),
+        mobile,
+    }
 }
 
 /// Pair energy per point, in the Lennard-Jones form Wales and Doye use to
@@ -784,6 +804,8 @@ impl ClusterMove {
             rmsd: LennardJonesPreset::SOAP_RMSD * LennardJonesPreset::REDUCED_SCALE,
             cutoff: LennardJonesPreset::SOAP_CUTOFF * LennardJonesPreset::REDUCED_SCALE,
             class: false,
+            species: None,
+            mobile: None,
         });
         v
     }
@@ -1196,15 +1218,25 @@ impl ClusterMove {
                 rmsd,
                 cutoff,
                 class,
+                species,
+                mobile,
             } => {
                 let spec = crate::soap::SoapSpec {
                     rcut_nn: *cutoff,
                     ..Default::default()
                 };
-                if *class {
+                let packing = species.is_none() && mobile.is_none();
+                if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else {
-                    crate::soap::step_away_mean(x, spec, *rmsd, rng)
+                    crate::soap::step_away_cloud(
+                        x,
+                        spec,
+                        *rmsd,
+                        species.as_deref(),
+                        mobile.as_deref(),
+                        rng,
+                    )
                 }
             }
         }
@@ -1293,6 +1325,8 @@ mod move_scaling_tests {
             rmsd: 0.45,
             cutoff: 3.5,
             class: true,
+            species: None,
+            mobile: None,
         };
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
@@ -1338,6 +1372,61 @@ mod move_scaling_tests {
             )),
             "recommended SOAP arm is not the observed-cloud residual"
         );
+    }
+
+    #[test]
+    fn recommended_molecular_offers_soap_with_species() {
+        let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        assert!(
+            !rec.packing_cna_applies(),
+            "CNA 555 must not apply to a molecule"
+        );
+        assert!(!rec.symmetrise_on_stall);
+        assert!(
+            rec.move_library.kernels(&rec).iter().any(|k| matches!(
+                k,
+                ClusterMove::Soap {
+                    class: false,
+                    species: Some(_),
+                    ..
+                }
+            )),
+            "recommended_molecular missing species-aware SOAP: {:?}",
+            rec.move_library
+                .kernels(&rec)
+                .iter()
+                .map(|k| k.name())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn slab_soap_arm_carries_the_mobile_mask() {
+        let mut rec = Config::recommended_molecular(
+            vec![29, 29, 1, 1],
+            vec![vec![2, 3]],
+            1.0,
+        );
+        rec.active_region = Some((vec![2, 3], 0));
+        rec.n_points = 4;
+        let soap = rec
+            .move_library
+            .kernels(&rec)
+            .into_iter()
+            .find(|k| matches!(k, ClusterMove::Soap { .. }));
+        match soap {
+            Some(ClusterMove::Soap {
+                class,
+                species,
+                mobile,
+                ..
+            }) => {
+                assert!(!class, "slab SOAP must not be the 555->421 oracle");
+                assert_eq!(species.as_deref(), Some(&[29, 29, 1, 1][..]));
+                assert_eq!(mobile.as_deref(), Some(&[2, 3][..]));
+            }
+            _ => panic!("slab recommended library has no SOAP arm"),
+        }
     }
 
     #[test]

@@ -1701,10 +1701,16 @@ fn run_full<'g, R: Rng + ?Sized>(
                 rcut_nn: 3.5 * cfg.length_scale,
                 ..Default::default()
             };
-            if crate::soap::ih_dominated(x.view(), soap_spec) {
-                // Withhold Ih-preserving symmetrise. The 555 fraction is
-                // an observation, not a hop target: do not invent a
-                // missing packing from it.
+            let withhold = (cfg.packing_cna_applies()
+                && crate::soap::ih_dominated(x.view(), soap_spec))
+                || cfg.active_region.is_some()
+                || cfg.frozen.is_some();
+            if withhold {
+                // Withhold Ih-preserving symmetrise on a packing cluster,
+                // and never run CNA or point-group symmetrise on a slab.
+                // A molecule without a frozen frame still uses the branch
+                // below. The 555 fraction is an observation, not a hop
+                // target.
                 quiet = 0;
                 longest_quiet = 0;
             } else {
