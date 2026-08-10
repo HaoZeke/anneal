@@ -418,11 +418,19 @@ fn main() {
                 None,
                 &mut rng_rec,
             );
+            let rec_at = rec
+                .improvements
+                .iter()
+                .rev()
+                .find(|(_, _, _, e)| (*e - rec.best).abs() < 1e-8)
+                .map(|(_, sp, _, _)| *sp)
+                .unwrap_or(ledger_rec.spent());
             log_line(&format!(
-                "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
+                "  seed {seed} rec: best {:.6} eV  charged {}  hops {}  hit_at {}",
                 rec.best,
                 ledger_rec.spent(),
-                rec.hops
+                rec.hops,
+                rec_at
             ));
         }
         #[cfg(feature = "graphkey")]

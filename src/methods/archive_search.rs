@@ -263,11 +263,14 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c.symmetrise_on_stall = true;
         c.return_polish = 0;
         let slices: Vec<usize> = if molecular {
-            // A 6-step return screen drops the water-prism quench. One
-            // long rec-quality walk keeps that quench; a short leftover
-            // walk starts from a re-placed packing.
+            // Rec finds the GFN2 prism in the last 200 of a 2000-eval
+            // 60-step walk, so a 90 % prefix of that walk misses it.
+            // Two 1000-eval walks at 40-step quench plus a re-placed
+            // second packing buy more hops and a second start.
             c.return_screen = false;
-            let a = ((cap * 9) / 10).max(1);
+            c.relax_steps = (cfg.relax_steps * 2 / 3).max(1);
+            c.angular_moves = true;
+            let a = (cap / 2).max(1);
             vec![a, cap.saturating_sub(a).max(1)]
         } else if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
