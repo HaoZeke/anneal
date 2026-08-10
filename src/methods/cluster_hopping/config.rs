@@ -426,7 +426,8 @@ pub struct Config {
     /// relaxation, returns and escapes separate cleanly: 0.160 against 1.846
     /// with 97 per cent of pairs ordered correctly at thirty iterations.
     pub return_screen: bool,
-    /// SOAP hop uses the class residual (555 toward 421). Off is `2p − μ`.
+    /// SOAP hop uses the 555→421 / fcc-prototype oracle. Off (recommended)
+    /// is the observed-cloud residual `2p − μ`.
     pub soap_class_residual: bool,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
@@ -584,9 +585,11 @@ impl Config {
     /// start from.
     ///
     /// LeanBurst includes the SOAP pullback (analytic \(J^{+}\) of stacked
-    /// local power spectra). Thompson allocates it with surface, single,
-    /// burst and sym. The return screen and stall symmetrisation are on:
-    /// they are part of the hop, not extras a second driver turns on.
+    /// local power spectra). The hop target is the observed-cloud residual
+    /// `2p − μ`, not a 421 / fcc prototype: that is a template oracle.
+    /// Thompson allocates SOAP with surface, single, burst and sym. The
+    /// return screen and stall symmetrisation are on; Ih-dominated stalls
+    /// withhold symmetrise rather than invent a missing packing.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -595,6 +598,7 @@ impl Config {
         cfg.tabu_on_stall = true;
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
+        cfg.soap_class_residual = false;
         cfg
     }
 
@@ -708,7 +712,7 @@ impl Config {
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
             return_screen: false,
-            soap_class_residual: true,
+            soap_class_residual: false,
             return_polish: 0,
             return_polish_after: 0,
             path_on_stall: false,

@@ -1702,6 +1702,9 @@ fn run_full<'g, R: Rng + ?Sized>(
                 ..Default::default()
             };
             if crate::soap::ih_dominated(x.view(), soap_spec) {
+                // Withhold Ih-preserving symmetrise. The 555 fraction is
+                // an observation, not a hop target: do not invent a
+                // missing packing from it.
                 quiet = 0;
                 longest_quiet = 0;
             } else {

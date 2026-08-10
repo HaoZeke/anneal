@@ -328,14 +328,15 @@ pub enum ClusterMove {
     },
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
-    /// Concerted, not a one-atom hop. The target in \(p\)-space is a residual
-    /// direction, not a Marks SOAP.
+    /// Concerted, not a one-atom hop. The recommended target is the
+    /// observed-cloud residual `2p − μ`. `class` turns on the 555→421 /
+    /// fcc-prototype oracle.
     Soap {
         /// Cartesian RMSD of the pulled-back step.
         rmsd: f64,
         /// Fixed SOAP cutoff in the same coordinate units as the state.
         cutoff: f64,
-        /// Class residual (555 toward 421). False is the mean residual.
+        /// Oracle residual (555 toward 421 / fcc). False is `2p − μ`.
         class: bool,
     },
 }
@@ -782,7 +783,7 @@ impl ClusterMove {
         v.push(ClusterMove::Soap {
             rmsd: LennardJonesPreset::SOAP_RMSD * LennardJonesPreset::REDUCED_SCALE,
             cutoff: LennardJonesPreset::SOAP_CUTOFF * LennardJonesPreset::REDUCED_SCALE,
-            class: true,
+            class: false,
         });
         v
     }
@@ -1326,13 +1327,16 @@ mod move_scaling_tests {
             names.iter().any(|n| n == "soap"),
             "recommended LeanBurst missing soap: {names:?}"
         );
-        assert!(rec.soap_class_residual);
+        assert!(
+            !rec.soap_class_residual,
+            "recommended SOAP must not ship the 555→421 / fcc oracle"
+        );
         assert!(
             rec.move_library.kernels(&rec).iter().any(|k| matches!(
                 k,
-                ClusterMove::Soap { class: true, .. }
+                ClusterMove::Soap { class: false, .. }
             )),
-            "recommended SOAP arm is not class-conditioned"
+            "recommended SOAP arm is not the observed-cloud residual"
         );
     }
 

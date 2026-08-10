@@ -512,6 +512,10 @@ fn main() {
     if opts.contains(&"rscreen") {
         cfg.return_screen = true;
     }
+    if opts.contains(&"soapclass") {
+        cfg.soap_class_residual = true;
+        println!("  SOAP residual: class 555->421 (oracle)");
+    }
     if opts.contains(&"soapmean") {
         cfg.soap_class_residual = false;
         println!("  SOAP residual: mean (2p-mu)");

@@ -10,10 +10,13 @@
 //! rank at most 24 in `R^{3N}`, so it cannot see which atoms carry
 //! icosahedral versus fivefold-join environments.
 //!
-//! A residual step is a direction on the *cloud* of local spectra, not the
-//! mean. On a Mackay icosahedron `p_i − μ` vanishes; the class residual
-//! pushes 555-like atoms toward a 421 (fcc) prototype and pulls back
-//! through the same analytic `J`. Not a Marks/CSA oracle.
+//! A residual step is a direction on the *cloud* of local spectra. The
+//! recommended hop is the observed-cloud residual `2p − μ`. That map
+//! has nothing to say when the cloud is a Dirac (Mackay Ih: every 555
+//! environment is the same), and it does not invent a class the search
+//! has not seen. The 555→421 / fcc-prototype residual is an oracle of
+//! the same class as a template library: it presupposes the missing
+//! packing. It is opt-in measurement, not the recommended hop.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -297,6 +300,8 @@ pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
 /// SOAP of the centre atom of an ideal neighbourhood template.
 ///
 /// 0 = icosahedral (555), 1 = fcc cuboctahedron (421), 2 = hcp (422).
+/// Classifier / diagnostic only. Feeding this into a hop target is an
+/// oracle: the search then presupposes a packing it has not observed.
 pub fn prototype_spectrum(kind: usize, spec: SoapSpec) -> Array1<f64> {
     let pts = match kind {
         1 => crate::structure::Template::FaceCentredCubic.points(),
@@ -396,6 +401,9 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
 }
 
 /// True when the contact graph carries a substantial 555 (icosahedral) fraction.
+///
+/// Observation, not a hop target. Used to *withhold* Ih-preserving
+/// symmetrise. Does not name a destination packing.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     let n = x.len() / 3;
     if n == 0 {
@@ -406,8 +414,10 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     c.fraction((5, 5, 5)) > 0.12
 }
 
-/// Stacked target: 555 atoms toward the 421 class (occupied mean, else fcc
-/// prototype). Other atoms keep a same-class `2p − μ` diversity residual.
+/// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
+///
+/// Invents a close-packed class when the observed cloud has none. Same
+/// class as a template reseed. Not the recommended hop.
 pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -475,7 +485,10 @@ fn apply_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> 
     &x.to_owned() + &dr
 }
 
-/// Residual step: class-conditioned cloud direction, pulled back by analytic `J`.
+/// Oracle residual: 555 toward 421 / fcc prototype, pulled back by analytic `J`.
+///
+/// Opt-in measurement (`soap_class_residual`). The recommended hop is
+/// [`step_away_mean`].
 pub fn step_away<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     _observed: &[Array1<f64>],
@@ -487,7 +500,10 @@ pub fn step_away<R: Rng + ?Sized>(
     apply_cap(x, pullback(x, target.view(), spec), rmsd)
 }
 
-/// Mean residual `2p − μ`. Diagnostic control; not the recommended hop.
+/// Observed-cloud residual `2p − μ`, pulled back by analytic `J`.
+///
+/// No external prototype. On a Dirac cloud the residual vanishes and the
+/// hop is a near-identity: SOAP yields rather than inventing a class.
 pub fn step_away_mean<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1041,6 +1057,26 @@ mod tests {
             ih_dominated(x.view(), spec),
             "ico13 should be Ih-dominated, 555 frac {}",
             crate::structure::cna(x.view(), 13, 1.2).fraction((5, 5, 5))
+        );
+        // No occupied 421 on Mackay ico13: the class target is the fcc
+        // prototype. That is the oracle. The recommended hop must not
+        // use it.
+        let fr_421: f64 = fr.iter().map(|a| a[1]).sum();
+        assert!(
+            fr_421 < 1e-9,
+            "ico13 should have no 421 mass, got {fr_421}"
+        );
+        let target = class_target(x.view(), spec);
+        let proto = prototype_spectrum(1, spec);
+        let dim = spec.dim();
+        let mut d2 = 0.0;
+        for t in 0..dim {
+            let d = target[t] - proto[t];
+            d2 += d * d;
+        }
+        assert!(
+            d2.sqrt() < 1e-9,
+            "class_target on 555-only ico must be the fcc prototype (oracle), rms {d2}"
         );
     }
 
