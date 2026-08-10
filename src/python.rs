@@ -2292,11 +2292,106 @@ fn cluster_bounds(n: usize) -> Bounds<f64> {
     )
 }
 
+/// Residual archive search on the measured recommended preset.
+///
+/// Uses the same warm-started relax and charged gradient as
+/// [`crate::methods::cluster_search::search`]. `archive_search` clones the
+/// config and turns `return_screen` on there; the preset itself is unchanged.
+#[cfg(feature = "graphkey")]
+fn cluster_archive_search(
+    py: Python<'_>,
+    obj: &CallableDiffObjective,
+    cfg: &crate::methods::cluster_hopping::Config,
+    ledger: &mut crate::methods::cluster_hopping::Ledger,
+    seed: u64,
+) -> PyResult<Py<PyDict>> {
+    use crate::methods::archive_search::{Archive, archive_search};
+    use crate::methods::cluster_hopping::random_cluster_in_radius;
+    use crate::methods::cluster_search::CONVERGED_GRADIENT;
+    use crate::methods::warm_lbfgs::WarmLbfgs;
+    use eindir_core::gradient::{DifferentiableObjective, Gradient};
+    use rand::SeedableRng;
+
+    let mut opt = WarmLbfgs::default();
+    let mut relax =
+        |led: &mut crate::methods::cluster_hopping::Ledger, x: ArrayView1<f64>, iters: usize| {
+            opt.forget();
+            let (f, xr, _) = opt.minimize(x, iters, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(obj.value_and_gradient(v))
+            });
+            // Same charged convergence check as the recommended search path.
+            if led.charge() {
+                let _ = Gradient::grad(obj, xr.view())
+                    .iter()
+                    .fold(0.0_f64, |a, v| a.max(v.abs()))
+                    < CONVERGED_GRADIENT;
+            }
+            (f, xr)
+        };
+    let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
+                    x: ArrayView1<f64>|
+     -> Option<Array1<f64>> {
+        if !led.charge() {
+            return None;
+        }
+        Some(Gradient::grad(obj, x))
+    };
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let start = random_cluster_in_radius(
+        cfg.n_points,
+        cfg.start_radius(),
+        cfg.min_separation,
+        &mut rng,
+    );
+    let mut archive = Archive::new();
+    let out = archive_search(
+        cfg,
+        start.view(),
+        ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut archive,
+        &mut rng,
+    );
+    let dim = 3 * cfg.n_points;
+    let best = out
+        .best_state
+        .map(|a| a.to_vec())
+        .unwrap_or_else(|| vec![0.0; dim]);
+    let dict = PyDict::new(py);
+    dict.set_item("best", PyArray1::from_vec(py, best))?;
+    dict.set_item("best_energy", out.best)?;
+    dict.set_item("hops", out.full)?;
+    dict.set_item("charged", out.charged)?;
+    dict.set_item("floors", out.floors)?;
+    dict.set_item("returned", out.returned)?;
+    dict.set_item("events", out.events)?;
+    Ok(dict.into())
+}
+
+#[cfg(not(feature = "graphkey"))]
+fn cluster_archive_search(
+    _py: Python<'_>,
+    _obj: &CallableDiffObjective,
+    _cfg: &crate::methods::cluster_hopping::Config,
+    _ledger: &mut crate::methods::cluster_hopping::Ledger,
+    _seed: u64,
+) -> PyResult<Py<PyDict>> {
+    Err(PyValueError::new_err(
+        "ras=True requires building with the graphkey feature",
+    ))
+}
+
 /// Runs the measured cluster-search layer on a user energy and gradient.
 ///
 /// `recommended=True` uses `Config.recommended(n)`; otherwise
 /// `Config.for_cluster(n)`. Every objective or gradient evaluation is charged
 /// to a ledger of `budget` units. Returns `{best, best_energy, hops}`.
+/// `ras=True` runs residual archive search on `Config.recommended(n)` and
+/// also reports `charged`, `floors`, `returned`, and `events`.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
@@ -2307,8 +2402,10 @@ fn cluster_bounds(n: usize) -> Bounds<f64> {
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
 ///   derived: cost-asymmetric Bayes screen and budget-window temperature
 ///     on top of the measured flags. Overrides `recommended` when true.
+///   ras: residual archive search on the recommended preset. Keyword-only;
+///     default false. Does not change `Config.recommended`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false, *, ras = false))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2318,6 +2415,7 @@ fn cluster_search(
     seed: u64,
     recommended: bool,
     derived: bool,
+    ras: bool,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
@@ -2325,7 +2423,9 @@ fn cluster_search(
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    let cfg = if derived {
+    let cfg = if ras {
+        crate::methods::cluster_hopping::Config::recommended(n)
+    } else if derived {
         crate::methods::cluster_hopping::Config::derived(n)
     } else if recommended {
         crate::methods::cluster_hopping::Config::recommended(n)
@@ -2338,6 +2438,9 @@ fn cluster_search(
         grad_fn,
         bounds: cluster_bounds(n),
     };
+    if ras {
+        return cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+    }
     let (out, _) = crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed);
     let dim = 3 * n;
     let best = out
