@@ -78,6 +78,8 @@ pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
 pub mod screen;
+/// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
+pub mod soap;
 pub mod spectral;
 pub mod structure;
 pub mod symmetrise;
