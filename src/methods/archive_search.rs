@@ -349,7 +349,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     }
                 }
                 if hop2.best.is_finite() {
-                    if let Some(ref x) = hop2.best_state {
+                    if let Some(ref x) = hop2_state {
                         if best_state
                             .as_ref()
                             .map(|b| {
