@@ -156,6 +156,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 record_best(archive, cfg, hop.best, x.view());
             }
         }
+        let best_at = hop_best_at(&hop, ledger.spent());
         return ArchiveOutcome {
             best: hop.best,
             best_state: hop.best_state,
@@ -167,7 +168,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             events: archive.catalog.event_count(),
             artn: hop.symmetrised.0 + hop.stall_escapes,
             charged: ledger.spent(),
-            best_at: hop_best_at(&hop, ledger.spent()),
+            best_at,
         };
     }
     // 30 % skip-return: enough for the ico GM on LJ55 (hits by ~120k of 400k).
