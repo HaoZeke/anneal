@@ -2733,17 +2733,31 @@ mod tests {
     }
 
     #[test]
-    fn screening_rejects_trials_without_a_full_relaxation() {
-        let cfg = Config::for_cluster(6);
+    fn screening_skips_full_relaxation_but_completes_the_hop() {
+        let mut cfg = Config::for_cluster(6);
+        cfg.screen_margin = -1.0e12;
         let mut ledger = Ledger::new(4000);
-        let mut relax = toy_relax;
+        let mut relaxation_steps = Vec::new();
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            relaxation_steps.push(steps);
+            toy_relax(ledger, x, steps)
+        };
         let out = optimize(&cfg, &mut ledger, &mut relax, 1);
         assert!(out.hops > 0, "no hop completed");
-        // Screening is the point of the driver; if nothing is ever rejected
-        // the margin is doing nothing and the budget is being wasted.
+        assert_eq!(out.screened_out, out.hops);
         assert!(
-            out.screened_out > 0 || out.hops > 0,
-            "neither screened nor hopped"
+            relaxation_steps
+                .iter()
+                .any(|&steps| steps == cfg.screen_steps),
+            "the short screen never ran"
+        );
+        assert_eq!(
+            relaxation_steps
+                .iter()
+                .filter(|&&steps| steps == cfg.relax_steps)
+                .count(),
+            1,
+            "a screened hop paid for a full relaxation"
         );
     }
 
