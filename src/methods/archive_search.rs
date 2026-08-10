@@ -9,7 +9,7 @@ use crate::catalog::Catalog;
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    active_mask, run_with_gradient, Config, GradFn, Ledger, Relax,
+    active_mask, run_with_gradient, Config, GradFn, Ledger, MoveLibrary, Relax,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -263,13 +263,17 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c.symmetrise_on_stall = true;
         c.return_polish = 0;
         let slices: Vec<usize> = if molecular {
-            // Progress inside the hop is remaining/budget, so a short
-            // first ledger is not a prefix of rec. One 2000-eval walk
-            // at 40-step quench plus angular moves buys more hops at
-            // the same budget. Rec hit_at on the prism is 1074 and 1780.
+            // Rec already quenches every trial. The extra is the combined
+            // reactive library: atomic single/surface/burst sit next to
+            // the rigid-group arms so a hydrogen-bond event is reachable.
+            // Shorter quench and angular moves lost both rec prisms.
             c.return_screen = false;
-            c.relax_steps = (cfg.relax_steps * 2 / 3).max(1);
-            c.angular_moves = true;
+            if let MoveLibrary::Molecular { groups, .. } = &cfg.move_library {
+                c.move_library = MoveLibrary::Molecular {
+                    groups: groups.clone(),
+                    reactive: true,
+                };
+            }
             vec![cap]
         } else if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
