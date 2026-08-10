@@ -1849,6 +1849,12 @@ pub struct Config {
     /// relaxation, returns and escapes separate cleanly: 0.160 against 1.846
     /// with 97 per cent of pairs ordered correctly at thirty iterations.
     pub return_screen: bool,
+    /// Extra relaxation steps on a returning trial when `return_screen` is on.
+    ///
+    /// Zero (the recommended default) skips the full quench entirely. A
+    /// positive value finishes the return at a fraction of `relax_steps` so
+    /// a near-incumbent that is actually a new isomer can still settle.
+    pub return_polish: usize,
     /// Attempt a multi-step path between funnels when hopping stalls.
     ///
     /// Basin hopping searches to depth one, and from the structure a 75-point
@@ -2107,6 +2113,7 @@ impl Config {
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
             return_screen: false,
+            return_polish: 0,
             path_on_stall: false,
             stall_patience: 60,
             path_images: 9,
@@ -3123,7 +3130,9 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if screened_this || returning {
+        let (e_new, x_new) = if returning && cfg.return_polish > 0 {
+            relax(ledger, x_screen.view(), cfg.return_polish)
+        } else if screened_this || returning {
             if screened_this && !returning {
                 screened_out += 1;
             }
