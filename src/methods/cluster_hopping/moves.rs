@@ -351,23 +351,18 @@ pub enum ClusterMove {
         species: Option<Vec<u32>>,
         /// Mobile atom indices. `None` is all atoms. Frozen stay as neighbours.
         mobile: Option<Vec<usize>>,
-        /// Rigid groups. The pullback is a rigid motion per group, so a
-        /// molecule is not stretched.
+        /// Rigid groups, forwarded for call-site compatibility. The
+        /// hop is `J⁺` of the stacked leftover, not a post-hoc fit.
         groups: Option<Vec<Vec<usize>>>,
     },
 }
 
 fn soap_arm(cfg: &Config, mobile: Option<Vec<usize>>, groups: Option<Vec<Vec<usize>>>) -> ClusterMove {
     let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
-    // Atomic leftover is a fraction of a bond. Molecular leftover is a
-    // rearrangement of intact groups, at the contact scale the SOAP
-    // cutoff already sees. Capping a water hop at 0.35 bond-lengths
-    // spends the arm on a shake the group library already does.
-    let rmsd = if groups.is_some() {
-        cfg.group_cutoff
-    } else {
-        LennardJonesPreset::SOAP_RMSD * cfg.length_scale
-    };
+    // The Jacobian hop is a leftover step, a fraction of a bond, on
+    // every system. Contact-scale amplitude was for a rigid group
+    // translation; the pullback is not that move.
+    let rmsd = LennardJonesPreset::SOAP_RMSD * cfg.length_scale;
     ClusterMove::Soap {
         rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
