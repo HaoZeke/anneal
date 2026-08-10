@@ -1616,19 +1616,6 @@ pub struct Config {
     /// where a coordinate length cannot. All scales come from the run's own
     /// quenched-energy distribution. See [`crate::dos::EnergyBias`].
     pub energy_bias: bool,
-    /// Add the heavy-tailed Tsallis visiting move to the library.
-    ///
-    /// Every other kernel is bounded by a scale set by hand, so none can make a
-    /// rare large excursion. See [`ClusterMove::Visit`].
-    pub visit_moves: bool,
-    /// Regrow from the structure's own local order, with no named packing.
-    ///
-    /// See [`ClusterMove::library_with_self_reseed`].
-    pub self_reseed: bool,
-    /// Growth and twinning together, the source chosen by a posterior.
-    ///
-    /// See [`ClusterMove::library_with_growth_and_twin`].
-    pub growth_and_twin: bool,
     /// Reward move arms by the depth they reach, not by acceptance.
     ///
     /// See [`crate::allocate::DepthAllocator`].
@@ -1663,12 +1650,6 @@ pub struct Config {
     /// mixture covariance. Nothing morphological enters; the buffer is this
     /// run's history.
     pub cov_perturb: bool,
-    /// Drop the move arms measured to produce nothing.
-    ///
-    /// See [`ClusterMove::library_lean`].
-    pub lean_moves: bool,
-    /// Add the composed-relocation burst arm to the lean library.
-    pub burst_moves: bool,
     /// Stage the quench: settle the moved atoms in the frozen environment
     /// before the screening relaxation.
     ///
@@ -1680,15 +1661,6 @@ pub struct Config {
     pub staged_quench: bool,
     /// Descent steps in the settle stage.
     pub settle_iters: usize,
-    /// Rigid groups of a molecular cluster. When set, the move library is the
-    /// molecular one: every arm rigid on these groups.
-    pub molecular_groups: Option<Vec<Vec<usize>>>,
-    /// With molecular groups set, also keep the atomic arms in the pool.
-    /// Rigid arms carry molecular transport; atomic arms keep bond breaking
-    /// and forming reachable on a reactive surface, and the allocator owns
-    /// the split. Off, the pool is rigid-only, the right choice when the
-    /// engine cannot describe dissociation anyway.
-    pub reactive_moves: bool,
     /// Inter-group contact cutoff for the molecular library.
     pub group_cutoff: f64,
     /// Bonding cutoff below which two atoms are one molecule, for deriving
@@ -1893,32 +1865,10 @@ pub struct Config {
     /// what the screen was reaching for and does not have. See
     /// [`crate::delayed`].
     pub delayed_acceptance: bool,
-    /// Whether the move set includes twinning across a dense plane.
-    ///
-    /// The one proposal here that changes morphology without discarding the
-    /// structure. See [`crate::twin`].
-    pub twin_moves: bool,
-    /// Whether a posterior chooses the growth move's parameters.
-    ///
-    /// The allocator decides which move to draw. This decides what the move
-    /// builds: which local order and how much of the current structure to keep.
-    /// Held on the construction rather than on the arm because that is where a
-    /// model can change what a hop reaches; the allocator's own arms carry
-    /// thousands of draws each and separate a 0.63 accept rate from a 0.00 one
-    /// without help. See [`crate::construct`].
-    pub learn_construction: bool,
     /// Candidates built and scored per growth proposal.
     ///
     /// Costs no charged evaluations, since scoring is structural.
     pub construct_width: usize,
-    /// Whether the move set includes growing a candidate from local order.
-    ///
-    /// The only proposals here that cross a funnel boundary in one step. Every
-    /// other move displaces points and lets the quench find a nearby minimum,
-    /// so the reachable set is whatever a displacement reaches, and on 98
-    /// points that set does not contain the tetrahedral funnel from anywhere in
-    /// the icosahedral one. See [`crate::lattice`].
-    pub reseed_moves: bool,
     /// Whether to score the quench extrapolation without acting on it.
     ///
     /// Runs the screening pass to its full length and records what an adaptive
@@ -2015,7 +1965,7 @@ impl Config {
             // Calibrated against the descriptor it is compared with, not
             // guessed. Over 75-point minima the sorted-pair distance between
             // independent minima is 0.9212 at the closest with a median of
-            // 3.28, while a structure one hop away sits at 0.4766 to 0.58, so
+            // 3.28, while a structure one hop away sits at 0.4766 to 0.58.
             // The multiplier separates a return from a genuinely different
             // minimum while remaining proportional to the declared scale.
             merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
@@ -2037,20 +1987,13 @@ impl Config {
             flat_quantile: 0.5,
             statistical_temperature: false,
             energy_bias: false,
-            visit_moves: false,
-            self_reseed: false,
-            growth_and_twin: false,
             depth_reward: false,
             soft_perturb: false,
             soft_modes: 6,
             soft_steps: 30,
             cov_perturb: false,
-            lean_moves: false,
-            burst_moves: false,
-            reactive_moves: false,
             staged_quench: false,
             settle_iters: 20,
-            molecular_groups: None,
             group_cutoff: LennardJonesPreset::GROUP_CUTOFF * length_scale,
             covalent_cutoff: LennardJonesPreset::COVALENT_CUTOFF * length_scale,
             species: None,
@@ -2096,10 +2039,7 @@ impl Config {
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
-            twin_moves: false,
-            learn_construction: false,
             construct_width: 4,
-            reseed_moves: false,
             probe_screen: false,
             quench_warmup: 4,
             quench_confidence: 2.0,
@@ -2107,7 +2047,6 @@ impl Config {
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and
             // 0.63, and the literature's 2.5 N^(1/3) is sized for a method
-            // that relaxes after every perturbation.
             container: LennardJonesPreset::CONTAINER_RADIUS
                 * length_scale
                 * (n_points as f64).cbrt(),
@@ -2135,7 +2074,6 @@ impl Config {
             groups: groups.clone(),
             reactive: false,
         };
-        cfg.molecular_groups = Some(groups);
         cfg.species = Some(species);
         cfg
     }
