@@ -17,6 +17,8 @@ impl LennardJonesPreset {
     pub(super) const GROUP_CUTOFF: f64 = 3.4;
     pub(super) const COVALENT_CUTOFF: f64 = 1.3;
     pub(super) const SYMMETRY_TOLERANCE: f64 = 0.35;
+    pub(super) const SOAP_RMSD: f64 = 0.35;
+    pub(super) const SOAP_CUTOFF: f64 = 3.5;
     pub(super) const ESCAPE_EPSILON: f64 = 1.0e-4;
     pub(super) const ESCAPE_AMPLITUDE: f64 = 0.25;
     pub(super) const SCREEN_MARGIN: f64 = 2.0;
