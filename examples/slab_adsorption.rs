@@ -74,7 +74,26 @@ struct Engine {
 }
 
 impl Engine {
-    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    fn atoms_overlap(x: ArrayView1<f64>) -> bool {
+        let n = x.len() / 3;
+        // CuH2 aborts when two nuclei sit on top of each other. Refuse
+        // those geometries here so the search does not record a collision
+        // well or kill potserv.
+        const MIN_R2: f64 = 0.16;
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = x[3 * i] - x[3 * j];
+                let dy = x[3 * i + 1] - x[3 * j + 1];
+                let dz = x[3 * i + 2] - x[3 * j + 2];
+                if dx * dx + dy * dy + dz * dz < MIN_R2 {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn call_once(&mut self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), String> {
         let n = x.len() / 3;
         let mut pos: Vec<f64> = x.iter().cloned().collect();
         let input = unsafe {
@@ -97,6 +116,12 @@ impl Engine {
         }
         match res {
             Ok(()) => {
+                if !out.energy.is_finite() || out.energy < -1000.0 {
+                    if !out.forces.is_null() {
+                        unsafe { rgpot_tensor_free(out.forces) };
+                    }
+                    return Err(format!("non-physical energy {}", out.energy));
+                }
                 let mut g = Array1::zeros(3 * n);
                 if !out.forces.is_null() {
                     let data = unsafe { rgpot_tensor_data(out.forces) } as *const f64;
@@ -117,26 +142,45 @@ impl Engine {
                     }
                     unsafe { rgpot_tensor_free(out.forces) };
                 }
-                Some((out.energy, g))
+                Ok((out.energy, g))
             }
-            Err(e) => {
-                self.failures += 1;
-                if self.failures == 1 || self.failures % 500 == 0 {
-                    eprintln!("  engine failure {}: {e}", self.failures);
-                }
-                // Connection errors mean potserv died or reset. Rebuild the
-                // client; calculate already opens a fresh TCP session, but a
-                // dead runtime/socket pair stays dead without this.
-                if (e.contains("connection failed") || e.contains("RPC call failed"))
-                    && (self.failures == 1 || self.failures % 20 == 0)
-                {
+            Err(e) => Err(e),
+        }
+    }
+
+    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        if Self::atoms_overlap(x) {
+            self.failures += 1;
+            return None;
+        }
+        // Connection loss is not a refused geometry: wait for potserv to
+        // come back on the same charged evaluation.
+        for attempt in 0..30 {
+            match self.call_once(x) {
+                Ok(pair) => return Some(pair),
+                Err(e) => {
+                    let lost = e.contains("connection failed")
+                        || e.contains("Disconnected")
+                        || e.contains("RPC call failed");
+                    if !lost {
+                        self.failures += 1;
+                        if self.failures == 1 || self.failures % 500 == 0 {
+                            eprintln!("  engine failure {}: {e}", self.failures);
+                        }
+                        return None;
+                    }
+                    if attempt == 0 || attempt % 10 == 0 {
+                        eprintln!("  potserv unreachable ({e}); retry {attempt}");
+                    }
                     if let Ok(c) = RpcClient::new(&self.host, self.port) {
                         self.client = c;
                     }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
-                None
             }
         }
+        self.failures += 1;
+        None
     }
 }
 
