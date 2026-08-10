@@ -72,9 +72,7 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                if cfg.soap_pullback {
-                    kernels.push(ClusterMove::Soap { rmsd: 0.35 });
-                }
+                kernels.push(ClusterMove::Soap { rmsd: 0.35 });
                 kernels
             }
             Self::Visit => {
@@ -773,6 +771,7 @@ impl ClusterMove {
             n_points: n,
             neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF,
         });
+        v.push(ClusterMove::Soap { rmsd: 0.35 });
         v
     }
 
@@ -1288,9 +1287,8 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_leanburst_does_not_offer_soap() {
+    fn recommended_leanburst_offers_soap() {
         let rec = Config::recommended(13);
-        assert!(!rec.soap_pullback);
         let names: Vec<String> = rec
             .move_library
             .kernels(&rec)
@@ -1298,24 +1296,8 @@ mod move_scaling_tests {
             .map(|k| k.name())
             .collect();
         assert!(
-            !names.iter().any(|n| n == "soap"),
-            "recommended kernels include soap: {names:?}"
-        );
-    }
-
-    #[test]
-    fn ras_clone_can_offer_soap() {
-        let mut cfg = Config::recommended(13);
-        cfg.soap_pullback = true;
-        let names: Vec<String> = cfg
-            .move_library
-            .kernels(&cfg)
-            .iter()
-            .map(|k| k.name())
-            .collect();
-        assert!(
             names.iter().any(|n| n == "soap"),
-            "soap_pullback clone missing soap: {names:?}"
+            "recommended LeanBurst missing soap: {names:?}"
         );
     }
 

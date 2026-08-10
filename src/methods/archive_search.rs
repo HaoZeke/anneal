@@ -628,7 +628,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
-    c_fast.soap_pullback = true;
     let mut led1 = Ledger::new(explore);
     let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
     let used1 = led1.spent();
@@ -663,7 +662,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_res.return_polish = (cfg.relax_steps / 4).max(1);
     c_res.return_polish_after = 0;
     c_res.symmetrise_on_stall = true;
-    c_res.soap_pullback = true;
     let mut spent = used1;
     let mut same_floor = 0usize;
     while ledger.remaining() >= cfg.relax_steps.max(1) {
@@ -841,7 +839,6 @@ mod tests {
             "archive_search mutated the caller's recommended config"
         );
         assert!(!rec.return_screen);
-        assert!(!rec.soap_pullback);
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
         assert!(!rec.symmetrise_on_stall);
