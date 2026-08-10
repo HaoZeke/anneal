@@ -51,6 +51,8 @@ pub use config::{Config, Keying};
 pub use moves::*;
 
 use moves::group_relocate;
+#[cfg(test)]
+use preset::LennardJonesPreset;
 
 /// Work ledger: every objective or gradient evaluation is charged.
 ///
