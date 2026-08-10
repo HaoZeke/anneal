@@ -290,8 +290,14 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
-                // A 60-step leftover walk landed 9 meV above the low isomer.
-                c2.relax_steps = (cfg.relax_steps * 3 / 2).max(cfg.relax_steps);
+                if let crate::methods::cluster_hopping::MoveLibrary::Molecular { groups, .. } =
+                    &cfg.move_library
+                {
+                    c2.move_library = crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                        groups: groups.clone(),
+                        reactive: true,
+                    };
+                }
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
                 let hop2 =
