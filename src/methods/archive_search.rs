@@ -116,6 +116,25 @@ struct HopAcc {
     basins: usize,
 }
 
+/// A later hop's start: redraw the adsorbate (slab) or leave the cluster.
+fn residual_start<R: Rng + ?Sized>(
+    start: ArrayView1<f64>,
+    cfg: &Config,
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut y = start.to_owned();
+    if let Some((ref seeds, _)) = cfg.active_region {
+        for &a in seeds {
+            if 3 * a + 2 < y.len() {
+                y[3 * a] += (rng.random::<f64>() - 0.5) * 3.0;
+                y[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
+                y[3 * a + 2] += rng.random::<f64>() * 1.0;
+            }
+        }
+    }
+    y
+}
+
 fn hops_from_start<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -124,6 +143,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
     mut grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
     slices: &[usize],
+    residual: bool,
 ) -> HopAcc {
     let mut acc = HopAcc {
         best: f64::INFINITY,
@@ -136,14 +156,19 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         basins: 0,
     };
     let mut spent_before = ledger.spent();
-    for &slice in slices {
+    for (i, &slice) in slices.iter().enumerate() {
         let rest = ledger.remaining();
         if rest == 0 {
             break;
         }
         let take = slice.max(1).min(rest);
         let mut led = Ledger::new(take);
-        let hop = run_with_gradient(cfg, start, &mut led, relax, grad.as_deref_mut(), rng);
+        let x0 = if residual && i > 0 {
+            residual_start(start, cfg, rng)
+        } else {
+            start.to_owned()
+        };
+        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
         let used = led.spent();
         let _ = ledger.charge_many(used);
         acc.screens += hop.screened_out;
@@ -230,6 +255,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             grad.as_deref_mut(),
             rng,
             &slices,
+            slab,
         );
         if acc.best.is_finite() {
             if let Some(ref x) = acc.best_state {
