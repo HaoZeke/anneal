@@ -1,16 +1,15 @@
 //! Molecular-cluster search against an external quantum-chemistry engine.
 //!
-//! The beyond-Lennard-Jones demonstration: (H2O)m under GFN2-xTB or PBE
-//! through CP2K, with the objective behind a persistent piped helper
-//! (`examples/ase_objective.py`) so engine startup is paid once. The move
-//! library is the molecular one: every arm rigid on the declared groups, the
-//! same shake / relocate / burst vocabulary whose atomic form carried the
-//! measured Lennard-Jones results. The ledger charges one unit per
-//! energy-and-forces evaluation, which at density-functional prices is the
-//! only honest unit there is.
+//! The beyond-Lennard-Jones demonstration: (H2O)m through an in-process
+//! minimum-profile backend (`nwchemc` or `cpmdc`), an rgpot RPC server, or a
+//! persistent ASE helper for GFN2-xTB and CP2K. Every route starts once and
+//! serves the full walk. The move library is the molecular one: every arm
+//! rigid on the declared groups, with the same shake / relocate / burst
+//! vocabulary whose atomic form carries the Lennard-Jones results. The ledger
+//! charges one unit per fused energy-and-forces evaluation.
 //!
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
-//! Engine is xtb (default) or cp2k, forwarded as ASE_ENGINE.
+//! Engine is xtb (default), cp2k, rgpot, nwchemc, or cpmdc.
 
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
@@ -22,6 +21,7 @@ use rand::{Rng, SeedableRng};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 
+use rgpot_core::profile::{ProfileEvaluation, ProfileRequest, ProfileSession};
 use rgpot_core::rpc::client::RpcClient;
 use rgpot_core::tensor::{
     rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
@@ -218,198 +218,89 @@ impl Engine {
     }
 }
 
-/// An anneal potential call backed by the dlopened libnwchemc C ABI.
-/// One session per process; positions in per call as plain arrays, energy
-/// and forces back in Hartree and Hartree/Bohr, converted here to eV and
-/// eV/Angstrom. NWCHEMC_LIBRARY names the shared object, NWCHEMC_PARAMS
-/// a serialized NWChemParams message (capnp encode output); without the
-/// blob the schema defaults apply through an empty message.
-struct ProcessLifetime<T>(std::mem::ManuallyDrop<T>);
-
-impl<T> ProcessLifetime<T> {
-    fn new(value: T) -> Self {
-        Self(std::mem::ManuallyDrop::new(value))
-    }
-}
-
-struct NwchemcEngine {
-    _potential_library: ProcessLifetime<libloading::Library>,
-    lifecycle: Option<NwchemcLifecycle>,
-    calc: unsafe extern "C" fn(
-        *mut std::ffi::c_void,
-        i32,
-        *const f64,
-        *const i32,
-        *mut f64,
-    ) -> NWChemCResult,
+/// A conforming potential backend behind rgpot's minimum in-process profile.
+/// The shared loader owns one persistent session, exchanges the schema's
+/// `ForceInput` and `PotentialResult` carriers, and returns eV/eV-per-Angstrom
+/// values directly to this driver.
+struct ProfileEngine {
+    session: ProfileSession,
     atmnrs: Vec<i32>,
+    box_: [f64; 9],
     failures: usize,
 }
 
-#[repr(C)]
-struct NWChemCResult {
-    ok: i32,
-    energy_h: f64,
-    message: [u8; 512],
-}
-
-const HARTREE_EV: f64 = 27.211386245988;
-const BOHR_ANG: f64 = 0.529177210903;
-
-struct NwchemcLifecycle {
-    session: *mut std::ffi::c_void,
-    destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
-    finalize: unsafe extern "C" fn(),
-}
-
-impl Drop for NwchemcLifecycle {
-    fn drop(&mut self) {
-        unsafe {
-            (self.destroy)(self.session);
-            self.session = std::ptr::null_mut();
-            (self.finalize)();
-        }
+fn profile_prefix(engine: &str) -> Option<&str> {
+    match engine {
+        "nwchemc" | "cpmdc" => Some(engine),
+        _ => None,
     }
 }
 
-impl Drop for NwchemcEngine {
-    fn drop(&mut self) {
-        drop(self.lifecycle.take());
-    }
+fn optimizer_value_gradient(evaluation: ProfileEvaluation) -> (f64, Array1<f64>) {
+    let gradient = Array1::from(
+        evaluation
+            .forces
+            .into_iter()
+            .map(|force| -force)
+            .collect::<Vec<_>>(),
+    );
+    (evaluation.energy, gradient)
 }
 
-impl NwchemcEngine {
-    fn load(m: usize) -> Self {
-        let path = std::env::var("NWCHEMC_LIBRARY").expect("NWCHEMC_LIBRARY");
-        let lib = unsafe { libloading::Library::new(&path) }.expect("dlopen libnwchemc");
-        let params = match std::env::var("NWCHEMC_PARAMS") {
-            Ok(p) => std::fs::read(p).expect("params blob"),
-            // A minimal flat message: one empty segment table entry and an
-            // all-default root struct, which the reader treats as defaults.
-            Err(_) => vec![0u8; 8],
-        };
+impl ProfileEngine {
+    fn load(m: usize, prefix: &str) -> Self {
+        let config_variable = format!("{}_CONFIG", prefix.to_ascii_uppercase());
+        let config_path = std::env::var("POTENTIAL_CONFIG")
+            .or_else(|_| std::env::var(&config_variable))
+            .unwrap_or_else(|_| panic!("POTENTIAL_CONFIG or {config_variable}"));
+        let config = std::fs::read(&config_path).expect("PotentialConfig message");
+        let explicit_library = std::env::var("POTENTIAL_LIBRARY").ok();
         let session = unsafe {
-            let create: libloading::Symbol<
-                unsafe extern "C" fn(*const std::ffi::c_void, usize) -> *mut std::ffi::c_void,
-            > = lib.get(b"nwchemc_session_create").expect("session_create");
-            create(params.as_ptr() as *const _, params.len())
-        };
-        assert!(!session.is_null(), "nwchemc session creation failed");
-        let calc = unsafe {
-            let s: libloading::Symbol<
-                unsafe extern "C" fn(
-                    *mut std::ffi::c_void,
-                    i32,
-                    *const f64,
-                    *const i32,
-                    *mut f64,
-                ) -> NWChemCResult,
-            > = lib
-                .get(b"nwchemc_session_energy_forces")
-                .expect("energy_forces");
-            *s
-        };
-        let destroy = unsafe {
-            let s: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void)> = lib
-                .get(b"nwchemc_session_destroy")
-                .expect("session_destroy");
-            *s
-        };
-        let finalize = unsafe {
-            let s: libloading::Symbol<unsafe extern "C" fn()> =
-                lib.get(b"nwchemc_finalize").expect("finalize");
-            *s
-        };
+            ProfileSession::load(
+                prefix,
+                explicit_library.as_deref().map(std::path::Path::new),
+                &config,
+            )
+        }
+        .unwrap_or_else(|error| panic!("load {prefix} profile: {error}"));
+        log_line(&format!(
+            "  profile {} {} ABI {} from {}",
+            session.prefix(),
+            session.version(),
+            session.abi_version(),
+            session.library_path()
+        ));
         let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
         Self {
-            _potential_library: ProcessLifetime::new(lib),
-            lifecycle: Some(NwchemcLifecycle {
-                session,
-                destroy,
-                finalize,
-            }),
-            calc,
+            session,
             atmnrs,
+            box_: [0.0; 9],
             failures: 0,
         }
     }
 
     fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-        let na = self.atmnrs.len();
-        let pos: Vec<f64> = x.iter().cloned().collect();
-        let mut forces = vec![0f64; 3 * na];
-        let session = self.lifecycle.as_ref().expect("nwchemc lifecycle").session;
-        let res = unsafe {
-            (self.calc)(
-                session,
-                na as i32,
-                pos.as_ptr(),
-                self.atmnrs.as_ptr(),
-                forces.as_mut_ptr(),
-            )
+        let positions = x.iter().copied().collect::<Vec<_>>();
+        let request = ProfileRequest {
+            positions: &positions,
+            atomic_numbers: &self.atmnrs,
+            box_matrix: &self.box_,
+            length_unit: "angstrom",
+            energy_unit: "eV",
         };
-        if res.ok == 0 {
-            self.failures += 1;
-            return None;
+        match self.session.evaluate(&request) {
+            Ok(evaluation) => Some(optimizer_value_gradient(evaluation)),
+            Err(_) => {
+                self.failures += 1;
+                None
+            }
         }
-        let g = Array1::from(
-            forces
-                .iter()
-                .map(|f| -f * HARTREE_EV / BOHR_ANG)
-                .collect::<Vec<f64>>(),
-        );
-        Some((res.energy_h * HARTREE_EV, g))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-
-    static LIFECYCLE_STEP: AtomicUsize = AtomicUsize::new(0);
-
-    unsafe extern "C" fn record_destroy(_session: *mut std::ffi::c_void) {
-        assert_eq!(LIFECYCLE_STEP.swap(1, Ordering::SeqCst), 0);
-    }
-
-    unsafe extern "C" fn record_finalize() {
-        assert_eq!(LIFECYCLE_STEP.swap(2, Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn nwchemc_session_is_destroyed_before_runtime_finalize() {
-        LIFECYCLE_STEP.store(0, Ordering::SeqCst);
-        let mut token = 0u8;
-        let lifecycle = NwchemcLifecycle {
-            session: (&mut token as *mut u8).cast(),
-            destroy: record_destroy,
-            finalize: record_finalize,
-        };
-
-        drop(lifecycle);
-
-        assert_eq!(LIFECYCLE_STEP.load(Ordering::SeqCst), 2);
-    }
-
-    struct DropProbe(Arc<AtomicBool>);
-
-    impl Drop for DropProbe {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
-        }
-    }
-
-    #[test]
-    fn dlopened_potential_handle_has_process_lifetime() {
-        let dropped = Arc::new(AtomicBool::new(false));
-        let handle = ProcessLifetime::new(DropProbe(Arc::clone(&dropped)));
-
-        drop(handle);
-
-        assert!(!dropped.load(Ordering::SeqCst));
-    }
 
     #[test]
     fn conforming_embed_backends_share_profile_path() {
@@ -456,22 +347,25 @@ fn main() {
     ));
 
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
+    let embed_prefix = profile_prefix(&engine);
+    let mut rg_eng = if engine == "rgpot" {
+        Some(RgpotEngine::connect(m))
+    } else {
+        None
+    };
+    let mut profile_eng = embed_prefix.map(|prefix| ProfileEngine::load(m, prefix));
+    let mut eng = if engine == "rgpot" || embed_prefix.is_some() {
+        None
+    } else {
+        Some(start_engine(m, &engine))
+    };
     for seed in seed0..(seed0 + seeds) {
-        let mut rg_eng = if engine == "rgpot" {
-            Some(RgpotEngine::connect(m))
-        } else {
-            None
-        };
-        let mut nw_eng = if engine == "nwchemc" {
-            Some(NwchemcEngine::load(m))
-        } else {
-            None
-        };
-        let mut eng = if engine == "rgpot" || engine == "nwchemc" {
-            None
-        } else {
-            Some(start_engine(m, &engine))
-        };
+        let failures_before = rg_eng
+            .as_ref()
+            .map(|candidate| candidate.failures)
+            .or_else(|| profile_eng.as_ref().map(|candidate| candidate.failures))
+            .or_else(|| eng.as_ref().map(|candidate| candidate.failures))
+            .unwrap_or(0);
         let mut ledger = Ledger::new(budget);
         let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
         let energy_scale = std::env::var("ENERGY_SCALE")
@@ -499,9 +393,9 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                match (&mut rg_eng, &mut nw_eng, &mut eng) {
+                match (&mut rg_eng, &mut profile_eng, &mut eng) {
                     (Some(r), _, _) => r.eval(v),
-                    (_, Some(nwe), _) => nwe.eval(v),
+                    (_, Some(profile), _) => profile.eval(v),
                     (_, _, Some(p)) => p.eval(v),
                     _ => None,
                 }
@@ -587,9 +481,10 @@ fn main() {
         let failures = rg_eng
             .as_ref()
             .map(|r| r.failures)
-            .or_else(|| nw_eng.as_ref().map(|e| e.failures))
+            .or_else(|| profile_eng.as_ref().map(|e| e.failures))
             .or_else(|| eng.as_ref().map(|p| p.failures))
-            .unwrap_or(0);
+            .unwrap_or(0)
+            .saturating_sub(failures_before);
         log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
             out.best, out.hops, failures
