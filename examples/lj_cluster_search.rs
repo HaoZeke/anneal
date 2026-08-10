@@ -299,6 +299,144 @@ fn main() {
         println!("{solved}/{seeds} solved (nested)");
         return;
     }
+    // Residual archive search. Token is `ras`, not `archive` (that is FFS).
+    #[cfg(feature = "graphkey")]
+    if std::env::args().nth(4).map(|v| v.split(',').any(|t| t == "ras" || t == "pair")).unwrap_or(false) {
+        use anneal_core::methods::archive_search::{archive_search, Archive};
+        use anneal_core::methods::cluster_hopping::{
+            optimize_with_gradient, random_cluster_in_radius,
+        };
+        use rand::SeedableRng;
+        let pair = std::env::args()
+            .nth(4)
+            .map(|v| v.split(',').any(|t| t == "pair"))
+            .unwrap_or(false);
+        let cfg = Config::recommended(n);
+        println!(
+            "LJ{n}, budget {budget} charged evaluations, {seeds} seeds{}  arm {}",
+            reference
+                .map(|r| format!(", reference {r:.6}"))
+                .unwrap_or_default(),
+            if pair { "pair rec+ras" } else { "ras" }
+        );
+        let mut rec_solved = 0usize;
+        let mut ras_solved = 0usize;
+        let mut rec_hit_at = Vec::new();
+        let mut ras_hit_at = Vec::new();
+        for seed in seed0..(seed0 + seeds) {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let start = random_cluster_in_radius(
+                n,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut rng,
+            );
+            if pair {
+                let mut ledger = Ledger::new(budget);
+                let mut opt = WarmLbfgs::default();
+                let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                    opt.forget();
+                    let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                    (f, xr)
+                };
+                let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                    if !led.charge() {
+                        return None;
+                    }
+                    Some(lj(x).1)
+                };
+                let out = optimize_with_gradient(
+                    &cfg,
+                    &mut ledger,
+                    &mut relax,
+                    Some(&mut grad),
+                    seed,
+                );
+                let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+                if hit {
+                    rec_solved += 1;
+                }
+                let hat = out
+                    .improvements
+                    .iter()
+                    .find(|(_, _, _, e)| reference.map(|r| *e < r + 1e-4).unwrap_or(false))
+                    .map(|(_, sp, _, _)| *sp);
+                if let Some(sp) = hat {
+                    rec_hit_at.push(sp);
+                }
+                println!(
+                    "  seed {seed} rec: best {:.6}  charged {}  hit_at {}{}",
+                    out.best,
+                    ledger.spent(),
+                    hat.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
+                    if hit { "  SOLVED" } else { "" }
+                );
+            }
+            let mut ledger = Ledger::new(budget);
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+                opt.forget();
+                let (f, xr, _) = opt.minimize(x, iters, |v| charged(led, v));
+                (f, xr)
+            };
+            let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+                if !led.charge() {
+                    return None;
+                }
+                Some(lj(x).1)
+            };
+            let mut archive = Archive::new();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(1));
+            let out = archive_search(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut archive,
+                &mut rng,
+            );
+            let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
+            if hit {
+                ras_solved += 1;
+            }
+            if hit {
+                ras_hit_at.push(out.best_at);
+            }
+            println!(
+                "  seed {seed} ras: best {:.6}  charged {}  hit_at {}  screens {} full {} returned {} same_floor {} floors {} events {} artn {}{}",
+                out.best,
+                out.charged,
+                if hit { out.best_at.to_string() } else { "-".into() },
+                out.screens,
+                out.full,
+                out.returned,
+                out.same_floor,
+                out.floors,
+                out.events,
+                out.artn,
+                if hit { "  SOLVED" } else { "" }
+            );
+        }
+        if pair {
+            let rec_mean = if rec_hit_at.is_empty() {
+                0
+            } else {
+                rec_hit_at.iter().sum::<usize>() / rec_hit_at.len()
+            };
+            let ras_mean = if ras_hit_at.is_empty() {
+                0
+            } else {
+                ras_hit_at.iter().sum::<usize>() / ras_hit_at.len()
+            };
+            println!(
+                "{rec_solved}/{seeds} solved (rec)  {ras_solved}/{seeds} solved (ras)  mean_hit_at rec {rec_mean} ras {ras_mean}"
+            );
+        } else {
+            println!("{ras_solved}/{seeds} solved (ras)");
+        }
+        return;
+    }
     println!(
         "LJ{n}, budget {budget} charged evaluations, {seeds} seeds{}",
         reference
