@@ -1727,7 +1727,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     x.view(),
                     n,
                     &group,
-                    cfg.merge_radius.max(0.5),
+                    cfg.symmetry_merge_radius,
                 ))
             } else {
                 crate::symmetrise::symmetrise_detected(
@@ -1735,7 +1735,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     n,
                     &[2, 3, 4, 5, 6],
                     cfg.symmetry_tolerance,
-                    cfg.merge_radius.max(0.5),
+                    cfg.symmetry_merge_radius,
                 )
                 .map(|(y, _)| y)
             };
@@ -1777,7 +1777,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
                 // Keep each rigid group's internal geometry; only the
                 // packing is redrawn. An atomic redraw overlaps waters.
-                repack_rigid_groups(start, groups, rng)
+                repack_rigid_groups(start, groups, cfg.length_scale, rng)
             } else {
                 random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
             };
@@ -2098,18 +2098,29 @@ pub fn random_cluster<R: Rng + ?Sized>(
 
 /// Seeds a non-overlapping configuration inside a declared sphere radius.
 /// Re-place rigid groups on a new sphere, keeping each group's internals.
+///
+/// The shell dimensions are dimensionless molecular-preset coefficients
+/// multiplied by the caller's declared `length_scale`.
 pub fn repack_rigid_groups<R: Rng + ?Sized>(
     template: ArrayView1<f64>,
     groups: &[Vec<usize>],
+    length_scale: f64,
     rng: &mut R,
 ) -> Array1<f64> {
+    assert!(
+        length_scale.is_finite() && length_scale > 0.0,
+        "length_scale must be finite and positive"
+    );
     let mut y = template.to_owned();
-    let r0 = 2.5 + rng.random::<f64>() * 2.0;
+    let r0 = (preset::MolecularPreset::REPACK_RADIUS
+        + rng.random::<f64>() * preset::MolecularPreset::REPACK_RADIAL_JITTER)
+        * length_scale;
     for (g, atoms) in groups.iter().enumerate() {
         if atoms.is_empty() {
             continue;
         }
-        let r = r0 + (g as f64) * 0.15;
+        let r = r0
+            + (g as f64) * preset::MolecularPreset::REPACK_GROUP_SPACING * length_scale;
         let th = rng.random::<f64>() * std::f64::consts::TAU;
         let ct = 2.0 * rng.random::<f64>() - 1.0;
         let st = (1.0 - ct * ct).sqrt();
@@ -2349,7 +2360,7 @@ mod tests {
         x[7] = 0.93;
         x[8] = 0.0;
         let groups = vec![vec![0, 1, 2]];
-        let y = repack_rigid_groups(x.view(), &groups, &mut rng);
+        let y = repack_rigid_groups(x.view(), &groups, 1.0, &mut rng);
         let d = |a: &Array1<f64>, i: usize, j: usize| {
             let mut s = 0.0;
             for k in 0..3 {
