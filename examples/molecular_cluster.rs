@@ -218,14 +218,22 @@ impl Engine {
     }
 }
 
-/// The in-process NWChem engine: dlopen of the split libnwchemc C ABI.
+/// An anneal potential call backed by the dlopened libnwchemc C ABI.
 /// One session per process; positions in per call as plain arrays, energy
 /// and forces back in Hartree and Hartree/Bohr, converted here to eV and
 /// eV/Angstrom. NWCHEMC_LIBRARY names the shared object, NWCHEMC_PARAMS
 /// a serialized NWChemParams message (capnp encode output); without the
 /// blob the schema defaults apply through an empty message.
+struct ProcessLifetime<T>(std::mem::ManuallyDrop<T>);
+
+impl<T> ProcessLifetime<T> {
+    fn new(value: T) -> Self {
+        Self(std::mem::ManuallyDrop::new(value))
+    }
+}
+
 struct NwchemcEngine {
-    _lib: libloading::Library,
+    _potential_library: ProcessLifetime<libloading::Library>,
     lifecycle: Option<NwchemcLifecycle>,
     calc: unsafe extern "C" fn(
         *mut std::ffi::c_void,
@@ -314,7 +322,7 @@ impl NwchemcEngine {
         };
         let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
         Self {
-            _lib: lib,
+            _potential_library: ProcessLifetime::new(lib),
             lifecycle: Some(NwchemcLifecycle {
                 session,
                 destroy,
