@@ -315,34 +315,6 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 
 /// A start that can open a new energy class: redraw the adsorbate or the
 /// rigid groups when those exist, otherwise a SOAP pullback from a packed rep.
-fn cluster_hole<R: Rng + ?Sized>(start: ArrayView1<f64>, cfg: &Config, rng: &mut R) -> Array1<f64> {
-    if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
-        return residual_start(start, cfg, rng);
-    }
-    soap_hole(&Archive::new(), start, cfg, rng)
-}
-
-fn soap_hole<R: Rng + ?Sized>(
-    archive: &Archive,
-    start: ArrayView1<f64>,
-    cfg: &Config,
-    rng: &mut R,
-) -> Array1<f64> {
-    if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
-        return residual_start(start, cfg, rng);
-    }
-    let spec = crate::soap::SoapSpec::default();
-    let observed: Vec<_> = archive
-        .reps
-        .iter()
-        .filter(|r| !r.is_empty() && r.len() == start.len())
-        .map(|r| crate::soap::power_spectrum(r.view(), spec))
-        .collect();
-    // Pull back the unused start, not the incumbent packing: J at a
-    // packed ico is a kick out of a funnel the explore hop already paid for.
-    crate::soap::step_away(start, &observed, spec, 0.55, rng)
-}
-
 /// Shake atoms that carry `key` so the residual hop leaves that topology.
 fn residual_from_key<R: Rng + ?Sized>(x: ArrayView1<f64>, key: u64, rng: &mut R) -> Array1<f64> {
     let keys = local_keys(x, LOCAL_CUTOFF);
@@ -383,12 +355,11 @@ fn residual_origin<R: Rng + ?Sized>(
             return (Some(k), residual_from_key(x.view(), k, rng));
         }
     }
-    // Residual cell U: a SOAP-space step pulled back through J, not a
-    // one-atom shake and not a CSA splice.
+    // Residual cell U keeps the live start. SOAP pullback is a hop
+    // proposal on the clone, not a leftover restart.
     if archive.residual.best_node().is_none() {
-        let x0 = soap_hole(archive, start, cfg, rng);
-        let keys = local_keys(key_coords(x0.view(), cfg).view(), LOCAL_CUTOFF);
-        return (keys.first().copied(), x0);
+        let keys = local_keys(key_coords(start, cfg).view(), LOCAL_CUTOFF);
+        return (keys.first().copied(), start.to_owned());
     }
     if let Some(i) = archive.residual.best_node() {
         if i < archive.reps.len() && !archive.reps[i].is_empty() {
@@ -407,15 +378,9 @@ fn residual_origin<R: Rng + ?Sized>(
         if let Some(x) = archive.key_reps.get(&k) {
             return (Some(k), residual_from_key(x.view(), k, rng));
         }
-        return (Some(k), soap_hole(archive, start, cfg, rng));
+        return (Some(k), start.to_owned());
     }
-    let seed = archive
-        .reps
-        .iter()
-        .find(|r| !r.is_empty())
-        .map(|r| r.view())
-        .unwrap_or(start);
-    (None, soap_hole(archive, seed, cfg, rng))
+    (None, start.to_owned())
 }
 
 fn fold_hop(acc: &mut HopAcc, hop: &crate::methods::cluster_hopping::Outcome, at: usize) {
@@ -663,6 +628,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
+    c_fast.soap_pullback = true;
     let mut led1 = Ledger::new(explore);
     let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
     let used1 = led1.spent();
@@ -697,6 +663,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_res.return_polish = (cfg.relax_steps / 4).max(1);
     c_res.return_polish_after = 0;
     c_res.symmetrise_on_stall = true;
+    c_res.soap_pullback = true;
     let mut spent = used1;
     let mut same_floor = 0usize;
     while ledger.remaining() >= cfg.relax_steps.max(1) {
@@ -874,6 +841,7 @@ mod tests {
             "archive_search mutated the caller's recommended config"
         );
         assert!(!rec.return_screen);
+        assert!(!rec.soap_pullback);
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
         assert!(!rec.symmetrise_on_stall);
@@ -1075,23 +1043,17 @@ mod tests {
             "incumbent keys are still due; that is the trap the hole must beat"
         );
         let (_from, x0) = residual_origin(&archive, &rec, start.view(), &mut rng);
-        // A SOAP pullback is concerted: more than one atom leaves its site.
-        // A due_key 1.6-shake of one local key can move a single atom only.
-        let n = start.len() / 3;
-        let mut moved = 0usize;
-        for i in 0..n {
-            let mut d2 = 0.0;
-            for k in 0..3 {
-                let d = x0[3 * i + k] - start[3 * i + k];
-                d2 += d * d;
-            }
-            if d2.sqrt() > 0.05 {
-                moved += 1;
-            }
-        }
+        // U leftover continues from the start. SOAP pullback is an in-hop
+        // proposal, not a leftover restart.
+        let d2: f64 = start
+            .iter()
+            .zip(x0.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum();
         assert!(
-            moved >= 2,
-            "residual origin was not a SOAP pullback (moved {moved} atoms)"
+            d2.sqrt() < 1e-12,
+            "U leftover restarted instead of keeping the live start (rmsd={})",
+            d2.sqrt()
         );
     }
 
