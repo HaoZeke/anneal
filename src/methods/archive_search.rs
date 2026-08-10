@@ -286,11 +286,11 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             }
             last_screen = Some((e_sc, x_sc.clone(), landed, k));
             last_nonreturn = Some((e_sc, x_sc.clone(), landed, k));
-            if should_buy(archive, landed, hat, ledger.best) {
-                found = Some((e_sc, x_sc, landed, k));
-                break;
-            }
-            out.same_floor += 1;
+            // First non-return is the purchase. Floor saturation must not
+            // keep redrawing up to MAX_REDRAW: that spends 16 S on a veto
+            // and leaves fewer R than recommended.
+            found = Some((e_sc, x_sc, landed, k));
+            break;
         }
 
         if found.is_none() {
@@ -361,32 +361,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     out.events = archive.catalog.event_count();
     out.charged = ledger.spent();
     out
-}
-
-fn should_buy(archive: &Archive, landed: Option<usize>, hat: f64, e_star: f64) -> bool {
-    // `FloorBook::saturated` trips at n=2 under the cost-asymmetric tau, which
-    // is the wrong purchase veto: two ico isomers must not block a Marks
-    // screen the drop model still assigns to that floor. Skip only a class
-    // that cannot undercut E_star and whose predicted full energy does not.
-    if !archive.drop.calibrated() {
-        return true;
-    }
-    if hat < e_star {
-        return true;
-    }
-    match landed {
-        None => true,
-        Some(id) => {
-            let dead = archive
-                .floors
-                .get(id)
-                .is_some_and(|f| !f.can_beat(e_star));
-            if !dead {
-                return true;
-            }
-            archive.residual.score(id) >= 0.5 * archive.residual.residual_score()
-        }
-    }
 }
 
 fn pending_blocks(archive: &Archive, landed: Option<usize>) -> bool {
