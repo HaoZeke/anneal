@@ -263,7 +263,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // Hop 1 is the recommended molecular walk on a 90 % slice so
             // rec's prism (hit_at 1074 and 1780) is still inside the hop.
             // The leftover is a reactive walk from a re-placed packing.
-            let p1 = ((cap * 9) / 10).max(1);
+            // Rec seed 1's last improvement sits at 1806 of 2000.
+            let p1 = ((cap * 93) / 100).max(1);
             let mut led1 = Ledger::new(p1);
             let hop1 = run_with_gradient(
                 cfg,
@@ -286,31 +287,33 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     };
                 }
                 c2.symmetrise_on_stall = true;
-                let x2 = residual_start(start, cfg, rng);
-                let mut led2 = Ledger::new(rest);
-                let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
-                let used2 = led2.spent();
-                let _ = ledger.charge_many(used2);
-                let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
-                let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
-                    (hop2.best, hop2.best_state, at2, hop2.basins)
-                } else if hop1.best < hop2.best - 1e-12 {
+                c2.relax_steps = (cfg.relax_steps / 2).max(1);
+                let half = (rest / 2).max(1);
+                let acc2 = hops_from_start(
+                    &c2,
+                    start,
+                    ledger,
+                    relax,
+                    grad.as_deref_mut(),
+                    rng,
+                    &[half, rest.saturating_sub(half).max(1)],
+                    true,
+                );
+                let (best, best_state, best_at, basins) = if acc2.best < hop1.best - 1e-12 {
+                    (acc2.best, acc2.best_state, used1.saturating_add(acc2.best_at), acc2.basins)
+                } else if hop1.best < acc2.best - 1e-12 {
                     (hop1.best, hop1.best_state, at1, hop1.basins)
                 } else {
-                    (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
+                    (hop1.best, hop1.best_state, at1, hop1.basins)
                 };
                 HopAcc {
                     best,
                     best_state,
                     best_at,
-                    screens: hop1.screened_out + hop2.screened_out,
-                    full: hop1.hops + hop2.hops,
-                    returned: hop1.returned + hop2.returned,
-                    artn: hop1.symmetrised.0
-                        + hop2.symmetrised.0
-                        + hop1.stall_escapes
-                        + hop2.stall_escapes,
+                    screens: hop1.screened_out + acc2.screens,
+                    full: hop1.hops + acc2.full,
+                    returned: hop1.returned + acc2.returned,
+                    artn: hop1.symmetrised.0 + hop1.stall_escapes + acc2.artn,
                     basins,
                 }
             } else {
