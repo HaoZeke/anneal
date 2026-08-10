@@ -2632,7 +2632,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut path_gain = 0.0_f64;
 
     for _ in 1..n_rep {
-        let s0 = random_cluster(n, 0.7, cfg.min_separation, rng);
+        let s0 = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
         let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
         ledger.record(e0, x0.view());
         chains.push((e0, x0));
@@ -3701,7 +3701,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         if (cfg.restart_on_stall || cfg.tabu_on_stall) && stuck {
             quiet = 0;
             longest_quiet = 0;
-            let fresh = random_cluster(n, 0.7, cfg.min_separation, rng);
+            let fresh = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
             let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
             ledger.record(ef, xf.view());
             hops += 1;
@@ -3996,6 +3996,16 @@ fn run_full<'g, R: Rng + ?Sized>(
 /// interest, and a relaxation cannot recover from that.
 pub fn random_cluster<R: Rng + ?Sized>(n: usize, density: f64, min_sep: f64, rng: &mut R) -> Array1<f64> {
     let radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * density)).cbrt();
+    random_cluster_in_radius(n, radius, min_sep, rng)
+}
+
+/// Seeds a non-overlapping configuration inside a declared sphere radius.
+pub fn random_cluster_in_radius<R: Rng + ?Sized>(
+    n: usize,
+    radius: f64,
+    min_sep: f64,
+    rng: &mut R,
+) -> Array1<f64> {
     let mut pts: Vec<[f64; 3]> = Vec::with_capacity(n);
     let mut tries = 0;
     while pts.len() < n && tries < 20_000 {
@@ -4042,7 +4052,12 @@ pub fn optimize_with_settle<'g>(
     seed: u64,
 ) -> Outcome {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let start = random_cluster_in_radius(
+        cfg.n_points,
+        cfg.start_radius(),
+        cfg.min_separation,
+        &mut rng,
+    );
     run_with_gradient_settle(cfg, start.view(), ledger, relax, grad, settle, &mut rng)
 }
 
@@ -4055,7 +4070,12 @@ pub fn optimize_with_gradient<'g>(
     seed: u64,
 ) -> Outcome {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let start = random_cluster_in_radius(
+        cfg.n_points,
+        cfg.start_radius(),
+        cfg.min_separation,
+        &mut rng,
+    );
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
 }
 
