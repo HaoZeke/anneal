@@ -1236,8 +1236,9 @@ impl ClusterMove {
                 groups,
             } => {
                 let spec = crate::soap::SoapSpec {
+                    n_max: 3,
+                    l_max: 6,
                     rcut_nn: *cutoff,
-                    ..Default::default()
                 };
                 let packing = species.is_none() && mobile.is_none();
                 if *class && packing {
@@ -1362,6 +1363,28 @@ mod move_scaling_tests {
             }
         }
         assert!(moved >= 2, "SOAP proposal moved {moved} atoms");
+    }
+
+    #[test]
+    fn recommended_soap_uses_lmax6() {
+        let rec = Config::recommended(13);
+        let soap = rec
+            .move_library
+            .kernels(&rec)
+            .into_iter()
+            .find(|k| matches!(k, ClusterMove::Soap { .. }));
+        match soap {
+            Some(ClusterMove::Soap { cutoff, .. }) => {
+                let spec = crate::soap::SoapSpec {
+                    n_max: 3,
+                    l_max: 6,
+                    rcut_nn: cutoff,
+                };
+                assert_eq!(spec.l_max, 6);
+                assert!(crate::ace::dim(3, 6) > crate::ace::dim(3, 3));
+            }
+            _ => panic!("recommended LeanBurst has no SOAP arm"),
+        }
     }
 
     #[test]
