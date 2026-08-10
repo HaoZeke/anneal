@@ -156,11 +156,23 @@ fn residual_start<R: Rng + ?Sized>(
             for d in 0..3 {
                 com[d] /= n;
             }
+            let a = rng.random::<f64>() * std::f64::consts::TAU;
+            let b = rng.random::<f64>() * std::f64::consts::TAU;
+            let (sa, ca) = a.sin_cos();
+            let (sb, cb) = b.sin_cos();
             for &i in atoms {
                 if 3 * i + 2 < y.len() {
-                    for d in 0..3 {
-                        y[3 * i + d] += new_c[d] - com[d];
-                    }
+                    let rx = y[3 * i] - com[0];
+                    let ry = y[3 * i + 1] - com[1];
+                    let rz = y[3 * i + 2] - com[2];
+                    let x1 = ca * rx - sa * ry;
+                    let y1 = sa * rx + ca * ry;
+                    let z1 = rz;
+                    let x2 = cb * x1 + sb * z1;
+                    let z2 = -sb * x1 + cb * z1;
+                    y[3 * i] = new_c[0] + x2;
+                    y[3 * i + 1] = new_c[1] + y1;
+                    y[3 * i + 2] = new_c[2] + z2;
                 }
             }
         }
@@ -278,6 +290,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
+                // A 60-step leftover walk landed 9 meV above the low isomer.
+                c2.relax_steps = (cfg.relax_steps * 3 / 2).max(cfg.relax_steps);
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
                 let hop2 =
