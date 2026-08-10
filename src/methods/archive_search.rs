@@ -806,14 +806,14 @@ mod tests {
         let rec = Config::recommended(13);
         let before = format!("{rec:?}");
         assert!(
-            !rec.return_screen,
-            "recommended must keep return_screen off; ras enables it on a clone"
+            rec.return_screen,
+            "recommended is the scientific hop; return_screen is on"
         );
-        assert!(!rec.symmetrise_on_stall);
+        assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 200);
         let rec2 = Config::recommended(75);
-        assert!(!rec2.return_screen);
+        assert!(rec2.return_screen);
         assert!(rec2.allocate_moves);
         assert!(rec2.tabu_on_stall);
         assert!(rec2.depth_reward);
@@ -838,10 +838,10 @@ mod tests {
             before,
             "archive_search mutated the caller's recommended config"
         );
-        assert!(!rec.return_screen);
+        assert!(rec.return_screen);
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
-        assert!(!rec.symmetrise_on_stall);
+        assert!(rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 200);
     }
@@ -961,7 +961,7 @@ mod tests {
         let before = format!("{rec:?}");
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
-        assert!(!rec.return_screen);
+        assert!(rec.return_screen);
         let mut rng = StdRng::seed_from_u64(5);
         let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
         let mut ledger = Ledger::new(50_000);
@@ -984,7 +984,7 @@ mod tests {
         );
         assert_eq!(rec.return_polish, 0);
         assert_eq!(rec.return_polish_after, 0);
-        assert!(!rec.return_screen);
+        assert!(rec.return_screen);
         assert!(out.best.is_finite());
         assert!(out.charged <= 50_000);
     }
