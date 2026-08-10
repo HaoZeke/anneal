@@ -1,4 +1,4 @@
-//! Global minimum of an adsorbate on a substrate through the rgpot server.
+//! Global minimum of an adsorbate on a substrate through an rgpot backend.
 //!
 //! The geometry comes from an eOn con file through readcon: nothing is grown
 //! here, and the file's fixed flags designate the substrate. The mobile set
@@ -9,8 +9,9 @@
 //! it moves. A descriptor-deviation bound over the same neighbourhoods is
 //! the stated refinement of this selector.
 //!
-//! Usage: slab_adsorption <con_file> <budget> <seeds> [shells]
-//! Env: RGPOT_HOST / RGPOT_PORT for the server (CuH2 for the copper case).
+//! Usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]
+//! Engine is rgpot (default), nwchemc, or cpmdc. The server uses RGPOT_HOST /
+//! RGPOT_PORT; profiles use POTENTIAL_CONFIG / POTENTIAL_LIBRARY.
 
 mod common;
 
@@ -18,6 +19,7 @@ mod common;
 use anneal_core::methods::archive_search::{Archive, archive_search};
 use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use common::profile_engine::{ProfileEngine, profile_prefix};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -189,16 +191,18 @@ fn main() {
     let con = args
         .get(1)
         .cloned()
-        .expect("usage: slab_adsorption <con_file> <budget> <seeds> [shells]");
+        .expect("usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]");
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let ras = args.iter().any(|t| t == "ras" || t == "pair");
-    let pair = args.iter().any(|t| t == "pair");
-    let shells: usize = args
+    let tail = &args[4.min(args.len())..];
+    let ras = tail.iter().any(|t| t == "ras" || t == "pair");
+    let pair = tail.iter().any(|t| t == "pair");
+    let shells: usize = tail.iter().find_map(|v| v.parse().ok()).unwrap_or(1);
+    let engine = tail
         .iter()
-        .skip(4)
-        .find_map(|v| v.parse().ok())
-        .unwrap_or(1);
+        .find(|value| matches!(value.as_str(), "rgpot" | "nwchemc" | "cpmdc"))
+        .map(String::as_str)
+        .unwrap_or("rgpot");
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -209,10 +213,45 @@ fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(9999);
 
+    let (base_x, species, free_seeds, box_) = read_system(&con);
+    let n = species.len();
+    // STACK=base runs the plain protocol; ATOMIC=1 keeps the atomic move
+    // library for free mixed clusters instead of the grouped molecular one.
+    let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
+    let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
+    let groups = vec![(0..n).collect()];
+    let mut cfg = if base_stack {
+        Config::for_molecular(species.clone(), groups.clone(), 1.0)
+    } else {
+        Config::recommended_molecular(species.clone(), groups, 1.0)
+    };
+    if atomic {
+        cfg.move_library = anneal_core::methods::cluster_hopping::MoveLibrary::Atomic;
+    } else {
+        cfg.active_region = Some((free_seeds.clone(), shells));
+    }
+    cfg.screen_steps = 10;
+    cfg.relax_steps = 150;
+
+    let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
+    let mut rpc_eng = (engine == "rgpot").then(|| Engine {
+        host: host.clone(),
+        port,
+        client: RpcClient::new(&host, port).expect("rgpot client"),
+        atmnrs: atmnrs.clone(),
+        species: species.clone(),
+        seeds: free_seeds.clone(),
+        shells,
+        tolerance: cfg.bond_tolerance,
+        box_,
+        failures: 0,
+    });
+    let mut profile_eng = profile_prefix(engine)
+        .map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
+
     for seed in seed0..(seed0 + seeds) {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
-        let (mut x0, species, free_seeds, box_) = read_system(&con);
-        let n = species.len();
+        let mut x0 = base_x.clone();
         // Different seeds start the adsorbate at different lateral offsets;
         // the substrate stays as the file placed it.
         for &a in &free_seeds {
@@ -221,41 +260,18 @@ fn main() {
             x0[3 * a + 2] += rng.random::<f64>() * 1.0;
         }
         log_line(&format!(
-            "{con}: {n} atoms, {} free seeds, {shells} active shells, budget {budget}, seed {seed}, box {:.4} {:.4} {:.4}",
+            "{con}: {n} atoms through {engine}, {} free seeds, {shells} active shells, budget {budget}, seed {seed}, box {:.4} {:.4} {:.4}",
             free_seeds.len(),
             box_[0],
             box_[4],
             box_[8]
         ));
-        // STACK=base runs the plain protocol; ATOMIC=1 keeps the atomic move
-        // library for free mixed clusters instead of the grouped molecular one.
-        let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
-        let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
-        let groups = vec![(0..n).collect()];
-        let mut cfg = if base_stack {
-            Config::for_molecular(species.clone(), groups.clone(), 1.0)
-        } else {
-            Config::recommended_molecular(species.clone(), groups, 1.0)
-        };
-        if atomic {
-            cfg.move_library = anneal_core::methods::cluster_hopping::MoveLibrary::Atomic;
-        } else {
-            cfg.active_region = Some((free_seeds.clone(), shells));
-        }
-        cfg.screen_steps = 10;
-        cfg.relax_steps = 150;
-        let mut eng = Engine {
-            host: host.clone(),
-            port,
-            client: RpcClient::new(&host, port).expect("rgpot client"),
-            atmnrs: species.iter().map(|&z| z as i32).collect(),
-            species: species.clone(),
-            seeds: free_seeds.clone(),
-            shells,
-            tolerance: cfg.bond_tolerance,
-            box_,
-            failures: 0,
-        };
+        let failures_before = rpc_eng
+            .as_ref()
+            .map(|candidate| candidate.failures)
+            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
+            .unwrap_or(0);
+        let mut overlap_failures = 0usize;
         let mut ledger = Ledger::new(budget);
         let mut opt = WarmLbfgs::default();
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
@@ -264,7 +280,29 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                eng.eval(v)
+                if let Some(rpc) = rpc_eng.as_mut() {
+                    return rpc.eval(v);
+                }
+                if Engine::atoms_overlap(v) {
+                    overlap_failures += 1;
+                    return None;
+                }
+                let (energy, mut gradient) = profile_eng.as_mut()?.eval(v)?;
+                let active = active_mask(
+                    v,
+                    &species,
+                    &free_seeds,
+                    shells,
+                    cfg.bond_tolerance,
+                );
+                for (atom, is_active) in active.into_iter().enumerate() {
+                    if !is_active {
+                        for axis in 0..3 {
+                            gradient[3 * atom + axis] = 0.0;
+                        }
+                    }
+                }
+                Some((energy, gradient))
             });
             (f, xr)
         };
@@ -316,9 +354,16 @@ fn main() {
         };
         #[cfg(not(feature = "graphkey"))]
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
+        let failures_after = rpc_eng
+            .as_ref()
+            .map(|candidate| candidate.failures)
+            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
+            .unwrap_or(0);
         log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
-            out.best, out.hops, eng.failures
+            out.best,
+            out.hops,
+            failures_after.saturating_sub(failures_before) + overlap_failures
         ));
         if let Some(bx) = out.best_state {
             let path = format!("best_cuh2_s{seed}.xyz");
