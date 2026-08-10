@@ -507,7 +507,11 @@ fn main() {
     cfg.adaptive_height = opts.contains(&"height");
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
-    cfg.return_screen = opts.contains(&"rscreen");
+    // Do not clobber Config::recommended: that hop already turns the
+    // return screen on. The flag only adds it to for_cluster.
+    if opts.contains(&"rscreen") {
+        cfg.return_screen = true;
+    }
     cfg.minima_hopping = opts.contains(&"mh");
     cfg.escape_on_stall = opts.contains(&"climb");
     // The radius read off the search's own step length rather than swept.
