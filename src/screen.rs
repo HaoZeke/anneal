@@ -35,6 +35,24 @@
 
 use ndarray::{Array1, Array2, ArrayView1};
 
+/// Bayes threshold from the hop's own step counts.
+///
+/// Finishing the quench costs `Q = R - S` extra evaluations. A discarded
+/// winner costs one full hop `R` of opportunity. Net value of quenching is
+/// `p R - (1-p) Q`, which is positive exactly when
+/// `p > Q / (Q + R) = (R - S) / (2 R - S)`.
+///
+/// For the measured hop (`S = 25`, `R = 200`) this is `7/15`, not a knob.
+pub fn cost_asymmetric_threshold(screen_steps: usize, relax_steps: usize) -> f64 {
+    assert!(
+        screen_steps < relax_steps && relax_steps > 0,
+        "screen_steps must be strictly less than relax_steps (got {screen_steps}, {relax_steps})"
+    );
+    let s = screen_steps as f64;
+    let r = relax_steps as f64;
+    (r - s) / (2.0 * r - s)
+}
+
 /// Features of a partially relaxed trial, and whether it deserves a full one.
 ///
 /// The design vector is the caller's. What the model needs is that it be cheap
@@ -269,6 +287,13 @@ mod tests {
     /// Features of a trial: an intercept and two cheap measurements.
     fn feat(a: f64, b: f64) -> Array1<f64> {
         array![1.0, a, b]
+    }
+
+    #[test]
+    fn cost_threshold_is_seven_fifteenths_on_the_measured_hop() {
+        let t = cost_asymmetric_threshold(25, 200);
+        assert!((t - 7.0 / 15.0).abs() < 1e-12, "{t}");
+        assert!(t > 0.0 && t < 1.0);
     }
 
     #[test]

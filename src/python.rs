@@ -2075,9 +2075,10 @@ fn osa_acceptance_rate(
 
 /// Driver settings for the cluster-search layer.
 ///
-/// Construct with [`Config.recommended`] or [`Config.for_cluster`]. The
-/// recommended stack is the measured default: composed surface relocations,
-/// depth-rewarded move allocation, and tabu on stall.
+/// Construct with [`Config.recommended`], [`Config.derived`], or
+/// [`Config.for_cluster`]. The recommended stack is the measured
+/// default: composed surface relocations, depth-rewarded move
+/// allocation, and tabu on stall.
 #[pyclass(name = "Config")]
 #[derive(Clone)]
 pub struct PyClusterConfig {
@@ -2095,6 +2096,19 @@ impl PyClusterConfig {
         }
         Ok(Self {
             inner: crate::methods::cluster_hopping::Config::recommended(n),
+            recommended: true,
+        })
+    }
+
+    /// Recommended flags with the cost-asymmetric screen and budget-window
+    /// temperature. Not the measured configuration.
+    #[staticmethod]
+    fn derived(n: usize) -> PyResult<Self> {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        Ok(Self {
+            inner: crate::methods::cluster_hopping::Config::derived(n),
             recommended: true,
         })
     }
@@ -2141,8 +2155,22 @@ impl PyClusterConfig {
         self.inner.tabu_on_stall
     }
 
+    /// Cost-asymmetric Bayes-screen threshold, if that screen is on.
+    #[getter]
+    fn bayes_threshold(&self) -> f64 {
+        self.inner.bayes_threshold
+    }
+
+    /// Budget-window temperature rather than fixed \(T=0.8\).
+    #[getter]
+    fn budget_window(&self) -> bool {
+        self.inner.budget_window
+    }
+
     fn __repr__(&self) -> String {
-        if self.recommended {
+        if self.inner.bayes_screen && self.inner.budget_window {
+            format!("Config.derived({})", self.inner.n_points)
+        } else if self.recommended {
             format!("Config.recommended({})", self.inner.n_points)
         } else {
             format!("Config.for_cluster({})", self.inner.n_points)
@@ -2274,8 +2302,10 @@ fn cluster_bounds(n: usize) -> Bounds<f64> {
 ///   budget: charged evaluations.
 ///   seed: RNG seed.
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
+///   derived: cost-asymmetric Bayes screen and budget-window temperature
+///     on top of the measured flags. Overrides `recommended` when true.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true))]
+#[pyo3(signature = (obj_fn, grad_fn, n, budget, seed = 0, recommended = true, derived = false))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2284,6 +2314,7 @@ fn cluster_search(
     budget: usize,
     seed: u64,
     recommended: bool,
+    derived: bool,
 ) -> PyResult<Py<PyDict>> {
     if n < 2 {
         return Err(PyValueError::new_err("n must be at least 2"));
@@ -2291,7 +2322,9 @@ fn cluster_search(
     if budget < 1 {
         return Err(PyValueError::new_err("budget must be positive"));
     }
-    let cfg = if recommended {
+    let cfg = if derived {
+        crate::methods::cluster_hopping::Config::derived(n)
+    } else if recommended {
         crate::methods::cluster_hopping::Config::recommended(n)
     } else {
         crate::methods::cluster_hopping::Config::for_cluster(n)
