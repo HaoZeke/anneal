@@ -48,7 +48,7 @@ trybuild  = "1.0"
 # Example/integration demo only: minimize an rgpot potential with anneal. Shares
 # the same registry eindir-core + dlpk versions, so one eindir-core compilation
 # backs both.
-rgpot-core = { version = "2.2.0", features = ["rpc"] }
+rgpot-core = { git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "20480334bda4c99669298f72a1d4611005786fb1", features = ["profile", "rpc"] }
 readcon-core = "0.14"
 
 [build-dependencies]

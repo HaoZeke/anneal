@@ -410,6 +410,27 @@ mod tests {
 
         assert!(!dropped.load(Ordering::SeqCst));
     }
+
+    #[test]
+    fn conforming_embed_backends_share_profile_path() {
+        assert_eq!(profile_prefix("nwchemc"), Some("nwchemc"));
+        assert_eq!(profile_prefix("cpmdc"), Some("cpmdc"));
+        assert_eq!(profile_prefix("rgpot"), None);
+        assert_eq!(profile_prefix("xtb"), None);
+    }
+
+    #[test]
+    fn profile_result_is_one_value_gradient_pair() {
+        let evaluation = rgpot_core::profile::ProfileEvaluation {
+            energy: -12.75,
+            forces: vec![1.0, -2.0, 3.0],
+        };
+
+        let (energy, gradient) = optimizer_value_gradient(evaluation);
+
+        assert_eq!(energy, -12.75);
+        assert_eq!(gradient.as_slice().unwrap(), [-1.0, 2.0, -3.0]);
+    }
 }
 
 fn main() {
