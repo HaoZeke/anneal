@@ -116,7 +116,7 @@ struct HopAcc {
     basins: usize,
 }
 
-/// A later hop's start: redraw the adsorbate (slab) or leave the cluster.
+/// A later hop's start: redraw the adsorbate, or re-place rigid groups.
 fn residual_start<R: Rng + ?Sized>(
     start: ArrayView1<f64>,
     cfg: &Config,
@@ -129,6 +129,38 @@ fn residual_start<R: Rng + ?Sized>(
                 y[3 * a] += (rng.random::<f64>() - 0.5) * 3.0;
                 y[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
                 y[3 * a + 2] += rng.random::<f64>() * 1.0;
+            }
+        }
+        return y;
+    }
+    if let Some(groups) = cfg.move_library.declared_groups() {
+        for (g, atoms) in groups.iter().enumerate() {
+            if atoms.is_empty() {
+                continue;
+            }
+            let r = 3.0 + (g as f64) * 0.1;
+            let th = rng.random::<f64>() * std::f64::consts::TAU;
+            let ct = 2.0 * rng.random::<f64>() - 1.0;
+            let st = (1.0 - ct * ct).sqrt();
+            let new_c = [r * st * th.cos(), r * st * th.sin(), r * ct];
+            let n = atoms.len() as f64;
+            let mut com = [0.0; 3];
+            for &i in atoms {
+                if 3 * i + 2 < y.len() {
+                    for d in 0..3 {
+                        com[d] += y[3 * i + d];
+                    }
+                }
+            }
+            for d in 0..3 {
+                com[d] /= n;
+            }
+            for &i in atoms {
+                if 3 * i + 2 < y.len() {
+                    for d in 0..3 {
+                        y[3 * i + d] += new_c[d] - com[d];
+                    }
+                }
             }
         }
     }
@@ -231,11 +263,11 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c.symmetrise_on_stall = true;
         c.return_polish = 0;
         let slices: Vec<usize> = if molecular {
-            // A 6-step return screen drops the water-prism quench. Two
-            // rec-quality walks from the same start keep quench quality
-            // and buy a second shot with the leftover ledger.
+            // A 6-step return screen drops the water-prism quench. One
+            // long rec-quality walk keeps that quench; a short leftover
+            // walk starts from a re-placed packing.
             c.return_screen = false;
-            let a = ((cap * 6) / 10).max(1);
+            let a = ((cap * 9) / 10).max(1);
             vec![a, cap.saturating_sub(a).max(1)]
         } else if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
@@ -255,7 +287,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             grad.as_deref_mut(),
             rng,
             &slices,
-            slab,
+            molecular || slab,
         );
         if acc.best.is_finite() {
             if let Some(ref x) = acc.best_state {
