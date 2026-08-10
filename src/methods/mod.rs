@@ -18,6 +18,8 @@ pub mod cluster_search;
 pub mod activation;
 pub mod bank;
 pub mod csa_cluster;
+/// Cut-and-splice mixing of two quenched clusters.
+pub mod splice;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
