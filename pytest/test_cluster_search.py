@@ -80,3 +80,46 @@ def test_cluster_search_rejects_bad_n_and_budget():
         cluster_search(lj_energy, lj_grad, 1, 100, seed=0)
     with pytest.raises(ValueError, match="positive"):
         cluster_search(lj_energy, lj_grad, 4, 0, seed=0)
+
+
+def test_cluster_search_ras_flag_exists_and_recommended_defaults():
+    import inspect
+
+    from anneal._core import cluster_search as core_cluster_search
+
+    sig = inspect.signature(core_cluster_search)
+    ras = sig.parameters["ras"]
+    assert ras.default is False
+    assert ras.kind is inspect.Parameter.KEYWORD_ONLY
+
+    rec = Config.recommended(38)
+    assert rec.burst_moves
+    assert rec.allocate_moves
+    assert rec.depth_reward
+    assert rec.tabu_on_stall
+
+    out = cluster_search(lj_energy, lj_grad, 4, 800, seed=0, recommended=True)
+    assert "best_energy" in out
+    assert "hops" in out
+    assert "charged" not in out
+    assert "floors" not in out
+    assert "returned" not in out
+    assert "events" not in out
+
+
+def test_cluster_search_ras_true_uses_archive_outcome():
+    from anneal._core import cluster_search as core_cluster_search
+
+    try:
+        out = core_cluster_search(lj_energy, lj_grad, 4, 800, seed=0, ras=True)
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+        return
+    assert np.isfinite(out["best_energy"])
+    assert np.asarray(out["best"]).shape == (12,)
+    assert "charged" in out
+    assert "floors" in out
+    assert "returned" in out
+    assert "events" in out
+    assert out["charged"] > 0
+    assert out["floors"] >= 1
