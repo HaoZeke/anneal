@@ -1,8 +1,8 @@
 //! Residual archive search: two measured hops on one budget.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! A short skip-return pass covers the ico GM (LJ55). A longer returning
-//! polish continues that live chain (LJ75 Marks; LJ38).
+//! A skip-return prefix covers the ico GM (LJ55). After half the budget
+//! the same chain polishes returning trials (LJ75 Marks; LJ38).
 //! Shared [`Archive`] state is filled from the better hop best.
 
 use crate::catalog::Catalog;
@@ -275,9 +275,9 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// Two measured hops on a clone of `cfg`, one budget: a skip-return pass
-/// (the LJ55-winning arm) and a returning polish that continues that live
-/// chain (the LJ75 arm). The caller's recommended defaults are not written.
+/// One hop on a clone of `cfg`: skip-return until half the budget, then
+/// polish returning trials on the same chain (LJ55 then LJ75). The caller's
+/// recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -495,85 +495,31 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    // Half skip-return (LJ55 ico), then polish the live chain (LJ75 Marks).
-    // Restarting hop2 from the original start is a different walk: that
-    // misses the 234437 LJ75 hit a single 400k chain found after 200k skip.
-    let p1 = (cap / 2).max(1).min(cap);
-
-    let mut c_fast = cfg.clone();
-    c_fast.return_screen = true;
-    c_fast.return_polish = 0;
-    c_fast.symmetrise_on_stall = true;
-
-    let mut led1 = Ledger::new(p1);
-    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
-    let _ = ledger.charge_many(led1.spent());
-    let at1 = hop_best_at(&hop1, led1.spent());
-
-    let rest = ledger.remaining();
-    let (best, best_state, best_at, basins, screens, full, returned, artn) = if rest > 0 {
-        let mut c_deep = cfg.clone();
-        c_deep.return_screen = true;
-        c_deep.return_polish = (cfg.relax_steps / 4).max(1);
-        c_deep.symmetrise_on_stall = true;
-        let mut led2 = Ledger::new(rest);
-        let x2 = hop1
-            .final_state
-            .as_ref()
-            .map(|s| s.view())
-            .unwrap_or(start);
-        let hop2 = run_with_gradient(&c_deep, x2, &mut led2, relax, grad.as_deref_mut(), rng);
-        let _ = ledger.charge_many(led2.spent());
-        let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
-        let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
-            (hop2.best, hop2.best_state, at2, hop2.basins)
-        } else if hop1.best < hop2.best - 1e-12 {
-            (hop1.best, hop1.best_state, at1, hop1.basins)
-        } else {
-            let at = at1.min(at2);
-            if at1 <= at2 {
-                (hop1.best, hop1.best_state, at, hop1.basins)
-            } else {
-                (hop2.best, hop2.best_state, at, hop2.basins)
-            }
-        };
-        (
-            best,
-            best_state,
-            best_at,
-            basins,
-            hop1.screened_out + hop2.screened_out,
-            hop1.hops + hop2.hops,
-            hop1.returned + hop2.returned,
-            hop1.symmetrised.0 + hop2.symmetrised.0 + hop1.stall_escapes + hop2.stall_escapes,
-        )
-    } else {
-        (
-            hop1.best,
-            hop1.best_state,
-            at1,
-            hop1.basins,
-            hop1.screened_out,
-            hop1.hops,
-            hop1.returned,
-            hop1.symmetrised.0 + hop1.stall_escapes,
-        )
-    };
-    if best.is_finite() {
-        if let Some(ref x) = best_state {
-            record_best(archive, cfg, best, x.view());
+    // One chain: skip-return until half the budget, then polish. That is
+    // the walk that hit LJ75 at 234437. Splitting into two hops rebuilds
+    // the bias and misses the Marks funnel.
+    let mut c = cfg.clone();
+    c.return_screen = true;
+    c.return_polish = (cfg.relax_steps / 4).max(1);
+    c.return_polish_after = cap / 2;
+    c.symmetrise_on_stall = true;
+    let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
+    let best_at = hop_best_at(&hop, hop.charged);
+    if hop.best.is_finite() {
+        if let Some(ref x) = hop.best_state {
+            record_best(archive, cfg, hop.best, x.view());
         }
     }
     ArchiveOutcome {
-        best,
-        best_state,
-        screens,
-        full,
-        returned,
+        best: hop.best,
+        best_state: hop.best_state,
+        screens: hop.screened_out,
+        full: hop.hops,
+        returned: hop.returned,
         same_floor: 0,
-        floors: archive.floors.len().max(basins),
+        floors: archive.floors.len().max(hop.basins),
         events: archive.catalog.event_count(),
-        artn,
+        artn: hop.symmetrised.0 + hop.stall_escapes,
         charged: ledger.spent(),
         best_at,
     }
@@ -702,6 +648,7 @@ mod tests {
         );
         assert!(!rec.return_screen);
         assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.return_polish_after, 0);
         assert!(!rec.symmetrise_on_stall);
         assert_eq!(rec.screen_steps, 25);
         assert_eq!(rec.relax_steps, 200);
@@ -814,36 +761,20 @@ mod tests {
         assert!(out.best.is_finite());
     }
 
-    /// The second large-budget hop continues the live chain. Restarting from
-    /// the original start is a different walk: v10 did that and missed the
-    /// LJ75 GM that a single 400k chain found at 234437.
+    /// A 50k run takes the one-hop large-budget path and must not write the
+    /// caller's recommended fields.
     #[test]
-    fn large_budget_second_hop_starts_from_the_live_chain() {
+    fn large_budget_one_hop_does_not_touch_recommended() {
         let rec = Config::recommended(7);
+        let before = format!("{rec:?}");
+        assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.return_polish_after, 0);
+        assert!(!rec.return_screen);
         let mut rng = StdRng::seed_from_u64(5);
         let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
-        let start0 = start[0];
-        let hop2_x0 = std::cell::Cell::new(f64::NAN);
-        let opening = std::cell::Cell::new(0usize);
-        let relax_steps = rec.relax_steps;
-        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
-            if led.spent() == 0 && steps == relax_steps {
-                let n = opening.get() + 1;
-                opening.set(n);
-                if n == 2 {
-                    hop2_x0.set(x[0]);
-                }
-            }
-            for _ in 0..steps {
-                if !led.charge() {
-                    break;
-                }
-            }
-            let mut y = x.to_owned();
-            y[0] += 1.0;
-            (-y[0], y)
-        };
         let mut ledger = Ledger::new(50_000);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
         let mut archive = Archive::new();
         let out = archive_search(
             &rec,
@@ -854,18 +785,15 @@ mod tests {
             &mut archive,
             &mut rng,
         );
-        assert!(
-            opening.get() >= 2,
-            "expected two opening quenches, got {}",
-            opening.get()
+        assert_eq!(
+            format!("{rec:?}"),
+            before,
+            "large-budget archive_search mutated recommended"
         );
-        let h2 = hop2_x0.get();
-        assert!(
-            h2.is_finite() && (h2 - start0).abs() > 0.5,
-            "hop2 opened at {h2}, original start {start0}; want the live chain"
-        );
-        assert!(out.best.is_finite());
         assert_eq!(rec.return_polish, 0);
+        assert_eq!(rec.return_polish_after, 0);
         assert!(!rec.return_screen);
+        assert!(out.best.is_finite());
+        assert!(out.charged <= 50_000);
     }
 }
