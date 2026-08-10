@@ -1,4 +1,6 @@
-use anneal_core::methods::cluster_hopping::{ClusterMove, Config, MoveLibrary, covalent_radius};
+use anneal_core::methods::cluster_hopping::{
+    ClusterMove, Config, MoveLibrary, covalent_radius, repack_rigid_groups,
+};
 use anneal_core::movekernel::MoveKernel;
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -56,4 +58,37 @@ fn cluster_moves_are_general_move_kernels() {
         step: 0.4,
     };
     assert_eq!(proposal_from(&kernel, n).len(), 3 * n);
+}
+
+#[test]
+fn symmetry_and_rigid_repacking_follow_the_declared_length_scale() {
+    let reduced = Config::with_scales(2, 1.0, 1.0);
+    let physical = Config::with_scales(2, 2.5, 1.0);
+    assert!(
+        (physical.symmetry_merge_radius / reduced.symmetry_merge_radius - 2.5).abs() < 1e-12
+    );
+
+    let groups = vec![vec![0], vec![1]];
+    let reduced_template = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+    let physical_template = reduced_template.mapv(|coordinate| coordinate * 2.5);
+    let mut reduced_rng = StdRng::seed_from_u64(37);
+    let mut physical_rng = StdRng::seed_from_u64(37);
+    let reduced_repack = repack_rigid_groups(
+        reduced_template.view(),
+        &groups,
+        reduced.length_scale,
+        &mut reduced_rng,
+    );
+    let physical_repack = repack_rigid_groups(
+        physical_template.view(),
+        &groups,
+        physical.length_scale,
+        &mut physical_rng,
+    );
+
+    for (reduced_coordinate, physical_coordinate) in
+        reduced_repack.iter().zip(physical_repack.iter())
+    {
+        assert!((physical_coordinate - 2.5 * reduced_coordinate).abs() < 1e-12);
+    }
 }
