@@ -91,6 +91,20 @@ On the output of a short Bayesian mixer run the polish typically recovers anothe
 Payoff: the same Armijo logic and low-discrepancy generator are used whether you call =polish=, =qmc_polish=, or =shifted_qmc_polish=.
 Source: =src/methods/local_polish.rs= and =python/anneal/__init__.py= wrappers.
 
+** Residual archive search (archive_search.rs)
+
+Slots: the molecular hop on a *clone* of the caller's config. Turns on
+=return_screen= and =symmetrise_on_stall= on the clone; never writes
+=Config::recommended=. CLI token =ras= / =pair= (not FFS =archive=).
+At =cap >= 50000=, =N >= 70= is one hop that polishes every returning
+trial (=return_polish = R/4=, =return_polish_after = 0=); smaller =N=
+is 30 percent skip-return then polish from the same start. Under
+=cap < 50000= the molecular and slab examples keep their own walks.
+Paired 400000 x 8 on HaoZeke/anneal =0937483=: LJ75 1/8 vs rec 0/8
+(seed 4 Marks at 234437), LJ38 6/8 both, LJ55 8/8 with mean hit 72022
+against rec 77364.
+Source: =src/methods/archive_search.rs=.
+
 ** Parallel tempering and mcmc_sa
 
 PT is an orthogonal lift (any inner Sampler + geometric ladder (Cool) + swap). mcmc_sa is the Gelman-Rubin termination variant of the fixed-K loop.
