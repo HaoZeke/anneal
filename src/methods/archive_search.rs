@@ -259,23 +259,95 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     if cap < 50_000 {
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
         let slab = cfg.active_region.is_some();
+        if molecular {
+            // Hop 1 is the recommended molecular walk on a 90 % slice so
+            // rec's prism (hit_at 1074 and 1780) is still inside the hop.
+            // The leftover is a reactive walk from a re-placed packing.
+            let p1 = ((cap * 9) / 10).max(1);
+            let mut led1 = Ledger::new(p1);
+            let hop1 = run_with_gradient(
+                cfg,
+                start,
+                &mut led1,
+                relax,
+                grad.as_deref_mut(),
+                rng,
+            );
+            let used1 = led1.spent();
+            let _ = ledger.charge_many(used1);
+            let at1 = hop_best_at(&hop1, used1);
+            let rest = ledger.remaining();
+            let acc = if rest > 0 {
+                let mut c2 = cfg.clone();
+                if let MoveLibrary::Molecular { groups, .. } = &cfg.move_library {
+                    c2.move_library = MoveLibrary::Molecular {
+                        groups: groups.clone(),
+                        reactive: true,
+                    };
+                }
+                c2.symmetrise_on_stall = true;
+                let x2 = residual_start(start, cfg, rng);
+                let mut led2 = Ledger::new(rest);
+                let hop2 =
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                let used2 = led2.spent();
+                let _ = ledger.charge_many(used2);
+                let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
+                let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
+                    (hop2.best, hop2.best_state, at2, hop2.basins)
+                } else if hop1.best < hop2.best - 1e-12 {
+                    (hop1.best, hop1.best_state, at1, hop1.basins)
+                } else {
+                    (hop1.best, hop1.best_state, at1.min(at2), hop1.basins)
+                };
+                HopAcc {
+                    best,
+                    best_state,
+                    best_at,
+                    screens: hop1.screened_out + hop2.screened_out,
+                    full: hop1.hops + hop2.hops,
+                    returned: hop1.returned + hop2.returned,
+                    artn: hop1.symmetrised.0
+                        + hop2.symmetrised.0
+                        + hop1.stall_escapes
+                        + hop2.stall_escapes,
+                    basins,
+                }
+            } else {
+                HopAcc {
+                    best: hop1.best,
+                    best_state: hop1.best_state,
+                    best_at: at1,
+                    screens: hop1.screened_out,
+                    full: hop1.hops,
+                    returned: hop1.returned,
+                    artn: hop1.symmetrised.0 + hop1.stall_escapes,
+                    basins: hop1.basins,
+                }
+            };
+            if acc.best.is_finite() {
+                if let Some(ref x) = acc.best_state {
+                    record_best(archive, cfg, acc.best, x.view());
+                }
+            }
+            return ArchiveOutcome {
+                best: acc.best,
+                best_state: acc.best_state,
+                screens: acc.screens,
+                full: acc.full,
+                returned: acc.returned,
+                same_floor: 0,
+                floors: archive.floors.len().max(acc.basins),
+                events: archive.catalog.event_count(),
+                artn: acc.artn,
+                charged: ledger.spent(),
+                best_at: acc.best_at,
+            };
+        }
         let mut c = cfg.clone();
         c.symmetrise_on_stall = true;
         c.return_polish = 0;
-        let slices: Vec<usize> = if molecular {
-            // Rec already quenches every trial. The extra is the combined
-            // reactive library: atomic single/surface/burst sit next to
-            // the rigid-group arms so a hydrogen-bond event is reachable.
-            // Shorter quench and angular moves lost both rec prisms.
-            c.return_screen = false;
-            if let MoveLibrary::Molecular { groups, .. } = &cfg.move_library {
-                c.move_library = MoveLibrary::Molecular {
-                    groups: groups.clone(),
-                    reactive: true,
-                };
-            }
-            vec![cap]
-        } else if slab {
+        let slices: Vec<usize> = if slab {
             // Four skip-return walks; CuH2 seed 2's deeper well is a
             // different draw from the same start, not a longer grind.
             c.return_screen = true;
