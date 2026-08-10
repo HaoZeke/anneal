@@ -19,10 +19,12 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian. The 4-body block is the two invariants of a neighbor
-//! triple that SOAP cannot see: squared volume and the product of
-//! pairwise dots. Leftover is `μ` on that block. The 555→421 /
-//! fcc-prototype residual is an oracle. Opt-in, cluster only.
+//! Jacobian. The 4-body block is the mean and second moment of the
+//! two triple invariants SOAP cannot see (volume and the product of
+//! pairwise dots). The means of an isotropic 12-shell coincide for
+//! icosahedral and cuboctahedral centres; the second moments do not.
+//! Leftover is `μ` on that block. The 555→421 / fcc-prototype
+//! residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -62,15 +64,13 @@ impl SoapSpec {
         self.dim() * neighbor_channels(species).len()
     }
 
-    /// Extra 4-body scalars per atom: two invariants per radial
-    /// channel. Three neighbor directions have three rotationally
-    /// invariant coordinates. SOAP already has the pairwise dots
-    /// (they collapse to |Σ û|²). The remaining two are the squared
-    /// triple product and the product of the three pairwise dots.
-    /// Those are the ACE ν=3 / λ-SOAP scalars the power spectrum
-    /// cannot see.
+    /// Extra 4-body scalars per atom: mean and second moment of the
+    /// two triple invariants, per radial channel. The means of an
+    /// isotropic 12-shell are the same for icosahedral and cuboctahedral
+    /// centres; the second moments are not, because one packing has
+    /// one kind of face and the other mixes flat and tetrahedral triples.
     pub fn nu3_dim(self) -> usize {
-        2 * self.n_max
+        4 * self.n_max
     }
 }
 
@@ -255,8 +255,10 @@ fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f
                     let w = weight_n(n, neigh[a].r, spec.rcut_nn)
                         * weight_n(n, neigh[b].r, spec.rcut_nn)
                         * weight_n(n, neigh[c].r, spec.rcut_nn);
-                    acc[2 * n] += w * vol2;
-                    acc[2 * n + 1] += w * ang;
+                    acc[4 * n] += w * vol2;
+                    acc[4 * n + 1] += w * ang;
+                    acc[4 * n + 2] += w * vol2 * vol2;
+                    acc[4 * n + 3] += w * ang * ang;
                 }
             }
         }
@@ -330,8 +332,10 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                         let dwb = dweight_n(n, neigh[b].r, rcut);
                         let dwc = dweight_n(n, neigh[c].r, rcut);
                         let w = wa * wb * wc;
-                        let row_v = i * d1 + 2 * n;
+                        let row_v = i * d1 + 4 * n;
                         let row_a = row_v + 1;
+                        let row_v2 = row_v + 2;
+                        let row_a2 = row_v + 3;
                         accum_four(
                             &mut j,
                             row_v,
@@ -396,6 +400,74 @@ pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                             uc,
                             dwc * wa * wb * ang,
                             w,
+                            dc_ang,
+                        );
+                        let vol4 = vol2 * vol2;
+                        let ang2 = ang * ang;
+                        accum_four(
+                            &mut j,
+                            row_v2,
+                            i,
+                            neigh[a].idx,
+                            neigh[a].r,
+                            ua,
+                            dwa * wb * wc * vol4,
+                            w * 4.0 * vol * vol2,
+                            dva,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_v2,
+                            i,
+                            neigh[b].idx,
+                            neigh[b].r,
+                            ub,
+                            dwb * wa * wc * vol4,
+                            w * 4.0 * vol * vol2,
+                            dvb,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_v2,
+                            i,
+                            neigh[c].idx,
+                            neigh[c].r,
+                            uc,
+                            dwc * wa * wb * vol4,
+                            w * 4.0 * vol * vol2,
+                            dvc,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a2,
+                            i,
+                            neigh[a].idx,
+                            neigh[a].r,
+                            ua,
+                            dwa * wb * wc * ang2,
+                            w * 2.0 * ang,
+                            da_ang,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a2,
+                            i,
+                            neigh[b].idx,
+                            neigh[b].r,
+                            ub,
+                            dwb * wa * wc * ang2,
+                            w * 2.0 * ang,
+                            db_ang,
+                        );
+                        accum_four(
+                            &mut j,
+                            row_a2,
+                            i,
+                            neigh[c].idx,
+                            neigh[c].r,
+                            uc,
+                            dwc * wa * wb * ang2,
+                            w * 2.0 * ang,
                             dc_ang,
                         );
                     }
@@ -1676,7 +1748,7 @@ mod tests {
     #[test]
     fn nu3_adds_two_scalars_per_radial_channel() {
         let spec = SoapSpec::default();
-        assert_eq!(spec.nu3_dim(), 2 * spec.n_max);
+        assert_eq!(spec.nu3_dim(), 4 * spec.n_max);
         let x = tetra();
         let p = local_spectra(x.view(), spec);
         let n3 = local_nu3(x.view(), spec);
@@ -1707,14 +1779,21 @@ mod tests {
         let cub = cuboct13();
         let bi = four_body(ico.view(), 0, 13, spec);
         let bc = four_body(cub.view(), 0, 13, spec);
-        let mut d2 = 0.0;
+        let mut mean2 = 0.0;
+        let mut m2 = 0.0;
         for n in 0..spec.n_max {
-            let d = bi[2 * n + 1] - bc[2 * n + 1];
-            d2 += d * d;
+            let dm = bi[4 * n + 1] - bc[4 * n + 1];
+            let ds = bi[4 * n + 3] - bc[4 * n + 3];
+            mean2 += dm * dm;
+            m2 += ds * ds;
         }
         assert!(
-            d2.sqrt() > 1e-3,
-            "angular 3-product is the same on ico and cuboct: ico {bi:?} cuboct {bc:?}"
+            mean2.sqrt() < 1e-6,
+            "isotropic 12-shell means should match, got {mean2}"
+        );
+        assert!(
+            m2.sqrt() > 1e-3,
+            "second moment of the angular triple is the same on ico and cuboct: ico {bi:?} cuboct {bc:?}"
         );
     }
 
