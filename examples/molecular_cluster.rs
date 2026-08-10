@@ -405,7 +405,10 @@ fn main() {
             }
         }
         #[cfg(feature = "graphkey")]
+        let mut rng_ras = rng.clone();
+        #[cfg(feature = "graphkey")]
         if pair {
+            let mut rng_rec = rng.clone();
             let mut ledger_rec = Ledger::new(budget);
             let rec = run_with_gradient(
                 &cfg,
@@ -413,7 +416,7 @@ fn main() {
                 &mut ledger_rec,
                 &mut relax,
                 None,
-                &mut rng,
+                &mut rng_rec,
             );
             log_line(&format!(
                 "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
@@ -432,7 +435,7 @@ fn main() {
                 &mut relax,
                 None,
                 &mut archive,
-                &mut rng,
+                &mut rng_ras,
             );
             if pair {
                 log_line(&format!(
