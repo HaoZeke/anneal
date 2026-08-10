@@ -1119,41 +1119,6 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     c.fraction((5, 5, 5)) > 0.12
 }
 
-/// True when the chain is still in the fivefold funnel.
-///
-/// With `ira`, that is a small SOFI deviation from a fivefold axis
-/// (a length). Without it, the 555 contact fraction. Either way this
-/// is a gate, not a destination: the leftover hop fires only here, so
-/// it cannot scramble a search that has already left Ih.
-pub fn in_fivefold_funnel(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
-    #[cfg(feature = "ira")]
-    {
-        if sofi_fivefold_close(x) {
-            return true;
-        }
-    }
-    ih_dominated(x, spec)
-}
-
-#[cfg(feature = "ira")]
-fn sofi_fivefold_close(x: ArrayView1<f64>) -> bool {
-    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    let axes = [
-        [0.0, 1.0, phi],
-        [0.0, 1.0, -phi],
-        [1.0, phi, 0.0],
-        [phi, 0.0, 1.0],
-    ];
-    for axis in axes {
-        if let Ok(d) = crate::shape::axis_deviation(x, axis, 5) {
-            if d < 0.35 {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// Oracle target: 555 atoms toward 421 (occupied mean, else fcc prototype).
 ///
 /// Invents a close-packed class when the observed cloud has none. Same
@@ -1287,12 +1252,8 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let n_at = x.len() / 3;
-    let packing = species.is_none() && mobile.is_none();
-    if packing && n_at > 0 && !in_fivefold_funnel(x, spec) {
-        return x.to_owned();
-    }
     let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
     let dim = loc.ncols();
     if n_at == 0 || dim == 0 {
         return x.to_owned();
@@ -2547,30 +2508,6 @@ mod tests {
             (atom_rms - 0.4).abs() < 1e-9,
             "gated leftover hop rms {atom_rms}, want the 0.4 cap"
         );
-    }
-
-    #[test]
-    fn cuboct_is_outside_the_fivefold_funnel() {
-        let spec = SoapSpec::default();
-        let cub = cuboct13();
-        assert!(
-            !in_fivefold_funnel(cub.view(), spec),
-            "cuboctahedron must not pass the fivefold gate"
-        );
-        let mut ico = ico13();
-        let nn = 2.0_f64.powf(1.0 / 6.0);
-        for v in ico.iter_mut() {
-            *v *= nn;
-        }
-        assert!(
-            in_fivefold_funnel(ico.view(), spec),
-            "Mackay ico must pass the fivefold gate"
-        );
-        let mut rng = StdRng::seed_from_u64(3);
-        let y = step_away_cloud(cub.view(), spec, 0.4, None, None, None, &mut rng);
-        for i in 0..cub.len() {
-            assert_eq!(y[i], cub[i], "cuboct hop was not a yield");
-        }
     }
 
     #[test]
