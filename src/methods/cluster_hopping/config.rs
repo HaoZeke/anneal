@@ -440,6 +440,12 @@ pub struct Config {
     /// many charged evaluations, so one chain can cover both the ico GM and
     /// the later Marks funnel.
     pub return_polish_after: usize,
+    /// Offer a SOAP-space pullback as a hop proposal.
+    ///
+    /// Off by default. Recommended stays write-free. Residual archive search
+    /// turns it on on a clone: one step in the power spectrum, Cartesian
+    /// update through \(J^{+}\), same chain.
+    pub soap_pullback: bool,
     /// Attempt a multi-step path between funnels when hopping stalls.
     ///
     /// Basin hopping searches to depth one, and from the structure a 75-point
@@ -701,6 +707,7 @@ impl Config {
             return_screen: false,
             return_polish: 0,
             return_polish_after: 0,
+            soap_pullback: false,
             path_on_stall: false,
             stall_patience: 60,
             path_images: 9,

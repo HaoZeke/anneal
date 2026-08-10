@@ -72,6 +72,9 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
+                if cfg.soap_pullback {
+                    kernels.push(ClusterMove::Soap { rmsd: 0.35 });
+                }
                 kernels
             }
             Self::Visit => {
@@ -320,6 +323,14 @@ pub enum ClusterMove {
         length_scale: f64,
         /// Lennard-Jones energy scale used by the binding criterion.
         energy_scale: f64,
+    },
+    /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
+    ///
+    /// Concerted, not a one-atom hop. The target in \(p\)-space is a residual
+    /// direction, not a Marks SOAP.
+    Soap {
+        /// Cartesian RMSD of the pulled-back step.
+        rmsd: f64,
     },
 }
 
@@ -978,6 +989,7 @@ impl ClusterMove {
             ClusterMove::Visit { .. } => "visit".into(),
             ClusterMove::Angular { .. } => "angular".into(),
             ClusterMove::Twin { .. } => "twin".into(),
+            ClusterMove::Soap { .. } => "soap".into(),
             ClusterMove::Reseed { source, .. } => format!("grow:{}", source.name()),
         }
     }
@@ -1168,6 +1180,10 @@ impl ClusterMove {
             ClusterMove::SurfaceRelocate(k) => k.propose(x, t, rng),
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
+            ClusterMove::Soap { rmsd } => {
+                let spec = crate::soap::SoapSpec::default();
+                crate::soap::step_away(x, &[], spec, *rmsd, rng)
+            }
         }
     }
 }
@@ -1245,6 +1261,61 @@ mod move_scaling_tests {
         assert!(
             (four / one - 4.0).abs() < 0.2,
             "a scale of four should reach four times as far: {four} against {one}"
+        );
+    }
+
+    #[test]
+    fn soap_pullback_proposal_moves_more_than_one_atom() {
+        let mv = ClusterMove::Soap { rmsd: 0.45 };
+        let x = Array1::from_vec(vec![
+            1.0, 1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0,
+        ]);
+        let mut rng = StdRng::seed_from_u64(4);
+        let y = mv.propose(x.view(), 0.8, &mut rng);
+        let n = 4;
+        let mut moved = 0usize;
+        for i in 0..n {
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = y[3 * i + k] - x[3 * i + k];
+                d2 += d * d;
+            }
+            if d2.sqrt() > 0.05 {
+                moved += 1;
+            }
+        }
+        assert!(moved >= 2, "SOAP proposal moved {moved} atoms");
+    }
+
+    #[test]
+    fn recommended_leanburst_does_not_offer_soap() {
+        let rec = Config::recommended(13);
+        assert!(!rec.soap_pullback);
+        let names: Vec<String> = rec
+            .move_library
+            .kernels(&rec)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert!(
+            !names.iter().any(|n| n == "soap"),
+            "recommended kernels include soap: {names:?}"
+        );
+    }
+
+    #[test]
+    fn ras_clone_can_offer_soap() {
+        let mut cfg = Config::recommended(13);
+        cfg.soap_pullback = true;
+        let names: Vec<String> = cfg
+            .move_library
+            .kernels(&cfg)
+            .iter()
+            .map(|k| k.name())
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "soap"),
+            "soap_pullback clone missing soap: {names:?}"
         );
     }
 
