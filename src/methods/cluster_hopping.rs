@@ -629,21 +629,37 @@ impl ClusterMove {
     /// LJ38 at 400 thousand charged evaluations that library solved 1 seed in 8
     /// where the campaign driver, which carries both, solves 8.
     pub fn library(n: usize) -> Vec<ClusterMove> {
+        Self::library_scaled(
+            n,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::NEIGHBOUR_CUTOFF,
+            LennardJonesPreset::SYMMETRISE_CUTOFF,
+        )
+    }
+
+    fn library_scaled(
+        n: usize,
+        length_scale: f64,
+        neighbour_cutoff: f64,
+        symmetrise_cutoff: f64,
+    ) -> Vec<ClusterMove> {
         vec![
-            ClusterMove::AllPoints { step: 0.38 },
+            ClusterMove::AllPoints {
+                step: LennardJonesPreset::ALL_POINTS_STEP * length_scale,
+            },
             ClusterMove::SinglePoint {
                 n_points: n,
-                step: 1.0,
+                step: LennardJonesPreset::SINGLE_POINT_STEP * length_scale,
             },
             ClusterMove::SurfaceRelocate(SurfaceRelocate {
                 n_points: n,
-                neighbour_cutoff: 1.6,
+                neighbour_cutoff,
             }),
             ClusterMove::ShellRotate(ShellRotate { n_points: n }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
                 orders: vec![2, 3, 4, 5, 6],
-                pair_cutoff: 2.5,
+                pair_cutoff: symmetrise_cutoff,
             }),
         ]
     }
@@ -660,28 +676,47 @@ impl ClusterMove {
     /// the proposal budget to the moves that do the work.
     /// The lean library with the burst arm added.
     pub fn library_lean_burst(n: usize) -> Vec<ClusterMove> {
-        let mut v = Self::library_lean(n);
+        let mut v = Self::library_lean_scaled(
+            n,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::NEIGHBOUR_CUTOFF,
+            LennardJonesPreset::SYMMETRISE_CUTOFF,
+        );
         v.push(ClusterMove::Burst {
             n_points: n,
-            neighbour_cutoff: 1.6,
+            neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF,
         });
         v
     }
 
     pub fn library_lean(n: usize) -> Vec<ClusterMove> {
+        Self::library_lean_scaled(
+            n,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::NEIGHBOUR_CUTOFF,
+            LennardJonesPreset::SYMMETRISE_CUTOFF,
+        )
+    }
+
+    fn library_lean_scaled(
+        n: usize,
+        length_scale: f64,
+        neighbour_cutoff: f64,
+        symmetrise_cutoff: f64,
+    ) -> Vec<ClusterMove> {
         vec![
             ClusterMove::SinglePoint {
                 n_points: n,
-                step: 1.0,
+                step: LennardJonesPreset::SINGLE_POINT_STEP * length_scale,
             },
             ClusterMove::SurfaceRelocate(SurfaceRelocate {
                 n_points: n,
-                neighbour_cutoff: 1.6,
+                neighbour_cutoff,
             }),
             ClusterMove::Symmetrise(Symmetrise {
                 n_points: n,
                 orders: vec![2, 3, 4, 5, 6],
-                pair_cutoff: 2.5,
+                pair_cutoff: symmetrise_cutoff,
             }),
         ]
     }
@@ -690,10 +725,22 @@ impl ClusterMove {
     /// caller's groups. Shake as the workhorse, relocation as the crossing
     /// operator, the composed burst as the excursion.
     pub fn library_molecular(groups: Vec<Vec<usize>>, neighbour_cutoff: f64) -> Vec<ClusterMove> {
+        Self::library_molecular_scaled(
+            groups,
+            neighbour_cutoff,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    fn library_molecular_scaled(
+        groups: Vec<Vec<usize>>,
+        neighbour_cutoff: f64,
+        length_scale: f64,
+    ) -> Vec<ClusterMove> {
         vec![
             ClusterMove::GroupShake {
                 groups: groups.clone(),
-                amplitude: 0.3,
+                amplitude: LennardJonesPreset::GROUP_SHAKE * length_scale,
             },
             ClusterMove::GroupRelocate {
                 groups: groups.clone(),
@@ -717,10 +764,24 @@ impl ClusterMove {
         groups: Vec<Vec<usize>>,
         neighbour_cutoff: f64,
     ) -> Vec<ClusterMove> {
-        let mut v = Self::library_molecular(groups, neighbour_cutoff);
+        Self::library_combined_scaled(
+            n,
+            groups,
+            neighbour_cutoff,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    fn library_combined_scaled(
+        n: usize,
+        groups: Vec<Vec<usize>>,
+        neighbour_cutoff: f64,
+        length_scale: f64,
+    ) -> Vec<ClusterMove> {
+        let mut v = Self::library_molecular_scaled(groups, neighbour_cutoff, length_scale);
         v.push(ClusterMove::SinglePoint {
             n_points: n,
-            step: 1.0,
+            step: LennardJonesPreset::SINGLE_POINT_STEP * length_scale,
         });
         v.push(ClusterMove::SurfaceRelocate(SurfaceRelocate {
             n_points: n,
