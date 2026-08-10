@@ -170,12 +170,11 @@ fn residual_start<R: Rng + ?Sized>(
         return y;
     }
     if let Some(groups) = cfg.move_library.declared_groups() {
-        let r0 = 2.5 + rng.random::<f64>() * 2.0;
         for (g, atoms) in groups.iter().enumerate() {
             if atoms.is_empty() {
                 continue;
             }
-            let r = r0 + (g as f64) * 0.15;
+            let r = 3.0 + (g as f64) * 0.1;
             let th = rng.random::<f64>() * std::f64::consts::TAU;
             let ct = 2.0 * rng.random::<f64>() - 1.0;
             let st = (1.0 - ct * ct).sqrt();
@@ -308,15 +307,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             let at1 = hop_best_at(&hop1, used1);
             let rest = ledger.remaining();
             let acc = if rest > 0 {
-                let mut c2 = cfg.clone();
-                c2.angular_moves = true;
-                c2.escape_stall_patience = 8;
-                c2.escape_stall_factor = 1.0;
-                c2.symmetrise_on_stall = true;
+                // Angular leftover walks find the cage, 9 meV above the
+                // prism. A second recommended walk from a new packing
+                // uses the same quench that hit the prism at 877.
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
                 let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
+                    run_with_gradient(cfg, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
