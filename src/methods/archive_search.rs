@@ -170,12 +170,11 @@ fn residual_start<R: Rng + ?Sized>(
         return y;
     }
     if let Some(groups) = cfg.move_library.declared_groups() {
-        let r0 = 2.5 + rng.random::<f64>() * 2.0;
         for (g, atoms) in groups.iter().enumerate() {
             if atoms.is_empty() {
                 continue;
             }
-            let r = r0 + (g as f64) * 0.15;
+            let r = 3.0 + (g as f64) * 0.1;
             let th = rng.random::<f64>() * std::f64::consts::TAU;
             let ct = 2.0 * rng.random::<f64>() - 1.0;
             let st = (1.0 - ct * ct).sqrt();
