@@ -580,12 +580,19 @@ impl Config {
     /// [`Config::for_cluster`] remains the plain Wales-Doye protocol, kept as
     /// the comparison baseline; this is what a caller who wants answers should
     /// start from.
+    ///
+    /// LeanBurst includes the SOAP pullback (analytic \(J^{+}\) of stacked
+    /// local power spectra). Thompson allocates it with surface, single,
+    /// burst and sym. The return screen and stall symmetrisation are on:
+    /// they are part of the hop, not extras a second driver turns on.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
+        cfg.return_screen = true;
+        cfg.symmetrise_on_stall = true;
         cfg
     }
 
