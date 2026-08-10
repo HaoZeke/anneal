@@ -1834,6 +1834,13 @@ pub struct Config {
     /// returning trial in that hop at a fraction of `relax_steps` so a
     /// near-incumbent that is actually a new isomer can still settle.
     pub return_polish: usize,
+    /// Ledger spend that must be reached before `return_polish` fires.
+    ///
+    /// Zero polishes every returning trial. A positive value keeps the first
+    /// part of the hop as skip-return and only finishes returns after that
+    /// many charged evaluations, so one chain can cover both the ico GM and
+    /// the later Marks funnel.
+    pub return_polish_after: usize,
     /// Attempt a multi-step path between funnels when hopping stalls.
     ///
     /// Basin hopping searches to depth one, and from the structure a 75-point
@@ -2093,6 +2100,7 @@ impl Config {
             ladder_top: 4.0,
             return_screen: false,
             return_polish: 0,
+            return_polish_after: 0,
             path_on_stall: false,
             stall_patience: 60,
             path_images: 9,
@@ -3112,10 +3120,12 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if returning && cfg.return_polish > 0 {
-            // A hop that should skip returns sets `return_polish` to zero.
-            // A positive value finishes every returning trial in this hop,
-            // including while more than half of this hop's ledger remains.
+        let (e_new, x_new) = if returning
+            && cfg.return_polish > 0
+            && (cfg.return_polish_after == 0 || ledger.spent() >= cfg.return_polish_after)
+        {
+            // `return_polish_after == 0` finishes every returning trial.
+            // A positive threshold keeps the early hop as skip-return.
             relax(ledger, x_screen.view(), cfg.return_polish)
         } else if screened_this || returning {
             if screened_this && !returning {
@@ -4629,6 +4639,50 @@ mod tests {
         assert!(
             first_half_polish >= 1,
             "return_polish={polish} never fired while spent < remaining; returned {}",
+            out.returned
+        );
+    }
+
+    /// A positive `return_polish_after` keeps the early hop as skip-return.
+    #[test]
+    fn return_polish_after_skips_until_the_threshold() {
+        let mut cfg = Config::recommended(7);
+        cfg.return_screen = true;
+        cfg.return_polish = 8;
+        cfg.return_polish_after = 200;
+        cfg.screen_steps = 6;
+        cfg.relax_steps = 16;
+        cfg.merge_radius = 1.0e3;
+
+        let mut rng = StdRng::seed_from_u64(1);
+        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(400);
+        let polish = cfg.return_polish;
+        let after = cfg.return_polish_after;
+        let mut before = 0usize;
+        let mut after_n = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps == polish {
+                if led.spent() < after {
+                    before += 1;
+                } else {
+                    after_n += 1;
+                }
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let e = x.iter().map(|v| v * v).sum::<f64>();
+            (e, x.to_owned())
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        assert!(out.returned >= 1, "expected returning trials, got {}", out.returned);
+        assert_eq!(before, 0, "polished {before} times before {after}");
+        assert!(
+            after_n >= 1,
+            "return_polish never fired after {after}; returned {}",
             out.returned
         );
     }
