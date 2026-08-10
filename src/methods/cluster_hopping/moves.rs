@@ -72,7 +72,9 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                kernels.push(soap_arm(cfg, None));
+                if cfg.soap_hop {
+                    kernels.push(soap_arm(cfg, None));
+                }
                 kernels
             }
             Self::Visit => {
@@ -137,7 +139,9 @@ impl MoveLibrary {
                 } else {
                     Some(mobile)
                 };
-                kernels.push(soap_arm(cfg, mobile));
+                if cfg.soap_hop {
+                    kernels.push(soap_arm(cfg, mobile));
+                }
                 kernels
             }
         }
