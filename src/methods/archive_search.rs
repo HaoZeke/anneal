@@ -9,13 +9,16 @@
 //! locks stop two of them paying `R` for the same floor or the same residual
 //! slot.
 
+use crate::allocate::DepthAllocator;
 use crate::calibrate::StepCalibrator;
 use crate::catalog::{Catalog, Event};
 use crate::floors::FloorBook;
 use crate::graphkey::contact_key;
 use crate::localkey::{bag_key, local_key, local_keys};
 use crate::methods::activation::{activate, Activation};
-use crate::methods::cluster_hopping::{Config, GradFn, Ledger, MoveLibrary, Relax};
+use crate::methods::cluster_hopping::{
+    active_mask, contain, recentre, Config, GradFn, Ledger, Relax,
+};
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
 use ndarray::{Array1, ArrayView1};
@@ -97,6 +100,8 @@ pub struct ArchiveOutcome {
     pub artn: usize,
     /// Charged evaluations spent (copied from the ledger).
     pub charged: usize,
+    /// Ledger spend when `best` last improved.
+    pub best_at: usize,
 }
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
@@ -110,7 +115,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     rng: &mut R,
 ) -> ArchiveOutcome {
     let tau = FloorBook::tau(cfg.screen_steps, cfg.relax_steps);
-    let kernels = MoveLibrary::LeanBurst.kernels(cfg);
+    let kernels = cfg.move_library.kernels(cfg);
+    let mut alloc = DepthAllocator::new(kernels.len().max(1));
+    let n = cfg.n_points;
     let mut x = start.to_owned();
     let (e0, x0) = relax(ledger, x.view(), cfg.relax_steps);
     x = x0;
@@ -123,7 +130,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             .observe(here.unwrap(), e0);
         archive.set_rep(here.unwrap(), x.view());
         ledger.record(e0, x.view());
-        let keys = local_keys(x.view(), LOCAL_CUTOFF);
+        let keyed = key_coords(x.view(), cfg);
+        let keys = local_keys(keyed.view(), LOCAL_CUTOFF);
         archive.catalog.observe_bag(&keys);
     }
     let mut out = ArchiveOutcome {
@@ -134,111 +142,69 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             None
         },
         full: 1,
+        best_at: ledger.spent(),
         ..ArchiveOutcome::default()
     };
     let mut scale_cal = StepCalibrator::new(0.5, 8, 1.0);
     let mut scale = 1.0_f64;
-    let mut here_key = contact_key(x.view(), LOCAL_CUTOFF);
+    let mut here_key = contact_key(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
 
     while ledger.remaining() > 0 {
         // Start choice: unsaturated local key / live floor / residual.
         let e_star = ledger.best;
-        if let Some(id) = archive.floors.best_start(tau, e_star) {
-            if id < archive.reps.len() && archive.reps[id].len() == x.len() {
-                if here != Some(id) {
+        let stuck = here
+            .and_then(|h| archive.floors.get(h))
+            .is_some_and(|f| f.saturated(tau, e_star));
+        if stuck {
+            if let Some(id) = archive.floors.best_start(tau, e_star) {
+                if id < archive.reps.len() && archive.reps[id].len() == x.len() && here != Some(id)
+                {
                     x = archive.reps[id].clone();
-                    e = archive
-                        .floors
-                        .get(id)
-                        .map(|f| f.e_min)
-                        .unwrap_or(e);
+                    e = archive.floors.get(id).map(|f| f.e_min).unwrap_or(e);
                     here = Some(id);
-                    here_key = contact_key(x.view(), LOCAL_CUTOFF);
+                    here_key = contact_key(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
                 }
             }
         }
 
-        let keys_here = local_keys(x.view(), LOCAL_CUTOFF);
+        let keys_here = local_keys(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
         archive.catalog.observe_bag(&keys_here);
 
-        // Residual ARTn when a local key still owes a search and a gradient
-        // is available.
-        if let Some(uk) = archive.catalog.unsaturated_in(&keys_here) {
-            if let Some(g) = grad.as_deref_mut() {
-                out.artn += 1;
-                let atom = keys_here.iter().position(|&k| k == uk).unwrap_or(0);
-                let _ = atom;
-                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
-                let act = Activation::default();
-                let climbed = activate(
-                    x.view(),
-                    |y| g(ledger, y),
-                    &act,
-                    sign,
-                );
-                if let Some(ao) = climbed {
-                    if ao.crossed && ledger.remaining() > 0 {
-                        let (ef, xf) = relax(ledger, ao.state.view(), cfg.relax_steps);
-                        out.full += 1;
-                        if ef.is_finite() {
-                            let rise = (ef - e).max(0.0);
-                            archive.floors.observe_rise(rise);
-                            let dest = archive.floors.assign(ef, here, rise);
-                            archive.residual.observe(dest, ef);
-                            if let (Some(h), d) = (here, dest) {
-                                if h != d {
-                                    archive.residual.edge(h, d);
-                                }
-                            }
-                            archive.set_rep(dest, xf.view());
-                            let to = local_key(xf.view(), 0, LOCAL_CUTOFF);
-                            archive.catalog.record_search(
-                                uk,
-                                Some(Event {
-                                    from: uk,
-                                    to,
-                                    dest_energy: ef,
-                                }),
-                            );
-                            ledger.record(ef, xf.view());
-                            if ef < out.best {
-                                out.best = ef;
-                                out.best_state = Some(xf.clone());
-                            }
-                            x = xf;
-                            e = ef;
-                            here = Some(dest);
-                            here_key = contact_key(x.view(), LOCAL_CUTOFF);
-                        } else {
-                            archive.catalog.record_search(uk, None);
-                        }
-                        continue;
-                    }
-                }
-                archive.catalog.record_search(uk, None);
-            }
-        }
-
-        // Cheap novelty loop.
+        // Cheap novelty loop: skip only exact returns. Same-floor isomers are
+        // still quenched; refusing them starved the search (24 full quenches
+        // in 400k on LJ38). ARTn waits until this loop finds no escape.
         let mut found = None;
         let s_steps = cfg.screen_steps.max(1);
-        let max_tries = (ledger.remaining() / s_steps).max(1);
+        let max_tries = ((ledger.remaining() / s_steps).max(1)).min(32);
         for _ in 0..max_tries {
             if ledger.remaining() < s_steps {
                 break;
             }
-            let k = rng.random_range(0..kernels.len());
-            let trial = kernels[k].propose_scaled(x.view(), cfg.temperature, scale, rng);
+            let k = if cfg.allocate_moves && !kernels.is_empty() {
+                alloc.select(rng)
+            } else if kernels.is_empty() {
+                break;
+            } else {
+                rng.random_range(0..kernels.len())
+            };
+            let mut trial = kernels[k].propose_scaled(x.view(), cfg.temperature, scale, rng);
+            recentre(&mut trial, n);
+            contain(&mut trial, n, cfg.container);
             let (e_sc, x_sc) = relax(ledger, trial.view(), cfg.screen_steps);
             out.screens += 1;
             if !e_sc.is_finite() {
                 continue;
             }
-            let sc_key = contact_key(x_sc.view(), LOCAL_CUTOFF);
+            let sc_key = contact_key(key_coords(x_sc.view(), cfg).view(), LOCAL_CUTOFF);
             if sc_key == here_key {
                 out.returned += 1;
                 scale_cal.observe(0.1);
                 scale = (scale * 1.05).min(8.0);
+                continue;
+            }
+            // Same energy screen as the recommended hop: a trial this far
+            // above the incumbent is not worth 200 L-BFGS steps.
+            if e_sc > ledger.best + cfg.screen_margin {
                 continue;
             }
             scale_cal.observe(1.0);
@@ -268,32 +234,71 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     }
                 }
             }
-            match landed {
-                Some(id)
-                    if archive
-                        .floors
-                        .get(id)
-                        .is_some_and(|f| f.saturated(tau, ledger.best))
-                        || archive.pending_floors.contains(&id) =>
+            if landed.is_some_and(|id| archive.pending_floors.contains(&id))
+                || (landed.is_none() && archive.pending_residual)
+            {
+                continue;
+            }
+            if landed.is_some_and(|id| {
+                archive
+                    .floors
+                    .get(id)
+                    .is_some_and(|f| f.saturated(tau, ledger.best))
+            }) {
+                out.same_floor += 1;
+            }
+            found = Some((e_sc, x_sc, landed, k));
+            break;
+        }
+        let Some((e_sc, x_sc, landed, arm)) = found else {
+            // No non-return in the cheap window: one ARTn residual, then hop.
+            if let (Some(uk), Some(g)) = (
+                archive.catalog.unsaturated_in(&keys_here),
+                grad.as_deref_mut(),
+            ) {
+                out.artn += 1;
+                let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
+                if let Some(ao) = activate(x.view(), |y| g(ledger, y), &Activation::default(), sign)
                 {
-                    out.same_floor += 1;
-                    continue;
-                }
-                Some(_) if archive.drop.observations() >= 2 && hat >= ledger.best => {
-                    // Predicted landing is not a global record and is a known
-                    // class: only buy if that class is still live (handled
-                    // above). Dead-on-arrival.
-                    out.same_floor += 1;
-                    continue;
-                }
-                None if archive.pending_residual => continue,
-                _ => {
-                    found = Some((e_sc, x_sc, landed));
-                    break;
+                    if ao.crossed && ledger.remaining() > 0 {
+                        let (ef, xf) = relax(ledger, ao.state.view(), cfg.relax_steps);
+                        out.full += 1;
+                        archive.catalog.record_search(
+                            uk,
+                            ef.is_finite().then_some(Event {
+                                from: uk,
+                                to: local_key(key_coords(xf.view(), cfg).view(), 0, LOCAL_CUTOFF),
+                                dest_energy: ef,
+                            }),
+                        );
+                        if ef.is_finite() {
+                            let rise = (ef - e).max(0.0);
+                            archive.floors.observe_rise(rise);
+                            let dest = archive.floors.assign(ef, here, rise);
+                            archive.residual.observe(dest, ef);
+                            archive.set_rep(dest, xf.view());
+                            ledger.record(ef, xf.view());
+                            if ef < out.best {
+                                out.best = ef;
+                                out.best_state = Some(xf.clone());
+                                out.best_at = ledger.spent();
+                            }
+                            let temp = cfg.temperature.max(1e-12);
+                            if ef <= e || rng.random::<f64>() < (-(ef - e) / temp).exp() {
+                                x = xf;
+                                e = ef;
+                                here = Some(dest);
+                                here_key =
+                                    contact_key(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
+                            }
+                        }
+                    } else {
+                        archive.catalog.record_search(uk, None);
+                    }
+                } else {
+                    archive.catalog.record_search(uk, None);
                 }
             }
-        }
-        let Some((e_sc, x_sc, landed)) = found else {
             continue;
         };
 
@@ -305,6 +310,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
 
         let (ef, xf) = relax(ledger, x_sc.view(), cfg.relax_steps);
         out.full += 1;
+        if cfg.allocate_moves {
+            alloc.update(arm, -ef);
+        }
         archive.drop.observe(e_sc, ef);
         if landed.is_none() {
             archive.pending_residual = false;
@@ -325,7 +333,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         }
         archive.set_rep(dest, xf.view());
         let from_bag = bag_key(&keys_here);
-        let to_keys = local_keys(xf.view(), LOCAL_CUTOFF);
+        let to_keys = local_keys(key_coords(xf.view(), cfg).view(), LOCAL_CUTOFF);
         if let Some(uk) = keys_here.first().copied() {
             archive.catalog.record_search(
                 uk,
@@ -341,17 +349,52 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         if ef < out.best {
             out.best = ef;
             out.best_state = Some(xf.clone());
+            out.best_at = ledger.spent();
         }
-        x = xf;
-        e = ef;
-        here = Some(dest);
-        here_key = contact_key(x.view(), LOCAL_CUTOFF);
+        let temp = cfg.temperature.max(1e-12);
+        let accept = ef <= e || rng.random::<f64>() < (-(ef - e) / temp).exp();
+        if accept {
+            x = xf;
+            e = ef;
+            here = Some(dest);
+            here_key = contact_key(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
+        }
     }
 
     out.floors = archive.floors.len();
     out.events = archive.catalog.event_count();
     out.charged = ledger.spent();
     out
+}
+
+/// Coordinates used for topology identity: the active patch on a slab, else all.
+fn key_coords(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
+    let n = x.len() / 3;
+    let Some((seeds, shells)) = cfg.active_region.as_ref() else {
+        return x.to_owned();
+    };
+    let Some(species) = cfg.species.as_ref() else {
+        return x.to_owned();
+    };
+    let mask = active_mask(x, species, seeds, *shells, cfg.bond_tolerance);
+    let idx: Vec<usize> = mask
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| **m)
+        .map(|(i, _)| i)
+        .collect();
+    if idx.len() < 2 {
+        return x.to_owned();
+    }
+    let mut y = Array1::zeros(idx.len() * 3);
+    for (k, &i) in idx.iter().enumerate() {
+        if i < n {
+            for d in 0..3 {
+                y[3 * k + d] = x[3 * i + d];
+            }
+        }
+    }
+    y
 }
 
 #[cfg(test)]

@@ -2327,7 +2327,7 @@ pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f
 pub type Grad<'a> = &'a mut GradFn<'a>;
 
 /// Moves the centre of mass to the origin.
-fn recentre(x: &mut Array1<f64>, n: usize) {
+pub(crate) fn recentre(x: &mut Array1<f64>, n: usize) {
     let mut c = [0.0; 3];
     for i in 0..n {
         for k in 0..3 {
@@ -2349,7 +2349,7 @@ fn recentre(x: &mut Array1<f64>, n: usize) {
 /// Applied when a move is generated and never inside a relaxation: a cluster
 /// relaxes in free space, and constraining the minimiser makes it stop at its
 /// own starting point.
-fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
+pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
     for i in 0..n {
         let r = (0..3)
             .map(|k| x[3 * i + k] * x[3 * i + k])

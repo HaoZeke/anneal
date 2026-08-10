@@ -15,6 +15,8 @@
 use anneal_core::methods::cluster_hopping::{
     run_with_gradient, Config, Ledger, MoveLibrary,
 };
+#[cfg(feature = "graphkey")]
+use anneal_core::methods::archive_search::{archive_search, Archive};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -290,7 +292,14 @@ fn main() {
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(6);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(2000);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let engine = args.get(4).cloned().unwrap_or_else(|| "xtb".into());
+    let tail: Vec<String> = args.iter().skip(4).cloned().collect();
+    let ras = tail.iter().any(|t| t == "ras" || t == "pair");
+    let pair = tail.iter().any(|t| t == "pair");
+    let engine = tail
+        .iter()
+        .find(|t| *t != "ras" && *t != "pair")
+        .cloned()
+        .unwrap_or_else(|| "xtb".into());
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -369,6 +378,52 @@ fn main() {
                 }
             }
         }
+        #[cfg(feature = "graphkey")]
+        if pair {
+            let mut ledger_rec = Ledger::new(budget);
+            let rec = run_with_gradient(
+                &cfg,
+                x0.view(),
+                &mut ledger_rec,
+                &mut relax,
+                None,
+                &mut rng,
+            );
+            println!(
+                "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
+                rec.best,
+                ledger_rec.spent(),
+                rec.hops
+            );
+        }
+        #[cfg(feature = "graphkey")]
+        let out = if ras {
+            let mut archive = Archive::new();
+            let a = archive_search(
+                &cfg,
+                x0.view(),
+                &mut ledger,
+                &mut relax,
+                None,
+                &mut archive,
+                &mut rng,
+            );
+            if pair {
+                println!(
+                    "  seed {seed} ras: best {:.6} eV  charged {}  hit_at {}  floors {} returned {} same_floor {}",
+                    a.best, a.charged, a.best_at, a.floors, a.returned, a.same_floor
+                );
+            }
+            anneal_core::methods::cluster_hopping::Outcome {
+                best: a.best,
+                best_state: a.best_state,
+                hops: a.full,
+                ..Default::default()
+            }
+        } else {
+            run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng)
+        };
+        #[cfg(not(feature = "graphkey"))]
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
         let failures = rg_eng
             .as_ref()
