@@ -939,7 +939,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         // the separated limit, and the run measured exactly that, an intact
         // H2 four billion Angstrom above its slab. The free atoms are clamped
         // to within `container` of the frame.
-        match cfg.frozen.as_ref() {
+        match hop_frozen.as_ref() {
             None => {
                 recentre(&mut trial, n);
                 contain(&mut trial, n, cfg.container);
