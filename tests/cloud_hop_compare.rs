@@ -11,13 +11,13 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
+fn water_proto() -> [[f64; 3]; 3] {
+    [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]]
+}
+
 fn packed_waters(m: usize, seed: u64) -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>) {
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(11));
-    let proto = [
-        [0.0, 0.0, 0.0],
-        [0.96, 0.0, 0.0],
-        [-0.24, 0.93, 0.0],
-    ];
+    let proto = water_proto();
     let mut x = Vec::with_capacity(9 * m);
     let mut z = Vec::with_capacity(3 * m);
     let mut groups = Vec::with_capacity(m);
@@ -36,6 +36,41 @@ fn packed_waters(m: usize, seed: u64) -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>
             x.push(p[0] + ox);
             x.push(p[1] + oy);
             x.push(p[2] + oz);
+        }
+    }
+    (Array1::from(x), z, groups)
+}
+
+/// Two adsorbate waters above a 2-water frozen layer. Contact spacing,
+/// no overlapping nuclei. The two adsorbates sit in different sites so
+/// the mobile ν=3 leftover is a real packing defect.
+fn slab_waters(seed: u64) -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>) {
+    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(29));
+    let proto = water_proto();
+    let mut x = Vec::with_capacity(36);
+    let mut z = Vec::with_capacity(12);
+    let mut groups = Vec::with_capacity(4);
+    let origins = [
+        [
+            (rng.random::<f64>() - 0.5) * 0.4,
+            (rng.random::<f64>() - 0.5) * 0.4,
+            3.3,
+        ],
+        [
+            1.7 + (rng.random::<f64>() - 0.5) * 0.4,
+            1.7 + (rng.random::<f64>() - 0.5) * 0.4,
+            4.1,
+        ],
+        [0.0, 0.0, 0.0],
+        [3.4, 0.0, 0.0],
+    ];
+    for (g, o) in origins.iter().enumerate() {
+        groups.push(vec![3 * g, 3 * g + 1, 3 * g + 2]);
+        z.extend_from_slice(&[8, 1, 1]);
+        for p in &proto {
+            x.push(p[0] + o[0]);
+            x.push(p[1] + o[1]);
+            x.push(p[2] + o[2]);
         }
     }
     (Array1::from(x), z, groups)
@@ -199,7 +234,7 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     let mut hops_on = 0usize;
     let mut hops_off = 0usize;
     for s in 0..SEEDS {
-        let (start, z, g) = packed_waters(M, s + 40);
+        let (start, z, g) = slab_waters(s);
         let n = z.len();
         let frozen: Vec<bool> = (0..n).map(|i| i >= 6).collect();
         let mut on = rec_on(z.clone(), g.clone());

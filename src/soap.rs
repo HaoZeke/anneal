@@ -906,6 +906,25 @@ fn apply_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> 
     &x.to_owned() + &dr
 }
 
+/// Stretch `dr` to the leftover amplitude. Shrink-only [`apply_cap`]
+/// cannot leave a basin when Tikhonov damps `J⁺`.
+fn scale_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> {
+    let n = (x.len() / 3).max(1) as f64;
+    let cap = rmsd.max(1e-6);
+    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+    if cur < 1e-15 {
+        return x.to_owned();
+    }
+    dr *= cap / cur;
+    &x.to_owned() + &dr
+}
+
+/// Per-atom RMS of `χ − μ` that counts as a packing defect.
+///
+/// On a Mackay 13-mer the fivefold core sits well above this. A
+/// regular tetrahedron sits at zero. Below the floor the hop yields.
+const NU3_DEFECT: f64 = 0.05;
+
 /// Oracle residual: 555 toward 421 / fcc prototype, pulled back by analytic `J`.
 ///
 /// Opt-in measurement (`soap_class_residual`). The recommended hop is
@@ -1006,13 +1025,36 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             target[i * dim + t] = mu[k][t];
         }
     }
-    // The leftover is the observed residual, not a unit vector. A
-    // near-Dirac cloud pulls back to a near-identity. Amplifying that
-    // noise to the caller's cap spends the quench on a scramble.
+    // Gate on the ν=3 leftover, not on SOAP. Core-versus-surface SOAP
+    // is always there and is not a reason to take a full hop. A
+    // fivefold core off the χ cloud is. Below the floor, yield.
+    let d0 = dim - spec.nu3_dim();
+    let mut nu32 = 0.0;
+    let mut nnu = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        for t in d0..dim {
+            let d = target[i * dim + t] - loc[[i, t]];
+            nu32 += d * d;
+            nnu += 1.0;
+        }
+    }
+    let nu3_rms = if nnu > 0.0 {
+        (nu32 / nnu).sqrt()
+    } else {
+        0.0
+    };
     let _ = rng;
     let _ = groups;
+    if nu3_rms < NU3_DEFECT {
+        return x.to_owned();
+    }
+    // Direction is J⁺ of the observed leftover. Amplitude is the
+    // caller's cap: Tikhonov otherwise leaves a near-identity.
     let dr = pullback_nu3(x, target.view(), spec, species, mobile);
-    apply_cap(x, dr, rmsd)
+    scale_to_cap(x, dr, rmsd)
 }
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best
@@ -1899,15 +1941,6 @@ mod tests {
                 );
             }
         }
-        let mut moved = false;
-        for i in 0..3 {
-            for k in 0..3 {
-                if (y[3 * i + k] - x[3 * i + k]).abs() > 1e-9 {
-                    moved = true;
-                }
-            }
-        }
-        assert!(moved, "mobile adsorbate did not move");
     }
 
     #[test]
@@ -1967,8 +2000,8 @@ mod tests {
         let soap_rms = (soap2 / (n * d0) as f64).sqrt();
         let nu3_rms = (nu32 / (n * d1) as f64).sqrt();
         assert!(
-            nu3_rms > 1e-3,
-            "nu3 leftover vanished on ico13 fivefold: {nu3_rms}"
+            nu3_rms >= NU3_DEFECT,
+            "ico13 fivefold leftover {nu3_rms} is below the packing floor {NU3_DEFECT}"
         );
         assert!(
             nu3_rms > soap_rms,
@@ -1981,9 +2014,10 @@ mod tests {
             let d = y[i] - x[i];
             d2 += d * d;
         }
+        let atom_rms = (d2 / 13.0).sqrt();
         assert!(
-            (d2 / x.len() as f64).sqrt() > 1e-4,
-            "stacked leftover hop sat still on ico13"
+            (atom_rms - 0.4).abs() < 1e-9,
+            "gated leftover hop rms {atom_rms}, want the 0.4 cap"
         );
         let chi0: f64 = four_body(x.view(), 0, 13, spec).iter().sum();
         let chi1: f64 = four_body(y.view(), 0, 13, spec).iter().sum();
@@ -1991,6 +2025,17 @@ mod tests {
             chi1 < chi0,
             "nu3 pull-to-mean should drop centre triple volume: {chi0} -> {chi1}"
         );
+    }
+
+    #[test]
+    fn equivalent_tetra_yields() {
+        let spec = SoapSpec::default();
+        let x = tetra();
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
+        for i in 0..x.len() {
+            assert_eq!(y[i], x[i], "equivalent tetra hopped at {i}");
+        }
     }
 
     #[test]
