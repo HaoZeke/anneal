@@ -586,7 +586,8 @@ impl Config {
     ///
     /// LeanBurst includes the SOAP pullback (analytic \(J^{+}\) of stacked
     /// local power spectra). The hop target is the observed-cloud residual
-    /// `2p − μ`, not a 421 / fcc prototype: that is a template oracle.
+    /// `2p − μ`, the same map used on molecules and slabs: partitioned by
+    /// observed species, never by a CNA class or an fcc prototype.
     /// Thompson allocates SOAP with surface, single, burst and sym. The
     /// return screen and stall symmetrisation are on; Ih-dominated stalls
     /// withhold symmetrise rather than invent a missing packing.
@@ -600,6 +601,16 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg
+    }
+
+    /// CNA 555 / Ih packing diagnostics apply only to a monoatomic
+    /// cluster. A molecule or a slab has species or a frozen frame;
+    /// those are not Honeycutt-Andersen environments.
+    pub fn packing_cna_applies(&self) -> bool {
+        self.species.is_none()
+            && self.active_region.is_none()
+            && self.frozen.is_none()
+            && !self.move_library.is_molecular()
     }
 
     /// Recommended flags, with the two hand-set scalars replaced by
@@ -763,6 +774,11 @@ impl Config {
     }
 
     /// Measured allocation and stall controls over a molecular move library.
+    ///
+    /// SOAP is the same observed-cloud residual as the cluster hop:
+    /// `2p − μ` within each observed atomic number. No CNA, no fcc
+    /// prototype. A slab sets `active_region`; frozen atoms stay as
+    /// SOAP neighbours and do not move.
     pub fn recommended_molecular(
         species: Vec<u32>,
         groups: Vec<Vec<usize>>,
@@ -772,6 +788,7 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
+        cfg.soap_class_residual = false;
         cfg
     }
 

@@ -11,12 +11,15 @@
 //! icosahedral versus fivefold-join environments.
 //!
 //! A residual step is a direction on the *cloud* of local spectra. The
-//! recommended hop is the observed-cloud residual `2p − μ`. That map
-//! has nothing to say when the cloud is a Dirac (Mackay Ih: every 555
-//! environment is the same), and it does not invent a class the search
-//! has not seen. The 555→421 / fcc-prototype residual is an oracle of
-//! the same class as a template library: it presupposes the missing
-//! packing. It is opt-in measurement, not the recommended hop.
+//! recommended hop is the observed-cloud residual `2p − μ`, partitioned
+//! by observed atomic numbers and by the mobile mask. That is the same
+//! map on a Lennard-Jones cluster, a water cluster, and an adsorbate
+//! on a frozen slab: no CNA class, no fcc prototype. Frozen atoms stay
+//! in the neighbour list and do not move. When the cloud of a species
+//! is a Dirac the residual vanishes and SOAP yields rather than
+//! inventing a packing. The 555→421 / fcc-prototype residual is an
+//! oracle of the same class as a template library. Opt-in, cluster
+//! only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -50,6 +53,52 @@ impl SoapSpec {
         let n = self.n_max;
         n * (n + 1) / 2 * (self.l_max + 1)
     }
+
+    /// `dim` times the number of observed neighbour-species channels.
+    pub fn feat_dim(self, species: Option<&[u32]>) -> usize {
+        self.dim() * neighbor_channels(species).len()
+    }
+}
+
+fn neighbor_channels(species: Option<&[u32]>) -> Vec<u32> {
+    match species {
+        None => vec![0],
+        Some(z) => {
+            let mut u = z.to_vec();
+            u.sort_unstable();
+            u.dedup();
+            if u.is_empty() {
+                vec![0]
+            } else {
+                u
+            }
+        }
+    }
+}
+
+fn neighbor_channel(species: Option<&[u32]>, j: usize, channels: &[u32]) -> usize {
+    match species {
+        None => 0,
+        Some(z) => {
+            let zj = z.get(j).copied().unwrap_or(0);
+            channels.iter().position(|&c| c == zj).unwrap_or(0)
+        }
+    }
+}
+
+fn mobile_mask(n_at: usize, mobile: Option<&[usize]>) -> Vec<bool> {
+    match mobile {
+        None => vec![true; n_at],
+        Some(m) => {
+            let mut keep = vec![false; n_at];
+            for &i in m {
+                if i < n_at {
+                    keep[i] = true;
+                }
+            }
+            keep
+        }
+    }
 }
 
 /// Packed average SOAP of `x` (flattened 3N).
@@ -68,10 +117,20 @@ pub fn power_spectrum(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     acc / n as f64
 }
 
-/// Per-atom power spectra, shape `(N, dim)`.
+/// Per-atom power spectra, shape `(N, dim)`. One neighbour-species channel.
 pub fn local_spectra(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    local_spectra_z(x, spec, None)
+}
+
+/// Per-atom power spectra. With `species`, one channel per observed
+/// neighbour atomic number, concatenated. Shape `(N, feat_dim)`.
+pub fn local_spectra_z(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
-    let dim = spec.dim();
+    let dim = spec.feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, dim));
     if n_at < 2 {
         return out;
@@ -81,7 +140,7 @@ pub fn local_spectra(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
         return out;
     }
     for i in 0..n_at {
-        let (p, _) = atom_expand(x, i, n_at, rcut, spec);
+        let (p, _) = atom_expand(x, i, n_at, rcut, spec, species);
         for t in 0..dim {
             out[[i, t]] = p[t];
         }
@@ -91,8 +150,20 @@ pub fn local_spectra(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 
 /// Analytic Jacobian of the *stacked* local spectra, shape `(N dim, 3N)`.
 pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    jacobian_z(x, spec, None)
+}
+
+/// Analytic Jacobian of stacked local spectra, species channels included.
+pub fn jacobian_z(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
     let n_at = x.len() / 3;
-    let dim = spec.dim();
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let dim1 = spec.dim();
+    let dim = dim1 * n_chan;
     let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
     if n_at < 2 {
         return j;
@@ -102,9 +173,10 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
         return j;
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
-    let mut c = vec![vec![0.0; spec.n_max * n_lm]; n_at];
+    let c_atom = n_chan * spec.n_max * n_lm;
+    let mut c = vec![vec![0.0; c_atom]; n_at];
     for i in 0..n_at {
-        let (_, ci) = atom_expand(x, i, n_at, rcut, spec);
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species);
         c[i] = ci;
     }
     for i in 0..n_at {
@@ -122,6 +194,10 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
             if r >= rcut || r < 1e-12 {
                 continue;
             }
+            let ch = neighbor_channel(species, jj, &channels);
+            let c_off = ch * spec.n_max * n_lm;
+            let row0 = i * dim + ch * dim1;
+            let c_ch = &c[i][c_off..c_off + spec.n_max * n_lm];
             let u = [d[0] / r, d[1] / r, d[2] / r];
             let (ylm, dylm) = tesseral(u, spec.l_max);
             let fc = fcut(r, rcut);
@@ -143,8 +219,8 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
                             s / r
                         };
                         let dc_j = dw * u[a] * y + w * dy;
-                        accumulate_dp(&mut j, i, dim, spec, n_lm, &c[i], n, lm, dc_j, 3 * jj + a);
-                        accumulate_dp(&mut j, i, dim, spec, n_lm, &c[i], n, lm, -dc_j, 3 * i + a);
+                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, dc_j, 3 * jj + a);
+                        accumulate_dp(&mut j, row0, spec, n_lm, c_ch, n, lm, -dc_j, 3 * i + a);
                     }
                 }
             }
@@ -155,8 +231,7 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 
 fn accumulate_dp(
     j: &mut Array2<f64>,
-    i: usize,
-    dim: usize,
+    row0: usize,
     spec: SoapSpec,
     n_lm: usize,
     c: &[f64],
@@ -183,7 +258,7 @@ fn accumulate_dp(
                     } else {
                         0.0
                     };
-                    j[[i * dim + t, col]] += d;
+                    j[[row0 + t, col]] += d;
                 }
                 t += 1;
             }
@@ -202,12 +277,34 @@ fn lm_to_l(lm: usize) -> usize {
 
 /// Cartesian displacement that realises a SOAP residual through analytic `J`.
 pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
-    let loc = local_spectra(x, spec);
+    pullback_z(x, target, spec, None, None)
+}
+
+/// Pullback with observed species channels and a mobile mask.
+///
+/// Frozen atoms stay in the neighbour list. Their Cartesian columns are
+/// dropped from `J` and their displacement is zero. Rigid-body stripping
+/// runs only when every atom is mobile.
+pub fn pullback_z(
+    x: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let loc = local_spectra_z(x, spec, species);
     let n_at = loc.nrows();
-    let dim = spec.dim();
+    let dim = loc.ncols();
     let mut dp = Array1::zeros(n_at * dim);
     if target.len() == dim {
-        let p = power_spectrum(x, spec);
+        let mut p = Array1::<f64>::zeros(dim);
+        if n_at > 0 {
+            for i in 0..n_at {
+                for t in 0..dim {
+                    p[t] += loc[[i, t]] / n_at as f64;
+                }
+            }
+        }
         for i in 0..n_at {
             for t in 0..dim {
                 dp[i * dim + t] = (target[t] - p[t]) / n_at.max(1) as f64;
@@ -222,9 +319,35 @@ pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> 
     } else {
         return Array1::zeros(x.len());
     }
-    let j = jacobian(x, spec);
+    let mut j = jacobian_z(x, spec, species);
+    let keep = mobile_mask(n_at, mobile);
+    let all_mobile = keep.iter().all(|&b| b);
+    if !all_mobile {
+        for i in 0..n_at {
+            if !keep[i] {
+                for t in 0..dim {
+                    dp[i * dim + t] = 0.0;
+                }
+                for a in 0..3 {
+                    for row in 0..j.nrows() {
+                        j[[row, 3 * i + a]] = 0.0;
+                    }
+                }
+            }
+        }
+    }
     let mut dr = tikhonov_jtj(&j, dp.view(), 1e-3);
-    strip_rigid(x, &mut dr);
+    if all_mobile {
+        strip_rigid(x, &mut dr);
+    } else {
+        for i in 0..n_at {
+            if !keep[i] {
+                dr[3 * i] = 0.0;
+                dr[3 * i + 1] = 0.0;
+                dr[3 * i + 2] = 0.0;
+            }
+        }
+    }
     dr
 }
 
@@ -510,25 +633,74 @@ pub fn step_away_mean<R: Rng + ?Sized>(
     rmsd: f64,
     _rng: &mut R,
 ) -> Array1<f64> {
-    let loc = local_spectra(x, spec);
+    step_away_cloud(x, spec, rmsd, None, None, _rng)
+}
+
+/// Observed-cloud residual, partitioned by observed atomic number and
+/// restricted to the mobile set. Frozen atoms are neighbours, not movers.
+pub fn step_away_cloud<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    _rng: &mut R,
+) -> Array1<f64> {
+    let loc = local_spectra_z(x, spec, species);
     let n_at = loc.nrows();
-    let dim = spec.dim();
+    let dim = loc.ncols();
     if n_at == 0 || dim == 0 {
         return x.to_owned();
     }
-    let mut mu = vec![0.0; dim];
+    let keep = mobile_mask(n_at, mobile);
+    let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
+    let mut labels: Vec<u32> = Vec::new();
     for i in 0..n_at {
+        if keep[i] {
+            let z = zi(i);
+            if !labels.contains(&z) {
+                labels.push(z);
+            }
+        }
+    }
+    let nlab = labels.len();
+    let mut mu = vec![vec![0.0; dim]; nlab];
+    let mut cnt = vec![0.0; nlab];
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+        cnt[k] += 1.0;
         for t in 0..dim {
-            mu[t] += loc[[i, t]] / n_at as f64;
+            mu[k][t] += loc[[i, t]];
+        }
+    }
+    for k in 0..nlab {
+        if cnt[k] > 0.0 {
+            for t in 0..dim {
+                mu[k][t] /= cnt[k];
+            }
         }
     }
     let mut target = Array1::zeros(n_at * dim);
     for i in 0..n_at {
+        if !keep[i] {
+            for t in 0..dim {
+                target[i * dim + t] = loc[[i, t]];
+            }
+            continue;
+        }
+        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
         for t in 0..dim {
-            target[i * dim + t] = 2.0 * loc[[i, t]] - mu[t];
+            target[i * dim + t] = 2.0 * loc[[i, t]] - mu[k][t];
         }
     }
-    apply_cap(x, pullback(x, target.view(), spec), rmsd)
+    apply_cap(
+        x,
+        pullback_z(x, target.view(), spec, species, mobile),
+        rmsd,
+    )
 }
 
 /// Finite-difference Jacobian of the *global* average, test-only.
@@ -560,11 +732,15 @@ fn atom_expand(
     n_at: usize,
     rcut: f64,
     spec: SoapSpec,
+    species: Option<&[u32]>,
 ) -> (Array1<f64>, Vec<f64>) {
     let n_max = spec.n_max;
     let l_max = spec.l_max;
     let n_lm = (l_max + 1) * (l_max + 1);
-    let mut c = vec![0.0; n_max * n_lm];
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let c_atom = n_chan * n_max * n_lm;
+    let mut c = vec![0.0; c_atom];
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
     for j in 0..n_at {
         if j == i {
@@ -575,29 +751,34 @@ fn atom_expand(
         if r >= rcut || r < 1e-12 {
             continue;
         }
+        let ch = neighbor_channel(species, j, &channels);
         let u = [d[0] / r, d[1] / r, d[2] / r];
         let (ylm, _) = tesseral(u, l_max);
         let fc = fcut(r, rcut);
         for n in 0..n_max {
             let w = radial(n, r, rcut) * fc;
-            let base = n * n_lm;
+            let base = ch * n_max * n_lm + n * n_lm;
             for (lm, &y) in ylm.iter().enumerate() {
                 c[base + lm] += w * y;
             }
         }
     }
-    let mut p = Array1::<f64>::zeros(spec.dim());
-    let mut t = 0usize;
-    for n in 0..n_max {
-        for np in n..n_max {
-            for l in 0..=l_max {
-                let mut s = 0.0;
-                for m in -(l as i32)..=(l as i32) {
-                    let lm = lm_index(l, m);
-                    s += c[n * n_lm + lm] * c[np * n_lm + lm];
+    let dim1 = spec.dim();
+    let mut p = Array1::<f64>::zeros(dim1 * n_chan);
+    for ch in 0..n_chan {
+        let c0 = ch * n_max * n_lm;
+        let mut t = 0usize;
+        for n in 0..n_max {
+            for np in n..n_max {
+                for l in 0..=l_max {
+                    let mut s = 0.0;
+                    for m in -(l as i32)..=(l as i32) {
+                        let lm = lm_index(l, m);
+                        s += c[c0 + n * n_lm + lm] * c[c0 + np * n_lm + lm];
+                    }
+                    p[ch * dim1 + t] = s;
+                    t += 1;
                 }
-                p[t] = s;
-                t += 1;
             }
         }
     }
@@ -1173,5 +1354,97 @@ mod tests {
             }
         }
         g
+    }
+
+    fn water_dimer() -> (Array1<f64>, Vec<u32>) {
+        (
+            Array1::from_vec(vec![
+                0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 3.10, 0.15, 0.08, 3.98, 0.40,
+                -0.05, 2.82, 1.05, 0.18,
+            ]),
+            vec![8, 1, 1, 8, 1, 1],
+        )
+    }
+
+    #[test]
+    fn species_channels_double_the_mono_dim() {
+        let spec = SoapSpec {
+            rcut_nn: 4.0,
+            ..SoapSpec::default()
+        };
+        let (x, z) = water_dimer();
+        let loc0 = local_spectra(x.view(), spec);
+        let locz = local_spectra_z(x.view(), spec, Some(&z));
+        assert_eq!(loc0.ncols(), spec.dim());
+        assert_eq!(locz.ncols(), 2 * spec.dim());
+        assert_eq!(locz.nrows(), 6);
+    }
+
+    #[test]
+    fn species_conditioned_residual_does_not_mix_o_and_h() {
+        let spec = SoapSpec {
+            rcut_nn: 4.0,
+            ..SoapSpec::default()
+        };
+        let (x, z) = water_dimer();
+        let loc = local_spectra_z(x.view(), spec, Some(&z));
+        let dim = loc.ncols();
+        let mut mu_o = vec![0.0; dim];
+        let mut mu_h = vec![0.0; dim];
+        for t in 0..dim {
+            mu_o[t] = 0.5 * (loc[[0, t]] + loc[[3, t]]);
+            mu_h[t] = 0.25 * (loc[[1, t]] + loc[[2, t]] + loc[[4, t]] + loc[[5, t]]);
+        }
+        let mut d2 = 0.0;
+        for t in 0..dim {
+            let d = mu_o[t] - mu_h[t];
+            d2 += d * d;
+        }
+        assert!(
+            d2.sqrt() > 1e-4,
+            "O and H cloud means must differ, rms {}",
+            d2.sqrt()
+        );
+    }
+
+    #[test]
+    fn frozen_slab_atoms_do_not_move() {
+        let spec = SoapSpec {
+            rcut_nn: 4.0,
+            ..SoapSpec::default()
+        };
+        let (x, z) = water_dimer();
+        let mut rng = StdRng::seed_from_u64(4);
+        let y = step_away_cloud(x.view(), spec, 0.35, Some(&z), Some(&[0, 1, 2]), &mut rng);
+        for i in 3..6 {
+            for k in 0..3 {
+                assert_eq!(
+                    y[3 * i + k], x[3 * i + k],
+                    "frozen atom {i} moved"
+                );
+            }
+        }
+        let mut moved = false;
+        for i in 0..3 {
+            for k in 0..3 {
+                if (y[3 * i + k] - x[3 * i + k]).abs() > 1e-9 {
+                    moved = true;
+                }
+            }
+        }
+        assert!(moved, "mobile adsorbate did not move");
+    }
+
+    #[test]
+    fn mono_cloud_matches_step_away_mean() {
+        let spec = SoapSpec::default();
+        let x = squashed();
+        let mut a = StdRng::seed_from_u64(2);
+        let mut b = StdRng::seed_from_u64(2);
+        let y0 = step_away_mean(x.view(), spec, 0.5, &mut a);
+        let y1 = step_away_cloud(x.view(), spec, 0.5, None, None, &mut b);
+        for i in 0..x.len() {
+            assert!((y0[i] - y1[i]).abs() < 1e-12, "mono cloud drifted at {i}");
+        }
     }
 }
