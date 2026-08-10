@@ -17,10 +17,10 @@
 //! on a frozen slab: no CNA class, no fcc prototype. Frozen atoms stay
 //! in the neighbour list and do not move. When the cloud of a species
 //! is a Dirac the residual vanishes and SOAP yields rather than
-//! inventing a packing. On a molecule the Cartesian leftover is then
-//! replaced by the rigid motion of each observed group: stretching a
-//! bond is not leftover on the packing surface. The 555→421 /
-//! fcc-prototype residual is an oracle. Opt-in, cluster only.
+//! inventing a packing. The Cartesian step is the Tikhonov pullback
+//! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
+//! Jacobian of the power spectrum and the 4-body triple-volume. The
+//! 555→421 / fcc-prototype residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -189,9 +189,14 @@ pub fn local_nu3_z(
     out
 }
 
-fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f64> {
-    let rcut = spec.rcut_nn;
-    let mut neigh: Vec<(f64, [f64; 3])> = Vec::new();
+struct Neigh {
+    idx: usize,
+    r: f64,
+    u: [f64; 3],
+}
+
+fn gather_neigh(x: ArrayView1<f64>, i: usize, n_at: usize, rcut: f64) -> Vec<Neigh> {
+    let mut neigh = Vec::new();
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
     for j in 0..n_at {
         if j == i {
@@ -202,39 +207,190 @@ fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f
         if r >= rcut || r < 1e-12 {
             continue;
         }
-        neigh.push((r, [d[0] / r, d[1] / r, d[2] / r]));
+        neigh.push(Neigh {
+            idx: j,
+            r,
+            u: [d[0] / r, d[1] / r, d[2] / r],
+        });
     }
+    neigh
+}
+
+fn weight_n(n: usize, r: f64, rcut: f64) -> f64 {
+    radial(n, r, rcut) * fcut(r, rcut)
+}
+
+fn dweight_n(n: usize, r: f64, rcut: f64) -> f64 {
+    dradial(n, r, rcut) * fcut(r, rcut) + radial(n, r, rcut) * dfcut(r, rcut)
+}
+
+fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f64> {
+    let neigh = gather_neigh(x, i, n_at, spec.rcut_nn);
     let mut acc = vec![0.0; spec.n_max];
     let m = neigh.len();
     if m < 3 {
         return acc;
     }
     for a in 0..m {
-        let (ra, ua) = neigh[a];
-        let fa = fcut(ra, rcut);
         for b in (a + 1)..m {
-            let (rb, ub) = neigh[b];
-            let fb = fcut(rb, rcut);
             for c in (b + 1)..m {
-                let (rc, uc) = neigh[c];
-                let fc = fcut(rc, rcut);
-                let cx = ub[1] * uc[2] - ub[2] * uc[1];
-                let cy = ub[2] * uc[0] - ub[0] * uc[2];
-                let cz = ub[0] * uc[1] - ub[1] * uc[0];
-                let vol2 = (ua[0] * cx + ua[1] * cy + ua[2] * cz).powi(2);
+                let vol = triple(neigh[a].u, neigh[b].u, neigh[c].u);
+                let vol2 = vol * vol;
                 for n in 0..spec.n_max {
-                    let w = radial(n, ra, rcut)
-                        * radial(n, rb, rcut)
-                        * radial(n, rc, rcut)
-                        * fa
-                        * fb
-                        * fc;
-                    acc[n] += w * vol2;
+                    acc[n] += weight_n(n, neigh[a].r, spec.rcut_nn)
+                        * weight_n(n, neigh[b].r, spec.rcut_nn)
+                        * weight_n(n, neigh[c].r, spec.rcut_nn)
+                        * vol2;
                 }
             }
         }
     }
     acc
+}
+
+fn triple(a: [f64; 3], b: [f64; 3], c: [f64; 3]) -> f64 {
+    a[0] * (b[1] * c[2] - b[2] * c[1])
+        + a[1] * (b[2] * c[0] - b[0] * c[2])
+        + a[2] * (b[0] * c[1] - b[1] * c[0])
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Analytic Jacobian of the ν=3 triple-volume, shape `(N n_max, 3N)`.
+pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    let n_at = x.len() / 3;
+    let d1 = spec.nu3_dim();
+    let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
+    let rcut = spec.rcut_nn;
+    if n_at < 4 || !(rcut > 0.0) {
+        return j;
+    }
+    for i in 0..n_at {
+        let neigh = gather_neigh(x, i, n_at, rcut);
+        let m = neigh.len();
+        if m < 3 {
+            continue;
+        }
+        for a in 0..m {
+            for b in (a + 1)..m {
+                for c in (b + 1)..m {
+                    let ua = neigh[a].u;
+                    let ub = neigh[b].u;
+                    let uc = neigh[c].u;
+                    let vol = triple(ua, ub, uc);
+                    let dva = cross(ub, uc);
+                    let dvb = cross(uc, ua);
+                    let dvc = cross(ua, ub);
+                    for n in 0..spec.n_max {
+                        let wa = weight_n(n, neigh[a].r, rcut);
+                        let wb = weight_n(n, neigh[b].r, rcut);
+                        let wc = weight_n(n, neigh[c].r, rcut);
+                        let dwa = dweight_n(n, neigh[a].r, rcut);
+                        let dwb = dweight_n(n, neigh[b].r, rcut);
+                        let dwc = dweight_n(n, neigh[c].r, rcut);
+                        let row = i * d1 + n;
+                        // ∂(W vol²)/∂coord for each of the three neighbors and the centre.
+                        accum_four(
+                            &mut j,
+                            row,
+                            i,
+                            neigh[a].idx,
+                            neigh[a].r,
+                            ua,
+                            dwa * wb * wc * vol * vol,
+                            wa * wb * wc * 2.0 * vol,
+                            dva,
+                        );
+                        accum_four(
+                            &mut j,
+                            row,
+                            i,
+                            neigh[b].idx,
+                            neigh[b].r,
+                            ub,
+                            dwb * wa * wc * vol * vol,
+                            wa * wb * wc * 2.0 * vol,
+                            dvb,
+                        );
+                        accum_four(
+                            &mut j,
+                            row,
+                            i,
+                            neigh[c].idx,
+                            neigh[c].r,
+                            uc,
+                            dwc * wa * wb * vol * vol,
+                            wa * wb * wc * 2.0 * vol,
+                            dvc,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    j
+}
+
+fn accum_four(
+    j: &mut Array2<f64>,
+    row: usize,
+    centre: usize,
+    nb: usize,
+    r: f64,
+    u: [f64; 3],
+    d_weight: f64,
+    d_vol_scale: f64,
+    dvol_du: [f64; 3],
+) {
+    // ∂r/∂x_nb = u, ∂r/∂x_centre = −u
+    // ∂û_α/∂x_nb_β = (δ_αβ − û_α û_β)/r, opposite at the centre.
+    for beta in 0..3 {
+        let mut dchi_nb = d_weight * u[beta];
+        for alpha in 0..3 {
+            let du = if alpha == beta {
+                1.0 - u[alpha] * u[beta]
+            } else {
+                -u[alpha] * u[beta]
+            } / r;
+            dchi_nb += d_vol_scale * dvol_du[alpha] * du;
+        }
+        j[[row, 3 * nb + beta]] += dchi_nb;
+        j[[row, 3 * centre + beta]] -= dchi_nb;
+    }
+}
+
+/// Stacked Jacobian of SOAP power spectrum and ν=3 scalars.
+pub fn jacobian_nu3(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
+    let js = jacobian_z(x, spec, species);
+    let jf = jacobian_four(x, spec);
+    let n_at = x.len() / 3;
+    let d0 = spec.feat_dim(species);
+    let d1 = spec.nu3_dim();
+    let dim = d0 + d1;
+    let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
+    for i in 0..n_at {
+        for t in 0..d0 {
+            for k in 0..n_at * 3 {
+                j[[i * dim + t, k]] = js[[i * d0 + t, k]];
+            }
+        }
+        for t in 0..d1 {
+            for k in 0..n_at * 3 {
+                j[[i * dim + d0 + t, k]] = jf[[i * d1 + t, k]];
+            }
+        }
+    }
+    j
 }
 
 /// Analytic Jacobian of the *stacked* local spectra, shape `(N dim, 3N)`.
@@ -409,6 +565,58 @@ pub fn pullback_z(
         return Array1::zeros(x.len());
     }
     let mut j = jacobian_z(x, spec, species);
+    let keep = mobile_mask(n_at, mobile);
+    let all_mobile = keep.iter().all(|&b| b);
+    if !all_mobile {
+        for i in 0..n_at {
+            if !keep[i] {
+                for t in 0..dim {
+                    dp[i * dim + t] = 0.0;
+                }
+                for a in 0..3 {
+                    for row in 0..j.nrows() {
+                        j[[row, 3 * i + a]] = 0.0;
+                    }
+                }
+            }
+        }
+    }
+    let mut dr = tikhonov_jtj(&j, dp.view(), 1e-3);
+    if all_mobile {
+        strip_rigid(x, &mut dr);
+    } else {
+        for i in 0..n_at {
+            if !keep[i] {
+                dr[3 * i] = 0.0;
+                dr[3 * i + 1] = 0.0;
+                dr[3 * i + 2] = 0.0;
+            }
+        }
+    }
+    dr
+}
+
+/// Pullback of a stacked SOAP+ν=3 residual through the stacked analytic `J`.
+pub fn pullback_nu3(
+    x: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    let mut dp = Array1::zeros(n_at * dim);
+    if target.len() != n_at * dim {
+        return Array1::zeros(x.len());
+    }
+    for i in 0..n_at {
+        for t in 0..dim {
+            dp[i * dim + t] = target[i * dim + t] - loc[[i, t]];
+        }
+    }
+    let mut j = jacobian_nu3(x, spec, species);
     let keep = mobile_mask(n_at, mobile);
     let all_mobile = keep.iter().all(|&b| b);
     if !all_mobile {
@@ -712,10 +920,10 @@ pub fn step_away<R: Rng + ?Sized>(
     apply_cap(x, pullback(x, target.view(), spec), rmsd)
 }
 
-/// Observed-cloud residual `2p − μ`, pulled back by analytic `J`.
+/// Observed-cloud residual `2p − μ` on the stacked SOAP+ν=3 cloud.
 ///
-/// No external prototype. On a Dirac cloud the residual vanishes and the
-/// hop is a near-identity: SOAP yields rather than inventing a class.
+/// No external prototype. A Dirac SOAP cloud is not a Dirac ν=3 cloud:
+/// the 4-body block still supplies a leftover on fivefold packing.
 pub fn step_away_mean<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -728,9 +936,9 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// When `groups` is set, the Cartesian pullback is replaced by the
-/// rigid motion of each group that best matches it. Stretching a
-/// covalent molecule is not leftover on the packing surface.
+/// The leftover is stacked `[SOAP; ν=3]` and the Cartesian step is
+/// `J⁺` of that block. `groups` is accepted for call-site compatibility
+/// and is not a post-hoc rigid projection.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -740,7 +948,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let loc = local_spectra_z(x, spec, species);
+    let loc = local_nu3_z(x, spec, species);
     let n_at = loc.nrows();
     let dim = loc.ncols();
     if n_at == 0 || dim == 0 {
@@ -827,21 +1035,9 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             target[i * dim + t] = loc[[i, t]] + u / nrm;
         }
     }
-    let mut dr = pullback_z(x, target.view(), spec, species, mobile);
-    match groups {
-        None => apply_cap(x, dr, rmsd),
-        Some(gs) => {
-            // Contact-scale hop: the leftover direction at the full
-            // intermolecular length, then the rigid motion of each group.
-            let n = (x.len() / 3).max(1) as f64;
-            let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
-            if cur > 1e-12 {
-                dr *= rmsd / cur;
-            }
-            project_rigid_groups(x, &mut dr, gs);
-            &x.to_owned() + &dr
-        }
-    }
+    let _ = groups;
+    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    apply_cap(x, dr, rmsd)
 }
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best
@@ -1752,67 +1948,109 @@ mod tests {
         }
     }
 
-    fn oh_delta(a: &Array1<f64>, b: &Array1<f64>, groups: &[Vec<usize>]) -> f64 {
-        let mut worst: f64 = 0.0;
-        for g in groups {
-            if g.len() < 2 {
-                continue;
+    #[test]
+    fn nu3_leftover_on_ico_fivefold_is_nonzero() {
+        let spec = SoapSpec::default();
+        let mut x = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in x.iter_mut() {
+            *v *= nn;
+        }
+        let loc = local_nu3(x.view(), spec);
+        let d0 = spec.dim();
+        let d1 = spec.nu3_dim();
+        let n = loc.nrows();
+        let mut mu_s = vec![0.0; d0];
+        let mut mu_n = vec![0.0; d1];
+        for i in 0..n {
+            for t in 0..d0 {
+                mu_s[t] += loc[[i, t]];
             }
-            for (ii, &i) in g.iter().enumerate() {
-                for &j in &g[ii + 1..] {
-                    let mut da = 0.0;
-                    let mut db = 0.0;
-                    for k in 0..3 {
-                        let xa = a[3 * i + k] - a[3 * j + k];
-                        let xb = b[3 * i + k] - b[3 * j + k];
-                        da += xa * xa;
-                        db += xb * xb;
-                    }
-                    worst = worst.max((da.sqrt() - db.sqrt()).abs());
-                }
+            for t in 0..d1 {
+                mu_n[t] += loc[[i, d0 + t]];
             }
         }
-        worst
+        let nf = n as f64;
+        for t in 0..d0 {
+            mu_s[t] /= nf;
+        }
+        for t in 0..d1 {
+            mu_n[t] /= nf;
+        }
+        let mut soap2 = 0.0;
+        let mut nu32 = 0.0;
+        for i in 0..n {
+            for t in 0..d0 {
+                let d = loc[[i, t]] - mu_s[t];
+                soap2 += d * d;
+            }
+            for t in 0..d1 {
+                let d = loc[[i, d0 + t]] - mu_n[t];
+                nu32 += d * d;
+            }
+        }
+        let soap_rms = (soap2 / (n * d0) as f64).sqrt();
+        let nu3_rms = (nu32 / (n * d1) as f64).sqrt();
+        assert!(
+            nu3_rms > 1e-3,
+            "nu3 leftover vanished on ico13 fivefold: {nu3_rms}"
+        );
+        assert!(
+            nu3_rms > soap_rms,
+            "nu3 leftover {nu3_rms} should exceed SOAP leftover {soap_rms}"
+        );
+        let mut rng = StdRng::seed_from_u64(11);
+        let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
+        let mut d2 = 0.0;
+        for i in 0..x.len() {
+            let d = y[i] - x[i];
+            d2 += d * d;
+        }
+        assert!(
+            (d2 / x.len() as f64).sqrt() > 1e-4,
+            "stacked leftover hop sat still on ico13"
+        );
     }
 
     #[test]
-    fn atomic_pullback_stretches_oh_rigid_does_not() {
+    fn jacobian_four_matches_fd() {
         let spec = SoapSpec {
+            n_max: 2,
+            l_max: 2,
             rcut_nn: 4.0,
-            ..SoapSpec::default()
         };
-        let (x, z) = water_dimer();
-        let groups = vec![vec![0usize, 1, 2], vec![3, 4, 5]];
-        let mut rng = StdRng::seed_from_u64(7);
-        let y_atom = step_away_cloud(x.view(), spec, 0.35, Some(&z), None, None, &mut rng);
-        let mut rng = StdRng::seed_from_u64(7);
-        let y_rig = step_away_cloud(
-            x.view(),
-            spec,
-            0.35,
-            Some(&z),
-            None,
-            Some(&groups),
-            &mut rng,
-        );
-        let atom_err = oh_delta(&x, &y_atom, &groups);
-        let rig_err = oh_delta(&x, &y_rig, &groups);
-        assert!(
-            atom_err > 0.02,
-            "atomic SOAP should change intramolecular distances, max |Δr|={atom_err}"
-        );
-        assert!(
-            rig_err < 1e-8,
-            "rigid SOAP must keep intramolecular distances, max |Δr|={rig_err}"
-        );
-        let mut moved = false;
-        for i in 0..6 {
-            for k in 0..3 {
-                if (y_rig[3 * i + k] - x[3 * i + k]).abs() > 1e-9 {
-                    moved = true;
-                }
+        let mut x = tetra();
+        x[0] += 0.2;
+        x[4] -= 0.15;
+        x[8] += 0.1;
+        let ja = jacobian_four(x.view(), spec);
+        let n_at = x.len() / 3;
+        let d1 = spec.nu3_dim();
+        let eps = 1e-6;
+        let mut max_a = 0.0_f64;
+        let mut max_d = 0.0_f64;
+        for k in 0..x.len() {
+            let old = x[k];
+            x[k] = old + eps;
+            let mut plus = Vec::new();
+            for i in 0..n_at {
+                plus.extend(four_body(x.view(), i, n_at, spec));
+            }
+            x[k] = old - eps;
+            let mut minus = Vec::new();
+            for i in 0..n_at {
+                minus.extend(four_body(x.view(), i, n_at, spec));
+            }
+            x[k] = old;
+            for r in 0..n_at * d1 {
+                let fd = (plus[r] - minus[r]) / (2.0 * eps);
+                max_a = max_a.max(fd.abs());
+                max_d = max_d.max((ja[[r, k]] - fd).abs());
             }
         }
-        assert!(moved, "rigid SOAP did not move the molecules");
+        assert!(
+            max_d < 1e-4 * max_a.max(1e-6) + 1e-6,
+            "nu3 J disagrees with FD: max|Δ|={max_d} max|FD|={max_a}"
+        );
     }
 }
