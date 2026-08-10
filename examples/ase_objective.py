@@ -40,7 +40,7 @@ class XtbCli:
         env = os.environ.copy()
         env.setdefault("OMP_NUM_THREADS", "1")
         subprocess.run(
-            [self.exe, "geo.xyz", "--grad", "--gfn", "2"],
+            [self.exe, "geo.xyz", "--grad", "--gfn", "2", "--norestart"],
             cwd=self.dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -48,6 +48,10 @@ class XtbCli:
             timeout=300,
             env=env,
         )
+        for leftover in ("xtbrestart", "charges", "wbo", "xtbtopo.mol", ".xtboptok"):
+            p = os.path.join(self.dir, leftover)
+            if os.path.exists(p):
+                os.remove(p)
         grad_path = os.path.join(self.dir, "gradient")
         energy = None
         grads = []
