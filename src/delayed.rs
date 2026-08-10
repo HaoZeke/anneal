@@ -599,4 +599,61 @@ mod tests {
         let x = Array1::zeros(24);
         assert!(s.predict(x.view(), 8, -1.0).is_none());
     }
+
+    /// The depth feature has to enter both the design and the prediction.
+    /// Two copies of one structure that differ only in `|g|` must produce
+    /// different rows, and after the model is shown a quadratic depth in
+    /// `|g|` they must produce different predictions. If `gnorm` is forced
+    /// to zero at train or query time, both assertions fail.
+    #[test]
+    fn gradient_norm_is_a_depth_feature() {
+        let n = 8;
+        let mut rng = StdRng::seed_from_u64(89);
+        let mut x = Array1::zeros(3 * n);
+        for v in x.iter_mut() {
+            *v = rng.random_range(-2.0..2.0);
+        }
+        let raw = -4.0;
+        let lo = features_with_gradient(x.view(), n, raw, 0.5);
+        let hi = features_with_gradient(x.view(), n, raw, 2.0);
+        assert!(
+            (lo[5] - 0.5).abs() < 1e-15 && (lo[6] - 0.25).abs() < 1e-15,
+            "gnorm 0.5 did not land in the design: {lo:?}"
+        );
+        assert!(
+            (hi[5] - 2.0).abs() < 1e-15 && (hi[6] - 4.0).abs() < 1e-15,
+            "gnorm 2 did not land in the design: {hi:?}"
+        );
+        for i in 0..5 {
+            assert_eq!(
+                lo[i], hi[i],
+                "structural feature {i} must not depend on gnorm"
+            );
+        }
+        assert_ne!(
+            lo, hi,
+            "identical structures with different gnorm produced the same row"
+        );
+
+        let mut s = Surrogate::new();
+        for k in 0..200 {
+            let g = 0.05 * (k as f64);
+            let depth = -0.5 * g * g;
+            s.observe_full(x.view(), n, raw, g, raw + depth);
+        }
+        let p_lo = s
+            .predict_full(x.view(), n, raw, 0.5, f64::INFINITY)
+            .expect("no prediction after 200 quenches");
+        let p_hi = s
+            .predict_full(x.view(), n, raw, 2.0, f64::INFINITY)
+            .expect("no prediction after 200 quenches");
+        assert!(
+            (p_lo - p_hi).abs() > 0.1,
+            "predictions ignored gnorm: {p_lo} and {p_hi}"
+        );
+        assert!(
+            p_hi < p_lo,
+            "larger |g| should predict a deeper quench, got {p_hi} against {p_lo}"
+        );
+    }
 }
