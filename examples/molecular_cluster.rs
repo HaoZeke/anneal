@@ -12,11 +12,9 @@
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
 //! Engine is xtb (default) or cp2k, forwarded as ASE_ENGINE.
 
-use anneal_core::methods::cluster_hopping::{
-    run_with_gradient, Config, Ledger, MoveLibrary,
-};
 #[cfg(feature = "graphkey")]
-use anneal_core::methods::archive_search::{archive_search, Archive};
+use anneal_core::methods::archive_search::{Archive, archive_search};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -220,7 +218,6 @@ impl Engine {
     }
 }
 
-
 /// The in-process NWChem engine: dlopen of the split libnwchemc C ABI.
 /// One session per process; positions in per call as plain arrays, energy
 /// and forces back in Hartree and Hartree/Bohr, converted here to eV and
@@ -299,12 +296,15 @@ impl NwchemcEngine {
                     *const i32,
                     *mut f64,
                 ) -> NWChemCResult,
-            > = lib.get(b"nwchemc_session_energy_forces").expect("energy_forces");
+            > = lib
+                .get(b"nwchemc_session_energy_forces")
+                .expect("energy_forces");
             *s
         };
         let destroy = unsafe {
-            let s: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void)> =
-                lib.get(b"nwchemc_session_destroy").expect("session_destroy");
+            let s: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void)> = lib
+                .get(b"nwchemc_session_destroy")
+                .expect("session_destroy");
             *s
         };
         let finalize = unsafe {
@@ -431,11 +431,7 @@ fn main() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1.0);
         // The recommended stack's allocator over the molecular library.
-        let mut cfg = Config::recommended_molecular(
-            species,
-            groups.clone(),
-            energy_scale,
-        );
+        let mut cfg = Config::recommended_molecular(species, groups.clone(), energy_scale);
         let reactive = std::env::var("REACTIVE").map(|v| v == "1").unwrap_or(false);
         cfg.move_library = MoveLibrary::Molecular {
             groups: groups.clone(),
@@ -471,7 +467,11 @@ fn main() {
             let r = 3.0 + (g as f64) * 0.1;
             let th = rng.random::<f64>() * std::f64::consts::TAU;
             let ph = (rng.random::<f64>() * 2.0 - 1.0).acos();
-            let c = [r * ph.sin() * th.cos(), r * ph.sin() * th.sin(), r * ph.cos()];
+            let c = [
+                r * ph.sin() * th.cos(),
+                r * ph.sin() * th.sin(),
+                r * ph.cos(),
+            ];
             for (a, &idx) in atoms.iter().enumerate() {
                 for k in 0..3 {
                     x0[3 * idx + k] = c[k] + WATER[a][k];

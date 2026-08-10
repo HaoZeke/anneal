@@ -35,7 +35,7 @@
 //! thousand in a long run, which is past what a dense solver should be asked
 //! for every step and comfortable every few thousand.
 
-use crate::spectral::{laplacian_embedding, SpectralError, TransitionGraph};
+use crate::spectral::{SpectralError, TransitionGraph, laplacian_embedding};
 use ndarray::Array1;
 
 /// A two-way split of the visited basins, with the confidence in it.
@@ -57,7 +57,10 @@ pub struct Partition {
 impl Partition {
     /// Which side a basin is on, if it was visited.
     pub fn side_of(&self, basin: usize) -> Option<bool> {
-        self.basins.iter().position(|b| *b == basin).map(|i| self.side[i])
+        self.basins
+            .iter()
+            .position(|b| *b == basin)
+            .map(|i| self.side[i])
     }
 
     /// Basins on each side.

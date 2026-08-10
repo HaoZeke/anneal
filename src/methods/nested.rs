@@ -37,7 +37,7 @@
 //! moves are the library's own, the constraint is the energy the run measures
 //! for itself, and the one dimensionless choice is the population size.
 
-use crate::methods::cluster_hopping::{random_cluster, ClusterMove, Ledger, Relax};
+use crate::methods::cluster_hopping::{ClusterMove, Ledger, Relax, random_cluster};
 use ndarray::Array1;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -165,7 +165,11 @@ pub fn nested_search(
         let (w, _) = live
             .iter()
             .enumerate()
-            .max_by(|a, b| a.1 .0.partial_cmp(&b.1 .0).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|a, b| {
+                a.1.0
+                    .partial_cmp(&b.1.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .expect("population is nonempty");
         ceiling = live[w].0;
         curve.record(ceiling, live.len());
@@ -277,7 +281,11 @@ mod tests {
             (f, xr)
         };
         let out = nested_search(&cfg, &mut led, &mut relax, 7);
-        assert!(out.replacements > 3, "only {} replacements", out.replacements);
+        assert!(
+            out.replacements > 3,
+            "only {} replacements",
+            out.replacements
+        );
         assert!(
             out.best <= out.final_ceiling,
             "best {} above the final ceiling {}",
@@ -348,7 +356,9 @@ impl VolumeCurve {
             return None;
         }
         let lo = n.saturating_sub(window.max(4));
-        let pts: Vec<(f64, f64)> = (lo..n).map(|i| (self.deaths[i], self.log_volume(i).0)).collect();
+        let pts: Vec<(f64, f64)> = (lo..n)
+            .map(|i| (self.deaths[i], self.log_volume(i).0))
+            .collect();
         let m = pts.len() as f64;
         let sx: f64 = pts.iter().map(|p| p.0).sum();
         let sy: f64 = pts.iter().map(|p| p.1).sum();

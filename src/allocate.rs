@@ -199,11 +199,7 @@ pub fn beta_draw<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
 fn sample_beta<R: Rng + ?Sized>(a: f64, b: f64, rng: &mut R) -> f64 {
     let x = sample_gamma(a, rng);
     let y = sample_gamma(b, rng);
-    if x + y <= 0.0 {
-        0.5
-    } else {
-        x / (x + y)
-    }
+    if x + y <= 0.0 { 0.5 } else { x / (x + y) }
 }
 
 /// Marsaglia and Tsang's Gamma sampler, with the shape boost below one.
@@ -236,7 +232,7 @@ fn sample_gamma<R: Rng + ?Sized>(shape: f64, rng: &mut R) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::{SeedableRng, rngs::StdRng};
 
     #[test]
     fn temperature_respects_the_descent_boundary() {
@@ -244,7 +240,10 @@ mod tests {
         // No barrier seen, so the floor is zero and the design point applies.
         let t = law.temperature(3.0, 1000);
         assert!(t <= 2.0 * 3.0 / 30.0 + 1e-12, "above the ceiling: {t}");
-        assert!((t - 0.5 * 3.0 / 30.0).abs() < 1e-12, "not the design point: {t}");
+        assert!(
+            (t - 0.5 * 3.0 / 30.0).abs() < 1e-12,
+            "not the design point: {t}"
+        );
     }
 
     #[test]
@@ -288,8 +287,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(1);
         for shape in [0.5_f64, 1.0, 3.0, 12.0] {
             let n = 20000;
-            let mean: f64 =
-                (0..n).map(|_| sample_gamma(shape, &mut rng)).sum::<f64>() / n as f64;
+            let mean: f64 = (0..n).map(|_| sample_gamma(shape, &mut rng)).sum::<f64>() / n as f64;
             assert!(
                 (mean - shape).abs() < 0.1 * shape.max(1.0),
                 "Gamma({shape}) mean {mean}"
@@ -478,8 +476,8 @@ fn student_t<R: Rng + ?Sized>(nu: f64, rng: &mut R) -> f64 {
 #[cfg(test)]
 mod depth_allocator_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// The allocator has to find the arm that reaches deeper, which is the
     /// whole point of rewarding depth instead of acceptance.
@@ -493,12 +491,11 @@ mod depth_allocator_tests {
             let r = match k {
                 1 => -1.0,
                 _ => -3.0,
-            } + 0.3
-                * {
-                    let u1: f64 = rng.random::<f64>().max(1e-12);
-                    let u2: f64 = rng.random::<f64>();
-                    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
-                };
+            } + 0.3 * {
+                let u1: f64 = rng.random::<f64>().max(1e-12);
+                let u2: f64 = rng.random::<f64>();
+                (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+            };
             a.update(k, r);
         }
         assert!(
@@ -547,10 +544,11 @@ mod depth_allocator_tests {
             let mut a = DepthAllocator::new(3);
             for _ in 0..500 {
                 let k = a.select(&mut rng);
-                let r = scale * match k {
-                    2 => -1.0,
-                    _ => -4.0,
-                };
+                let r = scale
+                    * match k {
+                        2 => -1.0,
+                        _ => -4.0,
+                    };
                 a.update(k, r);
             }
             a.draws
@@ -558,8 +556,16 @@ mod depth_allocator_tests {
         let small = run(1.0, 9);
         let large = run(100.0, 9);
         assert_eq!(
-            small.iter().enumerate().max_by_key(|(_, v)| **v).map(|(i, _)| i),
-            large.iter().enumerate().max_by_key(|(_, v)| **v).map(|(i, _)| i),
+            small
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, v)| **v)
+                .map(|(i, _)| i),
+            large
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, v)| **v)
+                .map(|(i, _)| i),
             "scale changed the winner: {small:?} against {large:?}"
         );
     }

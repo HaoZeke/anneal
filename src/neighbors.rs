@@ -165,7 +165,10 @@ mod tests {
         let mut b = a.clone();
         b[3 * 7] += 0.5;
         b[3 * 13 + 2] -= 0.1;
-        assert_eq!(NeighborTable::moved_between(a.view(), b.view()), vec![7, 13]);
+        assert_eq!(
+            NeighborTable::moved_between(a.view(), b.view()),
+            vec![7, 13]
+        );
     }
 }
 
@@ -242,7 +245,10 @@ mod vesin_ffi {
             };
             let mut list = VesinNeighborList {
                 length: 0,
-                device: VesinDevice { kind: 0, device_id: 0 },
+                device: VesinDevice {
+                    kind: 0,
+                    device_id: 0,
+                },
                 pairs: core::ptr::null_mut(),
                 shifts: core::ptr::null_mut(),
                 distances: core::ptr::null_mut(),
@@ -256,7 +262,10 @@ mod vesin_ffi {
                     n,
                     bbox.as_ptr(),
                     periodic.as_ptr(),
-                    VesinDevice { kind: 1, device_id: 0 },
+                    VesinDevice {
+                        kind: 1,
+                        device_id: 0,
+                    },
                     options,
                     &mut list,
                     &mut err,
@@ -300,8 +309,7 @@ mod vesin_ffi {
                 let n = 60;
                 let x = Array1::from_shape_fn(3 * n, |_| rng.random::<f64>() * 5.0);
                 let naive = NeighborTable::build(x.view(), n, 1.4);
-                let fast = NeighborTable::build_vesin(x.view(), n, 1.4)
-                    .expect("vesin refused");
+                let fast = NeighborTable::build_vesin(x.view(), n, 1.4).expect("vesin refused");
                 for i in 0..n {
                     assert_eq!(naive.neighbors(i), fast.neighbors(i), "atom {i}");
                 }

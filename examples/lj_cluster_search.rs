@@ -7,10 +7,10 @@
 //!
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
-use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_hopping::{
-    optimize_with_gradient, Config, Keying, Ledger, MoveLibrary, Outcome,
+    Config, Keying, Ledger, MoveLibrary, Outcome, optimize_with_gradient,
 };
+use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
@@ -156,7 +156,11 @@ fn main() {
     // Random structure search: the evaluation-matched baseline. Random starts,
     // full quenches, nothing else, so every stack above it is measured against
     // what pure sampling buys at the same number of charged evaluations.
-    if std::env::args().nth(4).map(|v| v.contains("rss")).unwrap_or(false) {
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.contains("rss"))
+        .unwrap_or(false)
+    {
         let mut solved = 0usize;
         for seed in seed0..(seed0 + seeds) {
             let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
@@ -167,9 +171,8 @@ fn main() {
             let mut best = f64::INFINITY;
             let mut relaxes = 0usize;
             while ledger.remaining() > 0 {
-                let x0 = anneal_core::methods::cluster_hopping::random_cluster(
-                    n, 0.7, 0.5, &mut rng,
-                );
+                let x0 =
+                    anneal_core::methods::cluster_hopping::random_cluster(n, 0.7, 0.5, &mut rng);
                 opt.forget();
                 let (e, _xr, _) = opt.minimize(x0.view(), 500, |v| {
                     if !ledger.charge() {
@@ -212,8 +215,12 @@ fn main() {
     // Archive-ratchet mode: the minima network explored from a permanent
     // keyed archive, launches by discovery posterior.
     #[cfg(feature = "graphkey")]
-    if std::env::args().nth(4).map(|v| v.contains("archive")).unwrap_or(false) {
-        use anneal_core::methods::ffs::{ffs_descent, FfsConfig};
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.contains("archive"))
+        .unwrap_or(false)
+    {
+        use anneal_core::methods::ffs::{FfsConfig, ffs_descent};
         let fcfg = FfsConfig::for_cluster(n);
         let mut solved = 0usize;
         for seed in seed0..(seed0 + seeds) {
@@ -226,10 +233,16 @@ fn main() {
             };
             let out = ffs_descent(&fcfg, &mut ledger, &mut relax, seed);
             let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
-            if hit { solved += 1; }
+            if hit {
+                solved += 1;
+            }
             println!(
                 "  seed {seed}: best {:.6}  archive {} inserts {} launches {} barren {}{}",
-                out.best, out.descents, out.stored, out.continuations, out.returns,
+                out.best,
+                out.descents,
+                out.stored,
+                out.continuations,
+                out.returns,
                 if hit { "  SOLVED" } else { "" }
             );
         }
@@ -238,7 +251,11 @@ fn main() {
     }
     // Committor-population mode: short chains of the configured stack,
     // resampled by improvement posterior.
-    if std::env::args().nth(4).map(|v| v.contains("committor")).unwrap_or(false) {
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.contains("committor"))
+        .unwrap_or(false)
+    {
         use anneal_core::methods::committor_pop::committor_population;
         let mut ccfg = Config::for_cluster(n);
         ccfg.move_library = MoveLibrary::LeanBurst;
@@ -257,10 +274,15 @@ fn main() {
             };
             let out = committor_population(&ccfg, walkers, seg, &mut ledger, &mut relax, seed);
             let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
-            if hit { solved += 1; }
+            if hit {
+                solved += 1;
+            }
             println!(
                 "  seed {seed}: best {:.6}  segments {} improvements {} resamples {}{}",
-                out.best, out.segments, out.improvements, out.resamples,
+                out.best,
+                out.segments,
+                out.improvements,
+                out.resamples,
                 if hit { "  SOLVED" } else { "" }
             );
         }
@@ -269,8 +291,12 @@ fn main() {
     }
     // Nested mode replaces the chain entirely: population under a descending
     // ceiling, stopping by the run's own volume curve.
-    if std::env::args().nth(4).map(|v| v.contains("nested")).unwrap_or(false) {
-        use anneal_core::methods::nested::{nested_search, NestedConfig};
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.contains("nested"))
+        .unwrap_or(false)
+    {
+        use anneal_core::methods::nested::{NestedConfig, nested_search};
         let ncfg = NestedConfig::for_cluster(n);
         let mut solved = 0usize;
         for seed in seed0..(seed0 + seeds) {
@@ -302,11 +328,13 @@ fn main() {
     }
     // Residual archive search. Token is `ras`, not `archive` (that is FFS).
     #[cfg(feature = "graphkey")]
-    if std::env::args().nth(4).map(|v| v.split(',').any(|t| t == "ras" || t == "pair")).unwrap_or(false) {
-        use anneal_core::methods::archive_search::{archive_search, Archive};
-        use anneal_core::methods::cluster_hopping::{
-            random_cluster_in_radius, run_with_gradient,
-        };
+    if std::env::args()
+        .nth(4)
+        .map(|v| v.split(',').any(|t| t == "ras" || t == "pair"))
+        .unwrap_or(false)
+    {
+        use anneal_core::methods::archive_search::{Archive, archive_search};
+        use anneal_core::methods::cluster_hopping::{random_cluster_in_radius, run_with_gradient};
         use rand::SeedableRng;
         let pair = std::env::args()
             .nth(4)
@@ -326,12 +354,8 @@ fn main() {
         let mut ras_hit_at = Vec::new();
         for seed in seed0..(seed0 + seeds) {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let start = random_cluster_in_radius(
-                n,
-                cfg.start_radius(),
-                cfg.min_separation,
-                &mut rng,
-            );
+            let start =
+                random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut rng);
             let mut rng_ras = rng.clone();
             if pair {
                 let mut ledger = Ledger::new(budget);
@@ -411,7 +435,11 @@ fn main() {
                 "  seed {seed} ras: best {:.6}  charged {}  hit_at {}  screens {} full {} returned {} same_floor {} floors {} events {} artn {}{}",
                 out.best,
                 out.charged,
-                if hit { out.best_at.to_string() } else { "-".into() },
+                if hit {
+                    out.best_at.to_string()
+                } else {
+                    "-".into()
+                },
                 out.screens,
                 out.full,
                 out.returned,
@@ -462,7 +490,10 @@ fn main() {
     // a length. Enabled by the fourth argument so both are measurable.
     // Mechanisms named on the command line, so each is measurable against the
     // others rather than all arriving at once.
-    let mut opts: Vec<&str> = args.get(4).map(|v| v.split(',').collect()).unwrap_or_default();
+    let mut opts: Vec<&str> = args
+        .get(4)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
     // The working Python driver (askmc_hopping) is Thompson over moves, the
     // budget-window temperature, and the per-basin bias the crate always
     // carries. Naming that stack keeps the measurement comparable without
@@ -558,15 +589,20 @@ fn main() {
         // and a rigid motion are one basin.
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
-        println!("  keying on a canonical order, merge radius {}", cfg.merge_radius);
+        println!(
+            "  keying on a canonical order, merge radius {}",
+            cfg.merge_radius
+        );
     }
     if opts.contains(&"pt") {
         // A ladder sharing one budget, not four budgets. The comparison is
         // against a single chain at the same total cost.
         cfg.replicas = 4;
         cfg.bias_by_rung = opts.contains(&"rungbias");
-        println!("  replica exchange: {} chains, swap every {} hops, top x{}",
-                 cfg.replicas, cfg.swap_period, cfg.ladder_top);
+        println!(
+            "  replica exchange: {} chains, swap every {} hops, top x{}",
+            cfg.replicas, cfg.swap_period, cfg.ladder_top
+        );
     }
     // The deposit height matters only now that basins are revisited: at 33
     // revisits a height of 0.25 accumulates to about 8, against escape gaps
@@ -598,7 +634,10 @@ fn main() {
         // atoms can be brought within this of each other by a permutation and
         // a rigid motion are the same basin.
         cfg.merge_radius = 0.2;
-        println!("  keying on IRA shape distance, merge radius {} (a length)", cfg.merge_radius);
+        println!(
+            "  keying on IRA shape distance, merge radius {} (a length)",
+            cfg.merge_radius
+        );
     }
 
     // The bank arm. Runs the same chains under the same total budget, with
@@ -771,7 +810,10 @@ fn main() {
                     b.mixes,
                     b.mix_admitted,
                     b.mix_below_both,
-                    b.bank.iter().map(|e| (e * 100.0).round() / 100.0).collect::<Vec<_>>()
+                    b.bank
+                        .iter()
+                        .map(|e| (e * 100.0).round() / 100.0)
+                        .collect::<Vec<_>>()
                 );
                 Outcome {
                     best: b.best,
@@ -798,8 +840,7 @@ fn main() {
                                   iters: usize|
                  -> Array1<f64> {
                     let np = x.len() / 3;
-                    let frac =
-                        (2.0 * moved.len() as f64) / ((np.max(2) - 1) as f64);
+                    let frac = (2.0 * moved.len() as f64) / ((np.max(2) - 1) as f64);
                     if std::env::var("AUDIT_SETTLE").is_ok() && !audited {
                         audited = true;
                         let (_, full) = lj(x);
@@ -850,7 +891,11 @@ fn main() {
                     } else {
                         None
                     },
-                    if cfg.staged_quench { Some(&mut settle) } else { None },
+                    if cfg.staged_quench {
+                        Some(&mut settle)
+                    } else {
+                        None
+                    },
                     seed,
                 )
             }
@@ -902,11 +947,7 @@ fn main() {
             }
         }
         if let Some(r) = reference {
-            if let Some((h, _, b, e)) = out
-                .improvements
-                .iter()
-                .find(|(_, _, _, e)| *e < r + 1e-4)
-            {
+            if let Some((h, _, b, e)) = out.improvements.iter().find(|(_, _, _, e)| *e < r + 1e-4) {
                 println!(
                     "      crossed at hop {h} of {} ({:.1}% in), {b} basins, {e:.6}",
                     out.hops,

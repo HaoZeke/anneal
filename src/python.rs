@@ -114,9 +114,9 @@ impl PyBasinBias {
     /// core is built against, so the buffer is reborrowed through a slice.
     fn potential(&self, x: numpy::PyReadonlyArray1<f64>) -> PyResult<f64> {
         use crate::bias::Bias;
-        let slice = x.as_slice().map_err(|_| {
-            pyo3::exceptions::PyValueError::new_err("x must be contiguous")
-        })?;
+        let slice = x
+            .as_slice()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
         let v = ndarray::ArrayView1::from(slice);
         let s = self.inner.cv(v);
         Ok(self.inner.potential(s.view()))
@@ -128,9 +128,9 @@ impl PyBasinBias {
         if !(temp > 0.0) {
             return Err(pyo3::exceptions::PyValueError::new_err("temp must be > 0"));
         }
-        let slice = x.as_slice().map_err(|_| {
-            pyo3::exceptions::PyValueError::new_err("x must be contiguous")
-        })?;
+        let slice = x
+            .as_slice()
+            .map_err(|_| pyo3::exceptions::PyValueError::new_err("x must be contiguous"))?;
         let v = ndarray::ArrayView1::from(slice);
         let s = self.inner.cv(v);
         self.inner.deposit(s.view(), temp);

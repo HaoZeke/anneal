@@ -133,12 +133,15 @@ impl WarmLbfgs {
         if sy <= 1e-12 {
             return;
         }
-        self.memory.push(Pair { s, y, rho: 1.0 / sy });
+        self.memory.push(Pair {
+            s,
+            y,
+            rho: 1.0 / sy,
+        });
         if self.memory.len() > self.max_pairs {
             self.memory.remove(0);
         }
     }
-
 
     /// Strong Wolfe line search by bracketing then cubic-interpolated zoom.
     ///
@@ -193,11 +196,7 @@ impl WarmLbfgs {
         // 1e-6, so the search fails and the relaxation returns its start.
         let mut a = if self.memory.is_empty() {
             let dnorm = d.iter().fold(0.0_f64, |acc, v| acc + v * v).sqrt();
-            if dnorm > 1.0 {
-                1.0 / dnorm
-            } else {
-                1.0
-            }
+            if dnorm > 1.0 { 1.0 / dnorm } else { 1.0 }
         } else {
             1.0
         };

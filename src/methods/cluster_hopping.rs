@@ -30,18 +30,18 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
+use crate::bias::{
+    AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
+};
 use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
-use crate::screen::Screen;
-use crate::methods::activation::{activate, Activation};
-use crate::bias::{
-    AdaptiveHeight, Bias, BasinBias, BasinIndex, Fingerprint, SiteEnergies, SortedPairs,
-};
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
+use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
-use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
+use crate::path::{StallDetector, interpolate_path};
+use crate::screen::Screen;
 
 /// Dimensionless coefficients for the Lennard-Jones cluster preset.
 ///
@@ -534,9 +534,7 @@ fn group_relocate<R: Rng + ?Sized>(
             }
         }
     }
-    let worst = (0..groups.len())
-        .min_by_key(|&g| contacts[g])
-        .unwrap_or(0);
+    let worst = (0..groups.len()).min_by_key(|&g| contacts[g]).unwrap_or(0);
     // Cluster centroid and surface radius from group centroids.
     let mut cc = [0.0_f64; 3];
     for i in 0..n {
@@ -550,7 +548,10 @@ fn group_relocate<R: Rng + ?Sized>(
     let mut rmax = 0.0_f64;
     for atoms in groups.iter() {
         let gc = group_centroid(x, atoms);
-        let r: f64 = (0..3).map(|k| (gc[k] - cc[k]) * (gc[k] - cc[k])).sum::<f64>().sqrt();
+        let r: f64 = (0..3)
+            .map(|k| (gc[k] - cc[k]) * (gc[k] - cc[k]))
+            .sum::<f64>()
+            .sqrt();
         rmax = rmax.max(r);
     }
     // Random direction on the sphere, random rigid rotation.
@@ -588,11 +589,7 @@ fn group_relocate<R: Rng + ?Sized>(
         if a >= n {
             continue;
         }
-        let p = [
-            x[3 * a] - gc[0],
-            x[3 * a + 1] - gc[1],
-            x[3 * a + 2] - gc[2],
-        ];
+        let p = [x[3 * a] - gc[0], x[3 * a + 1] - gc[1], x[3 * a + 2] - gc[2]];
         // Rodrigues rotation about `axis`.
         let dot = p[0] * axis[0] + p[1] * axis[1] + p[2] * axis[2];
         let cross = [
@@ -681,12 +678,15 @@ pub fn active_mask(
 /// unknown species bond to nothing rather than to everything.
 pub fn covalent_radius(z: u32) -> f64 {
     const R: [f64; 37] = [
-        0.0, 0.31, 0.28, 1.28, 0.96, 0.84, 0.76, 0.71, 0.66, 0.57, 0.58,
-        1.66, 1.41, 1.21, 1.11, 1.07, 1.05, 1.02, 1.06, 2.03, 1.76,
-        1.70, 1.60, 1.53, 1.39, 1.39, 1.32, 1.26, 1.24, 1.32, 1.22,
-        1.22, 1.20, 1.19, 1.20, 1.20, 1.16,
+        0.0, 0.31, 0.28, 1.28, 0.96, 0.84, 0.76, 0.71, 0.66, 0.57, 0.58, 1.66, 1.41, 1.21, 1.11,
+        1.07, 1.05, 1.02, 1.06, 2.03, 1.76, 1.70, 1.60, 1.53, 1.39, 1.39, 1.32, 1.26, 1.24, 1.32,
+        1.22, 1.22, 1.20, 1.19, 1.20, 1.20, 1.16,
     ];
-    if (z as usize) < R.len() { R[z as usize] } else { 0.0 }
+    if (z as usize) < R.len() {
+        R[z as usize]
+    } else {
+        0.0
+    }
 }
 
 /// Connected components under the bond-matrix rule: two atoms bond when their
@@ -876,11 +876,7 @@ impl ClusterMove {
     /// caller's groups. Shake as the workhorse, relocation as the crossing
     /// operator, the composed burst as the excursion.
     pub fn library_molecular(groups: Vec<Vec<usize>>, neighbour_cutoff: f64) -> Vec<ClusterMove> {
-        Self::library_molecular_scaled(
-            groups,
-            neighbour_cutoff,
-            LennardJonesPreset::REDUCED_SCALE,
-        )
+        Self::library_molecular_scaled(groups, neighbour_cutoff, LennardJonesPreset::REDUCED_SCALE)
     }
 
     fn library_molecular_scaled(
@@ -1062,12 +1058,7 @@ impl ClusterMove {
     }
 
     /// Draws a proposal from whichever kernel this is.
-    pub fn propose<R: Rng + ?Sized>(
-        &self,
-        x: ArrayView1<f64>,
-        t: f64,
-        rng: &mut R,
-    ) -> Array1<f64> {
+    pub fn propose<R: Rng + ?Sized>(&self, x: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         self.propose_scaled(x, t, 1.0, rng)
     }
 
@@ -1139,14 +1130,14 @@ impl ClusterMove {
                 }
                 let i = worst_bound_scaled(y.view(), n, 0.42, *length_scale, *energy_scale)
                     .unwrap_or_else(|| {
-                    let e = pair_energies_scaled(y.view(), n, *length_scale, *energy_scale);
-                    let mut hi = 0usize;
-                    for k in 1..n {
-                        if e[k] > e[hi] {
-                            hi = k;
+                        let e = pair_energies_scaled(y.view(), n, *length_scale, *energy_scale);
+                        let mut hi = 0usize;
+                        for k in 1..n {
+                            if e[k] > e[hi] {
+                                hi = k;
+                            }
                         }
-                    }
-                    hi
+                        hi
                     });
                 // Uniform on the sphere: cos(theta) uniform in [-1, 1], not
                 // theta itself, or the poles are oversampled.
@@ -1177,9 +1168,7 @@ impl ClusterMove {
                 for v in shift.iter_mut() {
                     let u1: f64 = rng.random::<f64>().max(1e-12);
                     let u2: f64 = rng.random::<f64>();
-                    *v = amplitude
-                        * (-2.0 * u1.ln()).sqrt()
-                        * (std::f64::consts::TAU * u2).cos();
+                    *v = amplitude * (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
                 }
                 let axis = {
                     let mut v;
@@ -1207,11 +1196,7 @@ impl ClusterMove {
                     if a >= n {
                         continue;
                     }
-                    let pvec = [
-                        x[3 * a] - gc[0],
-                        x[3 * a + 1] - gc[1],
-                        x[3 * a + 2] - gc[2],
-                    ];
+                    let pvec = [x[3 * a] - gc[0], x[3 * a + 1] - gc[1], x[3 * a + 2] - gc[2]];
                     let dot = pvec[0] * axis[0] + pvec[1] * axis[1] + pvec[2] * axis[2];
                     let cross = [
                         axis[1] * pvec[2] - axis[2] * pvec[1],
@@ -1263,12 +1248,7 @@ impl ClusterMove {
 }
 
 impl MoveKernel<f64> for ClusterMove {
-    fn propose<R: Rng + ?Sized>(
-        &self,
-        i: ArrayView1<f64>,
-        t: f64,
-        rng: &mut R,
-    ) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         ClusterMove::propose(self, i, t, rng)
     }
 
@@ -1300,12 +1280,7 @@ impl ClusterProposal {
 }
 
 impl MoveKernel<f64> for ClusterProposal {
-    fn propose<R: Rng + ?Sized>(
-        &self,
-        i: ArrayView1<f64>,
-        t: f64,
-        rng: &mut R,
-    ) -> Array1<f64> {
+    fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         let arm = rng.random_range(0..self.kernels.len());
         self.kernels[arm].propose(i, t, rng)
     }
@@ -1318,8 +1293,8 @@ impl MoveKernel<f64> for ClusterProposal {
 #[cfg(test)]
 mod move_scaling_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// The escape scale has to reach the step, which is the whole mechanism.
     /// It did not: the amplitude moves ignored the temperature argument, so a
@@ -1350,7 +1325,10 @@ mod move_scaling_tests {
 
     #[test]
     fn the_unscaled_call_is_the_old_behaviour() {
-        let mv = ClusterMove::SinglePoint { n_points: 10, step: 1.0 };
+        let mv = ClusterMove::SinglePoint {
+            n_points: 10,
+            step: 1.0,
+        };
         let x: Array1<f64> = Array1::zeros(30);
         let mut a = StdRng::seed_from_u64(3);
         let mut b = StdRng::seed_from_u64(3);
@@ -2142,11 +2120,7 @@ impl Config {
     }
 
     /// Species-aware molecular preset with rigid groups.
-    pub fn for_molecular(
-        species: Vec<u32>,
-        groups: Vec<Vec<usize>>,
-        energy_scale: f64,
-    ) -> Self {
+    pub fn for_molecular(species: Vec<u32>, groups: Vec<Vec<usize>>, energy_scale: f64) -> Self {
         assert!(!species.is_empty(), "species must not be empty");
         let length_scale = MolecularPreset::COVALENT_DIAMETER
             * species
@@ -2616,8 +2590,8 @@ fn run_full<'g, R: Rng + ?Sized>(
     // start from the spread of an initial population; here the configured value
     // is the start, so a run that does not anneal is unchanged and one that does
     // begins where the fixed version sat rather than somewhere new.
-    let mut diversity = DiversityAnnealer::from_initial(cfg.merge_radius)
-        .with_final_fraction(cfg.diversity_floor);
+    let mut diversity =
+        DiversityAnnealer::from_initial(cfg.merge_radius).with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
     let mut soft_escapes = 0usize;
@@ -2854,15 +2828,16 @@ fn run_full<'g, R: Rng + ?Sized>(
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
         // The learned-covariance arm competes uniformly like the others.
-        let cov_fire = cfg.cov_perturb
-            && !angular
-            && rng.random_range(0..kernels.len() + 1) == 0;
+        let cov_fire = cfg.cov_perturb && !angular && rng.random_range(0..kernels.len() + 1) == 0;
         let soft_fire = cfg.soft_perturb
             && !angular
             && grad.is_some()
             && rng.random_range(0..kernels.len() + 1) == 0;
         if soft_fire {
-            let stale = soft_cache.as_ref().map(|(ce, _, _)| *ce != e).unwrap_or(true);
+            let stale = soft_cache
+                .as_ref()
+                .map(|(ce, _, _)| *ce != e)
+                .unwrap_or(true);
             if stale {
                 if let Some(g) = grad.as_deref_mut() {
                     let got = crate::curvature::soft_subspace(
@@ -2879,7 +2854,11 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
             }
         }
-        let escape = if cfg.minima_hopping { feedback.escape() } else { 1.0 };
+        let escape = if cfg.minima_hopping {
+            feedback.escape()
+        } else {
+            1.0
+        };
         // Ordinary hops: scale the library move by the escape feedback. Soft
         // mode climbs live under `escape_on_stall` below; they are a few per
         // cent of the budget when the chain has stopped improving, not the
@@ -3042,25 +3021,25 @@ fn run_full<'g, R: Rng + ?Sized>(
             match sur.predict_full(trial.view(), n, raw_y, gnorm, tol) {
                 None => sur.abstained += 1,
                 Some(pred_y) => {
-                let pred_x = match surrogate_here {
-                    Some(v) => v,
-                    None => {
-                        // The incumbent has no surrogate value yet, so give it
-                        // one from its own raw energy rather than comparing
-                        // against nothing.
-                        let (raw_x, _) = relax(ledger, x.view(), 0);
-                        let v = sur.predict(x.view(), n, raw_x).unwrap_or(e);
-                        surrogate_here = Some(v);
-                        v
+                    let pred_x = match surrogate_here {
+                        Some(v) => v,
+                        None => {
+                            // The incumbent has no surrogate value yet, so give it
+                            // one from its own raw energy rather than comparing
+                            // against nothing.
+                            let (raw_x, _) = relax(ledger, x.view(), 0);
+                            let v = sur.predict(x.view(), n, raw_x).unwrap_or(e);
+                            surrogate_here = Some(v);
+                            v
+                        }
+                    };
+                    sur.stage_one += 1;
+                    let a1 = sur.stage_one_probability(pred_x, pred_y, temperature);
+                    if rng.random::<f64>() >= a1 {
+                        sur.stage_one_rejected += 1;
+                        stage_one_reject = true;
                     }
-                };
-                sur.stage_one += 1;
-                let a1 = sur.stage_one_probability(pred_x, pred_y, temperature);
-                if rng.random::<f64>() >= a1 {
-                    sur.stage_one_rejected += 1;
-                    stage_one_reject = true;
-                }
-                pending_surrogate = Some((pred_y, raw_y));
+                    pending_surrogate = Some((pred_y, raw_y));
                 }
             }
         }
@@ -3130,27 +3109,25 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if returning
-            && cfg.return_polish > 0
-            && ledger.spent() >= ledger.remaining()
-        {
-            // First half of the budget skips returns (same saving as a
-            // plain return_screen). After the halfway mark, a short polish
-            // finishes near-incumbent trials that a full skip would drop.
-            relax(ledger, x_screen.view(), cfg.return_polish)
-        } else if screened_this || returning {
-            if screened_this && !returning {
-                screened_out += 1;
-            }
-            (e_screen, x_screen)
-        } else {
-            let out = relax(ledger, x_screen.view(), cfg.relax_steps);
-            if cfg.bayes_screen {
-                // The answer to the question the posterior was asked.
-                screen.observe(feats.view(), out.0);
-            }
-            out
-        };
+        let (e_new, x_new) =
+            if returning && cfg.return_polish > 0 && ledger.spent() >= ledger.remaining() {
+                // First half of the budget skips returns (same saving as a
+                // plain return_screen). After the halfway mark, a short polish
+                // finishes near-incumbent trials that a full skip would drop.
+                relax(ledger, x_screen.view(), cfg.return_polish)
+            } else if screened_this || returning {
+                if screened_this && !returning {
+                    screened_out += 1;
+                }
+                (e_screen, x_screen)
+            } else {
+                let out = relax(ledger, x_screen.view(), cfg.relax_steps);
+                if cfg.bayes_screen {
+                    // The answer to the question the posterior was asked.
+                    screen.observe(feats.view(), out.0);
+                }
+                out
+            };
         // Under MH a screened structure is not a minimum; under Metropolis it
         // is still a legal chain state (cheaper step, same deposit).
         let unquenched = cfg.minima_hopping && (screened_this || returning);
@@ -3339,9 +3316,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
                 ok
             }
-        } else if let (Some(sur), Some((pred_y, raw_y))) =
-            (surrogate.as_mut(), pending_surrogate)
-        {
+        } else if let (Some(sur), Some((pred_y, raw_y))) = (surrogate.as_mut(), pending_surrogate) {
             // Second stage. The surrogate difference is subtracted back out, so
             // what is tested is the error the surrogate made on this pair, and
             // the composite step is reversible with respect to the true target
@@ -3377,7 +3352,9 @@ fn run_full<'g, R: Rng + ?Sized>(
                 // Before the window exists there is no entropy to accept
                 // against, so the first sweep runs the rule it is replacing and
                 // its energies are what set the window.
-                None => delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp(),
+                None => {
+                    delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
+                }
             };
             ok
         } else {
@@ -3481,10 +3458,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                         // Anything past the padding is handled by the linear
                         // extrapolation rather than by clamping.
                         let lo = flat_seen.iter().cloned().fold(f64::INFINITY, f64::min);
-                        let hi = flat_seen
-                            .iter()
-                            .cloned()
-                            .fold(f64::NEG_INFINITY, f64::max);
+                        let hi = flat_seen.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
                         if lo.is_finite() && hi > lo {
                             let span = hi - lo;
                             let mut d = crate::dos::DensityOfStates::new(
@@ -3541,11 +3515,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else if let Some(c) = &context {
             // The context is the one the move was chosen in, not the one the
             // chain now stands in: the reward belongs to the decision.
-            contextual.update(
-                k,
-                c.view(),
-                if improved || accept { 1.0 } else { 0.0 },
-            );
+            contextual.update(k, c.view(), if improved || accept { 1.0 } else { 0.0 });
         } else if cfg.allocate_moves {
             // An angular step is not the allocator's, so it does not carry a
             // reward for whichever arm the allocator happened to pick.
@@ -3889,15 +3859,22 @@ fn run_full<'g, R: Rng + ?Sized>(
                 chains.insert(rep, (e, x.clone()));
                 // A placeholder only; the destination rung's own bias is taken
                 // below, so this is never deposited into.
-                biases.insert(rep, std::mem::replace(
-                    &mut bias,
-                    BasinBias::new(
-                        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
-                        cfg.merge_radius,
-                        cfg.bias_height,
-                        cfg.bias_gamma,
+                biases.insert(
+                    rep,
+                    std::mem::replace(
+                        &mut bias,
+                        BasinBias::new(
+                            ClusterFingerprint::of_with(
+                                n,
+                                effective_keying(cfg),
+                                &canonical_reference,
+                            ),
+                            cfg.merge_radius,
+                            cfg.bias_height,
+                            cfg.bias_gamma,
+                        ),
                     ),
-                ));
+                );
                 let k = rep;
                 let j = (rep + 1) % n_rep;
                 if k != j {
@@ -4093,9 +4070,14 @@ fn run_full<'g, R: Rng + ?Sized>(
         swaps_tried,
         accepted,
         unconverged_records,
-        delayed: surrogate
-            .as_ref()
-            .map(|s| (s.stage_one, s.stage_one_rejected, s.stage_two, s.stage_two_rejected)),
+        delayed: surrogate.as_ref().map(|s| {
+            (
+                s.stage_one,
+                s.stage_one_rejected,
+                s.stage_two,
+                s.stage_two_rejected,
+            )
+        }),
         arms: kernels
             .iter()
             .enumerate()
@@ -4113,7 +4095,12 @@ fn run_full<'g, R: Rng + ?Sized>(
 ///
 /// Uniform draws over a container overlap almost surely at the sizes of
 /// interest, and a relaxation cannot recover from that.
-pub fn random_cluster<R: Rng + ?Sized>(n: usize, density: f64, min_sep: f64, rng: &mut R) -> Array1<f64> {
+pub fn random_cluster<R: Rng + ?Sized>(
+    n: usize,
+    density: f64,
+    min_sep: f64,
+    rng: &mut R,
+) -> Array1<f64> {
     let radius = (3.0 * n as f64 / (4.0 * std::f64::consts::PI * density)).cbrt();
     random_cluster_in_radius(n, radius, min_sep, rng)
 }
@@ -4182,7 +4169,8 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
         let r = radius * rng.random::<f64>().cbrt();
         let p = [v[0] / norm * r, v[1] / norm * r, v[2] / norm * r];
         if pts.iter().all(|q| {
-            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt() >= min_sep
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                >= min_sep
         }) {
             pts.push(p);
         }
@@ -4250,9 +4238,7 @@ mod bond_matrix_tests {
         // H2 at 0.75, a Cu pair at 2.5, far apart; and a stray H at 2.0 from
         // the molecule.
         let x = Array1::from(vec![
-            0.0, 0.0, 0.0, 0.75, 0.0, 0.0,
-            10.0, 0.0, 0.0, 12.5, 0.0, 0.0,
-            2.75, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.75, 0.0, 0.0, 10.0, 0.0, 0.0, 12.5, 0.0, 0.0, 2.75, 0.0, 0.0,
         ]);
         let z = [1u32, 1, 29, 29, 1];
         let g = connectivity_groups_z(x.view(), &z, 1.25);
@@ -4276,8 +4262,8 @@ mod connectivity_tests {
     fn groups_follow_the_bond_graph() {
         // O at origin with two H at 1.0; second molecule 4.0 away.
         let intact = Array1::from(vec![
-            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0,
-            4.0, 0.0, 0.0, 5.0, 0.0, 0.0, 3.2, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 4.0, 0.0, 0.0, 5.0, 0.0, 0.0, 3.2, 0.0,
+            0.0,
         ]);
         let g = connectivity_groups(intact.view(), 6, 1.3);
         assert_eq!(g, vec![vec![0, 1, 2], vec![3, 4, 5]]);
@@ -4293,8 +4279,8 @@ mod connectivity_tests {
 #[cfg(test)]
 mod group_move_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Six rigid three-atom groups in a blob.
     fn waterish() -> (Array1<f64>, Vec<Vec<usize>>) {
@@ -4391,13 +4377,29 @@ mod tests {
 
         let mut l1 = Ledger::new(3_000);
         let mut r1 = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
-        run_with_bias(&cfg, start.view(), &mut l1, &mut r1, None, &mut bias, &mut rng);
+        run_with_bias(
+            &cfg,
+            start.view(),
+            &mut l1,
+            &mut r1,
+            None,
+            &mut bias,
+            &mut rng,
+        );
         let after_first = bias.n_basins();
         assert!(after_first > 0, "the first chain deposited nothing");
 
         let mut l2 = Ledger::new(3_000);
         let mut r2 = |led: &mut Ledger, x: ArrayView1<f64>, n: usize| toy_relax(led, x, n);
-        let out = run_with_bias(&cfg, start.view(), &mut l2, &mut r2, None, &mut bias, &mut rng);
+        let out = run_with_bias(
+            &cfg,
+            start.view(),
+            &mut l2,
+            &mut r2,
+            None,
+            &mut bias,
+            &mut rng,
+        );
         assert!(
             out.basins >= after_first,
             "the second chain saw {} basins where the first left {after_first}",
@@ -4451,7 +4453,9 @@ mod tests {
         x[3 * last] = 9.0;
 
         let e = pair_energies(x.view(), n);
-        let hi = (0..n).max_by(|a, b| e[*a].partial_cmp(&e[*b]).unwrap()).unwrap();
+        let hi = (0..n)
+            .max_by(|a, b| e[*a].partial_cmp(&e[*b]).unwrap())
+            .unwrap();
         assert_eq!(hi, last, "the distant point should be the worst bound");
         assert_eq!(
             worst_bound(x.view(), n, 0.42),
@@ -4469,7 +4473,10 @@ mod tests {
         // Every other point is untouched: "with all other atoms fixed".
         for i in 0..last {
             for k in 0..3 {
-                assert!((y[3 * i + k] - x[3 * i + k]).abs() < 1e-12, "point {i} moved");
+                assert!(
+                    (y[3 * i + k] - x[3 * i + k]).abs() < 1e-12,
+                    "point {i} moved"
+                );
             }
         }
         assert!(
@@ -4517,7 +4524,9 @@ mod tests {
         let mut seed = 12345u64;
         for _ in 0..20_000 {
             tried += 1;
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let u = ((seed >> 33) as f64) / ((1u64 << 31) as f64);
             let accept = u < (1.0 - ratio);
             let hit = if accept { 1.0 } else { 0.0 };
@@ -4581,7 +4590,11 @@ mod tests {
         let mut relax = toy_relax;
         let out = optimize(&cfg, &mut ledger, &mut relax, 11);
         assert!(out.charged <= 1500, "spent {} of 1500", out.charged);
-        assert_eq!(ledger.remaining(), 0, "a funnel-biased run must still empty the ledger");
+        assert_eq!(
+            ledger.remaining(),
+            0,
+            "a funnel-biased run must still empty the ledger"
+        );
         assert!(out.hops > 0, "no hop completed under spectral bias");
         assert!(
             out.accepted <= out.hops,

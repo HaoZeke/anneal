@@ -15,9 +15,9 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-use crate::methods::cluster_hopping::{optimize_with_gradient, Config, Ledger, Outcome};
-use crate::quench::{QuenchPredictor, Verdict};
+use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_gradient};
 use crate::methods::warm_lbfgs::WarmLbfgs;
+use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 
@@ -99,7 +99,12 @@ pub const CONVERGED_GRADIENT: f64 = 1e-5;
 /// The relaxation is this crate's warm-started quasi-Newton one, and its
 /// curvature is deliberately not carried between calls: measured on a cluster,
 /// retaining it across a structural change costs more than it saves.
-pub fn search<O>(objective: &O, cfg: &Config, ledger: &mut Ledger, seed: u64) -> (Outcome, RelaxStats)
+pub fn search<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    seed: u64,
+) -> (Outcome, RelaxStats)
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -306,10 +311,7 @@ pub fn median_encounter(runs: &[Encounter]) -> Option<usize> {
     if runs.is_empty() {
         return None;
     }
-    let mut events: Vec<(usize, bool)> = runs
-        .iter()
-        .map(|e| (e.charged(), e.found()))
-        .collect();
+    let mut events: Vec<(usize, bool)> = runs.iter().map(|e| (e.charged(), e.found())).collect();
     events.sort_by_key(|(c, _)| *c);
 
     let mut at_risk = events.len() as f64;
@@ -414,13 +416,21 @@ mod tests {
         // A target nothing can reach must censor at the spend, not report a
         // time.
         let never = first_encounter(&out, -1e9, 1e-4, ledger.spent());
-        assert_eq!(never, Encounter::Censored { charged: ledger.spent() });
+        assert_eq!(
+            never,
+            Encounter::Censored {
+                charged: ledger.spent()
+            }
+        );
     }
 
     /// The median under censoring, and the refusal that keeps it honest.
     #[test]
     fn the_median_refuses_when_most_runs_are_censored() {
-        let found = |c: usize| Encounter::Found { charged: c, hops: c / 30 };
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: c / 30,
+        };
         let cens = |c: usize| Encounter::Censored { charged: c };
 
         // Five found, spread; the median is the third.
@@ -442,7 +452,10 @@ mod tests {
     /// A censored run late in the ordering must not shrink the median.
     #[test]
     fn late_censoring_does_not_flatter_the_median() {
-        let found = |c: usize| Encounter::Found { charged: c, hops: 1 };
+        let found = |c: usize| Encounter::Found {
+            charged: c,
+            hops: 1,
+        };
         let cens = |c: usize| Encounter::Censored { charged: c };
         let clean = vec![found(10), found(20), found(30), found(40)];
         let with_censor = vec![found(10), found(20), found(30), cens(1000)];

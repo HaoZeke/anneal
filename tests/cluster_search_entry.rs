@@ -4,7 +4,7 @@
 //! in-crate example that runs the same driver with the crate's own potential,
 //! and reports `{best, best_energy, hops}` without a solved flag.
 
-use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger, MoveLibrary};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, optimize};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};

@@ -1,10 +1,8 @@
-use anneal_core::methods::cluster_hopping::{
-    covalent_radius, ClusterMove, Config, MoveLibrary,
-};
+use anneal_core::methods::cluster_hopping::{ClusterMove, Config, MoveLibrary, covalent_radius};
 use anneal_core::movekernel::MoveKernel;
 use ndarray::Array1;
-use rand::rngs::StdRng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 fn proposal_from<K: MoveKernel<f64>>(kernel: &K, n: usize) -> Array1<f64> {
     let mut rng = StdRng::seed_from_u64(11);

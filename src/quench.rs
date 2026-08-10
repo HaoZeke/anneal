@@ -258,11 +258,7 @@ impl QuenchPredictor {
             _ => fallback,
         };
         let floor = best + self.margin;
-        if raw > floor {
-            raw
-        } else {
-            floor
-        }
+        if raw > floor { raw } else { floor }
     }
 
     /// Whether the descent can still reach `best`.
@@ -416,7 +412,11 @@ mod tests {
             gap *= 0.5;
         }
         let p = q.predict().expect("no prediction");
-        assert!(p.limit < -400.0, "limit {} is not below the incumbent", p.limit);
+        assert!(
+            p.limit < -400.0,
+            "limit {} is not below the incumbent",
+            p.limit
+        );
         let e = q.stopped_energy(-100.0, -495.0);
         assert!(e > -100.0, "stopped energy {e} beats the incumbent -100");
     }
@@ -433,7 +433,10 @@ mod tests {
             gap *= 0.5;
         }
         let e = q.stopped_energy(-100.0, -39.0);
-        assert!((e - q.predict().unwrap().limit).abs() < 1e-12, "estimate {e} was replaced");
+        assert!(
+            (e - q.predict().unwrap().limit).abs() < 1e-12,
+            "estimate {e} was replaced"
+        );
     }
 
     /// The asymmetry, stated as a test: a prediction sitting just above the

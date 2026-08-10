@@ -153,7 +153,9 @@ fn main() {
     }
 
     println!("LJ{n}, {hops} relaxations from perturbed minima, step {step}");
-    println!("  warm arm: {carried}/{hops} started with stored curvature, {kept} ended holding some");
+    println!(
+        "  warm arm: {carried}/{hops} started with stored curvature, {kept} ended holding some"
+    );
     println!(
         "  cold  {:>8} evals  {:>7.1} per relaxation  best {:.6}  worst |g| {:.2e}",
         cold_evals,

@@ -81,7 +81,10 @@ where
         quench_steps: usize,
         quench: Q,
     ) -> Self {
-        assert!(!initial_position.is_empty(), "initial position must not be empty");
+        assert!(
+            !initial_position.is_empty(),
+            "initial position must not be empty"
+        );
         assert!(quench_steps > 0, "quench_steps must be positive");
         Self {
             initial_position,
@@ -102,11 +105,10 @@ where
     Q: for<'a> FnMut(ArrayView1<'a, f64>, usize) -> FPair<f64> + Send,
 {
     fn initial_state<R: Rng>(&self, _rng: &mut R) -> State {
-        let pair = self
-            .quench
-            .lock()
-            .expect("quench mutex poisoned")
-            (self.initial_position.view(), self.quench_steps);
+        let pair = self.quench.lock().expect("quench mutex poisoned")(
+            self.initial_position.view(),
+            self.quench_steps,
+        );
         State {
             cur: pair.clone(),
             best: pair,
@@ -114,11 +116,8 @@ where
     }
 
     fn initial_state_from_position(&self, pos: Array1<f64>) -> Option<State> {
-        let pair = self
-            .quench
-            .lock()
-            .expect("quench mutex poisoned")
-            (pos.view(), self.quench_steps);
+        let pair =
+            self.quench.lock().expect("quench mutex poisoned")(pos.view(), self.quench_steps);
         Some(State {
             cur: pair.clone(),
             best: pair,
@@ -127,14 +126,9 @@ where
 
     fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
         let temperature = self.cooling.temperature(epoch);
-        let proposal = self
-            .mover
-            .propose(state.cur.pos.view(), temperature, rng);
-        let quenched = self
-            .quench
-            .lock()
-            .expect("quench mutex poisoned")
-            (proposal.view(), self.quench_steps);
+        let proposal = self.mover.propose(state.cur.pos.view(), temperature, rng);
+        let quenched =
+            self.quench.lock().expect("quench mutex poisoned")(proposal.view(), self.quench_steps);
         let probability = self
             .accept
             .accept_prob(quenched.val - state.cur.val, temperature);

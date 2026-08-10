@@ -211,9 +211,17 @@ mod tests {
         for v in y.iter_mut() {
             *v *= 1.02;
         }
-        assert_eq!(k1, contact_key(y.view(), 1.35), "uniform scaling changed the key");
+        assert_eq!(
+            k1,
+            contact_key(y.view(), 1.35),
+            "uniform scaling changed the key"
+        );
         let z = Array1::from_iter(x.iter().skip(3).cloned());
-        assert_ne!(k1, contact_key(z.view(), 1.35), "removing the centre kept the key");
+        assert_ne!(
+            k1,
+            contact_key(z.view(), 1.35),
+            "removing the centre kept the key"
+        );
     }
 }
 

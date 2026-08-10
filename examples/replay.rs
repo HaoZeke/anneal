@@ -55,7 +55,9 @@ fn field_num(rec: &str, key: &str) -> Option<f64> {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "py_trace.json".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "py_trace.json".into());
     let raw = std::fs::read_to_string(&path).expect("cannot read the trace");
     // Records are separated by "},{" in the dumped array.
     let records: Vec<&str> = raw.split("}, {").collect();
@@ -95,14 +97,10 @@ fn main() {
             agree += 1;
         }
         if i < 12 {
-            println!(
-                "{i:>5} {py_e:>13.5} {e_screen:>13.5} {e_full:>13.5} {py_full:>8}  n={n}"
-            );
+            println!("{i:>5} {py_e:>13.5} {e_screen:>13.5} {e_full:>13.5} {py_full:>8}  n={n}");
         }
     }
-    println!(
-        "\nfull relaxation agrees with the reference on {agree}/{total} trials"
-    );
+    println!("\nfull relaxation agrees with the reference on {agree}/{total} trials");
     println!(
         "screen promotes: rust {screen_pass_rust}/{total}, reference {screen_pass_py}/{total}"
     );

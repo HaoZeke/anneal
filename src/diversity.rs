@@ -205,7 +205,10 @@ mod tests {
         let at_end = a.threshold(a.anneal_fraction);
         assert!((at_end - 0.2).abs() < 1e-9, "floor {at_end} should be 0.2");
         let after = a.threshold(1.0);
-        assert!((after - 0.2).abs() < 1e-9, "past the floor it should hold: {after}");
+        assert!(
+            (after - 0.2).abs() < 1e-9,
+            "past the floor it should hold: {after}"
+        );
     }
 
     #[test]

@@ -117,9 +117,11 @@ impl Bank {
 
     /// The lowest member, if any.
     pub fn best(&self) -> Option<&Member> {
-        self.members
-            .iter()
-            .min_by(|a, b| a.energy.partial_cmp(&b.energy).unwrap_or(std::cmp::Ordering::Equal))
+        self.members.iter().min_by(|a, b| {
+            a.energy
+                .partial_cmp(&b.energy)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
     }
 
     /// Index of the highest-energy member.
@@ -273,11 +275,7 @@ impl Bank {
             return None;
         }
         let mean = total / count as f64;
-        if mean > 0.0 {
-            Some(mean)
-        } else {
-            None
-        }
+        if mean > 0.0 { Some(mean) } else { None }
     }
 }
 
@@ -315,7 +313,9 @@ mod tests {
         assert_eq!(a, Admission::Improved(0));
         assert_eq!(b.len(), 2);
         assert!(
-            b.members().iter().any(|m| (m.state[0] - 10.0).abs() < 1e-12),
+            b.members()
+                .iter()
+                .any(|m| (m.state[0] - 10.0).abs() < 1e-12),
             "the distant member was evicted by a near-copy"
         );
     }
@@ -337,7 +337,10 @@ mod tests {
         let mut b = Bank::new(2, 1.0);
         b.offer(point(0.0).view(), 5.0, line);
         b.offer(point(10.0).view(), 7.0, line);
-        assert_eq!(b.offer(point(20.0).view(), 6.0, line), Admission::Displaced(1));
+        assert_eq!(
+            b.offer(point(20.0).view(), 6.0, line),
+            Admission::Displaced(1)
+        );
         assert!(b.members().iter().all(|m| m.energy <= 6.0));
     }
 
@@ -357,7 +360,10 @@ mod tests {
         let mut b = Bank::new(4, 5.0);
         b.offer(point(0.0).view(), 5.0, line);
         // Two units away: one solution at Dcut = 5, two at Dcut = 1.
-        assert_eq!(b.offer(point(2.0).view(), 6.0, line), Admission::Duplicate(0));
+        assert_eq!(
+            b.offer(point(2.0).view(), 6.0, line),
+            Admission::Duplicate(0)
+        );
         assert_eq!(b.len(), 1);
         b.dcut = 1.0;
         assert_eq!(b.offer(point(2.0).view(), 6.0, line), Admission::Added(1));

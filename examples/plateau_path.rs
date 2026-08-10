@@ -105,11 +105,7 @@ fn seed(n: usize, family: &str, scale: f64, rng: &mut Rng) -> Option<Array1<f64>
                             let a = [base.cos() * ir as f64, base.sin() * ir as f64];
                             let nb = base + 2.0 * std::f64::consts::PI / 5.0;
                             let b = [nb.cos() * ir as f64, nb.sin() * ir as f64];
-                            pts.push([
-                                (1.0 - t) * a[0] + t * b[0],
-                                (1.0 - t) * a[1] + t * b[1],
-                                z,
-                            ]);
+                            pts.push([(1.0 - t) * a[0] + t * b[0], (1.0 - t) * a[1] + t * b[1], z]);
                         }
                     }
                 }
@@ -120,8 +116,12 @@ fn seed(n: usize, family: &str, scale: f64, rng: &mut Rng) -> Option<Array1<f64>
             for i in -3..=3 {
                 for j in -3..=3 {
                     for k in -3..=3 {
-                        for b in [[0.0, 0.0, 0.0], [0.5, 0.5, 0.0], [0.5, 0.0, 0.5], [0.0, 0.5, 0.5]]
-                        {
+                        for b in [
+                            [0.0, 0.0, 0.0],
+                            [0.5, 0.5, 0.0],
+                            [0.5, 0.0, 0.5],
+                            [0.0, 0.5, 0.5],
+                        ] {
                             pts.push([
                                 (i as f64 + b[0]) * 2.0_f64.sqrt(),
                                 (j as f64 + b[1]) * 2.0_f64.sqrt(),
@@ -211,7 +211,9 @@ fn main() {
     // before yielded fewer than 75 icosahedral sites, so the family the
     // plateau actually belongs to was the one family never tested.
     let mut targets: Vec<(String, f64, Array1<f64>)> = Vec::new();
-    let seed_file = std::env::args().nth(1).unwrap_or_else(|| "seeds_75.txt".into());
+    let seed_file = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "seeds_75.txt".into());
     let text = std::fs::read_to_string(&seed_file).expect("seed file");
     for line in text.lines() {
         let mut parts = line.split_whitespace();
@@ -270,15 +272,19 @@ fn main() {
              transverse best {t_best:>10.4}"
         );
     }
-    println!(
-        "\nfull relaxation  best {best_escape:.6} from {best_from}"
-    );
-    println!(
-        "transverse band  best {best_transverse:.6} from {best_t_from}"
-    );
+    println!("\nfull relaxation  best {best_escape:.6} from {best_from}");
+    println!("transverse band  best {best_transverse:.6} from {best_t_from}");
     println!(
         "criterion E < -396.5 from the plateau: full {}, transverse {}",
-        if best_escape < -396.5 { "MET" } else { "not met" },
-        if best_transverse < -396.5 { "MET" } else { "not met" }
+        if best_escape < -396.5 {
+            "MET"
+        } else {
+            "not met"
+        },
+        if best_transverse < -396.5 {
+            "MET"
+        } else {
+            "not met"
+        }
     );
 }

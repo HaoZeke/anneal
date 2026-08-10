@@ -56,7 +56,11 @@ pub struct Recipe {
 pub const FEATURES: usize = 6;
 
 /// Structural summary of a candidate, with no reference to the objective.
-pub fn features(recipe: &Recipe, candidate: ArrayView1<f64>, parent: ArrayView1<f64>) -> Array1<f64> {
+pub fn features(
+    recipe: &Recipe,
+    candidate: ArrayView1<f64>,
+    parent: ArrayView1<f64>,
+) -> Array1<f64> {
     let n = candidate.len() / 3;
     let scale = lattice::nearest_neighbour_scale(candidate);
     let cut = 1.2 * scale;
@@ -247,8 +251,8 @@ impl Constructor {
 mod tests {
     use super::*;
     use crate::structure::Template;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn parent(n: usize) -> Array1<f64> {
         let sites = lattice::grow(&Template::FaceCentredCubic.points(), n);

@@ -226,17 +226,14 @@ impl TransitionGraph {
     /// degree, which would make the normalised Laplacian undefined.
     pub fn adjacency(&self) -> (Vec<usize>, Array2<f64>) {
         let ids: Vec<usize> = self.nodes.iter().copied().collect();
-        let index: BTreeMap<usize, usize> =
-            ids.iter().enumerate().map(|(i, b)| (*b, i)).collect();
+        let index: BTreeMap<usize, usize> = ids.iter().enumerate().map(|(i, b)| (*b, i)).collect();
         let mut w = Array2::<f64>::zeros((ids.len(), ids.len()));
         for ((a, b), c) in &self.edges {
             let (i, j) = (index[a], index[b]);
             w[[i, j]] += c;
             w[[j, i]] += c;
         }
-        let keep: Vec<usize> = (0..ids.len())
-            .filter(|i| w.row(*i).sum() > 0.0)
-            .collect();
+        let keep: Vec<usize> = (0..ids.len()).filter(|i| w.row(*i).sum() > 0.0).collect();
         let mut sub = Array2::<f64>::zeros((keep.len(), keep.len()));
         for (a, i) in keep.iter().enumerate() {
             for (b, j) in keep.iter().enumerate() {
@@ -289,7 +286,10 @@ pub struct SpectralBias<F: Fingerprint> {
 impl<F: Fingerprint> SpectralBias<F> {
     /// Bias keyed by `fingerprint`, merging basins within `merge_radius`.
     pub fn new(fingerprint: F, merge_radius: f64, w0: f64, gamma: f64, sigma: f64) -> Self {
-        assert!(gamma > 1.0, "well-tempered gamma must exceed one, got {gamma}");
+        assert!(
+            gamma > 1.0,
+            "well-tempered gamma must exceed one, got {gamma}"
+        );
         Self {
             fingerprint,
             merge_radius,
@@ -315,11 +315,7 @@ impl<F: Fingerprint> SpectralBias<F> {
         // Most recent first: a chain revisits where it just was far more often
         // than anywhere else, so this ends early on the common case.
         for (i, c) in self.centres.iter().enumerate().rev() {
-            let d2: f64 = c
-                .iter()
-                .zip(s.iter())
-                .map(|(a, b)| (a - b) * (a - b))
-                .sum();
+            let d2: f64 = c.iter().zip(s.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
             if d2.sqrt() <= self.merge_radius {
                 return i;
             }
@@ -331,11 +327,7 @@ impl<F: Fingerprint> SpectralBias<F> {
     /// Basin index without creating one, for read-only queries.
     fn peek(&self, s: ArrayView1<f64>) -> Option<usize> {
         for (i, c) in self.centres.iter().enumerate().rev() {
-            let d2: f64 = c
-                .iter()
-                .zip(s.iter())
-                .map(|(a, b)| (a - b) * (a - b))
-                .sum();
+            let d2: f64 = c.iter().zip(s.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
             if d2.sqrt() <= self.merge_radius {
                 return Some(i);
             }
@@ -425,11 +417,7 @@ impl<F: Fingerprint> Bias for SpectralBias<F> {
         self.hills
             .iter()
             .map(|(c, h)| {
-                let d2: f64 = c
-                    .iter()
-                    .zip(s.iter())
-                    .map(|(a, b)| (a - b) * (a - b))
-                    .sum();
+                let d2: f64 = c.iter().zip(s.iter()).map(|(a, b)| (a - b) * (a - b)).sum();
                 h * (-d2 / two_sigma2).exp()
             })
             .sum()
@@ -562,7 +550,11 @@ mod tests {
         for _ in 0..50 {
             g.record(0, 0, 1.0);
         }
-        assert_eq!(g.n_edges(), 0, "a return is not a transition between basins");
+        assert_eq!(
+            g.n_edges(),
+            0,
+            "a return is not a transition between basins"
+        );
         assert_eq!(g.len(), 1);
         g.record(0, 1, 1.0);
         assert_eq!(g.n_edges(), 1);
@@ -613,7 +605,11 @@ mod tests {
                 assert!(bias.n_edges() > 0, "the walk recorded no transitions");
             }
         }
-        assert!(bias.refits > 0, "no embedding was computed: {:?}", bias.last_error);
+        assert!(
+            bias.refits > 0,
+            "no embedding was computed: {:?}",
+            bias.last_error
+        );
         assert!(
             bias.n_placed() >= 4,
             "only {} basins were placed",
@@ -698,8 +694,7 @@ impl DiffusionDirection {
         for i in 0..m {
             let mut row = 0.0;
             for j in 0..m {
-                let v = (-euclid(&anchors[i], &anchors[j]).powi(2)
-                    / (2.0 * bandwidth * bandwidth))
+                let v = (-euclid(&anchors[i], &anchors[j]).powi(2) / (2.0 * bandwidth * bandwidth))
                     .exp();
                 k[i][j] = v;
                 row += v;
@@ -762,10 +757,18 @@ mod diffusion_tests {
         // Twelve four-point structures along a one-parameter stretch.
         let make = |t: f64| -> Vec<f64> {
             vec![
-                0.0, 0.0, 0.0,
-                1.0 + t, 0.0, 0.0,
-                0.0, 1.0 + 0.5 * t, 0.0,
-                0.0, 0.0, 1.0 + 0.25 * t,
+                0.0,
+                0.0,
+                0.0,
+                1.0 + t,
+                0.0,
+                0.0,
+                0.0,
+                1.0 + 0.5 * t,
+                0.0,
+                0.0,
+                0.0,
+                1.0 + 0.25 * t,
             ]
         };
         let arch: Vec<Vec<f64>> = (0..12).map(|i| make(i as f64 * 0.1)).collect();
