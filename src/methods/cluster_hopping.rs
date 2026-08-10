@@ -71,6 +71,13 @@ impl LennardJonesPreset {
     const MIN_SEPARATION: f64 = 0.85;
 }
 
+struct MolecularPreset;
+
+impl MolecularPreset {
+    const COVALENT_DIAMETER: f64 = 2.0;
+    const GROUP_CUTOFF: f64 = 2.5;
+}
+
 /// Exactly one proposal library selected by a cluster preset.
 ///
 /// The adaptive allocator may still choose among the kernels inside the
@@ -1254,6 +1261,16 @@ impl Ledger {
 pub struct Config {
     /// Points in a state; the state length must be `3 * n_points`.
     pub n_points: usize,
+    /// Declared coordinate length scale.
+    pub length_scale: f64,
+    /// Declared objective-energy scale.
+    pub energy_scale: f64,
+    /// Proposal library hosted by this configuration.
+    pub move_library: MoveLibrary,
+    /// Separation below which two points count as neighbours.
+    pub neighbour_cutoff: f64,
+    /// Pair cutoff used by the symmetry proposal.
+    pub symmetrise_cutoff: f64,
     /// Metropolis temperature on the quenched chain.
     pub temperature: f64,
     /// Height of a fresh bias deposit.
@@ -1846,23 +1863,40 @@ impl Config {
     }
 
     pub fn for_cluster(n_points: usize) -> Self {
+        Self::with_scales(
+            n_points,
+            LennardJonesPreset::REDUCED_SCALE,
+            LennardJonesPreset::REDUCED_SCALE,
+        )
+    }
+
+    /// Lennard-Jones preset expressed against declared physical scales.
+    pub fn with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
+        assert!(
+            length_scale.is_finite() && length_scale > 0.0,
+            "length_scale must be finite and positive"
+        );
+        assert!(
+            energy_scale.is_finite() && energy_scale > 0.0,
+            "energy_scale must be finite and positive"
+        );
         Self {
             n_points,
-            temperature: 0.8,
-            bias_height: 0.25,
+            length_scale,
+            energy_scale,
+            move_library: MoveLibrary::Atomic,
+            neighbour_cutoff: LennardJonesPreset::NEIGHBOUR_CUTOFF * length_scale,
+            symmetrise_cutoff: LennardJonesPreset::SYMMETRISE_CUTOFF * length_scale,
+            temperature: LennardJonesPreset::TEMPERATURE * energy_scale,
+            bias_height: LennardJonesPreset::BIAS_HEIGHT * energy_scale,
             bias_gamma: 5.0,
             // Calibrated against the descriptor it is compared with, not
             // guessed. Over 75-point minima the sorted-pair distance between
             // independent minima is 0.9212 at the closest with a median of
             // 3.28, while a structure one hop away sits at 0.4766 to 0.58, so
-            // 0.7 separates a return from a genuinely different minimum.
-            //
-            // The previous 0.01 was fifty times below the smallest distance
-            // that ever occurs, so every structure was its own basin: the
-            // per-basin bias deposited one hill per structure and never
-            // accumulated, an escape test was always true and a return test
-            // never was. The mechanism was inert rather than ineffective.
-            merge_radius: 0.7,
+            // The multiplier separates a return from a genuinely different
+            // minimum while remaining proportional to the declared scale.
+            merge_radius: LennardJonesPreset::MERGE_RADIUS * length_scale,
             shape_keyed: false,
             theta: 0.5,
             budget_window: false,
@@ -1895,8 +1929,8 @@ impl Config {
             staged_quench: false,
             settle_iters: 20,
             molecular_groups: None,
-            group_cutoff: 3.4,
-            covalent_cutoff: 1.3,
+            group_cutoff: LennardJonesPreset::GROUP_CUTOFF * length_scale,
+            covalent_cutoff: LennardJonesPreset::COVALENT_CUTOFF * length_scale,
             species: None,
             bond_tolerance: 1.25,
             frozen: None,
@@ -1907,7 +1941,7 @@ impl Config {
             track_funnels: false,
             funnel_period: 20_000,
             symmetrise_on_stall: false,
-            symmetry_tolerance: 0.35,
+            symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetrise_patience: 2_000,
             tabu_on_stall: false,
             tabu_capacity: 8,
@@ -1919,8 +1953,8 @@ impl Config {
             calibrate_warmup: 200,
             minima_hopping: false,
             escape_lanczos_steps: 16,
-            escape_epsilon: 1e-4,
-            escape_amplitude: 0.25,
+            escape_epsilon: LennardJonesPreset::ESCAPE_EPSILON * length_scale,
+            escape_amplitude: LennardJonesPreset::ESCAPE_AMPLITUDE * length_scale,
             escape_overshoot: 1.5,
             escape_max_climb: 24,
             escape_on_stall: false,
@@ -1934,10 +1968,10 @@ impl Config {
             anneal_diversity: false,
             diversity_floor: 0.75,
             height_revisits: 4.0,
-            screen_margin: 2.0,
+            screen_margin: LennardJonesPreset::SCREEN_MARGIN * energy_scale,
             screen_steps: 25,
             adaptive_screen: false,
-            record_gradient: 1e-3,
+            record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             twin_moves: false,
@@ -1952,9 +1986,41 @@ impl Config {
             // from the centre of mass divides by N^(1/3) to between 0.46 and
             // 0.63, and the literature's 2.5 N^(1/3) is sized for a method
             // that relaxes after every perturbation.
-            container: 0.9 * (n_points as f64).cbrt(),
-            min_separation: 0.85,
+            container: LennardJonesPreset::CONTAINER_RADIUS
+                * length_scale
+                * (n_points as f64).cbrt(),
+            min_separation: LennardJonesPreset::MIN_SEPARATION * length_scale,
         }
+    }
+
+    /// Species-aware molecular preset with rigid groups.
+    pub fn for_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> Self {
+        assert!(!species.is_empty(), "species must not be empty");
+        let length_scale = MolecularPreset::COVALENT_DIAMETER
+            * species
+                .iter()
+                .copied()
+                .map(covalent_radius)
+                .fold(0.0_f64, f64::max);
+        assert!(length_scale > 0.0, "species must have known covalent radii");
+        let mut cfg = Self::with_scales(species.len(), length_scale, energy_scale);
+        cfg.group_cutoff = MolecularPreset::GROUP_CUTOFF * length_scale;
+        cfg.move_library = MoveLibrary::Molecular {
+            groups: groups.clone(),
+            reactive: false,
+        };
+        cfg.molecular_groups = Some(groups);
+        cfg.species = Some(species);
+        cfg
+    }
+
+    /// Radius of the preset's initial cluster sphere.
+    pub fn start_radius(&self) -> f64 {
+        self.container
     }
 }
 
