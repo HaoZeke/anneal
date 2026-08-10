@@ -1,7 +1,7 @@
 //! Cluster proposal libraries and scale-aware move kernels.
 
-use super::*;
 use super::preset::LennardJonesPreset;
+use super::*;
 
 /// Exactly one proposal library selected by a cluster preset.
 ///

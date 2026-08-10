@@ -150,7 +150,6 @@ impl Ledger {
     }
 }
 
-
 /// What a run produced.
 #[derive(Debug, Clone, Default)]
 pub struct Outcome {
@@ -2657,7 +2656,11 @@ mod tests {
             (e, x.to_owned())
         };
         let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
-        assert!(out.returned >= 1, "expected returning trials, got {}", out.returned);
+        assert!(
+            out.returned >= 1,
+            "expected returning trials, got {}",
+            out.returned
+        );
         assert_eq!(before, 0, "polished {before} times before {after}");
         assert!(
             after_n >= 1,
@@ -2809,7 +2812,6 @@ pub enum ClusterFingerprint {
     #[cfg(feature = "ira")]
     Canonical(Box<crate::shape::CanonicalOrder>),
 }
-
 
 /// The keying a config asks for, honouring the older boolean.
 fn effective_keying(cfg: &Config) -> Keying {

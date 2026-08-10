@@ -1,7 +1,7 @@
 //! Scale-aware cluster-search configuration and named presets.
 
-use super::*;
 use super::preset::{LennardJonesPreset, MolecularPreset};
+use super::*;
 
 /// Which descriptor a run keys basins on.
 ///
@@ -768,4 +768,3 @@ impl Config {
         ClusterProposal::new(self.move_library.kernels(self))
     }
 }
-
