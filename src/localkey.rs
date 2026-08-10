@@ -74,11 +74,14 @@ fn adjacency(x: ArrayView1<f64>, reach: f64) -> Vec<Vec<usize>> {
 fn hash_graph(nodes: &[usize], adj: &[Vec<usize>]) -> u64 {
     let mut g: UnGraph<(), ()> = UnGraph::default();
     let mut ix = vec![None; adj.len()];
-    let handles: Vec<_> = nodes.iter().map(|&a| {
-        let h = g.add_node(());
-        ix[a] = Some(h);
-        h
-    }).collect();
+    let handles: Vec<_> = nodes
+        .iter()
+        .map(|&a| {
+            let h = g.add_node(());
+            ix[a] = Some(h);
+            h
+        })
+        .collect();
     let _ = handles;
     let set: HashSet<usize> = nodes.iter().copied().collect();
     let mut edges: Vec<(usize, usize)> = Vec::new();

@@ -12,9 +12,9 @@
 //! Usage: slab_adsorption <con_file> <budget> <seeds> [shells]
 //! Env: RGPOT_HOST / RGPOT_PORT for the server (CuH2 for the copper case).
 
-use anneal_core::methods::cluster_hopping::{run_with_gradient, Config, Ledger};
 #[cfg(feature = "graphkey")]
-use anneal_core::methods::archive_search::{archive_search, Archive};
+use anneal_core::methods::archive_search::{Archive, archive_search};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -48,9 +48,7 @@ fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
         }
     }
     let boxl = frame.header.boxl;
-    let box_ = [
-        boxl[0], 0.0, 0.0, 0.0, boxl[1], 0.0, 0.0, 0.0, boxl[2],
-    ];
+    let box_ = [boxl[0], 0.0, 0.0, 0.0, boxl[1], 0.0, 0.0, 0.0, boxl[2]];
     (Array1::from(pos), species, seeds, box_)
 }
 
@@ -186,7 +184,10 @@ impl Engine {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let con = args.get(1).cloned().expect("usage: slab_adsorption <con_file> <budget> <seeds> [shells]");
+    let con = args
+        .get(1)
+        .cloned()
+        .expect("usage: slab_adsorption <con_file> <budget> <seeds> [shells]");
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
     let ras = args.iter().any(|t| t == "ras" || t == "pair");

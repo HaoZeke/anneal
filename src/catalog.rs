@@ -126,9 +126,9 @@ impl Catalog {
 
     /// Whether `(from, to)` is already a known event.
     pub fn known(&self, from: u64, to: u64) -> bool {
-        self.rec.get(&from).is_some_and(|r| {
-            r.events.iter().any(|e| e.from == from && e.to == to)
-        })
+        self.rec
+            .get(&from)
+            .is_some_and(|r| r.events.iter().any(|e| e.from == from && e.to == to))
     }
 
     /// Distinct events stored.

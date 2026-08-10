@@ -15,10 +15,10 @@
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
 use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger, MoveLibrary};
-use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_search::{
-    first_encounter, median_encounter, search, verify, Encounter,
+    Encounter, first_encounter, median_encounter, search, verify,
 };
+use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::potentials::{PairKind, PairPotential};
 use anneal_core::structure::{cna, ptm, ptm_fractions};
 
@@ -118,7 +118,10 @@ fn main() {
     cfg.min_separation *= scale;
     cfg.container *= scale;
 
-    let opts: Vec<&str> = args.get(5).map(|v| v.split(',').collect()).unwrap_or_default();
+    let opts: Vec<&str> = args
+        .get(5)
+        .map(|v| v.split(',').collect())
+        .unwrap_or_default();
     cfg.allocate_moves = opts.contains(&"thompson");
     cfg.return_screen = opts.contains(&"rscreen");
     cfg.adaptive_screen = opts.contains(&"aq");
@@ -263,7 +266,11 @@ fn main() {
         // What morphology the run actually ended in, which a success count
         // does not say. Cheap enough to do once per seed on the answer.
         let morphology = out.best_state.as_ref().map(|st| {
-            let c = cna(st.view(), n, 1.39 * pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0));
+            let c = cna(
+                st.view(),
+                n,
+                1.39 * pot.kind().r_min() / 2.0_f64.powf(1.0 / 6.0),
+            );
             let f = ptm_fractions(st.view(), n, 0.12);
             // The residual distribution, because a classification that reports
             // nothing is either a structure with no order or a cutoff set in

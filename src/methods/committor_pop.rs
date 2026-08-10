@@ -26,7 +26,7 @@
 //! excursion, the depth bandit) rides along unchanged.
 
 use crate::methods::cluster_hopping::{
-    random_cluster, run_with_gradient, Config, GradFn, Ledger, Relax,
+    Config, GradFn, Ledger, Relax, random_cluster, run_with_gradient,
 };
 use ndarray::Array1;
 use rand::rngs::StdRng;
@@ -82,14 +82,7 @@ pub fn committor_population(
             let slice = segment_budget.min(ledger.remaining());
             let mut sub = Ledger::new(slice);
             let start = pop[w].0.clone();
-            let out = run_with_gradient(
-                cfg,
-                start.view(),
-                &mut sub,
-                relax,
-                None,
-                &mut rng,
-            );
+            let out = run_with_gradient(cfg, start.view(), &mut sub, relax, None, &mut rng);
             segments += 1;
             if !ledger.charge_many(sub.spent()) {
                 // The slice overran the remaining budget; the overrun is

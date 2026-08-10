@@ -31,10 +31,29 @@ fn main() {
     // 1. Budget-window temperature.
     let rejections = [0.0, 2.5, 1.0, 0.0, 4.0, 0.3, 7.0, 0.0, 1.5, 2.0];
     let gaps = [3.0, 0.5, 0.01, 12.0, 0.2, 1.0, 0.001, 5.0, 0.75, 0.05];
-    let remaining = [1000000usize, 500000, 100000, 50000, 10000, 5000, 1000, 100, 10, 1];
+    let remaining = [
+        1000000usize,
+        500000,
+        100000,
+        50000,
+        10000,
+        5000,
+        1000,
+        100,
+        10,
+        1,
+    ];
     let expected = [
-        0.013157895, 0.003810288, 0.005993250, 0.052631579, 0.016027165,
-        0.017688690, 0.041625859, 0.062101654, 0.122648918, 0.263209643,
+        0.013157895,
+        0.003810288,
+        0.005993250,
+        0.052631579,
+        0.016027165,
+        0.017688690,
+        0.041625859,
+        0.062101654,
+        0.122648918,
+        0.263209643,
     ];
     let mut law = BudgetWindowTemperature::new(114, 0.5);
     println!("{:>4} {:>16} {:>16}  {}", "step", "rust", "python", "match");
@@ -64,8 +83,14 @@ fn main() {
         })
         .collect();
     let expected_h = [
-        0.028071519, 0.048693555, 0.005280677, 0.054643506,
-        0.017210625, 0.020515250, 0.056899093, 0.026367973,
+        0.028071519,
+        0.048693555,
+        0.005280677,
+        0.054643506,
+        0.017210625,
+        0.020515250,
+        0.056899093,
+        0.026367973,
     ];
     let mut h = AdaptiveHeight::new(0.1, 4.0, 0.25);
     let mut seen = Vec::new();
@@ -94,18 +119,24 @@ fn main() {
     // basin identity is exactly the sequence and the comparison isolates the
     // deposit rule from the fingerprint and the merge radius.
     let visits: [usize; 30] = [
-        0, 0, 0, 1, 1, 0, 2, 2, 2, 2, 0, 1, 3, 3, 0, 2, 4, 4, 4, 0, 1, 2, 3, 4,
-        0, 0, 1, 1, 2, 2,
+        0, 0, 0, 1, 1, 0, 2, 2, 2, 2, 0, 1, 3, 3, 0, 2, 4, 4, 4, 0, 1, 2, 3, 4, 0, 0, 1, 1, 2, 2,
     ];
     let expected_final = [
-        1.822052920, 1.303884480, 1.656837268, 0.706314509, 0.915847728,
+        1.822052920,
+        1.303884480,
+        1.656837268,
+        0.706314509,
+        0.915847728,
     ];
     let mut bias = BasinBias::new(IdentityKey, 1e-9, 0.25, 5.0);
     for v in &visits {
         let s = Array1::from(vec![*v as f64]);
         bias.deposit(s.view(), 1.0);
     }
-    println!("\n{:>6} {:>16} {:>16}  {}", "basin", "rust", "python", "match");
+    println!(
+        "\n{:>6} {:>16} {:>16}  {}",
+        "basin", "rust", "python", "match"
+    );
     for k in 0..5 {
         let s = Array1::from(vec![k as f64]);
         let got = bias.potential(s.view());

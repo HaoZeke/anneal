@@ -211,12 +211,7 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
         // structure keeps its size and the far side inherits a packing that
         // already exists rather than one assembled at the boundary.
         let signed: Vec<f64> = (0..n)
-            .map(|i| {
-                (0..3)
-                    .map(|k| (x[3 * i + k] - c[k]) * m[k])
-                    .sum::<f64>()
-                    - plane.offset
-            })
+            .map(|i| (0..3).map(|k| (x[3 * i + k] - c[k]) * m[k]).sum::<f64>() - plane.offset)
             .collect();
         let above: Vec<usize> = (0..n).filter(|&i| signed[i] > tol).collect();
         let below: Vec<usize> = (0..n).filter(|&i| signed[i] < -tol).collect();
@@ -256,11 +251,7 @@ pub fn twin(x: ArrayView1<f64>, n: usize, plane: &Plane, mode: Mode, layer: f64)
     }
 
     for i in 0..n {
-        let v = [
-            x[3 * i] - c[0],
-            x[3 * i + 1] - c[1],
-            x[3 * i + 2] - c[2],
-        ];
+        let v = [x[3 * i] - c[0], x[3 * i + 1] - c[1], x[3 * i + 2] - c[2]];
         let d: f64 = (0..3).map(|k| v[k] * m[k]).sum::<f64>() - plane.offset;
         if d <= tol {
             continue;
@@ -328,8 +319,8 @@ mod tests {
     use super::*;
     use crate::lattice;
     use crate::structure::Template;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn packed(n: usize) -> Array1<f64> {
         let sites = lattice::grow(&Template::FaceCentredCubic.points(), n);
@@ -437,7 +428,10 @@ mod tests {
                             })
                             .sum::<f64>()
                             .sqrt();
-                        assert!(d > 0.35 * s, "n={n}: points {i},{j} at {d} with spacing {s}");
+                        assert!(
+                            d > 0.35 * s,
+                            "n={n}: points {i},{j} at {d} with spacing {s}"
+                        );
                     }
                 }
             }

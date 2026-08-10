@@ -217,7 +217,10 @@ mod tests {
             for p in &points {
                 let a = fast.basin_of(p.view());
                 let b = slow.basin_of(p.view());
-                assert_eq!(a, b, "radius {radius}: pruned scan gave {a}, exhaustive {b}");
+                assert_eq!(
+                    a, b,
+                    "radius {radius}: pruned scan gave {a}, exhaustive {b}"
+                );
             }
             assert_eq!(fast.n_basins(), slow.n_basins(), "radius {radius}");
         }
@@ -982,7 +985,10 @@ mod basin_bias_tests {
             last = now;
         }
         for w in increments.windows(2) {
-            assert!(w[1] < w[0], "well-tempered weights must decrease: {increments:?}");
+            assert!(
+                w[1] < w[0],
+                "well-tempered weights must decrease: {increments:?}"
+            );
         }
     }
 
@@ -996,9 +1002,7 @@ mod basin_bias_tests {
         // Two genuinely different point sets whose mean pair distance, a
         // one-dimensional projection, is nearly identical.
         let a = tetra(1.0);
-        let b = array![
-            0.0, 0.0, 0.0, 1.02, 0.0, 0.0, 0.0, 0.98, 0.0, 0.0, 0.0, 1.0
-        ];
+        let b = array![0.0, 0.0, 0.0, 1.02, 0.0, 0.0, 0.0, 0.98, 0.0, 0.0, 0.0, 1.0];
         let da = fp.describe(a.view());
         let db = fp.describe(b.view());
         let mean = |v: &Array1<f64>| v.iter().sum::<f64>() / v.len() as f64;
@@ -1029,7 +1033,10 @@ mod basin_bias_tests {
         bias.deposit(b.view(), 1.0);
         assert!((bias.missing_mass() - 1.0).abs() < 1e-12, "both seen once");
         bias.deposit(a.view(), 1.0);
-        assert!(bias.missing_mass() < 1.0, "a repeat lowers the missing mass");
+        assert!(
+            bias.missing_mass() < 1.0,
+            "a repeat lowers the missing mass"
+        );
     }
 }
 

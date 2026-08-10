@@ -13,76 +13,76 @@ pub mod adapter;
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
 pub mod bias;
+/// Spectral statistics of the curvature, without forming a Hessian.
+pub mod calibrate;
+/// Event catalogue keyed by local topology.
+pub mod catalog;
+/// Collective variables from the spectrum of the visited-basin graph.
+pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
 pub mod cool;
-/// Spectral statistics of the curvature, without forming a Hessian.
-pub mod calibrate;
 pub mod curvature;
+pub mod delayed;
 /// Annealing the distance at which two solutions count as one.
 pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
 /// than by energy.
 pub mod dos;
-/// Incremental neighbour table shared across the hop.
-pub mod neighbors;
-/// Exact basin identity by canonical contact-graph labelling (nauty).
-#[cfg(feature = "graphkey")]
-pub mod graphkey;
-/// Local two-shell topology keys (k-ART).
-#[cfg(feature = "graphkey")]
-pub mod localkey;
-/// Event catalogue keyed by local topology.
-pub mod catalog;
-/// Energy-floor flicker components and record EI.
-pub mod floors;
-/// GMRF residual intensity on the class graph.
-pub mod residual_field;
 /// Error variants returned by `anneal-core`.
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;
+/// Energy-floor flicker components and record EI.
+pub mod floors;
 /// Free-energy estimators (Bennett's BAR + descendants).
 pub mod free_energy;
 /// First-derivative interface for HMC-style samplers.
 pub mod funnel_bo;
 pub mod funnel_spectral;
 pub mod grad;
+/// Exact basin identity by canonical contact-graph labelling (nauty).
+#[cfg(feature = "graphkey")]
+pub mod graphkey;
 /// Per-epoch run history returned by `run_rs`.
 pub mod history;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
+pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
 pub mod laws;
+/// Local two-shell topology keys (k-ART).
+#[cfg(feature = "graphkey")]
+pub mod localkey;
 /// Annealing-method extensions built on the typed algebra:
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
+pub mod model_hessian;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
 pub mod neigh;
+/// Incremental neighbour table shared across the hop.
+pub mod neighbors;
 /// Noise-aware acceptance (Ball, Branke & Meisel 2018 sequential OSA rule).
 pub mod noise_accept;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
 pub mod potentials;
-pub mod runner;
-/// Collective variables from the spectrum of the visited-basin graph.
-pub mod construct;
-pub mod delayed;
-pub mod lattice;
-pub mod model_hessian;
 pub mod quench;
+/// GMRF residual intensity on the class graph.
+pub mod residual_field;
+pub mod runner;
+/// Stan-style single-step sampler trait: `trait Sampler<T>`.
+pub mod sampler;
 pub mod screen;
-pub mod twin;
 pub mod spectral;
 pub mod structure;
 pub mod symmetrise;
 pub mod terminate;
-/// Stan-style single-step sampler trait: `trait Sampler<T>`.
-pub mod sampler;
+pub mod twin;
 /// Shared algebra-facing type definitions.
 pub mod types;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.

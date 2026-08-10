@@ -9,7 +9,7 @@ use crate::catalog::Catalog;
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    active_mask, run_with_gradient, Config, GradFn, Ledger, Relax,
+    Config, GradFn, Ledger, Relax, active_mask, run_with_gradient,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -266,14 +266,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // so leftover budget buys hops, not one grind.
             let p1 = 900.min(cap);
             let mut led1 = Ledger::new(p1);
-            let hop1 = run_with_gradient(
-                cfg,
-                start,
-                &mut led1,
-                relax,
-                grad.as_deref_mut(),
-                rng,
-            );
+            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
             let used1 = led1.spent();
             let _ = ledger.charge_many(used1);
             let at1 = hop_best_at(&hop1, used1);
@@ -287,14 +280,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.symmetrise_on_stall = true;
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
-                let hop2 = run_with_gradient(
-                    &c2,
-                    x2.view(),
-                    &mut led2,
-                    relax,
-                    grad.as_deref_mut(),
-                    rng,
-                );
+                let hop2 =
+                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng);
                 let used2 = led2.spent();
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
@@ -402,14 +389,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.symmetrise_on_stall = true;
 
     let mut led1 = Ledger::new(p1);
-    let hop1 = run_with_gradient(
-        &c_fast,
-        start,
-        &mut led1,
-        relax,
-        grad.as_deref_mut(),
-        rng,
-    );
+    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
     let _ = ledger.charge_many(led1.spent());
     let at1 = hop_best_at(&hop1, led1.spent());
 
@@ -420,29 +400,21 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c_deep.return_polish = (cfg.relax_steps / 4).max(1);
         c_deep.symmetrise_on_stall = true;
         let mut led2 = Ledger::new(rest);
-        let hop2 = run_with_gradient(
-            &c_deep,
-            start,
-            &mut led2,
-            relax,
-            grad.as_deref_mut(),
-            rng,
-        );
+        let hop2 = run_with_gradient(&c_deep, start, &mut led2, relax, grad.as_deref_mut(), rng);
         let _ = ledger.charge_many(led2.spent());
         let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
-        let (best, best_state, best_at, basins) =
-            if hop2.best < hop1.best - 1e-12 {
-                (hop2.best, hop2.best_state, at2, hop2.basins)
-            } else if hop1.best < hop2.best - 1e-12 {
-                (hop1.best, hop1.best_state, at1, hop1.basins)
+        let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
+            (hop2.best, hop2.best_state, at2, hop2.basins)
+        } else if hop1.best < hop2.best - 1e-12 {
+            (hop1.best, hop1.best_state, at1, hop1.basins)
+        } else {
+            let at = at1.min(at2);
+            if at1 <= at2 {
+                (hop1.best, hop1.best_state, at, hop1.basins)
             } else {
-                let at = at1.min(at2);
-                if at1 <= at2 {
-                    (hop1.best, hop1.best_state, at, hop1.basins)
-                } else {
-                    (hop2.best, hop2.best_state, at, hop2.basins)
-                }
-            };
+                (hop2.best, hop2.best_state, at, hop2.basins)
+            }
+        };
         (
             best,
             best_state,
@@ -451,10 +423,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             hop1.screened_out + hop2.screened_out,
             hop1.hops + hop2.hops,
             hop1.returned + hop2.returned,
-            hop1.symmetrised.0
-                + hop2.symmetrised.0
-                + hop1.stall_escapes
-                + hop2.stall_escapes,
+            hop1.symmetrised.0 + hop2.symmetrised.0 + hop1.stall_escapes + hop2.stall_escapes,
         )
     } else {
         (
@@ -522,8 +491,8 @@ fn key_coords(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
 mod tests {
     use super::*;
     use crate::methods::cluster_hopping::random_cluster;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn lj(x: ArrayView1<f64>) -> f64 {
         let n = x.len() / 3;
@@ -546,11 +515,7 @@ mod tests {
         e
     }
 
-    fn crude_relax(
-        led: &mut Ledger,
-        x: ArrayView1<f64>,
-        steps: usize,
-    ) -> (f64, Array1<f64>) {
+    fn crude_relax(led: &mut Ledger, x: ArrayView1<f64>, steps: usize) -> (f64, Array1<f64>) {
         let mut y = x.to_owned();
         let mut e = lj(y.view());
         for _ in 0..steps {

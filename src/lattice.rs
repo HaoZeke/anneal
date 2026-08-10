@@ -271,7 +271,11 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
             .collect();
         let counts: Vec<usize> = pts
             .iter()
-            .map(|a| pts.iter().filter(|b| sq(a, b) < 1.44 && sq(a, b) > 1e-9).count())
+            .map(|a| {
+                pts.iter()
+                    .filter(|b| sq(a, b) < 1.44 && sq(a, b) > 1e-9)
+                    .count()
+            })
             .collect();
         let mut order: Vec<usize> = (0..n_parent).collect();
         order.sort_by(|&i, &j| counts[j].cmp(&counts[i]));
@@ -404,8 +408,8 @@ fn random_rotation<R: Rng + ?Sized>(rng: &mut R) -> [[f64; 3]; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     fn rng() -> StdRng {
         StdRng::seed_from_u64(11)
@@ -487,7 +491,12 @@ mod tests {
     fn peeling_beats_a_spherical_cut() {
         let mut r = rng();
         let x = packed(120);
-        let peeled = candidate(Source::Named(Template::FaceCentredCubic), x.view(), 55, &mut r);
+        let peeled = candidate(
+            Source::Named(Template::FaceCentredCubic),
+            x.view(),
+            55,
+            &mut r,
+        );
         // The same grown set, cut by radius, which is what this replaced.
         let grown = grow(&Template::FaceCentredCubic.points(), 55 * 6);
         let mut by_radius = grown.clone();
@@ -541,7 +550,12 @@ mod tests {
     fn unused_old_compactness_check() {
         let mut r = rng();
         let x = packed(120);
-        let c = candidate(Source::Named(Template::FaceCentredCubic), x.view(), 55, &mut r);
+        let c = candidate(
+            Source::Named(Template::FaceCentredCubic),
+            x.view(),
+            55,
+            &mut r,
+        );
         let scale = nearest_neighbour_scale(c.view());
         let mut total = 0usize;
         for i in 0..55 {
@@ -581,7 +595,12 @@ mod tests {
             Template::SimpleCubic,
         ]
         .iter()
-        .map(|t| spectrum(candidate(Source::Named(*t), x.view(), 55, &mut r).view(), 55))
+        .map(|t| {
+            spectrum(
+                candidate(Source::Named(*t), x.view(), 55, &mut r).view(),
+                55,
+            )
+        })
         .collect();
         for i in 0..spectra.len() {
             for j in (i + 1)..spectra.len() {
@@ -635,7 +654,12 @@ mod tests {
         let mut r = rng();
         let x = packed(80);
         let c = candidate(Source::Observed, x.view(), 55, &mut r);
-        let named = candidate(Source::Named(Template::FaceCentredCubic), x.view(), 55, &mut r);
+        let named = candidate(
+            Source::Named(Template::FaceCentredCubic),
+            x.view(),
+            55,
+            &mut r,
+        );
         let a = spectrum(c.view(), 55);
         let b = spectrum(named.view(), 55);
         let diff: f64 = a

@@ -72,7 +72,10 @@ impl FunnelModel {
     pub fn new(length_scale: f64, amplitude: f64, noise: f64) -> Self {
         assert!(length_scale > 0.0, "the length scale is a distance");
         assert!(amplitude > 0.0, "the amplitude is a standard deviation");
-        assert!(noise > 0.0, "a positive noise keeps the factorisation stable");
+        assert!(
+            noise > 0.0,
+            "a positive noise keeps the factorisation stable"
+        );
         Self {
             length_scale,
             amplitude,
@@ -103,12 +106,10 @@ impl FunnelModel {
     }
 
     fn kernel(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        let d2: f64 = a
-            .iter()
-            .zip(b.iter())
-            .map(|(p, q)| (p - q) * (p - q))
-            .sum();
-        self.amplitude * self.amplitude * (-0.5 * d2 / (self.length_scale * self.length_scale)).exp()
+        let d2: f64 = a.iter().zip(b.iter()).map(|(p, q)| (p - q) * (p - q)).sum();
+        self.amplitude
+            * self.amplitude
+            * (-0.5 * d2 / (self.length_scale * self.length_scale)).exp()
     }
 
     /// Records the lowest energy found at a morphology.
@@ -210,9 +211,7 @@ impl FunnelModel {
             (Some(l), Some(a)) => (l, a),
             _ => return (self.prior_mean, self.amplitude),
         };
-        let ks: Array1<f64> = (0..n)
-            .map(|i| self.kernel(self.xs[i].view(), x))
-            .collect();
+        let ks: Array1<f64> = (0..n).map(|i| self.kernel(self.xs[i].view(), x)).collect();
         let mean = self.prior_mean + ks.iter().zip(a.iter()).map(|(p, q)| p * q).sum::<f64>();
         // v = L^-1 ks, and the variance is k(x,x) - v'v.
         let mut v = Array1::<f64>::zeros(n);

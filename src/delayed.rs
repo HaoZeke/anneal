@@ -169,12 +169,7 @@ pub fn features_orthogonal(
 /// `|g|^2 / 2 lambda`, so the squared norm is the leading term of the quantity
 /// being predicted rather than a proxy for it, and the linear term is carried
 /// alongside because the basin is only approximately quadratic.
-pub fn features_with_gradient(
-    x: ArrayView1<f64>,
-    n: usize,
-    raw: f64,
-    gnorm: f64,
-) -> Array1<f64> {
+pub fn features_with_gradient(x: ArrayView1<f64>, n: usize, raw: f64, gnorm: f64) -> Array1<f64> {
     if n < 2 {
         let mut v = Array1::zeros(FEATURES);
         v[0] = 1.0;
@@ -338,17 +333,16 @@ impl Surrogate {
         gnorm: f64,
         tolerance: f64,
     ) -> Option<f64> {
-        self.predict_features(features_with_gradient(x, n, raw, gnorm).view(), raw, tolerance)
+        self.predict_features(
+            features_with_gradient(x, n, raw, gnorm).view(),
+            raw,
+            tolerance,
+        )
     }
 
     /// Prediction from a feature vector the caller built, which is how the
     /// orthogonal split is supplied.
-    pub fn predict_features(
-        &self,
-        f: ArrayView1<f64>,
-        raw: f64,
-        tolerance: f64,
-    ) -> Option<f64> {
+    pub fn predict_features(&self, f: ArrayView1<f64>, raw: f64, tolerance: f64) -> Option<f64> {
         if self.model.observations() < self.warmup {
             return None;
         }
@@ -465,13 +459,8 @@ mod tests {
             }
             let a1 = s.stage_one_probability(surrogate[at], surrogate[y], t);
             if rng.random::<f64>() < a1 {
-                let a2 = s.stage_two_probability(
-                    surrogate[at],
-                    surrogate[y],
-                    truth[at],
-                    truth[y],
-                    t,
-                );
+                let a2 =
+                    s.stage_two_probability(surrogate[at], surrogate[y], truth[at], truth[y], t);
                 if rng.random::<f64>() < a2 {
                     at = y;
                 }
@@ -525,7 +514,10 @@ mod tests {
         let s = Surrogate::new();
         for (a, b) in [(0.0, 1.0), (1.0, 0.0), (-3.0, 2.5)] {
             let p = s.stage_two_probability(a, b, a, b, 0.8);
-            assert!((p - 1.0).abs() < 1e-12, "second stage rejected a perfect surrogate: {p}");
+            assert!(
+                (p - 1.0).abs() < 1e-12,
+                "second stage rejected a perfect surrogate: {p}"
+            );
         }
     }
 
@@ -563,8 +555,13 @@ mod tests {
         for v in x.iter_mut() {
             *v = rng.random_range(-2.0..2.0);
         }
-        let p = s.predict(x.view(), n, 0.0).expect("no prediction after 300 quenches");
-        assert!(p < 0.0, "predicted quenched energy {p} is not below the raw energy");
+        let p = s
+            .predict(x.view(), n, 0.0)
+            .expect("no prediction after 300 quenches");
+        assert!(
+            p < 0.0,
+            "predicted quenched energy {p} is not below the raw energy"
+        );
     }
 
     /// Abstention has to actually abstain: a tolerance of zero means the

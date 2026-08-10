@@ -11,30 +11,28 @@
 //! Accept) is silent on this loop control, so both styles are
 //! equally well-typed points. `mcmc_sa` ships the MCMC-style point.
 
-/// Basin hopping over quenched minima with a basin-keyed bias.
-pub mod cluster_hopping;
-pub mod cluster_search;
 /// History-conditioned escape feedback, after Goedecker's minima hopping.
 pub mod activation;
-pub mod bank;
-pub mod csa_cluster;
-/// Cut-and-splice mixing of two quenched clusters.
-pub mod splice;
-pub mod minima_hopping;
-/// Nested search: population under a descending energy ceiling.
-pub mod nested;
-/// Population resampled by estimated probability of improvement.
-pub mod committor_pop;
-/// Archive-ratcheted exploration of the minima network.
-#[cfg(feature = "graphkey")]
-pub mod ffs;
 /// Residual archive search: local events, floors, cheap novelty loop.
 #[cfg(feature = "graphkey")]
 pub mod archive_search;
+pub mod bank;
+/// Basin hopping over quenched minima with a basin-keyed bias.
+pub mod cluster_hopping;
+pub mod cluster_search;
+/// Population resampled by estimated probability of improvement.
+pub mod committor_pop;
+pub mod csa_cluster;
+/// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
-pub use archive_search::{archive_search, Archive, ArchiveOutcome};
-/// Quasi-Newton relaxation whose curvature persists between calls.
-pub mod warm_lbfgs;
+pub mod ffs;
+pub mod minima_hopping;
+/// Nested search: population under a descending energy ceiling.
+pub mod nested;
+/// Cut-and-splice mixing of two quenched clusters.
+pub mod splice;
+#[cfg(feature = "graphkey")]
+pub use archive_search::{Archive, ArchiveOutcome, archive_search};
 pub mod additive_independence;
 pub mod amsa;
 pub mod bayesian_mixing;
@@ -52,6 +50,8 @@ pub mod routing_probe;
 pub mod sketchmap;
 pub mod tpe;
 pub mod tps_shoot;
+/// Quasi-Newton relaxation whose curvature persists between calls.
+pub mod warm_lbfgs;
 
 pub use additive_independence::{AdditiveIndependenceResult, additive_independence_sa};
 pub use amsa::{AmsaResult, amsa_optimize};

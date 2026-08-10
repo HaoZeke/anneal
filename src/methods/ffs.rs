@@ -27,7 +27,7 @@
 //! threshold, no reference, no morphology.
 
 use crate::graphkey::contact_key;
-use crate::methods::cluster_hopping::{random_cluster, ClusterMove, Ledger, Relax};
+use crate::methods::cluster_hopping::{ClusterMove, Ledger, Relax, random_cluster};
 use ndarray::Array1;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -112,7 +112,12 @@ pub fn ffs_descent(
     best = best.min(e0);
     archive.insert(
         contact_key(xq.view(), cfg.key_cutoff),
-        Site { e: e0, x: xq, a: 1.0, b: 1.0 },
+        Site {
+            e: e0,
+            x: xq,
+            a: 1.0,
+            b: 1.0,
+        },
     );
     'outer: while ledger.remaining() > 0 {
         // The acquisition: Thompson draw on each launchable site's discovery
@@ -163,7 +168,12 @@ pub fn ffs_descent(
             best = best.min(e_new);
             let key = contact_key(x_new.view(), cfg.key_cutoff);
             if let std::collections::hash_map::Entry::Vacant(v) = archive.entry(key) {
-                v.insert(Site { e: e_new, x: x_new, a: 1.0, b: 1.0 });
+                v.insert(Site {
+                    e: e_new,
+                    x: x_new,
+                    a: 1.0,
+                    b: 1.0,
+                });
                 stored += 1;
                 found_new = true;
             }

@@ -141,11 +141,7 @@ impl ResidualField {
                 best_i = i;
             }
         }
-        if best_s > u {
-            Some(best_i)
-        } else {
-            None
-        }
+        if best_s > u { Some(best_i) } else { None }
     }
 }
 
@@ -203,7 +199,10 @@ mod tests {
             u > s0,
             "residual {u} should outrank a thrice-observed node {s0}"
         );
-        assert!(f.best_node().is_none(), "U should win over one mapped floor");
+        assert!(
+            f.best_node().is_none(),
+            "U should win over one mapped floor"
+        );
     }
 
     #[test]

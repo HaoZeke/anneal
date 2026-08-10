@@ -223,7 +223,10 @@ impl DensityOfStates {
         if e < self.lo {
             let slope = (self.mean[1] - self.mean[0]) / self.width;
             let d = self.lo + 0.5 * self.width - e;
-            (self.mean[0] - slope * d, self.sd[0] + self.sd[0].max(0.5) * d / self.width)
+            (
+                self.mean[0] - slope * d,
+                self.sd[0] + self.sd[0].max(0.5) * d / self.width,
+            )
         } else {
             // Flat above the evidence, with the spread still widening: nothing
             // observed supports a claim about how many states sit up there, and
@@ -334,7 +337,12 @@ impl DensityOfStates {
         if self.history.len() > 128 {
             self.history.remove(0);
         }
-        let mut best = (f64::NEG_INFINITY, self.tau, self.mean.clone(), self.sd.clone());
+        let mut best = (
+            f64::NEG_INFINITY,
+            self.tau,
+            self.mean.clone(),
+            self.sd.clone(),
+        );
         // The smoothness scale is chosen by the Laplace-approximated marginal
         // likelihood rather than fixed, so the amount of smoothing is set by
         // how much the histogram actually supports.
@@ -578,11 +586,7 @@ impl Weight {
     /// what makes the sampled histogram flat rather than funnel-weighted.
     pub fn accept_prob(&self, e_old: f64, e_new: f64) -> f64 {
         let d = self.at(e_new) - self.at(e_old);
-        if d <= 0.0 {
-            1.0
-        } else {
-            (-d).exp()
-        }
+        if d <= 0.0 { 1.0 } else { (-d).exp() }
     }
 }
 
@@ -629,11 +633,7 @@ impl CutWeight {
     /// additive term for any external bias the caller carries.
     pub fn accept_prob(&self, e_old: f64, e_new: f64, bias_delta: f64) -> f64 {
         let d = self.cost(e_new) - self.cost(e_old) + bias_delta;
-        if d <= 0.0 {
-            1.0
-        } else {
-            (-d).exp()
-        }
+        if d <= 0.0 { 1.0 } else { (-d).exp() }
     }
 }
 
@@ -716,8 +716,8 @@ fn cholesky_solve(l: &Array2<f64>, b: &Array1<f64>) -> Array1<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Counts drawn from a known entropy curve have to recover it, or the
     /// posterior is not measuring what it claims to.
@@ -1017,13 +1017,7 @@ impl EnergyBias {
         let lo = v.iter().cloned().fold(f64::INFINITY, f64::min) - sigma;
         let hi = v.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + sigma;
         let gamma = 1.0 + sigma / temp.max(1e-12);
-        Some(Self::new(
-            lo,
-            hi,
-            bins,
-            sigma / Self::FILL_DEPOSITS,
-            gamma,
-        ))
+        Some(Self::new(lo, hi, bins, sigma / Self::FILL_DEPOSITS, gamma))
     }
 
     /// A bias over `[lo, hi]`, empty until something is deposited.

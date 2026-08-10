@@ -184,7 +184,7 @@ where
                         steps,
                         crossed,
                         evaluations,
-                    })
+                    });
                 }
             };
             along = g.iter().zip(mode.iter()).map(|(a, b)| a * b).sum();
@@ -293,7 +293,9 @@ mod tests {
         let w = direction(dim);
         // A gradient a thousand times the scale the rate was set for.
         let g = move |x: ArrayView1<f64>| -> Option<Array1<f64>> {
-            Some(Array1::from_shape_fn(x.len(), |i| 1500.0 * x[i] + 3.0 * (i % 5) as f64))
+            Some(Array1::from_shape_fn(x.len(), |i| {
+                1500.0 * x[i] + 3.0 * (i % 5) as f64
+            }))
         };
         let cfg = Activation {
             max_steps: 4,

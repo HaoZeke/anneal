@@ -107,19 +107,11 @@ pub fn deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3], order: usize) -> 
     let angle = 2.0 * std::f64::consts::PI / order as f64;
     let mut total = 0.0;
     for a in 0..n {
-        let v = [
-            x[3 * a] - c[0],
-            x[3 * a + 1] - c[1],
-            x[3 * a + 2] - c[2],
-        ];
+        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
         let w = rotate(v, axis, angle);
         let mut best = f64::INFINITY;
         for b in 0..n {
-            let u = [
-                x[3 * b] - c[0],
-                x[3 * b + 1] - c[1],
-                x[3 * b + 2] - c[2],
-            ];
+            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
             let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
             if d < best {
                 best = d;
@@ -143,11 +135,7 @@ pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
     let m = mirror_matrix(axis);
     let mut total = 0.0;
     for a in 0..n {
-        let v = [
-            x[3 * a] - c[0],
-            x[3 * a + 1] - c[1],
-            x[3 * a + 2] - c[2],
-        ];
+        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
         let w = [
             m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
             m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
@@ -155,11 +143,7 @@ pub fn plane_deviation(x: ArrayView1<f64>, n: usize, axis: [f64; 3]) -> f64 {
         ];
         let mut best = f64::INFINITY;
         for b in 0..n {
-            let u = [
-                x[3 * b] - c[0],
-                x[3 * b + 1] - c[1],
-                x[3 * b + 2] - c[2],
-            ];
+            let u = [x[3 * b] - c[0], x[3 * b + 1] - c[1], x[3 * b + 2] - c[2]];
             let d = (w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2);
             if d < best {
                 best = d;
@@ -183,11 +167,7 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
     // Inertia tensor about the centroid, then its eigenvectors.
     let mut t = ndarray::Array2::<f64>::zeros((3, 3));
     for a in 0..n {
-        let v = [
-            x[3 * a] - c[0],
-            x[3 * a + 1] - c[1],
-            x[3 * a + 2] - c[2],
-        ];
+        let v = [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]];
         let r2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
         for i in 0..3 {
             for j in 0..3 {
@@ -203,11 +183,7 @@ fn candidate_axes(x: ArrayView1<f64>, n: usize) -> Vec<[f64; 3]> {
     }
     // Through each point.
     for a in 0..n {
-        if let Some(u) = normalise([
-            x[3 * a] - c[0],
-            x[3 * a + 1] - c[1],
-            x[3 * a + 2] - c[2],
-        ]) {
+        if let Some(u) = normalise([x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]]) {
             out.push(u);
         }
     }
@@ -306,25 +282,15 @@ pub fn mirror_matrix(axis: [f64; 3]) -> Rot {
 /// structure nearly has produces a structure that is neither, and the point of
 /// the scheme is to land in the symmetric basin so the relaxation can take it
 /// from there.
-pub fn symmetrise(
-    x: ArrayView1<f64>,
-    n: usize,
-    cand: &Candidate,
-    pair_cutoff: f64,
-) -> Array1<f64> {
+pub fn symmetrise(x: ArrayView1<f64>, n: usize, cand: &Candidate, pair_cutoff: f64) -> Array1<f64> {
     let mut out = x.to_owned();
     if n == 0 || cand.order < 2 {
         return out;
     }
     let c = centroid(x, n);
     let angle = 2.0 * std::f64::consts::PI / cand.order as f64;
-    let rel = |a: usize| -> [f64; 3] {
-        [
-            x[3 * a] - c[0],
-            x[3 * a + 1] - c[1],
-            x[3 * a + 2] - c[2],
-        ]
-    };
+    let rel =
+        |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
 
     let mut done = vec![false; n];
     for a in 0..n {
@@ -342,8 +308,8 @@ pub fn symmetrise(
             let mut best_d = f64::INFINITY;
             for b in 0..n {
                 let u = rel(b);
-                let d = ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2))
-                    .sqrt();
+                let d =
+                    ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2)).sqrt();
                 if d < best_d {
                     best_d = d;
                     best = b;
@@ -514,9 +480,8 @@ pub fn symmetrise_group(
         return out;
     }
     let c = centroid(x, n);
-    let rel = |a: usize| -> [f64; 3] {
-        [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]]
-    };
+    let rel =
+        |a: usize| -> [f64; 3] { [x[3 * a] - c[0], x[3 * a + 1] - c[1], x[3 * a + 2] - c[2]] };
 
     let mut done = vec![false; n];
     for a in 0..n {
@@ -532,8 +497,8 @@ pub fn symmetrise_group(
             let mut best_d = f64::INFINITY;
             for b in 0..n {
                 let u = rel(b);
-                let d = ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2))
-                    .sqrt();
+                let d =
+                    ((w[0] - u[0]).powi(2) + (w[1] - u[1]).powi(2) + (w[2] - u[2]).powi(2)).sqrt();
                 if d < best_d {
                     best_d = d;
                     best = b;
@@ -644,7 +609,7 @@ mod tests {
     /// Detection has to find the axis the structure actually has, which is the
     /// difference between this and symmetrising about a random direction.
     #[test]
-/// The groups the hard structures actually have, which proper rotations alone
+    /// The groups the hard structures actually have, which proper rotations alone
     /// cannot express. Tetrahedral order is 24 and octahedral is 48; the
     /// rotation subgroups are 12 and 24, so a generator set closed under proper
     /// rotations stops exactly halfway.
@@ -659,8 +624,18 @@ mod tests {
         // stating rather than assuming.
         let td = generate_group(
             &[
-                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
-                Candidate { axis: [0.0, 0.0, 1.0], order: 2, improper: false, deviation: 0.0 },
+                Candidate {
+                    axis: [s3, s3, s3],
+                    order: 3,
+                    improper: false,
+                    deviation: 0.0,
+                },
+                Candidate {
+                    axis: [0.0, 0.0, 1.0],
+                    order: 2,
+                    improper: false,
+                    deviation: 0.0,
+                },
                 Candidate {
                     axis: [1.0 / 2.0_f64.sqrt(), -1.0 / 2.0_f64.sqrt(), 0.0],
                     order: 1,
@@ -670,7 +645,12 @@ mod tests {
             ],
             200,
         );
-        assert_eq!(td.len(), 24, "tetrahedral group came out with {} elements", td.len());
+        assert_eq!(
+            td.len(),
+            24,
+            "tetrahedral group came out with {} elements",
+            td.len()
+        );
         assert!(
             td.iter().any(|m| determinant(m) < 0.0),
             "no improper element in a group that is half improper"
@@ -679,13 +659,33 @@ mod tests {
         // Octahedral: a four-fold axis and a mirror plane normal to another.
         let oh = generate_group(
             &[
-                Candidate { axis: [0.0, 0.0, 1.0], order: 4, improper: false, deviation: 0.0 },
-                Candidate { axis: [1.0, 0.0, 0.0], order: 1, improper: true, deviation: 0.0 },
-                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
+                Candidate {
+                    axis: [0.0, 0.0, 1.0],
+                    order: 4,
+                    improper: false,
+                    deviation: 0.0,
+                },
+                Candidate {
+                    axis: [1.0, 0.0, 0.0],
+                    order: 1,
+                    improper: true,
+                    deviation: 0.0,
+                },
+                Candidate {
+                    axis: [s3, s3, s3],
+                    order: 3,
+                    improper: false,
+                    deviation: 0.0,
+                },
             ],
             200,
         );
-        assert_eq!(oh.len(), 48, "octahedral group came out with {} elements", oh.len());
+        assert_eq!(
+            oh.len(),
+            48,
+            "octahedral group came out with {} elements",
+            oh.len()
+        );
     }
 
     /// Without the reflection the same generators must give the proper
@@ -695,12 +695,27 @@ mod tests {
         let s3 = 1.0 / 3.0_f64.sqrt();
         let t = generate_group(
             &[
-                Candidate { axis: [s3, s3, s3], order: 3, improper: false, deviation: 0.0 },
-                Candidate { axis: [0.0, 0.0, 1.0], order: 2, improper: false, deviation: 0.0 },
+                Candidate {
+                    axis: [s3, s3, s3],
+                    order: 3,
+                    improper: false,
+                    deviation: 0.0,
+                },
+                Candidate {
+                    axis: [0.0, 0.0, 1.0],
+                    order: 2,
+                    improper: false,
+                    deviation: 0.0,
+                },
             ],
             200,
         );
-        assert_eq!(t.len(), 12, "rotation subgroup came out with {} elements", t.len());
+        assert_eq!(
+            t.len(),
+            12,
+            "rotation subgroup came out with {} elements",
+            t.len()
+        );
         assert!(
             t.iter().all(|m| determinant(m) > 0.0),
             "an improper element appeared with no reflection generator"
@@ -850,7 +865,12 @@ mod tests {
             },
         ];
         let g = generate_group(&gens, 120);
-        assert_eq!(g.len(), 24, "octahedral rotations number 24, got {}", g.len());
+        assert_eq!(
+            g.len(),
+            24,
+            "octahedral rotations number 24, got {}",
+            g.len()
+        );
     }
 
     /// Averaging over the whole group beats averaging over one axis, which is
@@ -862,8 +882,18 @@ mod tests {
         let single = symmetrise(x.view(), 6, &one, 1.0);
 
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 4, improper: false, deviation: 0.0 },
-            Candidate { axis: [0.0, 1.0, 0.0], order: 4, improper: false, deviation: 0.0 },
+            Candidate {
+                axis: [1.0, 0.0, 0.0],
+                order: 4,
+                improper: false,
+                deviation: 0.0,
+            },
+            Candidate {
+                axis: [0.0, 1.0, 0.0],
+                order: 4,
+                improper: false,
+                deviation: 0.0,
+            },
         ];
         let group = generate_group(&gens, 120);
         let full = symmetrise_group(x.view(), 6, &group, 1.0);
@@ -883,8 +913,18 @@ mod tests {
     fn the_group_leaves_an_exact_structure_alone() {
         let x = octahedron(1.1);
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 4, improper: false, deviation: 0.0 },
-            Candidate { axis: [0.0, 1.0, 0.0], order: 4, improper: false, deviation: 0.0 },
+            Candidate {
+                axis: [1.0, 0.0, 0.0],
+                order: 4,
+                improper: false,
+                deviation: 0.0,
+            },
+            Candidate {
+                axis: [0.0, 1.0, 0.0],
+                order: 4,
+                improper: false,
+                deviation: 0.0,
+            },
         ];
         let group = generate_group(&gens, 120);
         let y = symmetrise_group(x.view(), 6, &group, 1.0);
@@ -898,7 +938,12 @@ mod tests {
     #[test]
     fn incommensurate_axes_are_capped_rather_than_run_away() {
         let gens = vec![
-            Candidate { axis: [1.0, 0.0, 0.0], order: 5, improper: false, deviation: 0.0 },
+            Candidate {
+                axis: [1.0, 0.0, 0.0],
+                order: 5,
+                improper: false,
+                deviation: 0.0,
+            },
             Candidate {
                 axis: [0.31, 0.77, 0.56],
                 order: 3,

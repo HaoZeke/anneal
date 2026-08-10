@@ -73,8 +73,8 @@ fn cutest_hs1_and_lj_hexamer_share_the_hop_loop() {
     let hs1_history = run_rs(hs1, &cooling, 4, 8, 17);
 
     let hexamer_start = array![
-        1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0,
-        1.0, 0.0, 0.0, -1.0,
+        1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+        -1.0,
     ];
     let hexamer_config = Config::with_scales(6, 1.0, 1.0);
     let hexamer = HoppingSampler::new(

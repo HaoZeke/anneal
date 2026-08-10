@@ -65,13 +65,19 @@ impl BayesLinear {
     }
 
     fn mean(&self) -> Array1<f64> {
-        solve(self.precision.view(), self.rhs.view()).unwrap_or_else(|| Array1::zeros(self.rhs.len()))
+        solve(self.precision.view(), self.rhs.view())
+            .unwrap_or_else(|| Array1::zeros(self.rhs.len()))
     }
 
     /// Posterior variance of the value at `x`, `x' P^-1 x`.
     fn variance(&self, x: ArrayView1<f64>) -> f64 {
         match solve(self.precision.view(), x) {
-            Some(z) => x.iter().zip(z.iter()).map(|(p, q)| p * q).sum::<f64>().max(0.0),
+            Some(z) => x
+                .iter()
+                .zip(z.iter())
+                .map(|(p, q)| p * q)
+                .sum::<f64>()
+                .max(0.0),
             None => 1.0,
         }
     }
@@ -155,8 +161,7 @@ impl ContextualAllocator {
                 // the posterior standard deviation at this context. A move
                 // never tried in this region has a wide posterior and can win
                 // on the draw, which is the exploration Thompson supplies.
-                let sd = (self.shared.variance(context) + self.arms[a].variance(context))
-                    .sqrt()
+                let sd = (self.shared.variance(context) + self.arms[a].variance(context)).sqrt()
                     * self.exploration;
                 let score = self.value(a, context) + sd * standard_normal(rng);
                 if score > best_score {
@@ -241,8 +246,8 @@ fn standard_normal<R: Rng + ?Sized>(rng: &mut R) -> f64 {
 mod tests {
     use super::*;
     use ndarray::array;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Two contexts, two moves, and each move is right in one of them. A
     /// context-free allocator cannot represent this at all: both moves have the

@@ -160,7 +160,11 @@ where
             // Scaled by the gradient size: an image between two minima can sit
             // on a repulsive wall where the gradient is enormous, and a fixed
             // step there moves it nowhere useful.
-            let scale = if gmax > 1.0 { step_size / gmax } else { step_size };
+            let scale = if gmax > 1.0 {
+                step_size / gmax
+            } else {
+                step_size
+            };
             for i in 0..images[k].len() {
                 images[k][i] -= scale * g[i];
             }

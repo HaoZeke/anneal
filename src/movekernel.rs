@@ -482,11 +482,7 @@ impl MoveKernel<f64> for ShellRotate {
             if radii[a] <= median {
                 continue;
             }
-            let v = [
-                i[3 * a] - c[0],
-                i[3 * a + 1] - c[1],
-                i[3 * a + 2] - c[2],
-            ];
+            let v = [i[3 * a] - c[0], i[3 * a + 1] - c[1], i[3 * a + 2] - c[2]];
             let w = rotate(v, axis, angle);
             for k in 0..3 {
                 out[3 * a + k] = c[k] + w[k];
@@ -528,26 +524,18 @@ impl MoveKernel<f64> for Symmetrise {
 
         let rotated: Vec<[f64; 3]> = (0..n)
             .map(|a| {
-                let v = [
-                    i[3 * a] - c[0],
-                    i[3 * a + 1] - c[1],
-                    i[3 * a + 2] - c[2],
-                ];
+                let v = [i[3 * a] - c[0], i[3 * a + 1] - c[1], i[3 * a + 2] - c[2]];
                 rotate(v, axis, angle)
             })
             .collect();
 
         for a in 0..n {
-            let v = [
-                i[3 * a] - c[0],
-                i[3 * a + 1] - c[1],
-                i[3 * a + 2] - c[2],
-            ];
+            let v = [i[3 * a] - c[0], i[3 * a + 1] - c[1], i[3 * a + 2] - c[2]];
             let mut best = 0usize;
             let mut best_d = f64::INFINITY;
             for (b, w) in rotated.iter().enumerate() {
-                let d = ((v[0] - w[0]).powi(2) + (v[1] - w[1]).powi(2) + (v[2] - w[2]).powi(2))
-                    .sqrt();
+                let d =
+                    ((v[0] - w[0]).powi(2) + (v[1] - w[1]).powi(2) + (v[2] - w[2]).powi(2)).sqrt();
                 if d < best_d {
                     best_d = d;
                     best = b;
@@ -591,9 +579,7 @@ mod cluster_move_tests {
         let mut rng = StdRng::seed_from_u64(1);
         let y = k.propose(x.view(), 1.0, &mut rng);
         let moved = (0..6)
-            .filter(|&a| {
-                (0..3).any(|c| (x[3 * a + c] - y[3 * a + c]).abs() > 1e-9)
-            })
+            .filter(|&a| (0..3).any(|c| (x[3 * a + c] - y[3 * a + c]).abs() > 1e-9))
             .count();
         assert_eq!(moved, 1, "relocation must touch a single point");
     }

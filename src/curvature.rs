@@ -676,7 +676,10 @@ mod tests {
             for j in 0..b.len() {
                 let dot: f64 = b[i].iter().zip(b[j].iter()).map(|(p, q)| p * q).sum();
                 let want = if i == j { 1.0 } else { 0.0 };
-                assert!((dot - want).abs() < 1e-12, "not orthonormal at {i},{j}: {dot}");
+                assert!(
+                    (dot - want).abs() < 1e-12,
+                    "not orthonormal at {i},{j}: {dot}"
+                );
             }
         }
     }
@@ -727,9 +730,8 @@ mod tests {
             let u = v / norm;
             let mut p2 = 0.0;
             for i in 0..n {
-                let pi = u[3 * i] * u[3 * i]
-                    + u[3 * i + 1] * u[3 * i + 1]
-                    + u[3 * i + 2] * u[3 * i + 2];
+                let pi =
+                    u[3 * i] * u[3 * i] + u[3 * i + 1] * u[3 * i + 1] + u[3 * i + 2] * u[3 * i + 2];
                 p2 += pi * pi;
             }
             1.0 / (n as f64 * p2)
@@ -769,8 +771,7 @@ mod tests {
         let x = scattered(20);
         let scales: Vec<f64> = (0..60).map(|i| 0.5 + 0.25 * i as f64).collect();
         let g = quadratic_grad(&scales);
-        let (l, v, _ev) =
-            soft_subspace(x.view(), |p| g(p), 40, 1e-4, 4).expect("no subspace");
+        let (l, v, _ev) = soft_subspace(x.view(), |p| g(p), 40, 1e-4, 4).expect("no subspace");
         assert!(l.len() >= 3, "only {} modes", l.len());
         for j in 1..l.len() {
             assert!(l[j] >= l[j - 1] - 1e-8, "not ascending: {l:?}");

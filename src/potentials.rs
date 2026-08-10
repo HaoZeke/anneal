@@ -18,9 +18,9 @@
 //! against each other. Two independent implementations agreeing to six decimals
 //! says more about both than either says alone.
 
+use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
 use eindir_core::gradient::Gradient;
-use eindir_core::Objective;
 use ndarray::{Array1, ArrayView1};
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
@@ -108,7 +108,11 @@ impl PairPotential {
 
     /// Lennard-Jones over `n_points`, with a domain scaled to the size.
     pub fn lennard_jones(n_points: usize) -> Self {
-        Self::new(n_points, PairKind::LennardJones, Self::extent_for(n_points, PairKind::LennardJones))
+        Self::new(
+            n_points,
+            PairKind::LennardJones,
+            Self::extent_for(n_points, PairKind::LennardJones),
+        )
     }
 
     /// Morse over `n_points` at range `rho`.

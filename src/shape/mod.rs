@@ -327,7 +327,10 @@ pub fn match_shapes(
             .open("ira_pair.txt")
         {
             let fmt = |v: &Vec<f64>| {
-                v.iter().map(|z| format!("{z:.17e}")).collect::<Vec<_>>().join(" ")
+                v.iter()
+                    .map(|z| format!("{z:.17e}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             };
             let _ = writeln!(f, "PAIR {n1}");
             let _ = writeln!(f, "A {}", fmt(&ca));
@@ -388,11 +391,7 @@ pub fn match_shapes(
                         true
                     }
                 });
-            if ok {
-                Some(perm)
-            } else {
-                None
-            }
+            if ok { Some(perm) } else { None }
         },
     })
 }
@@ -487,7 +486,9 @@ mod tests {
     fn a_canonical_order_absorbs_relabelling() {
         let r = generic12();
         let c = CanonicalOrder::new(r.clone(), 1.8);
-        let a = c.canonicalise(r.view()).expect("reference did not canonicalise");
+        let a = c
+            .canonicalise(r.view())
+            .expect("reference did not canonicalise");
         let b = c
             .canonicalise(relabel(r.view(), 5).view())
             .expect("relabelled copy did not canonicalise");
@@ -511,7 +512,9 @@ mod tests {
             moved[3 * i + 1] = px;
             moved[3 * i + 2] = r[3 * i + 2] + 0.5;
         }
-        let b = c.canonicalise(moved.view()).expect("moved copy did not canonicalise");
+        let b = c
+            .canonicalise(moved.view())
+            .expect("moved copy did not canonicalise");
         assert!(
             rms(a.view(), b.view()) < 1e-6,
             "a rigid motion moved the descriptor by {}",
@@ -530,7 +533,9 @@ mod tests {
         for k in 0..3 {
             far[k] *= 1.6;
         }
-        let b = c.canonicalise(far.view()).expect("distorted copy did not canonicalise");
+        let b = c
+            .canonicalise(far.view())
+            .expect("distorted copy did not canonicalise");
         assert!(
             rms(a.view(), b.view()) > 0.05,
             "a clearly different structure came out {} away",
@@ -661,7 +666,11 @@ mod tests {
         let mut b = octahedron();
         b[0] += 1.5; // pull one vertex well away
         let m = match_shapes(a.view(), b.view(), 1.8).expect("match");
-        assert!(m.distance > 0.1, "distorted shape should not match, got {}", m.distance);
+        assert!(
+            m.distance > 0.1,
+            "distorted shape should not match, got {}",
+            m.distance
+        );
     }
 
     #[test]
@@ -678,7 +687,10 @@ mod tests {
     fn metric_reports_infinity_rather_than_panicking() {
         let a = octahedron();
         let b = Array1::from(vec![0.0, 0.0, 0.0]);
-        assert_eq!(IraMetric::default().distance(a.view(), b.view()), f64::INFINITY);
+        assert_eq!(
+            IraMetric::default().distance(a.view(), b.view()),
+            f64::INFINITY
+        );
     }
 }
 
@@ -693,10 +705,7 @@ mod tests {
 /// answer that reads C1 for every structure a search on this landscape visits,
 /// so a bias on it deposits on a constant; the deviation under a chosen
 /// operation separates structures that no group label distinguishes.
-pub fn symmetry_deviation(
-    coords: ArrayView1<f64>,
-    matrix: &[f64; 9],
-) -> Result<f64, ShapeError> {
+pub fn symmetry_deviation(coords: ArrayView1<f64>, matrix: &[f64; 9]) -> Result<f64, ShapeError> {
     if coords.len() % 3 != 0 {
         return Err(ShapeError::NotThreeDimensional(coords.len()));
     }
@@ -790,11 +799,7 @@ mod sofi_tests {
     #[test]
     fn rotation_matrix_is_orthogonal_with_unit_determinant() {
         let m = rotation_matrix([0.3, -0.5, 0.81], 1.1);
-        let r = [
-            [m[0], m[1], m[2]],
-            [m[3], m[4], m[5]],
-            [m[6], m[7], m[8]],
-        ];
+        let r = [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]];
         for i in 0..3 {
             for j in 0..3 {
                 let dot: f64 = (0..3).map(|k| r[i][k] * r[j][k]).sum();
