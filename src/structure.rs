@@ -184,6 +184,50 @@ pub fn cna(x: ArrayView1<f64>, n: usize, cutoff: f64) -> CnaCounts {
     CnaCounts { counts, bonds }
 }
 
+/// Per-atom fractions of 555 / 421 / 422 among that atom's bonds.
+pub fn atom_triplet_fracs(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[f64; 3]> {
+    let adj = adjacency(x, n, cutoff);
+    let mut out = vec![[0.0; 3]; n];
+    for i in 0..n {
+        let mut n555 = 0usize;
+        let mut n421 = 0usize;
+        let mut n422 = 0usize;
+        let mut nb = 0usize;
+        for j in 0..n {
+            if j == i || !adj[i][j] {
+                continue;
+            }
+            nb += 1;
+            let common: Vec<usize> = (0..n).filter(|&k| adj[i][k] && adj[j][k]).collect();
+            let r = common.len();
+            if r == 0 {
+                continue;
+            }
+            let sub: Vec<Vec<bool>> = common
+                .iter()
+                .map(|&a| common.iter().map(|&b| adj[a][b]).collect())
+                .collect();
+            let s: usize = sub
+                .iter()
+                .enumerate()
+                .map(|(a, row)| row.iter().enumerate().filter(|&(b, &v)| v && b > a).count())
+                .sum();
+            let t = longest_trail(&sub);
+            match (r, s, t) {
+                (5, 5, 5) => n555 += 1,
+                (4, 2, 1) => n421 += 1,
+                (4, 2, 2) => n422 += 1,
+                _ => {}
+            }
+        }
+        if nb > 0 {
+            let inv = 1.0 / nb as f64;
+            out[i] = [n555 as f64 * inv, n421 as f64 * inv, n422 as f64 * inv];
+        }
+    }
+    out
+}
+
 /// A local structure a neighbourhood can be matched to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Template {
@@ -717,6 +761,13 @@ mod tests {
             c.counts
         );
         assert_eq!(c.get((5, 5, 4)), 0, "555 was miscounted as 554");
+        let fr = atom_triplet_fracs(x.view(), 13, 1.2);
+        assert!(
+            fr[0][0] > 0.9,
+            "centre atom 555 fraction {}, counts {:?}",
+            fr[0][0],
+            c.counts
+        );
     }
 
     /// Template matching has to recognise the same structure, and by a
