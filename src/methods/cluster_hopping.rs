@@ -1277,6 +1277,44 @@ impl MoveKernel<f64> for ClusterMove {
     }
 }
 
+/// Uniform mixture of the proposal kernels selected by a cluster preset.
+pub struct ClusterProposal {
+    kernels: Vec<ClusterMove>,
+}
+
+impl ClusterProposal {
+    fn new(kernels: Vec<ClusterMove>) -> Self {
+        assert!(!kernels.is_empty(), "a proposal library must not be empty");
+        Self { kernels }
+    }
+
+    /// Number of proposal arms in the mixture.
+    pub fn len(&self) -> usize {
+        self.kernels.len()
+    }
+
+    /// Whether the mixture has no proposal arms.
+    pub fn is_empty(&self) -> bool {
+        self.kernels.is_empty()
+    }
+}
+
+impl MoveKernel<f64> for ClusterProposal {
+    fn propose<R: Rng + ?Sized>(
+        &self,
+        i: ArrayView1<f64>,
+        t: f64,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        let arm = rng.random_range(0..self.kernels.len());
+        self.kernels[arm].propose(i, t, rng)
+    }
+
+    fn supports_in<N: crate::neigh::Neighborhood<f64>>(&self, _n: &N) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod move_scaling_tests {
     use super::*;
@@ -2136,6 +2174,11 @@ impl Config {
     /// Radius of the preset's initial cluster sphere.
     pub fn start_radius(&self) -> f64 {
         self.container
+    }
+
+    /// Proposal mixture for use by the general [`crate::sampler::Sampler`].
+    pub fn proposal_kernel(&self) -> ClusterProposal {
+        ClusterProposal::new(self.move_library.kernels(self))
     }
 }
 
