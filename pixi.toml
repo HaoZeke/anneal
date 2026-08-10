@@ -18,8 +18,9 @@ towncrier-draft = { cmd = "uvx towncrier build --draft", description = "Preview 
 towncrier-build = { cmd = "uvx towncrier build", description = "Incorporate newsfragments into CHANGELOG.md for release preparation" }
 
 [dependencies]
-rust = ">=1.88"
-uv   = ">=0.6.0"
+rust       = ">=1.88"
+uv         = ">=0.6.0"
+capnproto  = ">=1,<2"
 
 [feature.python.dependencies]
 python  = ">=3.10"
