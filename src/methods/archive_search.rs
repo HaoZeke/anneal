@@ -1,15 +1,17 @@
 //! Residual archive search: explore, then spend what the fingerprints owe.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! Large-budget ras records local-topology keys on the explore hop and pays
-//! leftover evaluations to unsaturated keys and residual-field holes.
-//! Small-budget molecular and slab walks stay on their own branch.
+//! Large-budget ras records local-topology keys and energy classes on the
+//! explore hop. Leftover evaluations go to residual-field holes (new draws
+//! that can open a class) and to unsaturated keys on non-incumbent floors,
+//! not to another polish of the incumbent key. Small-budget molecular and
+//! slab walks stay on their own branch.
 
 use crate::catalog::{Catalog, Event};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    Config, GradFn, Ledger, Relax, active_mask, run_with_gradient,
+    active_mask, run_with_gradient, Config, GradFn, Ledger, Relax,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -35,6 +37,8 @@ pub struct Archive {
     pub reps: Vec<Array1<f64>>,
     /// First structure that exhibited each local key.
     pub key_reps: HashMap<u64, Array1<f64>>,
+    /// Energy class on which each local key was first seen.
+    pub key_floor: HashMap<u64, usize>,
     /// Floor currently being fully quenched.
     pub pending_floors: HashSet<usize>,
     /// Whether a residual full quench is in flight.
@@ -57,17 +61,9 @@ impl Archive {
             drop: DropModel::new(),
             reps: Vec::new(),
             key_reps: HashMap::new(),
+            key_floor: HashMap::new(),
             pending_floors: HashSet::new(),
             pending_residual: false,
-        }
-    }
-
-    fn set_rep(&mut self, id: usize, x: ArrayView1<f64>) {
-        if id >= self.reps.len() {
-            self.reps.resize(id + 1, Array1::zeros(0));
-        }
-        if self.reps[id].is_empty() {
-            self.reps[id] = x.to_owned();
         }
     }
 }
@@ -150,7 +146,11 @@ fn symmetry_polish(
         .map(|(s, _)| s)?
     };
     let (e, xs) = relax(ledger, y.view(), cfg.relax_steps);
-    if e.is_finite() { Some((e, xs)) } else { None }
+    if e.is_finite() {
+        Some((e, xs))
+    } else {
+        None
+    }
 }
 
 /// A later hop's start: redraw the adsorbate, or re-place rigid groups.
@@ -263,18 +263,72 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
     acc
 }
 
+fn incumbent_floor(archive: &Archive) -> Option<usize> {
+    let n = archive.floors.len();
+    if n == 0 {
+        return None;
+    }
+    let mut best = 0usize;
+    let mut e = f64::INFINITY;
+    for i in 0..n {
+        if let Some(f) = archive.floors.get(i) {
+            if f.e_min < e {
+                e = f.e_min;
+                best = i;
+            }
+        }
+    }
+    Some(best)
+}
+
 fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f64>) {
     if !energy.is_finite() {
         return;
     }
-    let id = archive.floors.assign(energy, None, 0.0);
+    let prev = incumbent_floor(archive);
+    let rise = prev
+        .and_then(|i| archive.floors.get(i))
+        .map(|f| (energy - f.e_min).abs())
+        .unwrap_or(0.0);
+    if rise > 0.0 {
+        archive.floors.observe_rise(rise);
+    }
+    let id = archive.floors.assign(energy, prev, rise);
     archive.residual.observe(id, energy);
-    archive.set_rep(id, x);
+    if let Some(p) = prev {
+        archive.residual.edge(p, id);
+    }
+    if id >= archive.reps.len() {
+        archive.reps.resize(id + 1, Array1::zeros(0));
+    }
+    let is_min = archive
+        .floors
+        .get(id)
+        .map(|f| (energy - f.e_min).abs() < 1e-12)
+        .unwrap_or(true);
+    if archive.reps[id].is_empty() || is_min {
+        archive.reps[id] = x.to_owned();
+    }
     let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
     archive.catalog.observe_bag(&keys);
     for &k in &keys {
         archive.key_reps.entry(k).or_insert_with(|| x.to_owned());
+        archive.key_floor.entry(k).or_insert(id);
     }
+}
+
+/// A start that can open a new energy class: redraw the adsorbate or the
+/// rigid groups when those exist, otherwise a fresh random cluster.
+fn cluster_hole<R: Rng + ?Sized>(start: ArrayView1<f64>, cfg: &Config, rng: &mut R) -> Array1<f64> {
+    if cfg.active_region.is_some() || cfg.move_library.declared_groups().is_some() {
+        return residual_start(start, cfg, rng);
+    }
+    let n = if cfg.n_points > 0 {
+        cfg.n_points
+    } else {
+        start.len() / 3
+    };
+    crate::methods::cluster_hopping::random_cluster(n, 0.7, cfg.min_separation, rng)
 }
 
 /// Shake atoms that carry `key` so the residual hop leaves that topology.
@@ -304,16 +358,43 @@ fn residual_origin<R: Rng + ?Sized>(
     start: ArrayView1<f64>,
     rng: &mut R,
 ) -> (Option<u64>, Array1<f64>) {
+    let inc = incumbent_floor(archive);
+    for k in archive.catalog.keys_due() {
+        let on_incumbent = match (archive.key_floor.get(&k).copied(), inc) {
+            (Some(f), Some(i)) => f == i,
+            _ => true,
+        };
+        if on_incumbent {
+            continue;
+        }
+        if let Some(x) = archive.key_reps.get(&k) {
+            return (Some(k), residual_from_key(x.view(), k, rng));
+        }
+    }
+    // Residual cell U outranks mapped floors: a new draw opens a class.
+    if archive.residual.best_node().is_none() {
+        let x0 = cluster_hole(start, cfg, rng);
+        let keys = local_keys(key_coords(x0.view(), cfg).view(), LOCAL_CUTOFF);
+        return (keys.first().copied(), x0);
+    }
+    if let Some(i) = archive.residual.best_node() {
+        if i < archive.reps.len() && !archive.reps[i].is_empty() {
+            let x = archive.reps[i].view();
+            let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
+            if let Some(k) = archive.catalog.unsaturated_in(&keys) {
+                return (Some(k), residual_from_key(x, k, rng));
+            }
+            return (
+                None,
+                residual_from_key(x, keys.first().copied().unwrap_or(0), rng),
+            );
+        }
+    }
     if let Some(k) = archive.catalog.due_key() {
         if let Some(x) = archive.key_reps.get(&k) {
             return (Some(k), residual_from_key(x.view(), k, rng));
         }
-        return (Some(k), residual_start(start, cfg, rng));
-    }
-    if let Some(i) = archive.residual.best_node() {
-        if i < archive.reps.len() && !archive.reps[i].is_empty() {
-            return (None, residual_start(archive.reps[i].view(), cfg, rng));
-        }
+        return (Some(k), cluster_hole(start, cfg, rng));
     }
     let seed = archive
         .reps
@@ -321,7 +402,7 @@ fn residual_origin<R: Rng + ?Sized>(
         .find(|r| !r.is_empty())
         .map(|r| r.view())
         .unwrap_or(start);
-    (None, residual_start(seed, cfg, rng))
+    (None, cluster_hole(seed, cfg, rng))
 }
 
 fn fold_hop(acc: &mut HopAcc, hop: &crate::methods::cluster_hopping::Outcome, at: usize) {
@@ -561,9 +642,9 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    // Explore (skip-return) then residual on unsaturated local keys.
-    // The same mix for every N: ico GM is a skip-return hop; leftover
-    // spend follows the catalogue, not a size gate.
+    // Explore (skip-return) then residual holes / non-incumbent keys.
+    // The same mix for every N: leftover follows the residual field and
+    // the catalogue, not a size gate.
     let explore = ((cap * 3) / 10).max(1).min(cap);
     let mut c_fast = cfg.clone();
     c_fast.return_screen = true;
@@ -582,8 +663,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     if let Some(ref x) = hop1.final_state {
         let keys = local_keys(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
         archive.catalog.observe_bag(&keys);
+        let floor = incumbent_floor(archive).unwrap_or(0);
         for &k in &keys {
             archive.key_reps.entry(k).or_insert_with(|| x.clone());
+            archive.key_floor.entry(k).or_insert(floor);
         }
     }
     let mut acc = HopAcc {
@@ -602,19 +685,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_res.return_polish_after = 0;
     c_res.symmetrise_on_stall = true;
     let mut spent = used1;
+    let mut same_floor = 0usize;
     while ledger.remaining() >= cfg.relax_steps.max(1) {
         let rest = ledger.remaining();
         let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
         let (from_key, x0) = residual_origin(archive, cfg, start, rng);
         let mut led = Ledger::new(take.max(1));
-        let hop = run_with_gradient(
-            &c_res,
-            x0.view(),
-            &mut led,
-            relax,
-            grad.as_deref_mut(),
-            rng,
-        );
+        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng);
         let used = led.spent();
         if used == 0 {
             break;
@@ -634,13 +711,18 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             });
             let _ = archive.catalog.record_search(k, landing);
         }
+        let floors_before = archive.floors.len();
         if hop.best.is_finite() {
             if let Some(ref x) = hop.best_state {
                 record_best(archive, cfg, hop.best, x.view());
             }
         }
+        if archive.floors.len() == floors_before {
+            same_floor += 1;
+        }
         fold_hop(&mut acc, &hop, at);
-        archive.pending_residual = archive.catalog.due_key().is_some();
+        archive.pending_residual =
+            archive.catalog.due_key().is_some() || archive.residual.best_node().is_none();
     }
     ArchiveOutcome {
         best: acc.best,
@@ -648,8 +730,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         screens: acc.screens,
         full: acc.full,
         returned: acc.returned,
-        same_floor: 0,
-        floors: archive.floors.len().max(acc.basins),
+        same_floor,
+        floors: archive.floors.len(),
         events: archive.catalog.event_count(),
         artn: acc.artn,
         charged: ledger.spent(),
@@ -691,8 +773,8 @@ fn key_coords(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
 mod tests {
     use super::*;
     use crate::methods::cluster_hopping::random_cluster;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     fn lj(x: ArrayView1<f64>) -> f64 {
         let n = x.len() / 3;
@@ -957,6 +1039,41 @@ mod tests {
         );
         assert_eq!(rec.return_polish, 0);
         assert!(out.charged <= 50_000);
+    }
+
+    /// Residual cell U outranks a thrice-observed incumbent. The origin
+    /// must then be a hole that can open a new energy class, not a 1.6
+    /// shake of the incumbent's due key (that is the ico-polish trap).
+    #[test]
+    fn residual_hole_starts_off_the_incumbent_floor() {
+        let rec = Config::recommended(7);
+        let mut rng = StdRng::seed_from_u64(11);
+        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let mut archive = Archive::new();
+        record_best(&mut archive, &rec, -10.0, start.view());
+        record_best(&mut archive, &rec, -10.0, start.view());
+        record_best(&mut archive, &rec, -10.0, start.view());
+        assert!(
+            archive.residual.best_node().is_none(),
+            "U should outrank a thrice-observed incumbent"
+        );
+        assert!(
+            archive.catalog.due_key().is_some(),
+            "incumbent keys are still due; that is the trap the hole must beat"
+        );
+        let (_from, x0) = residual_origin(&archive, &rec, start.view(), &mut rng);
+        // A due_key polish moves each coordinate by at most 0.8. A hole
+        // that opens a new class is a new draw, so some coordinate leaves
+        // that box.
+        let max_shift = start
+            .iter()
+            .zip(x0.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_shift > 0.81,
+            "residual origin stayed on the incumbent (max_shift={max_shift}); due_key polish does not open a floor"
+        );
     }
 
     /// After the explore hop records local keys, an unsaturated key is
