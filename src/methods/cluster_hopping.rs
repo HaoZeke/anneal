@@ -2171,6 +2171,8 @@ pub struct Outcome {
     pub best: f64,
     /// State attaining it.
     pub best_state: Option<Array1<f64>>,
+    /// Live chain at the end of the run, which a later hop can continue.
+    pub final_state: Option<Array1<f64>>,
     /// Hops taken.
     pub hops: usize,
     /// Trials rejected by screening before a full relaxation.
@@ -4011,6 +4013,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     Outcome {
         best: ledger.best,
         best_state: ledger.best_state.clone(),
+        final_state: Some(x.clone()),
         hops,
         screened_out,
         basins: n_basins,
