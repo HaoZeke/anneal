@@ -791,7 +791,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 .kernels(cfg);
             }
         }
-        let k = match (&context, cfg.allocate_moves) {
+        let mut k = match (&context, cfg.allocate_moves) {
             (Some(c), _) => contextual.select(c.view(), rng),
             (None, true) if cfg.depth_reward => depth_allocator.select(rng),
             (None, true) => allocator.select(rng),
@@ -921,6 +921,41 @@ fn run_full<'g, R: Rng + ?Sized>(
                 _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
             }
         };
+        // Identity SOAP is not an arm. Thompson must not buy a no-op:
+        // reselect a real kernel, or skip the hop.
+        if !cov_fire
+            && !soft_fire
+            && !angular
+            && kernels[k].name() == "soap"
+            && hop_is_identity(x.view(), trial.view())
+        {
+            let mut swapped = false;
+            for _ in 0..kernels.len() {
+                let k2 = match (&context, cfg.allocate_moves) {
+                    (Some(c), _) => contextual.select(c.view(), rng),
+                    (None, true) if cfg.depth_reward => depth_allocator.select(rng),
+                    (None, true) => allocator.select(rng),
+                    (None, false) => rng.random_range(0..kernels.len()),
+                };
+                if kernels[k2].name() == "soap" {
+                    continue;
+                }
+                k = k2;
+                trial = match (&mut constructor, &kernels[k]) {
+                    (Some(c), ClusterMove::Reseed { n_points, .. }) => {
+                        let (cand, f) = c.propose(x.view(), *n_points, rng);
+                        pending_features = Some(f);
+                        cand
+                    }
+                    _ => kernels[k].propose_scaled(x.view(), cfg.temperature, escape, rng),
+                };
+                swapped = true;
+                break;
+            }
+            if !swapped {
+                continue;
+            }
+        }
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
@@ -2165,6 +2200,19 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         }
     }
     y
+}
+
+fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
+    if x.len() != y.len() || x.is_empty() {
+        return false;
+    }
+    let n = (x.len() / 3).max(1) as f64;
+    let mut s = 0.0;
+    for i in 0..x.len() {
+        let d = y[i] - x[i];
+        s += d * d;
+    }
+    (s / n).sqrt() < 1e-8
 }
 
 pub fn random_cluster_in_radius<R: Rng + ?Sized>(
