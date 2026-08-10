@@ -2,7 +2,7 @@
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
 //! A short skip-return pass covers the ico GM (LJ55). A longer returning
-//! polish with stall symmetrisation is the residual pass (LJ38 / LJ75).
+//! polish continues that live chain (LJ75 Marks; LJ38).
 //! Shared [`Archive`] state is filled from the better hop best.
 
 use crate::catalog::Catalog;
@@ -275,10 +275,9 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// Two measured hops on a clone of `cfg`, same start, one budget:
-/// a short skip-return pass (the LJ55-winning arm) and a longer returning
-/// polish with stall symmetrisation (the LJ38/LJ75 arm). The caller's
-/// recommended defaults are not written.
+/// Two measured hops on a clone of `cfg`, one budget: a skip-return pass
+/// (the LJ55-winning arm) and a returning polish that continues that live
+/// chain (the LJ75 arm). The caller's recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -496,8 +495,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    // 30 % skip-return: enough for the ico GM on LJ55 (hits by ~120k of 400k).
-    let p1 = ((cap * 3) / 10).max(1).min(cap);
+    // Half skip-return (LJ55 ico), then polish the live chain (LJ75 Marks).
+    // Restarting hop2 from the original start is a different walk: that
+    // misses the 234437 LJ75 hit a single 400k chain found after 200k skip.
+    let p1 = (cap / 2).max(1).min(cap);
 
     let mut c_fast = cfg.clone();
     c_fast.return_screen = true;
@@ -516,7 +517,12 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         c_deep.return_polish = (cfg.relax_steps / 4).max(1);
         c_deep.symmetrise_on_stall = true;
         let mut led2 = Ledger::new(rest);
-        let hop2 = run_with_gradient(&c_deep, start, &mut led2, relax, grad.as_deref_mut(), rng);
+        let x2 = hop1
+            .final_state
+            .as_ref()
+            .map(|s| s.view())
+            .unwrap_or(start);
+        let hop2 = run_with_gradient(&c_deep, x2, &mut led2, relax, grad.as_deref_mut(), rng);
         let _ = ledger.charge_many(led2.spent());
         let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
         let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
@@ -806,5 +812,60 @@ mod tests {
         );
         assert!(out.charged <= 400);
         assert!(out.best.is_finite());
+    }
+
+    /// The second large-budget hop continues the live chain. Restarting from
+    /// the original start is a different walk: v10 did that and missed the
+    /// LJ75 GM that a single 400k chain found at 234437.
+    #[test]
+    fn large_budget_second_hop_starts_from_the_live_chain() {
+        let rec = Config::recommended(7);
+        let mut rng = StdRng::seed_from_u64(5);
+        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let start0 = start[0];
+        let hop2_x0 = std::cell::Cell::new(f64::NAN);
+        let opening = std::cell::Cell::new(0usize);
+        let relax_steps = rec.relax_steps;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if led.spent() == 0 && steps == relax_steps {
+                let n = opening.get() + 1;
+                opening.set(n);
+                if n == 2 {
+                    hop2_x0.set(x[0]);
+                }
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let mut y = x.to_owned();
+            y[0] += 1.0;
+            (-y[0], y)
+        };
+        let mut ledger = Ledger::new(50_000);
+        let mut archive = Archive::new();
+        let out = archive_search(
+            &rec,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        assert!(
+            opening.get() >= 2,
+            "expected two opening quenches, got {}",
+            opening.get()
+        );
+        let h2 = hop2_x0.get();
+        assert!(
+            h2.is_finite() && (h2 - start0).abs() > 0.5,
+            "hop2 opened at {h2}, original start {start0}; want the live chain"
+        );
+        assert!(out.best.is_finite());
+        assert_eq!(rec.return_polish, 0);
+        assert!(!rec.return_screen);
     }
 }
