@@ -251,6 +251,16 @@ struct NWChemCResult {
 const HARTREE_EV: f64 = 27.211386245988;
 const BOHR_ANG: f64 = 0.529177210903;
 
+struct NwchemcLifecycle {
+    session: *mut std::ffi::c_void,
+    destroy: unsafe extern "C" fn(*mut std::ffi::c_void),
+    finalize: unsafe extern "C" fn(),
+}
+
+impl Drop for NwchemcLifecycle {
+    fn drop(&mut self) {}
+}
+
 impl NwchemcEngine {
     fn load(m: usize) -> Self {
         let path = std::env::var("NWCHEMC_LIBRARY").expect("NWCHEMC_LIBRARY");
@@ -308,6 +318,37 @@ impl NwchemcEngine {
                 .collect::<Vec<f64>>(),
         );
         Some((res.energy_h * HARTREE_EV, g))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static LIFECYCLE_STEP: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe extern "C" fn record_destroy(_session: *mut std::ffi::c_void) {
+        assert_eq!(LIFECYCLE_STEP.swap(1, Ordering::SeqCst), 0);
+    }
+
+    unsafe extern "C" fn record_finalize() {
+        assert_eq!(LIFECYCLE_STEP.swap(2, Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn nwchemc_session_is_destroyed_before_runtime_finalize() {
+        LIFECYCLE_STEP.store(0, Ordering::SeqCst);
+        let mut token = 0u8;
+        let lifecycle = NwchemcLifecycle {
+            session: (&mut token as *mut u8).cast(),
+            destroy: record_destroy,
+            finalize: record_finalize,
+        };
+
+        drop(lifecycle);
+
+        assert_eq!(LIFECYCLE_STEP.load(Ordering::SeqCst), 2);
     }
 }
 
