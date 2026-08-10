@@ -132,6 +132,8 @@ fn soap_on_vs_off_water4_eight_seeds() {
     let mut sum_on = 0.0;
     let mut sum_off = 0.0;
     let mut soap_draws = 0usize;
+    let mut hops_on = 0usize;
+    let mut hops_off = 0usize;
     for s in 0..SEEDS {
         let (start, z, g) = packed_waters(M, s);
         let a = run_one(rec_on(z.clone(), g.clone()), start.view(), BUDGET, 100 + s, None);
@@ -139,6 +141,8 @@ fn soap_on_vs_off_water4_eight_seeds() {
         sum_on += a.best;
         sum_off += b.best;
         soap_draws += a.soap_draws;
+        hops_on += a.hops;
+        hops_off += b.hops;
         assert_eq!(b.soap_draws, 0, "soap_hop=false still drew SOAP");
         assert!(a.best.is_finite() && b.best.is_finite());
         let d = a.best - b.best;
@@ -156,9 +160,13 @@ fn soap_on_vs_off_water4_eight_seeds() {
     }
     let n = SEEDS as f64;
     println!(
-        "mol summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws}",
+        "mol summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws} hops_on {hops_on} hops_off {hops_off}",
         sum_on / n,
         sum_off / n
+    );
+    assert!(
+        hops_on * 4 > hops_off,
+        "SOAP is a budget tax: hops_on {hops_on} hops_off {hops_off}"
     );
 }
 
@@ -173,6 +181,8 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     let mut sum_on = 0.0;
     let mut sum_off = 0.0;
     let mut soap_draws = 0usize;
+    let mut hops_on = 0usize;
+    let mut hops_off = 0usize;
     for s in 0..SEEDS {
         let (start, z, g) = packed_waters(M, s + 40);
         let n = z.len();
@@ -188,6 +198,8 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
         sum_on += a.best;
         sum_off += b.best;
         soap_draws += a.soap_draws;
+        hops_on += a.hops;
+        hops_off += b.hops;
         assert_eq!(b.soap_draws, 0);
         assert!(a.best.is_finite() && b.best.is_finite());
         let d = a.best - b.best;
@@ -205,7 +217,7 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     }
     let n = SEEDS as f64;
     println!(
-        "slab summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws}",
+        "slab summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws} hops_on {hops_on} hops_off {hops_off}",
         sum_on / n,
         sum_off / n
     );
