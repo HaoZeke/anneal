@@ -3,7 +3,7 @@
 //! Cluster control is the Elja paper-budget table, not this file.
 //! This drives molecule and slab through `run_with_gradient`.
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, optimize, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -206,6 +206,67 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     let n = SEEDS as f64;
     println!(
         "slab summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws}",
+        sum_on / n,
+        sum_off / n
+    );
+}
+
+fn run_cluster(n: usize, budget: usize, seed: u64, soap: bool) -> Row {
+    let mut cfg = Config::recommended(n);
+    cfg.soap_hop = soap;
+    let pot = PairPotential::lennard_jones(n);
+    let mut ledger = Ledger::new(budget);
+    let mut opt = WarmLbfgs::default();
+    let mut relax = charged_relax(&pot, &mut opt, None);
+    let out = optimize(&cfg, &mut ledger, &mut relax, seed);
+    let soap_draws = out
+        .arms
+        .iter()
+        .find(|(name, _, _, _)| name == "soap")
+        .map(|(_, d, _, _)| *d)
+        .unwrap_or(0);
+    Row {
+        best: out.best,
+        hops: out.hops,
+        soap_draws,
+    }
+}
+
+#[test]
+fn soap_on_vs_off_lj38_eight_seeds() {
+    const N: usize = 38;
+    const SEEDS: u64 = 8;
+    const BUDGET: usize = 25_000;
+    let mut on_better = 0usize;
+    let mut off_better = 0usize;
+    let mut tie = 0usize;
+    let mut sum_on = 0.0;
+    let mut sum_off = 0.0;
+    let mut soap_draws = 0usize;
+    for s in 0..SEEDS {
+        let a = run_cluster(N, BUDGET, 300 + s, true);
+        let b = run_cluster(N, BUDGET, 300 + s, false);
+        sum_on += a.best;
+        sum_off += b.best;
+        soap_draws += a.soap_draws;
+        assert_eq!(b.soap_draws, 0, "soap_hop=false still drew SOAP");
+        assert!(a.best.is_finite() && b.best.is_finite());
+        let d = a.best - b.best;
+        if d < -1e-6 {
+            on_better += 1;
+        } else if d > 1e-6 {
+            off_better += 1;
+        } else {
+            tie += 1;
+        }
+        println!(
+            "lj38 seed {s}: soap_on {:.6} hops {} draws {} | soap_off {:.6} hops {} | d {:+.6}",
+            a.best, a.hops, a.soap_draws, b.best, b.hops, d
+        );
+    }
+    let n = SEEDS as f64;
+    println!(
+        "lj38 summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws}",
         sum_on / n,
         sum_off / n
     );
