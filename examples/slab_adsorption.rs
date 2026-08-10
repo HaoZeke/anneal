@@ -12,6 +12,8 @@
 //! Usage: slab_adsorption <con_file> <budget> <seeds> [shells]
 //! Env: RGPOT_HOST / RGPOT_PORT for the server (CuH2 for the copper case).
 
+mod common;
+
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
 use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
@@ -335,5 +337,22 @@ fn main() {
             }
             log_line(&format!("  wrote {path}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn periodic_profile_request_carries_the_simulation_cell() {
+        let positions = [0.0, 0.0, 0.0];
+        let atomic_numbers = [29];
+        let cell = [8.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 10.0];
+        let request = super::common::profile_engine::profile_request(
+            &positions,
+            &atomic_numbers,
+            Some(&cell),
+        );
+
+        assert_eq!(request.box_matrix, Some(&cell));
     }
 }

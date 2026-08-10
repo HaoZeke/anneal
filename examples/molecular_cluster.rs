@@ -11,6 +11,8 @@
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
 //! Engine is xtb (default), cp2k, rgpot, nwchemc, or cpmdc.
 
+mod common;
+
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
 use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, run_with_gradient};
@@ -332,7 +334,7 @@ mod tests {
     fn molecular_profile_request_has_no_simulation_cell() {
         let positions = [0.0, 0.0, 0.0];
         let atomic_numbers = [8];
-        let request = molecular_profile_request(&positions, &atomic_numbers);
+        let request = common::profile_engine::profile_request(&positions, &atomic_numbers, None);
 
         assert!(request.box_matrix.is_none());
     }
