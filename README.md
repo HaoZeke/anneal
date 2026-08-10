@@ -45,6 +45,25 @@ let mut ledger = Ledger::new(400_000);
 // supply `relax` closing over your objective; see examples/lj_cluster_search.rs
 ```
 
+External potentials use the same optimizer driver. The molecular-cluster and
+slab examples share one persistent in-process profile adapter; selecting
+`nwchemc` loads `libnwchemc` once and serves the complete hop loop without an
+RPC server or a result cache. Molecular requests omit a simulation cell, while
+the slab driver sends the periodic cell through the same adapter.
+
+```bash
+POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
+POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
+cargo run --locked --release --features rgpot-ex \
+  --example molecular_cluster -- 6 1200 8 nwchemc
+```
+
+The shared adapter is
+[`examples/common/profile_engine.rs`](examples/common/profile_engine.rs); the
+two consumers are
+[`examples/molecular_cluster.rs`](examples/molecular_cluster.rs) and
+[`examples/slab_adsorption.rs`](examples/slab_adsorption.rs).
+
 ## Install
 
 ```bash

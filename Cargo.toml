@@ -24,8 +24,9 @@ graphkey = ["dep:petgraph", "dep:nauty-pet"]
 vesin-nl = []
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
-# Examples that talk to an rgpot server. Off by default so HPC logins
-# without capnp can still build lj_cluster_search.
+# Examples using rgpot potential interfaces: persistent in-process profiles
+# for nwchemc/cpmdc and the optional RPC client. Off by default so builds
+# without Cap'n Proto can still compile lj_cluster_search.
 rgpot-ex = ["dep:rgpot-core"]
 
 [dependencies]
@@ -42,7 +43,7 @@ rand_distr  = "0.5"
 rayon       = "1.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
-# Only examples/molecular_cluster, slab_adsorption, rgpot_minimize.
+# Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
 rgpot-core = { git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "6e50d838ef75940f3776c36bf4fa6f90f23d4347", features = ["profile", "rpc"], optional = true }
 
 [dev-dependencies]

@@ -43,3 +43,24 @@ print(out["hops"], round(out["best_energy"], 3), len(out["best"]))
 Expected output (seed 0)::
 
     PLACEHOLDER
+
+* Direct quantum-chemistry profiles
+
+The molecular-cluster and slab examples use the same persistent
+=ProfileEngine=. The adapter loads a conforming potential library once, turns
+each energy-and-force result into the optimizer's value-and-gradient pair, and
+owns the session for the full hop loop. Selecting =nwchemc= calls
+=libnwchemc= in process; no RPC server or result cache participates. Molecular
+requests omit a simulation cell and slab requests carry their periodic cell
+through the same request type.
+
+#+begin_src bash
+POTENTIAL_CONFIG=/path/to/PotentialConfig.bin \
+POTENTIAL_LIBRARY=/path/to/libnwchemc.so \
+cargo run --locked --release --features rgpot-ex \
+  --example molecular_cluster -- 6 1200 8 nwchemc
+#+end_src
+
+The shared adapter is =examples/common/profile_engine.rs=. The molecular and
+periodic consumers are =examples/molecular_cluster.rs= and
+=examples/slab_adsorption.rs=.
