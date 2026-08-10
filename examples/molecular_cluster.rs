@@ -229,7 +229,7 @@ impl Engine {
 /// blob the schema defaults apply through an empty message.
 struct NwchemcEngine {
     _lib: libloading::Library,
-    session: *mut std::ffi::c_void,
+    lifecycle: Option<NwchemcLifecycle>,
     calc: unsafe extern "C" fn(
         *mut std::ffi::c_void,
         i32,
@@ -258,7 +258,19 @@ struct NwchemcLifecycle {
 }
 
 impl Drop for NwchemcLifecycle {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        unsafe {
+            (self.destroy)(self.session);
+            self.session = std::ptr::null_mut();
+            (self.finalize)();
+        }
+    }
+}
+
+impl Drop for NwchemcEngine {
+    fn drop(&mut self) {
+        drop(self.lifecycle.take());
+    }
 }
 
 impl NwchemcEngine {
@@ -290,17 +302,38 @@ impl NwchemcEngine {
             > = lib.get(b"nwchemc_session_energy_forces").expect("energy_forces");
             *s
         };
+        let destroy = unsafe {
+            let s: libloading::Symbol<unsafe extern "C" fn(*mut std::ffi::c_void)> =
+                lib.get(b"nwchemc_session_destroy").expect("session_destroy");
+            *s
+        };
+        let finalize = unsafe {
+            let s: libloading::Symbol<unsafe extern "C" fn()> =
+                lib.get(b"nwchemc_finalize").expect("finalize");
+            *s
+        };
         let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
-        Self { _lib: lib, session, calc, atmnrs, failures: 0 }
+        Self {
+            _lib: lib,
+            lifecycle: Some(NwchemcLifecycle {
+                session,
+                destroy,
+                finalize,
+            }),
+            calc,
+            atmnrs,
+            failures: 0,
+        }
     }
 
     fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
         let na = self.atmnrs.len();
         let pos: Vec<f64> = x.iter().cloned().collect();
         let mut forces = vec![0f64; 3 * na];
+        let session = self.lifecycle.as_ref().expect("nwchemc lifecycle").session;
         let res = unsafe {
             (self.calc)(
-                self.session,
+                session,
                 na as i32,
                 pos.as_ptr(),
                 self.atmnrs.as_ptr(),
