@@ -32,6 +32,10 @@ const LOCAL_CUTOFF: f64 = 1.35;
 /// Cheap redraws of one hop before ARTn or a starve-gate purchase.
 const MAX_REDRAW: usize = 16;
 
+/// SEakMC-style incomplete catalogue. Past this, new events are not stored
+/// and NAUTY bags are not observed; return tests still use contact keys.
+const EVENT_CAP: usize = 512;
+
 /// Fraction of stall restarts that leave `E_star` for a high-residual rep.
 const DIVERSE_START: f64 = 0.25;
 
@@ -71,6 +75,24 @@ impl Archive {
             reps: Vec::new(),
             pending_floors: HashSet::new(),
             pending_residual: false,
+        }
+    }
+
+    fn catalog_open(&self) -> bool {
+        self.catalog.event_count() < EVENT_CAP
+    }
+
+    fn note_bag(&mut self, keys: &[u64]) {
+        if self.catalog_open() {
+            self.catalog.observe_bag(keys);
+        }
+    }
+
+    fn note_search(&mut self, from: u64, landing: Option<Event>) -> bool {
+        if self.catalog_open() {
+            self.catalog.record_search(from, landing)
+        } else {
+            false
         }
     }
 
@@ -146,7 +168,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         archive.set_rep(here.unwrap(), x.view());
         ledger.record(e0, x.view());
         let keys = local_keys(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
-        archive.catalog.observe_bag(&keys);
+        archive.note_bag(&keys);
     }
     let mut out = ArchiveOutcome {
         best: e0,
@@ -211,13 +233,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     here_key = contact_key(here_coords.view(), LOCAL_CUTOFF);
                     here_keys = local_keys(here_coords.view(), LOCAL_CUTOFF);
                     here_bag = bag_key(&here_keys);
-                    archive.catalog.observe_bag(&here_keys);
+                    archive.note_bag(&here_keys);
                     returned_streak = 0;
                 }
             }
         }
 
-        archive.catalog.observe_bag(&here_keys);
+        archive.note_bag(&here_keys);
         // Recycle is a free topology hop, not a ledger-free outer continue:
         // apply the known landing and then hunt from there.
         let keys_now = here_keys.clone();
@@ -623,7 +645,7 @@ fn try_recycle<R: Rng + ?Sized>(
     *here_key = contact_key(here_coords.view(), LOCAL_CUTOFF);
     *here_keys = local_keys(here_coords.view(), LOCAL_CUTOFF);
     *here_bag = bag_key(here_keys);
-    archive.catalog.observe_bag(here_keys);
+    archive.note_bag(here_keys);
     true
 }
 
@@ -696,7 +718,7 @@ fn buy_full<R: Rng + ?Sized>(
         *here_key = contact_key(here_coords.view(), LOCAL_CUTOFF);
         *here_keys = local_keys(here_coords.view(), LOCAL_CUTOFF);
         *here_bag = bag_key(here_keys);
-        archive.catalog.observe_bag(here_keys);
+        archive.note_bag(here_keys);
     }
 }
 
@@ -719,13 +741,13 @@ fn record_atom_events(
             to: to_keys[i],
             dest_energy: ef,
         };
-        archive.catalog.record_search(from_keys[i], Some(ev));
+        archive.note_search(from_keys[i], Some(ev));
         recorded = true;
     }
     if !recorded {
         if let (Some(&fk), Some(&tk)) = (from_keys.first(), to_keys.first()) {
             if fk != tk {
-                archive.catalog.record_search(
+                archive.note_search(
                     fk,
                     Some(Event {
                         from: fk,
@@ -736,7 +758,7 @@ fn record_atom_events(
             }
         }
     }
-    archive.catalog.observe_bag(&to_keys);
+    archive.note_bag(&to_keys);
 }
 
 fn run_artn<R: Rng + ?Sized>(
@@ -778,17 +800,17 @@ fn run_artn<R: Rng + ?Sized>(
     };
     let climbed = activate(x.view(), |y| g(ledger, y), &act, sign);
     let Some(ao) = climbed else {
-        archive.catalog.record_search(uk, None);
+        archive.note_search(uk, None);
         return true;
     };
     if !ao.crossed || ledger.remaining() == 0 {
-        archive.catalog.record_search(uk, None);
+        archive.note_search(uk, None);
         return true;
     }
     let (ef, xf) = relax(ledger, ao.state.view(), cfg.relax_steps);
     out.full += 1;
     if !ef.is_finite() {
-        archive.catalog.record_search(uk, None);
+        archive.note_search(uk, None);
         return true;
     }
     let to_keys = local_keys(key_coords(xf.view(), cfg).view(), LOCAL_CUTOFF);
@@ -798,7 +820,7 @@ fn run_artn<R: Rng + ?Sized>(
         .find(|&k| k != uk)
         .or_else(|| to_keys.first().copied())
         .unwrap_or(uk);
-    archive.catalog.record_search(
+    archive.note_search(
         uk,
         Some(Event {
             from: uk,
@@ -818,7 +840,7 @@ fn run_artn<R: Rng + ?Sized>(
         archive.residual.edge(h, d);
     }
     archive.set_rep(dest, xf.view());
-    archive.catalog.observe_bag(&to_keys);
+    archive.note_bag(&to_keys);
     ledger.record(ef, xf.view());
     if ef < out.best {
         out.best = ef;

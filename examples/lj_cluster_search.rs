@@ -14,6 +14,7 @@ use anneal_core::methods::cluster_hopping::{
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
+use std::io::{self, Write};
 
 #[cfg(feature = "ira")]
 use anneal_core::shape::IraMetric;
@@ -374,6 +375,7 @@ fn main() {
                     hat.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
                     if hit { "  SOLVED" } else { "" }
                 );
+                let _ = io::stdout().flush();
             }
             let mut ledger = Ledger::new(budget);
             let mut opt = WarmLbfgs::default();
@@ -419,6 +421,7 @@ fn main() {
                 out.artn,
                 if hit { "  SOLVED" } else { "" }
             );
+            let _ = io::stdout().flush();
         }
         if pair {
             let rec_mean = if rec_hit_at.is_empty() {
