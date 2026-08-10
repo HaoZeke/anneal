@@ -3130,7 +3130,13 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if returning && cfg.return_polish > 0 {
+        let (e_new, x_new) = if returning
+            && cfg.return_polish > 0
+            && ledger.spent() >= ledger.remaining()
+        {
+            // First half of the budget skips returns (same saving as a
+            // plain return_screen). After the halfway mark, a short polish
+            // finishes near-incumbent trials that a full skip would drop.
             relax(ledger, x_screen.view(), cfg.return_polish)
         } else if screened_this || returning {
             if screened_this && !returning {
