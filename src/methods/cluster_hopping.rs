@@ -43,6 +43,77 @@ use crate::methods::minima_hopping::EscapeFeedback;
 use crate::path::{interpolate_path, StallDetector};
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
 
+/// Dimensionless coefficients for the Lennard-Jones cluster preset.
+///
+/// Every quantity with length or energy units enters the driver through this
+/// layer and is multiplied by a declared length or energy scale. Reduced units
+/// are the special case where both scales equal one.
+struct LennardJonesPreset;
+
+impl LennardJonesPreset {
+    const REDUCED_SCALE: f64 = 1.0;
+    const TEMPERATURE: f64 = 0.8;
+    const BIAS_HEIGHT: f64 = 0.25;
+    const MERGE_RADIUS: f64 = 0.7;
+    const ALL_POINTS_STEP: f64 = 0.38;
+    const SINGLE_POINT_STEP: f64 = 1.0;
+    const NEIGHBOUR_CUTOFF: f64 = 1.6;
+    const SYMMETRISE_CUTOFF: f64 = 2.5;
+    const GROUP_SHAKE: f64 = 0.3;
+    const GROUP_CUTOFF: f64 = 3.4;
+    const COVALENT_CUTOFF: f64 = 1.3;
+    const SYMMETRY_TOLERANCE: f64 = 0.35;
+    const ESCAPE_EPSILON: f64 = 1.0e-4;
+    const ESCAPE_AMPLITUDE: f64 = 0.25;
+    const SCREEN_MARGIN: f64 = 2.0;
+    const RECORD_GRADIENT: f64 = 1.0e-3;
+    const CONTAINER_RADIUS: f64 = 0.9;
+    const MIN_SEPARATION: f64 = 0.85;
+}
+
+/// Exactly one proposal library selected by a cluster preset.
+///
+/// The adaptive allocator may still choose among the kernels inside the
+/// selected library.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MoveLibrary {
+    /// Wales-Doye atomic moves.
+    Atomic,
+    /// Productive atomic arms only.
+    Lean,
+    /// Productive atomic arms plus composed surface relocation.
+    LeanBurst,
+    /// Atomic moves plus the heavy-tailed visiting kernel.
+    Visit,
+    /// Atomic moves plus twinning.
+    Twin,
+    /// Regrow from the incumbent's observed local order.
+    SelfReseed,
+    /// Let a posterior choose the observed-order construction.
+    LearnedReseed,
+    /// Offer every named and observed construction source.
+    Reseed,
+    /// Couple posterior-selected growth to twinning.
+    GrowthAndTwin,
+    /// Rigid molecular moves, optionally combined with atomic reactive moves.
+    Molecular {
+        /// Atom indices belonging to each declared rigid group.
+        groups: Vec<Vec<usize>>,
+        /// Keep atomic moves reachable for bond breaking and formation.
+        reactive: bool,
+    },
+}
+
+impl MoveLibrary {
+    /// Declared rigid groups for a molecular library.
+    pub fn declared_groups(&self) -> Option<&[Vec<usize>]> {
+        match self {
+            Self::Molecular { groups, .. } => Some(groups),
+            _ => None,
+        }
+    }
+}
+
 /// The move library, dispatched by value.
 ///
 /// [`MoveKernel::propose`] is generic over the generator, which makes the
