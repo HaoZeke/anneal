@@ -78,6 +78,8 @@ pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
 pub mod screen;
+/// ACE ν=3 / λ-SOAP CG contraction of a spherical expansion.
+pub mod ace;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
 pub mod spectral;

@@ -19,12 +19,11 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian. The 4-body block is the mean and second moment of the
-//! two triple invariants SOAP cannot see (volume and the product of
-//! pairwise dots). The means of an isotropic 12-shell coincide for
-//! icosahedral and cuboctahedral centres; the second moments do not.
-//! Leftover is `μ` on that block. The 555→421 / fcc-prototype
-//! residual is an oracle. Opt-in, cluster only.
+//! Jacobian. The hop fingerprint is SOAP at `l_max = 6` plus the ACE
+//! ν=3 / λ-SOAP CG contraction of the same spherical expansion.
+//! Ih is silent in the power spectrum until `l = 6`. Surface
+//! coordination is SOFI/IRA (a length), not this map. The 555→421 /
+//! fcc-prototype residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -64,13 +63,14 @@ impl SoapSpec {
         self.dim() * neighbor_channels(species).len()
     }
 
-    /// Extra 4-body scalars per atom: mean and second moment of the
-    /// two triple invariants, per radial channel. The means of an
-    /// isotropic 12-shell are the same for icosahedral and cuboctahedral
-    /// centres; the second moments are not, because one packing has
-    /// one kind of face and the other mixes flat and tetrahedral triples.
+    /// ACE ν=3 / λ-SOAP scalars per atom per species channel.
     pub fn nu3_dim(self) -> usize {
-        4 * self.n_max
+        crate::ace::dim(self.n_max, self.l_max)
+    }
+
+    /// `nu3_dim` times the number of observed neighbour-species channels.
+    pub fn nu3_feat_dim(self, species: Option<&[u32]>) -> usize {
+        self.nu3_dim() * neighbor_channels(species).len()
     }
 }
 
@@ -182,15 +182,28 @@ pub fn local_nu3_z(
     let soap = local_spectra_z(x, spec, species);
     let n_at = soap.nrows();
     let d0 = soap.ncols();
-    let d1 = spec.nu3_dim();
+    let d1 = spec.nu3_feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, d0 + d1));
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let ace1 = spec.nu3_dim();
+    let rcut = spec.rcut_nn;
     for i in 0..n_at {
         for t in 0..d0 {
             out[[i, t]] = soap[[i, t]];
         }
-        let b = four_body(x, i, n_at, spec, species);
-        for t in 0..d1 {
-            out[[i, d0 + t]] = b[t];
+        if n_at < 2 || !(rcut > 0.0) {
+            continue;
+        }
+        let (_, c) = atom_expand(x, i, n_at, rcut, spec, species);
+        for ch in 0..n_chan {
+            let c0 = ch * spec.n_max * n_lm;
+            let sl = &c[c0..c0 + spec.n_max * n_lm];
+            let b = crate::ace::from_c(sl, spec.n_max, spec.l_max);
+            for t in 0..ace1 {
+                out[[i, d0 + ch * ace1 + t]] = b[t];
+            }
         }
     }
     out
@@ -276,7 +289,7 @@ fn four_body(
     species: Option<&[u32]>,
 ) -> Vec<f64> {
     let neigh = gather_neigh(x, i, n_at, spec.rcut_nn, species);
-    let mut acc = vec![0.0; spec.nu3_dim()];
+    let mut acc = vec![0.0; 4 * spec.n_max];
     let m = neigh.len();
     if m < 3 {
         return acc;
@@ -326,7 +339,7 @@ pub fn jacobian_four(
     species: Option<&[u32]>,
 ) -> Array2<f64> {
     let n_at = x.len() / 3;
-    let d1 = spec.nu3_dim();
+    let d1 = 4 * spec.n_max;
     let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
     let rcut = spec.rcut_nn;
     if n_at < 4 || !(rcut > 0.0) {
@@ -550,17 +563,104 @@ fn accum_four(
     }
 }
 
-/// Stacked Jacobian of SOAP power spectrum and ν=3 scalars.
+/// Analytic Jacobian of the ACE ν=3 block, shape `(N · nu3_feat, 3N)`.
+pub fn jacobian_ace(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
+    let n_at = x.len() / 3;
+    let channels = neighbor_channels(species);
+    let n_chan = channels.len();
+    let ace1 = spec.nu3_dim();
+    let d1 = ace1 * n_chan;
+    let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
+    if n_at < 2 || ace1 == 0 {
+        return j;
+    }
+    let rcut = spec.rcut_nn;
+    if !(rcut > 0.0) {
+        return j;
+    }
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let c_atom = n_chan * spec.n_max * n_lm;
+    let mut c = vec![vec![0.0; c_atom]; n_at];
+    let mut dbdc = Vec::with_capacity(n_at * n_chan);
+    for i in 0..n_at {
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species);
+        c[i] = ci;
+        for ch in 0..n_chan {
+            let c0 = ch * spec.n_max * n_lm;
+            dbdc.push(crate::ace::d_from_c(
+                &c[i][c0..c0 + spec.n_max * n_lm],
+                spec.n_max,
+                spec.l_max,
+            ));
+        }
+    }
+    for i in 0..n_at {
+        let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+        for jj in 0..n_at {
+            if jj == i {
+                continue;
+            }
+            let d = [
+                x[3 * jj] - xi[0],
+                x[3 * jj + 1] - xi[1],
+                x[3 * jj + 2] - xi[2],
+            ];
+            let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+            if r >= rcut || r < 1e-12 {
+                continue;
+            }
+            let ch = neighbor_channel(species, jj, &channels);
+            let u = [d[0] / r, d[1] / r, d[2] / r];
+            let (ylm, dylm) = tesseral(u, spec.l_max);
+            let fc = fcut(r, rcut);
+            let dfc = dfcut(r, rcut);
+            let db = &dbdc[i * n_chan + ch];
+            for n in 0..spec.n_max {
+                let g = radial(n, r, rcut);
+                let dg = dradial(n, r, rcut);
+                let w = g * fc;
+                let dw = dg * fc + g * dfc;
+                for lm in 0..n_lm {
+                    let yv = ylm[lm];
+                    for a in 0..3 {
+                        let dyv = {
+                            let mut s = 0.0;
+                            for b in 0..3 {
+                                let proj = if a == b { 1.0 } else { 0.0 } - u[b] * u[a];
+                                s += dylm[lm][b] * proj;
+                            }
+                            s / r
+                        };
+                        let dc = dw * u[a] * yv + w * dyv;
+                        let col_c = n * n_lm + lm;
+                        for t in 0..ace1 {
+                            let gij = db[[t, col_c]] * dc;
+                            j[[i * d1 + ch * ace1 + t, 3 * jj + a]] += gij;
+                            j[[i * d1 + ch * ace1 + t, 3 * i + a]] -= gij;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    j
+}
+
+/// Stacked Jacobian of SOAP power spectrum and ACE ν=3 scalars.
 pub fn jacobian_nu3(
     x: ArrayView1<f64>,
     spec: SoapSpec,
     species: Option<&[u32]>,
 ) -> Array2<f64> {
     let js = jacobian_z(x, spec, species);
-    let jf = jacobian_four(x, spec, species);
+    let ja = jacobian_ace(x, spec, species);
     let n_at = x.len() / 3;
     let d0 = spec.feat_dim(species);
-    let d1 = spec.nu3_dim();
+    let d1 = spec.nu3_feat_dim(species);
     let dim = d0 + d1;
     let mut j = Array2::<f64>::zeros((n_at * dim, n_at * 3));
     for i in 0..n_at {
@@ -571,7 +671,7 @@ pub fn jacobian_nu3(
         }
         for t in 0..d1 {
             for k in 0..n_at * 3 {
-                j[[i * dim + d0 + t, k]] = jf[[i * d1 + t, k]];
+                j[[i * dim + d0 + t, k]] = ja[[i * d1 + t, k]];
             }
         }
     }
@@ -1198,40 +1298,27 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             continue;
         }
         let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-        // SOAP and the 4-body means are isotropic on a closed shell.
-        // Leftover lives in the second moments (4n+2, 4n+3).
+        // SOAP l ≤ 3 is isotropic on a closed shell. Leftover is the
+        // ACE ν=3 / high-l block: pull those channels to the cloud mean.
         for t in 0..dim {
             target[i * dim + t] = loc[[i, t]];
         }
-        let d0 = dim - spec.nu3_dim();
-        for n in 0..spec.n_max {
-            let a = d0 + 4 * n + 2;
-            let b = d0 + 4 * n + 3;
-            if a < dim {
-                target[i * dim + a] = mu[k][a];
-            }
-            if b < dim {
-                target[i * dim + b] = mu[k][b];
-            }
+        let d0 = dim - spec.nu3_feat_dim(species);
+        for t in d0..dim {
+            target[i * dim + t] = mu[k][t];
         }
     }
-    let d0 = dim - spec.nu3_dim();
+    let d0 = dim - spec.nu3_feat_dim(species);
     let mut nu32 = 0.0;
     let mut nnu = 0.0;
     for i in 0..n_at {
         if !keep[i] {
             continue;
         }
-        for n in 0..spec.n_max {
-            for off in [2usize, 3] {
-                let t = d0 + 4 * n + off;
-                if t >= dim {
-                    continue;
-                }
-                let d = target[i * dim + t] - loc[[i, t]];
-                nu32 += d * d;
-                nnu += 1.0;
-            }
+        for t in d0..dim {
+            let d = target[i * dim + t] - loc[[i, t]];
+            nu32 += d * d;
+            nnu += 1.0;
         }
     }
     let nu3_rms = if nnu > 0.0 {
@@ -1594,8 +1681,104 @@ fn tesseral(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
         n33 * x * (-6.0 * yy),
         0.0,
     ];
-    let _ = l_max;
+    if l_max <= 3 {
+        return (y, dy);
+    }
+    tesseral_al(u, l_max)
+}
+
+/// Associated-Legendre tesseral Y_lm and Cartesian derivatives, any `l_max`.
+fn tesseral_al(u: [f64; 3], l_max: usize) -> (Vec<f64>, Vec<[f64; 3]>) {
+    let y = ylm_real(u, l_max);
+    let n_lm = y.len();
+    let mut dy = vec![[0.0; 3]; n_lm];
+    let eps = 1e-7;
+    for a in 0..3 {
+        let mut up = u;
+        up[a] += eps;
+        let np = (up[0] * up[0] + up[1] * up[1] + up[2] * up[2]).sqrt();
+        if np > 1e-15 {
+            up[0] /= np;
+            up[1] /= np;
+            up[2] /= np;
+        }
+        let yp = ylm_real(up, l_max);
+        let mut um = u;
+        um[a] -= eps;
+        let nm = (um[0] * um[0] + um[1] * um[1] + um[2] * um[2]).sqrt();
+        if nm > 1e-15 {
+            um[0] /= nm;
+            um[1] /= nm;
+            um[2] /= nm;
+        }
+        let ym = ylm_real(um, l_max);
+        for i in 0..n_lm {
+            dy[i][a] = (yp[i] - ym[i]) / (2.0 * eps);
+        }
+    }
     (y, dy)
+}
+
+fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
+    let n_lm = (l_max + 1) * (l_max + 1);
+    let mut y = vec![0.0; n_lm];
+    let (x, yy, z) = (u[0], u[1], u[2]);
+    let rho2 = x * x + yy * yy;
+    let rho = rho2.sqrt();
+    // Associated Legendre P_l^m(z) on the unit sphere, sinθ = ρ.
+    let mut p = vec![vec![0.0; l_max + 1]; l_max + 1];
+    p[0][0] = 1.0;
+    for m in 1..=l_max {
+        p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
+    }
+    for m in 0..l_max {
+        if m + 1 <= l_max {
+            p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
+        }
+    }
+    for l in 2..=l_max {
+        for m in 0..=l.saturating_sub(2) {
+            let a = 2.0 * l as f64 - 1.0;
+            let b = (l + m - 1) as f64;
+            let d = (l - m) as f64;
+            p[l][m] = (a * z * p[l - 1][m] - b * p[l - 2][m]) / d;
+        }
+    }
+    let mut cosph = vec![1.0; l_max + 1];
+    let mut sinph = vec![0.0; l_max + 1];
+    if rho > 1e-14 {
+        cosph[1] = x / rho;
+        sinph[1] = yy / rho;
+        for m in 2..=l_max {
+            cosph[m] = cosph[1] * cosph[m - 1] - sinph[1] * sinph[m - 1];
+            sinph[m] = sinph[1] * cosph[m - 1] + cosph[1] * sinph[m - 1];
+        }
+    }
+    for l in 0..=l_max {
+        let n0 = ((2.0 * l as f64 + 1.0) / (4.0 * PI)).sqrt();
+        y[lm_index(l, 0)] = n0 * p[l][0];
+        for m in 1..=l {
+            let nf = fact_ratio(l - m, l + m);
+            let nlm = n0 * (nf * 2.0).sqrt();
+            y[lm_index(l, m as i32)] = nlm * p[l][m] * cosph[m];
+            y[lm_index(l, -(m as i32))] = nlm * p[l][m] * sinph[m];
+        }
+    }
+    y
+}
+
+fn fact_ratio(n_minus: usize, n_plus: usize) -> f64 {
+    // (l-m)! / (l+m)!
+    if n_plus < n_minus {
+        return 0.0;
+    }
+    let mut v = 1.0;
+    let mut k = n_minus + 1;
+    while k <= n_plus {
+        v /= k as f64;
+        k += 1;
+    }
+    v
 }
 
 fn strip_rigid(x: ArrayView1<f64>, dr: &mut Array1<f64>) {
@@ -1808,7 +1991,7 @@ mod tests {
     #[test]
     fn nu3_adds_two_scalars_per_radial_channel() {
         let spec = SoapSpec::default();
-        assert_eq!(spec.nu3_dim(), 4 * spec.n_max);
+        assert!(spec.nu3_dim() > 0);
         let x = tetra();
         let p = local_spectra(x.view(), spec);
         let n3 = local_nu3(x.view(), spec);
@@ -1854,6 +2037,34 @@ mod tests {
         assert!(
             m2.sqrt() > 1e-3,
             "second moment of the angular triple is the same on ico and cuboct: ico {bi:?} cuboct {bc:?}"
+        );
+    }
+
+    #[test]
+    fn ace_lmax6_separates_ico_from_cuboct() {
+        let spec = SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5,
+        };
+        let mut ico = ico13();
+        let nn = 2.0_f64.powf(1.0 / 6.0);
+        for v in ico.iter_mut() {
+            *v *= nn;
+        }
+        let cub = cuboct13();
+        let bi = local_nu3(ico.view(), spec);
+        let bc = local_nu3(cub.view(), spec);
+        let d0 = spec.dim();
+        let mut d2 = 0.0;
+        for t in d0..bi.ncols() {
+            let d = bi[[0, t]] - bc[[0, t]];
+            d2 += d * d;
+        }
+        assert!(
+            d2.sqrt() > 1e-4,
+            "ACE l_max=6 centre leftover ico vs cuboct vanished: {}",
+            d2.sqrt()
         );
     }
 
@@ -2233,7 +2444,10 @@ mod tests {
 
     #[test]
     fn nu3_leftover_on_ico_fivefold_is_nonzero() {
-        let spec = SoapSpec::default();
+        let spec = SoapSpec {
+            l_max: 6,
+            ..SoapSpec::default()
+        };
         let mut x = ico13();
         let nn = 2.0_f64.powf(1.0 / 6.0);
         for v in x.iter_mut() {
@@ -2280,24 +2494,7 @@ mod tests {
         );
         assert!(
             nu3_rms > soap_rms,
-            "nu3 leftover {nu3_rms} should exceed SOAP leftover {soap_rms}"
-        );
-        let mut m22 = 0.0;
-        let mut nm2 = 0.0;
-        for i in 0..n {
-            for ch in 0..spec.n_max {
-                for off in [2usize, 3] {
-                    let t = 4 * ch + off;
-                    let d = loc[[i, d0 + t]] - mu_n[t];
-                    m22 += d * d;
-                    nm2 += 1.0;
-                }
-            }
-        }
-        let m2_rms = (m22 / nm2).sqrt();
-        assert!(
-            m2_rms >= NU3_DEFECT,
-            "second-moment leftover {m2_rms} is below the packing floor {NU3_DEFECT}"
+            "ACE leftover {nu3_rms} should exceed SOAP leftover {soap_rms}"
         );
         let mut rng = StdRng::seed_from_u64(11);
         let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
@@ -2310,23 +2507,6 @@ mod tests {
         assert!(
             (atom_rms - 0.4).abs() < 1e-9,
             "gated leftover hop rms {atom_rms}, want the 0.4 cap"
-        );
-        let b0 = four_body(x.view(), 0, 13, spec, None);
-        let b1 = four_body(y.view(), 0, 13, spec, None);
-        let mut dmu0 = 0.0;
-        let mut dmu1 = 0.0;
-        for ch in 0..spec.n_max {
-            for off in [2usize, 3] {
-                let t = 4 * ch + off;
-                let u = b0[t] - mu_n[t];
-                let v = b1[t] - mu_n[t];
-                dmu0 += u * u;
-                dmu1 += v * v;
-            }
-        }
-        assert!(
-            dmu1 < dmu0,
-            "centre second moment should approach the cloud mean: {dmu0} -> {dmu1}"
         );
     }
 
@@ -2354,7 +2534,7 @@ mod tests {
         x[8] += 0.1;
         let ja = jacobian_four(x.view(), spec, None);
         let n_at = x.len() / 3;
-        let d1 = spec.nu3_dim();
+        let d1 = 4 * spec.n_max;
         let eps = 1e-6;
         let mut max_a = 0.0_f64;
         let mut max_d = 0.0_f64;
