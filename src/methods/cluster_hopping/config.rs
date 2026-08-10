@@ -188,6 +188,8 @@ pub struct Config {
     pub symmetrise_on_stall: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
+    /// Coordinate-space radius used to merge points after symmetrisation.
+    pub symmetry_merge_radius: f64,
     /// Hops without improvement before a symmetrisation is considered.
     ///
     /// Separate from the escape patience because the two answer different
@@ -676,6 +678,7 @@ impl Config {
             funnel_period: 20_000,
             symmetrise_on_stall: false,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
+            symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,
             tabu_on_stall: false,
             tabu_capacity: 8,

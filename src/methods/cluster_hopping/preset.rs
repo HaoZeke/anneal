@@ -12,6 +12,7 @@ impl LennardJonesPreset {
     pub(super) const SINGLE_POINT_STEP: f64 = 1.0;
     pub(super) const NEIGHBOUR_CUTOFF: f64 = 1.6;
     pub(super) const SYMMETRISE_CUTOFF: f64 = 2.5;
+    pub(super) const SYMMETRY_MERGE_RADIUS: f64 = 0.7;
     pub(super) const GROUP_SHAKE: f64 = 0.3;
     pub(super) const GROUP_CUTOFF: f64 = 3.4;
     pub(super) const COVALENT_CUTOFF: f64 = 1.3;
@@ -30,4 +31,7 @@ pub(super) struct MolecularPreset;
 impl MolecularPreset {
     pub(super) const COVALENT_DIAMETER: f64 = 2.0;
     pub(super) const GROUP_CUTOFF: f64 = 2.5;
+    pub(super) const REPACK_RADIUS: f64 = 2.5;
+    pub(super) const REPACK_RADIAL_JITTER: f64 = 2.0;
+    pub(super) const REPACK_GROUP_SPACING: f64 = 0.15;
 }
