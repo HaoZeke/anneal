@@ -4345,6 +4345,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn repack_rigid_groups_keeps_internal_distances() {
+        let mut rng = StdRng::seed_from_u64(7);
+        let mut x = Array1::zeros(9);
+        x[0] = 0.0;
+        x[1] = 0.0;
+        x[2] = 0.0;
+        x[3] = 0.96;
+        x[4] = 0.0;
+        x[5] = 0.0;
+        x[6] = -0.24;
+        x[7] = 0.93;
+        x[8] = 0.0;
+        let groups = vec![vec![0, 1, 2]];
+        let y = repack_rigid_groups(x.view(), &groups, &mut rng);
+        let d = |a: &Array1<f64>, i: usize, j: usize| {
+            let mut s = 0.0;
+            for k in 0..3 {
+                let t = a[3 * i + k] - a[3 * j + k];
+                s += t * t;
+            }
+            s.sqrt()
+        };
+        assert!((d(&x, 0, 1) - d(&y, 0, 1)).abs() < 1e-12);
+        assert!((d(&x, 0, 2) - d(&y, 0, 2)).abs() < 1e-12);
+        assert!((d(&x, 1, 2) - d(&y, 1, 2)).abs() < 1e-12);
+        let moved = (0..3).any(|k| (y[k] - x[k]).abs() > 1e-9);
+        assert!(moved, "repack left the group on its original centre");
+    }
+
+    #[test]
     fn derived_replaces_the_two_hand_set_scalars() {
         let rec = Config::recommended(13);
         let der = Config::derived(13);
