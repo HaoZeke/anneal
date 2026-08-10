@@ -11,6 +11,7 @@ use eindir_core::{Bounds, FPair};
 use ndarray::Array1;
 use num_traits::Float;
 use rand::Rng;
+use std::sync::Mutex;
 
 use crate::accept::AcceptRule;
 use crate::cool::Cooling;
@@ -49,6 +50,99 @@ pub trait Sampler<T: Float>: Send + Sync {
     /// Best-seen pair for the given state. Default impl returns `state.best`.
     fn best_pair(&self, state: &State) -> FPair<f64> {
         state.best.clone()
+    }
+}
+
+/// Basin-hopping sampler with interchangeable proposal and quench kernels.
+///
+/// `run_rs` owns the hop loop. This type supplies the basin-hopping step:
+/// propose from the current local minimum, quench the proposal, then apply the
+/// configured acceptance rule to the two quenched objective values. Cluster
+/// moves and ordinary continuous-space kernels therefore use the same driver.
+pub struct HoppingSampler<C, M, A, Q> {
+    initial_position: Array1<f64>,
+    mover: M,
+    cooling: C,
+    accept: A,
+    quench_steps: usize,
+    quench: Mutex<Q>,
+}
+
+impl<C, M, A, Q> HoppingSampler<C, M, A, Q> {
+    /// Constructs a basin-hopping sampler from general sampler components.
+    pub fn new(
+        initial_position: Array1<f64>,
+        mover: M,
+        cooling: C,
+        accept: A,
+        quench_steps: usize,
+        quench: Q,
+    ) -> Self {
+        assert!(!initial_position.is_empty(), "initial position must not be empty");
+        assert!(quench_steps > 0, "quench_steps must be positive");
+        Self {
+            initial_position,
+            mover,
+            cooling,
+            accept,
+            quench_steps,
+            quench: Mutex::new(quench),
+        }
+    }
+}
+
+impl<C, M, A, Q> Sampler<f64> for HoppingSampler<C, M, A, Q>
+where
+    C: Cooling<f64>,
+    M: MoveKernel<f64>,
+    A: AcceptRule<f64>,
+    Q: for<'a> FnMut(ArrayView1<'a, f64>, usize) -> FPair<f64> + Send,
+{
+    fn initial_state<R: Rng>(&self, _rng: &mut R) -> State {
+        let pair = self
+            .quench
+            .lock()
+            .expect("quench mutex poisoned")
+            (self.initial_position.view(), self.quench_steps);
+        State {
+            cur: pair.clone(),
+            best: pair,
+        }
+    }
+
+    fn initial_state_from_position(&self, pos: Array1<f64>) -> Option<State> {
+        let pair = self
+            .quench
+            .lock()
+            .expect("quench mutex poisoned")
+            (pos.view(), self.quench_steps);
+        Some(State {
+            cur: pair.clone(),
+            best: pair,
+        })
+    }
+
+    fn step<R: Rng>(&self, state: &mut State, epoch: usize, rng: &mut R) -> bool {
+        let temperature = self.cooling.temperature(epoch);
+        let proposal = self
+            .mover
+            .propose(state.cur.pos.view(), temperature, rng);
+        let quenched = self
+            .quench
+            .lock()
+            .expect("quench mutex poisoned")
+            (proposal.view(), self.quench_steps);
+        let probability = self
+            .accept
+            .accept_prob(quenched.val - state.cur.val, temperature);
+        if rng.random::<f64>() >= probability {
+            return false;
+        }
+        state.cur = quenched;
+        if state.cur.val < state.best.val {
+            state.best = state.cur.clone();
+        }
+        true
     }
 }
 
