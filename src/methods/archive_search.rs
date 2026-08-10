@@ -104,6 +104,70 @@ fn hop_best_at(hop: &crate::methods::cluster_hopping::Outcome, fallback: usize) 
         .unwrap_or(fallback)
 }
 
+/// Independent hops from the same start; keep the record.
+struct HopAcc {
+    best: f64,
+    best_state: Option<Array1<f64>>,
+    best_at: usize,
+    screens: usize,
+    full: usize,
+    returned: usize,
+    artn: usize,
+    basins: usize,
+}
+
+fn hops_from_start<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    mut grad: Option<&mut GradFn<'g>>,
+    rng: &mut R,
+    slices: &[usize],
+) -> HopAcc {
+    let mut acc = HopAcc {
+        best: f64::INFINITY,
+        best_state: None,
+        best_at: 0,
+        screens: 0,
+        full: 0,
+        returned: 0,
+        artn: 0,
+        basins: 0,
+    };
+    let mut spent_before = ledger.spent();
+    for &slice in slices {
+        let rest = ledger.remaining();
+        if rest == 0 {
+            break;
+        }
+        let take = slice.max(1).min(rest);
+        let mut led = Ledger::new(take);
+        let hop = run_with_gradient(cfg, start, &mut led, relax, grad.as_deref_mut(), rng);
+        let used = led.spent();
+        let _ = ledger.charge_many(used);
+        acc.screens += hop.screened_out;
+        acc.full += hop.hops;
+        acc.returned += hop.returned;
+        acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+        acc.basins = acc.basins.max(hop.basins);
+        if hop.best.is_finite() {
+            let at = spent_before.saturating_add(hop_best_at(&hop, used));
+            if hop.best < acc.best - 1e-12 {
+                acc.best = hop.best;
+                acc.best_state = hop.best_state;
+                acc.best_at = at;
+            } else if (hop.best - acc.best).abs() < 1e-12 && (acc.best_at == 0 || at < acc.best_at)
+            {
+                acc.best_at = at;
+                acc.best_state = hop.best_state;
+            }
+        }
+        spent_before = spent_before.saturating_add(used);
+    }
+    acc
+}
+
 fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f64>) {
     if !energy.is_finite() {
         return;
@@ -132,43 +196,58 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
 ) -> ArchiveOutcome {
     let cap = ledger.remaining();
     // Molecular / slab budgets are a few thousand evaluations. A 30 %
-    // skip-return slice is then too short to be a hop, so they run one
-    // pass. LJ campaigns (400k) keep the two-pass split.
+    // skip-return slice is then too short to be a hop, so they spend the
+    // ledger as independent walks from the same start. LJ 400k keeps the
+    // two-pass split.
     if cap < 50_000 {
-        let mut c = cfg.clone();
-        c.return_screen = true;
-        c.symmetrise_on_stall = true;
-        // Water at screen 6 / relax 60 does ~30 hops in 2000 evaluations.
-        // The default stall patience is 5000 hops, so tabu and symmetrise
-        // never fire. Bring them inside a molecular campaign. A slab keeps
-        // the skip-return hop that already beat rec on CuH2 seed 2.
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
-        if molecular {
-            c.return_polish = (cfg.relax_steps / 4).max(1);
-            c.escape_stall_patience = 8;
-            c.escape_stall_factor = 1.0;
+        let slab = cfg.active_region.is_some();
+        let mut c = cfg.clone();
+        c.symmetrise_on_stall = true;
+        c.return_polish = 0;
+        let slices: Vec<usize> = if molecular {
+            // A 6-step return screen drops the water-prism quench. Two
+            // rec-quality walks from the same start keep quench quality
+            // and buy a second shot with the leftover ledger.
+            c.return_screen = false;
+            let a = ((cap * 6) / 10).max(1);
+            vec![a, cap.saturating_sub(a).max(1)]
+        } else if slab {
+            // Four skip-return walks; CuH2 seed 2's deeper well is a
+            // different draw from the same start, not a longer grind.
+            c.return_screen = true;
+            let q = (cap / 4).max(1);
+            vec![q, q, q, cap.saturating_sub(3 * q).max(1)]
         } else {
-            c.return_polish = 0;
-        }
-        let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
-        if hop.best.is_finite() {
-            if let Some(ref x) = hop.best_state {
-                record_best(archive, cfg, hop.best, x.view());
+            c.return_screen = true;
+            vec![cap]
+        };
+        let acc = hops_from_start(
+            &c,
+            start,
+            ledger,
+            relax,
+            grad.as_deref_mut(),
+            rng,
+            &slices,
+        );
+        if acc.best.is_finite() {
+            if let Some(ref x) = acc.best_state {
+                record_best(archive, cfg, acc.best, x.view());
             }
         }
-        let best_at = hop_best_at(&hop, ledger.spent());
         return ArchiveOutcome {
-            best: hop.best,
-            best_state: hop.best_state,
-            screens: hop.screened_out,
-            full: hop.hops,
-            returned: hop.returned,
+            best: acc.best,
+            best_state: acc.best_state,
+            screens: acc.screens,
+            full: acc.full,
+            returned: acc.returned,
             same_floor: 0,
-            floors: archive.floors.len().max(hop.basins),
+            floors: archive.floors.len().max(acc.basins),
             events: archive.catalog.event_count(),
-            artn: hop.symmetrised.0 + hop.stall_escapes,
+            artn: acc.artn,
             charged: ledger.spent(),
-            best_at,
+            best_at: acc.best_at,
         };
     }
     // 30 % skip-return: enough for the ico GM on LJ55 (hits by ~120k of 400k).
