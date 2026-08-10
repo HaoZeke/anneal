@@ -14,7 +14,7 @@
 //! `cargo run --release --example cluster_bench -- <potential> <n> <budget> <seeds> [mechanisms]`
 //! where `<potential>` is `lj`, or `morse:RHO` such as `morse:6`.
 
-use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger};
+use anneal_core::methods::cluster_hopping::{Config, Keying, Ledger, MoveLibrary};
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_search::{
     first_encounter, median_encounter, search, verify, Encounter,
@@ -124,12 +124,18 @@ fn main() {
     cfg.adaptive_screen = opts.contains(&"aq");
     cfg.probe_screen = opts.contains(&"probe");
     cfg.track_funnels = opts.contains(&"funnel");
-    cfg.reseed_moves = opts.contains(&"reseed");
-    cfg.twin_moves = opts.contains(&"twin");
     cfg.delayed_acceptance = opts.contains(&"da");
-    cfg.learn_construction = opts.contains(&"learn");
-    if cfg.learn_construction {
-        cfg.reseed_moves = true;
+    let selected: Vec<MoveLibrary> = [
+        ("reseed", MoveLibrary::Reseed),
+        ("twin", MoveLibrary::Twin),
+        ("learn", MoveLibrary::LearnedReseed),
+    ]
+    .into_iter()
+    .filter_map(|(name, library)| opts.contains(&name).then_some(library))
+    .collect();
+    assert!(selected.len() <= 1, "select at most one move library");
+    if let Some(library) = selected.into_iter().next() {
+        cfg.move_library = library;
     }
     if let Ok(v) = std::env::var("SCREEN_STEPS") {
         cfg.screen_steps = v.parse().unwrap_or(25);

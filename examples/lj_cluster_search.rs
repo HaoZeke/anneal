@@ -9,7 +9,7 @@
 
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::cluster_hopping::{
-    optimize_with_gradient, Config, Keying, Ledger, Outcome,
+    optimize_with_gradient, Config, Keying, Ledger, MoveLibrary, Outcome,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
@@ -240,7 +240,7 @@ fn main() {
     if std::env::args().nth(4).map(|v| v.contains("committor")).unwrap_or(false) {
         use anneal_core::methods::committor_pop::committor_population;
         let mut ccfg = Config::for_cluster(n);
-        ccfg.burst_moves = true;
+        ccfg.move_library = MoveLibrary::LeanBurst;
         ccfg.allocate_moves = true;
         ccfg.depth_reward = true;
         let walkers = 6usize;
@@ -352,27 +352,34 @@ fn main() {
     cfg.statistical_temperature = opts.contains(&"stemp");
     // A well-tempered bias in quenched energy, scales from the run itself.
     cfg.energy_bias = opts.contains(&"ebias");
-    // The heavy-tailed visiting distribution of generalised annealing.
-    cfg.visit_moves = opts.contains(&"visit");
-    // Rebuild the cluster from a library of local orders rather than displacing
-    // it. Acts on the operator that crosses funnels.
-    cfg.reseed_moves = opts.contains(&"reseed");
-    // Regrow from the structure's own order, carrying no named packing.
-    cfg.self_reseed = opts.contains(&"selfseed");
-    // The growth source chosen by a posterior rather than fixed, so an arm that
-    // does not pay on this system is switched off by evidence.
-    cfg.learn_construction = opts.contains(&"learncon");
-    // Local order and global twinning together, the source under a posterior.
+    let requested_libraries = [
+        ("visit", MoveLibrary::Visit),
+        ("reseed", MoveLibrary::Reseed),
+        ("selfseed", MoveLibrary::SelfReseed),
+        ("learncon", MoveLibrary::LearnedReseed),
+        ("lean", MoveLibrary::Lean),
+        ("burst", MoveLibrary::LeanBurst),
+        ("twin", MoveLibrary::Twin),
+        ("gtwin", MoveLibrary::GrowthAndTwin),
+    ];
+    let selected: Vec<MoveLibrary> = requested_libraries
+        .into_iter()
+        .filter_map(|(name, library)| opts.contains(&name).then_some(library))
+        .collect();
+    assert!(
+        selected.len() <= 1,
+        "select at most one move library: visit,reseed,selfseed,learncon,lean,burst,twin,gtwin"
+    );
+    if let Some(library) = selected.into_iter().next() {
+        cfg.move_library = library;
+    }
+    // Local order and global twinning together use one typed library.
     // Arms rewarded by depth reached rather than by acceptance.
     cfg.depth_reward = cfg.depth_reward || opts.contains(&"depth");
     // Perturbation drawn in the soft subspace of the incumbent's curvature.
     cfg.soft_perturb = opts.contains(&"softsub");
     // Proposal covariance learned from the run's accepted displacements.
     cfg.cov_perturb = opts.contains(&"covper");
-    // The library without the arms measured to produce nothing.
-    cfg.lean_moves = opts.contains(&"lean");
-    // Composed surface relocations paying one acceptance test.
-    cfg.burst_moves = cfg.burst_moves || opts.contains(&"burst");
     // Settle moved atoms at fractional price before the full-system screen.
     cfg.staged_quench = opts.contains(&"staged");
     // Arm selection has to be under an allocator at all before the reward rule
@@ -380,10 +387,6 @@ fn main() {
     // inert.
     if cfg.depth_reward {
         cfg.allocate_moves = true;
-    }
-    if opts.contains(&"gtwin") {
-        cfg.growth_and_twin = true;
-        cfg.learn_construction = true;
     }
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
