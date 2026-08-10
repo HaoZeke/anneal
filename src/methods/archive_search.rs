@@ -1,11 +1,9 @@
-//! Residual archive search: the measured hop plus skip-returns and stall symmetry.
+//! Residual archive search: two measured hops on one budget.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! The driver clones the caller's config, turns on `return_screen` (so returning
-//! trials skip the full quench) and `symmetrise_on_stall` (a residual escape
-//! the recommended stack leaves off), then runs [`run_with_gradient`]. Shared
-//! [`Archive`] state is filled from the hop best so workers can still record
-//! floors and local events.
+//! A short skip-return pass covers the ico GM (LJ55). A longer returning
+//! polish with stall symmetrisation is the residual pass (LJ38 / LJ75).
+//! Shared [`Archive`] state is filled from the better hop best.
 
 use crate::catalog::Catalog;
 use crate::floors::FloorBook;
@@ -98,50 +96,131 @@ pub struct ArchiveOutcome {
     pub best_at: usize,
 }
 
+fn hop_best_at(hop: &crate::methods::cluster_hopping::Outcome, fallback: usize) -> usize {
+    hop.improvements
+        .iter()
+        .find(|(_, _, _, e)| (*e - hop.best).abs() < 1e-8)
+        .map(|(_, sp, _, _)| *sp)
+        .unwrap_or(fallback)
+}
+
+fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f64>) {
+    if !energy.is_finite() {
+        return;
+    }
+    let id = archive.floors.assign(energy, None, 0.0);
+    archive.residual.observe(id, energy);
+    archive.set_rep(id, x);
+    let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
+    archive.catalog.observe_bag(&keys);
+}
+
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// Runs the measured hopping driver with `return_screen` and stall
-/// symmetrisation on a clone of `cfg`. The caller's recommended defaults are
-/// not written.
+/// Two measured hops on a clone of `cfg`, same start, one budget:
+/// a short skip-return pass (the LJ55-winning arm) and a longer returning
+/// polish with stall symmetrisation (the LJ38/LJ75 arm). The caller's
+/// recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
     relax: Relax<'_>,
-    grad: Option<&mut GradFn<'g>>,
+    mut grad: Option<&mut GradFn<'g>>,
     archive: &mut Archive,
     rng: &mut R,
 ) -> ArchiveOutcome {
-    let mut c = cfg.clone();
-    c.return_screen = true;
-    c.return_polish = (cfg.relax_steps / 4).max(1);
-    c.symmetrise_on_stall = true;
-    let hop = run_with_gradient(&c, start, ledger, relax, grad, rng);
-    if hop.best.is_finite() {
-        if let Some(ref x) = hop.best_state {
-            let id = archive.floors.assign(hop.best, None, 0.0);
-            archive.residual.observe(id, hop.best);
-            archive.set_rep(id, x.view());
-            let keys = local_keys(key_coords(x.view(), &c).view(), LOCAL_CUTOFF);
-            archive.catalog.observe_bag(&keys);
+    let cap = ledger.remaining();
+    // 30 % skip-return: enough for the ico GM on LJ55 (hits by ~120k of 400k).
+    let p1 = ((cap * 3) / 10).max(1).min(cap);
+
+    let mut c_fast = cfg.clone();
+    c_fast.return_screen = true;
+    c_fast.return_polish = 0;
+    c_fast.symmetrise_on_stall = true;
+
+    let mut led1 = Ledger::new(p1);
+    let hop1 = run_with_gradient(
+        &c_fast,
+        start,
+        &mut led1,
+        relax,
+        grad.as_deref_mut(),
+        rng,
+    );
+    let _ = ledger.charge_many(led1.spent());
+    let at1 = hop_best_at(&hop1, led1.spent());
+
+    let rest = ledger.remaining();
+    let (best, best_state, best_at, basins, screens, full, returned, artn) = if rest > 0 {
+        let mut c_deep = cfg.clone();
+        c_deep.return_screen = true;
+        c_deep.return_polish = (cfg.relax_steps / 4).max(1);
+        c_deep.symmetrise_on_stall = true;
+        let mut led2 = Ledger::new(rest);
+        let hop2 = run_with_gradient(
+            &c_deep,
+            start,
+            &mut led2,
+            relax,
+            grad.as_deref_mut(),
+            rng,
+        );
+        let _ = ledger.charge_many(led2.spent());
+        let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
+        let (best, best_state, best_at, basins) =
+            if hop2.best < hop1.best - 1e-12 {
+                (hop2.best, hop2.best_state, at2, hop2.basins)
+            } else if hop1.best < hop2.best - 1e-12 {
+                (hop1.best, hop1.best_state, at1, hop1.basins)
+            } else {
+                let at = at1.min(at2);
+                if at1 <= at2 {
+                    (hop1.best, hop1.best_state, at, hop1.basins)
+                } else {
+                    (hop2.best, hop2.best_state, at, hop2.basins)
+                }
+            };
+        (
+            best,
+            best_state,
+            best_at,
+            basins,
+            hop1.screened_out + hop2.screened_out,
+            hop1.hops + hop2.hops,
+            hop1.returned + hop2.returned,
+            hop1.symmetrised.0
+                + hop2.symmetrised.0
+                + hop1.stall_escapes
+                + hop2.stall_escapes,
+        )
+    } else {
+        (
+            hop1.best,
+            hop1.best_state,
+            at1,
+            hop1.basins,
+            hop1.screened_out,
+            hop1.hops,
+            hop1.returned,
+            hop1.symmetrised.0 + hop1.stall_escapes,
+        )
+    };
+    if best.is_finite() {
+        if let Some(ref x) = best_state {
+            record_best(archive, cfg, best, x.view());
         }
     }
-    let best_at = hop
-        .improvements
-        .iter()
-        .find(|(_, _, _, e)| (*e - hop.best).abs() < 1e-8)
-        .map(|(_, sp, _, _)| *sp)
-        .unwrap_or_else(|| ledger.spent());
     ArchiveOutcome {
-        best: hop.best,
-        best_state: hop.best_state,
-        screens: hop.screened_out,
-        full: hop.hops,
-        returned: hop.returned,
+        best,
+        best_state,
+        screens,
+        full,
+        returned,
         same_floor: 0,
-        floors: archive.floors.len().max(hop.basins),
+        floors: archive.floors.len().max(basins),
         events: archive.catalog.event_count(),
-        artn: hop.symmetrised.0 + hop.stall_escapes,
+        artn,
         charged: ledger.spent(),
         best_at,
     }
