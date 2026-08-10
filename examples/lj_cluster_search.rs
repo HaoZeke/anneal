@@ -304,7 +304,7 @@ fn main() {
     if std::env::args().nth(4).map(|v| v.split(',').any(|t| t == "ras" || t == "pair")).unwrap_or(false) {
         use anneal_core::methods::archive_search::{archive_search, Archive};
         use anneal_core::methods::cluster_hopping::{
-            optimize_with_gradient, random_cluster_in_radius,
+            random_cluster_in_radius, run_with_gradient,
         };
         use rand::SeedableRng;
         let pair = std::env::args()
@@ -331,6 +331,7 @@ fn main() {
                 cfg.min_separation,
                 &mut rng,
             );
+            let mut rng_ras = rng.clone();
             if pair {
                 let mut ledger = Ledger::new(budget);
                 let mut opt = WarmLbfgs::default();
@@ -345,12 +346,14 @@ fn main() {
                     }
                     Some(lj(x).1)
                 };
-                let out = optimize_with_gradient(
+                let mut rng_rec = rng_ras.clone();
+                let out = run_with_gradient(
                     &cfg,
+                    start.view(),
                     &mut ledger,
                     &mut relax,
                     Some(&mut grad),
-                    seed,
+                    &mut rng_rec,
                 );
                 let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
                 if hit {
@@ -386,7 +389,6 @@ fn main() {
                 Some(lj(x).1)
             };
             let mut archive = Archive::new();
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed.wrapping_add(1));
             let out = archive_search(
                 &cfg,
                 start.view(),
@@ -394,7 +396,7 @@ fn main() {
                 &mut relax,
                 Some(&mut grad),
                 &mut archive,
-                &mut rng,
+                &mut rng_ras,
             );
             let hit = reference.map(|r| out.best < r + 1e-4).unwrap_or(false);
             if hit {
