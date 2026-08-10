@@ -159,8 +159,10 @@ fn main() {
         class_residual_rms(x.view(), spec),
         ih_dominated(x.view(), spec)
     );
-    escape_table(&format!("LJ{n}"), x.view(), trials, false);
-    escape_table(&format!("LJ{n}"), x.view(), trials, true);
+    if trials > 0 {
+        escape_table(&format!("LJ{n}"), x.view(), trials, false);
+        escape_table(&format!("LJ{n}"), x.view(), trials, true);
+    }
 }
 
 struct RngWalk(u64);
