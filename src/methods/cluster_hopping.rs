@@ -391,6 +391,10 @@ pub enum ClusterMove {
     Angular {
         /// Points in a state.
         n_points: usize,
+        /// Lennard-Jones length scale used by the binding criterion.
+        length_scale: f64,
+        /// Lennard-Jones energy scale used by the binding criterion.
+        energy_scale: f64,
     },
 }
 
@@ -398,8 +402,23 @@ pub enum ClusterMove {
 /// decide which point is worst bound.
 ///
 /// `E(i) = sum_{j != i} 4 [ (1/r_ij)^12 - (1/r_ij)^6 ]`, so the total energy is
-/// half the sum. Reduced units, matching the rest of this driver.
+/// half the sum. This compatibility entry point uses the reduced-unit preset.
 pub fn pair_energies(x: ArrayView1<f64>, n: usize) -> Array1<f64> {
+    pair_energies_scaled(
+        x,
+        n,
+        LennardJonesPreset::REDUCED_SCALE,
+        LennardJonesPreset::REDUCED_SCALE,
+    )
+}
+
+/// Lennard-Jones pair energy per point against declared scales.
+pub fn pair_energies_scaled(
+    x: ArrayView1<f64>,
+    n: usize,
+    length_scale: f64,
+    energy_scale: f64,
+) -> Array1<f64> {
     let mut e = Array1::<f64>::zeros(n);
     for i in 0..n {
         for j in (i + 1)..n {
@@ -410,8 +429,9 @@ pub fn pair_energies(x: ArrayView1<f64>, n: usize) -> Array1<f64> {
             if r2 <= 0.0 {
                 continue;
             }
-            let s6 = 1.0 / (r2 * r2 * r2);
-            let v = 4.0 * (s6 * s6 - s6);
+            let scaled_r2 = length_scale * length_scale / r2;
+            let s6 = scaled_r2 * scaled_r2 * scaled_r2;
+            let v = 4.0 * energy_scale * (s6 * s6 - s6);
             e[i] += v;
             e[j] += v;
         }
@@ -427,10 +447,27 @@ pub fn pair_energies(x: ArrayView1<f64>, n: usize) -> Array1<f64> {
 /// this fires when the worst-bound point holds less than `ratio` of the binding
 /// the best-bound one does.
 pub fn worst_bound(x: ArrayView1<f64>, n: usize, ratio: f64) -> Option<usize> {
+    worst_bound_scaled(
+        x,
+        n,
+        ratio,
+        LennardJonesPreset::REDUCED_SCALE,
+        LennardJonesPreset::REDUCED_SCALE,
+    )
+}
+
+/// Scale-aware form of [`worst_bound`].
+pub fn worst_bound_scaled(
+    x: ArrayView1<f64>,
+    n: usize,
+    ratio: f64,
+    length_scale: f64,
+    energy_scale: f64,
+) -> Option<usize> {
     if n == 0 {
         return None;
     }
-    let e = pair_energies(x, n);
+    let e = pair_energies_scaled(x, n, length_scale, energy_scale);
     let mut hi = 0usize;
     let mut lo = 0usize;
     for i in 1..n {
@@ -1072,7 +1109,11 @@ impl ClusterMove {
                 // and none of the objective it is proposing against.
                 crate::lattice::candidate(*source, x, *n_points, rng)
             }
-            ClusterMove::Angular { n_points } => {
+            ClusterMove::Angular {
+                n_points,
+                length_scale,
+                energy_scale,
+            } => {
                 let n = *n_points;
                 let mut y = x.to_owned();
                 if n == 0 {
@@ -1096,8 +1137,9 @@ impl ClusterMove {
                     let dz = y[3 * i + 2] - c[2];
                     rmax = rmax.max((dx * dx + dy * dy + dz * dz).sqrt());
                 }
-                let i = worst_bound(y.view(), n, 0.42).unwrap_or_else(|| {
-                    let e = pair_energies(y.view(), n);
+                let i = worst_bound_scaled(y.view(), n, 0.42, *length_scale, *energy_scale)
+                    .unwrap_or_else(|| {
+                    let e = pair_energies_scaled(y.view(), n, *length_scale, *energy_scale);
                     let mut hi = 0usize;
                     for k in 1..n {
                         if e[k] > e[hi] {
@@ -1105,7 +1147,7 @@ impl ClusterMove {
                         }
                     }
                     hi
-                });
+                    });
                 // Uniform on the sphere: cos(theta) uniform in [-1, 1], not
                 // theta itself, or the poles are oversampled.
                 let cos_t: f64 = rng.random_range(-1.0..1.0);
@@ -2683,7 +2725,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         // quantity Wales and Doye use for the angular criterion, read as a
         // continuous context rather than a threshold.
         let context = if cfg.contextual_moves {
-            let e = pair_energies(x.view(), n);
+            let e = pair_energies_scaled(x.view(), n, cfg.length_scale, cfg.energy_scale);
             let lo = e.iter().copied().fold(f64::INFINITY, f64::min);
             let hi = e.iter().copied().fold(f64::NEG_INFINITY, f64::max);
             let mean = e.iter().sum::<f64>() / n.max(1) as f64;
@@ -2749,7 +2791,15 @@ fn run_full<'g, R: Rng + ?Sized>(
         // returning proposes further each time until it leaves.
         // The angular move takes the step when a point is loose enough for the
         // criterion to fire, whatever the allocator picked.
-        let angular = cfg.angular_moves && worst_bound(x.view(), n, angular_ratio).is_some();
+        let angular = cfg.angular_moves
+            && worst_bound_scaled(
+                x.view(),
+                n,
+                angular_ratio,
+                cfg.length_scale,
+                cfg.energy_scale,
+            )
+            .is_some();
         // The soft-subspace arm competes uniformly with the library's arms.
         // The subspace is cached per incumbent and recomputed when the chain
         // moves, since it is a property of the point the chain stands on.
@@ -2835,7 +2885,12 @@ fn run_full<'g, R: Rng + ?Sized>(
             // The criterion decides this is the right move, so it takes the
             // step rather than competing as one arm among many.
             angular_tried += 1;
-            ClusterMove::Angular { n_points: n }.propose(x.view(), cfg.temperature, rng)
+            ClusterMove::Angular {
+                n_points: n,
+                length_scale: cfg.length_scale,
+                energy_scale: cfg.energy_scale,
+            }
+            .propose(x.view(), cfg.temperature, rng)
         } else {
             match (&mut constructor, &kernels[k]) {
                 (Some(c), ClusterMove::Reseed { n_points, .. }) => {
@@ -4301,7 +4356,12 @@ mod tests {
         );
 
         let mut rng = StdRng::seed_from_u64(9);
-        let y = ClusterMove::Angular { n_points: n }.propose(x.view(), 0.8, &mut rng);
+        let y = ClusterMove::Angular {
+            n_points: n,
+            length_scale: LennardJonesPreset::REDUCED_SCALE,
+            energy_scale: LennardJonesPreset::REDUCED_SCALE,
+        }
+        .propose(x.view(), 0.8, &mut rng);
         // Every other point is untouched: "with all other atoms fixed".
         for i in 0..last {
             for k in 0..3 {
