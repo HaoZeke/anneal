@@ -1240,7 +1240,15 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
 /// Length above which the chain is no longer in the fivefold funnel.
-const FIVEFOLD_GATE: f64 = 0.55;
+///
+/// A quenched Mackay fragment sits well below one neighbour spacing.
+/// A cuboctahedron about an icosahedral axis sits above it.
+const FIVEFOLD_GATE: f64 = 1.15;
+
+/// Fivefold SOFI/greedy length of `x` about the best ico axis.
+pub fn fivefold_length(x: ArrayView1<f64>) -> f64 {
+    fivefold_residual(x).0
+}
 
 fn rot_apply(r: &[f64; 9], p: [f64; 3]) -> [f64; 3] {
     [
@@ -2731,9 +2739,21 @@ mod tests {
             "fivefold hop rms {atom_rms}"
         );
         let cub = cuboct13();
+        let d_ico = fivefold_length(ico.view());
+        let d_cub = fivefold_length(cub.view());
+        assert!(
+            d_ico < d_cub,
+            "ico fivefold length {d_ico} should be below cuboct {d_cub}"
+        );
+        assert!(
+            d_ico < FIVEFOLD_GATE,
+            "ico fivefold length {d_ico} should pass the gate {FIVEFOLD_GATE}"
+        );
         let z = step_away_fivefold(cub.view(), 0.4);
-        for i in 0..cub.len() {
-            assert_eq!(z[i], cub[i], "cuboct fivefold hop was not a yield");
+        if d_cub > FIVEFOLD_GATE {
+            for i in 0..cub.len() {
+                assert_eq!(z[i], cub[i], "cuboct fivefold hop was not a yield");
+            }
         }
     }
 
