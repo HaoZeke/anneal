@@ -1,12 +1,11 @@
-//! Residual archive search: two measured hops on one budget.
+//! Residual archive search: explore, then spend what the fingerprints owe.
 //!
 //! This is not [`Config::recommended`]. That preset keeps its measured rates.
-//! Large-budget: N>=70 polishes every return (LJ75 Marks); smaller N is
-//! skip-return then polish from the same start (LJ38/55). Small-budget
-//! molecular and slab walks stay on their own branch.
-//! Shared [`Archive`] state is filled from the better hop best.
+//! Large-budget ras records local-topology keys on the explore hop and pays
+//! leftover evaluations to unsaturated keys and residual-field holes.
+//! Small-budget molecular and slab walks stay on their own branch.
 
-use crate::catalog::Catalog;
+use crate::catalog::{Catalog, Event};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
@@ -16,7 +15,7 @@ use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Contact multiple for local NAUTY, matching [`crate::graphkey`] tests.
 const LOCAL_CUTOFF: f64 = 1.35;
@@ -34,6 +33,8 @@ pub struct Archive {
     pub drop: DropModel,
     /// One representative structure per floor.
     pub reps: Vec<Array1<f64>>,
+    /// First structure that exhibited each local key.
+    pub key_reps: HashMap<u64, Array1<f64>>,
     /// Floor currently being fully quenched.
     pub pending_floors: HashSet<usize>,
     /// Whether a residual full quench is in flight.
@@ -55,6 +56,7 @@ impl Archive {
             residual: ResidualField::new(),
             drop: DropModel::new(),
             reps: Vec::new(),
+            key_reps: HashMap::new(),
             pending_floors: HashSet::new(),
             pending_residual: false,
         }
@@ -270,13 +272,81 @@ fn record_best(archive: &mut Archive, cfg: &Config, energy: f64, x: ArrayView1<f
     archive.set_rep(id, x);
     let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
     archive.catalog.observe_bag(&keys);
+    for &k in &keys {
+        archive.key_reps.entry(k).or_insert_with(|| x.to_owned());
+    }
+}
+
+/// Shake atoms that carry `key` so the residual hop leaves that topology.
+fn residual_from_key<R: Rng + ?Sized>(x: ArrayView1<f64>, key: u64, rng: &mut R) -> Array1<f64> {
+    let keys = local_keys(x, LOCAL_CUTOFF);
+    let mut y = x.to_owned();
+    let mut shook = false;
+    for (i, &k) in keys.iter().enumerate() {
+        if k == key && 3 * i + 2 < y.len() {
+            for d in 0..3 {
+                y[3 * i + d] += (rng.random::<f64>() - 0.5) * 1.6;
+            }
+            shook = true;
+        }
+    }
+    if !shook {
+        for d in 0..3.min(y.len()) {
+            y[d] += (rng.random::<f64>() - 0.5) * 1.6;
+        }
+    }
+    y
+}
+
+fn residual_origin<R: Rng + ?Sized>(
+    archive: &Archive,
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    rng: &mut R,
+) -> (Option<u64>, Array1<f64>) {
+    if let Some(k) = archive.catalog.due_key() {
+        if let Some(x) = archive.key_reps.get(&k) {
+            return (Some(k), residual_from_key(x.view(), k, rng));
+        }
+        return (Some(k), residual_start(start, cfg, rng));
+    }
+    if let Some(i) = archive.residual.best_node() {
+        if i < archive.reps.len() && !archive.reps[i].is_empty() {
+            return (None, residual_start(archive.reps[i].view(), cfg, rng));
+        }
+    }
+    let seed = archive
+        .reps
+        .iter()
+        .find(|r| !r.is_empty())
+        .map(|r| r.view())
+        .unwrap_or(start);
+    (None, residual_start(seed, cfg, rng))
+}
+
+fn fold_hop(acc: &mut HopAcc, hop: &crate::methods::cluster_hopping::Outcome, at: usize) {
+    acc.screens += hop.screened_out;
+    acc.full += hop.hops;
+    acc.returned += hop.returned;
+    acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+    acc.basins = acc.basins.max(hop.basins);
+    if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
+        acc.best = hop.best;
+        acc.best_state = hop.best_state.clone();
+        acc.best_at = at;
+    } else if hop.best.is_finite()
+        && (hop.best - acc.best).abs() < 1e-12
+        && (acc.best_at == 0 || at < acc.best_at)
+    {
+        acc.best_at = at;
+        acc.best_state = hop.best_state.clone();
+    }
 }
 
 /// One worker on a shared [`Archive`], until the ledger is empty.
 ///
-/// Large-budget hops on a clone of `cfg`. N>=70 polishes every return;
-/// smaller N is skip-return then polish from the same start. The caller's
-/// recommended defaults are not written.
+/// Large-budget: skip-return explore, then residual hops on unsaturated
+/// local keys. The caller's recommended defaults are not written.
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -491,104 +561,99 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             best_at: acc.best_at,
         };
     }
-    let n = start.len() / 3;
-    // LJ75 Marks is a 400k ungated polish hop (b30caa5 seed 4 at 234437).
-    // The same hop loses LJ55 seeds 0 and 1. Those ico GMs are a 120k
-    // skip-return hop on the 38/55 sizes.
-    if n >= 70 {
-        let mut c = cfg.clone();
-        c.return_screen = true;
-        c.return_polish = (cfg.relax_steps / 4).max(1);
-        c.return_polish_after = 0;
-        c.symmetrise_on_stall = true;
-        let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
-        let best_at = hop_best_at(&hop, hop.charged);
+    // Explore (skip-return) then residual on unsaturated local keys.
+    // The same mix for every N: ico GM is a skip-return hop; leftover
+    // spend follows the catalogue, not a size gate.
+    let explore = ((cap * 3) / 10).max(1).min(cap);
+    let mut c_fast = cfg.clone();
+    c_fast.return_screen = true;
+    c_fast.return_polish = 0;
+    c_fast.symmetrise_on_stall = true;
+    let mut led1 = Ledger::new(explore);
+    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
+    let used1 = led1.spent();
+    let _ = ledger.charge_many(used1);
+    let at1 = hop_best_at(&hop1, used1);
+    if hop1.best.is_finite() {
+        if let Some(ref x) = hop1.best_state {
+            record_best(archive, cfg, hop1.best, x.view());
+        }
+    }
+    if let Some(ref x) = hop1.final_state {
+        let keys = local_keys(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
+        archive.catalog.observe_bag(&keys);
+        for &k in &keys {
+            archive.key_reps.entry(k).or_insert_with(|| x.clone());
+        }
+    }
+    let mut acc = HopAcc {
+        best: hop1.best,
+        best_state: hop1.best_state,
+        best_at: at1,
+        screens: hop1.screened_out,
+        full: hop1.hops,
+        returned: hop1.returned,
+        artn: hop1.symmetrised.0 + hop1.stall_escapes,
+        basins: hop1.basins,
+    };
+    let mut c_res = cfg.clone();
+    c_res.return_screen = true;
+    c_res.return_polish = (cfg.relax_steps / 4).max(1);
+    c_res.return_polish_after = 0;
+    c_res.symmetrise_on_stall = true;
+    let mut spent = used1;
+    while ledger.remaining() >= cfg.relax_steps.max(1) {
+        let rest = ledger.remaining();
+        let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
+        let (from_key, x0) = residual_origin(archive, cfg, start, rng);
+        let mut led = Ledger::new(take.max(1));
+        let hop = run_with_gradient(
+            &c_res,
+            x0.view(),
+            &mut led,
+            relax,
+            grad.as_deref_mut(),
+            rng,
+        );
+        let used = led.spent();
+        if used == 0 {
+            break;
+        }
+        let _ = ledger.charge_many(used);
+        let at = spent.saturating_add(hop_best_at(&hop, used));
+        spent = spent.saturating_add(used);
+        if let Some(k) = from_key {
+            let landing = hop.best_state.as_ref().map(|y| {
+                let after = local_keys(key_coords(y.view(), cfg).view(), LOCAL_CUTOFF);
+                let to = after.first().copied().unwrap_or(k);
+                Event {
+                    from: k,
+                    to,
+                    dest_energy: hop.best,
+                }
+            });
+            let _ = archive.catalog.record_search(k, landing);
+        }
         if hop.best.is_finite() {
             if let Some(ref x) = hop.best_state {
                 record_best(archive, cfg, hop.best, x.view());
             }
         }
-        return ArchiveOutcome {
-            best: hop.best,
-            best_state: hop.best_state,
-            screens: hop.screened_out,
-            full: hop.hops,
-            returned: hop.returned,
-            same_floor: 0,
-            floors: archive.floors.len().max(hop.basins),
-            events: archive.catalog.event_count(),
-            artn: hop.symmetrised.0 + hop.stall_escapes,
-            charged: ledger.spent(),
-            best_at,
-        };
-    }
-    let p1 = ((cap * 3) / 10).max(1).min(cap);
-    let mut c_fast = cfg.clone();
-    c_fast.return_screen = true;
-    c_fast.return_polish = 0;
-    c_fast.symmetrise_on_stall = true;
-    let mut led1 = Ledger::new(p1);
-    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng);
-    let _ = ledger.charge_many(led1.spent());
-    let at1 = hop_best_at(&hop1, led1.spent());
-    let rest = ledger.remaining();
-    let (best, best_state, best_at, basins, screens, full, returned, artn) = if rest > 0 {
-        let mut c_deep = cfg.clone();
-        c_deep.return_screen = true;
-        c_deep.return_polish = (cfg.relax_steps / 4).max(1);
-        c_deep.symmetrise_on_stall = true;
-        let mut led2 = Ledger::new(rest);
-        let hop2 = run_with_gradient(&c_deep, start, &mut led2, relax, grad.as_deref_mut(), rng);
-        let _ = ledger.charge_many(led2.spent());
-        let at2 = p1.saturating_add(hop_best_at(&hop2, led2.spent()));
-        let (best, best_state, best_at, basins) = if hop2.best < hop1.best - 1e-12 {
-            (hop2.best, hop2.best_state, at2, hop2.basins)
-        } else if hop1.best < hop2.best - 1e-12 {
-            (hop1.best, hop1.best_state, at1, hop1.basins)
-        } else if at1 <= at2 {
-            (hop1.best, hop1.best_state, at1, hop1.basins)
-        } else {
-            (hop2.best, hop2.best_state, at2, hop2.basins)
-        };
-        (
-            best,
-            best_state,
-            best_at,
-            basins,
-            hop1.screened_out + hop2.screened_out,
-            hop1.hops + hop2.hops,
-            hop1.returned + hop2.returned,
-            hop1.symmetrised.0 + hop2.symmetrised.0 + hop1.stall_escapes + hop2.stall_escapes,
-        )
-    } else {
-        (
-            hop1.best,
-            hop1.best_state,
-            at1,
-            hop1.basins,
-            hop1.screened_out,
-            hop1.hops,
-            hop1.returned,
-            hop1.symmetrised.0 + hop1.stall_escapes,
-        )
-    };
-    if best.is_finite() {
-        if let Some(ref x) = best_state {
-            record_best(archive, cfg, best, x.view());
-        }
+        fold_hop(&mut acc, &hop, at);
+        archive.pending_residual = archive.catalog.due_key().is_some();
     }
     ArchiveOutcome {
-        best,
-        best_state,
-        screens,
-        full,
-        returned,
+        best: acc.best,
+        best_state: acc.best_state,
+        screens: acc.screens,
+        full: acc.full,
+        returned: acc.returned,
         same_floor: 0,
-        floors: archive.floors.len().max(basins),
+        floors: archive.floors.len().max(acc.basins),
         events: archive.catalog.event_count(),
-        artn,
+        artn: acc.artn,
         charged: ledger.spent(),
-        best_at,
+        best_at: acc.best_at,
     }
 }
 
@@ -891,6 +956,43 @@ mod tests {
             "N>=70 archive_search mutated recommended"
         );
         assert_eq!(rec.return_polish, 0);
+        assert!(out.charged <= 50_000);
+    }
+
+    /// After the explore hop records local keys, an unsaturated key is
+    /// owed a residual quench. Seeing a bag without paying =record_search=
+    /// leaves events at zero, which is the LJ75 pair failure mode.
+    #[test]
+    fn unsaturated_local_key_is_searched_before_the_ledger_empties() {
+        let rec = Config::recommended(7);
+        let before = format!("{rec:?}");
+        let mut rng = StdRng::seed_from_u64(8);
+        let start = random_cluster(7, 0.7, rec.min_separation, &mut rng);
+        let mut ledger = Ledger::new(50_000);
+        let mut relax =
+            |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| crude_relax(led, x, steps);
+        let mut archive = Archive::new();
+        let out = archive_search(
+            &rec,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        );
+        assert_eq!(format!("{rec:?}"), before);
+        assert!(
+            archive.catalog.key_count() >= 1,
+            "explore hop never recorded a local key"
+        );
+        assert!(
+            archive.catalog.total_searches() >= 1,
+            "unsaturated key never paid a residual search; events={} keys={}",
+            out.events,
+            archive.catalog.key_count()
+        );
+        assert!(out.best.is_finite());
         assert!(out.charged <= 50_000);
     }
 }

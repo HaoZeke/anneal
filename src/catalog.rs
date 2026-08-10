@@ -140,6 +140,19 @@ impl Catalog {
     pub fn key_count(&self) -> usize {
         self.rec.len()
     }
+
+    /// Residual searches paid across all keys.
+    pub fn total_searches(&self) -> u64 {
+        self.rec.values().map(|r| r.searches).sum()
+    }
+
+    /// A visited key that still owes a search.
+    pub fn due_key(&self) -> Option<u64> {
+        self.rec
+            .iter()
+            .find(|(_, r)| r.unsaturated())
+            .map(|(&k, _)| k)
+    }
 }
 
 #[cfg(test)]
@@ -181,5 +194,7 @@ mod tests {
         assert!(!c.record_search(1, Some(ev)));
         assert_eq!(c.event_count(), 1);
         assert!(c.known(1, 2));
+        assert_eq!(c.total_searches(), 2);
+        assert!(c.due_key().is_none());
     }
 }
