@@ -1961,7 +1961,7 @@ impl Config {
     /// start from.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
-        cfg.burst_moves = true;
+        cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
@@ -2518,31 +2518,7 @@ fn run_full<'g, R: Rng + ?Sized>(
          silently remain a descriptor-space number"
     );
 
-    let mut kernels = if let Some(groups) = cfg.molecular_groups.clone() {
-        if cfg.reactive_moves {
-            ClusterMove::library_combined(n, groups, cfg.group_cutoff)
-        } else {
-            ClusterMove::library_molecular(groups, cfg.group_cutoff)
-        }
-    } else if cfg.burst_moves {
-        ClusterMove::library_lean_burst(n)
-    } else if cfg.lean_moves {
-        ClusterMove::library_lean(n)
-    } else if cfg.growth_and_twin {
-        ClusterMove::library_with_growth_and_twin(n)
-    } else if cfg.self_reseed {
-        ClusterMove::library_with_self_reseed(n)
-    } else if cfg.visit_moves {
-        ClusterMove::library_with_visit(n)
-    } else if cfg.twin_moves {
-        ClusterMove::library_with_twin(n)
-    } else if cfg.learn_construction {
-        ClusterMove::library_with_learned_reseed(n)
-    } else if cfg.reseed_moves {
-        ClusterMove::library_with_reseed(n)
-    } else {
-        ClusterMove::library(n)
-    };
+    let mut kernels = cfg.move_library.kernels(cfg);
     // Which kernel to propose from is learned rather than drawn uniformly. The
     // useful move changes as the search moves through the landscape, so the
     // evidence is discounted and a decaying floor keeps every kernel reachable.
@@ -2577,7 +2553,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // which is the one place a model can change what a hop reaches rather than
     // where it goes. Costs no charged evaluations: candidates are built and
     // featured without calling the objective.
-    let mut constructor = if cfg.learn_construction {
+    let mut constructor = if cfg.move_library.learns_construction() {
         Some(crate::construct::Constructor::new(cfg.construct_width))
     } else {
         None
@@ -2780,7 +2756,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             ),
             _ => cfg.frozen.clone(),
         };
-        if cfg.molecular_groups.is_some() {
+        if let MoveLibrary::Molecular { reactive, .. } = &cfg.move_library {
             let fresh = match cfg.species.as_ref() {
                 Some(z) => connectivity_groups_z(x.view(), z, cfg.bond_tolerance),
                 None => connectivity_groups(x.view(), n, cfg.covalent_cutoff),
@@ -2800,11 +2776,11 @@ fn run_full<'g, R: Rng + ?Sized>(
             if !movable.is_empty() {
                 // Same shape as the initial pool: the allocator's arm
                 // statistics stay aligned across the per-hop rebuild.
-                kernels = if cfg.reactive_moves {
-                    ClusterMove::library_combined(n, movable, cfg.group_cutoff)
-                } else {
-                    ClusterMove::library_molecular(movable, cfg.group_cutoff)
-                };
+                kernels = MoveLibrary::Molecular {
+                    groups: movable,
+                    reactive: *reactive,
+                }
+                .kernels(cfg);
             }
         }
         let k = match (&context, cfg.allocate_moves) {
@@ -4256,7 +4232,8 @@ mod tests {
     fn derived_replaces_the_two_hand_set_scalars() {
         let rec = Config::recommended(13);
         let der = Config::derived(13);
-        assert!(der.burst_moves && der.allocate_moves && der.depth_reward && der.tabu_on_stall);
+        assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
+        assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);
