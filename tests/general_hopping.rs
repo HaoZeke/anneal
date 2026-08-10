@@ -1,6 +1,6 @@
 use anneal_core::accept::Metropolis;
 use anneal_core::cool::LogCool;
-use anneal_core::methods::cluster_hopping::ClusterMove;
+use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::run_rs;
 use anneal_core::sampler::HoppingSampler;
 use eindir_core::FPair;
@@ -76,12 +76,10 @@ fn cutest_hs1_and_lj_hexamer_share_the_hop_loop() {
         1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0,
         1.0, 0.0, 0.0, -1.0,
     ];
+    let hexamer_config = Config::with_scales(6, 1.0, 1.0);
     let hexamer = HoppingSampler::new(
         hexamer_start,
-        ClusterMove::SinglePoint {
-            n_points: 6,
-            step: 0.2,
-        },
+        hexamer_config.proposal_kernel(),
         cooling.clone(),
         Metropolis,
         40,
