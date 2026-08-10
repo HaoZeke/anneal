@@ -3,7 +3,7 @@
 //! Cluster control is the Elja paper-budget table, not this file.
 //! This drives molecule and slab through `run_with_gradient`.
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, optimize, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -273,25 +273,26 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     );
 }
 
-fn run_cluster(n: usize, budget: usize, seed: u64, soap: bool) -> Row {
+fn ico_cluster(n: usize, seed: u64) -> Array1<f64> {
+    let sites = anneal_core::lattice::grow(
+        &anneal_core::structure::Template::Icosahedral.points(),
+        n,
+    );
+    let nn = 2.0_f64.powf(1.0 / 6.0);
+    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x51ED));
+    let mut x = Array1::zeros(3 * n);
+    for (i, p) in sites.iter().enumerate().take(n) {
+        for k in 0..3 {
+            x[3 * i + k] = p[k] * nn + (rng.random::<f64>() - 0.5) * 0.04;
+        }
+    }
+    x
+}
+
+fn rec_cluster(n: usize, soap: bool) -> Config {
     let mut cfg = Config::recommended(n);
     cfg.soap_hop = soap;
-    let pot = PairPotential::lennard_jones(n);
-    let mut ledger = Ledger::new(budget);
-    let mut opt = WarmLbfgs::default();
-    let mut relax = charged_relax(&pot, &mut opt, None);
-    let out = optimize(&cfg, &mut ledger, &mut relax, seed);
-    let soap_draws = out
-        .arms
-        .iter()
-        .find(|(name, _, _, _)| name == "soap")
-        .map(|(_, d, _, _)| *d)
-        .unwrap_or(0);
-    Row {
-        best: out.best,
-        hops: out.hops,
-        soap_draws,
-    }
+    cfg
 }
 
 #[test]
@@ -306,8 +307,9 @@ fn soap_on_vs_off_lj38_eight_seeds() {
     let mut sum_off = 0.0;
     let mut soap_draws = 0usize;
     for s in 0..SEEDS {
-        let a = run_cluster(N, BUDGET, 300 + s, true);
-        let b = run_cluster(N, BUDGET, 300 + s, false);
+        let start = ico_cluster(N, s);
+        let a = run_one(rec_cluster(N, true), start.view(), BUDGET, 300 + s, None);
+        let b = run_one(rec_cluster(N, false), start.view(), BUDGET, 300 + s, None);
         sum_on += a.best;
         sum_off += b.best;
         soap_draws += a.soap_draws;
