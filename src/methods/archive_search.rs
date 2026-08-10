@@ -260,82 +260,33 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
         let slab = cfg.active_region.is_some();
         if molecular {
-            // Cold-SCF rec hits the low isomer (-829.8477 eV) at 877 on
-            // seed 0. Hop 1 is that recommended walk just past 877; the
-            // leftover is two rec-quality walks from re-placed packings.
-            // Three 60-step quenches never left that isomer.
-            let p1 = 900.min(cap);
-            let mut led1 = Ledger::new(p1);
-            let hop1 = run_with_gradient(
-                cfg,
-                start,
-                &mut led1,
-                relax,
-                grad.as_deref_mut(),
-                rng,
-            );
-            let used1 = led1.spent();
-            let _ = ledger.charge_many(used1);
-            let at1 = hop_best_at(&hop1, used1);
-            let rest = ledger.remaining();
-            let acc = if rest > 0 {
-                let half = (rest / 2).max(1);
-                let acc2 = hops_from_start(
-                    cfg,
-                    start,
-                    ledger,
-                    relax,
-                    grad.as_deref_mut(),
-                    rng,
-                    &[half, rest.saturating_sub(half).max(1)],
-                    true,
-                );
-                let (best, best_state, best_at, basins) = if acc2.best < hop1.best - 1e-12 {
-                    (acc2.best, acc2.best_state, used1.saturating_add(acc2.best_at), acc2.basins)
-                } else if hop1.best < acc2.best - 1e-12 {
-                    (hop1.best, hop1.best_state, at1, hop1.basins)
-                } else {
-                    (hop1.best, hop1.best_state, at1, hop1.basins)
-                };
-                HopAcc {
-                    best,
-                    best_state,
-                    best_at,
-                    screens: hop1.screened_out + acc2.screens,
-                    full: hop1.hops + acc2.full,
-                    returned: hop1.returned + acc2.returned,
-                    artn: hop1.symmetrised.0 + hop1.stall_escapes + acc2.artn,
-                    basins,
-                }
-            } else {
-                HopAcc {
-                    best: hop1.best,
-                    best_state: hop1.best_state,
-                    best_at: at1,
-                    screens: hop1.screened_out,
-                    full: hop1.hops,
-                    returned: hop1.returned,
-                    artn: hop1.symmetrised.0 + hop1.stall_escapes,
-                    basins: hop1.basins,
-                }
-            };
-            if acc.best.is_finite() {
-                if let Some(ref x) = acc.best_state {
-                    record_best(archive, cfg, acc.best, x.view());
+            // One full-budget recommended walk. Stall patience 8 so tabu
+            // restart fires inside ~30 hops; the restart re-places rigid
+            // groups instead of drawing an atomic cloud. Rec keeps the
+            // 5000-hop default and never restarts.
+            let mut c = cfg.clone();
+            c.escape_stall_patience = 8;
+            c.escape_stall_factor = 1.0;
+            c.symmetrise_on_stall = true;
+            let hop = run_with_gradient(&c, start, ledger, relax, grad.as_deref_mut(), rng);
+            if hop.best.is_finite() {
+                if let Some(ref x) = hop.best_state {
+                    record_best(archive, cfg, hop.best, x.view());
                 }
             }
+            let best_at = hop_best_at(&hop, ledger.spent());
             return ArchiveOutcome {
-                best: acc.best,
-                best_state: acc.best_state,
-                screens: acc.screens,
-                full: acc.full,
-                returned: acc.returned,
+                best: hop.best,
+                best_state: hop.best_state,
+                screens: hop.screened_out,
+                full: hop.hops,
+                returned: hop.returned,
                 same_floor: 0,
-                floors: archive.floors.len().max(acc.basins),
+                floors: archive.floors.len().max(hop.basins),
                 events: archive.catalog.event_count(),
-                artn: acc.artn,
+                artn: hop.symmetrised.0 + hop.stall_escapes + hop.restarts,
                 charged: ledger.spent(),
-                best_at: acc.best_at,
+                best_at,
             };
         }
         let mut c = cfg.clone();

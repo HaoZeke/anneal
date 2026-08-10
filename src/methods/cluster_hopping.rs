@@ -3814,7 +3814,13 @@ fn run_full<'g, R: Rng + ?Sized>(
         if (cfg.restart_on_stall || cfg.tabu_on_stall) && stuck {
             quiet = 0;
             longest_quiet = 0;
-            let fresh = random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
+            let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
+                // Keep each rigid group's internal geometry; only the
+                // packing is redrawn. An atomic redraw overlaps waters.
+                repack_rigid_groups(start, groups, rng)
+            } else {
+                random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng)
+            };
             let (ef, xf) = relax(ledger, fresh.view(), cfg.relax_steps);
             ledger.record(ef, xf.view());
             hops += 1;
@@ -4113,6 +4119,46 @@ pub fn random_cluster<R: Rng + ?Sized>(n: usize, density: f64, min_sep: f64, rng
 }
 
 /// Seeds a non-overlapping configuration inside a declared sphere radius.
+/// Re-place rigid groups on a new sphere, keeping each group's internals.
+pub fn repack_rigid_groups<R: Rng + ?Sized>(
+    template: ArrayView1<f64>,
+    groups: &[Vec<usize>],
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut y = template.to_owned();
+    let r0 = 2.5 + rng.random::<f64>() * 2.0;
+    for (g, atoms) in groups.iter().enumerate() {
+        if atoms.is_empty() {
+            continue;
+        }
+        let r = r0 + (g as f64) * 0.15;
+        let th = rng.random::<f64>() * std::f64::consts::TAU;
+        let ct = 2.0 * rng.random::<f64>() - 1.0;
+        let st = (1.0 - ct * ct).sqrt();
+        let new_c = [r * st * th.cos(), r * st * th.sin(), r * ct];
+        let n = atoms.len() as f64;
+        let mut com = [0.0; 3];
+        for &i in atoms {
+            if 3 * i + 2 < y.len() {
+                for d in 0..3 {
+                    com[d] += y[3 * i + d];
+                }
+            }
+        }
+        for d in 0..3 {
+            com[d] /= n;
+        }
+        for &i in atoms {
+            if 3 * i + 2 < y.len() {
+                for d in 0..3 {
+                    y[3 * i + d] += new_c[d] - com[d];
+                }
+            }
+        }
+    }
+    y
+}
+
 pub fn random_cluster_in_radius<R: Rng + ?Sized>(
     n: usize,
     radius: f64,
