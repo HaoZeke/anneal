@@ -153,6 +153,15 @@ impl Catalog {
             .find(|(_, r)| r.unsaturated())
             .map(|(&k, _)| k)
     }
+
+    /// Every visited key that still owes a search.
+    pub fn keys_due(&self) -> Vec<u64> {
+        self.rec
+            .iter()
+            .filter(|(_, r)| r.unsaturated())
+            .map(|(&k, _)| k)
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -196,5 +205,6 @@ mod tests {
         assert!(c.known(1, 2));
         assert_eq!(c.total_searches(), 2);
         assert!(c.due_key().is_none());
+        assert!(c.keys_due().is_empty());
     }
 }
