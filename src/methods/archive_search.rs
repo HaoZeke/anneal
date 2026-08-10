@@ -34,7 +34,7 @@ const MAX_REDRAW: usize = 16;
 
 /// SEakMC-style incomplete catalogue. Past this, new events are not stored
 /// and NAUTY bags are not observed; return tests still use contact keys.
-const EVENT_CAP: usize = 512;
+const EVENT_CAP: usize = 32;
 
 /// Fraction of stall restarts that leave `E_star` for a high-residual rep.
 const DIVERSE_START: f64 = 0.25;
@@ -677,7 +677,9 @@ fn buy_full<R: Rng + ?Sized>(
         archive.residual.edge(h, d);
     }
     archive.set_rep(dest, xf.view());
-    record_atom_events(archive, keys_from, xf.view(), cfg, ef);
+    if archive.catalog_open() {
+        record_atom_events(archive, keys_from, xf.view(), cfg, ef);
+    }
     ledger.record(ef, xf.view());
     if ef < out.best {
         out.best = ef;
@@ -689,10 +691,12 @@ fn buy_full<R: Rng + ?Sized>(
         *e = ef;
         *here = Some(dest);
         *here_coords = key_coords(x.view(), cfg);
-        *here_key = contact_key(here_coords.view(), LOCAL_CUTOFF);
-        *here_keys = local_keys(here_coords.view(), LOCAL_CUTOFF);
-        *here_bag = bag_key(here_keys);
-        archive.note_bag(here_keys);
+        if archive.catalog_open() {
+            *here_key = contact_key(here_coords.view(), LOCAL_CUTOFF);
+            *here_keys = local_keys(here_coords.view(), LOCAL_CUTOFF);
+            *here_bag = bag_key(here_keys);
+            archive.note_bag(here_keys);
+        }
     }
 }
 
