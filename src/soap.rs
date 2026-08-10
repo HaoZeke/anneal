@@ -348,14 +348,15 @@ pub fn class_masses(x: ArrayView1<f64>, spec: SoapSpec) -> [f64; 3] {
     mass
 }
 
-/// True when most atoms sit on the icosahedral prototype.
+/// True when the contact graph carries a substantial 555 (icosahedral) fraction.
 pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     let n = x.len() / 3;
     if n == 0 {
         return false;
     }
-    let m = class_masses(x, spec);
-    m[0] / n as f64 > 0.6
+    let _ = spec;
+    let c = crate::structure::cna(x, n, 1.4);
+    c.fraction((5, 5, 5)) > 0.12
 }
 
 /// Stacked target: 555 weight toward the 421 prototype, otherwise `2p − μ`.
@@ -967,7 +968,11 @@ mod tests {
         );
         let class = class_residual_rms(x.view(), spec);
         assert!(class > 0.05, "class residual vanished on ico: {class}");
-        assert!(ih_dominated(x.view(), spec), "ico13 should be Ih-dominated");
+        assert!(
+            ih_dominated(x.view(), spec),
+            "ico13 should be Ih-dominated, 555 frac {}",
+            crate::structure::cna(x.view(), 13, 1.4).fraction((5, 5, 5))
+        );
         // Same-shell ico neighbourhood (template centre only): mean residual
         // of that 13-mer is core-vs-surface, not the vanishing-Ih claim.
         // The vanishing claim is the centre vs the 555 prototype.
