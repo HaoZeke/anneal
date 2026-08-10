@@ -19,7 +19,8 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian of the power spectrum and the 4-body triple-volume. The
+//! Jacobian: SOAP explores (`2p − μ`), the 4-body block corrects
+//! (`χ → μ`). Amplifying `χ − μ` deepens a fivefold core. The
 //! 555→421 / fcc-prototype residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
@@ -920,10 +921,11 @@ pub fn step_away<R: Rng + ?Sized>(
     apply_cap(x, pullback(x, target.view(), spec), rmsd)
 }
 
-/// Observed-cloud residual `2p − μ` on the stacked SOAP+ν=3 cloud.
+/// Observed-cloud residual on the stacked SOAP+ν=3 cloud.
 ///
-/// No external prototype. A Dirac SOAP cloud is not a Dirac ν=3 cloud:
-/// the 4-body block still supplies a leftover on fivefold packing.
+/// SOAP uses `2p − μ`. The ν=3 block uses `μ`: fivefold cores are a
+/// defect against the observed cloud. A Dirac SOAP cloud is not a
+/// Dirac ν=3 cloud.
 pub fn step_away_mean<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -937,8 +939,10 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
 /// The leftover is stacked `[SOAP; ν=3]` and the Cartesian step is
-/// `J⁺` of that block. `groups` is accepted for call-site compatibility
-/// and is not a post-hoc rigid projection.
+/// `J⁺` of that block. SOAP uses `2p − μ`. The ν=3 block uses `μ`:
+/// a high-χ fivefold core is a defect against the observed cloud, not
+/// a direction to amplify. `groups` is accepted for call-site
+/// compatibility and is not a post-hoc rigid projection.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -994,14 +998,19 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             continue;
         }
         let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-        for t in 0..dim {
+        let d0 = dim - spec.nu3_dim();
+        for t in 0..d0 {
             target[i * dim + t] = 2.0 * loc[[i, t]] - mu[k][t];
         }
+        for t in d0..dim {
+            target[i * dim + t] = mu[k][t];
+        }
     }
-    // A Dirac cloud makes 2p−μ vanish. That is not a reason to sit
-    // still: the leftover is any direction that leaves the occupied
-    // point. A random unit in the observed p-space is not a packing
-    // prototype. Either way the Cartesian length is the caller's cap.
+    // A Dirac SOAP cloud and a flat ν=3 cloud make the leftover
+    // vanish. That is not a reason to sit still: the leftover is any
+    // direction that leaves the occupied point. A random unit in the
+    // observed p-space is not a packing prototype. Either way the
+    // Cartesian length is the caller's cap.
     let mut dp2 = 0.0;
     for i in 0..n_at {
         if !keep[i] {
@@ -2009,6 +2018,12 @@ mod tests {
         assert!(
             (d2 / x.len() as f64).sqrt() > 1e-4,
             "stacked leftover hop sat still on ico13"
+        );
+        let chi0: f64 = four_body(x.view(), 0, 13, spec).iter().sum();
+        let chi1: f64 = four_body(y.view(), 0, 13, spec).iter().sum();
+        assert!(
+            chi1 < chi0,
+            "nu3 pull-to-mean should drop centre triple volume: {chi0} -> {chi1}"
         );
     }
 
