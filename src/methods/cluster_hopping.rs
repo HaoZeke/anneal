@@ -1829,9 +1829,10 @@ pub struct Config {
     pub return_screen: bool,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
-    /// Zero (the recommended default) skips the full quench entirely. A
-    /// positive value finishes the return at a fraction of `relax_steps` so
-    /// a near-incumbent that is actually a new isomer can still settle.
+    /// Zero (the recommended default) skips the full quench entirely, which is
+    /// how a hop opts out of return polish. A positive value finishes every
+    /// returning trial in that hop at a fraction of `relax_steps` so a
+    /// near-incumbent that is actually a new isomer can still settle.
     pub return_polish: usize,
     /// Attempt a multi-step path between funnels when hopping stalls.
     ///
@@ -3109,25 +3110,24 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) =
-            if returning && cfg.return_polish > 0 && ledger.spent() >= ledger.remaining() {
-                // First half of the budget skips returns (same saving as a
-                // plain return_screen). After the halfway mark, a short polish
-                // finishes near-incumbent trials that a full skip would drop.
-                relax(ledger, x_screen.view(), cfg.return_polish)
-            } else if screened_this || returning {
-                if screened_this && !returning {
-                    screened_out += 1;
-                }
-                (e_screen, x_screen)
-            } else {
-                let out = relax(ledger, x_screen.view(), cfg.relax_steps);
-                if cfg.bayes_screen {
-                    // The answer to the question the posterior was asked.
-                    screen.observe(feats.view(), out.0);
-                }
-                out
-            };
+        let (e_new, x_new) = if returning && cfg.return_polish > 0 {
+            // A hop that should skip returns sets `return_polish` to zero.
+            // A positive value finishes every returning trial in this hop,
+            // including while more than half of this hop's ledger remains.
+            relax(ledger, x_screen.view(), cfg.return_polish)
+        } else if screened_this || returning {
+            if screened_this && !returning {
+                screened_out += 1;
+            }
+            (e_screen, x_screen)
+        } else {
+            let out = relax(ledger, x_screen.view(), cfg.relax_steps);
+            if cfg.bayes_screen {
+                // The answer to the question the posterior was asked.
+                screen.observe(feats.view(), out.0);
+            }
+            out
+        };
         // Under MH a screened structure is not a minimum; under Metropolis it
         // is still a legal chain state (cheaper step, same deposit).
         let unquenched = cfg.minima_hopping && (screened_this || returning);
@@ -4581,6 +4581,53 @@ mod tests {
             x[3 * i + 2] = 0.2 * (i % 4) as f64;
         }
         assert_eq!(worst_bound(x.view(), n, 0.05), None);
+    }
+
+    /// A positive `return_polish` finishes a returning trial for the whole hop,
+    /// including while more than half of that hop's ledger remains. The first
+    /// hop of a two-phase search opts out by setting the field to zero; the
+    /// gate is that assignment, not a spent-versus-remaining test inside the
+    /// driver.
+    #[test]
+    fn return_polish_fires_while_first_half_of_ledger_remains() {
+        let mut cfg = Config::recommended(7);
+        cfg.return_screen = true;
+        cfg.return_polish = 8;
+        cfg.screen_steps = 6;
+        cfg.relax_steps = 16;
+        // Dummy does not walk a trial home, so the return screen sees the
+        // move where the kernel left it. A wide radius makes those trials
+        // returning, which is the case this gate is about.
+        cfg.merge_radius = 1.0e3;
+
+        let mut rng = StdRng::seed_from_u64(1);
+        let start = random_cluster(7, 0.7, cfg.min_separation, &mut rng);
+        let mut ledger = Ledger::new(400);
+        let polish = cfg.return_polish;
+        let mut first_half_polish = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps == polish && led.spent() < led.remaining() {
+                first_half_polish += 1;
+            }
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let e = x.iter().map(|v| v * v).sum::<f64>();
+            (e, x.to_owned())
+        };
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+        assert!(
+            out.returned >= 1,
+            "expected returning trials, got {}",
+            out.returned
+        );
+        assert!(
+            first_half_polish >= 1,
+            "return_polish={polish} never fired while spent < remaining; returned {}",
+            out.returned
+        );
     }
 
     /// A separable quadratic in the point coordinates: its minimum is every
