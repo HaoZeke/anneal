@@ -26,7 +26,6 @@ capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 
 [dependencies]
-libloading = "0.8"
 petgraph = { version = "0.8", optional = true }
 nauty-pet = { version = "0.14", optional = true }
 
