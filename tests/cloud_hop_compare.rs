@@ -26,9 +26,9 @@ fn packed_waters(m: usize, seed: u64) -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>
         let ix = g % side;
         let iy = (g / side) % side;
         let iz = g / (side * side);
-        let ox = ix as f64 * 3.4 + (rng.random::<f64>() - 0.5) * 0.6;
-        let oy = iy as f64 * 3.4 + (rng.random::<f64>() - 0.5) * 0.6;
-        let oz = iz as f64 * 3.4 + (rng.random::<f64>() - 0.5) * 0.6;
+        let ox = ix as f64 * 2.3 + (rng.random::<f64>() - 0.5) * 1.4;
+        let oy = iy as f64 * 2.3 + (rng.random::<f64>() - 0.5) * 1.4;
+        let oz = iz as f64 * 2.3 + (rng.random::<f64>() - 0.5) * 1.4;
         let base = 3 * g;
         groups.push(vec![base, base + 1, base + 2]);
         z.extend_from_slice(&[8, 1, 1]);
@@ -115,6 +115,17 @@ fn rec_on(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
     Config::recommended_molecular(species, groups, 1.0)
 }
 
+fn soap_rmsd(cfg: &Config) -> f64 {
+    cfg.move_library
+        .kernels(cfg)
+        .into_iter()
+        .find_map(|k| match k {
+            anneal_core::methods::cluster_hopping::ClusterMove::Soap { rmsd, .. } => Some(rmsd),
+            _ => None,
+        })
+        .unwrap_or(f64::NAN)
+}
+
 fn rec_off(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
     let mut cfg = Config::recommended_molecular(species, groups, 1.0);
     cfg.soap_hop = false;
@@ -134,6 +145,10 @@ fn soap_on_vs_off_water4_eight_seeds() {
     let mut soap_draws = 0usize;
     let mut hops_on = 0usize;
     let mut hops_off = 0usize;
+    {
+        let ( _, z, g) = packed_waters(M, 0);
+        println!("mol soap_rmsd {}", soap_rmsd(&rec_on(z, g)));
+    }
     for s in 0..SEEDS {
         let (start, z, g) = packed_waters(M, s);
         let a = run_one(rec_on(z.clone(), g.clone()), start.view(), BUDGET, 100 + s, None);
@@ -165,7 +180,7 @@ fn soap_on_vs_off_water4_eight_seeds() {
         sum_off / n
     );
     assert!(
-        hops_on * 4 > hops_off,
+        hops_on * 2 >= hops_off,
         "SOAP is a budget tax: hops_on {hops_on} hops_off {hops_off}"
     );
 }
