@@ -357,7 +357,8 @@ impl NwchemcEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     static LIFECYCLE_STEP: AtomicUsize = AtomicUsize::new(0);
 
@@ -384,12 +385,22 @@ mod tests {
         assert_eq!(LIFECYCLE_STEP.load(Ordering::SeqCst), 2);
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn nwchemc_plugin_loads_mpi_dependencies_eagerly_and_globally() {
-        use libloading::os::unix::{RTLD_GLOBAL, RTLD_NOW};
+    struct DropProbe(Arc<AtomicBool>);
 
-        assert_eq!(nwchemc_dlopen_flags(), RTLD_NOW | RTLD_GLOBAL);
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn dlopened_potential_handle_has_process_lifetime() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handle = ProcessLifetime::new(DropProbe(Arc::clone(&dropped)));
+
+        drop(handle);
+
+        assert!(!dropped.load(Ordering::SeqCst));
     }
 }
 
