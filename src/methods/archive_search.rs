@@ -313,14 +313,6 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.escape_stall_patience = 8;
                 c2.escape_stall_factor = 1.0;
                 c2.symmetrise_on_stall = true;
-                if let crate::methods::cluster_hopping::MoveLibrary::Molecular { groups, .. } =
-                    &cfg.move_library
-                {
-                    c2.move_library = crate::methods::cluster_hopping::MoveLibrary::Molecular {
-                        groups: groups.clone(),
-                        reactive: true,
-                    };
-                }
                 let x2 = residual_start(start, cfg, rng);
                 let mut led2 = Ledger::new(rest);
                 let hop2 =
