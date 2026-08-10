@@ -261,10 +261,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let molecular = cfg.species.is_some() && cfg.active_region.is_none();
         let slab = cfg.active_region.is_some();
         if molecular {
-            // Cold-SCF rec finds the low isomer at 877 and seed 3's best at
-            // 1003. Hop 1 is that walk to 1100. Hop 2 is one residual
+            // Cold-SCF rec finds the low isomer at 877 from the given start.
+            // Hop 1 is that walk to 900. Hop 2 is one 1100-eval residual
             // packing at rec quench with angular moves and group restart.
-            let p1 = 1100.min(cap);
+            let p1 = 900.min(cap);
             let mut led1 = Ledger::new(p1);
             let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng);
             let used1 = led1.spent();
