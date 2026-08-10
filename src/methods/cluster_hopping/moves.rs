@@ -73,7 +73,7 @@ impl MoveLibrary {
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
                 if cfg.soap_hop {
-                    kernels.push(soap_arm(cfg, None));
+                    kernels.push(soap_arm(cfg, None, None));
                 }
                 kernels
             }
@@ -140,7 +140,7 @@ impl MoveLibrary {
                     Some(mobile)
                 };
                 if cfg.soap_hop {
-                    kernels.push(soap_arm(cfg, mobile));
+                    kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
                 kernels
             }
@@ -351,17 +351,30 @@ pub enum ClusterMove {
         species: Option<Vec<u32>>,
         /// Mobile atom indices. `None` is all atoms. Frozen stay as neighbours.
         mobile: Option<Vec<usize>>,
+        /// Rigid groups. The pullback is a rigid motion per group, so a
+        /// molecule is not stretched.
+        groups: Option<Vec<Vec<usize>>>,
     },
 }
 
-fn soap_arm(cfg: &Config, mobile: Option<Vec<usize>>) -> ClusterMove {
+fn soap_arm(cfg: &Config, mobile: Option<Vec<usize>>, groups: Option<Vec<Vec<usize>>>) -> ClusterMove {
     let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
+    // Atomic leftover is a fraction of a bond. Molecular leftover is a
+    // rearrangement of intact groups, at the contact scale the SOAP
+    // cutoff already sees. Capping a water hop at 0.35 bond-lengths
+    // spends the arm on a shake the group library already does.
+    let rmsd = if groups.is_some() {
+        cfg.group_cutoff
+    } else {
+        LennardJonesPreset::SOAP_RMSD * cfg.length_scale
+    };
     ClusterMove::Soap {
-        rmsd: LennardJonesPreset::SOAP_RMSD * cfg.length_scale,
+        rmsd,
         cutoff: LennardJonesPreset::SOAP_CUTOFF * cfg.length_scale,
         class: cfg.soap_class_residual && packing,
         species: cfg.species.clone(),
         mobile,
+        groups,
     }
 }
 
@@ -810,6 +823,7 @@ impl ClusterMove {
             class: false,
             species: None,
             mobile: None,
+            groups: None,
         });
         v
     }
@@ -1224,6 +1238,7 @@ impl ClusterMove {
                 class,
                 species,
                 mobile,
+                groups,
             } => {
                 let spec = crate::soap::SoapSpec {
                     rcut_nn: *cutoff,
@@ -1239,6 +1254,7 @@ impl ClusterMove {
                         *rmsd,
                         species.as_deref(),
                         mobile.as_deref(),
+                        groups.as_deref(),
                         rng,
                     )
                 }
@@ -1331,6 +1347,7 @@ mod move_scaling_tests {
             class: true,
             species: None,
             mobile: None,
+            groups: None,
         };
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
@@ -1392,6 +1409,7 @@ mod move_scaling_tests {
                 ClusterMove::Soap {
                     class: false,
                     species: Some(_),
+                    groups: Some(_),
                     ..
                 }
             )),

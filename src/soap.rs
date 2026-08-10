@@ -17,9 +17,10 @@
 //! on a frozen slab: no CNA class, no fcc prototype. Frozen atoms stay
 //! in the neighbour list and do not move. When the cloud of a species
 //! is a Dirac the residual vanishes and SOAP yields rather than
-//! inventing a packing. The 555→421 / fcc-prototype residual is an
-//! oracle of the same class as a template library. Opt-in, cluster
-//! only.
+//! inventing a packing. On a molecule the Cartesian leftover is then
+//! replaced by the rigid motion of each observed group: stretching a
+//! bond is not leftover on the packing surface. The 555→421 /
+//! fcc-prototype residual is an oracle. Opt-in, cluster only.
 
 use ndarray::{Array1, Array2, ArrayView1};
 use rand::Rng;
@@ -633,18 +634,23 @@ pub fn step_away_mean<R: Rng + ?Sized>(
     rmsd: f64,
     _rng: &mut R,
 ) -> Array1<f64> {
-    step_away_cloud(x, spec, rmsd, None, None, _rng)
+    step_away_cloud(x, spec, rmsd, None, None, None, _rng)
 }
 
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
+///
+/// When `groups` is set, the Cartesian pullback is replaced by the
+/// rigid motion of each group that best matches it. Stretching a
+/// covalent molecule is not leftover on the packing surface.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
     rmsd: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
-    _rng: &mut R,
+    groups: Option<&[Vec<usize>]>,
+    rng: &mut R,
 ) -> Array1<f64> {
     let loc = local_spectra_z(x, spec, species);
     let n_at = loc.nrows();
@@ -696,11 +702,203 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
             target[i * dim + t] = 2.0 * loc[[i, t]] - mu[k][t];
         }
     }
-    apply_cap(
-        x,
-        pullback_z(x, target.view(), spec, species, mobile),
-        rmsd,
-    )
+    // A Dirac cloud makes 2p−μ vanish. That is not a reason to sit
+    // still: the leftover is any direction that leaves the occupied
+    // point. A random unit in the observed p-space is not a packing
+    // prototype. Either way the Cartesian length is the caller's cap.
+    let mut dp2 = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        for t in 0..dim {
+            let d = target[i * dim + t] - loc[[i, t]];
+            dp2 += d * d;
+        }
+    }
+    if dp2.sqrt() < 1e-4 {
+        dp2 = 0.0;
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            for t in 0..dim {
+                let u = rng.random::<f64>() * 2.0 - 1.0;
+                target[i * dim + t] = loc[[i, t]] + u;
+                dp2 += u * u;
+            }
+        }
+    }
+    let nrm = dp2.sqrt().max(1e-15);
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        for t in 0..dim {
+            let u = target[i * dim + t] - loc[[i, t]];
+            target[i * dim + t] = loc[[i, t]] + u / nrm;
+        }
+    }
+    let mut dr = pullback_z(x, target.view(), spec, species, mobile);
+    match groups {
+        None => apply_cap(x, dr, rmsd),
+        Some(gs) => {
+            // Contact-scale hop: the leftover direction at the full
+            // intermolecular length, then the rigid motion of each group.
+            let n = (x.len() / 3).max(1) as f64;
+            let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+            if cur > 1e-12 {
+                dr *= rmsd / cur;
+            }
+            project_rigid_groups(x, &mut dr, gs);
+            &x.to_owned() + &dr
+        }
+    }
+}
+
+/// Replace `dr` on each group by the rigid motion (Kabsch) that best
+/// matches it. Atoms not in a group are left as the atomic pullback.
+fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<usize>]) {
+    let n_at = x.len() / 3;
+    for g in groups {
+        if g.len() < 2 {
+            continue;
+        }
+        let mut from = Vec::with_capacity(g.len());
+        let mut to = Vec::with_capacity(g.len());
+        let mut com_f = [0.0; 3];
+        let mut com_t = [0.0; 3];
+        for &i in g {
+            if i >= n_at {
+                continue;
+            }
+            let p = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+            let q = [p[0] + dr[3 * i], p[1] + dr[3 * i + 1], p[2] + dr[3 * i + 2]];
+            com_f[0] += p[0];
+            com_f[1] += p[1];
+            com_f[2] += p[2];
+            com_t[0] += q[0];
+            com_t[1] += q[1];
+            com_t[2] += q[2];
+            from.push(p);
+            to.push(q);
+        }
+        let m = from.len() as f64;
+        if m < 2.0 {
+            continue;
+        }
+        for a in 0..3 {
+            com_f[a] /= m;
+            com_t[a] /= m;
+        }
+        for p in &mut from {
+            for a in 0..3 {
+                p[a] -= com_f[a];
+            }
+        }
+        for q in &mut to {
+            for a in 0..3 {
+                q[a] -= com_t[a];
+            }
+        }
+        let r = horn_rotation(&from, &to);
+        for &i in g {
+            if i >= n_at {
+                continue;
+            }
+            let p = [
+                x[3 * i] - com_f[0],
+                x[3 * i + 1] - com_f[1],
+                x[3 * i + 2] - com_f[2],
+            ];
+            let rp = [
+                r[0][0] * p[0] + r[0][1] * p[1] + r[0][2] * p[2],
+                r[1][0] * p[0] + r[1][1] * p[1] + r[1][2] * p[2],
+                r[2][0] * p[0] + r[2][1] * p[1] + r[2][2] * p[2],
+            ];
+            dr[3 * i] = rp[0] + com_t[0] - x[3 * i];
+            dr[3 * i + 1] = rp[1] + com_t[1] - x[3 * i + 1];
+            dr[3 * i + 2] = rp[2] + com_t[2] - x[3 * i + 2];
+        }
+    }
+}
+
+/// Optimal rotation taking centred `from` onto centred `to` (Horn 1987).
+/// The Newton polar factor of the covariance is singular for a planar
+/// water; the quaternion eigenproblem is not.
+fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
+    let mut s = [[0.0_f64; 3]; 3];
+    for (p, q) in from.iter().zip(to.iter()) {
+        for i in 0..3 {
+            for j in 0..3 {
+                s[i][j] += p[i] * q[j];
+            }
+        }
+    }
+    let mut n = [[0.0_f64; 4]; 4];
+    n[0][0] = s[0][0] + s[1][1] + s[2][2];
+    n[0][1] = s[1][2] - s[2][1];
+    n[0][2] = s[2][0] - s[0][2];
+    n[0][3] = s[0][1] - s[1][0];
+    n[1][0] = n[0][1];
+    n[1][1] = s[0][0] - s[1][1] - s[2][2];
+    n[1][2] = s[0][1] + s[1][0];
+    n[1][3] = s[2][0] + s[0][2];
+    n[2][0] = n[0][2];
+    n[2][1] = n[1][2];
+    n[2][2] = -s[0][0] + s[1][1] - s[2][2];
+    n[2][3] = s[1][2] + s[2][1];
+    n[3][0] = n[0][3];
+    n[3][1] = n[1][3];
+    n[3][2] = n[2][3];
+    n[3][3] = -s[0][0] - s[1][1] + s[2][2];
+    // N is indefinite. Shift so the algebraically largest eigenvalue
+    // is the one power iteration sees.
+    let mut fro = 0.0;
+    for row in &n {
+        for &v in row {
+            fro += v * v;
+        }
+    }
+    let shift = 3.0 * fro.sqrt().max(1.0);
+    for i in 0..4 {
+        n[i][i] += shift;
+    }
+    let mut q = [1.0, 0.0, 0.0, 0.0];
+    for _ in 0..40 {
+        let mut nq = [0.0; 4];
+        for i in 0..4 {
+            for j in 0..4 {
+                nq[i] += n[i][j] * q[j];
+            }
+        }
+        let mut norm = 0.0;
+        for v in nq {
+            norm += v * v;
+        }
+        let norm = norm.sqrt().max(1e-15);
+        for i in 0..4 {
+            q[i] = nq[i] / norm;
+        }
+    }
+    let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
+    [
+        [
+            1.0 - 2.0 * (y * y + z * z),
+            2.0 * (x * y - w * z),
+            2.0 * (x * z + w * y),
+        ],
+        [
+            2.0 * (x * y + w * z),
+            1.0 - 2.0 * (x * x + z * z),
+            2.0 * (y * z - w * x),
+        ],
+        [
+            2.0 * (x * z - w * y),
+            2.0 * (y * z + w * x),
+            1.0 - 2.0 * (x * x + y * y),
+        ],
+    ]
 }
 
 /// Finite-difference Jacobian of the *global* average, test-only.
@@ -1415,7 +1613,15 @@ mod tests {
         };
         let (x, z) = water_dimer();
         let mut rng = StdRng::seed_from_u64(4);
-        let y = step_away_cloud(x.view(), spec, 0.35, Some(&z), Some(&[0, 1, 2]), &mut rng);
+        let y = step_away_cloud(
+            x.view(),
+            spec,
+            0.35,
+            Some(&z),
+            Some(&[0, 1, 2]),
+            Some(&[vec![0, 1, 2]]),
+            &mut rng,
+        );
         for i in 3..6 {
             for k in 0..3 {
                 assert_eq!(
@@ -1442,9 +1648,73 @@ mod tests {
         let mut a = StdRng::seed_from_u64(2);
         let mut b = StdRng::seed_from_u64(2);
         let y0 = step_away_mean(x.view(), spec, 0.5, &mut a);
-        let y1 = step_away_cloud(x.view(), spec, 0.5, None, None, &mut b);
+        let y1 = step_away_cloud(x.view(), spec, 0.5, None, None, None, &mut b);
         for i in 0..x.len() {
             assert!((y0[i] - y1[i]).abs() < 1e-12, "mono cloud drifted at {i}");
         }
+    }
+
+    fn oh_delta(a: &Array1<f64>, b: &Array1<f64>, groups: &[Vec<usize>]) -> f64 {
+        let mut worst: f64 = 0.0;
+        for g in groups {
+            if g.len() < 2 {
+                continue;
+            }
+            for (ii, &i) in g.iter().enumerate() {
+                for &j in &g[ii + 1..] {
+                    let mut da = 0.0;
+                    let mut db = 0.0;
+                    for k in 0..3 {
+                        let xa = a[3 * i + k] - a[3 * j + k];
+                        let xb = b[3 * i + k] - b[3 * j + k];
+                        da += xa * xa;
+                        db += xb * xb;
+                    }
+                    worst = worst.max((da.sqrt() - db.sqrt()).abs());
+                }
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn atomic_pullback_stretches_oh_rigid_does_not() {
+        let spec = SoapSpec {
+            rcut_nn: 4.0,
+            ..SoapSpec::default()
+        };
+        let (x, z) = water_dimer();
+        let groups = vec![vec![0usize, 1, 2], vec![3, 4, 5]];
+        let mut rng = StdRng::seed_from_u64(7);
+        let y_atom = step_away_cloud(x.view(), spec, 0.35, Some(&z), None, None, &mut rng);
+        let mut rng = StdRng::seed_from_u64(7);
+        let y_rig = step_away_cloud(
+            x.view(),
+            spec,
+            0.35,
+            Some(&z),
+            None,
+            Some(&groups),
+            &mut rng,
+        );
+        let atom_err = oh_delta(&x, &y_atom, &groups);
+        let rig_err = oh_delta(&x, &y_rig, &groups);
+        assert!(
+            atom_err > 0.02,
+            "atomic SOAP should change intramolecular distances, max |Δr|={atom_err}"
+        );
+        assert!(
+            rig_err < 1e-8,
+            "rigid SOAP must keep intramolecular distances, max |Δr|={rig_err}"
+        );
+        let mut moved = false;
+        for i in 0..6 {
+            for k in 0..3 {
+                if (y_rig[3 * i + k] - x[3 * i + k]).abs() > 1e-9 {
+                    moved = true;
+                }
+            }
+        }
+        assert!(moved, "rigid SOAP did not move the molecules");
     }
 }
