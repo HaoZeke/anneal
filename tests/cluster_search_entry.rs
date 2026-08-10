@@ -4,7 +4,7 @@
 //! in-crate example that runs the same driver with the crate's own potential,
 //! and reports `{best, best_energy, hops}` without a solved flag.
 
-use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
+use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger, MoveLibrary};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -81,6 +81,8 @@ fn recommended_differs_from_for_cluster() {
     let base = Config::for_cluster(38);
     assert_eq!(rec.n_points, 38);
     assert_eq!(base.n_points, 38);
-    assert!(rec.burst_moves && rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
-    assert!(!(base.burst_moves || base.allocate_moves || base.depth_reward || base.tabu_on_stall));
+    assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
+    assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
+    assert!(matches!(base.move_library, MoveLibrary::Atomic));
+    assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));
 }

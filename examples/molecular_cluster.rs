@@ -12,7 +12,9 @@
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
 //! Engine is xtb (default) or cp2k, forwarded as ASE_ENGINE.
 
-use anneal_core::methods::cluster_hopping::{run_with_gradient, Config, Ledger};
+use anneal_core::methods::cluster_hopping::{
+    run_with_gradient, Config, Ledger, MoveLibrary,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -314,21 +316,25 @@ fn main() {
             Some(start_engine(m, &engine))
         };
         let mut ledger = Ledger::new(budget);
+        let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
+        let energy_scale = std::env::var("ENERGY_SCALE")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0);
         // The recommended stack's allocator over the molecular library.
-        let mut cfg = Config::recommended(n);
-        cfg.burst_moves = false;
-        cfg.temperature = 0.8;
-        // Water oxygen-oxygen contacts sit near 2.8 A; the group contact
-        // cutoff has to see them.
-        cfg.molecular_groups = Some(groups.clone());
-        // REACTIVE=1 keeps the atomic arms in the pool alongside the rigid
-        // ones, for engines that can describe bond breaking.
-        cfg.reactive_moves = std::env::var("REACTIVE").map(|v| v == "1").unwrap_or(false);
+        let mut cfg = Config::recommended_molecular(
+            species,
+            groups.clone(),
+            energy_scale,
+        );
+        let reactive = std::env::var("REACTIVE").map(|v| v == "1").unwrap_or(false);
+        cfg.move_library = MoveLibrary::Molecular {
+            groups: groups.clone(),
+            reactive,
+        };
         // Species drive the bond-matrix connectivity: groups follow the
         // structure's own bonding each hop, so a reactive event regroups the
         // moves instead of stranding the walker.
-        cfg.species = Some((0..m).flat_map(|_| [8u32, 1, 1]).collect());
-        cfg.group_cutoff = 3.4;
         // Screen at DFT prices: a handful of relaxation steps decides.
         cfg.screen_steps = 6;
         cfg.relax_steps = 60;

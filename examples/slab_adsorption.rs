@@ -145,18 +145,17 @@ fn main() {
         // library for free mixed clusters instead of the grouped molecular one.
         let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
         let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
+        let groups = vec![(0..n).collect()];
         let mut cfg = if base_stack {
-            Config::for_cluster(n)
+            Config::for_molecular(species.clone(), groups.clone(), 1.0)
         } else {
-            Config::recommended(n)
+            Config::recommended_molecular(species.clone(), groups, 1.0)
         };
-        cfg.burst_moves = false;
-        cfg.species = Some(species.clone());
-        if !atomic {
-            cfg.molecular_groups = Some(vec![(0..n).collect()]);
+        if atomic {
+            cfg.move_library = anneal_core::methods::cluster_hopping::MoveLibrary::Atomic;
+        } else {
             cfg.active_region = Some((free_seeds.clone(), shells));
         }
-        cfg.group_cutoff = 3.4;
         cfg.screen_steps = 10;
         cfg.relax_steps = 150;
         let mut eng = Engine {
