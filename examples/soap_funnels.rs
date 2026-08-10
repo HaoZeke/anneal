@@ -9,7 +9,7 @@
 //! would have to exist for a Jacobian hop to leave Ih toward Marks).
 
 use anneal_core::soap::{
-    SoapSpec, class_masses, ih_dominated, jacobian_z, local_spectra_z, mean_residual_rms,
+    SoapSpec, class_masses, ih_dominated, jacobian_z, local_nu3, local_spectra_z, mean_residual_rms,
     power_spectrum,
 };
 use ndarray::{Array1, ArrayView1};
@@ -266,9 +266,68 @@ fn main() {
         let k_avg4 = average_kernel(&qi, &qm, 4.0);
         let d_avg4 = (2.0 - 2.0 * k_avg4).max(0.0).sqrt();
         println!(
-            "n_max={n_max} l_max={l_max}  AVG ζ=4 D {d_avg4:.6}  k^4(555,421) {:.6}  pairs {np}",
+            "n_max={n_max} l_max={l_max}  AVG ζ=4 D {d_avg4:.6}  k^4(fivefold,421) {:.6}  pairs {np}",
             if np > 0 { s / np as f64 } else { 0.0 }
         );
+    }
+
+    let nm = caro_q(&local_nu3(marks.view(), spec));
+    let ni = caro_q(&local_nu3(ico.view(), spec));
+    let k_avg4 = average_kernel(&ni, &nm, 4.0);
+    let d_avg4 = (2.0 - 2.0 * k_avg4).max(0.0).sqrt();
+    let k_rem = rematch(&ni, &nm, 4.0, 0.05, 80);
+    let d_rem = (2.0 - 2.0 * k_rem).max(0.0).sqrt();
+    let mut s = 0.0;
+    let mut np = 0usize;
+    for i in 0..75 {
+        if fr_i[i][0] < 0.5 {
+            continue;
+        }
+        for j in 0..75 {
+            if fr_m[j][1] < 0.3 {
+                continue;
+            }
+            s += kernel_zeta(&ni, i, &nm, j, 4.0);
+            np += 1;
+        }
+    }
+    println!(
+        "nu3=PS+triple  AVG ζ=4 D {d_avg4:.6}  REMatch D {d_rem:.6}  k^4(fivefold,421) {:.6}  pairs {np}",
+        if np > 0 { s / np as f64 } else { 0.0 }
+    );
+
+    // Raw 4-body channels, not Caro-renormalized against the power spectrum.
+    let nm_raw = local_nu3(marks.view(), spec);
+    let ni_raw = local_nu3(ico.view(), spec);
+    let d0 = local_spectra_z(marks.view(), spec, None).ncols();
+    let mut ico5 = vec![0.0; spec.nu3_dim()];
+    let mut n5 = 0.0;
+    let mut mk4 = vec![0.0; spec.nu3_dim()];
+    let mut n4 = 0.0;
+    for i in 0..75 {
+        if fr_i[i][0] > 0.5 {
+            n5 += 1.0;
+            for t in 0..spec.nu3_dim() {
+                ico5[t] += ni_raw[[i, d0 + t]];
+            }
+        }
+        if fr_m[i][1] > 0.3 {
+            n4 += 1.0;
+            for t in 0..spec.nu3_dim() {
+                mk4[t] += nm_raw[[i, d0 + t]];
+            }
+        }
+    }
+    if n5 > 0.0 && n4 > 0.0 {
+        print!("raw triple ico-fivefold");
+        for t in 0..spec.nu3_dim() {
+            print!(" {:.6}", ico5[t] / n5);
+        }
+        print!("   Marks close-packed");
+        for t in 0..spec.nu3_dim() {
+            print!(" {:.6}", mk4[t] / n4);
+        }
+        println!("   n {n5:.0}/{n4:.0}");
     }
 }
 

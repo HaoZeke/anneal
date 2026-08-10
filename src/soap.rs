@@ -59,6 +59,13 @@ impl SoapSpec {
     pub fn feat_dim(self, species: Option<&[u32]>) -> usize {
         self.dim() * neighbor_channels(species).len()
     }
+
+    /// Extra 4-body (ν=3) scalars per atom: weighted neighbor-triple
+    /// volumes. The power spectrum is three-body and is degenerate on
+    /// 555 vs 421; this term sees the common-neighbor prism.
+    pub fn nu3_dim(self) -> usize {
+        self.n_max
+    }
 }
 
 fn neighbor_channels(species: Option<&[u32]>) -> Vec<u32> {
@@ -147,6 +154,87 @@ pub fn local_spectra_z(
         }
     }
     out
+}
+
+/// SOAP power spectrum concatenated with the ν=3 triple-volume invariants.
+///
+/// featomic's next layer after the power spectrum is a CG product of two
+/// spherical expansions (λ-SOAP / ACE ν=3). The invariant piece of that
+/// is a 4-body correlation. Here it is the weighted squared scalar
+/// triple product of neighbor directions, one scalar per radial channel.
+pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
+    local_nu3_z(x, spec, None)
+}
+
+/// Species-aware SOAP plus the same 4-body scalars (all neighbors).
+pub fn local_nu3_z(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+) -> Array2<f64> {
+    let soap = local_spectra_z(x, spec, species);
+    let n_at = soap.nrows();
+    let d0 = soap.ncols();
+    let d1 = spec.nu3_dim();
+    let mut out = Array2::<f64>::zeros((n_at, d0 + d1));
+    for i in 0..n_at {
+        for t in 0..d0 {
+            out[[i, t]] = soap[[i, t]];
+        }
+        let b = four_body(x, i, n_at, spec);
+        for t in 0..d1 {
+            out[[i, d0 + t]] = b[t];
+        }
+    }
+    out
+}
+
+fn four_body(x: ArrayView1<f64>, i: usize, n_at: usize, spec: SoapSpec) -> Vec<f64> {
+    let rcut = spec.rcut_nn;
+    let mut neigh: Vec<(f64, [f64; 3])> = Vec::new();
+    let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
+    for j in 0..n_at {
+        if j == i {
+            continue;
+        }
+        let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
+        let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+        if r >= rcut || r < 1e-12 {
+            continue;
+        }
+        neigh.push((r, [d[0] / r, d[1] / r, d[2] / r]));
+    }
+    let mut acc = vec![0.0; spec.n_max];
+    let m = neigh.len();
+    if m < 3 {
+        return acc;
+    }
+    for a in 0..m {
+        let (ra, ua) = neigh[a];
+        let fa = fcut(ra, rcut);
+        for b in (a + 1)..m {
+            let (rb, ub) = neigh[b];
+            let fb = fcut(rb, rcut);
+            for c in (b + 1)..m {
+                let (rc, uc) = neigh[c];
+                let fc = fcut(rc, rcut);
+                let cx = ub[1] * uc[2] - ub[2] * uc[1];
+                let cy = ub[2] * uc[0] - ub[0] * uc[2];
+                let cz = ub[0] * uc[1] - ub[1] * uc[0];
+                let vol2 = (ua[0] * cx + ua[1] * cy + ua[2] * cz).powi(2);
+                for n in 0..spec.n_max {
+                    let w = radial(n, ra, rcut)
+                        * radial(n, rb, rcut)
+                        * radial(n, rc, rcut)
+                        * fa
+                        * fb
+                        * fc;
+                    acc[n] += w * vol2;
+                }
+            }
+        }
+    }
+    acc
 }
 
 /// Analytic Jacobian of the *stacked* local spectra, shape `(N dim, 3N)`.
@@ -1309,6 +1397,16 @@ mod tests {
             y[3 * i + 2] = x[3 * i + 2];
         }
         y
+    }
+
+    #[test]
+    fn nu3_adds_one_scalar_per_radial_channel() {
+        let spec = SoapSpec::default();
+        let x = tetra();
+        let p = local_spectra(x.view(), spec);
+        let n3 = local_nu3(x.view(), spec);
+        assert_eq!(n3.ncols(), p.ncols() + spec.nu3_dim());
+        assert_eq!(n3.nrows(), p.nrows());
     }
 
     #[test]
