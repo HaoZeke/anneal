@@ -119,6 +119,113 @@ impl MoveLibrary {
             _ => None,
         }
     }
+
+    /// Builds proposal kernels using the scales declared by `cfg`.
+    pub fn kernels(&self, cfg: &Config) -> Vec<ClusterMove> {
+        let atomic = || {
+            ClusterMove::library_scaled(
+                cfg.n_points,
+                cfg.length_scale,
+                cfg.neighbour_cutoff,
+                cfg.symmetrise_cutoff,
+            )
+        };
+        let lean = || {
+            ClusterMove::library_lean_scaled(
+                cfg.n_points,
+                cfg.length_scale,
+                cfg.neighbour_cutoff,
+                cfg.symmetrise_cutoff,
+            )
+        };
+        match self {
+            Self::Atomic => atomic(),
+            Self::Lean => lean(),
+            Self::LeanBurst => {
+                let mut kernels = lean();
+                kernels.push(ClusterMove::Burst {
+                    n_points: cfg.n_points,
+                    neighbour_cutoff: cfg.neighbour_cutoff,
+                });
+                kernels
+            }
+            Self::Visit => {
+                let mut kernels = atomic();
+                kernels.push(ClusterMove::Visit { q_v: 2.7 });
+                kernels
+            }
+            Self::Twin => {
+                let mut kernels = atomic();
+                kernels.push(ClusterMove::Twin {
+                    n_points: cfg.n_points,
+                });
+                kernels
+            }
+            Self::SelfReseed | Self::LearnedReseed => {
+                let mut kernels = atomic();
+                kernels.push(ClusterMove::Reseed {
+                    n_points: cfg.n_points,
+                    source: crate::lattice::Source::Observed,
+                });
+                kernels
+            }
+            Self::Reseed => {
+                let mut kernels = atomic();
+                for source in crate::lattice::Source::library() {
+                    kernels.push(ClusterMove::Reseed {
+                        n_points: cfg.n_points,
+                        source,
+                    });
+                }
+                kernels
+            }
+            Self::GrowthAndTwin => {
+                let mut kernels = atomic();
+                kernels.push(ClusterMove::Reseed {
+                    n_points: cfg.n_points,
+                    source: crate::lattice::Source::Observed,
+                });
+                kernels.push(ClusterMove::Twin {
+                    n_points: cfg.n_points,
+                });
+                kernels
+            }
+            Self::Molecular { groups, reactive } => {
+                if *reactive {
+                    ClusterMove::library_combined_scaled(
+                        cfg.n_points,
+                        groups.clone(),
+                        cfg.group_cutoff,
+                        cfg.length_scale,
+                    )
+                } else {
+                    ClusterMove::library_molecular_scaled(
+                        groups.clone(),
+                        cfg.group_cutoff,
+                        cfg.length_scale,
+                    )
+                }
+            }
+        }
+    }
+
+    /// Whether the library asks the construction posterior to select growth.
+    pub fn learns_construction(&self) -> bool {
+        matches!(self, Self::LearnedReseed | Self::GrowthAndTwin)
+    }
+
+    /// Whether the library contains rigid molecular proposal arms.
+    pub fn is_molecular(&self) -> bool {
+        matches!(self, Self::Molecular { .. })
+    }
+
+    /// Reactive setting carried by a molecular library.
+    pub fn molecular_reactive(&self) -> Option<bool> {
+        match self {
+            Self::Molecular { reactive, .. } => Some(*reactive),
+            _ => None,
+        }
+    }
 }
 
 /// The move library, dispatched by value.
@@ -1110,6 +1217,21 @@ impl ClusterMove {
             ClusterMove::ShellRotate(k) => k.propose(x, t, rng),
             ClusterMove::Symmetrise(k) => k.propose(x, t, rng),
         }
+    }
+}
+
+impl MoveKernel<f64> for ClusterMove {
+    fn propose<R: Rng + ?Sized>(
+        &self,
+        i: ArrayView1<f64>,
+        t: f64,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        ClusterMove::propose(self, i, t, rng)
+    }
+
+    fn supports_in<N: crate::neigh::Neighborhood<f64>>(&self, _n: &N) -> bool {
+        true
     }
 }
 
