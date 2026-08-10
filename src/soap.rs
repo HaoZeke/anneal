@@ -225,7 +225,53 @@ pub fn pullback(x: ArrayView1<f64>, target: ArrayView1<f64>, spec: SoapSpec) -> 
     dr
 }
 
-/// RMS of local SOAP from the cluster mean. Near zero on a Mackay ico.
+fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
+    let mut s = 0.0;
+    for t in 0..a.len() {
+        let d = a[t] - b[t];
+        s += d * d;
+    }
+    s
+}
+
+fn mu_weighted(loc: &Array2<f64>, w: &[f64], dim: usize) -> (Vec<f64>, f64) {
+    let n_at = loc.nrows();
+    let mut mass = 0.0;
+    let mut mu = vec![0.0; dim];
+    for i in 0..n_at {
+        if w[i] <= 0.0 {
+            continue;
+        }
+        mass += w[i];
+        for t in 0..dim {
+            mu[t] += w[i] * loc[[i, t]];
+        }
+    }
+    if mass > 1e-12 {
+        for t in 0..dim {
+            mu[t] /= mass;
+        }
+    }
+    (mu, mass)
+}
+
+fn target_421(x: ArrayView1<f64>, loc: &Array2<f64>, _w555: &[f64], spec: SoapSpec) -> Array1<f64> {
+    let n_at = loc.nrows();
+    let dim = spec.dim();
+    let fr = crate::structure::atom_triplet_fracs(x, n_at, 1.4);
+    let mut w421 = vec![0.0; n_at];
+    for i in 0..n_at {
+        w421[i] = fr[i][1];
+    }
+    let (mu421, mass421) = mu_weighted(loc, &w421, dim);
+    if mass421 > 1e-12 {
+        Array1::from(mu421)
+    } else {
+        prototype_spectrum(1, spec)
+    }
+}
+
+/// RMS of 555-class SOAP from that class's own mean. Near zero on Mackay ico.
 pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -233,20 +279,19 @@ pub fn mean_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     if n_at == 0 || dim == 0 {
         return 0.0;
     }
-    let mut mu = vec![0.0; dim];
-    for i in 0..n_at {
-        for t in 0..dim {
-            mu[t] += loc[[i, t]] / n_at as f64;
-        }
+    let w = atom_w555(x, spec);
+    let (mu, mass) = mu_weighted(&loc, &w, dim);
+    if mass < 1e-12 {
+        return 0.0;
     }
     let mut s = 0.0;
     for i in 0..n_at {
-        for t in 0..dim {
-            let d = loc[[i, t]] - mu[t];
-            s += d * d;
+        if w[i] <= 0.0 {
+            continue;
         }
+        s += w[i] * soap_dist2(loc.row(i), &mu);
     }
-    (s / n_at as f64).sqrt()
+    (s / mass).sqrt()
 }
 
 /// SOAP of the centre atom of an ideal neighbourhood template.
@@ -359,7 +404,8 @@ pub fn ih_dominated(x: ArrayView1<f64>, spec: SoapSpec) -> bool {
     c.fraction((5, 5, 5)) > 0.12
 }
 
-/// Stacked target: 555 weight toward the 421 prototype, otherwise `2p − μ`.
+/// Stacked target: 555 atoms toward the 421 class (occupied mean, else fcc
+/// prototype). Other atoms keep a same-class `2p − μ` diversity residual.
 pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     let loc = local_spectra(x, spec);
     let n_at = loc.nrows();
@@ -368,41 +414,53 @@ pub fn class_target(x: ArrayView1<f64>, spec: SoapSpec) -> Array1<f64> {
     if n_at == 0 || dim == 0 {
         return target;
     }
-    let mut mu = vec![0.0; dim];
-    for i in 0..n_at {
-        for t in 0..dim {
-            mu[t] += loc[[i, t]] / n_at as f64;
-        }
-    }
-    let t421 = prototype_spectrum(1, spec);
     let w555 = atom_w555(x, spec);
+    let t421 = target_421(x, &loc, &w555, spec);
+    let mut w_other = vec![0.0; n_at];
+    for i in 0..n_at {
+        w_other[i] = (1.0 - w555[i].clamp(0.0, 1.0)).max(0.0);
+    }
+    let (mu_other, mass_other) = mu_weighted(&loc, &w_other, dim);
     for i in 0..n_at {
         let w = w555[i].clamp(0.0, 1.0);
         for t in 0..dim {
-            let mean_tgt = 2.0 * loc[[i, t]] - mu[t];
-            target[i * dim + t] = (1.0 - w) * mean_tgt + w * t421[t];
+            let other_tgt = if mass_other > 1e-12 {
+                2.0 * loc[[i, t]] - mu_other[t]
+            } else {
+                loc[[i, t]]
+            };
+            target[i * dim + t] = (1.0 - w) * other_tgt + w * t421[t];
         }
     }
     target
 }
 
-/// RMS of the class residual. O(1) on a Mackay ico where the mean residual is ~0.
+/// RMS of 555-class SOAP toward the 421 target. O(1) on a Mackay ico.
 pub fn class_residual_rms(x: ArrayView1<f64>, spec: SoapSpec) -> f64 {
     let loc = local_spectra(x, spec);
-    let tgt = class_target(x, spec);
     let n_at = loc.nrows();
     let dim = spec.dim();
     if n_at == 0 || dim == 0 {
         return 0.0;
     }
+    let w = atom_w555(x, spec);
+    let (mass, _) = {
+        let m: f64 = w.iter().sum();
+        (m, ())
+    };
+    if mass < 1e-12 {
+        return 0.0;
+    }
+    let t421 = target_421(x, &loc, &w, spec);
+    let t421v: Vec<f64> = t421.to_vec();
     let mut s = 0.0;
     for i in 0..n_at {
-        for t in 0..dim {
-            let d = tgt[i * dim + t] - loc[[i, t]];
-            s += d * d;
+        if w[i] <= 0.0 {
+            continue;
         }
+        s += w[i] * soap_dist2(loc.row(i), &t421v);
     }
-    (s / n_at as f64).sqrt()
+    (s / mass).sqrt()
 }
 
 fn apply_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f64> {
@@ -966,27 +1024,17 @@ mod tests {
             "ico13 centre should be 555, fr {:?}",
             fr[0]
         );
+        let mean = mean_residual_rms(x.view(), spec);
         let class = class_residual_rms(x.view(), spec);
-        assert!(class > 0.05, "class residual vanished on ico: {class}");
+        assert!(class > 0.05, "555->421 residual vanished on ico: {class}");
+        assert!(
+            mean < 0.15 * class,
+            "555-class mean residual {mean} should be << 555->421 residual {class}"
+        );
         assert!(
             ih_dominated(x.view(), spec),
             "ico13 should be Ih-dominated, 555 frac {}",
             crate::structure::cna(x.view(), 13, 1.4).fraction((5, 5, 5))
-        );
-        // Same-shell ico neighbourhood (template centre only): mean residual
-        // of that 13-mer is core-vs-surface, not the vanishing-Ih claim.
-        // The vanishing claim is the centre vs the 555 prototype.
-        let loc = local_spectra(x.view(), spec);
-        let t555 = prototype_spectrum(0, spec);
-        let mut d555 = 0.0;
-        for t in 0..spec.dim() {
-            let d = loc[[0, t]] - t555[t];
-            d555 += d * d;
-        }
-        assert!(
-            d555.sqrt() < class,
-            "centre SOAP should sit nearer Ih than the 555->421 residual {class}, d555 {}",
-            d555.sqrt()
         );
     }
 
