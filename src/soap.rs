@@ -1877,7 +1877,7 @@ mod tests {
     #[test]
     fn bonded_pairs_are_not_packing_triples() {
         let spec = SoapSpec {
-            rcut_nn: 4.0,
+            rcut_nn: 5.0,
             ..SoapSpec::default()
         };
         let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0]);
