@@ -2078,6 +2078,19 @@ impl Config {
         cfg
     }
 
+    /// Measured allocation and stall controls over a molecular move library.
+    pub fn recommended_molecular(
+        species: Vec<u32>,
+        groups: Vec<Vec<usize>>,
+        energy_scale: f64,
+    ) -> Self {
+        let mut cfg = Self::for_molecular(species, groups, energy_scale);
+        cfg.allocate_moves = true;
+        cfg.depth_reward = true;
+        cfg.tabu_on_stall = true;
+        cfg
+    }
+
     /// Radius of the preset's initial cluster sphere.
     pub fn start_radius(&self) -> f64 {
         self.container

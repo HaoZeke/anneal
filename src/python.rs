@@ -2134,7 +2134,10 @@ impl PyClusterConfig {
     /// Composed surface-relocation burst arm.
     #[getter]
     fn burst_moves(&self) -> bool {
-        self.inner.burst_moves
+        matches!(
+            self.inner.move_library,
+            crate::methods::cluster_hopping::MoveLibrary::LeanBurst
+        )
     }
 
     /// Discounted Thompson allocation over move arms.
