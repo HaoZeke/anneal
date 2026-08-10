@@ -254,6 +254,19 @@ impl DropModel {
     pub fn observations(&self) -> usize {
         self.inner.observations()
     }
+
+    /// Purchased pairs required before a predicted landing may refuse a quench.
+    ///
+    /// This is the screen warmup the model was built with, not a search-level
+    /// knob: refusing before it has seen that many pairs starves the driver.
+    pub fn warmup(&self) -> usize {
+        self.inner.warmup
+    }
+
+    /// Whether enough purchased pairs have arrived to trust a refuse.
+    pub fn calibrated(&self) -> bool {
+        self.observations() >= self.warmup()
+    }
 }
 
 impl Default for DropModel {
@@ -474,5 +487,20 @@ mod tests {
             (hat - 9.5).abs() < 0.2,
             "predicted landing {hat}, expected about 9.5"
         );
+    }
+
+    #[test]
+    fn drop_model_is_uncalibrated_until_its_own_warmup() {
+        let mut d = DropModel::new();
+        let need = d.warmup();
+        assert!(need > 0);
+        assert!(!d.calibrated());
+        for i in 0..need {
+            d.observe(i as f64, i as f64 - 0.5);
+            if i + 1 < need {
+                assert!(!d.calibrated());
+            }
+        }
+        assert!(d.calibrated());
     }
 }
