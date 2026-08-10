@@ -15,15 +15,17 @@ mod common;
 
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
-use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, MoveLibrary, repack_rigid_groups, run_with_gradient,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use common::profile_engine::{ProfileEngine, optimizer_value_gradient, profile_prefix};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 
-use rgpot_core::profile::{ProfileEvaluation, ProfileRequest, ProfileSession};
 use rgpot_core::rpc::client::RpcClient;
 use rgpot_core::tensor::{
     rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
@@ -220,91 +222,6 @@ impl Engine {
     }
 }
 
-/// A conforming potential backend behind rgpot's minimum in-process profile.
-/// The shared loader owns one persistent session, exchanges the schema's
-/// `ForceInput` and `PotentialResult` carriers, and returns eV/eV-per-Angstrom
-/// values directly to this driver.
-struct ProfileEngine {
-    session: ProfileSession,
-    atmnrs: Vec<i32>,
-    failures: usize,
-}
-
-fn profile_prefix(engine: &str) -> Option<&str> {
-    match engine {
-        "nwchemc" | "cpmdc" => Some(engine),
-        _ => None,
-    }
-}
-
-fn optimizer_value_gradient(evaluation: ProfileEvaluation) -> (f64, Array1<f64>) {
-    let gradient = Array1::from(
-        evaluation
-            .forces
-            .into_iter()
-            .map(|force| -force)
-            .collect::<Vec<_>>(),
-    );
-    (evaluation.energy, gradient)
-}
-
-fn molecular_profile_request<'a>(
-    positions: &'a [f64],
-    atomic_numbers: &'a [i32],
-) -> ProfileRequest<'a> {
-    ProfileRequest {
-        positions,
-        atomic_numbers,
-        box_matrix: None,
-        length_unit: "angstrom",
-        energy_unit: "eV",
-    }
-}
-
-impl ProfileEngine {
-    fn load(m: usize, prefix: &str) -> Self {
-        let config_variable = format!("{}_CONFIG", prefix.to_ascii_uppercase());
-        let config_path = std::env::var("POTENTIAL_CONFIG")
-            .or_else(|_| std::env::var(&config_variable))
-            .unwrap_or_else(|_| panic!("POTENTIAL_CONFIG or {config_variable}"));
-        let config = std::fs::read(&config_path).expect("PotentialConfig message");
-        let explicit_library = std::env::var("POTENTIAL_LIBRARY").ok();
-        let session = unsafe {
-            ProfileSession::load(
-                prefix,
-                explicit_library.as_deref().map(std::path::Path::new),
-                &config,
-            )
-        }
-        .unwrap_or_else(|error| panic!("load {prefix} profile: {error}"));
-        log_line(&format!(
-            "  profile {} {} ABI {} from {}",
-            session.prefix(),
-            session.version(),
-            session.abi_version(),
-            session.library_path()
-        ));
-        let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
-        Self {
-            session,
-            atmnrs,
-            failures: 0,
-        }
-    }
-
-    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-        let positions = x.iter().copied().collect::<Vec<_>>();
-        let request = molecular_profile_request(&positions, &self.atmnrs);
-        match self.session.evaluate(&request) {
-            Ok(evaluation) => Some(optimizer_value_gradient(evaluation)),
-            Err(_) => {
-                self.failures += 1;
-                None
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,7 +286,9 @@ fn main() {
     } else {
         None
     };
-    let mut profile_eng = embed_prefix.map(|prefix| ProfileEngine::load(m, prefix));
+    let profile_atomic_numbers: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
+    let mut profile_eng = embed_prefix
+        .map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
     let mut eng = if engine == "rgpot" || embed_prefix.is_some() {
         None
     } else {
@@ -379,7 +298,7 @@ fn main() {
         let failures_before = rg_eng
             .as_ref()
             .map(|candidate| candidate.failures)
-            .or_else(|| profile_eng.as_ref().map(|candidate| candidate.failures))
+            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
             .or_else(|| eng.as_ref().map(|candidate| candidate.failures))
             .unwrap_or(0);
         let mut ledger = Ledger::new(budget);
@@ -420,22 +339,15 @@ fn main() {
         };
         // Start: molecules on a loose sphere, rigid, no overlaps.
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(1));
-        let mut x0 = Array1::zeros(3 * n);
-        for (g, atoms) in groups.iter().enumerate() {
-            let r = 3.0 + (g as f64) * 0.1;
-            let th = rng.random::<f64>() * std::f64::consts::TAU;
-            let ph = (rng.random::<f64>() * 2.0 - 1.0).acos();
-            let c = [
-                r * ph.sin() * th.cos(),
-                r * ph.sin() * th.sin(),
-                r * ph.cos(),
-            ];
+        let mut template = Array1::zeros(3 * n);
+        for atoms in &groups {
             for (a, &idx) in atoms.iter().enumerate() {
                 for k in 0..3 {
-                    x0[3 * idx + k] = c[k] + WATER[a][k];
+                    template[3 * idx + k] = WATER[a][k];
                 }
             }
         }
+        let x0 = repack_rigid_groups(template.view(), &groups, cfg.length_scale, &mut rng);
         #[cfg(feature = "graphkey")]
         let mut rng_ras = rng.clone();
         #[cfg(feature = "graphkey")]
@@ -497,7 +409,7 @@ fn main() {
         let failures = rg_eng
             .as_ref()
             .map(|r| r.failures)
-            .or_else(|| profile_eng.as_ref().map(|e| e.failures))
+            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
             .or_else(|| eng.as_ref().map(|p| p.failures))
             .unwrap_or(0)
             .saturating_sub(failures_before);
