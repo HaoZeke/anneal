@@ -3,11 +3,11 @@
 # Does not cancel running HQ jobs.
 set -euo pipefail
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
-OUT=${LJ_OUT:-$HOME/ljwork/hq-sci-bankrpc}
+OUT=${LJ_OUT:-$HOME/ljwork/hq-sci-ira}
 ONE=$ROOT/scripts/elja_hq_one.sh
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SRV=$ROOT/target/release/examples/bank_server
-PORT=${BANK_PORT:-7424}
+PORT=${BANK_PORT:-7425}
 HOST=${BANK_HOST:-$(hostname)}
 CAP=${BANK_CAPACITY:-30}
 mkdir -p "$OUT"
@@ -16,14 +16,32 @@ IDFILE=$OUT/hq_job_ids.txt
 : >"$OUT/hq_submit.log"
 
 if [[ ! -x $SRV ]]; then
-  echo "missing $SRV; build with --features featomic,bank-rpc" >&2
+  echo "missing $SRV; build with --features featomic,ira,bank-rpc" >&2
   exit 1
 fi
+if ldd "$SRV" | grep -q "not found"; then
+  echo "bank_server unresolved libs" >&2
+  ldd "$SRV"
+  exit 1
+fi
+if ! ldd "$SRV" | grep -q libira; then
+  echo "bank_server is not linked to libira; rebuild with --features ira" >&2
+  exit 1
+fi
+
+export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
+GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
+export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 
 if ! ss -ltn | grep -q ":${PORT} "; then
   nohup "$SRV" "0.0.0.0:${PORT}" "$CAP" >"$OUT/bank_server.log" 2>&1 &
   echo $! >"$OUT/bank_server.pid"
   sleep 1
+fi
+if ! grep -q "bank identity: IRA" "$OUT/bank_server.log"; then
+  echo "bank_server did not print IRA identity" >&2
+  cat "$OUT/bank_server.log" >&2
+  exit 1
 fi
 export BANK_RPC="${HOST}:${PORT}"
 echo "BANK_RPC=$BANK_RPC" | tee -a "$OUT/hq_submit.log"
@@ -32,7 +50,7 @@ submit_arm() {
   local n=$1 budget=$2 seeds=$3
   local last=$((seeds - 1))
   hq submit \
-    --name "rpc-lj${n}-rec" \
+    --name "ira-lj${n}-rec" \
     --array="0-${last}" \
     --cpus 1 \
     --time-limit=8h \

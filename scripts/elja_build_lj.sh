@@ -14,11 +14,17 @@ echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
 echo "glibc=$(ldd --version | head -1)"
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
+GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 if [[ ! -e "$IRA_LIB_DIR/libira.so" ]]; then
-  echo "missing $IRA_LIB_DIR/libira.so" >&2
+  echo "missing $IRA_LIB_DIR/libira.so; run scripts/elja_rebuild_ira.sh" >&2
   exit 1
 fi
-export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
+if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
+  echo "libira unresolved; run scripts/elja_rebuild_ira.sh" >&2
+  ldd "$IRA_LIB_DIR/libira.so"
+  exit 1
+fi
 cargo build --release --features featomic,ira,bank-rpc --example lj_cluster_search --example bank_server
 ldd "$BIN"
 echo "SMOKE"
