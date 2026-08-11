@@ -1426,6 +1426,22 @@ mod move_scaling_tests {
             )),
             "recommended SOAP arm is not the observed-cloud residual"
         );
+        assert!(rec.adaptive_height, "recommended must fill a packing over many revisits");
+        assert!(
+            (rec.height_revisits - 20.0).abs() < 1e-12,
+            "recommended N_f analogue is 20 revisits, got {}",
+            rec.height_revisits
+        );
+        #[cfg(feature = "featomic")]
+        {
+            assert_eq!(rec.keying, Keying::SoapPacking);
+            assert!(
+                (rec.merge_radius - crate::featomic_hop::SOAP_PACK_MERGE).abs() < 1e-12,
+                "SOAP packing merge is {}, got {}",
+                crate::featomic_hop::SOAP_PACK_MERGE,
+                rec.merge_radius
+            );
+        }
     }
 
     #[test]

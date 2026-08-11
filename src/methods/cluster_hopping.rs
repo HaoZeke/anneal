@@ -490,7 +490,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 cfg.bias_height
             };
             BasinBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_config(cfg, &canonical_reference),
                 cfg.merge_radius,
                 h,
                 cfg.bias_gamma,
@@ -620,7 +620,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut spectral: Option<crate::spectral::SpectralBias<ClusterFingerprint>> =
         if cfg.track_funnels {
             let mut sb = crate::spectral::SpectralBias::new(
-                ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+                ClusterFingerprint::of_config(cfg, &canonical_reference),
                 cfg.merge_radius,
                 cfg.bias_height,
                 cfg.bias_gamma,
@@ -675,7 +675,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // instead would break under replica exchange, where each rung owns its own
     // bias and the indices of one rung mean nothing in another.
     let mut identity = BasinIndex::new(
-        ClusterFingerprint::of_with(n, effective_keying(cfg), &canonical_reference),
+        ClusterFingerprint::of_config(cfg, &canonical_reference),
         cfg.merge_radius,
     );
     // Structures kept for path endpoints. Only ones far from every member are
@@ -1920,11 +1920,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                     std::mem::replace(
                         &mut bias,
                         BasinBias::new(
-                            ClusterFingerprint::of_with(
-                                n,
-                                effective_keying(cfg),
-                                &canonical_reference,
-                            ),
+                            ClusterFingerprint::of_config(cfg, &canonical_reference),
                             cfg.merge_radius,
                             cfg.bias_height,
                             cfg.bias_gamma,
@@ -2916,6 +2912,12 @@ pub enum ClusterFingerprint {
     /// Euclidean distance between two of them is a shape distance.
     #[cfg(feature = "ira")]
     Canonical(Box<crate::shape::CanonicalOrder>),
+    /// Unit high-`l` mean SOAP. Packing superbasin, not an isomer.
+    #[cfg(feature = "featomic")]
+    SoapMean {
+        rcut: f64,
+        species: Option<Vec<u32>>,
+    },
 }
 
 /// The keying a config asks for, honouring the older boolean.
@@ -2954,6 +2956,7 @@ impl ClusterFingerprint {
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             Keying::Sites => ClusterFingerprint::Sites(SiteEnergies { n_points }),
+            Keying::SoapPacking => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
             #[cfg(feature = "ira")]
             Keying::Canonical => {
                 if reference.len() == 3 * n_points {
@@ -2969,6 +2972,29 @@ impl ClusterFingerprint {
             Keying::Canonical => ClusterFingerprint::Spectrum(SortedPairs { n_points }),
         }
     }
+
+    /// Descriptor from the live config, so SOAP packing carries cutoff
+    /// and species.
+    pub fn of_config(cfg: &Config, reference: &Array1<f64>) -> Self {
+        match effective_keying(cfg) {
+            Keying::SoapPacking => {
+                #[cfg(feature = "featomic")]
+                {
+                    ClusterFingerprint::SoapMean {
+                        rcut: 3.5 * cfg.length_scale,
+                        species: cfg.species.clone(),
+                    }
+                }
+                #[cfg(not(feature = "featomic"))]
+                {
+                    ClusterFingerprint::Spectrum(SortedPairs {
+                        n_points: cfg.n_points,
+                    })
+                }
+            }
+            other => Self::of_with(cfg.n_points, other, reference),
+        }
+    }
 }
 
 impl Fingerprint for ClusterFingerprint {
@@ -2979,6 +3005,10 @@ impl Fingerprint for ClusterFingerprint {
             ClusterFingerprint::Sites(s) => s.describe(x),
             #[cfg(feature = "ira")]
             ClusterFingerprint::Canonical(c) => c.describe(x),
+            #[cfg(feature = "featomic")]
+            ClusterFingerprint::SoapMean { rcut, species } => {
+                crate::featomic_hop::soap_cloud_mean(x, *rcut, species.as_deref(), None)
+            }
         }
     }
 }

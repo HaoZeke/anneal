@@ -525,6 +525,12 @@ fn main() {
         println!(
             "  SOAP hop: featomic packing-mean kick on a closed shell, leftover patch otherwise, l>=5, no 421/fcc"
         );
+        if cfg.keying == Keying::SoapPacking {
+            println!(
+                "  SOAP superbasin: mean-SOAP merge {}, adaptive height N_f={}",
+                cfg.merge_radius, cfg.height_revisits
+            );
+        }
         #[cfg(not(feature = "featomic"))]
         println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
     }
