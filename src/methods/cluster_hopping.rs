@@ -1083,24 +1083,13 @@ fn run_full<'g, R: Rng + ?Sized>(
         // nowhere useful by energy, or it is going back where the chain already
         // is, which the energy screen cannot see because a returning trial
         // carries the incumbent's energy.
-        // Packing SOAP that actually moved is the fivefold leave.
-        // Treating that opening as a return polishes the chain back
-        // onto the icosahedral shelf. Molecule/slab leftover and
-        // identity SOAP keep the ordinary screens.
-        let soap_leave = !cov_fire
-            && !soft_fire
-            && !angular
-            && matches!(
-                &kernels[k],
-                ClusterMove::Soap {
-                    species: None,
-                    mobile: None,
-                    ..
-                }
-            )
-            && !hop_is_identity(x.view(), trial.view())
-            && n >= 75;
-        let returning = cfg.return_screen && !soap_leave && {
+        // SOAP leftover on a packing shell is a local reconstruction.
+        // Skipping the return and energy screens for every non-identity
+        // packing SOAP paid a full quench that polished back onto the
+        // icosahedral shelf and cut LJ75 Marks from 10/48 to 4/48.
+        // The ordinary screens stay on. Molecule and slab leftover
+        // never hit this packing path.
+        let returning = cfg.return_screen && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
             let d: f64 = ds
@@ -1135,9 +1124,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 .sqrt();
             Array1::from(vec![1.0, e_screen, drift, e_screen * drift])
         };
-        let screened_this = if soap_leave {
-            false
-        } else if cfg.bayes_screen {
+        let screened_this = if cfg.bayes_screen {
             // Refusing is what "screened" means here: the posterior says
             // finishing this relaxation is unlikely to improve on the
             // incumbent, so the evaluations go elsewhere.

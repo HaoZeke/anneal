@@ -226,7 +226,7 @@ fn main() {
             l_max: 6,
             rcut_nn: 3.5,
         };
-        for (tag, seed) in [("trial1", 1u64), ("trial2", 2)] {
+        for seed in 1u64..=8 {
             let mut rng = StdRng::seed_from_u64(seed);
             let y = anneal_core::soap::step_away_cloud(
                 x0.view(),
@@ -237,7 +237,7 @@ fn main() {
                 None,
                 &mut rng,
             );
-            report(tag, e0, x0.view(), y.view());
+            report(&format!("trial{seed}"), e0, x0.view(), y.view());
         }
         for cap in [
             0.20_f64, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 1.00,
@@ -344,7 +344,7 @@ fn main() {
     println!("mh_off {off}/40 best {best:.9}");
 
     #[cfg(feature = "featomic")]
-    {
+    if std::env::var("ICO75_MELT").is_ok() {
         const MARKS: f64 = -397.492331;
         let spec = anneal_core::soap::SoapSpec {
             n_max: 3,

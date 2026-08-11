@@ -2,12 +2,11 @@
 //!
 //! The calculator is featomic `soap_power_spectrum`. The leftover is
 //! the per-centre *high-`l`* spectrum (`l ≥ 5`) minus the
-//! species-conditioned mean of the mobile set. Low-`l` channels are a
-//! core-versus-surface breathing: their pullback either snaps back onto
-//! the icosahedral shelf or melts the cluster. `l ≥ 5` is the first
-//! block that leaves quenched LJ75 ico to a nearby isomer. The Cartesian
-//! step is the Tikhonov pullback through featomic's analytic position
-//! gradient. No Marks, fcc, or 421 target.
+//! species-conditioned mean of the mobile set, restricted to a random
+//! defect patch. Low-`l` channels are a core-versus-surface breathing.
+//! A global high-`l` leftover is one deterministic ray. The patch is
+//! drawn with probability `‖Δp_i‖²` and pulled back through featomic's
+//! analytic position gradient. No Marks, fcc, or 421 target.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -22,9 +21,6 @@ use rand::Rng;
 pub const CALCULATOR: &str = "soap_power_spectrum";
 /// Power-spectrum angular channels kept in the leftover.
 pub const LMIN: i32 = 5;
-/// Packing RMSD floor. Below this the high-`l` pullback is in-basin.
-pub const PACK_CAP: f64 = 0.44;
-
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 const LAMBDA: f64 = 1e-3;
@@ -343,6 +339,72 @@ fn tikhonov(j: &ndarray::Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array
     Array1::from(x)
 }
 
+/// Restrict leftover and Jacobian to a random defect patch.
+///
+/// Atom `a` is drawn with probability proportional to `‖Δp_a‖²`. The
+/// patch is `a` and every mobile neighbour inside `rcut`. A global
+/// leftover on a closed shell is one breathing ray; a patch is one
+/// local reconstruction, and the draw is a different site each hop.
+fn focus_patch<R: Rng + ?Sized>(s: &mut Spectrum, x: ArrayView1<f64>, rcut: f64, rng: &mut R) {
+    let n = s.n_at;
+    let nf = s.n_feat;
+    if n == 0 || nf == 0 {
+        return;
+    }
+    let mut w = vec![0.0; n];
+    for i in 0..n {
+        let mut q = 0.0;
+        for f in 0..nf {
+            let v = s.leftover[i * nf + f];
+            q += v * v;
+        }
+        w[i] = q;
+    }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&i, &j| w[j].total_cmp(&w[i]));
+    if w[order[0]] < 1e-18 {
+        return;
+    }
+    // A unique core leftover is a breathing mode. Drop it and hop a
+    // surface site so two seeds reconstruct different patches.
+    let mut start = 0usize;
+    if n >= 2 && w[order[0]] > 3.0 * w[order[1]] {
+        start = 1;
+    }
+    let pool = (n / 8).max(6).min(n - start).max(1);
+    let pick = rng.random_range(0..pool);
+    let a = order[start + pick];
+    let r2 = rcut * rcut;
+    let mut patch = vec![false; n];
+    for j in 0..n {
+        let mut d2 = 0.0;
+        for k in 0..3 {
+            let d = x[3 * j + k] - x[3 * a + k];
+            d2 += d * d;
+        }
+        patch[j] = d2 <= r2;
+    }
+    let m = 3 * n;
+    for i in 0..n {
+        if !patch[i] {
+            for f in 0..nf {
+                s.leftover[i * nf + f] = 0.0;
+            }
+        }
+        for f in 0..nf {
+            for j in 0..n {
+                if patch[j] {
+                    continue;
+                }
+                for d in 0..3 {
+                    s.jacobian[[i * nf + f, 3 * j + d]] = 0.0;
+                }
+            }
+            let _ = m;
+        }
+    }
+}
+
 /// Leftover hop through featomic `soap_power_spectrum`.
 pub fn step_away_featomic<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
@@ -350,23 +412,19 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     rcut: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
-    _rng: &mut R,
+    rng: &mut R,
 ) -> Array1<f64> {
-    let s = spectrum(x, rcut, species, mobile);
+    let mut s = spectrum(x, rcut, species, mobile);
     let nnu = (s.n_at * s.n_feat).max(1) as f64;
     let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
     if rms < DEFECT {
         return x.to_owned();
     }
+    focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
-    // High-l leftover at 0.35 is in-basin on LJ75 ico; PACK_CAP
-    // leaves to a nearby isomer. Molecule/slab keep the caller cap.
-    let cap = if species.is_none() && mobile.is_none() {
-        rmsd.max(PACK_CAP)
-    } else {
-        rmsd
-    };
-    pin_frozen(x, scale_to_cap(x, dr, cap), mobile)
+    // A patch hop at the caller cap is a local reconstruction.
+    // The old global 0.44 floor was a whole-cluster distortion.
+    pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 
 /// Same leftover direction as [`step_away_featomic`], at `rmsd` with no floor.
@@ -376,14 +434,15 @@ pub fn step_away_featomic_at<R: Rng + ?Sized>(
     rcut: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
-    _rng: &mut R,
+    rng: &mut R,
 ) -> Array1<f64> {
-    let s = spectrum(x, rcut, species, mobile);
+    let mut s = spectrum(x, rcut, species, mobile);
     let nnu = (s.n_at * s.n_feat).max(1) as f64;
     let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
     if rms < DEFECT {
         return x.to_owned();
     }
+    focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
@@ -450,6 +509,33 @@ mod tests {
         }
         let rms = (s / n).sqrt();
         assert!(rms > 1e-8, "featomic hop was identity, rms {rms}");
+    }
+
+    #[test]
+    fn two_seeds_leave_on_different_patches() {
+        let x = ico13();
+        let mut hops = Vec::new();
+        for seed in 1u64..=8 {
+            let mut rng = StdRng::seed_from_u64(seed);
+            // ico13 fits inside the production 3.5 cutoff, so every patch
+            // is the whole cluster. A first-shell cutoff splits vertices.
+            hops.push(step_away_featomic(x.view(), 0.35, 1.5, None, None, &mut rng));
+        }
+        let mut max_rms = 0.0_f64;
+        for i in 0..hops.len() {
+            for j in (i + 1)..hops.len() {
+                let mut s = 0.0;
+                for k in 0..x.len() {
+                    let d = hops[i][k] - hops[j][k];
+                    s += d * d;
+                }
+                max_rms = max_rms.max((s / 13.0).sqrt());
+            }
+        }
+        assert!(
+            max_rms > 1e-8,
+            "eight leftover seeds produced one hop, max rms {max_rms}"
+        );
     }
 
     #[test]
