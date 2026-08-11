@@ -81,6 +81,18 @@ pub struct BankConfig {
     /// Each trial is a different plane and a separate quench, so one mix can
     /// offer several children without starting a chain slice for each.
     pub mix_images: usize,
+    /// Independent random kicks of a seed in a mixing round, quenched
+    /// like the splice images. Lee, Lee and Scheraga draw twenty
+    /// splices and ten random perturbations a seed.
+    pub random_images: usize,
+    /// Complete passes over the bank before a deadlock enlargement.
+    ///
+    /// One pass is every member used once as a seed. After this many
+    /// passes Lee, Lee and Scheraga add random minima to both banks
+    /// and reset `Dcut` to `Dave/2`.
+    pub deadlock_iters: usize,
+    /// Random minima injected on deadlock. Zero turns the enlargement off.
+    pub deadlock_inject: usize,
     /// Choose the next member to search from by expected improvement over
     /// morphology, rather than by which has been used least.
     ///
@@ -106,6 +118,29 @@ impl Default for BankConfig {
             dcut_floor: 0.4,
             mix_fraction: 0.5,
             mix_images: 7,
+            random_images: 0,
+            deadlock_iters: 3,
+            deadlock_inject: 0,
+            acquisition: false,
+        }
+    }
+}
+
+impl BankConfig {
+    /// The published CSA schedule: bank 50, Dave/2 to Dave/5, twenty
+    /// splices and ten random images a mix, deadlock after three
+    /// passes with fifty injected minima.
+    pub fn published() -> Self {
+        Self {
+            capacity: 50,
+            slice: 60_000,
+            seeding: 50,
+            dcut_floor: 0.4,
+            mix_fraction: 0.5,
+            mix_images: 20,
+            random_images: 10,
+            deadlock_iters: 3,
+            deadlock_inject: 50,
             acquisition: false,
         }
     }
@@ -158,6 +193,10 @@ pub struct BankOutcome {
     pub dcut: (f64, f64),
     /// Energies held in the bank at the end, ascending.
     pub bank: Vec<f64>,
+    /// Deadlock enlargements that fired.
+    pub deadlocks: usize,
+    /// Random minima those enlargements admitted.
+    pub injected: usize,
 }
 
 /// One chain against its own sub-ledger, settled up against the caller's.
@@ -327,6 +366,10 @@ where
     }
     .with_final_fraction(bank_cfg.dcut_floor);
     let dcut0 = schedule.current();
+    bank.dcut = dcut0;
+    let mut deadlocks = 0usize;
+    let mut injected = 0usize;
+    let mut passes = 0usize;
 
     while ledger.remaining() > 0 {
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
@@ -358,6 +401,40 @@ where
             }
         };
         bank.mark_used(i);
+
+        let min_hits = bank
+            .members()
+            .iter()
+            .map(|m| m.hits)
+            .min()
+            .unwrap_or(0);
+        if min_hits > passes {
+            passes = min_hits;
+            if bank_cfg.deadlock_inject > 0
+                && bank_cfg.deadlock_iters > 0
+                && passes % bank_cfg.deadlock_iters == 0
+            {
+                deadlocks += 1;
+                bank.grow(bank_cfg.deadlock_inject);
+                for _ in 0..bank_cfg.deadlock_inject {
+                    if ledger.remaining() == 0 {
+                        break;
+                    }
+                    let start =
+                        random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+                    let (e, x) = relax(ledger, start.view(), cfg.relax_steps);
+                    ledger.record(e, x.view());
+                    if bank.inject(x.view(), e) {
+                        injected += 1;
+                    }
+                }
+                if let Some(m) = bank.mean_distance(&mut distance) {
+                    schedule = DiversityAnnealer::from_initial(0.5 * m)
+                        .with_final_fraction(bank_cfg.dcut_floor);
+                    bank.dcut = schedule.current();
+                }
+            }
+        }
 
         // A mixing round: cut-and-splice this member with another, quench the
         // trial, and offer what comes back. One quench per trial, charged on
@@ -393,6 +470,29 @@ where
                 let trial =
                     cut_and_splice(a.view(), b.view(), species, cfg.min_separation, &mut rng);
                 let (e, x) = relax(ledger, trial.view(), cfg.relax_steps);
+                ledger.record(e, x.view());
+                if !matches!(
+                    bank.offer(x.view(), e, &mut distance),
+                    Admission::Duplicate(_) | Admission::Rejected
+                ) {
+                    mix_admitted += 1;
+                }
+                if e < ea.min(eb) {
+                    mix_below_both += 1;
+                }
+            }
+            // Lee, Lee and Scheraga also draw random perturbations of
+            // the seed, not only splices. Small kicks, then the same
+            // quench and the same replacement rule.
+            for _ in 0..bank_cfg.random_images {
+                if ledger.remaining() == 0 {
+                    break;
+                }
+                let mut kick = a.clone();
+                for v in kick.iter_mut() {
+                    *v += rng.random_range(-0.15..0.15);
+                }
+                let (e, x) = relax(ledger, kick.view(), cfg.relax_steps);
                 ledger.record(e, x.view());
                 if !matches!(
                     bank.offer(x.view(), e, &mut distance),
@@ -476,6 +576,8 @@ where
         duplicates,
         dcut: (dcut0, bank.dcut),
         bank: energies,
+        deadlocks,
+        injected,
     }
 }
 
@@ -498,6 +600,68 @@ pub fn spectrum_distance(n_points: usize) -> impl FnMut(ArrayView1<f64>, ArrayVi
             .sum::<f64>()
             .sqrt()
     }
+}
+
+/// Lee, Lee and Scheraga coordination-histogram distance.
+///
+/// First- and second-neighbour shells at `r1` and `r2` (1.35 and 1.70
+/// in reduced LJ units). \(H(s,n)\) is how many atoms have \(n\)
+/// neighbours in shell \(s\). The published \(D\) weights the core:
+///
+/// \[
+/// D(k,k')=\sum_n n\bigl(2|H^k(1,n)-H^{k'}(1,n)|+|H^k(2,n)-H^{k'}(2,n)|\bigr).
+/// \]
+pub fn coordination_histogram_distance(
+    a: ArrayView1<f64>,
+    b: ArrayView1<f64>,
+    r1: f64,
+    r2: f64,
+) -> f64 {
+    let ha = shell_histograms(a, r1, r2);
+    let hb = shell_histograms(b, r1, r2);
+    let m = ha.0.len().max(hb.0.len()).max(ha.1.len()).max(hb.1.len());
+    let mut d = 0.0;
+    for n in 0..m {
+        let h1a = *ha.0.get(n).unwrap_or(&0) as f64;
+        let h1b = *hb.0.get(n).unwrap_or(&0) as f64;
+        let h2a = *ha.1.get(n).unwrap_or(&0) as f64;
+        let h2b = *hb.1.get(n).unwrap_or(&0) as f64;
+        d += n as f64 * (2.0 * (h1a - h1b).abs() + (h2a - h2b).abs());
+    }
+    d
+}
+
+fn shell_histograms(x: ArrayView1<f64>, r1: f64, r2: f64) -> (Vec<usize>, Vec<usize>) {
+    let n = x.len() / 3;
+    let r1sq = r1 * r1;
+    let r2sq = r2 * r2;
+    let mut h1 = vec![0usize; n];
+    let mut h2 = vec![0usize; n];
+    for i in 0..n {
+        let mut n1 = 0usize;
+        let mut n2 = 0usize;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            let r2ij = dx * dx + dy * dy + dz * dz;
+            if r2ij <= r1sq {
+                n1 += 1;
+            } else if r2ij <= r2sq {
+                n2 += 1;
+            }
+        }
+        if n1 < h1.len() {
+            h1[n1] += 1;
+        }
+        if n2 < h2.len() {
+            h2[n2] += 1;
+        }
+    }
+    (h1, h2)
 }
 
 #[cfg(test)]
@@ -613,6 +777,7 @@ mod tests {
             mix_fraction: 1.0,
             mix_images: 5,
             acquisition: false,
+            ..BankConfig::default()
         };
         let mut ledger = Ledger::new(20_000);
         let out = run(
@@ -643,6 +808,7 @@ mod tests {
             mix_fraction: 0.0,
             mix_images: 5,
             acquisition: false,
+            ..BankConfig::default()
         };
         let mut ledger = Ledger::new(9_000);
         let out = run(
@@ -706,5 +872,109 @@ mod tests {
             5,
         );
         assert!(out.charged <= 500, "spent {}", out.charged);
+    }
+
+    fn ico13() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, p],
+            [0.0, 1.0, -p],
+            [0.0, -1.0, p],
+            [0.0, -1.0, -p],
+            [1.0, p, 0.0],
+            [1.0, -p, 0.0],
+            [-1.0, p, 0.0],
+            [-1.0, -p, 0.0],
+            [p, 0.0, 1.0],
+            [-p, 0.0, 1.0],
+            [p, 0.0, -1.0],
+            [-p, 0.0, -1.0],
+        ];
+        let s = 1.0 / (1.0 + p * p).sqrt() * 2.0_f64.powf(1.0 / 6.0);
+        let mut x = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * (i + 1) + k] = s * v[k];
+            }
+        }
+        x
+    }
+
+    fn cuboct13() -> Array1<f64> {
+        let s = 2.0_f64.powf(1.0 / 6.0);
+        let verts = [
+            [1.0, 1.0, 0.0],
+            [1.0, -1.0, 0.0],
+            [-1.0, 1.0, 0.0],
+            [-1.0, -1.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 0.0, -1.0],
+            [-1.0, 0.0, 1.0],
+            [-1.0, 0.0, -1.0],
+            [0.0, 1.0, 1.0],
+            [0.0, 1.0, -1.0],
+            [0.0, -1.0, 1.0],
+            [0.0, -1.0, -1.0],
+        ];
+        let mut y = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                y[3 * (i + 1) + k] = s * v[k];
+            }
+        }
+        y
+    }
+
+    /// Lee, Lee and Scheraga eq. (2): a structure is zero from itself,
+    /// and two closed packings are not.
+    #[test]
+    fn published_d_vanishes_on_a_copy_and_separates_packings() {
+        let x = ico13();
+        let d0 = coordination_histogram_distance(x.view(), x.view(), 1.35, 1.70);
+        assert_eq!(d0, 0.0);
+        let y = cuboct13();
+        let d = coordination_histogram_distance(x.view(), y.view(), 1.35, 1.70);
+        assert!(d > 0.0, "ico13 and cuboct13 have published D={d}");
+    }
+
+    /// After every member has been a seed once, the published
+    /// enlargement adds random minima to both banks.
+    #[test]
+    fn deadlock_enlarges_the_bank_after_one_pass() {
+        let cfg = small_config(8);
+        let bank_cfg = BankConfig {
+            capacity: 2,
+            slice: 80,
+            seeding: 2,
+            mix_fraction: 0.0,
+            deadlock_iters: 1,
+            deadlock_inject: 2,
+            ..BankConfig::default()
+        };
+        let mut ledger = Ledger::new(20_000);
+        let out = run(
+            &cfg,
+            &bank_cfg,
+            &mut ledger,
+            &mut toy_relax,
+            None,
+            spectrum_distance(8),
+            11,
+        );
+        assert!(
+            out.deadlocks >= 1,
+            "no deadlock fired, bank {:?}",
+            out.bank
+        );
+        assert!(
+            out.injected >= 1,
+            "deadlock injected nothing, bank {:?}",
+            out.bank
+        );
+        assert!(
+            out.bank.len() >= 3,
+            "the bank did not grow, holding {:?}",
+            out.bank
+        );
     }
 }
