@@ -18,17 +18,13 @@ done
 if [[ $missing -ne 0 ]]; then
   exit 1
 fi
-write_group() {
-  local name=$1
-  local dso=$2
-  cat >"$SYS/$name" <<EOF
-OUTPUT_FORMAT(elf64-x86-64)
-GROUP ( $dso )
-EOF
-}
-write_group libm.so /lib64/libm.so.6
-write_group libc.so /lib64/libc.so.6
-write_group libpthread.so /lib64/libpthread.so.0
-write_group libdl.so /lib64/libdl.so.2
-write_group librt.so /lib64/librt.so.1
+# rust-lld does not expand GNU ld GROUP scripts. Unversioned names
+# must be real files or symlinks to the compute DSOs.
+ln -sfn /lib64/libm.so.6 "$SYS/libm.so"
+ln -sfn /lib64/libc.so.6 "$SYS/libc.so"
+ln -sfn /lib64/libpthread.so.0 "$SYS/libpthread.so"
+ln -sfn /lib64/libdl.so.2 "$SYS/libdl.so"
+ln -sfn /lib64/librt.so.1 "$SYS/librt.so"
+ln -sfn /lib64/libutil.so.1 "$SYS/libutil.so"
+ln -sfn /opt/ohpc/pub/compiler/gcc/12.4.0/lib64/libgcc_s.so.1 "$SYS/libgcc_s.so"
 echo "SYSROOT_OK $SYS"
