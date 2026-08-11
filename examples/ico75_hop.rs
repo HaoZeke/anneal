@@ -216,8 +216,9 @@ fn main() {
     {
         let leftover = anneal_core::featomic_hop::leftover_rms(x0.view(), 3.5, None, None);
         println!(
-            "descriptor calculator {} leftover_rms {:.6}",
+            "descriptor calculator {} lmin {} leftover_rms {:.6}",
             anneal_core::featomic_hop::CALCULATOR,
+            anneal_core::featomic_hop::LMIN,
             leftover
         );
         let spec = anneal_core::soap::SoapSpec {

@@ -1,9 +1,13 @@
 //! Recommended leftover hop in a featomic SOAP power spectrum.
 //!
 //! The calculator is featomic `soap_power_spectrum`. The leftover is
-//! the per-centre spectrum minus the species-conditioned mean of the
-//! mobile set. The Cartesian step is the Tikhonov pullback through
-//! featomic's analytic position gradient. No Marks, fcc, or 421 target.
+//! the per-centre *high-`l`* spectrum (`l ≥ 5`) minus the
+//! species-conditioned mean of the mobile set. Low-`l` channels are a
+//! core-versus-surface breathing: their pullback either snaps back onto
+//! the icosahedral shelf or melts the cluster. `l ≥ 5` is the first
+//! block that leaves quenched LJ75 ico to a nearby isomer. The Cartesian
+//! step is the Tikhonov pullback through featomic's analytic position
+//! gradient. No Marks, fcc, or 421 target.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,6 +20,10 @@ use rand::Rng;
 
 /// Calculator name passed to [`Calculator::new`].
 pub const CALCULATOR: &str = "soap_power_spectrum";
+/// Power-spectrum angular channels kept in the leftover.
+pub const LMIN: i32 = 5;
+/// Packing RMSD floor. Below this the high-`l` pullback is in-basin.
+pub const PACK_CAP: f64 = 0.44;
 
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
@@ -92,6 +100,8 @@ fn spectrum(
     });
 
     // Concatenate blocks. Each block is one (center_type, neighbor types) key.
+    // Only `l ≥ LMIN` columns enter the leftover: the radial/low-l block is
+    // a breathing mode on a closed packing shell.
     let mut rows: Vec<Vec<f64>> = vec![Vec::new(); n];
     let mut j_raw: Vec<Vec<f64>> = vec![Vec::new(); n];
     let m = 3 * n;
@@ -103,17 +113,37 @@ fn spectrum(
         let n_s = shape[0];
         let n_f = shape[shape.len() - 1];
         let samples = block.samples();
+        let sample_names = samples.names();
+        let atom_col = sample_names
+            .iter()
+            .position(|&s| s == "atom")
+            .unwrap_or(0);
+        let props = block.properties();
+        let names = props.names();
+        let l_idx = names.iter().position(|&s| s == "l");
+        let keep: Vec<usize> = (0..n_f)
+            .filter(|&f| match l_idx {
+                Some(li) if f < props.count() => props[f][li].i32() >= LMIN,
+                None => true,
+                _ => false,
+            })
+            .collect();
+        let n_keep = keep.len();
+        if n_keep == 0 {
+            continue;
+        }
         for row in 0..n_s {
-            let centre = samples[row][0].usize();
+            let centre = samples[row][atom_col].usize();
             if centre >= n {
                 continue;
             }
             if rows[centre].is_empty() {
-                rows[centre] = vec![0.0; n_f];
-                j_raw[centre] = vec![0.0; n_f * m];
+                rows[centre] = vec![0.0; n_keep];
+                j_raw[centre] = vec![0.0; n_keep * m];
             }
-            for f in 0..n_f.min(rows[centre].len()) {
-                rows[centre][f] += flat[row * n_f + f];
+            let nf = n_keep.min(rows[centre].len());
+            for (tf, &f) in keep.iter().take(nf).enumerate() {
+                rows[centre][tf] += flat[row * n_f + f];
             }
         }
         if let Some(g) = block.gradient("positions") {
@@ -129,14 +159,18 @@ fn spectrum(
                 if sample >= n_s || atom >= n {
                     continue;
                 }
-                let centre = samples[sample][0].usize();
+                let centre = samples[sample][atom_col].usize();
                 if centre >= n || j_raw[centre].is_empty() {
                     continue;
                 }
+                let nf = n_keep.min(rows[centre].len());
                 for d in 0..g_dirs {
-                    for f in 0..g_f.min(rows[centre].len()) {
+                    for (tf, &f) in keep.iter().take(nf).enumerate() {
+                        if f >= g_f {
+                            continue;
+                        }
                         let v = gflat[(grow * g_dirs + d) * g_f + f];
-                        j_raw[centre][f * m + 3 * atom + d] += v;
+                        j_raw[centre][tf * m + 3 * atom + d] += v;
                     }
                 }
             }
@@ -188,8 +222,14 @@ fn spectrum(
         let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
         for f in 0..n_feat {
             leftover[i * n_feat + f] = rows[i][f] - mu[k][f];
-            for c in 0..m {
-                jac[[i * n_feat + f, c]] = j_raw[i][f * m + c];
+            for atom in 0..n {
+                if !keep[atom] {
+                    continue;
+                }
+                for d in 0..3 {
+                    let c = 3 * atom + d;
+                    jac[[i * n_feat + f, c]] = j_raw[i][f * m + c];
+                }
             }
         }
     }
@@ -240,6 +280,19 @@ fn scale_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> Array1<f6
     }
     dr *= cap / cur;
     &x.to_owned() + &dr
+}
+
+fn pin_frozen(x: ArrayView1<f64>, mut y: Array1<f64>, mobile: Option<&[usize]>) -> Array1<f64> {
+    let n = x.len() / 3;
+    let keep = mobile_mask(n, mobile);
+    for i in 0..n {
+        if !keep[i] {
+            for d in 0..3 {
+                y[3 * i + d] = x[3 * i + d];
+            }
+        }
+    }
+    y
 }
 
 fn tikhonov(j: &ndarray::Array2<f64>, dp: ArrayView1<f64>, lambda: f64) -> Array1<f64> {
@@ -306,16 +359,14 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         return x.to_owned();
     }
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
-    // Packing leftover is a core-versus-surface SOAP residual. A
-    // 0.35 cap is an in-basin wobble on LJ75 ico; 0.75 leaves
-    // by melting. The floor is the production packing hop;
-    // `step_away_featomic_at` keeps the requested length.
+    // High-l leftover at 0.35 is in-basin on LJ75 ico; PACK_CAP
+    // leaves to a nearby isomer. Molecule/slab keep the caller cap.
     let cap = if species.is_none() && mobile.is_none() {
-        rmsd.max(0.75)
+        rmsd.max(PACK_CAP)
     } else {
         rmsd
     };
-    scale_to_cap(x, dr, cap)
+    pin_frozen(x, scale_to_cap(x, dr, cap), mobile)
 }
 
 /// Same leftover direction as [`step_away_featomic`], at `rmsd` with no floor.
@@ -334,7 +385,7 @@ pub fn step_away_featomic_at<R: Rng + ?Sized>(
         return x.to_owned();
     }
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
-    scale_to_cap(x, dr, rmsd)
+    pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 
 #[cfg(test)]
@@ -373,6 +424,7 @@ mod tests {
     #[test]
     fn calculator_is_soap_power_spectrum() {
         assert_eq!(CALCULATOR, "soap_power_spectrum");
+        assert_eq!(LMIN, 5);
     }
 
     #[test]
