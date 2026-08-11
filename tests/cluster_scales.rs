@@ -51,6 +51,17 @@ fn species_preset_derives_its_length_and_selects_one_library() {
 }
 
 #[test]
+fn gold_has_cordero_radius_and_molecular_preset_accepts_it() {
+    // Cordero et al., Dalton Trans. 2008, 2832 (doi:10.1039/B801115J).
+    assert!((covalent_radius(79) - 1.36).abs() < 1e-12);
+    assert!((covalent_radius(29) - 1.32).abs() < 1e-12);
+    let species = vec![79u32; 4];
+    let groups = vec![(0..4).collect()];
+    let cfg = Config::for_molecular(species, groups, 1.0);
+    assert!((cfg.length_scale - 2.0 * covalent_radius(79)).abs() < 1e-12);
+}
+
+#[test]
 fn cluster_moves_are_general_move_kernels() {
     let n = 5;
     let kernel = ClusterMove::SinglePoint {
