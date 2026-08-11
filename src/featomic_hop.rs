@@ -614,7 +614,7 @@ fn shell_leftover(s: &Spectrum) -> bool {
 
 /// Orthonormalise `basis` in place (modified Gram-Schmidt), drop zeros.
 fn orthonormal(basis: &mut Vec<Array1<f64>>) {
-    let mut out = Vec::new();
+    let mut out: Vec<Array1<f64>> = Vec::new();
     for v in basis.drain(..) {
         let mut w = v;
         for b in &out {
