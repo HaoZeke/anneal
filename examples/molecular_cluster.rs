@@ -9,8 +9,8 @@
 //! charges one unit per fused energy-and-forces evaluation.
 //!
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
-//! Engine is xtb / xtb-cli (default path, no Cap'n Proto), cp2k, rgpot,
-//! nwchemc, or cpmdc.
+//! Engine is rgpot (default: Cap'n Proto to potserv), nwchemc, cpmdc,
+//! xtb / xtb-cli, or cp2k.
 
 mod common;
 
@@ -183,7 +183,7 @@ fn main() {
         .iter()
         .find(|t| *t != "ras" && *t != "pair")
         .cloned()
-        .unwrap_or_else(|| "xtb-cli".into());
+        .unwrap_or_else(|| "rgpot".into());
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())

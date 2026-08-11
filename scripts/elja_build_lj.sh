@@ -13,10 +13,9 @@ fi
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
 echo "glibc=$(ldd --version | head -1)"
-cargo build --release --features featomic --example lj_cluster_search \
-  --example molecular_cluster --example slab_adsorption
+cargo build --release --features featomic --example lj_cluster_search
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
-echo "EXAMPLES_OK molecular_cluster slab_adsorption (xtb-cli, no capnp)"
+echo "NOTE molecular_cluster and slab_adsorption need --features rgpot-ex and potserv"

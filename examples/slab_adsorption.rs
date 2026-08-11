@@ -10,7 +10,8 @@
 //! the stated refinement of this selector.
 //!
 //! Usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]
-//! Engine is xtb-cli / xtb (no Cap'n Proto), rgpot, nwchemc, or cpmdc.
+//! Engine is rgpot (default: Cap'n Proto to potserv), nwchemc, cpmdc,
+//! or xtb / xtb-cli.
 
 mod common;
 
@@ -210,7 +211,7 @@ fn main() {
             )
         })
         .map(String::as_str)
-        .unwrap_or("xtb-cli");
+        .unwrap_or("rgpot");
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
