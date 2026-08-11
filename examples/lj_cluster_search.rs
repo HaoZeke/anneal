@@ -792,12 +792,26 @@ fn main() {
                 // Shape distance when IRA is linked; otherwise the pairwise
                 // spectrum. The bank rule is Lee's Dcut replacement, not the
                 // metric: two members closer than Dcut are one solution.
-                #[cfg(feature = "ira")]
+                #[cfg(feature = "featomic")]
+                let mut dist = {
+                    let rcut = 3.5 * cfg.length_scale;
+                    let z = cfg.species.clone();
+                    move |p: ArrayView1<f64>, q: ArrayView1<f64>| {
+                        anneal_core::featomic_hop::soap_bank_distance(
+                            p,
+                            q,
+                            rcut,
+                            z.as_deref(),
+                            None,
+                        )
+                    }
+                };
+                #[cfg(all(feature = "ira", not(feature = "featomic")))]
                 let mut dist = {
                     let ira = IraMetric::default();
                     move |p: ArrayView1<f64>, q: ArrayView1<f64>| ira.distance(p, q)
                 };
-                #[cfg(not(feature = "ira"))]
+                #[cfg(not(any(feature = "ira", feature = "featomic")))]
                 let mut dist = csa_cluster::spectrum_distance(n);
                 let b = csa_cluster::run(
                     &cfg,

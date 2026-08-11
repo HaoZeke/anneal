@@ -11,7 +11,9 @@
 //! the icosahedral funnel and the decahedron is never seen. Nothing in a single
 //! chain notices that, because from inside the funnel the search looks healthy.
 //! A bank does notice, because it holds solutions from more than one funnel at
-//! once and spends its next start on the one it knows least about.
+//! once and spends its next start on the one it knows least about. With
+//! featomic the distance and the acquisition morphology are the SOAP
+//! leftover profile, not a CNA class.
 //!
 //! The budget is split, not multiplied. A bank of eight running eight chains of
 //! an eighth the length costs what one chain costs, which is the comparison
@@ -25,7 +27,22 @@ use crate::methods::bank::{Admission, Bank};
 use crate::methods::cluster_hopping::ClusterFingerprint;
 use crate::methods::cluster_hopping::{Config, GradFn, Ledger, Outcome, Relax, random_cluster};
 use crate::methods::splice::cut_and_splice;
+#[cfg(not(feature = "featomic"))]
 use crate::structure::cna_descriptor;
+
+/// Morphology the acquisition model fits. SOAP leftover when featomic
+/// is on; CNA fractions otherwise.
+fn morphology(x: ArrayView1<f64>, cfg: &Config, bond_cutoff: f64) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        let _ = bond_cutoff;
+        crate::featomic_hop::soap_morphology(x, 3.5 * cfg.length_scale, cfg.species.as_deref(), None)
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        cna_descriptor(x, cfg.n_points, bond_cutoff)
+    }
+}
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -273,7 +290,7 @@ where
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(
-                    cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(),
+                    morphology(s.view(), cfg, bond_cutoff).view(),
                     out.best,
                 );
             }
@@ -304,7 +321,7 @@ where
             let mut best = None;
             let mut best_ei = f64::NEG_INFINITY;
             for (k, m) in bank.members().iter().enumerate() {
-                let d = cna_descriptor(m.state.view(), cfg.n_points, bond_cutoff);
+                let d = morphology(m.state.view(), cfg, bond_cutoff);
                 let ei = funnel.expected_improvement(d.view());
                 if ei > best_ei {
                     best_ei = ei;
@@ -404,7 +421,7 @@ where
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(
-                    cna_descriptor(s.view(), cfg.n_points, bond_cutoff).view(),
+                    morphology(s.view(), cfg, bond_cutoff).view(),
                     out.best,
                 );
             }

@@ -252,6 +252,89 @@ fn mobile_mask(n: usize, mobile: Option<&[usize]>) -> Vec<bool> {
     }
 }
 
+/// Per-atom leftover RMS of the high-`l` power spectrum.
+pub fn atom_leftover_rms(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let s = spectrum(x, rcut, species, mobile);
+    let mut w = Array1::zeros(s.n_at);
+    let nf = s.n_feat.max(1) as f64;
+    for i in 0..s.n_at {
+        let mut q = 0.0;
+        for f in 0..s.n_feat {
+            let v = s.leftover[i * s.n_feat + f];
+            q += v * v;
+        }
+        w[i] = (q / nf).sqrt();
+    }
+    w
+}
+
+/// Five SOAP leftover quantiles, scaled to the unit interval.
+///
+/// This is the morphology the bank acquisition model fits: how the
+/// leftover mass is distributed, not a CNA class.
+pub fn soap_morphology(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let mut w: Vec<f64> = atom_leftover_rms(x, rcut, species, mobile)
+        .iter()
+        .copied()
+        .collect();
+    if w.is_empty() {
+        return Array1::zeros(5);
+    }
+    w.sort_by(|a, b| b.total_cmp(a));
+    let n = w.len();
+    let tot = w.iter().sum::<f64>().max(1e-15);
+    let at = |p: f64| w[((p * (n - 1) as f64).round() as usize).min(n - 1)] / tot;
+    let global = leftover_rms(x, rcut, species, mobile);
+    Array1::from(vec![
+        at(0.0),
+        at(0.25),
+        at(0.5),
+        at(0.75),
+        global / (1.0 + global),
+    ])
+}
+
+/// Permutation-invariant distance between two leftover profiles.
+///
+/// Sorted per-atom leftover RMS. Icosahedral and Marks clouds differ
+/// here; two Mackay isomers of the same shelf sit close.
+pub fn soap_bank_distance(
+    a: ArrayView1<f64>,
+    b: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> f64 {
+    let mut wa: Vec<f64> = atom_leftover_rms(a, rcut, species, mobile)
+        .iter()
+        .copied()
+        .collect();
+    let mut wb: Vec<f64> = atom_leftover_rms(b, rcut, species, mobile)
+        .iter()
+        .copied()
+        .collect();
+    if wa.len() != wb.len() || wa.is_empty() {
+        return f64::INFINITY;
+    }
+    wa.sort_by(|x, y| y.total_cmp(x));
+    wb.sort_by(|x, y| y.total_cmp(x));
+    wa.iter()
+        .zip(wb.iter())
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt()
+}
+
 /// RMS of the featomic leftover on the mobile, species-conditioned cloud.
 pub fn leftover_rms(
     x: ArrayView1<f64>,
@@ -494,6 +577,11 @@ mod tests {
             rms > DEFECT,
             "featomic leftover on ico13 is {rms}, want a packing defect"
         );
+        let d = soap_bank_distance(x.view(), x.view(), 3.5, None, None);
+        assert!(d < 1e-12, "SOAP bank distance of a structure to itself is {d}");
+        let morph = soap_morphology(x.view(), 3.5, None, None);
+        assert_eq!(morph.len(), 5);
+        assert!(morph.iter().all(|v| v.is_finite() && *v >= 0.0));
     }
 
     #[test]
