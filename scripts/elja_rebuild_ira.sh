@@ -22,7 +22,10 @@ echo "gfortran=$(gfortran --version | head -1)"
 cd "$IRA/src"
 make clean
 # Empty LIBLAPACK compiles lap_local/lap.f instead of -llapack (FlexiBLAS).
-LIBLAPACK= make shlib
+# No -march=native: login is Sapphire Rapids; AMD compute nodes SIGILL on that.
+FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops"
+export FFLAGS
+LIBLAPACK= make shlib FFLAGS="$FFLAGS"
 # Bake gcc 12 into DT_RUNPATH so HQ tasks do not need LD_LIBRARY_PATH.
 gfortran -o "$IRA/lib/libira.so" -shared \
   -J"$IRA/include" -I"$IRA/include" \
