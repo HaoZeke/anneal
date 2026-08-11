@@ -523,7 +523,7 @@ fn main() {
     if cfg.soap_hop {
         #[cfg(feature = "featomic")]
         println!(
-            "  SOAP hop: featomic soap_power_spectrum leftover 2p-mu, l>=5, no 421/fcc"
+            "  SOAP hop: featomic packing-mean kick on a closed shell, leftover patch otherwise, l>=5, no 421/fcc"
         );
         #[cfg(not(feature = "featomic"))]
         println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
