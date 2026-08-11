@@ -82,6 +82,9 @@ pub mod screen;
 pub mod ace;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
+/// featomic SOAP power-spectrum leftover hop.
+#[cfg(feature = "featomic")]
+pub mod featomic_hop;
 pub mod spectral;
 pub mod structure;
 pub mod symmetrise;

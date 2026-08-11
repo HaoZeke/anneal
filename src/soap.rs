@@ -1756,6 +1756,16 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        let _ = spec;
+        let _ = groups;
+        return crate::featomic_hop::step_away_featomic(
+            x, rmsd, spec.rcut_nn, species, mobile, rng,
+        );
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
     let packing = species.is_none() && mobile.is_none();
     if packing {
         let _ = spec;
@@ -1844,6 +1854,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     // caller's cap: Tikhonov otherwise leaves a near-identity.
     let dr = pullback_nu3(x, target.view(), spec, species, mobile);
     scale_to_cap(x, dr, rmsd)
+    }
 }
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best

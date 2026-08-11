@@ -20,6 +20,9 @@ default = []
 ira = []
 # Exact basin identity by canonical contact-graph labelling through nauty.
 graphkey = ["dep:petgraph", "dep:nauty-pet"]
+# featomic SOAP power spectrum leftover. Off by default because the
+# metatensor C core is built from source by cmake.
+featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
 capi = ["eindir-core/capi"]
@@ -45,6 +48,11 @@ pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"],
 numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
 rgpot-core = { git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "6e50d838ef75940f3776c36bf4fa6f90f23d4347", features = ["profile", "rpc"], optional = true }
+# SOAP power spectrum leftover. featomic 0.6 carries ndarray 0.16;
+# descriptor data crosses as f64 slices. metatensor-static embeds the
+# C core so SLURM tasks do not need LD_LIBRARY_PATH.
+featomic   = { version = "0.6.0", features = ["metatensor-static"], optional = true }
+metatensor = { version = "=0.2.3", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
