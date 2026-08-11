@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: well-UCB start (QD), archive-null SOAP hop, Lee splice + Dcut"
+                    "  bank explore: FunnelModel EI start, well-UCB fallback, archive-null hop, Lee splice + Dcut"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1151,6 +1151,9 @@ fn run_capnp_bank(
     use anneal_core::diversity::DiversityAnnealer;
     use anneal_core::methods::splice::cut_and_splice;
     use rand::Rng;
+    let mut cfg = cfg.clone();
+    cfg.budget_window = true;
+    let cfg = &cfg;
     let mut client = BankClient::connect(sock).unwrap_or_else(|e| panic!("BANK_RPC {sock}: {e}"));
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(cfg, &Array1::zeros(0)),
