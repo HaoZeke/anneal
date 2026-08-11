@@ -13,7 +13,13 @@ fi
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
 echo "glibc=$(ldd --version | head -1)"
-cargo build --release --features featomic,bank-rpc --example lj_cluster_search --example bank_server
+export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
+if [[ ! -e "$IRA_LIB_DIR/libira.so" ]]; then
+  echo "missing $IRA_LIB_DIR/libira.so" >&2
+  exit 1
+fi
+export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+cargo build --release --features featomic,ira,bank-rpc --example lj_cluster_search --example bank_server
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec

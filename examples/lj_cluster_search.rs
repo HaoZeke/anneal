@@ -525,8 +525,10 @@ fn main() {
     if cfg.soap_hop {
         #[cfg(feature = "featomic")]
         println!(
-            "  SOAP hop: featomic packing-mean kick on a closed shell, leftover patch otherwise, l>=5, no 421/fcc"
+            "  SOAP hop: SOFI C5 residual while fivefold, else featomic packing-mean kick / leftover, l>=5, no 421/fcc"
         );
+        #[cfg(feature = "ira")]
+        println!("  IRA: libira_match Hausdorff on the shared bank, SOFI libira_try_mat on the hop");
         if cfg.keying == Keying::SoapPacking {
             println!(
                 "  SOAP superbasin: mean-SOAP merge {}, adaptive height N_f={}",

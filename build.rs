@@ -37,6 +37,7 @@ fn main() {
             .expect("feature `ira` requires IRA_LIB_DIR pointing at libira");
         println!("cargo:rustc-link-search=native={dir}");
         println!("cargo:rustc-link-lib=dylib=ira");
+        println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
         println!("cargo:rerun-if-env-changed=IRA_LIB_DIR");
     }
 }
