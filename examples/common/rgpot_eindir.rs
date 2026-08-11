@@ -239,6 +239,7 @@ impl RgpotObjective {
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir xtb");
         println!("  eindir objective from rgpot xtb ({})", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         Self { pot: handle }
     }
 
@@ -271,6 +272,7 @@ impl RgpotObjective {
         };
         assert!(!handle.is_null(), "rgpot_potential_new_eindir cuh2");
         println!("  eindir objective from rgpot cuh2 ({})", path.display());
+        let _ = std::io::Write::flush(&mut std::io::stdout());
         Self { pot: handle }
     }
 }
