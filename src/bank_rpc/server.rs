@@ -312,7 +312,7 @@ fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String>
                 }
             }
         }
-        serialize::write_message(&mut *stream, &reply).map_err(|e| e.to_string())?;
+        serialize::write_message(&mut stream, &reply).map_err(|e| e.to_string())?;
         stream.flush().map_err(|e| e.to_string())?;
     }
 }
