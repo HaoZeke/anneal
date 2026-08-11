@@ -90,9 +90,9 @@ smoke() {
   export LD_LIBRARY_PATH="${RGPOT}/.pixi/envs/xtbbld/lib:${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
   echo "SMOKE water dimer"
   "$ROOT/target/release/examples/molecular_cluster" 2 20 1
-  echo "SMOKE cuh2_tiny"
+  echo "SMOKE cuh2 FCC slab"
   "$ROOT/target/release/examples/slab_adsorption" \
-    "$ROOT/examples/fixtures/cuh2_tiny.con" 8 1
+    "$ROOT/examples/fixtures/cuh2_fcc_slab.con" 15 1
   echo "SMOKE_OK"
 }
 
