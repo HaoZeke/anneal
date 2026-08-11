@@ -12,6 +12,12 @@ GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
 export PATH="${GCC}/bin:${PATH}"
 IRA=${IRA_ROOT:-$HOME/ira}
 GCCLIB=${GCCLIB:-${GCC}/lib64}
+SYS=${IRA_SYSROOT:-$HOME/ira/sysroot}
+if [[ ! -e $SYS/crti.o ]]; then
+  echo "missing $SYS/crti.o; run scripts/elja_stage_sysroot.sh on the login node" >&2
+  exit 1
+fi
+export LIBRARY_PATH="${SYS}:${GCCLIB}:/usr/lib64:${LIBRARY_PATH:-}"
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 lscpu | grep -E "Model name|Vendor ID" || true
 if [[ ! -d $IRA/src ]]; then
@@ -29,11 +35,11 @@ rm -rf "$IRA/src/Obj"
 mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"
 # Empty LIBLAPACK compiles lap_local/lap.f instead of -llapack (FlexiBLAS).
 # Portable ISA: Intel and AMD compute share this .so.
-FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops"
+FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops -B${SYS}"
 cd "$IRA/src"
 LIBLAPACK= make shlib FFLAGS="$FFLAGS"
 # Relink with rpath; write a new inode so mapped tasks keep the old file.
-gfortran -o "$IRA/lib/libira.so.new" -shared \
+gfortran -B"$SYS" -o "$IRA/lib/libira.so.new" -shared \
   -J"$IRA/include" -I"$IRA/include" \
   "$IRA/src/Obj"/*.o \
   -Wl,-soname,libira.so \
