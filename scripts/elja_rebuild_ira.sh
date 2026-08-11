@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
-# Rebuild libira.so on Elja without FlexiBLAS.
-# Uses IRA's in-tree lap_local and OHPC gcc 12, with rpath so compute
-# nodes load libgfortran/libquadmath without a module.
+# Rebuild libira.so on an Elja compute node. Login-node gfortran
+# -march=native is Sapphire Rapids and SIGILLs on amd-compute.
+# Uses IRA's in-tree lap_local and OHPC gcc 12, with rpath so tasks
+# load libgfortran/libquadmath without a module.
 set -euo pipefail
+if [[ -z ${SLURM_JOB_ID:-} ]]; then
+  echo "elja_rebuild_ira.sh: run under srun, not on $(hostname)" >&2
+  exit 1
+fi
 GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
 export PATH="${GCC}/bin:${PATH}"
 IRA=${IRA_ROOT:-$HOME/ira}
 GCCLIB=${GCCLIB:-${GCC}/lib64}
+echo "host=$(hostname) job=$SLURM_JOB_ID"
+lscpu | grep -E "Model name|Vendor ID" || true
 if [[ ! -d $IRA/src ]]; then
   echo "missing $IRA/src" >&2
   exit 1
@@ -15,23 +22,23 @@ if [[ ! -e $GCCLIB/libgfortran.so.5 || ! -e $GCCLIB/libquadmath.so.0 ]]; then
   echo "missing gfortran/quadmath under $GCCLIB" >&2
   exit 1
 fi
-if [[ -e $IRA/lib/libira.so ]]; then
-  cp -a "$IRA/lib/libira.so" "$IRA/libira.so.flexiblas-bak"
-fi
 echo "gfortran=$(gfortran --version | head -1)"
-cd "$IRA/src"
-make clean
+# Do not `make clean` the live lib/: HQ tasks keep the inode open and
+# NFS leaves a .nfs* that makes `rm -rf lib` fail.
+rm -rf "$IRA/src/Obj"
+mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"
 # Empty LIBLAPACK compiles lap_local/lap.f instead of -llapack (FlexiBLAS).
-# No -march=native: login is Sapphire Rapids; AMD compute nodes SIGILL on that.
+# Portable ISA: Intel and AMD compute share this .so.
 FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops"
-export FFLAGS
+cd "$IRA/src"
 LIBLAPACK= make shlib FFLAGS="$FFLAGS"
-# Bake gcc 12 into DT_RUNPATH so HQ tasks do not need LD_LIBRARY_PATH.
-gfortran -o "$IRA/lib/libira.so" -shared \
+# Relink with rpath; write a new inode so mapped tasks keep the old file.
+gfortran -o "$IRA/lib/libira.so.new" -shared \
   -J"$IRA/include" -I"$IRA/include" \
   "$IRA/src/Obj"/*.o \
   -Wl,-soname,libira.so \
   -Wl,-rpath,"$GCCLIB"
+mv -f "$IRA/lib/libira.so.new" "$IRA/lib/libira.so"
 ln -sfn "$IRA/lib/libira.so" "$IRA/src/libira.so"
 echo "=== ldd libira.so ==="
 ldd "$IRA/lib/libira.so"
