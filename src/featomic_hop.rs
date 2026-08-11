@@ -21,6 +21,14 @@ use rand::Rng;
 pub const CALCULATOR: &str = "soap_power_spectrum";
 /// Power-spectrum angular channels kept in the leftover.
 pub const LMIN: i32 = 5;
+/// `Dcut` when every seed is the same packing.
+///
+/// High-`l` mean SOAP of LJ75 Mackay vs Marks is 0.163; of a structure
+/// to itself is 0. The bank used to fall back to `merge_radius` (0.7),
+/// which is a length, and 0.163 < 0.7 so Marks was a duplicate of
+/// Mackay. This floor sits below the packing gap and above numerical
+/// zero, so a one-funnel seed bank still admits the other funnel.
+pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 const LAMBDA: f64 = 1e-3;
@@ -86,6 +94,16 @@ fn spectrum(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> Spectrum {
+    spectrum_keep(x, rcut, species, mobile, LMIN)
+}
+
+fn spectrum_keep(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+) -> Spectrum {
     let n = x.len() / 3;
     let json = hypers(rcut);
     let mut systems = system_of(x, species);
@@ -122,7 +140,7 @@ fn spectrum(
         let l_idx = names.iter().position(|&s| s == "l");
         let keep: Vec<usize> = (0..n_f)
             .filter(|&f| match l_idx {
-                Some(li) if f < props.count() => props[f][li].i32() >= LMIN,
+                Some(li) if f < props.count() => props[f][li].i32() >= lmin,
                 None => true,
                 _ => false,
             })
@@ -321,13 +339,58 @@ pub fn soap_bank_distance(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> f64 {
-    let ua = soap_cloud_mean(a, rcut, species, mobile);
-    let ub = soap_cloud_mean(b, rcut, species, mobile);
+    soap_bank_distance_lmin(a, b, rcut, species, mobile, LMIN)
+}
+
+/// Mean-SOAP L2 with a chosen angular floor. `lmin = 0` is the full
+/// spectrum; production leftover hops keep [`LMIN`].
+pub fn soap_bank_distance_lmin(
+    a: ArrayView1<f64>,
+    b: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    lmin: i32,
+) -> f64 {
+    let ua = unit(&spectrum_keep(a, rcut, species, mobile, lmin).cloud_mean);
+    let ub = unit(&spectrum_keep(b, rcut, species, mobile, lmin).cloud_mean);
     if ua.len() != ub.len() || ua.is_empty() {
         return f64::INFINITY;
     }
     ua.iter()
         .zip(ub.iter())
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// Sorted per-atom leftover-RMS L2. This is the metric that collapsed.
+///
+/// Closed shells share a core-versus-surface leftover magnitude, so
+/// Mackay and Marks sit almost on top of each other. Kept so a test
+/// can name the failure; the bank must not call this.
+pub fn leftover_profile_distance(
+    a: ArrayView1<f64>,
+    b: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> f64 {
+    let mut wa: Vec<f64> = atom_leftover_rms(a, rcut, species, mobile)
+        .iter()
+        .copied()
+        .collect();
+    let mut wb: Vec<f64> = atom_leftover_rms(b, rcut, species, mobile)
+        .iter()
+        .copied()
+        .collect();
+    if wa.len() != wb.len() || wa.is_empty() {
+        return f64::INFINITY;
+    }
+    wa.sort_by(|x, y| y.total_cmp(x));
+    wb.sort_by(|x, y| y.total_cmp(x));
+    wa.iter()
+        .zip(wb.iter())
         .map(|(x, y)| (x - y) * (x - y))
         .sum::<f64>()
         .sqrt()
@@ -680,5 +743,149 @@ mod tests {
         for i in 9..x.len() {
             assert_eq!(y[i], x[i], "frozen coordinate {i} moved");
         }
+    }
+
+    fn load_xyz(text: &str) -> Array1<f64> {
+        let mut vals = Vec::new();
+        for (i, line) in text.lines().enumerate() {
+            if i < 2 {
+                continue;
+            }
+            let t = line.trim();
+            if t.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = t.split_whitespace().collect();
+            let start = if parts.len() >= 4 { 1 } else { 0 };
+            for k in 0..3 {
+                vals.push(parts[start + k].parse::<f64>().expect(t));
+            }
+        }
+        Array1::from(vals)
+    }
+
+    fn rotate_z(x: &Array1<f64>) -> Array1<f64> {
+        let mut y = x.clone();
+        for i in 0..x.len() / 3 {
+            let xx = x[3 * i];
+            let yy = x[3 * i + 1];
+            y[3 * i] = -yy;
+            y[3 * i + 1] = xx;
+        }
+        y
+    }
+
+    /// The bank distance has to separate the paper funnels. Leftover RMS
+    /// does not: it is a core-versus-surface magnitude shared by every
+    /// closed shell. Mean SOAP has to, or Dcut is still a one-funnel
+    /// threshold.
+    #[test]
+    fn paper_funnels_mean_soap_not_leftover_rms() {
+        let ico38 = load_xyz(include_str!("../tests/fixtures/lj38_ico.xyz"));
+        let fcc38 = load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz"));
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        assert_eq!(ico38.len(), 38 * 3);
+        assert_eq!(fcc38.len(), 38 * 3);
+        assert_eq!(ico75.len(), 75 * 3);
+        assert_eq!(marks.len(), 75 * 3);
+
+        let pairs = [
+            ("LJ38 ico-fcc", ico38.view(), fcc38.view()),
+            ("LJ75 ico-Marks", ico75.view(), marks.view()),
+        ];
+        for (label, a, b) in pairs {
+            let d_left = leftover_profile_distance(a, b, 3.5, None, None);
+            let d_high = soap_bank_distance(a, b, 3.5, None, None);
+            let d_full = soap_bank_distance_lmin(a, b, 3.5, None, None, 0);
+            let rms_a = leftover_rms(a, 3.5, None, None);
+            let rms_b = leftover_rms(b, 3.5, None, None);
+            eprintln!(
+                "{label}: leftover_profile={d_left:.6} high_l={d_high:.6} \
+                 full_l={d_full:.6} leftover_rms={rms_a:.6}/{rms_b:.6}"
+            );
+            assert!(
+                d_left < 0.05,
+                "{label}: leftover profile was supposed to collapse, got {d_left}"
+            );
+            assert!(
+                d_high > 0.05,
+                "{label}: high-l mean SOAP must separate the funnels, got {d_high}"
+            );
+        }
+
+        let rot = rotate_z(&ico75);
+        let d_rot = soap_bank_distance(ico75.view(), rot.view(), 3.5, None, None);
+        let d_self = soap_bank_distance(ico75.view(), ico75.view(), 3.5, None, None);
+        eprintln!("LJ75 ico-rotated high_l={d_rot:.8} self={d_self:.8}");
+        assert!(d_self < 1e-12, "self distance is {d_self}");
+        assert!(
+            d_rot < 0.01,
+            "a rotation of the same packing must stay below Dcut scale, got {d_rot}"
+        );
+
+        // A surface kick quenched back onto the ico shelf is the isomer
+        // leftover treated as a new basin. Dcut is half the seed-pair
+        // mean; if that isomer sits near ico-Marks, the bank still fills
+        // with Mackay variants.
+        let mut kicked = ico75.clone();
+        kicked[0] += 0.35;
+        kicked[1] -= 0.20;
+        let (e_iso, iso) = quench_lj(kicked.view());
+        let d_iso_high = soap_bank_distance(ico75.view(), iso.view(), 3.5, None, None);
+        let d_iso_full = soap_bank_distance_lmin(ico75.view(), iso.view(), 3.5, None, None, 0);
+        let d_iso_left = leftover_profile_distance(ico75.view(), iso.view(), 3.5, None, None);
+        let d_pack = soap_bank_distance(ico75.view(), marks.view(), 3.5, None, None);
+        eprintln!(
+            "LJ75 ico-isomer E={e_iso:.6} leftover={d_iso_left:.6} \
+             high_l={d_iso_high:.6} full_l={d_iso_full:.6} vs_marks={d_pack:.6}"
+        );
+        assert!(
+            d_pack > SOAP_DCUT_FALLBACK,
+            "ico-Marks {d_pack} is below the SOAP Dcut fallback {SOAP_DCUT_FALLBACK}"
+        );
+        assert!(
+            d_pack < 0.7,
+            "ico-Marks {d_pack} must stay below merge_radius or the old fallback was not the bug"
+        );
+        assert!(
+            (e_iso + 396.282249).abs() < 0.5,
+            "surface kick left the ico shelf, E={e_iso}"
+        );
+        assert!(
+            d_iso_high < 0.4 * d_pack,
+            "ico isomer high-l {d_iso_high} is too close to ico-Marks {d_pack}"
+        );
+    }
+
+    fn quench_lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            let n = x.len() / 3;
+            let mut e = 0.0;
+            let mut g = Array1::zeros(x.len());
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let d = [
+                        x[3 * i] - x[3 * j],
+                        x[3 * i + 1] - x[3 * j + 1],
+                        x[3 * i + 2] - x[3 * j + 2],
+                    ];
+                    let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+                    let inv2 = 1.0 / r2;
+                    let inv6 = inv2 * inv2 * inv2;
+                    let inv12 = inv6 * inv6;
+                    e += 4.0 * (inv12 - inv6);
+                    let coef = 24.0 * inv2 * (2.0 * inv12 - inv6);
+                    for k in 0..3 {
+                        g[3 * i + k] -= coef * d[k];
+                        g[3 * j + k] += coef * d[k];
+                    }
+                }
+            }
+            (e, g)
+        }
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (f, xr, _) = opt.minimize(x, 400, |v| Some(lj(v)));
+        (f, xr)
     }
 }
