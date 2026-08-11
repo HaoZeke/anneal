@@ -342,4 +342,213 @@ fn main() {
         );
     }
     println!("mh_off {off}/40 best {best:.9}");
+
+    #[cfg(feature = "featomic")]
+    {
+        const MARKS: f64 = -397.492331;
+        let spec = anneal_core::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5,
+        };
+        let classify = |e: f64| {
+            if (e - MARKS).abs() < 1e-4 {
+                "marks"
+            } else if (e - PLATEAU).abs() < 1e-4 {
+                "ico"
+            } else if e < PLATEAU - 1e-4 {
+                "below_ico"
+            } else if e > PLATEAU + 3.0 {
+                "melt"
+            } else {
+                "other"
+            }
+        };
+        // Force the high-l leftover at 0.75: that is the melt hop.
+        let mut rngm = StdRng::seed_from_u64(99);
+        let ym = anneal_core::featomic_hop::step_away_featomic_at(
+            x0.view(),
+            0.75,
+            3.5,
+            None,
+            None,
+            &mut rngm,
+        );
+        let (em, xm) = relax(ym.view(), 800);
+        println!(
+            "melt_start e {em:.9} class {} dE {:+.4}",
+            classify(em),
+            em - e0
+        );
+        // Always take the shipped hop quench. From melt, downhill is free.
+        let mut e = em;
+        let mut x = xm.clone();
+        let mut best = em;
+        let mut n_marks = 0usize;
+        let mut n_ico = 0usize;
+        let mut n_below = 0usize;
+        for hop in 0..40 {
+            let y = anneal_core::soap::step_away_cloud(
+                x.view(),
+                spec,
+                RMSD,
+                None,
+                None,
+                None,
+                &mut rngm,
+            );
+            let (e2, x2) = relax(y.view(), 400);
+            e = e2;
+            x = x2;
+            if e < best {
+                best = e;
+            }
+            let c = classify(e);
+            if c == "marks" {
+                n_marks += 1;
+            }
+            if c == "ico" {
+                n_ico += 1;
+            }
+            if c == "below_ico" || c == "marks" {
+                n_below += 1;
+            }
+            println!(
+                "melt_walk {hop} e {e:.9} class {c} best {best:.9}"
+            );
+        }
+        println!(
+            "melt_walk_summary marks {n_marks}/40 ico {n_ico}/40 below {n_below}/40 best {best:.9}"
+        );
+        // Metropolis at production T=0.8 from the melt, shipped hop.
+        let mut rng = StdRng::seed_from_u64(101);
+        e = em;
+        x = xm.clone();
+        best = em;
+        let mut acc_n = 0usize;
+        n_marks = 0;
+        n_ico = 0;
+        n_below = 0;
+        for hop in 0..40 {
+            let y = anneal_core::soap::step_away_cloud(
+                x.view(),
+                spec,
+                RMSD,
+                None,
+                None,
+                None,
+                &mut rng,
+            );
+            let (e2, x2) = relax(y.view(), 400);
+            let acc = e2 < e || rng.random::<f64>() < ((e - e2) / 0.8).exp();
+            if acc {
+                e = e2;
+                x = x2;
+                acc_n += 1;
+            }
+            if e < best {
+                best = e;
+            }
+            let c = classify(e);
+            if c == "marks" {
+                n_marks += 1;
+            }
+            if c == "ico" {
+                n_ico += 1;
+            }
+            if c == "below_ico" || c == "marks" {
+                n_below += 1;
+            }
+            println!(
+                "melt_mh {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
+            );
+        }
+        println!(
+            "melt_mh_summary acc {acc_n}/40 marks {n_marks}/40 ico {n_ico}/40 below {n_below}/40 best {best:.9}"
+        );
+        // Wales–Doye random step from the same melt, T=0.8, amplitude 0.38.
+        let mut rng = StdRng::seed_from_u64(103);
+        e = em;
+        x = xm.clone();
+        best = em;
+        acc_n = 0;
+        n_marks = 0;
+        n_ico = 0;
+        n_below = 0;
+        for hop in 0..80 {
+            let mut y = x.clone();
+            for v in y.iter_mut() {
+                *v += rng.random::<f64>() * 0.76 - 0.38;
+            }
+            let (e2, x2) = relax(y.view(), 400);
+            let acc = e2 < e || rng.random::<f64>() < ((e - e2) / 0.8).exp();
+            if acc {
+                e = e2;
+                x = x2;
+                acc_n += 1;
+            }
+            if e < best {
+                best = e;
+            }
+            let c = classify(e);
+            if c == "marks" {
+                n_marks += 1;
+            }
+            if c == "ico" {
+                n_ico += 1;
+            }
+            if c == "below_ico" || c == "marks" {
+                n_below += 1;
+            }
+            if hop % 5 == 4 || c == "marks" || c == "below_ico" {
+                println!(
+                    "melt_bh {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
+                );
+            }
+        }
+        println!(
+            "melt_bh_summary acc {acc_n}/80 marks {n_marks}/80 ico {n_ico}/80 below {n_below}/80 best {best:.9}"
+        );
+        // Same random BH, but Metropolis against the incumbent ico energy
+        // after a forced melt (the production question: take the melt, then
+        // explore at T=0.8 with ico as the accepted best).
+        let mut rng = StdRng::seed_from_u64(107);
+        e = em;
+        x = xm.clone();
+        best = e0.min(em);
+        acc_n = 0;
+        n_marks = 0;
+        let mut landed_ico = 0usize;
+        for hop in 0..80 {
+            let mut y = x.clone();
+            for v in y.iter_mut() {
+                *v += rng.random::<f64>() * 0.76 - 0.38;
+            }
+            let (e2, x2) = relax(y.view(), 400);
+            let acc = e2 < e || rng.random::<f64>() < ((e - e2) / 0.8).exp();
+            if acc {
+                e = e2;
+                x = x2;
+                acc_n += 1;
+            }
+            if e < best {
+                best = e;
+            }
+            let c = classify(e);
+            if c == "marks" {
+                n_marks += 1;
+            }
+            if c == "ico" {
+                landed_ico += 1;
+            }
+            if hop % 5 == 4 || c == "marks" || c == "below_ico" {
+                println!(
+                    "melt_rec {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
+                );
+            }
+        }
+        println!(
+            "melt_rec_summary acc {acc_n}/80 marks {n_marks}/80 on_ico {landed_ico}/80 best {best:.9}"
+        );
+    }
 }
