@@ -8,6 +8,13 @@ if [[ -z ${SLURM_JOB_ID:-} ]]; then
 fi
 export PATH="${HOME}/.cargo/bin:${PATH}"
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
+SYS=${IRA_SYSROOT:-$HOME/ira/sysroot}
+export CC="${GCC}/bin/gcc"
+export CXX="${GCC}/bin/g++"
+export FC="${GCC}/bin/gfortran"
+export LIBRARY_PATH="${SYS}:${GCC}/lib64:/usr/lib64:${LIBRARY_PATH:-}"
+export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-B${SYS} -L ${SYS}"
 cd "$ROOT"
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 lscpu | grep -E "Model name|Vendor ID" || true

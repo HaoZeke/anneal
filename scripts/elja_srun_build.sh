@@ -11,6 +11,8 @@ if [[ -n ${SLURM_JOB_ID:-} ]]; then
   bash "$ROOT/scripts/elja_build_lj.sh"
   exit 0
 fi
+# Startfiles live on the login image only. Stage them before srun.
+bash "$ROOT/scripts/elja_stage_sysroot.sh"
 exec srun \
   --partition="$PART" \
   --nodes=1 \
