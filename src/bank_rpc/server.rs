@@ -11,6 +11,9 @@ use ndarray::{Array1, ArrayView1};
 use crate::Bank_capnp::{bank_reply, bank_request};
 use crate::methods::bank::{Admission, Bank};
 
+/// Hausdorff length below which two members are the same geometry.
+const IRA_SAME: f64 = 0.05;
+
 /// Packing merge for wells. Same number as recommended SOAP packing.
 fn pack_merge() -> f64 {
     #[cfg(feature = "featomic")]
@@ -76,24 +79,27 @@ impl Inner {
             let states: Vec<Array1<f64>> =
                 self.bank.members().iter().map(|m| m.state.clone()).collect();
             let admission = self.bank.offer(coords.view(), energy, |p, q| {
+                // IRA: same geometry under rotation/permutation (a length).
+                // SOAP: Lee Dcut among distinct packings (unit mean-SOAP).
+                // They are not substitutes. Mixing IRA lengths into a SOAP
+                // Dcut makes every offer novel or every offer a duplicate.
                 #[cfg(feature = "ira")]
                 {
-                    let _ = (&soaps, &cand);
-                    crate::shape::IraMetric::default().distance(p, q)
+                    let ira_d = crate::shape::IraMetric::default().distance(p, q);
+                    if ira_d.is_finite() && ira_d <= IRA_SAME {
+                        return 0.0;
+                    }
                 }
-                #[cfg(not(feature = "ira"))]
-                {
-                    let _ = p;
-                    states
-                        .iter()
-                        .position(|s| {
-                            s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b)
-                        })
-                        .and_then(|i| soaps.get(i))
-                        .filter(|s| !s.is_empty() && !cand.is_empty())
-                        .map(|s| soap_l2(cand.view(), s.view()))
-                        .unwrap_or(f64::INFINITY)
-                }
+                let _ = p;
+                states
+                    .iter()
+                    .position(|s| {
+                        s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b)
+                    })
+                    .and_then(|i| soaps.get(i))
+                    .filter(|s| !s.is_empty() && !cand.is_empty())
+                    .map(|s| soap_l2(cand.view(), s.view()))
+                    .unwrap_or(f64::INFINITY)
             });
             match admission {
                 Admission::Added(i) => {
@@ -226,10 +232,18 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
     listener.set_nonblocking(false)?;
     let inner = Arc::new(Mutex::new(Inner::new(capacity.max(1))));
     eprintln!("bank listening on {} capacity {capacity}", addr.as_ref());
-    #[cfg(feature = "ira")]
-    eprintln!("bank identity: IRA libira_match Hausdorff");
+    #[cfg(all(feature = "ira", feature = "featomic"))]
+    eprintln!(
+        "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}",
+        pack_merge()
+    );
+    #[cfg(all(feature = "ira", not(feature = "featomic")))]
+    eprintln!("bank identity: IRA libira_match Hausdorff (no featomic SOAP)");
     #[cfg(not(feature = "ira"))]
-    eprintln!("bank identity: SOAP L2 (rebuild with --features ira)");
+    eprintln!(
+        "bank identity: SOAP L2 Lee Dcut, SOAP wells merge {}",
+        pack_merge()
+    );
     for conn in listener.incoming() {
         let stream = match conn {
             Ok(s) => s,
