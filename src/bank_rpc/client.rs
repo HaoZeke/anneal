@@ -162,7 +162,7 @@ fn list_f64(r: capnp::primitive_list::Reader<'_, f64>) -> Array1<f64> {
 }
 
 fn write_msg(stream: &mut TcpStream, message: &Builder<HeapAllocator>) -> Result<(), String> {
-    serialize::write_message(stream, message).map_err(|e| format!("bank write: {e}"))?;
+    serialize::write_message(&mut *stream, message).map_err(|e| format!("bank write: {e}"))?;
     stream.flush().map_err(|e| format!("bank flush: {e}"))?;
     Ok(())
 }
