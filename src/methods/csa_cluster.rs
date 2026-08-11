@@ -13,7 +13,7 @@
 //! A bank does notice, because it holds solutions from more than one funnel at
 //! once and spends its next start on the one it knows least about. With
 //! featomic the distance and the acquisition morphology are the SOAP
-//! leftover profile, not a CNA class.
+//! unit mean high-`l` SOAP, not a leftover-RMS profile or a CNA class.
 //!
 //! The budget is split, not multiplied. A bank of eight running eight chains of
 //! an eighth the length costs what one chain costs, which is the comparison
@@ -307,12 +307,23 @@ where
     }
 
     let mean = bank.mean_distance(&mut distance);
+    let fallback = {
+        #[cfg(feature = "featomic")]
+        {
+            crate::featomic_hop::SOAP_DCUT_FALLBACK
+        }
+        #[cfg(not(feature = "featomic"))]
+        {
+            cfg.merge_radius
+        }
+    };
     let mut schedule = match mean {
         Some(m) => DiversityAnnealer::from_initial(0.5 * m),
-        // Without two distinguishable members there is no scale to take, and a
-        // number invented here would be the hand-set constant this replaces.
-        // The run continues as plain restarts, which is what it already is.
-        None => DiversityAnnealer::from_initial(cfg.merge_radius),
+        // Seeding landed in one packing: Dave is zero. merge_radius is a
+        // length (0.7) and SOAP distances live on the unit sphere
+        // (ico-Marks = 0.163). Using the length as Dcut makes Marks a
+        // duplicate of Mackay. The SOAP floor is below that gap.
+        None => DiversityAnnealer::from_initial(fallback),
     }
     .with_final_fraction(bank_cfg.dcut_floor);
     let dcut0 = schedule.current();
