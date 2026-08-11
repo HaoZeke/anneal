@@ -1,12 +1,13 @@
-//! Recommended leftover hop in a featomic SOAP power spectrum.
+//! Recommended hop in a featomic SOAP power spectrum.
 //!
-//! The calculator is featomic `soap_power_spectrum`. The leftover is
-//! the per-centre *high-`l`* spectrum (`l ≥ 5`) minus the
-//! species-conditioned mean of the mobile set, restricted to a random
-//! defect patch. Low-`l` channels are a core-versus-surface breathing.
-//! A global high-`l` leftover is one deterministic ray. The patch is
-//! drawn with probability `‖Δp_i‖²` and pulled back through featomic's
-//! analytic position gradient. No Marks, fcc, or 421 target.
+//! The calculator is featomic `soap_power_spectrum`. High-`l`
+//! (`l ≥ 5`) leftover `p_i − μ` is a defect patch when some centres
+//! stick out of the species mean. On a closed shell that leftover is
+//! a core-versus-surface breath: the quench returns the same packing.
+//! The packing label is the unit species mean `μ` (the bank Dcut).
+//! When leftover is a shell mode the hop is a kick of `μ` along a
+//! random direction orthogonal to the occupied mean, pulled back
+//! through `∂μ/∂x`. No Marks, fcc, or 421 target.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -84,6 +85,8 @@ struct Spectrum {
     /// Species-conditioned mean spectrum. This is the packing label:
     /// leftover RMS is almost the same on every closed shell.
     cloud_mean: Array1<f64>,
+    /// Jacobian of [`cloud_mean`] with respect to coordinates.
+    mean_jac: ndarray::Array2<f64>,
     n_at: usize,
     n_feat: usize,
 }
@@ -251,15 +254,31 @@ fn spectrum_keep(
         }
     }
     let mut cloud_mean = Array1::zeros(nlab * n_feat);
+    let mut mean_jac = ndarray::Array2::zeros((nlab * n_feat, m));
     for k in 0..nlab {
         for f in 0..n_feat {
             cloud_mean[k * n_feat + f] = mu[k][f];
+            if cnt[k] <= 0.0 {
+                continue;
+            }
+            for i in 0..n {
+                if !keep[i] {
+                    continue;
+                }
+                if labels.iter().position(|&z| z == zi(i)).unwrap_or(0) != k {
+                    continue;
+                }
+                for c in 0..m {
+                    mean_jac[[k * n_feat + f, c]] += j_raw[i][f * m + c] / cnt[k];
+                }
+            }
         }
     }
     Spectrum {
         leftover,
         jacobian: jac,
         cloud_mean,
+        mean_jac,
         n_at: n,
         n_feat,
     }
@@ -549,7 +568,68 @@ fn focus_patch<R: Rng + ?Sized>(s: &mut Spectrum, x: ArrayView1<f64>, rcut: f64,
     }
 }
 
-/// Leftover hop through featomic `soap_power_spectrum`.
+/// True when leftover is a shell breath, not a local defect.
+///
+/// The largest per-atom leftover is then only a few times the median,
+/// so `p_i − μ` is the same core-versus-surface mode on every closed
+/// packing. Pulling that mode back does not change `μ`.
+fn shell_leftover(s: &Spectrum) -> bool {
+    let n = s.n_at;
+    let nf = s.n_feat;
+    if n == 0 || nf == 0 {
+        return true;
+    }
+    let mut w = vec![0.0; n];
+    for i in 0..n {
+        let mut q = 0.0;
+        for f in 0..nf {
+            let v = s.leftover[i * nf + f];
+            q += v * v;
+        }
+        w[i] = q;
+    }
+    w.sort_by(|a, b| a.total_cmp(b));
+    let med = w[n / 2].max(1e-18);
+    w[n - 1] < 4.0 * med
+}
+
+/// Kick the occupied mean SOAP along a random ray orthogonal to it.
+fn packing_kick<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    s: &Spectrum,
+    rmsd: f64,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let mu = unit(&s.cloud_mean);
+    if mu.is_empty() || s.mean_jac.nrows() != mu.len() {
+        return x.to_owned();
+    }
+    let mut u = Array1::<f64>::zeros(mu.len());
+    for v in u.iter_mut() {
+        let a: f64 = rng.random();
+        let b: f64 = rng.random();
+        let r = (-2.0 * a.max(1e-15).ln()).sqrt();
+        *v = r * (2.0 * std::f64::consts::PI * b).cos();
+    }
+    let proj = u.iter().zip(mu.iter()).map(|(a, b)| a * b).sum::<f64>();
+    for (v, m) in u.iter_mut().zip(mu.iter()) {
+        *v -= proj * *m;
+    }
+    let nrm = u.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if nrm < 1e-15 {
+        return x.to_owned();
+    }
+    u /= nrm;
+    let dr = tikhonov(&s.mean_jac, u.view(), LAMBDA);
+    pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
+}
+
+/// SOAP hop through featomic `soap_power_spectrum`.
+///
+/// A local leftover patch when some centres stick out of the species
+/// mean. A packing-mean kick when leftover is a closed-shell breath
+/// or numerically gone.
 pub fn step_away_featomic<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rmsd: f64,
@@ -561,17 +641,15 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     let mut s = spectrum(x, rcut, species, mobile);
     let nnu = (s.n_at * s.n_feat).max(1) as f64;
     let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
-    if rms < DEFECT {
-        return x.to_owned();
+    if rms < DEFECT || shell_leftover(&s) {
+        return packing_kick(x, &s, rmsd, mobile, rng);
     }
     focus_patch(&mut s, x, rcut, rng);
     let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
-    // A patch hop at the caller cap is a local reconstruction.
-    // The old global 0.44 floor was a whole-cluster distortion.
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 
-/// Same leftover direction as [`step_away_featomic`], at `rmsd` with no floor.
+/// Same hop as [`step_away_featomic`], at `rmsd` with no extra floor.
 pub fn step_away_featomic_at<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rmsd: f64,
@@ -580,15 +658,7 @@ pub fn step_away_featomic_at<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let mut s = spectrum(x, rcut, species, mobile);
-    let nnu = (s.n_at * s.n_feat).max(1) as f64;
-    let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
-    if rms < DEFECT {
-        return x.to_owned();
-    }
-    focus_patch(&mut s, x, rcut, rng);
-    let dr = tikhonov(&s.jacobian, s.leftover.view(), LAMBDA);
-    pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
+    step_away_featomic(x, rmsd, rcut, species, mobile, rng)
 }
 
 #[cfg(test)]
@@ -856,6 +926,28 @@ mod tests {
             d_iso_high < 0.4 * d_pack,
             "ico isomer high-l {d_iso_high} is too close to ico-Marks {d_pack}"
         );
+    }
+
+    #[test]
+    fn packing_kick_moves_lj75_ico_mean_soap() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut rng = StdRng::seed_from_u64(7);
+        let y = step_away_featomic(ico75.view(), 0.35, 3.5, None, None, &mut rng);
+        let mut s = 0.0;
+        for i in 0..ico75.len() {
+            let d = y[i] - ico75[i];
+            s += d * d;
+        }
+        let rms = (s / 75.0).sqrt();
+        assert!(rms > 0.1, "packing hop was a twitch, rms {rms}");
+        let d = soap_bank_distance(ico75.view(), y.view(), 3.5, None, None);
+        assert!(
+            d > SOAP_DCUT_FALLBACK,
+            "packing hop left mean SOAP unchanged, d={d}"
+        );
+        for i in 0..y.len() {
+            assert!(y[i].is_finite(), "packing hop produced a non-finite coordinate");
+        }
     }
 
     fn quench_lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {

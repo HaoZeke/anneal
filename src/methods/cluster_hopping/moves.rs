@@ -337,9 +337,11 @@ pub enum ClusterMove {
     /// Step in the SOAP power spectrum and pull back through \(J = \partial p/\partial R\).
     ///
     /// Concerted, not a one-atom hop. The recommended target is the
-    /// observed-cloud residual `2p − μ`, partitioned by `species` and
-    /// restricted to `mobile`. `class` turns on the 555→421 / fcc
-    /// prototype, cluster-only.
+    /// observed-cloud leftover `p − μ` on a defect, or a kick of the
+    /// mean SOAP orthogonal to the occupied packing when leftover is
+    /// a closed-shell breath. Partitioned by `species`, restricted to
+    /// `mobile`. `class` turns on the 555→421 / fcc prototype,
+    /// cluster-only.
     Soap {
         /// Cartesian RMSD of the pulled-back step.
         rmsd: f64,
