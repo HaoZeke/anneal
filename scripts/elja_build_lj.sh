@@ -51,4 +51,4 @@ ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
-echo "NOTE molecular_cluster and slab_adsorption need --features rgpot-ex and potserv"
+echo "NOTE molecular_cluster and slab_adsorption: scripts/elja_build_rgpot_ex.sh (in-process rgpot, not potserv)"
