@@ -226,6 +226,10 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
     listener.set_nonblocking(false)?;
     let inner = Arc::new(Mutex::new(Inner::new(capacity.max(1))));
     eprintln!("bank listening on {} capacity {capacity}", addr.as_ref());
+    #[cfg(feature = "ira")]
+    eprintln!("bank identity: IRA libira_match Hausdorff");
+    #[cfg(not(feature = "ira"))]
+    eprintln!("bank identity: SOAP L2 (rebuild with --features ira)");
     for conn in listener.incoming() {
         let stream = match conn {
             Ok(s) => s,

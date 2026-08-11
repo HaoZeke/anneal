@@ -7,6 +7,7 @@ BUDGET=${2:?budget}
 ARM=${3:?rec|base}
 export SEED_OFFSET=${SEED_OFFSET:-${HQ_TASK_ID:-0}}
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
-export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
+GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
+export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 BIN=${LJ_BIN:-$HOME/anneal-build/target/release/examples/lj_cluster_search}
 exec "$BIN" "$N" "$BUDGET" 1 "$ARM"
