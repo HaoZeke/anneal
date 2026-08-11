@@ -1756,6 +1756,17 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    let packing = species.is_none() && mobile.is_none();
+    if packing {
+        let y = step_away_fivefold(x, rmsd, rng);
+        let moved = y
+            .iter()
+            .zip(x.iter())
+            .any(|(a, b)| (a - b).abs() > 1e-12);
+        if moved {
+            return y;
+        }
+    }
     #[cfg(feature = "featomic")]
     {
         let _ = spec;
@@ -1766,10 +1777,8 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
     #[cfg(not(feature = "featomic"))]
     {
-    let packing = species.is_none() && mobile.is_none();
     if packing {
-        let _ = spec;
-        return step_away_fivefold(x, rmsd, rng);
+        return x.to_owned();
     }
     let loc = local_nu3_z(x, spec, species);
     let n_at = loc.nrows();

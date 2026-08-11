@@ -75,14 +75,25 @@ impl Inner {
             let cand = soap.clone();
             let states: Vec<Array1<f64>> =
                 self.bank.members().iter().map(|m| m.state.clone()).collect();
-            let admission = self.bank.offer(coords.view(), energy, |_p, q| {
-                states
-                    .iter()
-                    .position(|s| s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b))
-                    .and_then(|i| soaps.get(i))
-                    .filter(|s| !s.is_empty() && !cand.is_empty())
-                    .map(|s| soap_l2(cand.view(), s.view()))
-                    .unwrap_or(f64::INFINITY)
+            let admission = self.bank.offer(coords.view(), energy, |p, q| {
+                #[cfg(feature = "ira")]
+                {
+                    let _ = (&soaps, &cand);
+                    crate::shape::IraMetric::default().distance(p, q)
+                }
+                #[cfg(not(feature = "ira"))]
+                {
+                    let _ = p;
+                    states
+                        .iter()
+                        .position(|s| {
+                            s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b)
+                        })
+                        .and_then(|i| soaps.get(i))
+                        .filter(|s| !s.is_empty() && !cand.is_empty())
+                        .map(|s| soap_l2(cand.view(), s.view()))
+                        .unwrap_or(f64::INFINITY)
+                }
             });
             match admission {
                 Admission::Added(i) => {
@@ -138,6 +149,24 @@ impl Inner {
             .iter()
             .map(|w| soap_l2(soap, w.soap.view()))
             .fold(f64::INFINITY, f64::min)
+    }
+
+    fn nearest_state(&self, coords: ArrayView1<f64>) -> f64 {
+        #[cfg(feature = "ira")]
+        {
+            let ira = crate::shape::IraMetric::default();
+            return self
+                .bank
+                .members()
+                .iter()
+                .map(|m| ira.distance(coords, m.state.view()))
+                .fold(f64::INFINITY, f64::min);
+        }
+        #[cfg(not(feature = "ira"))]
+        {
+            let _ = coords;
+            f64::INFINITY
+        }
     }
 
     fn deposit(&mut self, soap: Array1<f64>, increment: f64) -> f64 {
