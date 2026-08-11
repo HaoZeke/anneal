@@ -224,6 +224,22 @@ impl Bank {
         &self.first
     }
 
+    /// Replace slot `i` in the working bank and the first bank.
+    ///
+    /// Used when a later seed is the same packing as an earlier one and
+    /// deeper. The first bank must move with it or the frozen copy stays
+    /// on the shallower ico isomer.
+    pub fn overwrite(&mut self, i: usize, state: ArrayView1<f64>, energy: f64) {
+        if let Some(m) = self.members.get_mut(i) {
+            m.state = state.to_owned();
+            m.energy = energy;
+        }
+        if let Some(m) = self.first.get_mut(i) {
+            m.state = state.to_owned();
+            m.energy = energy;
+        }
+    }
+
     /// Picks a member to search from next.
     ///
     /// Least-used first, breaking ties by energy. The bank is a set of regions

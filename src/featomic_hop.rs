@@ -344,6 +344,17 @@ fn unit(v: &Array1<f64>) -> Array1<f64> {
     v / n
 }
 
+fn soap_l2_pack(a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return f64::INFINITY;
+    }
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y) * (x - y))
+        .sum::<f64>()
+        .sqrt()
+}
+
 /// Species-conditioned mean high-`l` SOAP. The packing label.
 pub fn soap_cloud_mean(
     x: ArrayView1<f64>,
@@ -655,10 +666,20 @@ fn packing_kick<R: Rng + ?Sized>(
     }
     let mut basis = vec![mu.clone()];
     PACK_ARCHIVE.with(|a| {
+        let merge = SOAP_PACK_MERGE;
         for w in a.borrow().iter() {
-            if w.len() == mu.len() {
-                basis.push(w.clone());
+            if w.len() != mu.len() {
+                continue;
             }
+            // One vector a packing. Thirty ico wells would otherwise
+            // fill the Gram-Schmidt budget with the same funnel.
+            if basis
+                .iter()
+                .any(|b| soap_l2_pack(b.view(), w.view()) <= merge)
+            {
+                continue;
+            }
+            basis.push(w.clone());
         }
     });
     orthonormal(&mut basis);

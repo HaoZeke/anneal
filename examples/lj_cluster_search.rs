@@ -1188,7 +1188,17 @@ fn run_capnp_bank(
             );
             if s.size >= 2 {
                 let sched = schedule.get_or_insert_with(|| {
-                    DiversityAnnealer::from_initial(s.dcut.max(0.05)).with_final_fraction(0.4)
+                    let floor = {
+                        #[cfg(feature = "featomic")]
+                        {
+                            anneal_core::featomic_hop::SOAP_PACK_MERGE
+                        }
+                        #[cfg(not(feature = "featomic"))]
+                        {
+                            0.10
+                        }
+                    };
+                    DiversityAnnealer::from_initial(s.dcut.max(floor)).with_final_fraction(0.4)
                 });
                 let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
                 let _ = client.set_dcut(sched.threshold(progress));
