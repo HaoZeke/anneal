@@ -1083,7 +1083,11 @@ fn run_full<'g, R: Rng + ?Sized>(
         // nowhere useful by energy, or it is going back where the chain already
         // is, which the energy screen cannot see because a returning trial
         // carries the incumbent's energy.
-        let returning = cfg.return_screen && {
+        // SOAP is the leave. Treating its pentagon opening as a return
+        // polishes the chain back onto the icosahedral shelf. The
+        // one-shot hop leaves; production with return_screen did not.
+        let soap_leave = !cov_fire && !soft_fire && !angular && kernels[k].name() == "soap";
+        let returning = cfg.return_screen && !soap_leave && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
             let d: f64 = ds
@@ -1118,7 +1122,9 @@ fn run_full<'g, R: Rng + ?Sized>(
                 .sqrt();
             Array1::from(vec![1.0, e_screen, drift, e_screen * drift])
         };
-        let screened_this = if cfg.bayes_screen {
+        let screened_this = if soap_leave {
+            false
+        } else if cfg.bayes_screen {
             // Refusing is what "screened" means here: the posterior says
             // finishing this relaxation is unlikely to improve on the
             // incumbent, so the evaluations go elsewhere.

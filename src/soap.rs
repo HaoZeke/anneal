@@ -1700,14 +1700,23 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
     if good.len() < FIVEFOLD_MIN_AXES {
         return x.to_owned();
     }
-    let prefer: Vec<([f64; 3], f64)> = good
-        .iter()
-        .copied()
-        .filter(|(_, d)| *d >= RECON_LO && *d < RECON_HI)
-        .collect();
-    let pool = if prefer.is_empty() { &good } else { &prefer };
-    let pick = rng.random_range(0..pool.len());
-    step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), pool[pick].0)
+    // The tightest axes snap back into the ico basin. The two
+    // openings that leave sit near d5 = 0.90 and 0.99. Draw one.
+    let closest = |target: f64| {
+        good.iter()
+            .min_by(|a, b| {
+                (a.1 - target)
+                    .abs()
+                    .partial_cmp(&(b.1 - target).abs())
+                    .unwrap()
+            })
+            .map(|r| r.0)
+            .unwrap_or(good[0].0)
+    };
+    let a = closest(RECON_LO + 0.01);
+    let b = closest(RECON_HI - 0.01);
+    let axis = if rng.random::<bool>() { a } else { b };
+    step_away_fivefold_about(x, rmsd.max(PENTAGON_CAP), axis)
 }
 
 /// Fivefold residual hop about one named axis. Used to probe which
