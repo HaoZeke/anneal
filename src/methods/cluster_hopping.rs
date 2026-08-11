@@ -1098,7 +1098,8 @@ fn run_full<'g, R: Rng + ?Sized>(
                     ..
                 }
             )
-            && !hop_is_identity(x.view(), trial.view());
+            && !hop_is_identity(x.view(), trial.view())
+            && n >= 75;
         let returning = cfg.return_screen && !soap_leave && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
