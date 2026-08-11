@@ -1145,6 +1145,8 @@ fn run_capnp_bank(
     sock: &str,
 ) -> Outcome {
     use anneal_core::bank_rpc::BankClient;
+    use anneal_core::diversity::DiversityAnnealer;
+    use anneal_core::methods::splice::cut_and_splice;
     use rand::Rng;
     let mut client = BankClient::connect(sock).unwrap_or_else(|e| panic!("BANK_RPC {sock}: {e}"));
     let mut bias = BasinBias::new(
@@ -1165,14 +1167,69 @@ fn run_capnp_bank(
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut slices = 0usize;
+    let mut mixes = 0usize;
+    let mut random_starts = 0usize;
+    let total = ledger.remaining();
+    let mut schedule: Option<DiversityAnnealer> = None;
+    let well_cap = cfg.bias_height * cfg.height_revisits.max(1.0);
     while ledger.remaining() > 0 {
-        if let Ok(wells) = client.wells() {
-            for (soap, h) in wells {
-                bias.import_well(soap, h);
+        let snap = client.snapshot().ok();
+        if let Some(s) = snap.as_ref() {
+            for (soap, h) in &s.wells {
+                bias.import_well(soap.clone(), *h);
+            }
+            if s.size >= 2 {
+                let sched = schedule.get_or_insert_with(|| {
+                    DiversityAnnealer::from_initial(s.dcut.max(0.05)).with_final_fraction(0.4)
+                });
+                let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
+                let _ = client.set_dcut(sched.threshold(progress));
+            }
+        }
+        // Mix two members (working + first bank) instead of searching one
+        // ico copy again. Lee's operator; the hop alone stays in-funnel.
+        if snap.as_ref().map(|s| s.size >= 2).unwrap_or(false) && rng.random::<f64>() < 0.5 {
+            if let (Ok(Some((_, a))), Ok(Some((_, b)))) = (
+                client.sample(rng.random::<u64>() & !1),
+                client.sample(rng.random::<u64>() | 1),
+            ) {
+                if a.len() == 3 * cfg.n_points && b.len() == 3 * cfg.n_points {
+                    let trial = cut_and_splice(
+                        a.view(),
+                        b.view(),
+                        cfg.species.as_deref(),
+                        cfg.min_separation,
+                        &mut rng,
+                    );
+                    let mut mix_led = Ledger::new(cfg.relax_steps.max(32).min(ledger.remaining()));
+                    let (e, x) = relax(&mut mix_led, trial.view(), cfg.relax_steps);
+                    ledger.charge_many(mix_led.spent());
+                    ledger.record(e, x.view());
+                    let soap = packing_of(x.view(), cfg);
+                    let _ = client.offer(e, x.view(), soap.view());
+                    let _ = client.deposit(soap.view(), cfg.bias_height);
+                    mixes += 1;
+                    if e < best {
+                        best = e;
+                        best_state = Some(x);
+                    }
+                    slices += 1;
+                    continue;
+                }
             }
         }
         let start = match client.sample(rng.random()) {
-            Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => x,
+            Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => {
+                let soap = packing_of(x.view(), cfg);
+                let h = client.bias_of(soap.view()).unwrap_or(0.0);
+                // Known packing already filled: do not start there again.
+                if h >= well_cap {
+                    random_starts += 1;
+                    random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng)
+                } else {
+                    x
+                }
+            }
             _ => random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng),
         };
         let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
@@ -1204,7 +1261,9 @@ fn run_capnp_bank(
             let _ = client.deposit(soap.view(), cfg.bias_height);
         }
     }
-    println!("      capnp bank: {slices} slices, best {best:.6}");
+    println!(
+        "      capnp bank: {slices} slices, {mixes} splices, {random_starts} novel starts, best {best:.6}"
+    );
     Outcome {
         best,
         best_state,
