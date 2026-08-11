@@ -9,7 +9,8 @@
 //! charges one unit per fused energy-and-forces evaluation.
 //!
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
-//! Engine is xtb (default), cp2k, rgpot, nwchemc, or cpmdc.
+//! Engine is xtb / xtb-cli (default path, no Cap'n Proto), cp2k, rgpot,
+//! nwchemc, or cpmdc.
 
 mod common;
 
@@ -19,18 +20,22 @@ use anneal_core::methods::cluster_hopping::{
     Config, Ledger, MoveLibrary, repack_rigid_groups, run_with_gradient,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use common::pipe_engine::PipeEngine;
+#[cfg(feature = "rgpot-ex")]
 use common::profile_engine::{ProfileEngine, optimizer_value_gradient, profile_prefix};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::io::Write;
 
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::rpc::client::RpcClient;
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::tensor::{
     rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
     rgpot_tensor_data, rgpot_tensor_free,
 };
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 /// The rgpot route: energy and forces over Cap'n Proto from an rgpot server,
@@ -38,6 +43,7 @@ use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 /// serves a metatomic model such as PET-MAD; the same server ABI carries the
 /// quantum-chemistry backends. One charged unit per calculate call, exactly as
 /// for the piped helper, and no engine code in this driver at all.
+#[cfg(feature = "rgpot-ex")]
 struct RgpotEngine {
     client: RpcClient,
     atmnrs: Vec<i32>,
@@ -46,6 +52,7 @@ struct RgpotEngine {
     failures: usize,
 }
 
+#[cfg(feature = "rgpot-ex")]
 impl RgpotEngine {
     fn connect(m: usize) -> Self {
         let host = std::env::var("RGPOT_HOST").unwrap_or_else(|_| "127.0.0.1".into());
@@ -122,110 +129,16 @@ fn log_line(msg: &str) {
     let _ = out.flush();
 }
 
-/// The piped engine: one child process, many evaluations.
-struct Engine {
-    child: Child,
-    reader: BufReader<std::process::ChildStdout>,
-    symbols: Vec<&'static str>,
-    /// Evaluations the engine refused (failed SCF), reported at the end.
-    failures: usize,
-}
-
-impl Drop for Engine {
-    fn drop(&mut self) {
-        // Close stdin so the helper's read loop sees EOF and exits after
-        // finishing any in-flight write. Killing first closes the pipe
-        // under that write and the helper reports BrokenPipe.
-        drop(self.child.stdin.take());
-        let _ = self.child.wait();
-    }
-}
-
-fn start_engine(m: usize, engine: &str) -> Engine {
-    let helper = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/ase_objective.py");
-    // One OpenMP team per xtb-cli call: the driver is already serial, and
-    // inheriting the host's default (all cores) oversubscribes every EVAL.
-    let omp = std::env::var("OMP_NUM_THREADS").unwrap_or_else(|_| "1".into());
-    let mut child = Command::new("python3")
-        .arg(helper)
-        .env("ASE_ENGINE", engine)
-        .env("PYTHONUNBUFFERED", "1")
-        .env("OMP_NUM_THREADS", omp)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("failed to start the ASE helper");
-    let stdout = child.stdout.take().expect("helper stdout");
-    let mut symbols = Vec::new();
-    for _ in 0..m {
-        symbols.extend_from_slice(&SYMBOLS);
-    }
-    Engine {
-        child,
-        reader: BufReader::new(stdout),
-        symbols,
-        failures: 0,
-    }
-}
-
-impl Engine {
-    /// One charged evaluation: energy in eV, forces to gradient in eV/A.
-    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-        let n = x.len() / 3;
-        let stdin = self.child.stdin.as_mut()?;
-        let mut msg = format!("{n}\n");
-        for i in 0..n {
-            msg.push_str(&format!(
-                "{} {:.10} {:.10} {:.10}\n",
-                self.symbols[i],
-                x[3 * i],
-                x[3 * i + 1],
-                x[3 * i + 2]
-            ));
-        }
-        msg.push_str("EVAL\n");
-        stdin.write_all(msg.as_bytes()).ok()?;
-        stdin.flush().ok()?;
-        let mut line = String::new();
-        let nread = self.reader.read_line(&mut line).ok()?;
-        if nread == 0 {
-            return None;
-        }
-        let failed = line.starts_with("FAIL");
-        let energy: f64 = if failed {
-            f64::INFINITY
-        } else {
-            line.trim().strip_prefix("E ")?.parse().ok()?
-        };
-        let mut g = Array1::zeros(3 * n);
-        for i in 0..n {
-            let mut fl = String::new();
-            self.reader.read_line(&mut fl).ok()?;
-            let p: Vec<f64> = fl
-                .split_whitespace()
-                .filter_map(|v| v.parse().ok())
-                .collect();
-            if p.len() == 3 {
-                // Gradient is minus the force.
-                for k in 0..3 {
-                    g[3 * i + k] = -p[k];
-                }
-            }
-        }
-        let mut done = String::new();
-        self.reader.read_line(&mut done).ok()?;
-        if failed {
-            self.failures += 1;
-            return None;
-        }
-        Some((energy, g))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn pipe_path_is_the_default_without_capnp() {
+        assert_eq!(SYMBOLS, ["O", "H", "H"]);
+    }
+
+    #[cfg(feature = "rgpot-ex")]
     #[test]
     fn conforming_embed_backends_share_profile_path() {
         assert_eq!(profile_prefix("nwchemc"), Some("nwchemc"));
@@ -234,6 +147,7 @@ mod tests {
         assert_eq!(profile_prefix("xtb"), None);
     }
 
+    #[cfg(feature = "rgpot-ex")]
     #[test]
     fn profile_result_is_one_value_gradient_pair() {
         let evaluation = rgpot_core::profile::ProfileEvaluation {
@@ -269,7 +183,7 @@ fn main() {
         .iter()
         .find(|t| *t != "ras" && *t != "pair")
         .cloned()
-        .unwrap_or_else(|| "xtb".into());
+        .unwrap_or_else(|| "xtb-cli".into());
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -280,27 +194,51 @@ fn main() {
     ));
 
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
+    #[cfg(feature = "rgpot-ex")]
     let embed_prefix = profile_prefix(&engine);
+    #[cfg(not(feature = "rgpot-ex"))]
+    let embed_prefix: Option<&str> = None;
+    #[cfg(feature = "rgpot-ex")]
     let mut rg_eng = if engine == "rgpot" {
         Some(RgpotEngine::connect(m))
     } else {
         None
     };
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut rg_eng: Option<()> = if engine == "rgpot" {
+        panic!("rebuild with --features rgpot-ex for the rgpot engine");
+    } else {
+        None
+    };
     let profile_atomic_numbers: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
+    #[cfg(feature = "rgpot-ex")]
     let mut profile_eng =
         embed_prefix.map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
-    let mut eng = if engine == "rgpot" || embed_prefix.is_some() {
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut profile_eng: Option<()> = None;
+    let _ = (embed_prefix, &profile_atomic_numbers);
+    let mut pipe_eng = if engine == "rgpot" || embed_prefix.is_some() {
         None
     } else {
-        Some(start_engine(m, &engine))
+        let mut symbols = Vec::new();
+        for _ in 0..m {
+            symbols.extend(SYMBOLS.iter().map(|s| (*s).to_string()));
+        }
+        Some(PipeEngine::start(&engine, symbols, None))
     };
     for seed in seed0..(seed0 + seeds) {
-        let failures_before = rg_eng
-            .as_ref()
-            .map(|candidate| candidate.failures)
-            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
-            .or_else(|| eng.as_ref().map(|candidate| candidate.failures))
-            .unwrap_or(0);
+        let failures_before = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+            + {
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    rg_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
+                }
+                #[cfg(not(feature = "rgpot-ex"))]
+                {
+                    0
+                }
+            };
         let mut ledger = Ledger::new(budget);
         let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
         let energy_scale = std::env::var("ENERGY_SCALE")
@@ -328,12 +266,19 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                match (&mut rg_eng, &mut profile_eng, &mut eng) {
-                    (Some(r), _, _) => r.eval(v),
-                    (_, Some(profile), _) => profile.eval(v),
-                    (_, _, Some(p)) => p.eval(v),
-                    _ => None,
+                if let Some(p) = pipe_eng.as_mut() {
+                    return p.eval(v);
                 }
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    if let Some(r) = rg_eng.as_mut() {
+                        return r.eval(v);
+                    }
+                    if let Some(profile) = profile_eng.as_mut() {
+                        return profile.eval(v);
+                    }
+                }
+                None
             });
             (f, xr)
         };
@@ -406,13 +351,19 @@ fn main() {
         };
         #[cfg(not(feature = "graphkey"))]
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
-        let failures = rg_eng
-            .as_ref()
-            .map(|r| r.failures)
-            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
-            .or_else(|| eng.as_ref().map(|p| p.failures))
-            .unwrap_or(0)
-            .saturating_sub(failures_before);
+        let failures_after = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+            + {
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    rg_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
+                }
+                #[cfg(not(feature = "rgpot-ex"))]
+                {
+                    0
+                }
+            };
+        let failures = failures_after.saturating_sub(failures_before);
         log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
             out.best, out.hops, failures

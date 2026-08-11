@@ -98,8 +98,6 @@ required-features = ["capi", "rgpot-ex"]
 
 [[example]]
 name = "molecular_cluster"
-required-features = ["rgpot-ex"]
 
 [[example]]
 name = "slab_adsorption"
-required-features = ["rgpot-ex"]
