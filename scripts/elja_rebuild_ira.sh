@@ -3,11 +3,10 @@
 # Uses IRA's in-tree lap_local and OHPC gcc 12, with rpath so compute
 # nodes load libgfortran/libquadmath without a module.
 set -euo pipefail
-# shellcheck disable=SC1091
-source /etc/profile.d/lmod.sh
-module load gnu12
+GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
+export PATH="${GCC}/bin:${PATH}"
 IRA=${IRA_ROOT:-$HOME/ira}
-GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
+GCCLIB=${GCCLIB:-${GCC}/lib64}
 if [[ ! -d $IRA/src ]]; then
   echo "missing $IRA/src" >&2
   exit 1
