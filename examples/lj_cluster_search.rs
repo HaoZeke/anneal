@@ -685,16 +685,13 @@ fn main() {
         mix_images: 7,
     };
     if use_bank {
-        #[cfg(not(feature = "ira"))]
-        {
-            eprintln!(
-                "the bank arm needs the `ira` feature (shape distance for Dcut); rebuild with --features ira"
-            );
-            std::process::exit(2);
-        }
         println!(
-            "  bank of {} chains, {} charged per slice, Dcut floor {}",
-            bank_cfg.capacity, bank_cfg.slice, bank_cfg.dcut_floor
+            "  bank of {} chains, {} charged per slice, Dcut floor {}, mix {}, acq {}",
+            bank_cfg.capacity,
+            bank_cfg.slice,
+            bank_cfg.dcut_floor,
+            bank_cfg.mix_fraction,
+            bank_cfg.acquisition
         );
     }
 
@@ -791,12 +788,17 @@ fn main() {
             Some(lj(x).1)
         };
         let mut out = if use_bank {
-            #[cfg(feature = "ira")]
             {
-                // A shape distance, so Dcut is a length: two structures whose
-                // points can be brought within it of each other by a permutation
-                // and a rigid motion are the same solution.
-                let ira = IraMetric::default();
+                // Shape distance when IRA is linked; otherwise the pairwise
+                // spectrum. The bank rule is Lee's Dcut replacement, not the
+                // metric: two members closer than Dcut are one solution.
+                #[cfg(feature = "ira")]
+                let mut dist = {
+                    let ira = IraMetric::default();
+                    move |p: ArrayView1<f64>, q: ArrayView1<f64>| ira.distance(p, q)
+                };
+                #[cfg(not(feature = "ira"))]
+                let mut dist = csa_cluster::spectrum_distance(n);
                 let b = csa_cluster::run(
                     &cfg,
                     &bank_cfg,
@@ -807,7 +809,7 @@ fn main() {
                     } else {
                         None
                     },
-                    |p, q| ira.distance(p, q),
+                    &mut dist,
                     seed,
                 );
                 println!(
@@ -834,10 +836,6 @@ fn main() {
                     basins: b.basins,
                     ..Outcome::default()
                 }
-            }
-            #[cfg(not(feature = "ira"))]
-            {
-                unreachable!("bank requires ira; checked at startup")
             }
         } else {
             {
