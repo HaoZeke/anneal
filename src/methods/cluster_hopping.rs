@@ -1083,10 +1083,22 @@ fn run_full<'g, R: Rng + ?Sized>(
         // nowhere useful by energy, or it is going back where the chain already
         // is, which the energy screen cannot see because a returning trial
         // carries the incumbent's energy.
-        // SOAP is the leave. Treating its pentagon opening as a return
-        // polishes the chain back onto the icosahedral shelf. The
-        // one-shot hop leaves; production with return_screen did not.
-        let soap_leave = !cov_fire && !soft_fire && !angular && kernels[k].name() == "soap";
+        // Packing SOAP that actually moved is the fivefold leave.
+        // Treating that opening as a return polishes the chain back
+        // onto the icosahedral shelf. Molecule/slab leftover and
+        // identity SOAP keep the ordinary screens.
+        let soap_leave = !cov_fire
+            && !soft_fire
+            && !angular
+            && matches!(
+                &kernels[k],
+                ClusterMove::Soap {
+                    species: None,
+                    mobile: None,
+                    ..
+                }
+            )
+            && !hop_is_identity(x.view(), trial.view());
         let returning = cfg.return_screen && !soap_leave && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
