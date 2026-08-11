@@ -212,6 +212,53 @@ fn main() {
         p.top5_share,
         p.top12_share
     );
+    #[cfg(feature = "featomic")]
+    {
+        let leftover = anneal_core::featomic_hop::leftover_rms(x0.view(), 3.5, None, None);
+        println!(
+            "descriptor calculator {} leftover_rms {:.6}",
+            anneal_core::featomic_hop::CALCULATOR,
+            leftover
+        );
+        let spec = anneal_core::soap::SoapSpec {
+            n_max: 3,
+            l_max: 6,
+            rcut_nn: 3.5,
+        };
+        for (tag, seed) in [("trial1", 1u64), ("trial2", 2)] {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let y = anneal_core::soap::step_away_cloud(
+                x0.view(),
+                spec,
+                RMSD,
+                None,
+                None,
+                None,
+                &mut rng,
+            );
+            report(tag, e0, x0.view(), y.view());
+        }
+        for cap in [
+            0.20_f64, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 1.00,
+        ] {
+            let mut rng = StdRng::seed_from_u64(3);
+            let y = anneal_core::featomic_hop::step_away_featomic_at(
+                x0.view(),
+                cap,
+                3.5,
+                None,
+                None,
+                &mut rng,
+            );
+            let rms = hop_rms(x0.view(), y.view());
+            let (eq, _) = relax(y.view(), 400);
+            println!(
+                "featomic_amp {cap:.2} hop_rms {rms:.6} quench {eq:.9} on_shelf {} dE {:+.4}",
+                (eq - PLATEAU).abs() < 1e-4,
+                eq - e0
+            );
+        }
+    }
     if let Some(ref pth) = path {
         if !std::path::Path::new(pth).is_file() {
             dump_xyz(pth, x0.view(), e0);
