@@ -520,6 +520,14 @@ fn main() {
         cfg.soap_class_residual = false;
         println!("  SOAP residual: mean (2p-mu)");
     }
+    if cfg.soap_hop {
+        #[cfg(feature = "featomic")]
+        println!(
+            "  SOAP hop: featomic soap_power_spectrum leftover 2p-mu, l>=5, no 421/fcc"
+        );
+        #[cfg(not(feature = "featomic"))]
+        println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
+    }
     cfg.minima_hopping = opts.contains(&"mh");
     cfg.escape_on_stall = opts.contains(&"climb");
     // The radius read off the search's own step length rather than swept.
@@ -803,6 +811,10 @@ fn main() {
                 let mut dist = {
                     let rcut = 3.5 * cfg.length_scale;
                     let z = cfg.species.clone();
+                    println!(
+                        "  bank Dcut: featomic soap_bank_distance, fallback {}",
+                        anneal_core::featomic_hop::SOAP_DCUT_FALLBACK
+                    );
                     move |p: ArrayView1<f64>, q: ArrayView1<f64>| {
                         anneal_core::featomic_hop::soap_bank_distance(
                             p,
