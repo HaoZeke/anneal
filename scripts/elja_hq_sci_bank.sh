@@ -25,10 +25,7 @@ submit_arm() {
     --cwd "$OUT" \
     --stdout "$OUT/lj${n}_rec_%{TASK_ID}.out" \
     --stderr "$OUT/lj${n}_rec_%{TASK_ID}.err" \
-    --env BANK_CAPACITY="$BANK_CAPACITY" \
-    --env BANK_SLICE="$BANK_SLICE" \
-    --env BANK_MIX="$BANK_MIX" \
-    -- "$ONE" "$n" "$budget" "rec,bank,acq" | tee -a "$OUT/hq_submit.log"
+    -- bash -lc "BANK_CAPACITY=${BANK_CAPACITY} BANK_SLICE=${BANK_SLICE} BANK_MIX=${BANK_MIX} exec ${ONE} ${n} ${budget} rec,bank,acq" | tee -a "$OUT/hq_submit.log"
   awk '/job ID:/{print $NF}' "$OUT/hq_submit.log" | tail -1 >>"$IDFILE"
 }
 
