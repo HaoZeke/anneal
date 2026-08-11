@@ -677,20 +677,27 @@ fn main() {
         dcut_floor: std::env::var("BANK_DCUT_FLOOR")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0.2),
+            .unwrap_or(0.4),
         mix_fraction: std::env::var("BANK_MIX")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(0.5),
-        mix_images: 7,
+        mix_images: env("BANK_MIX_IMAGES", 20),
+        random_images: env("BANK_RANDOM", 10),
+        deadlock_iters: env("BANK_DEADLOCK_ITERS", 3),
+        deadlock_inject: env("BANK_DEADLOCK", 50),
     };
     if use_bank {
         println!(
-            "  bank of {} chains, {} charged per slice, Dcut floor {}, mix {}, acq {}",
+            "  bank of {} chains, {} charged per slice, Dcut floor {}, mix {} ({} splice + {} random), deadlock {}x{}, acq {}",
             bank_cfg.capacity,
             bank_cfg.slice,
             bank_cfg.dcut_floor,
             bank_cfg.mix_fraction,
+            bank_cfg.mix_images,
+            bank_cfg.random_images,
+            bank_cfg.deadlock_iters,
+            bank_cfg.deadlock_inject,
             bank_cfg.acquisition
         );
     }
@@ -828,7 +835,8 @@ fn main() {
                 );
                 println!(
                     "      bank: {} slices, Dcut {:.3} -> {:.3}, {} improved, {} novel, \
-                     {} duplicate, {} mixes ({} admitted, {} below both ends), holding {:?}",
+                     {} duplicate, {} mixes ({} admitted, {} below both ends), \
+                     {} deadlocks ({} injected), holding {:?}",
                     b.slices,
                     b.dcut.0,
                     b.dcut.1,
@@ -838,6 +846,8 @@ fn main() {
                     b.mixes,
                     b.mix_admitted,
                     b.mix_below_both,
+                    b.deadlocks,
+                    b.injected,
                     b.bank
                         .iter()
                         .map(|e| (e * 100.0).round() / 100.0)

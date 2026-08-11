@@ -277,6 +277,42 @@ impl Bank {
         let mean = total / count as f64;
         if mean > 0.0 { Some(mean) } else { None }
     }
+
+    /// Raises the cap so a deadlock injection can enlarge both banks.
+    ///
+    /// Lee, Lee and Scheraga add fifty random minima to the bank *and*
+    /// the first bank after three idle iterations, and reset `Dcut` to
+    /// `Dave/2`. The first bank has to grow with the working bank or
+    /// the injection is only a working-set refresh.
+    pub fn grow(&mut self, extra: usize) {
+        self.capacity = self.capacity.saturating_add(extra);
+    }
+
+    /// How many solutions the bank is allowed to hold.
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    /// Adds a minimised structure to the working bank and the first bank.
+    ///
+    /// Seeding is the only other writer of the first bank. This is the
+    /// deadlock enlargement: the new members are part of the frozen
+    /// population, not a later replacement.
+    pub fn inject(&mut self, state: ArrayView1<f64>, energy: f64) -> bool {
+        if self.members.len() >= self.capacity {
+            return false;
+        }
+        self.offered += 1;
+        self.novel += 1;
+        let m = Member {
+            state: state.to_owned(),
+            energy,
+            hits: 0,
+        };
+        self.first.push(m.clone());
+        self.members.push(m);
+        true
+    }
 }
 
 #[cfg(test)]
@@ -442,5 +478,30 @@ mod tests {
         // Distances 1, 3, 2: mean 2.
         let m = c.mean_distance(line).unwrap();
         assert!((m - 2.0).abs() < 1e-12, "mean distance {m} should be 2");
+    }
+
+    /// Lee's deadlock step: the cap rises and the first bank grows
+    /// with the working bank. A write to the working members after
+    /// that must still leave the injected first-bank copy alone.
+    #[test]
+    fn deadlock_injection_grows_the_first_bank() {
+        let mut b = Bank::new(2, 1.0);
+        assert!(b.seed(point(0.0).view(), 5.0));
+        assert!(b.seed(point(10.0).view(), 6.0));
+        assert_eq!(b.first_bank().len(), 2);
+        b.grow(2);
+        assert_eq!(b.capacity(), 4);
+        assert!(b.inject(point(20.0).view(), 7.0));
+        assert!(b.inject(point(30.0).view(), 8.0));
+        assert_eq!(b.len(), 4);
+        assert_eq!(b.first_bank().len(), 4);
+        let first_before: Vec<f64> = b.first_bank().iter().map(|m| m.state[0]).collect();
+        b.offer(point(20.2).view(), -50.0, line);
+        let first_after: Vec<f64> = b.first_bank().iter().map(|m| m.state[0]).collect();
+        assert_eq!(first_before, first_after);
+        assert_eq!(
+            b.first_bank().iter().map(|m| m.state[0]).collect::<Vec<_>>(),
+            vec![0.0, 10.0, 20.0, 30.0]
+        );
     }
 }
