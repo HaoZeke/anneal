@@ -267,7 +267,6 @@ fn main() {
         profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
     #[cfg(not(feature = "rgpot-ex"))]
     let mut profile_eng: Option<()> = None;
-    let _ = (&host, port, &atmnrs);
     let mut pipe_eng = if matches!(engine, "xtb" | "xtb-cli") {
         let symbols = species.iter().map(|&z| symbol(z).to_string()).collect();
         let cell = (box_[0].abs() > 1.0 && box_[4].abs() > 1.0 && box_[8].abs() > 1.0)

@@ -216,7 +216,6 @@ fn main() {
         embed_prefix.map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
     #[cfg(not(feature = "rgpot-ex"))]
     let mut profile_eng: Option<()> = None;
-    let _ = (embed_prefix, &profile_atomic_numbers);
     let mut pipe_eng = if engine == "rgpot" || embed_prefix.is_some() {
         None
     } else {
