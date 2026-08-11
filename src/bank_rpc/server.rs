@@ -9,6 +9,7 @@ use capnp::serialize;
 use ndarray::{Array1, ArrayView1};
 
 use crate::Bank_capnp::{bank_reply, bank_request};
+use crate::funnel_bo::FunnelModel;
 use crate::methods::bank::{Admission, Bank};
 
 /// Hausdorff length below which two members are the same geometry.
@@ -46,6 +47,7 @@ struct Inner {
     bank: Bank,
     soaps: Vec<Array1<f64>>,
     wells: Vec<Well>,
+    funnel: FunnelModel,
     seeded: usize,
     capacity: usize,
 }
@@ -56,14 +58,23 @@ impl Inner {
             bank: Bank::new(capacity, 1.0),
             soaps: Vec::new(),
             wells: Vec::new(),
+            // Length 0.15 sits on the unit-SOAP packing gap (ico–Marks 0.163).
+            funnel: FunnelModel::new(0.15, 20.0, 1e-2),
             seeded: 0,
             capacity,
+        }
+    }
+
+    fn observe(&mut self, soap: ArrayView1<f64>, energy: f64) {
+        if !soap.is_empty() {
+            self.funnel.observe(soap, energy);
         }
     }
 
     fn offer(&mut self, energy: f64, coords: Array1<f64>, soap: Array1<f64>) -> (u16, f64) {
         let kind = if self.seeded < self.capacity {
             if self.bank.seed(coords.view(), energy) {
+                self.observe(soap.view(), energy);
                 self.soaps.push(soap);
                 self.seeded += 1;
                 if self.seeded == self.capacity {
@@ -101,6 +112,7 @@ impl Inner {
                     .map(|s| soap_l2(cand.view(), s.view()))
                     .unwrap_or(f64::INFINITY)
             });
+            self.observe(cand.view(), energy);
             match admission {
                 Admission::Added(i) => {
                     if i == self.soaps.len() {
@@ -218,9 +230,10 @@ impl Inner {
         if n == 0 {
             return None;
         }
-        // MAP-Elites / UCB1 on packings, not isomers. Least-hit members
-        // of one ico well are the same cell. Score quality (energy) plus
-        // an exploration bonus on the SOAP well height.
+        // Shared GP over packing SOAP. EI says where to go (unvisited
+        // morphology scores on variance). UCB on well height is the
+        // fallback before three distinct observations.
+        let use_ei = self.funnel.len() >= 3;
         let e_best = self
             .bank
             .members()
@@ -233,9 +246,8 @@ impl Inner {
         let mut best_i = 0usize;
         let mut best_s = f64::NEG_INFINITY;
         for (i, m) in self.bank.members().iter().enumerate() {
-            let h = self
-                .soaps
-                .get(i)
+            let soap = self.soaps.get(i);
+            let h = soap
                 .and_then(|s| {
                     self.wells
                         .iter()
@@ -243,12 +255,24 @@ impl Inner {
                         .map(|w| w.height)
                 })
                 .unwrap_or(0.0);
-            let quality = m.energy / e_best;
-            let bonus = 0.15 * (ln / (1.0 + h)).sqrt();
+            let score = if use_ei {
+                if let Some(s) = soap {
+                    if !s.is_empty() {
+                        self.funnel.expected_improvement(s.view())
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            } else {
+                let quality = m.energy / e_best;
+                let bonus = 0.15 * (ln / (1.0 + h)).sqrt();
+                quality + bonus
+            };
             let jitter = ((seed.wrapping_mul(i as u64 + 1)) % 1000) as f64 * 1e-6;
-            let score = quality + bonus + jitter;
-            if score > best_s {
-                best_s = score;
+            if score + jitter > best_s {
+                best_s = score + jitter;
                 best_i = i;
             }
         }
@@ -277,7 +301,7 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
     eprintln!("bank listening on {} capacity {capacity}", addr.as_ref());
     #[cfg(all(feature = "ira", feature = "featomic"))]
     eprintln!(
-        "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}",
+        "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}, FunnelModel EI",
         pack_merge()
     );
     #[cfg(all(feature = "ira", not(feature = "featomic")))]
