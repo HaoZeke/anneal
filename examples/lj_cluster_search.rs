@@ -848,6 +848,8 @@ fn main() {
                     best_state: b.best_state,
                     hops: b.hops,
                     basins: b.basins,
+                    screened_out: b.screened_out,
+                    returned: b.returned,
                     ..Outcome::default()
                 }
             }

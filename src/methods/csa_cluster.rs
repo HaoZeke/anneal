@@ -134,6 +134,10 @@ pub struct BankOutcome {
     pub novel: usize,
     /// Candidates discarded as near-copies.
     pub duplicates: usize,
+    /// Screened trials summed over slices.
+    pub screened_out: usize,
+    /// Return-screened trials summed over slices.
+    pub returned: usize,
     /// Hop, charged evaluations, basins and value at each new campaign best.
     ///
     /// Merged from the slices with each slice's spend offset by what the
@@ -231,6 +235,8 @@ where
     let mut duplicates = 0usize;
     let mut hops = 0usize;
     let mut basins = 0usize;
+    let mut screened_out = 0usize;
+    let mut returned = 0usize;
     // A model of how low each morphology goes, over the share of points in
     // each local environment. Five numbers, so a Gaussian process over it is
     // exact and cheap; the coordinates would not be.
@@ -287,6 +293,8 @@ where
         slices += 1;
         hops += out.hops;
         basins += out.basins;
+        screened_out += out.screened_out;
+        returned += out.returned;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(
@@ -418,6 +426,8 @@ where
         slices += 1;
         hops += out.hops;
         basins += out.basins;
+        screened_out += out.screened_out;
+        returned += out.returned;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
                 funnel.observe(
@@ -447,6 +457,8 @@ where
         mix_below_both,
         hops,
         basins,
+        screened_out,
+        returned,
         charged: ledger.spent(),
         improved,
         novel: bank.novel,

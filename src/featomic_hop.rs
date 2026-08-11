@@ -73,6 +73,9 @@ struct Spectrum {
     leftover: Array1<f64>,
     /// Rows of leftover, columns of coordinates.
     jacobian: ndarray::Array2<f64>,
+    /// Species-conditioned mean spectrum. This is the packing label:
+    /// leftover RMS is almost the same on every closed shell.
+    cloud_mean: Array1<f64>,
     n_at: usize,
     n_feat: usize,
 }
@@ -229,9 +232,16 @@ fn spectrum(
             }
         }
     }
+    let mut cloud_mean = Array1::zeros(nlab * n_feat);
+    for k in 0..nlab {
+        for f in 0..n_feat {
+            cloud_mean[k * n_feat + f] = mu[k][f];
+        }
+    }
     Spectrum {
         leftover,
         jacobian: jac,
+        cloud_mean,
         n_at: n,
         n_feat,
     }
@@ -273,41 +283,37 @@ pub fn atom_leftover_rms(
     w
 }
 
-/// Five SOAP leftover quantiles, scaled to the unit interval.
-///
-/// This is the morphology the bank acquisition model fits: how the
-/// leftover mass is distributed, not a CNA class.
+fn unit(v: &Array1<f64>) -> Array1<f64> {
+    let n = v.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-15);
+    v / n
+}
+
+/// Species-conditioned mean high-`l` SOAP. The packing label.
+pub fn soap_cloud_mean(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    unit(&spectrum(x, rcut, species, mobile).cloud_mean)
+}
+
+/// Mean-spectrum morphology the bank acquisition model fits.
 pub fn soap_morphology(
     x: ArrayView1<f64>,
     rcut: f64,
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> Array1<f64> {
-    let mut w: Vec<f64> = atom_leftover_rms(x, rcut, species, mobile)
-        .iter()
-        .copied()
-        .collect();
-    if w.is_empty() {
-        return Array1::zeros(5);
-    }
-    w.sort_by(|a, b| b.total_cmp(a));
-    let n = w.len();
-    let tot = w.iter().sum::<f64>().max(1e-15);
-    let at = |p: f64| w[((p * (n - 1) as f64).round() as usize).min(n - 1)] / tot;
-    let global = leftover_rms(x, rcut, species, mobile);
-    Array1::from(vec![
-        at(0.0),
-        at(0.25),
-        at(0.5),
-        at(0.75),
-        global / (1.0 + global),
-    ])
+    soap_cloud_mean(x, rcut, species, mobile)
 }
 
-/// Permutation-invariant distance between two leftover profiles.
+/// Distance between two packings in mean SOAP, not leftover RMS.
 ///
-/// Sorted per-atom leftover RMS. Icosahedral and Marks clouds differ
-/// here; two Mackay isomers of the same shelf sit close.
+/// Leftover RMS is a core-versus-surface magnitude. It is almost the
+/// same on every closed shell, so Dcut collapsed to 10^{-3} and the
+/// bank treated every Mackay isomer as a new basin. The mean spectrum
+/// is the packing.
 pub fn soap_bank_distance(
     a: ArrayView1<f64>,
     b: ArrayView1<f64>,
@@ -315,21 +321,13 @@ pub fn soap_bank_distance(
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
 ) -> f64 {
-    let mut wa: Vec<f64> = atom_leftover_rms(a, rcut, species, mobile)
-        .iter()
-        .copied()
-        .collect();
-    let mut wb: Vec<f64> = atom_leftover_rms(b, rcut, species, mobile)
-        .iter()
-        .copied()
-        .collect();
-    if wa.len() != wb.len() || wa.is_empty() {
+    let ua = soap_cloud_mean(a, rcut, species, mobile);
+    let ub = soap_cloud_mean(b, rcut, species, mobile);
+    if ua.len() != ub.len() || ua.is_empty() {
         return f64::INFINITY;
     }
-    wa.sort_by(|x, y| y.total_cmp(x));
-    wb.sort_by(|x, y| y.total_cmp(x));
-    wa.iter()
-        .zip(wb.iter())
+    ua.iter()
+        .zip(ub.iter())
         .map(|(x, y)| (x - y) * (x - y))
         .sum::<f64>()
         .sqrt()
@@ -580,8 +578,40 @@ mod tests {
         let d = soap_bank_distance(x.view(), x.view(), 3.5, None, None);
         assert!(d < 1e-12, "SOAP bank distance of a structure to itself is {d}");
         let morph = soap_morphology(x.view(), 3.5, None, None);
-        assert_eq!(morph.len(), 5);
-        assert!(morph.iter().all(|v| v.is_finite() && *v >= 0.0));
+        assert!(!morph.is_empty());
+        assert!(morph.iter().all(|v| v.is_finite()));
+        // A cuboctahedral shell is a different packing. Leftover RMS
+        // magnitude does not see that; the mean spectrum must.
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let s = 1.0 / (1.0 + p * p).sqrt() * 2.0_f64.powf(1.0 / 6.0);
+        let fcc = {
+            let verts = [
+                [1.0, 1.0, 0.0],
+                [1.0, -1.0, 0.0],
+                [-1.0, 1.0, 0.0],
+                [-1.0, -1.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [1.0, 0.0, -1.0],
+                [-1.0, 0.0, 1.0],
+                [-1.0, 0.0, -1.0],
+                [0.0, 1.0, 1.0],
+                [0.0, 1.0, -1.0],
+                [0.0, -1.0, 1.0],
+                [0.0, -1.0, -1.0],
+            ];
+            let mut y = Array1::<f64>::zeros(3 * 13);
+            for (i, v) in verts.iter().enumerate() {
+                for k in 0..3 {
+                    y[3 * (i + 1) + k] = s * v[k];
+                }
+            }
+            y
+        };
+        let d_pack = soap_bank_distance(x.view(), fcc.view(), 3.5, None, None);
+        assert!(
+            d_pack > 0.05,
+            "mean SOAP must separate ico13 from cuboct13, got {d_pack}"
+        );
     }
 
     #[test]
