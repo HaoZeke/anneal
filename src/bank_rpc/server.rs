@@ -77,7 +77,23 @@ impl Inner {
 
     fn offer(&mut self, energy: f64, coords: Array1<f64>, soap: Array1<f64>) -> (u16, f64) {
         let kind = if self.seeded < self.capacity {
-            if self.bank.seed(coords.view(), energy) {
+            let merge = pack_merge();
+            if let Some(i) = self
+                .soaps
+                .iter()
+                .position(|s| soap_l2(soap.view(), s.view()) <= merge)
+            {
+                // Same packing: one first-bank slot, keep the deeper energy.
+                if energy < self.bank.members().get(i).map(|m| m.energy).unwrap_or(f64::INFINITY)
+                {
+                    self.bank.overwrite(i, coords.view(), energy);
+                    self.observe(soap.view(), energy);
+                    self.soaps[i] = soap;
+                    1
+                } else {
+                    2
+                }
+            } else if self.bank.seed(coords.view(), energy) {
                 self.observe(soap.view(), energy);
                 self.soaps.push(soap);
                 self.seeded += 1;
@@ -100,7 +116,11 @@ impl Inner {
                 // Dcut makes every offer novel or every offer a duplicate.
                 #[cfg(feature = "ira")]
                 {
-                    let ira_d = crate::shape::IraMetric::default().distance(p, q);
+                    let n = p.len() / 3;
+                    let ira = crate::shape::IraMetric {
+                        kmax_factor: if n >= 55 { 2.5 } else { 1.8 },
+                    };
+                    let ira_d = ira.distance(p, q);
                     if ira_d.is_finite() && ira_d <= IRA_SAME {
                         return 0.0;
                     }
@@ -163,7 +183,10 @@ impl Inner {
         }
         let mean = if c > 0.0 { s / c } else { 0.0 };
         let start = if mean > 1e-12 { mean * 0.5 } else { fb };
-        self.bank.dcut = start.max(fb);
+        // Floor is the packing merge, not the 0.05 leftover fallback.
+        // 0.05 splits ico isomers (gap ~0.06) and fills 30 slots with
+        // one funnel. 0.10 merges those isomers and keeps Marks (0.163).
+        self.bank.dcut = start.max(pack_merge()).max(fb);
     }
 
     fn nearest(&self, soap: ArrayView1<f64>) -> f64 {
@@ -226,17 +249,27 @@ impl Inner {
     }
 
     fn sample(&mut self, seed: u64) -> Option<(f64, Array1<f64>)> {
-        // Even seed: first bank (cannot collapse). Odd: least-hit
-        // working member, random among ties, then mark it used.
-        if seed & 1 == 0 {
-            let first = self.bank.first_bank();
-            if !first.is_empty() {
-                let m = &first[(seed as usize / 2) % first.len()];
-                return Some((m.energy, m.state.clone()));
-            }
-        }
         let n = self.bank.len();
         if n == 0 {
+            return None;
+        }
+        let merge = pack_merge();
+        // One packing in the whole bank: do not restamp it. The client
+        // treats None as a random start. First-bank even-sample was the
+        // ico restamp: 30 Mackay seeds, every other start on the shelf.
+        let distinct = {
+            let mut reps: Vec<&Array1<f64>> = Vec::new();
+            for s in &self.soaps {
+                if s.is_empty() {
+                    continue;
+                }
+                if !reps.iter().any(|r| soap_l2(s.view(), r.view()) <= merge) {
+                    reps.push(s);
+                }
+            }
+            reps.len()
+        };
+        if distinct <= 1 {
             return None;
         }
         // Shared GP over packing SOAP. EI says where to go (unvisited
@@ -251,7 +284,6 @@ impl Inner {
             .fold(f64::INFINITY, f64::min)
             .min(-1e-12);
         let ln = (1.0 + n as f64).ln();
-        let merge = pack_merge();
         let mut best_i = 0usize;
         let mut best_s = f64::NEG_INFINITY;
         for (i, m) in self.bank.members().iter().enumerate() {
@@ -437,7 +469,7 @@ fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String>
                 }
                 bank_request::SetDcut(d) => {
                     if g.seeded >= g.capacity && d.is_finite() && d > 0.0 {
-                        g.bank.dcut = d;
+                        g.bank.dcut = d.max(pack_merge());
                     }
                     out.set_dcut(g.bank.dcut);
                     out.set_size(g.bank.len() as u32);
