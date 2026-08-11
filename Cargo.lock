@@ -40,6 +40,7 @@ checksum = "4b46cbb362ab8752921c97e041f5e366ee6297bd428a31275b9fcf1e380f7299"
 name = "anneal-core"
 version = "0.8.0"
 dependencies = [
+ "capnp 0.21.7",
  "cbindgen 0.29.4",
  "cc",
  "criterion",
@@ -192,12 +193,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp"
+version = "0.21.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e92edec8974fcd7ece90bb021db782abe14a61c10c817f197f700fef7430eb8"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
 name = "capnp-futures"
 version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b70b0d44372d42654e3efac38c1643c7b0f9d3a9e9b72b635f942ff3f17e891"
 dependencies = [
- "capnp",
+ "capnp 0.20.6",
  "futures-channel",
  "futures-util",
 ]
@@ -208,7 +218,7 @@ version = "0.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5a945dd7eac211c30763aa1dbf86ed8e58129d01442d4d2d516facfdb859a1e"
 dependencies = [
- "capnp",
+ "capnp 0.20.6",
  "capnp-futures",
  "futures",
 ]
@@ -219,7 +229,7 @@ version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa3d5f01e69ed11656d2c7c47bf34327ea9bfb5c85c7de787fcd7b6c5e45b61"
 dependencies = [
- "capnp",
+ "capnp 0.20.6",
 ]
 
 [[package]]
@@ -1423,7 +1433,7 @@ name = "rgpot-core"
 version = "3.0.2"
 source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=6e50d838ef75940f3776c36bf4fa6f90f23d4347#6e50d838ef75940f3776c36bf4fa6f90f23d4347"
 dependencies = [
- "capnp",
+ "capnp 0.20.6",
  "capnp-rpc",
  "capnpc",
  "dlpk",

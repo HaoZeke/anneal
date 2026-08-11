@@ -25,6 +25,8 @@ graphkey = ["dep:petgraph", "dep:nauty-pet"]
 featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
+# Cap'n Proto shared bank. Chains are separate processes.
+bank-rpc = ["dep:capnp"]
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 # Examples using rgpot potential interfaces: persistent in-process profiles
@@ -49,6 +51,7 @@ numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
 rgpot-core = { git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "6e50d838ef75940f3776c36bf4fa6f90f23d4347", features = ["profile", "rpc"], optional = true }
 libloading = { version = "0.8", optional = true }
+capnp = { version = "0.21", optional = true }
 # SOAP power spectrum leftover. featomic 0.6 carries ndarray 0.16;
 # descriptor data crosses as f64 slices. metatensor-static embeds the
 # C core so SLURM tasks do not need LD_LIBRARY_PATH.
@@ -104,3 +107,7 @@ required-features = ["rgpot-ex"]
 [[example]]
 name = "slab_adsorption"
 required-features = ["rgpot-ex"]
+
+[[example]]
+name = "bank_server"
+required-features = ["bank-rpc"]

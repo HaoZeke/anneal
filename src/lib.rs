@@ -5,6 +5,17 @@
 //! traits, Boltzmann / Fast / Tsallis points, and the SaVariant tuple)
 //! consumed by the Python `anneal` package via pyo3.
 
+/// Shared CSA bank over Cap'n Proto. Optional; process-local bank stays default.
+#[cfg(feature = "bank-rpc")]
+pub mod bank_rpc;
+/// Generated Cap'n Proto schema for [`bank_rpc`].
+#[cfg(feature = "bank-rpc")]
+#[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
+#[rustfmt::skip]
+pub mod Bank_capnp {
+    include!("bank_rpc/Bank_capnp.rs");
+}
+
 /// The acceptance-rule trait: `(delta_e, T) -> p`.
 pub mod accept;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.

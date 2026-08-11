@@ -7,8 +7,10 @@
 //!
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
+use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    Config, Keying, Ledger, MoveLibrary, Outcome, optimize_with_gradient,
+    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, random_cluster,
+    run_with_bias, optimize_with_gradient,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -808,7 +810,18 @@ fn main() {
             }
             Some(lj(x).1)
         };
-        let mut out = if use_bank {
+        let mut out = if let Ok(sock) = std::env::var("BANK_RPC") {
+            #[cfg(feature = "bank-rpc")]
+            {
+                println!("  capnp bank {sock}");
+                run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
+            }
+            #[cfg(not(feature = "bank-rpc"))]
+            {
+                let _ = sock;
+                panic!("BANK_RPC set; rebuild with --features bank-rpc");
+            }
+        } else if use_bank {
             {
                 // Shape distance when IRA is linked; otherwise the pairwise
                 // spectrum. The bank rule is Lee's Dcut replacement, not the
@@ -1090,5 +1103,105 @@ fn main() {
     );
     if let Some(r) = reference {
         println!("gap to reference {:+.6}", deepest - r);
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
+fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        anneal_core::featomic_hop::soap_cloud_mean(
+            x,
+            3.5 * cfg.length_scale,
+            cfg.species.as_deref(),
+            None,
+        )
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (x, cfg);
+        Array1::zeros(0)
+    }
+}
+
+/// One HQ chain against the Cap'n Proto bank: slice, offer, deposit, repeat.
+#[cfg(feature = "bank-rpc")]
+fn run_capnp_bank(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    seed: u64,
+    sock: &str,
+) -> Outcome {
+    use anneal_core::bank_rpc::BankClient;
+    use rand::Rng;
+    let mut client = BankClient::connect(sock).unwrap_or_else(|e| panic!("BANK_RPC {sock}: {e}"));
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(cfg, &Array1::zeros(0)),
+        cfg.merge_radius,
+        cfg.bias_height,
+        cfg.bias_gamma,
+    );
+    let slice = std::env::var("BANK_SLICE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(3_000);
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
+    let mut best = f64::INFINITY;
+    let mut best_state = None;
+    let mut hops = 0usize;
+    let mut basins = 0usize;
+    let mut screened_out = 0usize;
+    let mut returned = 0usize;
+    let mut slices = 0usize;
+    while ledger.remaining() > 0 {
+        if let Ok(wells) = client.wells() {
+            for (soap, h) in wells {
+                bias.import_well(soap, h);
+            }
+        }
+        let start = match client.sample(rng.random()) {
+            Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => x,
+            _ => random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng),
+        };
+        let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
+        let out = run_with_bias(
+            cfg,
+            start.view(),
+            &mut slice_led,
+            relax,
+            Some(grad),
+            &mut bias,
+            &mut rng,
+        );
+        ledger.charge_many(slice_led.spent());
+        if let Some(st) = slice_led.best_state.as_ref() {
+            ledger.record(slice_led.best, st.view());
+        }
+        hops += out.hops;
+        basins += out.basins;
+        screened_out += out.screened_out;
+        returned += out.returned;
+        slices += 1;
+        if out.best < best {
+            best = out.best;
+            best_state = out.best_state.clone();
+        }
+        if let Some(st) = out.best_state.as_ref() {
+            let soap = packing_of(st.view(), cfg);
+            let _ = client.offer(out.best, st.view(), soap.view());
+            let _ = client.deposit(soap.view(), cfg.bias_height);
+        }
+    }
+    println!("      capnp bank: {slices} slices, best {best:.6}");
+    Outcome {
+        best,
+        best_state,
+        hops,
+        basins,
+        screened_out,
+        returned,
+        ..Outcome::default()
     }
 }

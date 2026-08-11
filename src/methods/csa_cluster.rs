@@ -298,7 +298,7 @@ where
     // landscape has already been filled in, which does not belong to whichever
     // chain did the filling.
     let mut bias = BasinBias::new(
-        ClusterFingerprint::for_keying(cfg.n_points, cfg.shape_keyed),
+        ClusterFingerprint::of_config(cfg, &ndarray::Array1::zeros(0)),
         cfg.merge_radius,
         cfg.bias_height,
         cfg.bias_gamma,
