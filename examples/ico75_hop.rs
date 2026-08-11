@@ -247,6 +247,27 @@ fn main() {
             (eq - PLATEAU).abs() < 1e-4
         );
     }
+    // Forced walk: always take the quench. If this never goes below
+    // the shelf, Metropolis cannot either.
+    let mut rngw = StdRng::seed_from_u64(17);
+    let mut ew = e0;
+    let mut xw = x0.clone();
+    let mut below = 0usize;
+    for hop in 0..12 {
+        let y = step_away_fivefold(xw.view(), RMSD, &mut rngw);
+        let (e2, x2) = relax(y.view(), 400);
+        ew = e2;
+        xw = x2;
+        if ew < PLATEAU - 1e-4 {
+            below += 1;
+        }
+        println!(
+            "walk {hop} e {ew:.9} on_shelf {} below_ico {}",
+            (ew - PLATEAU).abs() < 1e-4,
+            ew < PLATEAU - 1e-4
+        );
+    }
+    println!("walk_below {below}/12 best_walk {ew:.9}");
     // 40 Metropolis hops from the shelf at T=0.8, the production temperature.
     let mut rng = StdRng::seed_from_u64(11);
     let mut e = e0;
