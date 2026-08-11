@@ -816,6 +816,14 @@ fn main() {
             #[cfg(feature = "bank-rpc")]
             {
                 println!("  capnp bank {sock}");
+                #[cfg(feature = "featomic")]
+                println!(
+                    "  bank SOAP: soap_bank_distance / packing wells merge {}, Dcut fallback {}",
+                    anneal_core::featomic_hop::SOAP_PACK_MERGE,
+                    anneal_core::featomic_hop::SOAP_DCUT_FALLBACK
+                );
+                #[cfg(feature = "ira")]
+                println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
             #[cfg(not(feature = "bank-rpc"))]
