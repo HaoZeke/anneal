@@ -204,12 +204,37 @@ impl Inner {
             .unwrap_or(0.0)
     }
 
-    fn sample(&self, seed: u64) -> Option<(f64, Array1<f64>)> {
+    fn sample(&mut self, seed: u64) -> Option<(f64, Array1<f64>)> {
+        // Even seed: first bank (cannot collapse). Odd: least-hit
+        // working member, random among ties, then mark it used.
+        if seed & 1 == 0 {
+            let first = self.bank.first_bank();
+            if !first.is_empty() {
+                let m = &first[(seed as usize / 2) % first.len()];
+                return Some((m.energy, m.state.clone()));
+            }
+        }
         let n = self.bank.len();
         if n == 0 {
             return None;
         }
-        let i = (seed as usize) % n;
+        let min_hits = self
+            .bank
+            .members()
+            .iter()
+            .map(|m| m.hits)
+            .min()
+            .unwrap_or(0);
+        let cands: Vec<usize> = self
+            .bank
+            .members()
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.hits == min_hits)
+            .map(|(i, _)| i)
+            .collect();
+        let i = cands[(seed as usize / 2) % cands.len()];
+        self.bank.mark_used(i);
         let m = &self.bank.members()[i];
         Some((m.energy, m.state.clone()))
     }
