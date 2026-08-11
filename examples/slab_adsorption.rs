@@ -10,8 +10,7 @@
 //! the stated refinement of this selector.
 //!
 //! Usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]
-//! Engine is rgpot (default), nwchemc, or cpmdc. The server uses RGPOT_HOST /
-//! RGPOT_PORT; profiles use POTENTIAL_CONFIG / POTENTIAL_LIBRARY.
+//! Engine is xtb-cli / xtb (no Cap'n Proto), rgpot, nwchemc, or cpmdc.
 
 mod common;
 
@@ -19,6 +18,8 @@ mod common;
 use anneal_core::methods::archive_search::{Archive, archive_search};
 use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use common::pipe_engine::{PipeEngine, symbol};
+#[cfg(feature = "rgpot-ex")]
 use common::profile_engine::{ProfileEngine, profile_prefix};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -28,11 +29,14 @@ use std::path::Path;
 
 use anneal_core::methods::cluster_hopping::active_mask;
 
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::rpc::client::RpcClient;
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::tensor::{
     rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
     rgpot_tensor_data, rgpot_tensor_free,
 };
+#[cfg(feature = "rgpot-ex")]
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 
 /// Reads the first frame of a con file: coordinates, species, the free
@@ -62,6 +66,23 @@ fn log_line(msg: &str) {
     let _ = out.flush();
 }
 
+fn atoms_overlap(x: ArrayView1<f64>) -> bool {
+    let n = x.len() / 3;
+    const MIN_R2: f64 = 0.16;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            if dx * dx + dy * dy + dz * dz < MIN_R2 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(feature = "rgpot-ex")]
 struct Engine {
     host: String,
     port: u16,
@@ -75,26 +96,8 @@ struct Engine {
     failures: usize,
 }
 
+#[cfg(feature = "rgpot-ex")]
 impl Engine {
-    fn atoms_overlap(x: ArrayView1<f64>) -> bool {
-        let n = x.len() / 3;
-        // CuH2 aborts when two nuclei sit on top of each other. Refuse
-        // those geometries here so the search does not record a collision
-        // well or kill potserv.
-        const MIN_R2: f64 = 0.16;
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = x[3 * i] - x[3 * j];
-                let dy = x[3 * i + 1] - x[3 * j + 1];
-                let dz = x[3 * i + 2] - x[3 * j + 2];
-                if dx * dx + dy * dy + dz * dz < MIN_R2 {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     fn call_once(&mut self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), String> {
         let n = x.len() / 3;
         let mut pos: Vec<f64> = x.iter().cloned().collect();
@@ -151,7 +154,7 @@ impl Engine {
     }
 
     fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-        if Self::atoms_overlap(x) {
+        if atoms_overlap(x) {
             self.failures += 1;
             return None;
         }
@@ -200,9 +203,14 @@ fn main() {
     let shells: usize = tail.iter().find_map(|v| v.parse().ok()).unwrap_or(1);
     let engine = tail
         .iter()
-        .find(|value| matches!(value.as_str(), "rgpot" | "nwchemc" | "cpmdc"))
+        .find(|value| {
+            matches!(
+                value.as_str(),
+                "rgpot" | "nwchemc" | "cpmdc" | "xtb" | "xtb-cli"
+            )
+        })
         .map(String::as_str)
-        .unwrap_or("rgpot");
+        .unwrap_or("xtb-cli");
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -234,6 +242,7 @@ fn main() {
     cfg.relax_steps = 150;
 
     let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
+    #[cfg(feature = "rgpot-ex")]
     let mut rpc_eng = (engine == "rgpot").then(|| Engine {
         host: host.clone(),
         port,
@@ -246,8 +255,26 @@ fn main() {
         box_,
         failures: 0,
     });
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut rpc_eng: Option<()> = if engine == "rgpot" {
+        panic!("rebuild with --features rgpot-ex for the rgpot engine");
+    } else {
+        None
+    };
+    #[cfg(feature = "rgpot-ex")]
     let mut profile_eng =
         profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut profile_eng: Option<()> = None;
+    let _ = (&host, port, &atmnrs);
+    let mut pipe_eng = if matches!(engine, "xtb" | "xtb-cli") {
+        let symbols = species.iter().map(|&z| symbol(z).to_string()).collect();
+        let cell = (box_[0].abs() > 1.0 && box_[4].abs() > 1.0 && box_[8].abs() > 1.0)
+            .then_some(box_);
+        Some(PipeEngine::start(engine, symbols, cell))
+    } else {
+        None
+    };
 
     for seed in seed0..(seed0 + seeds) {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
@@ -266,11 +293,18 @@ fn main() {
             box_[4],
             box_[8]
         ));
-        let failures_before = rpc_eng
-            .as_ref()
-            .map(|candidate| candidate.failures)
-            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
-            .unwrap_or(0);
+        let failures_before = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+            + {
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
+                }
+                #[cfg(not(feature = "rgpot-ex"))]
+                {
+                    0
+                }
+            };
         let mut overlap_failures = 0usize;
         let mut ledger = Ledger::new(budget);
         let mut opt = WarmLbfgs::default();
@@ -280,23 +314,42 @@ fn main() {
                 if !led.charge() {
                     return None;
                 }
-                if let Some(rpc) = rpc_eng.as_mut() {
-                    return rpc.eval(v);
-                }
-                if Engine::atoms_overlap(v) {
+                if atoms_overlap(v) {
                     overlap_failures += 1;
                     return None;
                 }
-                let (energy, mut gradient) = profile_eng.as_mut()?.eval(v)?;
-                let active = active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
-                for (atom, is_active) in active.into_iter().enumerate() {
-                    if !is_active {
-                        for axis in 0..3 {
-                            gradient[3 * atom + axis] = 0.0;
+                if let Some(p) = pipe_eng.as_mut() {
+                    let (energy, mut gradient) = p.eval(v)?;
+                    let active =
+                        active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
+                    for (atom, is_active) in active.into_iter().enumerate() {
+                        if !is_active {
+                            for axis in 0..3 {
+                                gradient[3 * atom + axis] = 0.0;
+                            }
                         }
                     }
+                    return Some((energy, gradient));
                 }
-                Some((energy, gradient))
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    if let Some(rpc) = rpc_eng.as_mut() {
+                        return rpc.eval(v);
+                    }
+                    let (energy, mut gradient) = profile_eng.as_mut()?.eval(v)?;
+                    let active =
+                        active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
+                    for (atom, is_active) in active.into_iter().enumerate() {
+                        if !is_active {
+                            for axis in 0..3 {
+                                gradient[3 * atom + axis] = 0.0;
+                            }
+                        }
+                    }
+                    return Some((energy, gradient));
+                }
+                #[cfg(not(feature = "rgpot-ex"))]
+                None
             });
             (f, xr)
         };
@@ -348,11 +401,18 @@ fn main() {
         };
         #[cfg(not(feature = "graphkey"))]
         let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
-        let failures_after = rpc_eng
-            .as_ref()
-            .map(|candidate| candidate.failures)
-            .or_else(|| profile_eng.as_ref().map(ProfileEngine::failures))
-            .unwrap_or(0);
+        let failures_after = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+            + {
+                #[cfg(feature = "rgpot-ex")]
+                {
+                    rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
+                }
+                #[cfg(not(feature = "rgpot-ex"))]
+                {
+                    0
+                }
+            };
         log_line(&format!(
             "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
             out.best,
@@ -367,7 +427,7 @@ fn main() {
                 writeln!(
                     f,
                     "{} {:.6} {:.6} {:.6}",
-                    if species[i] == 29 { "Cu" } else { "H" },
+                    symbol(species[i]),
                     bx[3 * i],
                     bx[3 * i + 1],
                     bx[3 * i + 2]
@@ -381,6 +441,14 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pipe_engine_is_the_default_without_capnp() {
+        assert_eq!(super::symbol(29), "Cu");
+        assert_eq!(super::symbol(1), "H");
+        assert_eq!(super::symbol(79), "Au");
+    }
+
+    #[cfg(feature = "rgpot-ex")]
     #[test]
     fn periodic_profile_request_carries_the_simulation_cell() {
         let positions = [0.0, 0.0, 0.0];

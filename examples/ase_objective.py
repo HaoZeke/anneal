@@ -31,16 +31,29 @@ class XtbCli:
         self.exe = os.environ.get("XTB_EXE", "xtb")
         self.dir = tempfile.mkdtemp(prefix="xtbcli-")
 
-    def eval(self, symbols, positions):
+    def eval(self, symbols, positions, cell=None):
         xyz = os.path.join(self.dir, "geo.xyz")
         with open(xyz, "w") as f:
             f.write(f"{len(symbols)}\n\n")
             for s, p in zip(symbols, positions):
                 f.write(f"{s} {p[0]:.10f} {p[1]:.10f} {p[2]:.10f}\n")
+        xcontrol = os.path.join(self.dir, "xcontrol")
+        if cell is not None:
+            a = (cell[0] ** 2 + cell[1] ** 2 + cell[2] ** 2) ** 0.5
+            b = (cell[3] ** 2 + cell[4] ** 2 + cell[5] ** 2) ** 0.5
+            c = (cell[6] ** 2 + cell[7] ** 2 + cell[8] ** 2) ** 0.5
+            with open(xcontrol, "w") as f:
+                f.write("$periodic\n$cell angs\n")
+                f.write(f"  {a:.10f} {b:.10f} {c:.10f} 90.0 90.0 90.0\n")
+        elif os.path.exists(xcontrol):
+            os.remove(xcontrol)
         env = os.environ.copy()
         env.setdefault("OMP_NUM_THREADS", "1")
+        cmd = [self.exe, "geo.xyz", "--grad", "--gfn", "2", "--norestart"]
+        if cell is not None:
+            cmd.extend(["--input", "xcontrol"])
         subprocess.run(
-            [self.exe, "geo.xyz", "--grad", "--gfn", "2", "--norestart"],
+            cmd,
             cwd=self.dir,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -121,16 +134,32 @@ def main():
             symbols.append(parts[0])
             positions.append([float(v) for v in parts[1:4]])
         tag = stdin.readline().strip()
+        cell = None
+        if tag.startswith("CELL"):
+            vals = [float(v) for v in tag.split()[1:]]
+            if len(vals) != 9:
+                raise SystemExit(f"protocol error: CELL needs 9 numbers, got {tag!r}")
+            cell = vals
+            tag = stdin.readline().strip()
         if tag != "EVAL":
             raise SystemExit(f"protocol error: expected EVAL, got {tag!r}")
         try:
             if isinstance(calc, XtbCli):
-                energy, forces = calc.eval(symbols, positions)
+                energy, forces = calc.eval(symbols, positions, cell)
             else:
                 from ase import Atoms
 
                 atoms = Atoms(symbols=symbols, positions=positions)
-                if os.environ.get("ASE_ENGINE") == "cp2k":
+                if cell is not None:
+                    atoms.set_cell(
+                        [
+                            [cell[0], cell[1], cell[2]],
+                            [cell[3], cell[4], cell[5]],
+                            [cell[6], cell[7], cell[8]],
+                        ]
+                    )
+                    atoms.pbc = True
+                elif os.environ.get("ASE_ENGINE") == "cp2k":
                     # CP2K needs a cell. Resize-every-call (center(vacuum=...))
                     # changes the Poisson grid between hops and the restart
                     # guess then fails to converge, aborting the shell.
