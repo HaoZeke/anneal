@@ -184,6 +184,9 @@ fn main() {
         dcut_floor: 0.4,
         mix_fraction: 0.5,
         mix_images: 7,
+        random_images: 0,
+        deadlock_iters: 3,
+        deadlock_inject: 0,
         acquisition: opts.contains(&"ei"),
     };
     if use_bank {

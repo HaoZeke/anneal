@@ -20,6 +20,7 @@ use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 
 /// What a search did, beyond the outcome the driver reports.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -234,6 +235,117 @@ where
     };
 
     let out = optimize_with_gradient(cfg, ledger, &mut relax, Some(&mut grad), seed);
+    (out, stats)
+}
+
+/// As [`search`], from a geometry the caller already has.
+///
+/// A slab or a packed molecular start is not a random cluster in a sphere.
+/// The hop RNG is seeded independently of that geometry.
+pub fn search_from<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
+    let mut opt = WarmLbfgs::default();
+    let screen_iters = cfg.screen_steps;
+    let adaptive = cfg.adaptive_screen;
+    let probe = cfg.probe_screen;
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+        opt.forget();
+        let before = led.spent();
+        let screening = iters <= screen_iters;
+        let mut pred = QuenchPredictor::new();
+        pred.warmup = cfg.quench_warmup;
+        pred.confidence = cfg.quench_confidence;
+        let mut early = false;
+        let mut probe_at: Option<(usize, f64)> = None;
+        let target = led.best;
+        let (f, xr, _) = opt.minimize_watched(
+            x,
+            iters,
+            |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            },
+            |_, fv| {
+                if screening && probe {
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
+                if !(screening && adaptive) {
+                    return true;
+                }
+                pred.observe(fv);
+                if pred.verdict(target) != Verdict::Hopeless {
+                    return true;
+                }
+                early = true;
+                false
+            },
+        );
+        if let Some((at, claim)) = probe_at {
+            stats.probe_stops += 1;
+            stats.probe_steps += at;
+            stats.probe_error += (claim - f).abs();
+        }
+        let cost = led.spent() - before;
+        if screening {
+            stats.screen_charged += cost;
+            stats.screen_steps_taken += pred.len();
+            stats.screens += 1;
+        } else {
+            stats.full_charged += cost;
+        }
+        let f = if early {
+            pred.stopped_energy(target, f)
+        } else {
+            f
+        };
+        if early {
+            stats.capped += 1;
+            return (f, xr);
+        }
+        let converged = if led.charge() {
+            stats.check_charged += 1;
+            let g = objective.grad(xr.view());
+            g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
+        } else {
+            false
+        };
+        if converged {
+            stats.converged += 1;
+        } else {
+            stats.capped += 1;
+        }
+        (f, xr)
+    };
+    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+        if !led.charge() {
+            return None;
+        }
+        Some(objective.grad(x))
+    };
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let out = crate::methods::cluster_hopping::run_with_gradient(
+        cfg,
+        start,
+        ledger,
+        &mut relax,
+        Some(&mut grad),
+        &mut rng,
+    );
     (out, stats)
 }
 

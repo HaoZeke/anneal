@@ -1,52 +1,20 @@
-//! Global minimum of an adsorbate on a substrate through an rgpot backend.
+//! Adsorbate search on a substrate. The potential is an rgpot handle
+//! viewed as an eindir objective. Anneal only runs [`cluster_search`].
 //!
-//! The geometry comes from an eOn con file through readcon: nothing is grown
-//! here, and the file's fixed flags designate the substrate. The mobile set
-//! is not that static designation, though: the active region is the free
-//! seeds plus their bond-matrix neighbour shells, recomputed from the
-//! current structure each hop, so substrate atoms near the adsorbate respond
-//! and the far substrate stands still, the region following the adsorbate as
-//! it moves. A descriptor-deviation bound over the same neighbourhoods is
-//! the stated refinement of this selector.
-//!
-//! Usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]
-//! Engine is cuh2 (default: in-process `rgpot_cuh2_force`), xtb
-//! (`rgpot_xtb_force`), rgpot (potserv), nwchemc, cpmdc, or xtb-cli.
+//! Usage: slab_adsorption <con_file> <budget> <seeds>
 
 mod common;
 
-#[cfg(feature = "graphkey")]
-use anneal_core::methods::archive_search::{Archive, archive_search};
-use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, covalent_radius, run_with_gradient,
-};
-use anneal_core::methods::warm_lbfgs::WarmLbfgs;
-use common::pipe_engine::{PipeEngine, symbol};
-#[cfg(feature = "rgpot-ex")]
-use common::profile_engine::{ProfileEngine, profile_prefix};
-#[cfg(feature = "rgpot-ex")]
-use common::rgpot_direct::{Cuh2Direct, XtbDirect};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, covalent_radius};
+use anneal_core::methods::cluster_search::{search_from, verify};
+use common::rgpot_eindir::RgpotObjective;
+use eindir_core::Objective;
+use eindir_core::bounds::Bounds;
+use eindir_core::gradient::Gradient;
 use ndarray::{Array1, ArrayView1};
-use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 use std::io::Write;
 use std::path::Path;
 
-use anneal_core::methods::cluster_hopping::active_mask;
-
-#[cfg(feature = "rgpot-ex")]
-use rgpot_core::rpc::client::RpcClient;
-#[cfg(feature = "rgpot-ex")]
-use rgpot_core::tensor::{
-    rgpot_tensor_cpu_f64_2d, rgpot_tensor_cpu_f64_matrix3, rgpot_tensor_cpu_i32_1d,
-    rgpot_tensor_data, rgpot_tensor_free,
-};
-#[cfg(feature = "rgpot-ex")]
-use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
-
-/// Reads the first frame of a con file: coordinates, species, the free
-/// seeds (the atoms the file does not mark fixed), and the orthogonal
-/// box matrix from the file header.
 fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     let frame = readcon_core::iterators::read_first_frame(Path::new(path))
         .expect("failed to read the con file");
@@ -65,132 +33,50 @@ fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     (Array1::from(pos), species, seeds, box_)
 }
 
-fn log_line(msg: &str) {
-    let mut out = std::io::stdout();
-    let _ = writeln!(out, "{msg}");
-    let _ = out.flush();
-}
-
-fn atoms_overlap(x: ArrayView1<f64>) -> bool {
-    let n = x.len() / 3;
-    const MIN_R2: f64 = 0.16;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dx = x[3 * i] - x[3 * j];
-            let dy = x[3 * i + 1] - x[3 * j + 1];
-            let dz = x[3 * i + 2] - x[3 * j + 2];
-            if dx * dx + dy * dy + dz * dz < MIN_R2 {
-                return true;
-            }
-        }
+fn symbol(z: u32) -> &'static str {
+    match z {
+        1 => "H",
+        6 => "C",
+        7 => "N",
+        8 => "O",
+        29 => "Cu",
+        79 => "Au",
+        _ => "X",
     }
-    false
 }
 
-#[cfg(feature = "rgpot-ex")]
-struct Engine {
-    host: String,
-    port: u16,
-    client: RpcClient,
-    atmnrs: Vec<i32>,
-    species: Vec<u32>,
-    seeds: Vec<usize>,
-    shells: usize,
-    tolerance: f64,
-    box_: [f64; 9],
-    failures: usize,
+/// Zero the gradient on frozen substrate atoms. The potential is unchanged.
+struct Mobile<'a, O> {
+    inner: &'a O,
+    active: Vec<bool>,
 }
 
-#[cfg(feature = "rgpot-ex")]
-impl Engine {
-    fn call_once(&mut self, x: ArrayView1<f64>) -> Result<(f64, Array1<f64>), String> {
-        let n = x.len() / 3;
-        let mut pos: Vec<f64> = x.iter().cloned().collect();
-        let input = unsafe {
-            rgpot_force_input_t {
-                positions: rgpot_tensor_cpu_f64_2d(pos.as_mut_ptr(), n as i64, 3),
-                atomic_numbers: rgpot_tensor_cpu_i32_1d(self.atmnrs.as_mut_ptr(), n as i64),
-                box_matrix: rgpot_tensor_cpu_f64_matrix3(self.box_.as_mut_ptr()),
-            }
-        };
-        let mut out = rgpot_force_out_t {
-            forces: std::ptr::null_mut(),
-            energy: 0.0,
-            variance: 0.0,
-        };
-        let res = self.client.calculate(&input, &mut out);
-        unsafe {
-            rgpot_tensor_free(input.positions);
-            rgpot_tensor_free(input.atomic_numbers);
-            rgpot_tensor_free(input.box_matrix);
-        }
-        match res {
-            Ok(()) => {
-                if !out.energy.is_finite() || out.energy < -1000.0 {
-                    if !out.forces.is_null() {
-                        unsafe { rgpot_tensor_free(out.forces) };
-                    }
-                    return Err(format!("non-physical energy {}", out.energy));
-                }
-                let mut g = Array1::zeros(3 * n);
-                if !out.forces.is_null() {
-                    let data = unsafe { rgpot_tensor_data(out.forces) } as *const f64;
-                    if !data.is_null() {
-                        // The same active region the driver moves: force on
-                        // the mobile patch, zero outside it, recomputed from
-                        // the coordinates being evaluated so the quench and
-                        // the moves agree on what stands still.
-                        let act =
-                            active_mask(x, &self.species, &self.seeds, self.shells, self.tolerance);
-                        for i in 0..n {
-                            if act[i] {
-                                for k in 0..3 {
-                                    g[3 * i + k] = -unsafe { *data.add(3 * i + k) };
-                                }
-                            }
-                        }
-                    }
-                    unsafe { rgpot_tensor_free(out.forces) };
-                }
-                Ok((out.energy, g))
-            }
-            Err(e) => Err(e),
-        }
+impl<O: Objective<f64>> Objective<f64> for Mobile<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
     }
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+    fn eval(&self, x: ArrayView1<f64>) -> f64 {
+        self.inner.eval(x)
+    }
+}
 
-    fn eval(&mut self, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-        if atoms_overlap(x) {
-            self.failures += 1;
-            return None;
-        }
-        // Connection loss is not a refused geometry: wait for potserv to
-        // come back on the same charged evaluation.
-        for attempt in 0..30 {
-            match self.call_once(x) {
-                Ok(pair) => return Some(pair),
-                Err(e) => {
-                    let lost = e.contains("connection failed")
-                        || e.contains("Disconnected")
-                        || e.contains("RPC call failed");
-                    if !lost {
-                        self.failures += 1;
-                        if self.failures == 1 || self.failures % 500 == 0 {
-                            eprintln!("  engine failure {}: {e}", self.failures);
-                        }
-                        return None;
-                    }
-                    if attempt == 0 || attempt % 10 == 0 {
-                        eprintln!("  potserv unreachable ({e}); retry {attempt}");
-                    }
-                    if let Ok(c) = RpcClient::new(&self.host, self.port) {
-                        self.client = c;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(200));
+impl<O: Gradient<f64>> Gradient<f64> for Mobile<'_, O> {
+    fn dim(&self) -> usize {
+        self.inner.dim()
+    }
+    fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+        let mut g = self.inner.grad(x);
+        for (i, on) in self.active.iter().enumerate() {
+            if !on {
+                for k in 0..3 {
+                    g[3 * i + k] = 0.0;
                 }
             }
         }
-        self.failures += 1;
-        None
+        g
     }
 }
 
@@ -199,298 +85,59 @@ fn main() {
     let con = args
         .get(1)
         .cloned()
-        .expect("usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]");
-    let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(20_000);
+        .expect("usage: slab_adsorption <con_file> <budget> <seeds>");
+    let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(25);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
-    let tail = &args[4.min(args.len())..];
-    let ras = tail.iter().any(|t| t == "ras" || t == "pair");
-    let pair = tail.iter().any(|t| t == "pair");
-    let shells: usize = tail.iter().find_map(|v| v.parse().ok()).unwrap_or(1);
-    let engine = tail
-        .iter()
-        .find(|value| {
-            matches!(
-                value.as_str(),
-                "rgpot" | "nwchemc" | "cpmdc" | "xtb" | "xtb-cli" | "cuh2"
-            )
-        })
-        .map(String::as_str)
-        .unwrap_or("cuh2");
-    let seed0: u64 = std::env::var("SEED_OFFSET")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
-    let host = std::env::var("RGPOT_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port: u16 = std::env::var("RGPOT_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(9999);
-
     let (base_x, species, free_seeds, box_) = read_system(&con);
     let n = species.len();
-    // STACK=base runs the plain protocol; ATOMIC=1 keeps the atomic move
-    // library for free mixed clusters instead of the grouped molecular one.
-    let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
-    let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
+    let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
     let groups = if free_seeds.is_empty() || free_seeds.len() == n {
         vec![(0..n).collect()]
     } else {
         vec![free_seeds.clone()]
     };
-    let mut cfg = if base_stack {
-        Config::for_molecular(species.clone(), groups.clone(), 1.0)
-    } else {
-        Config::recommended_molecular(species.clone(), groups, 1.0)
-    };
-    if atomic {
-        cfg.move_library = anneal_core::methods::cluster_hopping::MoveLibrary::Atomic;
-    } else {
-        cfg.active_region = Some((free_seeds.clone(), shells));
-        if !free_seeds.is_empty() && free_seeds.len() < n {
-            let adsorbate = free_seeds
-                .iter()
-                .map(|&i| covalent_radius(species[i]))
-                .fold(0.0_f64, f64::max);
-            cfg.length_scale = 2.0 * adsorbate;
-        }
+    let mut cfg = Config::recommended_molecular(species.clone(), groups, 1.0);
+    cfg.active_region = Some((free_seeds.clone(), 1));
+    if !free_seeds.is_empty() && free_seeds.len() < n {
+        let adsorbate = free_seeds
+            .iter()
+            .map(|&i| covalent_radius(species[i]))
+            .fold(0.0_f64, f64::max);
+        cfg.length_scale = 2.0 * adsorbate;
     }
     cfg.screen_steps = 10;
     cfg.relax_steps = 150;
-
-    let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
-    #[cfg(feature = "rgpot-ex")]
-    let mut rpc_eng = (engine == "rgpot").then(|| Engine {
-        host: host.clone(),
-        port,
-        client: RpcClient::new(&host, port).expect("rgpot client"),
-        atmnrs: atmnrs.clone(),
-        species: species.clone(),
-        seeds: free_seeds.clone(),
-        shells,
-        tolerance: cfg.bond_tolerance,
-        box_,
-        failures: 0,
-    });
-    #[cfg(not(feature = "rgpot-ex"))]
-    let mut rpc_eng: Option<()> = if engine == "rgpot" {
-        panic!("rebuild with --features rgpot-ex for the rgpot engine");
-    } else {
-        None
+    let pot = RgpotObjective::cuh2(&atmnrs, box_);
+    let inner = pot.wrapper();
+    let mut active = vec![false; n];
+    for &i in &free_seeds {
+        active[i] = true;
+    }
+    let obj = Mobile {
+        inner: &inner,
+        active,
     };
-    #[cfg(feature = "rgpot-ex")]
-    let mut profile_eng =
-        profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs.clone(), Some(box_)));
-    #[cfg(not(feature = "rgpot-ex"))]
-    let mut profile_eng: Option<()> = None;
-    #[cfg(feature = "rgpot-ex")]
-    let mut xtb_eng = (engine == "xtb").then(|| XtbDirect::load(atmnrs.clone(), box_));
-    #[cfg(not(feature = "rgpot-ex"))]
-    let mut xtb_eng: Option<()> = if engine == "xtb" {
-        panic!("rebuild with --features rgpot-ex for the rgpot xtb kernel");
-    } else {
-        None
-    };
-    #[cfg(feature = "rgpot-ex")]
-    let mut cuh2_eng = (engine == "cuh2").then(|| Cuh2Direct::load(atmnrs.clone(), box_));
-    #[cfg(not(feature = "rgpot-ex"))]
-    let mut cuh2_eng: Option<()> = if engine == "cuh2" {
-        panic!("rebuild with --features rgpot-ex for the rgpot cuh2 kernel");
-    } else {
-        None
-    };
-    let mut pipe_eng = if engine == "xtb-cli" {
-        let symbols = species.iter().map(|&z| symbol(z).to_string()).collect();
-        let cell = (box_[0].abs() > 1.0 && box_[4].abs() > 1.0 && box_[8].abs() > 1.0)
-            .then_some(box_);
-        Some(PipeEngine::start(engine, symbols, cell))
-    } else {
-        None
-    };
-
-    for seed in seed0..(seed0 + seeds) {
-        let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
-        let mut x0 = base_x.clone();
-        // Different seeds start the adsorbate at different lateral offsets;
-        // the substrate stays as the file placed it. An all-free file is a
-        // cluster, not a slab: do not melt every atom before the first hop.
-        if free_seeds.len() < n {
-            for _ in 0..32 {
-                x0 = base_x.clone();
-                for &a in &free_seeds {
-                    x0[3 * a] += (rng.random::<f64>() - 0.5) * cfg.length_scale;
-                    x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * cfg.length_scale;
-                    x0[3 * a + 2] += rng.random::<f64>() * 0.2 * cfg.length_scale;
-                }
-                if !atoms_overlap(x0.view()) {
-                    break;
-                }
-            }
-        }
-        log_line(&format!(
-            "{con}: {n} atoms through {engine}, {} free seeds, {shells} active shells, budget {budget}, seed {seed}, box {:.4} {:.4} {:.4}",
-            free_seeds.len(),
-            box_[0],
-            box_[4],
-            box_[8]
-        ));
-        let failures_before = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-            + {
-                #[cfg(feature = "rgpot-ex")]
-                {
-                    rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + cuh2_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
-                }
-                #[cfg(not(feature = "rgpot-ex"))]
-                {
-                    0
-                }
-            };
-        let mut overlap_failures = 0usize;
+    println!(
+        "{con}: {n} atoms through eindir/rgpot cuh2, {} free, budget {budget}, {seeds} seeds",
+        free_seeds.len()
+    );
+    for seed in 0..seeds {
         let mut ledger = Ledger::new(budget);
-        let mut opt = WarmLbfgs::default();
-        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
-            opt.forget();
-            let (f, xr, _) = opt.minimize(x, iters, |v| {
-                if !led.charge() {
-                    return None;
-                }
-                if atoms_overlap(v) {
-                    overlap_failures += 1;
-                    return None;
-                }
-                if let Some(p) = pipe_eng.as_mut() {
-                    let (energy, mut gradient) = p.eval(v)?;
-                    let active =
-                        active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
-                    for (atom, is_active) in active.into_iter().enumerate() {
-                        if !is_active {
-                            for axis in 0..3 {
-                                gradient[3 * atom + axis] = 0.0;
-                            }
-                        }
-                    }
-                    return Some((energy, gradient));
-                }
-                #[cfg(feature = "rgpot-ex")]
-                {
-                    if let Some(cuh2) = cuh2_eng.as_mut() {
-                        let (energy, mut gradient) = cuh2.eval(v)?;
-                        let active =
-                            active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
-                        for (atom, is_active) in active.into_iter().enumerate() {
-                            if !is_active {
-                                for axis in 0..3 {
-                                    gradient[3 * atom + axis] = 0.0;
-                                }
-                            }
-                        }
-                        return Some((energy, gradient));
-                    }
-                    if let Some(xtb) = xtb_eng.as_mut() {
-                        let (energy, mut gradient) = xtb.eval(v)?;
-                        let active =
-                            active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
-                        for (atom, is_active) in active.into_iter().enumerate() {
-                            if !is_active {
-                                for axis in 0..3 {
-                                    gradient[3 * atom + axis] = 0.0;
-                                }
-                            }
-                        }
-                        return Some((energy, gradient));
-                    }
-                    if let Some(rpc) = rpc_eng.as_mut() {
-                        return rpc.eval(v);
-                    }
-                    let (energy, mut gradient) = profile_eng.as_mut()?.eval(v)?;
-                    let active =
-                        active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
-                    for (atom, is_active) in active.into_iter().enumerate() {
-                        if !is_active {
-                            for axis in 0..3 {
-                                gradient[3 * atom + axis] = 0.0;
-                            }
-                        }
-                    }
-                    return Some((energy, gradient));
-                }
-                #[cfg(not(feature = "rgpot-ex"))]
-                None
-            });
-            (f, xr)
-        };
-        #[cfg(feature = "graphkey")]
-        let mut rng_ras = rng.clone();
-        #[cfg(feature = "graphkey")]
-        if pair {
-            let mut rng_rec = rng.clone();
-            let mut ledger_rec = Ledger::new(budget);
-            let rec = run_with_gradient(
-                &cfg,
-                x0.view(),
-                &mut ledger_rec,
-                &mut relax,
-                None,
-                &mut rng_rec,
-            );
-            log_line(&format!(
-                "  seed {seed} rec: best {:.6} eV  charged {}  hops {}",
-                rec.best,
-                ledger_rec.spent(),
-                rec.hops
-            ));
-        }
-        #[cfg(feature = "graphkey")]
-        let out = if ras {
-            let mut archive = Archive::new();
-            let a = archive_search(
-                &cfg,
-                x0.view(),
-                &mut ledger,
-                &mut relax,
-                None,
-                &mut archive,
-                &mut rng_ras,
-            );
-            log_line(&format!(
-                "  seed {seed} ras: best {:.6} eV  charged {}  hit_at {}  floors {} returned {} same_floor {}",
-                a.best, a.charged, a.best_at, a.floors, a.returned, a.same_floor
-            ));
-            anneal_core::methods::cluster_hopping::Outcome {
-                best: a.best,
-                best_state: a.best_state,
-                hops: a.full,
-                ..Default::default()
-            }
-        } else {
-            run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng)
-        };
-        #[cfg(not(feature = "graphkey"))]
-        let out = run_with_gradient(&cfg, x0.view(), &mut ledger, &mut relax, None, &mut rng);
-        let failures_after = pipe_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-            + {
-                #[cfg(feature = "rgpot-ex")]
-                {
-                    rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + cuh2_eng.as_ref().map(|e| e.failures).unwrap_or(0)
-                        + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
-                }
-                #[cfg(not(feature = "rgpot-ex"))]
-                {
-                    0
-                }
-            };
-        log_line(&format!(
-            "  seed {seed}: best {:.6} eV  hops {}  engine failures {}",
+        let (out, stats) = search_from(&obj, &cfg, &mut ledger, base_x.view(), seed);
+        let checked = verify(&obj, &out);
+        println!(
+            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}{}",
             out.best,
             out.hops,
-            failures_after.saturating_sub(failures_before) + overlap_failures
-        ));
+            ledger.spent(),
+            stats.converged,
+            stats.total(),
+            checked
+                .map(|(e, g)| format!("  verify e={e:.6} |g|_mobile={g:.3e}"))
+                .unwrap_or_default()
+        );
         if let Some(bx) = out.best_state {
-            let path = format!("best_slab_s{seed}.xyz");
+            let path = format!("best_slab_eindir_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");
             writeln!(f, "{n}\nbest {:.6} eV", out.best).ok();
             for i in 0..n {
@@ -504,32 +151,7 @@ fn main() {
                 )
                 .ok();
             }
-            log_line(&format!("  wrote {path}"));
+            println!("  wrote {path}");
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn slab_symbols_cover_cu_h_and_au() {
-        assert_eq!(super::symbol(29), "Cu");
-        assert_eq!(super::symbol(1), "H");
-        assert_eq!(super::symbol(79), "Au");
-    }
-
-    #[cfg(feature = "rgpot-ex")]
-    #[test]
-    fn periodic_profile_request_carries_the_simulation_cell() {
-        let positions = [0.0, 0.0, 0.0];
-        let atomic_numbers = [29];
-        let cell = [8.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 10.0];
-        let request = super::common::profile_engine::profile_request(
-            &positions,
-            &atomic_numbers,
-            Some(&cell),
-        );
-
-        assert_eq!(request.box_matrix, Some(&cell));
     }
 }
