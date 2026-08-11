@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CSA bank remesure: recommended hop + Lee Dcut bank + mix + EI.
+# Shared-bank remesure: recommended hop + SOAP Dcut bank. No cut-and-splice.
 # Budget is split across the bank, not multiplied.
 # Does not touch HQ jobs 2, 87, 89-91.
 set -euo pipefail
@@ -8,7 +8,7 @@ OUT=${LJ_OUT:-$HOME/ljwork/hq-sci-bank}
 ONE=$ROOT/scripts/elja_hq_one.sh
 export BANK_CAPACITY=${BANK_CAPACITY:-30}
 export BANK_SLICE=${BANK_SLICE:-3000}
-export BANK_MIX=${BANK_MIX:-0.5}
+export BANK_MIX=${BANK_MIX:-0}
 export BANK_DCUT_FLOOR=${BANK_DCUT_FLOOR:-0.4}
 export BANK_MIX_IMAGES=${BANK_MIX_IMAGES:-20}
 export BANK_RANDOM=${BANK_RANDOM:-10}

@@ -699,7 +699,7 @@ fn main() {
         mix_fraction: std::env::var("BANK_MIX")
             .ok()
             .and_then(|v| v.parse().ok())
-            .unwrap_or(0.5),
+            .unwrap_or(0.0),
         mix_images: env("BANK_MIX_IMAGES", 20),
         random_images: env("BANK_RANDOM", 10),
         deadlock_iters: env("BANK_DEADLOCK_ITERS", 3),
@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: FunnelModel EI, well-UCB, archive-null hop, Lee splice+Dcut, AS-KMC α=2 / MCAMC absorb at N_f"
+                    "  bank explore: FunnelModel EI, well-UCB, archive-null SOAP hop, AS-KMC α=2 / MCAMC absorb at N_f"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1149,7 +1149,6 @@ fn run_capnp_bank(
 ) -> Outcome {
     use anneal_core::bank_rpc::BankClient;
     use anneal_core::diversity::DiversityAnnealer;
-    use anneal_core::methods::splice::cut_and_splice;
     use rand::Rng;
     let mut cfg = cfg.clone();
     cfg.budget_window = true;
@@ -1173,7 +1172,6 @@ fn run_capnp_bank(
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut slices = 0usize;
-    let mut mixes = 0usize;
     let mut random_starts = 0usize;
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
@@ -1194,38 +1192,6 @@ fn run_capnp_bank(
                 });
                 let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
                 let _ = client.set_dcut(sched.threshold(progress));
-            }
-        }
-        // Mix two members (working + first bank) instead of searching one
-        // ico copy again. Lee's operator; the hop alone stays in-funnel.
-        if snap.as_ref().map(|s| s.size >= 2).unwrap_or(false) && rng.random::<f64>() < 0.5 {
-            if let (Ok(Some((_, a))), Ok(Some((_, b)))) = (
-                client.sample(rng.random::<u64>() & !1),
-                client.sample(rng.random::<u64>() | 1),
-            ) {
-                if a.len() == 3 * cfg.n_points && b.len() == 3 * cfg.n_points {
-                    let trial = cut_and_splice(
-                        a.view(),
-                        b.view(),
-                        cfg.species.as_deref(),
-                        cfg.min_separation,
-                        &mut rng,
-                    );
-                    let mut mix_led = Ledger::new(cfg.relax_steps.max(32).min(ledger.remaining()));
-                    let (e, x) = relax(&mut mix_led, trial.view(), cfg.relax_steps);
-                    ledger.charge_many(mix_led.spent());
-                    ledger.record(e, x.view());
-                    let soap = packing_of(x.view(), cfg);
-                    let _ = client.offer(e, x.view(), soap.view());
-                    let _ = client.deposit(soap.view(), cfg.bias_height);
-                    mixes += 1;
-                    if e < best {
-                        best = e;
-                        best_state = Some(x);
-                    }
-                    slices += 1;
-                    continue;
-                }
             }
         }
         let start = match client.sample(rng.random()) {
@@ -1272,7 +1238,7 @@ fn run_capnp_bank(
         }
     }
     println!(
-        "      capnp bank: {slices} slices, {mixes} splices, {random_starts} novel starts, best {best:.6}"
+        "      capnp bank: {slices} slices, {random_starts} novel SOAP starts, best {best:.6}"
     );
     Outcome {
         best,
