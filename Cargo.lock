@@ -46,6 +46,7 @@ dependencies = [
  "dlpk",
  "eindir-core",
  "featomic",
+ "libloading",
  "metatensor",
  "nauty-pet",
  "ndarray 0.17.2",

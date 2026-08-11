@@ -10,18 +10,22 @@
 //! the stated refinement of this selector.
 //!
 //! Usage: slab_adsorption <con_file> <budget> <seeds> [shells] [engine]
-//! Engine is rgpot (default: Cap'n Proto to potserv), nwchemc, cpmdc,
-//! or xtb / xtb-cli.
+//! Engine is cuh2 (default: in-process `rgpot_cuh2_force`), xtb
+//! (`rgpot_xtb_force`), rgpot (potserv), nwchemc, cpmdc, or xtb-cli.
 
 mod common;
 
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
-use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, covalent_radius, run_with_gradient,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use common::pipe_engine::{PipeEngine, symbol};
 #[cfg(feature = "rgpot-ex")]
 use common::profile_engine::{ProfileEngine, profile_prefix};
+#[cfg(feature = "rgpot-ex")]
+use common::rgpot_direct::{Cuh2Direct, XtbDirect};
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -207,11 +211,11 @@ fn main() {
         .find(|value| {
             matches!(
                 value.as_str(),
-                "rgpot" | "nwchemc" | "cpmdc" | "xtb" | "xtb-cli"
+                "rgpot" | "nwchemc" | "cpmdc" | "xtb" | "xtb-cli" | "cuh2"
             )
         })
         .map(String::as_str)
-        .unwrap_or("rgpot");
+        .unwrap_or("cuh2");
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -228,7 +232,11 @@ fn main() {
     // library for free mixed clusters instead of the grouped molecular one.
     let base_stack = std::env::var("STACK").map(|v| v == "base").unwrap_or(false);
     let atomic = std::env::var("ATOMIC").map(|v| v == "1").unwrap_or(false);
-    let groups = vec![(0..n).collect()];
+    let groups = if free_seeds.is_empty() || free_seeds.len() == n {
+        vec![(0..n).collect()]
+    } else {
+        vec![free_seeds.clone()]
+    };
     let mut cfg = if base_stack {
         Config::for_molecular(species.clone(), groups.clone(), 1.0)
     } else {
@@ -238,6 +246,13 @@ fn main() {
         cfg.move_library = anneal_core::methods::cluster_hopping::MoveLibrary::Atomic;
     } else {
         cfg.active_region = Some((free_seeds.clone(), shells));
+        if !free_seeds.is_empty() && free_seeds.len() < n {
+            let adsorbate = free_seeds
+                .iter()
+                .map(|&i| covalent_radius(species[i]))
+                .fold(0.0_f64, f64::max);
+            cfg.length_scale = 2.0 * adsorbate;
+        }
     }
     cfg.screen_steps = 10;
     cfg.relax_steps = 150;
@@ -264,10 +279,26 @@ fn main() {
     };
     #[cfg(feature = "rgpot-ex")]
     let mut profile_eng =
-        profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs, Some(box_)));
+        profile_prefix(engine).map(|prefix| ProfileEngine::load(prefix, atmnrs.clone(), Some(box_)));
     #[cfg(not(feature = "rgpot-ex"))]
     let mut profile_eng: Option<()> = None;
-    let mut pipe_eng = if matches!(engine, "xtb" | "xtb-cli") {
+    #[cfg(feature = "rgpot-ex")]
+    let mut xtb_eng = (engine == "xtb").then(|| XtbDirect::load(atmnrs.clone(), box_));
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut xtb_eng: Option<()> = if engine == "xtb" {
+        panic!("rebuild with --features rgpot-ex for the rgpot xtb kernel");
+    } else {
+        None
+    };
+    #[cfg(feature = "rgpot-ex")]
+    let mut cuh2_eng = (engine == "cuh2").then(|| Cuh2Direct::load(atmnrs.clone(), box_));
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut cuh2_eng: Option<()> = if engine == "cuh2" {
+        panic!("rebuild with --features rgpot-ex for the rgpot cuh2 kernel");
+    } else {
+        None
+    };
+    let mut pipe_eng = if engine == "xtb-cli" {
         let symbols = species.iter().map(|&z| symbol(z).to_string()).collect();
         let cell = (box_[0].abs() > 1.0 && box_[4].abs() > 1.0 && box_[8].abs() > 1.0)
             .then_some(box_);
@@ -283,10 +314,16 @@ fn main() {
         // the substrate stays as the file placed it. An all-free file is a
         // cluster, not a slab: do not melt every atom before the first hop.
         if free_seeds.len() < n {
-            for &a in &free_seeds {
-                x0[3 * a] += (rng.random::<f64>() - 0.5) * 3.0;
-                x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
-                x0[3 * a + 2] += rng.random::<f64>() * 1.0;
+            for _ in 0..32 {
+                x0 = base_x.clone();
+                for &a in &free_seeds {
+                    x0[3 * a] += (rng.random::<f64>() - 0.5) * cfg.length_scale;
+                    x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * cfg.length_scale;
+                    x0[3 * a + 2] += rng.random::<f64>() * 0.2 * cfg.length_scale;
+                }
+                if !atoms_overlap(x0.view()) {
+                    break;
+                }
             }
         }
         log_line(&format!(
@@ -301,6 +338,8 @@ fn main() {
                 #[cfg(feature = "rgpot-ex")]
                 {
                     rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + cuh2_eng.as_ref().map(|e| e.failures).unwrap_or(0)
                         + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
                 }
                 #[cfg(not(feature = "rgpot-ex"))]
@@ -336,6 +375,32 @@ fn main() {
                 }
                 #[cfg(feature = "rgpot-ex")]
                 {
+                    if let Some(cuh2) = cuh2_eng.as_mut() {
+                        let (energy, mut gradient) = cuh2.eval(v)?;
+                        let active =
+                            active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
+                        for (atom, is_active) in active.into_iter().enumerate() {
+                            if !is_active {
+                                for axis in 0..3 {
+                                    gradient[3 * atom + axis] = 0.0;
+                                }
+                            }
+                        }
+                        return Some((energy, gradient));
+                    }
+                    if let Some(xtb) = xtb_eng.as_mut() {
+                        let (energy, mut gradient) = xtb.eval(v)?;
+                        let active =
+                            active_mask(v, &species, &free_seeds, shells, cfg.bond_tolerance);
+                        for (atom, is_active) in active.into_iter().enumerate() {
+                            if !is_active {
+                                for axis in 0..3 {
+                                    gradient[3 * atom + axis] = 0.0;
+                                }
+                            }
+                        }
+                        return Some((energy, gradient));
+                    }
                     if let Some(rpc) = rpc_eng.as_mut() {
                         return rpc.eval(v);
                     }
@@ -409,6 +474,8 @@ fn main() {
                 #[cfg(feature = "rgpot-ex")]
                 {
                     rpc_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + cuh2_eng.as_ref().map(|e| e.failures).unwrap_or(0)
                         + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
                 }
                 #[cfg(not(feature = "rgpot-ex"))]
@@ -445,7 +512,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn pipe_engine_is_the_default_without_capnp() {
+    fn slab_symbols_cover_cu_h_and_au() {
         assert_eq!(super::symbol(29), "Cu");
         assert_eq!(super::symbol(1), "H");
         assert_eq!(super::symbol(79), "Au");

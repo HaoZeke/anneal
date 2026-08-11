@@ -9,8 +9,8 @@
 //! charges one unit per fused energy-and-forces evaluation.
 //!
 //! Usage: molecular_cluster <m_molecules> <budget> <seeds> [engine]
-//! Engine is rgpot (default: Cap'n Proto to potserv), nwchemc, cpmdc,
-//! xtb / xtb-cli, or cp2k.
+//! Engine is xtb (default: in-process `rgpot_xtb_force`), rgpot (potserv),
+//! nwchemc, cpmdc, or xtb-cli.
 
 mod common;
 
@@ -23,6 +23,8 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use common::pipe_engine::PipeEngine;
 #[cfg(feature = "rgpot-ex")]
 use common::profile_engine::{ProfileEngine, optimizer_value_gradient, profile_prefix};
+#[cfg(feature = "rgpot-ex")]
+use common::rgpot_direct::XtbDirect;
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -134,7 +136,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pipe_path_is_the_default_without_capnp() {
+    fn water_template_symbols_are_o_h_h() {
         assert_eq!(SYMBOLS, ["O", "H", "H"]);
     }
 
@@ -183,7 +185,7 @@ fn main() {
         .iter()
         .find(|t| *t != "ras" && *t != "pair")
         .cloned()
-        .unwrap_or_else(|| "rgpot".into());
+        .unwrap_or_else(|| "xtb".into());
     let seed0: u64 = std::env::var("SEED_OFFSET")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -216,7 +218,18 @@ fn main() {
         embed_prefix.map(|prefix| ProfileEngine::load(prefix, profile_atomic_numbers, None));
     #[cfg(not(feature = "rgpot-ex"))]
     let mut profile_eng: Option<()> = None;
-    let mut pipe_eng = if engine == "rgpot" || embed_prefix.is_some() {
+    #[cfg(feature = "rgpot-ex")]
+    let mut xtb_eng = (engine == "xtb").then(|| {
+        let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
+        XtbDirect::load(atmnrs, [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0])
+    });
+    #[cfg(not(feature = "rgpot-ex"))]
+    let mut xtb_eng: Option<()> = if engine == "xtb" {
+        panic!("rebuild with --features rgpot-ex for the rgpot xtb kernel");
+    } else {
+        None
+    };
+    let mut pipe_eng = if engine == "rgpot" || engine == "xtb" || embed_prefix.is_some() {
         None
     } else {
         let mut symbols = Vec::new();
@@ -231,6 +244,7 @@ fn main() {
                 #[cfg(feature = "rgpot-ex")]
                 {
                     rg_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
                         + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
                 }
                 #[cfg(not(feature = "rgpot-ex"))]
@@ -270,6 +284,9 @@ fn main() {
                 }
                 #[cfg(feature = "rgpot-ex")]
                 {
+                    if let Some(x) = xtb_eng.as_mut() {
+                        return x.eval(v);
+                    }
                     if let Some(r) = rg_eng.as_mut() {
                         return r.eval(v);
                     }
@@ -355,6 +372,7 @@ fn main() {
                 #[cfg(feature = "rgpot-ex")]
                 {
                     rg_eng.as_ref().map(|e| e.failures).unwrap_or(0)
+                        + xtb_eng.as_ref().map(|e| e.failures).unwrap_or(0)
                         + profile_eng.as_ref().map(ProfileEngine::failures).unwrap_or(0)
                 }
                 #[cfg(not(feature = "rgpot-ex"))]
