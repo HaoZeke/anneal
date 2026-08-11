@@ -14,6 +14,10 @@ use crate::methods::bank::{Admission, Bank};
 
 /// Hausdorff length below which two members are the same geometry.
 const IRA_SAME: f64 = 0.05;
+/// AS-KMC / MCAMC: well height at which the packing is a raised
+/// superbasin (N_f = 20 deposits of 0.25). Intra-well hops are then
+/// rate-scaled and the well is absorbing: sample will not start there.
+const SUPERBASIN_HEIGHT: f64 = 5.0;
 
 /// Packing merge for wells. Same number as recommended SOAP packing.
 fn pack_merge() -> f64 {
@@ -197,6 +201,11 @@ impl Inner {
             .iter_mut()
             .find(|w| soap_l2(soap.view(), w.soap.view()) <= merge)
         {
+            // Raised superbasin: stop filling (AS-KMC resets sightings
+            // after the barrier is raised). Height stays at the cap.
+            if w.height >= SUPERBASIN_HEIGHT {
+                return w.height;
+            }
             w.height += increment;
             return w.height;
         }
@@ -271,10 +280,19 @@ impl Inner {
                 quality + bonus
             };
             let jitter = ((seed.wrapping_mul(i as u64 + 1)) % 1000) as f64 * 1e-6;
+            // MCAMC: a raised well is absorbing. Do not start another
+            // slice inside it; the exit is a different packing or a
+            // random draw (client treats None as that escape).
+            if h >= SUPERBASIN_HEIGHT {
+                continue;
+            }
             if score + jitter > best_s {
                 best_s = score + jitter;
                 best_i = i;
             }
+        }
+        if best_s == f64::NEG_INFINITY {
+            return None;
         }
         self.bank.mark_used(best_i);
         let m = &self.bank.members()[best_i];
@@ -301,7 +319,7 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
     eprintln!("bank listening on {} capacity {capacity}", addr.as_ref());
     #[cfg(all(feature = "ira", feature = "featomic"))]
     eprintln!(
-        "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}, FunnelModel EI",
+        "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}, FunnelModel EI, AS-KMC/MCAMC raise at {SUPERBASIN_HEIGHT}",
         pack_merge()
     );
     #[cfg(all(feature = "ira", not(feature = "featomic")))]

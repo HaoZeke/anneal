@@ -663,6 +663,22 @@ impl<F: Fingerprint> BasinBias<F> {
         self
     }
 
+    /// Chatterjee–Voter AS-KMC: an intra-well hop after the well has
+    /// been seen N_f times is a frequent superbasin process. Its rate
+    /// is what gets lowered. `nf_height` is N_f times the deposit
+    /// increment (the same number as recommended `height_revisits * w0`).
+    pub fn frequent_superbasin(
+        &self,
+        s_old: ArrayView1<f64>,
+        s_new: ArrayView1<f64>,
+        nf_height: f64,
+    ) -> bool {
+        match (self.lookup(s_old), self.lookup(s_new)) {
+            (Some(i), Some(j)) if i == j => self.v.get(i).copied().unwrap_or(0.0) >= nf_height,
+            _ => false,
+        }
+    }
+
     /// Index of the nearest registered basin within `merge_radius`.
     fn lookup(&self, d: ArrayView1<f64>) -> Option<usize> {
         self.index.lookup(d)
