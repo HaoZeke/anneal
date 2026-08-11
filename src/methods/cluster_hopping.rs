@@ -1832,7 +1832,12 @@ fn run_full<'g, R: Rng + ?Sized>(
                 tabu.push(d);
             }
         }
-        if (cfg.restart_on_stall || cfg.tabu_on_stall) && stuck {
+        // Tabu names the basin. It does not redraw the cluster.
+        // Coupling the two sampled Doye's wide icosahedral funnel
+        // (J. Chem. Phys. 111, 8417 (1999)): a random restart lands
+        // back on Mackay. The manuscript stall step is tabu only.
+        // A directed leave is `escape_on_stall` (Goedecker / Schönborn).
+        if cfg.restart_on_stall && stuck {
             quiet = 0;
             longest_quiet = 0;
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
@@ -2455,6 +2460,8 @@ mod tests {
         let der = Config::derived(13);
         assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
+        assert!(der.escape_on_stall);
+        assert!(!der.restart_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
         assert!(!rec.budget_window);

@@ -83,6 +83,9 @@ fn recommended_differs_from_for_cluster() {
     assert_eq!(base.n_points, 38);
     assert!(matches!(rec.move_library, MoveLibrary::LeanBurst));
     assert!(rec.allocate_moves && rec.depth_reward && rec.tabu_on_stall);
+    assert!(rec.escape_on_stall);
+    assert!(!rec.restart_on_stall);
     assert!(matches!(base.move_library, MoveLibrary::Atomic));
     assert!(!(base.allocate_moves || base.depth_reward || base.tabu_on_stall));
+    assert!(!base.escape_on_stall);
 }
