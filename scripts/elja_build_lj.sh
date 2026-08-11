@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# Native Elja build of lj_cluster_search. No rgpot-ex, so no capnp.
+# Compute-node Elja build of lj_cluster_search + bank_server.
 # rustup lives in ~/.cargo/bin and is off the non-interactive PATH.
 set -euo pipefail
+if [[ -z ${SLURM_JOB_ID:-} ]]; then
+  echo "elja_build_lj.sh: run under srun, not on $(hostname)" >&2
+  exit 1
+fi
 export PATH="${HOME}/.cargo/bin:${PATH}"
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 cd "$ROOT"
+echo "host=$(hostname) job=$SLURM_JOB_ID"
+lscpu | grep -E "Model name|Vendor ID" || true
 BIN=target/release/examples/lj_cluster_search
 mkdir -p target/release/examples
 if [[ -e "$BIN" ]] && ! ldd "$BIN" >/dev/null 2>&1; then
@@ -25,7 +31,8 @@ if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
   ldd "$IRA_LIB_DIR/libira.so"
   exit 1
 fi
-cargo build --release --features featomic,ira,bank-rpc --example lj_cluster_search --example bank_server
+# Registry is on NFS from the login fetch. Compute may have no outbound net.
+cargo build --offline --release --features featomic,ira,bank-rpc --example lj_cluster_search --example bank_server
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec
