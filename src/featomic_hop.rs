@@ -37,6 +37,18 @@ pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
 /// packing gap, so a well-tempered deposit fills the occupied
 /// superbasin and not the other funnel.
 pub const SOAP_PACK_MERGE: f64 = 0.10;
+thread_local! {
+    /// Shared-bank packing means. The hop steps in the SOAP null
+    /// space of this archive (MAP-Elites coverage + null-space
+    /// motion): directions the bank already spans are known.
+    static PACK_ARCHIVE: RefCell<Vec<Array1<f64>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Replace the packing archive used by [`step_away_featomic`].
+pub fn set_packing_archive(wells: Vec<Array1<f64>>) {
+    PACK_ARCHIVE.with(|a| *a.borrow_mut() = wells);
+}
+
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 const LAMBDA: f64 = 1e-3;
@@ -600,7 +612,36 @@ fn shell_leftover(s: &Spectrum) -> bool {
     w[n - 1] < 4.0 * med
 }
 
-/// Kick the occupied mean SOAP along a random ray orthogonal to it.
+/// Orthonormalise `basis` in place (modified Gram-Schmidt), drop zeros.
+fn orthonormal(basis: &mut Vec<Array1<f64>>) {
+    let mut out = Vec::new();
+    for v in basis.drain(..) {
+        let mut w = v;
+        for b in &out {
+            if b.len() != w.len() {
+                continue;
+            }
+            let p = w.iter().zip(b.iter()).map(|(a, c)| a * c).sum::<f64>();
+            for (x, c) in w.iter_mut().zip(b.iter()) {
+                *x -= p * *c;
+            }
+        }
+        let n = w.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if n > 1e-12 {
+            for x in w.iter_mut() {
+                *x /= n;
+            }
+            out.push(w);
+        }
+        if out.len() == 8 {
+            break;
+        }
+    }
+    *basis = out;
+}
+
+/// Kick mean SOAP in the null space of the occupied packing *and*
+/// of the shared-bank archive (known packings).
 fn packing_kick<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     s: &Spectrum,
@@ -612,6 +653,15 @@ fn packing_kick<R: Rng + ?Sized>(
     if mu.is_empty() || s.mean_jac.nrows() != mu.len() {
         return x.to_owned();
     }
+    let mut basis = vec![mu.clone()];
+    PACK_ARCHIVE.with(|a| {
+        for w in a.borrow().iter() {
+            if w.len() == mu.len() {
+                basis.push(w.clone());
+            }
+        }
+    });
+    orthonormal(&mut basis);
     let mut u = Array1::<f64>::zeros(mu.len());
     for v in u.iter_mut() {
         let a: f64 = rng.random();
@@ -619,9 +669,11 @@ fn packing_kick<R: Rng + ?Sized>(
         let r = (-2.0 * a.max(1e-15).ln()).sqrt();
         *v = r * (2.0 * std::f64::consts::PI * b).cos();
     }
-    let proj = u.iter().zip(mu.iter()).map(|(a, b)| a * b).sum::<f64>();
-    for (v, m) in u.iter_mut().zip(mu.iter()) {
-        *v -= proj * *m;
+    for b in &basis {
+        let p = u.iter().zip(b.iter()).map(|(a, c)| a * c).sum::<f64>();
+        for (v, c) in u.iter_mut().zip(b.iter()) {
+            *v -= p * *c;
+        }
     }
     let nrm = u.iter().map(|v| v * v).sum::<f64>().sqrt();
     if nrm < 1e-15 {
@@ -752,6 +804,22 @@ mod tests {
             d_pack > 0.05,
             "mean SOAP must separate ico13 from cuboct13, got {d_pack}"
         );
+    }
+
+    #[test]
+    fn archive_null_still_moves_ico13() {
+        let x = ico13();
+        let mu = unit(&spectrum(x.view(), 3.5, None, None).cloud_mean);
+        set_packing_archive(vec![mu]);
+        let mut rng = StdRng::seed_from_u64(2);
+        let y = step_away_featomic(x.view(), 0.35, 3.5, None, None, &mut rng);
+        set_packing_archive(Vec::new());
+        let mut s = 0.0;
+        for i in 0..x.len() {
+            let d = y[i] - x[i];
+            s += d * d;
+        }
+        assert!((s / 13.0).sqrt() > 1e-8, "archive-null hop was identity");
     }
 
     #[test]

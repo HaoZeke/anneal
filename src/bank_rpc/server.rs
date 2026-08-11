@@ -218,24 +218,42 @@ impl Inner {
         if n == 0 {
             return None;
         }
-        let min_hits = self
+        // MAP-Elites / UCB1 on packings, not isomers. Least-hit members
+        // of one ico well are the same cell. Score quality (energy) plus
+        // an exploration bonus on the SOAP well height.
+        let e_best = self
             .bank
             .members()
             .iter()
-            .map(|m| m.hits)
-            .min()
-            .unwrap_or(0);
-        let cands: Vec<usize> = self
-            .bank
-            .members()
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.hits == min_hits)
-            .map(|(i, _)| i)
-            .collect();
-        let i = cands[(seed as usize / 2) % cands.len()];
-        self.bank.mark_used(i);
-        let m = &self.bank.members()[i];
+            .map(|m| m.energy)
+            .fold(f64::INFINITY, f64::min)
+            .min(-1e-12);
+        let ln = (1.0 + n as f64).ln();
+        let merge = pack_merge();
+        let mut best_i = 0usize;
+        let mut best_s = f64::NEG_INFINITY;
+        for (i, m) in self.bank.members().iter().enumerate() {
+            let h = self
+                .soaps
+                .get(i)
+                .and_then(|s| {
+                    self.wells
+                        .iter()
+                        .find(|w| soap_l2(s.view(), w.soap.view()) <= merge)
+                        .map(|w| w.height)
+                })
+                .unwrap_or(0.0);
+            let quality = m.energy / e_best;
+            let bonus = 0.15 * (ln / (1.0 + h)).sqrt();
+            let jitter = ((seed.wrapping_mul(i as u64 + 1)) % 1000) as f64 * 1e-6;
+            let score = quality + bonus + jitter;
+            if score > best_s {
+                best_s = score;
+                best_i = i;
+            }
+        }
+        self.bank.mark_used(best_i);
+        let m = &self.bank.members()[best_i];
         Some((m.energy, m.state.clone()))
     }
 }
