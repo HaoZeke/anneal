@@ -13,7 +13,7 @@ fi
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
 echo "glibc=$(ldd --version | head -1)"
-cargo build --release --features featomic --example lj_cluster_search
+cargo build --release --features featomic,bank-rpc --example lj_cluster_search --example bank_server
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec

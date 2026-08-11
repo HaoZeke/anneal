@@ -688,6 +688,28 @@ impl<F: Fingerprint> BasinBias<F> {
     pub fn deepest(&self) -> f64 {
         self.v.iter().copied().fold(0.0, f64::max)
     }
+
+    /// Merge a packing well found by another chain.
+    ///
+    /// The descriptor is already a fingerprint (unit mean SOAP), not raw
+    /// coordinates. Height is kept if this well is new, or raised to the
+    /// remote value if the same packing is already local.
+    pub fn import_well(&mut self, descriptor: Array1<f64>, height: f64) {
+        if !height.is_finite() || height < 0.0 || descriptor.is_empty() {
+            return;
+        }
+        match self.lookup(descriptor.view()) {
+            Some(i) => {
+                if height > self.v[i] {
+                    self.v[i] = height;
+                }
+            }
+            None => {
+                self.index.push(descriptor);
+                self.v.push(height);
+            }
+        }
+    }
 }
 
 impl<F: Fingerprint> Bias for BasinBias<F> {
