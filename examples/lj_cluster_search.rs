@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: FunnelModel EI start, well-UCB fallback, archive-null hop, Lee splice + Dcut"
+                    "  bank explore: FunnelModel EI, well-UCB, archive-null hop, Lee splice+Dcut, AS-KMC α=2 / MCAMC absorb at N_f"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }

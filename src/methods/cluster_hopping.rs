@@ -1400,6 +1400,20 @@ fn run_full<'g, R: Rng + ?Sized>(
             let d = delta / temperature.max(1e-12) + eb;
             d < 0.0 || rng.random::<f64>() < (-d).exp()
         };
+        let mut accept = accept;
+        // AS-KMC (Chatterjee–Voter 2010): after N_f sightings the
+        // intra-packing hop is a frequent process. Raise its barrier
+        // (α = 2, their usual superbasin tolerance) so the rare exit
+        // is selected. Not another deposit: that is well-tempered
+        // filling. This is rate scaling.
+        if accept && cfg.adaptive_height {
+            let cap = cfg.bias_height * cfg.height_revisits.max(1.0);
+            if bias.frequent_superbasin(s_old.view(), s_new.view(), cap)
+                && rng.random::<f64>() * 2.0 > 1.0
+            {
+                accept = false;
+            }
+        }
         // Counted before the tabu veto, so the figure describes the acceptance
         // rule rather than the rule plus whatever the veto happens to remove.
         // White and Mayne report plain basin hopping running near a half, and
@@ -1412,7 +1426,6 @@ fn run_full<'g, R: Rng + ?Sized>(
         // A quarantined funnel is refused whatever the energy. Checked after
         // the acceptance test rather than instead of it, so the veto is
         // visible as a veto rather than folded into the rule.
-        let mut accept = accept;
         if !tabu.is_empty() && accept {
             let d = s_new.view();
             if tabu.iter().any(|t| {
