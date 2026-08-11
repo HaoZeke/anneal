@@ -280,11 +280,14 @@ fn main() {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
         let mut x0 = base_x.clone();
         // Different seeds start the adsorbate at different lateral offsets;
-        // the substrate stays as the file placed it.
-        for &a in &free_seeds {
-            x0[3 * a] += (rng.random::<f64>() - 0.5) * 3.0;
-            x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
-            x0[3 * a + 2] += rng.random::<f64>() * 1.0;
+        // the substrate stays as the file placed it. An all-free file is a
+        // cluster, not a slab: do not melt every atom before the first hop.
+        if free_seeds.len() < n {
+            for &a in &free_seeds {
+                x0[3 * a] += (rng.random::<f64>() - 0.5) * 3.0;
+                x0[3 * a + 1] += (rng.random::<f64>() - 0.5) * 3.0;
+                x0[3 * a + 2] += rng.random::<f64>() * 1.0;
+            }
         }
         log_line(&format!(
             "{con}: {n} atoms through {engine}, {} free seeds, {shells} active shells, budget {budget}, seed {seed}, box {:.4} {:.4} {:.4}",
@@ -420,7 +423,7 @@ fn main() {
             failures_after.saturating_sub(failures_before) + overlap_failures
         ));
         if let Some(bx) = out.best_state {
-            let path = format!("best_cuh2_s{seed}.xyz");
+            let path = format!("best_slab_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");
             writeln!(f, "{n}\nbest {:.6} eV", out.best).ok();
             for i in 0..n {
