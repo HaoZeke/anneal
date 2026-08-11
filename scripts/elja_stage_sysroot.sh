@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Copy login-node glibc startfiles. Compute images have libm.so.6 but
-# no crti.o / libm.so linker script, so gfortran and rustc cannot link.
+# Compute images have the glibc DSOs but no startfiles and no
+# libm.so / libc.so linker scripts (those pull libc_nonshared.a).
+# Copy crti from login and write scripts that only GROUP the DSOs.
 set -euo pipefail
 SYS=${IRA_SYSROOT:-$HOME/ira/sysroot}
 mkdir -p "$SYS"
 src=/usr/lib64
 missing=0
-for f in crti.o crt1.o crtn.o Scrt1.o libc.so libm.so libpthread.so libdl.so librt.so; do
+for f in crti.o crt1.o crtn.o Scrt1.o; do
   if [[ ! -e $src/$f ]]; then
     echo "missing $src/$f (run this on the login node)" >&2
     missing=1
@@ -17,4 +18,17 @@ done
 if [[ $missing -ne 0 ]]; then
   exit 1
 fi
+write_group() {
+  local name=$1
+  local dso=$2
+  cat >"$SYS/$name" <<EOF
+OUTPUT_FORMAT(elf64-x86-64)
+GROUP ( $dso )
+EOF
+}
+write_group libm.so /lib64/libm.so.6
+write_group libc.so /lib64/libc.so.6
+write_group libpthread.so /lib64/libpthread.so.0
+write_group libdl.so /lib64/libdl.so.2
+write_group librt.so /lib64/librt.so.1
 echo "SYSROOT_OK $SYS"
