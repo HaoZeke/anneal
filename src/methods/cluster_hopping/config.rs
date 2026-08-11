@@ -600,6 +600,13 @@ impl Config {
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
+        // Soft-mode climb on an adaptive stall, not a random redraw.
+        // Schönborn, Goedecker, Roy, Oganov, J. Chem. Phys. 130, 144108
+        // (2009): do not keep leaving a minimum along the same mode;
+        // the climb takes a random sign. Doye, Miller, Wales, J. Chem.
+        // Phys. 111, 8417 (1999): LJ75 is a double funnel whose ico
+        // side is the wider one, so a random restart is an ico draw.
+        cfg.escape_on_stall = true;
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
