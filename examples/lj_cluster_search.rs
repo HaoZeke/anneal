@@ -824,6 +824,9 @@ fn main() {
                 );
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
+                println!(
+                    "  bank explore: well-UCB start (QD), archive-null SOAP hop, Lee splice + Dcut"
+                );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
             #[cfg(not(feature = "bank-rpc"))]
@@ -1178,6 +1181,10 @@ fn run_capnp_bank(
             for (soap, h) in &s.wells {
                 bias.import_well(soap.clone(), *h);
             }
+            #[cfg(feature = "featomic")]
+            anneal_core::featomic_hop::set_packing_archive(
+                s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
+            );
             if s.size >= 2 {
                 let sched = schedule.get_or_insert_with(|| {
                     DiversityAnnealer::from_initial(s.dcut.max(0.05)).with_final_fraction(0.4)
