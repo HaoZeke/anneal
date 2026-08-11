@@ -18,8 +18,10 @@ export CC="${GCC}/bin/gcc"
 export CXX="${GCC}/bin/g++"
 export FC="${GCC}/bin/gfortran"
 export LIBRARY_PATH="${SYS}:${GCC}/lib64:/usr/lib64:${LIBRARY_PATH:-}"
-# rustc 1.95 defaults to rust-lld, which cannot consume GNU ld scripts.
-export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-fuse-ld=/usr/bin/ld -C link-arg=-B${SYS} -L ${SYS}"
+# Do not pass -fuse-ld=/path: OHPC gcc 12 rejects it. collect2 finds
+# ld via -B. rust-lld is avoided by pointing gcc at SYS/bin/ld.
+ln -sfn /usr/bin/ld "$SYS/bin/ld"
+export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-B${SYS} -C link-arg=-B${SYS}/bin -L ${SYS}"
 cd "$ROOT"
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 lscpu | grep -E "Model name|Vendor ID" || true
