@@ -101,10 +101,20 @@ impl BankClient {
 
     /// Packing wells held on the server.
     pub fn wells(&mut self) -> Result<Vec<(Array1<f64>, f64)>, String> {
+        Ok(self.snapshot()?.wells)
+    }
+
+    /// Bank size, Dcut, member energies, and SOAP wells.
+    pub fn snapshot(&mut self) -> Result<Snapshot, String> {
         let reply = self.call(|mut req| {
             req.set_snapshot(());
         })?;
-        Ok(reply.wells)
+        Ok(Snapshot {
+            size: reply.size,
+            dcut: reply.dcut,
+            energies: reply.energies,
+            wells: reply.wells,
+        })
     }
 
     /// Publish a Dcut. Ignored while the first bank is still seeding.
@@ -116,6 +126,18 @@ impl BankClient {
     }
 }
 
+/// Live bank contents from `snapshot`.
+pub struct Snapshot {
+    /// Members currently held.
+    pub size: u32,
+    /// Current Lee Dcut.
+    pub dcut: f64,
+    /// Member energies, bank order.
+    pub energies: Vec<f64>,
+    /// SOAP packing wells `(spectrum, height)`.
+    pub wells: Vec<(Array1<f64>, f64)>,
+}
+
 /// Decoded reply.
 struct Reply {
     kind: u16,
@@ -123,7 +145,9 @@ struct Reply {
     dcut: f64,
     distance: f64,
     height: f64,
+    size: u32,
     coords: Array1<f64>,
+    energies: Vec<f64>,
     empty: bool,
     wells: Vec<(Array1<f64>, f64)>,
 }
@@ -131,6 +155,11 @@ struct Reply {
 impl Reply {
     fn from_reader(r: bank_reply::Reader<'_>) -> Result<Self, String> {
         let coords = list_f64(r.get_coords().map_err(|e| e.to_string())?);
+        let energies = if let Ok(es) = r.get_energies() {
+            es.iter().collect()
+        } else {
+            Vec::new()
+        };
         let mut wells = Vec::new();
         if let Ok(ws) = r.get_wells() {
             for w in ws.iter() {
@@ -144,7 +173,9 @@ impl Reply {
             dcut: r.get_dcut(),
             distance: r.get_distance(),
             height: r.get_height(),
+            size: r.get_size(),
             coords,
+            energies,
             empty: r.get_empty(),
             wells,
         })
