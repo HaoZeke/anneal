@@ -26,6 +26,10 @@ fn main() {
     let m: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(2);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
+    let seed0: u64 = std::env::var("SEED_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let n = 3 * m;
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
     let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
@@ -42,8 +46,11 @@ fn main() {
     };
     cfg.screen_steps = 6;
     cfg.relax_steps = 60;
-    println!("(H2O){m} through eindir/rgpot xtb, budget {budget}, {seeds} seeds");
-    for seed in 0..seeds {
+    println!(
+        "(H2O){m} through eindir/rgpot xtb, budget {budget}, seeds {seed0}..{}",
+        seed0 + seeds
+    );
+    for seed in seed0..seed0 + seeds {
         let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(1));
         let mut template = Array1::zeros(3 * n);
         for atoms in &groups {

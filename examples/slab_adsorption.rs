@@ -88,6 +88,10 @@ fn main() {
         .expect("usage: slab_adsorption <con_file> <budget> <seeds>");
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(25);
     let seeds: u64 = args.get(3).and_then(|v| v.parse().ok()).unwrap_or(1);
+    let seed0: u64 = std::env::var("SEED_OFFSET")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let (base_x, species, free_seeds, box_) = read_system(&con);
     let n = species.len();
     let atmnrs: Vec<i32> = species.iter().map(|&z| z as i32).collect();
@@ -118,10 +122,11 @@ fn main() {
         active,
     };
     println!(
-        "{con}: {n} atoms through eindir/rgpot cuh2, {} free, budget {budget}, {seeds} seeds",
-        free_seeds.len()
+        "{con}: {n} atoms through eindir/rgpot cuh2, {} free, budget {budget}, seeds {seed0}..{}",
+        free_seeds.len(),
+        seed0 + seeds
     );
-    for seed in 0..seeds {
+    for seed in seed0..seed0 + seeds {
         let mut ledger = Ledger::new(budget);
         let (out, stats) = search_from(&obj, &cfg, &mut ledger, base_x.view(), seed);
         let checked = verify(&obj, &out);
