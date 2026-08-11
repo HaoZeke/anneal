@@ -30,6 +30,13 @@ pub const LMIN: i32 = 5;
 /// Mackay. This floor sits below the packing gap and above numerical
 /// zero, so a one-funnel seed bank still admits the other funnel.
 pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
+/// Merge radius on unit mean SOAP: isomers of one packing, not Marks.
+///
+/// LJ75 ico-isomer high-`l` sits below `0.4` of the ico-Marks gap
+/// (0.163). This floor is above that isomer band and below the
+/// packing gap, so a well-tempered deposit fills the occupied
+/// superbasin and not the other funnel.
+pub const SOAP_PACK_MERGE: f64 = 0.10;
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 const LAMBDA: f64 = 1e-3;
@@ -925,6 +932,26 @@ mod tests {
         assert!(
             d_iso_high < 0.4 * d_pack,
             "ico isomer high-l {d_iso_high} is too close to ico-Marks {d_pack}"
+        );
+    }
+
+    #[test]
+    fn soap_pack_merge_is_the_funnel_not_the_isomer() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let mut kicked = ico75.clone();
+        kicked[0] += 0.35;
+        kicked[1] -= 0.20;
+        let (_e, iso) = quench_lj(kicked.view());
+        let d_iso = soap_bank_distance(ico75.view(), iso.view(), 3.5, None, None);
+        let d_marks = soap_bank_distance(ico75.view(), marks.view(), 3.5, None, None);
+        assert!(
+            d_iso < SOAP_PACK_MERGE,
+            "ico isomer {d_iso} must merge into the packing well {SOAP_PACK_MERGE}"
+        );
+        assert!(
+            d_marks > SOAP_PACK_MERGE,
+            "ico-Marks {d_marks} must stay outside the packing well {SOAP_PACK_MERGE}"
         );
     }
 

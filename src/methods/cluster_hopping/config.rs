@@ -31,6 +31,15 @@ pub enum Keying {
     /// Matching each structure once against a reference costs one call per hop
     /// and leaves every comparison Euclidean.
     Canonical,
+    /// High-`l` mean SOAP. The packing superbasin, not an isomer.
+    ///
+    /// SortedPairs at 0.7 merges a one-hop return and splits distinct
+    /// minima, so bias fills each Mackay isomer and never the funnel.
+    /// Unit mean SOAP puts isomers of one packing inside `0.10` and
+    /// LJ75 ico-Marks at `0.163`. Filling that one well is the
+    /// Chatterjee-Voter move under a force ledger: many recrossings
+    /// of the occupied packing, then an exit. No clock, no FPTA.
+    SoapPacking,
 }
 
 /// Driver settings.
@@ -611,6 +620,18 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_hop = true;
+        // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
+        // gap (~0.09-0.18). That empties a basin on the first revisit
+        // and the next start is another ico draw. Adaptive height with
+        // twenty revisits is the AS-KMC N_f analogue: fill the occupied
+        // packing before the exit is cheap.
+        cfg.adaptive_height = true;
+        cfg.height_revisits = 20.0;
+        #[cfg(feature = "featomic")]
+        {
+            cfg.keying = Keying::SoapPacking;
+            cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
+        }
         cfg
     }
 
@@ -802,6 +823,13 @@ impl Config {
         cfg.tabu_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_hop = true;
+        cfg.adaptive_height = true;
+        cfg.height_revisits = 20.0;
+        #[cfg(feature = "featomic")]
+        {
+            cfg.keying = Keying::SoapPacking;
+            cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
+        }
         cfg
     }
 
