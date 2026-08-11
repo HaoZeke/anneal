@@ -42,7 +42,13 @@ fn load_points(path: &str, n: usize) -> Array1<f64> {
             continue;
         }
         let parts: Vec<&str> = t.split_whitespace().collect();
-        let start = if parts.len() >= 4 { 1 } else { 0 };
+        let start = if parts.first().is_some_and(|p| p.parse::<f64>().is_ok()) {
+            0
+        } else if parts.len() >= 4 && parts[1].parse::<f64>().is_ok() {
+            1
+        } else {
+            continue;
+        };
         if parts.len() < start + 3 {
             continue;
         }
