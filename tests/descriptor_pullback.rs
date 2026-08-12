@@ -1,6 +1,9 @@
 use anneal_core::descriptor_space::pullback::{
     PullbackConfig, PullbackConstraints, PullbackError, regularized_pullback,
 };
+use anneal_core::descriptor_space::{
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorError, DescriptorSchema, DescriptorSpace,
+};
 use ndarray::{Array1, Array2, array};
 
 fn unconstrained(coordinate_dim: usize) -> PullbackConstraints {
@@ -17,6 +20,17 @@ fn config(damping: f64, trust_radius: f64) -> PullbackConfig {
         trust_radius,
         length_scale: 1.0,
     }
+}
+
+fn nonlinear_descriptor_space() -> DescriptorSpace {
+    DescriptorSpace::new(
+        DescriptorSchema::new(
+            "pullback-soap",
+            1,
+            vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap()],
+        )
+        .unwrap(),
+    )
 }
 
 #[test]
@@ -200,5 +214,96 @@ fn malformed_dimensions_and_parameters_are_classified() {
         )
         .unwrap_err(),
         PullbackError::InvalidDamping
+    );
+}
+
+#[test]
+fn finite_difference_jacobian_matches_an_explicit_central_column() {
+    let descriptor_space = nonlinear_descriptor_space();
+    let coordinates = array![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5
+    ];
+    let step = 1e-6;
+    let jacobian = descriptor_space
+        .jacobian_fd(coordinates.view(), None, step)
+        .unwrap();
+    let column = 4;
+    let mut plus = coordinates.clone();
+    let mut minus = coordinates.clone();
+    plus[column] += step;
+    minus[column] -= step;
+    let plus_descriptor = descriptor_space.describe(plus.view(), None).unwrap();
+    let minus_descriptor = descriptor_space.describe(minus.view(), None).unwrap();
+
+    assert_eq!(jacobian.nrows(), plus_descriptor.values().len());
+    assert_eq!(jacobian.ncols(), coordinates.len());
+    for row in 0..jacobian.nrows() {
+        let expected =
+            (plus_descriptor.values()[row] - minus_descriptor.values()[row]) / (2.0 * step);
+        assert!((jacobian[[row, column]] - expected).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn finite_difference_jacobian_rejects_an_invalid_step() {
+    let descriptor_space = nonlinear_descriptor_space();
+    let coordinates = array![0.0, 0.0, 0.0, 1.1, 0.2, -0.1];
+
+    assert_eq!(
+        descriptor_space
+            .jacobian_fd(coordinates.view(), None, 0.0)
+            .unwrap_err(),
+        DescriptorError::InvalidFiniteDifferenceStep
+    );
+}
+
+#[test]
+fn descriptor_pullback_contracts_the_actual_nonlinear_residual() {
+    let descriptor_space = nonlinear_descriptor_space();
+    let coordinates = array![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5
+    ];
+    let mut target_coordinates = coordinates.clone();
+    target_coordinates[3] += 2e-3;
+    target_coordinates[7] -= 1e-3;
+    let current = descriptor_space.describe(coordinates.view(), None).unwrap();
+    let target = descriptor_space
+        .describe(target_coordinates.view(), None)
+        .unwrap();
+    let desired = Array1::from_iter(
+        target
+            .values()
+            .iter()
+            .zip(current.values())
+            .map(|(target, current)| target - current),
+    );
+    let jacobian = descriptor_space
+        .jacobian_fd(coordinates.view(), None, 1e-6)
+        .unwrap();
+    let result = regularized_pullback(
+        jacobian.view(),
+        desired.view(),
+        Array1::ones(desired.len()).view(),
+        None,
+        &unconstrained(coordinates.len()),
+        config(1e-5, 0.01),
+    )
+    .unwrap();
+    let moved_coordinates = &coordinates + result.step();
+    let moved = descriptor_space
+        .describe(moved_coordinates.view(), None)
+        .unwrap();
+    let initial_residual = desired.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let final_residual = moved
+        .values()
+        .iter()
+        .zip(target.values())
+        .map(|(moved, target)| (moved - target).powi(2))
+        .sum::<f64>()
+        .sqrt();
+
+    assert!(
+        final_residual < initial_residual,
+        "nonlinear residual did not contract: {initial_residual} -> {final_residual}"
     );
 }
