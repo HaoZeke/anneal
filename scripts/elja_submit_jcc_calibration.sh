@@ -6,7 +6,7 @@ ROOT=${LJ_ROOT:-$HOME/anneal-build}
 REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 CALIBRATOR=$ROOT/scripts/elja_jcc_lj_calibration.sh
 FINALIZER=$ROOT/scripts/elja_jcc_finalize_calibration.sh
-LOG_DIR=${JCC_CALIBRATION_LOG_DIR:-$REPRO_ROOT/results/jcc/calibration/logs}
+LOG_DIR=${JCC_CALIBRATION_LOG_DIR:-$REPRO_ROOT/results_jcc/calibration/logs}
 
 [[ -x $CALIBRATOR ]] || { echo "missing calibrator: $CALIBRATOR" >&2; exit 1; }
 [[ -x $FINALIZER ]] || { echo "missing finalizer: $FINALIZER" >&2; exit 1; }
