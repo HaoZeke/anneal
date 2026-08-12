@@ -24,6 +24,35 @@ pub enum ChargeKind {
 }
 
 impl ChargeKind {
+    /// Stable protocol discriminant.
+    pub const fn wire_code(self) -> u16 {
+        match self {
+            Self::LocalProposal => 0,
+            Self::RemoteProposal => 1,
+            Self::DescriptorEvaluation => 2,
+            Self::AcceptedQuench => 3,
+            Self::RejectedQuench => 4,
+            Self::FreshValidation => 5,
+            Self::Retry => 6,
+            Self::RpcFallback => 7,
+        }
+    }
+
+    /// Decode one stable protocol discriminant.
+    pub const fn from_wire_code(code: u16) -> Option<Self> {
+        match code {
+            0 => Some(Self::LocalProposal),
+            1 => Some(Self::RemoteProposal),
+            2 => Some(Self::DescriptorEvaluation),
+            3 => Some(Self::AcceptedQuench),
+            4 => Some(Self::RejectedQuench),
+            5 => Some(Self::FreshValidation),
+            6 => Some(Self::Retry),
+            7 => Some(Self::RpcFallback),
+            _ => None,
+        }
+    }
+
     const fn carries_potential_calls(self) -> bool {
         matches!(
             self,
@@ -154,6 +183,11 @@ impl FirstEncounter {
     /// Sum of all replica counters at the encounter.
     pub fn ensemble_total(&self) -> u64 {
         self.ensemble_total
+    }
+
+    /// Declared aggregate charged-work budget.
+    pub fn aggregate_budget(&self) -> u64 {
+        self.per_replica_budget * self.replicas.len() as u64
     }
 }
 
