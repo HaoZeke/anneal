@@ -9,9 +9,9 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    decode_reply_reader, encode_request, AcceptedReply, CatalogIdentity, CatalogOperation,
-    CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError, ProtocolRejection,
-    PROTOCOL_VERSION,
+    decode_reply_reader, encode_request, AcceptedReply, CatalogCandidate, CatalogIdentity,
+    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError,
+    ProtocolRejection, PROTOCOL_VERSION,
 };
 use crate::Catalog_capnp::catalog_reply;
 
@@ -208,18 +208,9 @@ impl CatalogClient {
     pub fn record_visit(
         &mut self,
         event_sequence: u64,
-        basin_id: u64,
-        created: bool,
-        descriptor: Vec<f64>,
+        candidate: CatalogCandidate,
     ) -> Result<MutationReceipt, CatalogClientError> {
-        let reply = self.call(
-            event_sequence,
-            CatalogOperation::RecordVisit {
-                basin_id,
-                created,
-                descriptor,
-            },
-        )?;
+        let reply = self.call(event_sequence, CatalogOperation::RecordVisit { candidate })?;
         Ok(MutationReceipt {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,

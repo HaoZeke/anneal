@@ -5,13 +5,16 @@ use std::io::Cursor;
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
-use crate::Catalog_capnp::{RejectionKind, catalog_reply, catalog_request};
+use crate::Catalog_capnp::{
+    candidate_record, catalog_reply, catalog_request, QuenchStatus as WireQuenchStatus,
+    RejectionKind,
+};
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +29,35 @@ pub struct CatalogIdentity {
     pub signature_digest: [u8; 32],
 }
 
+/// Complete scientific candidate carried under the request identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogCandidate {
+    /// Replica that produced the candidate.
+    pub producer_replica: u32,
+    /// Cartesian coordinates in system-signature order.
+    pub coordinates: Vec<f64>,
+    /// Row-major cell, or no cell for a finite nonperiodic system.
+    pub cell: Option<[f64; 9]>,
+    /// Producer-side quenched energy.
+    pub energy: f64,
+    /// Producer-side forces in coordinate order.
+    pub forces: Vec<f64>,
+    /// Producer-side Euclidean gradient norm.
+    pub gradient_norm: f64,
+    /// Descriptor under the declared schema.
+    pub descriptor: Vec<f64>,
+    /// Descriptor schema version.
+    pub descriptor_schema_version: u32,
+    /// Whether the producer quench met its convergence contract.
+    pub quench_converged: bool,
+    /// Producer charged-work counter at this candidate.
+    pub charged_work: u64,
+    /// Producer event sequence retained inside the immutable record.
+    pub event_sequence: u64,
+    /// Producer random-seed identity.
+    pub seed: u64,
+}
+
 /// Mutation or read operation carried by a catalog request.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CatalogOperation {
@@ -33,25 +65,13 @@ pub enum CatalogOperation {
     Snapshot,
     /// Record one exact fixed-census observation.
     RecordVisit {
-        /// Assigned basin identity.
-        basin_id: u64,
-        /// Whether the observation opened the basin.
-        created: bool,
-        /// Normalized descriptor.
-        descriptor: Vec<f64>,
+        /// Candidate that must pass coordinator validation before observation.
+        candidate: CatalogCandidate,
     },
     /// Offer one validated candidate to the active catalog.
     OfferCandidate {
-        /// Fixed-census basin identity.
-        basin_id: u64,
-        /// Validated energy.
-        energy: f64,
-        /// Cartesian coordinates.
-        coordinates: Vec<f64>,
-        /// Normalized descriptor.
-        descriptor: Vec<f64>,
-        /// Stable producer provenance.
-        provenance: String,
+        /// Candidate that must pass coordinator validation before admission.
+        candidate: CatalogCandidate,
     },
     /// Sample an admissible active representative.
     Sample {
@@ -224,39 +244,11 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
     let mut operation = root.init_operation();
     match &request.operation {
         CatalogOperation::Snapshot => operation.set_snapshot(()),
-        CatalogOperation::RecordVisit {
-            basin_id,
-            created,
-            descriptor,
-        } => {
-            let mut record = operation.init_record_visit();
-            record.set_basin_id(*basin_id);
-            record.set_created(*created);
-            fill_f64(record.init_descriptor(descriptor.len() as u32), descriptor);
+        CatalogOperation::RecordVisit { candidate } => {
+            fill_candidate(operation.init_record_visit(), candidate);
         }
-        CatalogOperation::OfferCandidate {
-            basin_id,
-            energy,
-            coordinates,
-            descriptor,
-            provenance,
-        } => {
-            let mut candidate = operation.init_offer_candidate();
-            candidate.set_basin_id(*basin_id);
-            candidate.set_energy(*energy);
-            fill_f64(
-                candidate
-                    .reborrow()
-                    .init_coordinates(coordinates.len() as u32),
-                coordinates,
-            );
-            fill_f64(
-                candidate
-                    .reborrow()
-                    .init_descriptor(descriptor.len() as u32),
-                descriptor,
-            );
-            candidate.set_provenance(provenance.as_str());
+        CatalogOperation::OfferCandidate { candidate } => {
+            fill_candidate(operation.init_offer_candidate(), candidate);
         }
         CatalogOperation::Sample { draw } => operation.set_sample(*draw),
         CatalogOperation::DescriptorHole { samples } => operation.set_descriptor_hole(*samples),
@@ -307,24 +299,12 @@ pub(crate) fn decode_request_reader(
     };
     let operation = match root.get_operation().which().map_err(wire_error)? {
         catalog_request::operation::Snapshot(()) => CatalogOperation::Snapshot,
-        catalog_request::operation::RecordVisit(record) => {
-            let record = record.map_err(wire_error)?;
-            CatalogOperation::RecordVisit {
-                basin_id: record.get_basin_id(),
-                created: record.get_created(),
-                descriptor: list_f64(record.get_descriptor().map_err(wire_error)?),
-            }
-        }
-        catalog_request::operation::OfferCandidate(candidate) => {
-            let candidate = candidate.map_err(wire_error)?;
-            CatalogOperation::OfferCandidate {
-                basin_id: candidate.get_basin_id(),
-                energy: candidate.get_energy(),
-                coordinates: list_f64(candidate.get_coordinates().map_err(wire_error)?),
-                descriptor: list_f64(candidate.get_descriptor().map_err(wire_error)?),
-                provenance: text_value(candidate.get_provenance().map_err(wire_error)?)?,
-            }
-        }
+        catalog_request::operation::RecordVisit(record) => CatalogOperation::RecordVisit {
+            candidate: read_candidate(record.map_err(wire_error)?)?,
+        },
+        catalog_request::operation::OfferCandidate(candidate) => CatalogOperation::OfferCandidate {
+            candidate: read_candidate(candidate.map_err(wire_error)?)?,
+        },
         catalog_request::operation::Sample(draw) => CatalogOperation::Sample { draw },
         catalog_request::operation::DescriptorHole(samples) => {
             CatalogOperation::DescriptorHole { samples }
@@ -451,6 +431,73 @@ fn fill_f64(mut output: capnp::primitive_list::Builder<'_, f64>, values: &[f64])
     for (index, value) in values.iter().copied().enumerate() {
         output.set(index as u32, value);
     }
+}
+
+fn fill_candidate(mut output: candidate_record::Builder<'_>, candidate: &CatalogCandidate) {
+    output.set_producer_replica(candidate.producer_replica);
+    fill_f64(
+        output
+            .reborrow()
+            .init_coordinates(candidate.coordinates.len() as u32),
+        &candidate.coordinates,
+    );
+    {
+        let mut cell = output.reborrow().init_cell();
+        match candidate.cell {
+            Some(values) => fill_f64(cell.reborrow().init_present(9), &values),
+            None => cell.set_absent(()),
+        }
+    }
+    output.set_energy(candidate.energy);
+    fill_f64(
+        output.reborrow().init_forces(candidate.forces.len() as u32),
+        &candidate.forces,
+    );
+    output.set_gradient_norm(candidate.gradient_norm);
+    fill_f64(
+        output
+            .reborrow()
+            .init_descriptor(candidate.descriptor.len() as u32),
+        &candidate.descriptor,
+    );
+    output.set_descriptor_schema_version(candidate.descriptor_schema_version);
+    output.set_quench_status(if candidate.quench_converged {
+        WireQuenchStatus::Converged
+    } else {
+        WireQuenchStatus::Unconverged
+    });
+    output.set_charged_work(candidate.charged_work);
+    output.set_event_sequence(candidate.event_sequence);
+    output.set_seed(candidate.seed);
+}
+
+fn read_candidate(input: candidate_record::Reader<'_>) -> Result<CatalogCandidate, ProtocolError> {
+    let cell = match input.get_cell().which().map_err(wire_error)? {
+        candidate_record::cell::Absent(()) => None,
+        candidate_record::cell::Present(values) => {
+            let values = list_f64(values.map_err(wire_error)?);
+            Some(values.try_into().map_err(|values: Vec<f64>| {
+                ProtocolError::Malformed(format!("cell length is {}, expected 9", values.len()))
+            })?)
+        }
+    };
+    Ok(CatalogCandidate {
+        producer_replica: input.get_producer_replica(),
+        coordinates: list_f64(input.get_coordinates().map_err(wire_error)?),
+        cell,
+        energy: input.get_energy(),
+        forces: list_f64(input.get_forces().map_err(wire_error)?),
+        gradient_norm: input.get_gradient_norm(),
+        descriptor: list_f64(input.get_descriptor().map_err(wire_error)?),
+        descriptor_schema_version: input.get_descriptor_schema_version(),
+        quench_converged: match input.get_quench_status().map_err(wire_error)? {
+            WireQuenchStatus::Converged => true,
+            WireQuenchStatus::Unconverged => false,
+        },
+        charged_work: input.get_charged_work(),
+        event_sequence: input.get_event_sequence(),
+        seed: input.get_seed(),
+    })
 }
 
 fn list_f64(input: capnp::primitive_list::Reader<'_, f64>) -> Vec<f64> {
