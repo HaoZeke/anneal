@@ -179,6 +179,14 @@ impl BasinCensus {
         self.total_visits
     }
 
+    /// Classify a descriptor without changing visit counts.
+    pub fn basin_for(&self, descriptor: &[f64]) -> Result<Option<BasinId>, CensusError> {
+        self.validate_descriptor(descriptor)?;
+        Ok(self
+            .nearest_within_radius(descriptor)
+            .map(|index| self.entries[index].id))
+    }
+
     /// Number of basins observed exactly once.
     pub fn singleton_count(&self) -> u64 {
         u64::try_from(
