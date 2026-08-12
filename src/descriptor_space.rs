@@ -254,6 +254,9 @@ pub enum DescriptorError {
         /// Index within that block.
         index: usize,
     },
+    /// Central differences require a finite, strictly positive Cartesian step.
+    #[error("finite-difference step must be finite and positive")]
+    InvalidFiniteDifferenceStep,
 }
 
 /// Evaluator bound to one immutable descriptor schema.
@@ -348,6 +351,36 @@ impl DescriptorSpace {
             values,
             blocks: metadata,
         })
+    }
+
+    /// Evaluate the Cartesian Jacobian of the normalized descriptor by central differences.
+    pub fn jacobian_fd(
+        &self,
+        coordinates: ArrayView1<f64>,
+        species: Option<&[u32]>,
+        step: f64,
+    ) -> Result<Array2<f64>, DescriptorError> {
+        if !step.is_finite() || step <= 0.0 {
+            return Err(DescriptorError::InvalidFiniteDifferenceStep);
+        }
+        let descriptor_dimension = self.describe(coordinates, species)?.values.len();
+        let coordinate_dimension = coordinates.len();
+        let mut jacobian = Array2::zeros((descriptor_dimension, coordinate_dimension));
+        let mut plus = coordinates.to_owned();
+        let mut minus = plus.clone();
+        for column in 0..coordinate_dimension {
+            plus[column] += step;
+            minus[column] -= step;
+            let plus_descriptor = self.describe(plus.view(), species)?;
+            let minus_descriptor = self.describe(minus.view(), species)?;
+            for row in 0..descriptor_dimension {
+                jacobian[[row, column]] =
+                    (plus_descriptor.values[row] - minus_descriptor.values[row]) / (2.0 * step);
+            }
+            plus[column] = coordinates[column];
+            minus[column] = coordinates[column];
+        }
+        Ok(jacobian)
     }
 }
 
