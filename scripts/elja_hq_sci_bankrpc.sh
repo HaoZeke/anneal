@@ -75,22 +75,26 @@ case $cmd in
     start_bank 7438 "${BASE}38"
     start_bank 7455 "${BASE}55"
     start_bank 7475 "${BASE}75"
-    echo "banks 7438/7455/7475"
+    start_bank 7498 "${BASE}98"
+    echo "banks 7438/7455/7475/7498"
     ;;
   submit)
     submit_arm 38 400000 72 7438
     submit_arm 55 1000000 48 7455
     submit_arm 75 4000000 48 7475
-    echo "submitted 38/55/75 SOAP clients"
+    submit_arm 98 4000000 48 7498
+    echo "submitted 38/55/75/98 SOAP clients"
     hq job list
     ;;
   all)
     start_bank 7438 "${BASE}38"
     start_bank 7455 "${BASE}55"
     start_bank 7475 "${BASE}75"
+    start_bank 7498 "${BASE}98"
     submit_arm 38 400000 72 7438
     submit_arm 55 1000000 48 7455
     submit_arm 75 4000000 48 7475
+    submit_arm 98 4000000 48 7498
     echo "banks + clients"
     hq job list
     ;;

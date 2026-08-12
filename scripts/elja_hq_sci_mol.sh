@@ -41,7 +41,8 @@ exec ${BIN} ${m} ${budget} 1" \
     | tee -a "$out/hq_submit.log"
 }
 
+submit_arm 2 2500 8
 submit_arm 4 2500 8
 submit_arm 6 4000 8
-echo "submitted water tetramer 2500x8 and hexamer 4000x8"
+echo "submitted water dimer/tetramer/hexamer"
 hq job list
