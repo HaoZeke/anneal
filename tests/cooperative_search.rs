@@ -267,6 +267,38 @@ fn candidate_replica_must_match_while_producer_sequence_remains_independent() {
 }
 
 #[test]
+fn distributed_trace_uses_the_coordinator_aggregate_counter() {
+    let server = server();
+    let digest = signature().digest();
+    let mut first = CooperativeRun::new([0], 100).unwrap();
+    let mut second = CooperativeRun::new([1], 100).unwrap();
+    first
+        .attach_client(
+            0,
+            CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+                .unwrap(),
+        )
+        .unwrap();
+    second
+        .attach_client(
+            1,
+            CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+                .unwrap(),
+        )
+        .unwrap();
+    first
+        .record_work(0, ChargeKind::AcceptedQuench, 60)
+        .unwrap();
+    second
+        .record_work(1, ChargeKind::AcceptedQuench, 40)
+        .unwrap();
+    first.synchronize(0).unwrap();
+
+    assert_eq!(first.ledger().ensemble_total(), 60);
+    assert_eq!(first.events().last().unwrap().aggregate_charged, 100);
+}
+
+#[test]
 fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
     let server = server();
     let digest = signature().digest();
