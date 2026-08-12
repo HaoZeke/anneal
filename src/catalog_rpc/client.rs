@@ -69,6 +69,15 @@ pub struct MutationReceipt {
     pub snapshot: CatalogSnapshot,
 }
 
+/// Exact policy evidence and the coordinator snapshot that carried it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicyStateReceipt {
+    /// Exact census and active-catalog evidence.
+    pub state: PolicyState,
+    /// Coordinator snapshot observed with the evidence.
+    pub snapshot: CatalogSnapshot,
+}
+
 /// Result of a coordinator read when local execution remains available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogAccess {
@@ -291,14 +300,27 @@ impl CatalogClient {
         descriptor: Vec<f64>,
         energy: f64,
     ) -> Result<PolicyState, CatalogClientError> {
-        match self
-            .call(
-                event_sequence,
-                CatalogOperation::PolicyState { descriptor, energy },
-            )?
-            .payload
-        {
-            AcceptedPayload::PolicyState(state) => Ok(state),
+        Ok(self
+            .policy_state_with_snapshot(event_sequence, descriptor, energy)?
+            .state)
+    }
+
+    /// Read exact policy evidence together with its coordinator snapshot.
+    pub fn policy_state_with_snapshot(
+        &mut self,
+        event_sequence: u64,
+        descriptor: Vec<f64>,
+        energy: f64,
+    ) -> Result<PolicyStateReceipt, CatalogClientError> {
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::PolicyState { descriptor, energy },
+        )?;
+        match reply.payload {
+            AcceptedPayload::PolicyState(state) => Ok(PolicyStateReceipt {
+                state,
+                snapshot: reply.snapshot,
+            }),
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_) => Err(ProtocolError::Malformed(
