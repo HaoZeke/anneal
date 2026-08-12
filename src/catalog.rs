@@ -1,11 +1,13 @@
 //! Search catalogs with explicit event and descriptor-basin identities.
 
 pub mod basin;
+pub mod census;
 pub mod event;
 pub mod signature;
 pub mod validator;
 
 pub use basin::BasinCatalog;
+pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
