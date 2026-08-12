@@ -12,8 +12,8 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    AcceptedReply, CatalogIdentity, CatalogOperation, CatalogReply, CatalogRequest,
-    CatalogSnapshot, ProtocolRejection, decode_request_reader, encode_reply,
+    decode_request_reader, encode_reply, AcceptedReply, CatalogIdentity, CatalogOperation,
+    CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError, ProtocolRejection,
 };
 use crate::Catalog_capnp::catalog_request;
 
@@ -172,14 +172,15 @@ fn handle_connection(
         };
         let request = match decode_request_reader(root) {
             Ok(request) => request,
-            Err(_) => {
+            Err(error) => {
+                let event_sequence = root.get_event_sequence();
+                let state = match state.lock() {
+                    Ok(state) => state,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
                 write_reply(
                     &mut stream,
-                    CatalogReply::Rejected {
-                        event_sequence: 0,
-                        snapshot_version: 0,
-                        reason: ProtocolRejection::Malformed,
-                    },
+                    rejected(&state, event_sequence, rejection_for_protocol_error(&error)),
                 )?;
                 continue;
             }
@@ -194,7 +195,10 @@ fn process_request(
     state: &Arc<Mutex<CoordinatorState>>,
     request: CatalogRequest,
 ) -> CatalogReply {
-    let mut state = state.lock().expect("catalog coordinator mutex poisoned");
+    let mut state = match state.lock() {
+        Ok(state) => state,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let rejection = identity_rejection(config, &request.identity).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
@@ -230,15 +234,50 @@ fn process_request(
         | CatalogOperation::Sample { .. }
         | CatalogOperation::DescriptorHole { .. } => {}
         CatalogOperation::RecordVisit { .. } => {
-            state.census_visits = state.census_visits.saturating_add(1);
-            state.snapshot_version = state.snapshot_version.saturating_add(1);
+            let Some(census_visits) = state.census_visits.checked_add(1) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.census_visits = census_visits;
+            state.snapshot_version = snapshot_version;
         }
         CatalogOperation::OfferCandidate { .. } => {
-            state.active_entries = state.active_entries.saturating_add(1);
-            state.snapshot_version = state.snapshot_version.saturating_add(1);
+            let Some(active_entries) = state.active_entries.checked_add(1) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.active_entries = active_entries;
+            state.snapshot_version = snapshot_version;
         }
         CatalogOperation::LedgerEvent { .. } => {
-            state.snapshot_version = state.snapshot_version.saturating_add(1);
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.snapshot_version = snapshot_version;
         }
     }
     state
@@ -246,6 +285,19 @@ fn process_request(
         .insert(request.identity.replica, request.event_sequence);
     state.requests.insert(key, request);
     accepted(&state, key.1, false)
+}
+
+fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
+    match error {
+        ProtocolError::UnsupportedVersion { .. } => ProtocolRejection::UnsupportedVersion,
+        ProtocolError::CampaignMismatch => ProtocolRejection::CampaignMismatch,
+        ProtocolError::EnsembleMismatch => ProtocolRejection::EnsembleMismatch,
+        ProtocolError::ReplicaMismatch => ProtocolRejection::ReplicaMismatch,
+        ProtocolError::SignatureMismatch => ProtocolRejection::SignatureMismatch,
+        ProtocolError::SignatureDigestLength { .. } | ProtocolError::Malformed(_) => {
+            ProtocolRejection::Malformed
+        }
+    }
 }
 
 fn identity_rejection(
