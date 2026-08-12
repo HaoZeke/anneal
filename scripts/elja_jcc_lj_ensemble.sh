@@ -53,7 +53,7 @@ for executable in "$BIN" "$SERVER"; do
     echo "missing executable: $executable" >&2
     exit 1
   fi
-  if ldd "$executable" | rg -q "not found"; then
+  if ldd "$executable" | grep -q "not found"; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 1
@@ -84,7 +84,7 @@ if [[ $ARM == shared ]]; then
     >"$OUT/coordinator.jsonl" 2>"$OUT/coordinator.err" &
   server_pid=$!
   for _ in $(seq 1 100); do
-    endpoint=$(rg -o '"addr":"[^"]+"' "$OUT/coordinator.jsonl" 2>/dev/null | head -1 | cut -d '"' -f4 || true)
+    endpoint=$(grep -o '"addr":"[^"]*"' "$OUT/coordinator.jsonl" 2>/dev/null | head -1 | cut -d '"' -f4 || true)
     if [[ -n $endpoint ]]; then
       break
     fi
@@ -137,6 +137,13 @@ if (( status != 0 )); then
   exit "$status"
 fi
 
+if [[ $ARM == shared ]] && ! kill -0 "$server_pid" 2>/dev/null; then
+  wait "$server_pid" || true
+  echo "catalog coordinator exited before the ensemble terminal boundary" >&2
+  cat "$OUT/coordinator.err" >&2
+  exit 1
+fi
+
 stop_server
 server_pid=
 
@@ -145,22 +152,22 @@ for replica in 0 1 2 3; do
   trace="$OUT/traces/replica-${replica}.jsonl"
   test -s "$output"
   test -s "$trace"
-  rg -q "charged ${PER_REPLICA_BUDGET}" "$output"
-  rg -q '"kind":"manifest_header"' "$trace"
+  grep -q "charged ${PER_REPLICA_BUDGET}" "$output"
+  grep -q '"kind":"manifest_header"' "$trace"
   if [[ $ARM == control ]]; then
-    rg -q '"sharing":false' "$trace"
-    if rg -q '"kind":"rpc_fallback"' "$trace"; then
+    grep -q '"sharing":false' "$trace"
+    if grep -q '"kind":"rpc_fallback"' "$trace"; then
       echo "control replica $replica recorded an RPC fallback" >&2
       exit 1
     fi
   else
-    rg -q '"sharing":true' "$trace"
+    grep -q '"sharing":true' "$trace"
   fi
 done
 
 if [[ $ARM == shared ]]; then
-  rg --no-filename '"aggregate_charged":' "$OUT"/traces/replica-*.jsonl \
-    | rg -q "\"aggregate_charged\":${TOTAL_BUDGET}"
+  grep -h '"aggregate_charged":' "$OUT"/traces/replica-*.jsonl \
+    | grep -q "\"aggregate_charged\":${TOTAL_BUDGET}"
 fi
 
 {
@@ -184,8 +191,8 @@ fi
   fi
 } >"$OUT/run.manifest"
 
-find "$OUT" -type f ! -name SHA256SUMS -print0 \
-  | sort -z \
-  | xargs -0 sha256sum >"$OUT/SHA256SUMS"
 touch "$OUT/TERMINAL_OK"
+(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
+  | sort -z \
+  | xargs -0 sha256sum >SHA256SUMS)
 printf '%s\n' "$OUT"
