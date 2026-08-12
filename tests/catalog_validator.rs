@@ -271,3 +271,100 @@ fn nonfinite_fresh_evaluation_is_rejected() {
         }
     );
 }
+
+#[test]
+fn overlapping_atoms_are_rejected_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.coordinates[3] = 0.4;
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::MinimumSeparation {
+            first_atom: 0,
+            second_atom: 1,
+        },
+    );
+}
+
+#[test]
+fn frozen_coordinates_are_rejected_before_engine_evaluation() {
+    let mut expected = signature();
+    expected.frozen_mask[0] = true;
+    let mut record = candidate(expected.clone());
+    record.coordinates[1] = 1e-5;
+    let called = Cell::new(false);
+
+    let result = validator(expected).validate(&record, |_| {
+        called.set(true);
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 6],
+        })
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::FrozenCoordinate { atom: 0, axis: 1 }
+    );
+    assert!(!called.get());
+}
+
+#[test]
+fn rigid_group_distances_are_rejected_before_engine_evaluation() {
+    let mut expected = signature();
+    expected.group_labels = vec![4, 4];
+    expected.group_schema = "rigid-groups-v1".to_owned();
+    let mut record = candidate(expected.clone());
+    record.coordinates[3] = 1.3;
+    let called = Cell::new(false);
+
+    let result = validator(expected).validate(&record, |_| {
+        called.set(true);
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 6],
+        })
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::RigidGroupDistance {
+            first_atom: 0,
+            second_atom: 1,
+        }
+    );
+    assert!(!called.get());
+}
+
+#[test]
+fn cell_presence_and_values_are_rejected_before_engine_evaluation() {
+    let mut expected = signature();
+    expected.cell = Some([10.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0]);
+    expected.periodic = [true, true, true];
+
+    let record = candidate(expected.clone());
+    let called = Cell::new(false);
+    let result = validator(expected.clone()).validate(&record, |_| {
+        called.set(true);
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 6],
+        })
+    });
+    assert_eq!(result.unwrap_err(), ValidationFailure::CellMismatch);
+    assert!(!called.get());
+
+    let mut record = candidate(expected.clone());
+    record.cell = expected.cell;
+    record.cell.as_mut().unwrap()[8] = 10.000_001;
+    let called = Cell::new(false);
+    let result = validator(expected).validate(&record, |_| {
+        called.set(true);
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 6],
+        })
+    });
+    assert_eq!(result.unwrap_err(), ValidationFailure::CellMismatch);
+    assert!(!called.get());
+}
