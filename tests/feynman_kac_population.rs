@@ -9,6 +9,7 @@ fn coefficients() -> SelectionCoefficients {
         energy: 1.0,
         novelty: 0.8,
         scarcity: 0.6,
+        uncertainty: 0.4,
         log_weight_clip: 4.0,
     }
 }
@@ -108,6 +109,21 @@ fn scarcity_is_inverse_visit_count_but_ranking_is_scale_free() {
 
     assert_eq!(ranked[0].evidence().scarcity_rank(), 1.0);
     assert_eq!(ranked[1].evidence().scarcity_rank(), 0.0);
+}
+
+#[test]
+fn gmrf_uncertainty_augments_but_does_not_replace_exact_scarcity() {
+    let certain = PopulationMember::new_with_uncertainty(0, -10.0, 0.5, 2.0, 0.1).unwrap();
+    let uncertain = PopulationMember::new_with_uncertainty(1, -10.0, 0.5, 2.0, 0.9).unwrap();
+    let ranked = rank_population(&[certain, uncertain]).unwrap();
+
+    assert_eq!(ranked[0].evidence().scarcity_rank(), 0.5);
+    assert_eq!(ranked[1].evidence().scarcity_rank(), 0.5);
+    assert_eq!(ranked[0].evidence().uncertainty_rank(), 0.0);
+    assert_eq!(ranked[1].evidence().uncertainty_rank(), 1.0);
+    let evidence = [ranked[0].evidence(), ranked[1].evidence()];
+    let plan = reconfiguration_plan(&evidence, coefficients(), 0.25, 1).unwrap();
+    assert!(plan.weights()[1] > plan.weights()[0]);
 }
 
 #[test]
