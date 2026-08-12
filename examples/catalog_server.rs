@@ -1,7 +1,8 @@
 //! Isolated scientific catalog coordinator for a reduced-unit LJ ensemble.
 //!
 //! Usage: `catalog_server <addr> <n> <capacity> <census-radius> <total-work>
-//! <campaign> <ensemble> [replicas]`, where replicas defaults to `0,1,2,3`.
+//! <campaign> <ensemble> [replicas] [state-directory]`, where replicas defaults
+//! to `0,1,2,3` and the state directory enables restart-safe request replay.
 
 use anneal_core::catalog::lj::{
     descriptor_space, fresh_evaluation, reference_coordinates, system_signature, validator_config,
@@ -36,15 +37,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?
         .values()
         .len();
-    let config = ServerConfig::new(campaign, ensemble, digest, replicas)?.with_scientific_state(
-        signature,
-        descriptor,
-        validator_config(&reference, descriptor_dim)?,
-        capacity,
-        census_radius,
-        total_work,
-        move |coordinates| fresh_evaluation(n_points, coordinates),
-    )?;
+    let mut config = ServerConfig::new(campaign, ensemble, digest, replicas)?
+        .with_scientific_state(
+            signature,
+            descriptor,
+            validator_config(&reference, descriptor_dim)?,
+            capacity,
+            census_radius,
+            total_work,
+            move |coordinates| fresh_evaluation(n_points, coordinates),
+        )?;
+    if let Some(directory) = args.get(9) {
+        config = config.with_state_directory(directory)?;
+    }
     let server = CatalogServer::start(addr, config)?;
     let header = server.header();
     println!(
