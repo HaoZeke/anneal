@@ -4,6 +4,7 @@ pub mod basin;
 pub mod calibration;
 pub mod census;
 pub mod event;
+pub mod lj;
 pub mod signature;
 pub mod validator;
 
