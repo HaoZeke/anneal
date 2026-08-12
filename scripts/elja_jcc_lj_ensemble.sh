@@ -34,6 +34,11 @@ OUT="$OUT_ROOT/$CAMPAIGN/lj${N}/$ARM/$ENSEMBLE"
 CAPACITY=${CATALOG_CAPACITY:-30}
 SLICE=${CATALOG_SLICE:-500}
 HOLE_SAMPLES=${CATALOG_HOLE_SAMPLES:-256}
+POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
+MINIMUM_POPULATION_INTERVAL=$((2 * SLICE + 2))
+if (( POPULATION_INTERVAL < MINIMUM_POPULATION_INTERVAL )); then
+  POPULATION_INTERVAL=$MINIMUM_POPULATION_INTERVAL
+fi
 REPLICAS=4
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$(( ${SEED_OFFSET_BASE:-0} + ENSEMBLE_INDEX * REPLICAS ))
@@ -114,6 +119,7 @@ for replica in 0 1 2 3; do
     export CATALOG_REPLICA="$replica"
     export CATALOG_SLICE="$SLICE"
     export CATALOG_HOLE_SAMPLES="$HOLE_SAMPLES"
+    export CATALOG_POPULATION_INTERVAL="$POPULATION_INTERVAL"
     export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
     export SEED_OFFSET="$seed"
     if [[ $ARM == shared ]]; then
@@ -162,6 +168,9 @@ for replica in 0 1 2 3; do
     fi
   else
     grep -q '"sharing":true' "$trace"
+    if (( POPULATION_INTERVAL <= PER_REPLICA_BUDGET - 4 )); then
+      grep -q '"kind":"population_ready"' "$trace"
+    fi
   fi
 done
 
@@ -183,6 +192,7 @@ fi
   printf 'census_radius=%s\n' "$CENSUS_RADIUS"
   printf 'slice=%s\n' "$SLICE"
   printf 'hole_samples=%s\n' "$HOLE_SAMPLES"
+  printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
   sha256sum "$BIN"
