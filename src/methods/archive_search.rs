@@ -7,7 +7,7 @@
 //! not to another polish of the incumbent key. Small-budget molecular and
 //! slab walks stay on their own branch.
 
-use crate::catalog::{Catalog, Event};
+use crate::catalog::{Event, EventCatalog};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
@@ -26,7 +26,7 @@ const LOCAL_CUTOFF: f64 = 1.35;
 #[derive(Debug, Clone)]
 pub struct Archive {
     /// Local-topology events.
-    pub catalog: Catalog,
+    pub catalog: EventCatalog,
     /// Energy classes.
     pub floors: FloorBook,
     /// GMRF residual on the class graph.
@@ -55,7 +55,7 @@ impl Archive {
     /// Empty shared state.
     pub fn new() -> Self {
         Self {
-            catalog: Catalog::new(),
+            catalog: EventCatalog::new(),
             floors: FloorBook::new(),
             residual: ResidualField::new(),
             drop: DropModel::new(),
