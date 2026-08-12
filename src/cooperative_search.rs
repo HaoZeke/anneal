@@ -6,9 +6,14 @@ pub mod ledger;
 mod run {
     use std::collections::BTreeMap;
 
-    use crate::catalog_policy::{CatalogPolicy, CatalogPolicyInput, PolicyAction, PolicyDecision};
+    use crate::catalog_policy::{
+        ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput,
+        CensusEvidence, PolicyAction, PolicyDecision, PolicyInputError, ValidationState,
+    };
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
-    use crate::catalog_rpc::{CatalogCandidate, CatalogSnapshot, ProtocolRejection};
+    use crate::catalog_rpc::{
+        CatalogCandidate, CatalogRelation, CatalogSnapshot, PolicyState, ProtocolRejection,
+    };
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
 
@@ -106,12 +111,28 @@ mod run {
         SharingDisabled,
     }
 
+    /// Availability and validation result for exact remote policy evidence.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub enum PolicyEvidenceOutcome {
+        /// Exact coordinator evidence mapped into the pure policy input.
+        Remote(CatalogPolicyInput),
+        /// The coordinator rejected the evidence request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
     /// Invalid cooperative-run operation.
     #[derive(Debug, thiserror::Error)]
     pub enum CooperativeRunError {
         /// Aggregate ledger validation failed.
         #[error("cooperative ledger failed: {0}")]
         Ledger(#[from] LedgerError),
+        /// Exact coordinator evidence is internally inconsistent.
+        #[error("cooperative policy input failed: {0}")]
+        PolicyInput(#[from] PolicyInputError),
         /// An operation names a replica outside the run manifest.
         #[error("unknown cooperative replica {replica}")]
         UnknownReplica {
@@ -305,6 +326,63 @@ mod run {
             }
         }
 
+        /// Fetch exact coordinator evidence and map it into the pure policy input.
+        pub fn policy_input(
+            &mut self,
+            replica: u32,
+            descriptor: Vec<f64>,
+            energy: f64,
+            progress: AggregateProgress,
+            local_stall_slices: u32,
+            local_deepened: bool,
+        ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => {
+                        Some(client.policy_state_with_snapshot(rpc_sequence, descriptor, energy))
+                    }
+                    None => None,
+                }
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(PolicyEvidenceOutcome::SharingDisabled)
+                }
+                Some(Ok(receipt)) => {
+                    let input = policy_input_from_state(
+                        receipt.state,
+                        progress,
+                        local_stall_slices,
+                        local_deepened,
+                    )?;
+                    self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                    self.push_event(
+                        replica,
+                        TraceKind::SnapshotRefresh,
+                        Some(receipt.snapshot.version),
+                        None,
+                    )?;
+                    Ok(PolicyEvidenceOutcome::Remote(input))
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(PolicyEvidenceOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(PolicyEvidenceOutcome::LocalFallback)
+                }
+            }
+        }
+
         /// Evaluate and record one pure catalog policy decision.
         pub fn decide(
             &mut self,
@@ -335,11 +413,11 @@ mod run {
         /// Encode a manifest header followed by one JSON object per trace event.
         pub fn json_lines(&self, manifest: &RunManifest) -> String {
             let mut output = format!(
-            "{{\"kind\":\"manifest_header\",\"campaign\":\"{}\",\"ensemble\":\"{}\",\"sharing\":{}}}\n",
-            json_escape(&manifest.campaign),
-            json_escape(&manifest.ensemble),
-            manifest.sharing
-        );
+                "{{\"kind\":\"manifest_header\",\"campaign\":\"{}\",\"ensemble\":\"{}\",\"sharing\":{}}}\n",
+                json_escape(&manifest.campaign),
+                json_escape(&manifest.ensemble),
+                manifest.sharing
+            );
             for event in &self.events {
                 let version = event
                     .catalog_version
@@ -416,6 +494,38 @@ mod run {
             ProtocolRejection::SnapshotRegression => "snapshot_regression",
             ProtocolRejection::ValidationRejected => "validation_rejected",
         }
+    }
+
+    fn policy_input_from_state(
+        state: PolicyState,
+        progress: AggregateProgress,
+        local_stall_slices: u32,
+        local_deepened: bool,
+    ) -> Result<CatalogPolicyInput, PolicyInputError> {
+        let relation = match state.relation {
+            CatalogRelation::Empty => ActiveCatalogRelation::Empty,
+            CatalogRelation::Incumbent => ActiveCatalogRelation::Incumbent,
+            CatalogRelation::SameBasin => ActiveCatalogRelation::SameBasin,
+            CatalogRelation::UnrelatedNoAnchor => ActiveCatalogRelation::Unrelated {
+                lower_energy_anchor: false,
+            },
+            CatalogRelation::UnrelatedLowerAnchor => ActiveCatalogRelation::Unrelated {
+                lower_energy_anchor: true,
+            },
+        };
+        Ok(CatalogPolicyInput {
+            validation: ValidationState::Validated,
+            relation,
+            census: CensusEvidence::from_exact_counts(
+                state.total_visits,
+                state.singleton_basins,
+                state.local_basin_visits,
+                state.globally_saturated,
+            )?,
+            progress,
+            local_stall_slices,
+            local_deepened,
+        })
     }
 
     fn json_escape(value: &str) -> String {

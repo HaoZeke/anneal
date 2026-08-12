@@ -56,6 +56,28 @@ impl CensusEvidence {
         }
     }
 
+    /// Construct checked evidence from exact coordinator counts.
+    pub fn from_exact_counts(
+        total_visits: u64,
+        singleton_basins: u64,
+        local_basin_visits: u64,
+        globally_saturated: bool,
+    ) -> Result<Self, PolicyInputError> {
+        if singleton_basins > total_visits || local_basin_visits > total_visits {
+            return Err(PolicyInputError::ImpossibleCensusCounts {
+                total_visits,
+                singleton_basins,
+                local_basin_visits,
+            });
+        }
+        Ok(Self {
+            total_visits,
+            singleton_basins,
+            local_basin_visits,
+            globally_saturated,
+        })
+    }
+
     /// Exact number of validated census observations.
     pub fn total_visits(self) -> u64 {
         self.total_visits
@@ -115,6 +137,18 @@ pub enum PolicyInputError {
         charged: u64,
         /// Declared aggregate budget.
         budget: u64,
+    },
+    /// Exact census components cannot exceed the global visit total.
+    #[error(
+        "impossible census counts: total={total_visits}, singleton={singleton_basins}, local={local_basin_visits}"
+    )]
+    ImpossibleCensusCounts {
+        /// Exact global visit total.
+        total_visits: u64,
+        /// Reported singleton-basin count.
+        singleton_basins: u64,
+        /// Reported local-basin visit count.
+        local_basin_visits: u64,
     },
 }
 
