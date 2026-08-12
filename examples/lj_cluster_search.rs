@@ -1349,6 +1349,16 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(256)
         .max(1);
+    let minimum_population_interval = slice
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(2))
+        .expect("catalog slice must admit a charged-work population interval");
+    let population_interval = std::env::var("CATALOG_POPULATION_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(50_000)
+        .max(minimum_population_interval);
+    let last_population_threshold = ledger.budget().saturating_sub(4);
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
@@ -1570,7 +1580,22 @@ fn run_capnp_catalog(
             }
         }
 
-        if let Some(representative) = population_representative.clone() {
+        let population_threshold = usize::try_from(
+            population_epoch
+                .checked_add(1)
+                .and_then(|epoch| {
+                    epoch.checked_mul(
+                        u64::try_from(population_interval)
+                            .expect("population interval must fit u64"),
+                    )
+                })
+                .expect("population charged-work threshold must fit u64"),
+        )
+        .expect("population charged-work threshold must fit usize");
+        if population_threshold <= last_population_threshold
+            && ledger.spent() >= population_threshold
+            && let Some(representative) = population_representative.clone()
+        {
             assert!(
                 ledger.charge(),
                 "slice reservation must cover population receiving validation"
