@@ -9,9 +9,9 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    decode_reply_reader, encode_request, AcceptedReply, CatalogCandidate, CatalogIdentity,
-    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError,
-    ProtocolRejection, PROTOCOL_VERSION,
+    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
+    CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION,
+    ProtocolError, ProtocolRejection, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 
@@ -235,6 +235,52 @@ impl CatalogClient {
             duplicate: reply.duplicate,
             snapshot: reply.snapshot,
         })
+    }
+
+    /// Draw one validated active-catalog candidate with an explicit seed.
+    pub fn sample_candidate(
+        &mut self,
+        event_sequence: u64,
+        draw: u64,
+    ) -> Result<Option<CatalogCandidate>, CatalogClientError> {
+        match self
+            .call(event_sequence, CatalogOperation::Sample { draw })?
+            .payload
+        {
+            AcceptedPayload::Candidate(candidate) => Ok(Some(candidate)),
+            AcceptedPayload::None => Ok(None),
+            AcceptedPayload::DescriptorHole(_) => Err(ProtocolError::Malformed(
+                "sample returned a descriptor-hole payload".into(),
+            )
+            .into()),
+        }
+    }
+
+    /// Request one seeded target-free descriptor-hole proposal.
+    pub fn descriptor_hole(
+        &mut self,
+        event_sequence: u64,
+        current: Vec<f64>,
+        samples: u32,
+        draw: u64,
+    ) -> Result<DescriptorHoleProposal, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::DescriptorHole {
+                    current,
+                    samples,
+                    draw,
+                },
+            )?
+            .payload
+        {
+            AcceptedPayload::DescriptorHole(hole) => Ok(hole),
+            AcceptedPayload::None | AcceptedPayload::Candidate(_) => Err(ProtocolError::Malformed(
+                "descriptor-hole request returned an incompatible payload".into(),
+            )
+            .into()),
+        }
     }
 
     fn call(

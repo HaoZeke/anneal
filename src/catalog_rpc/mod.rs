@@ -6,8 +6,8 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
 use crate::Catalog_capnp::{
-    candidate_record, catalog_reply, catalog_request, QuenchStatus as WireQuenchStatus,
-    RejectionKind,
+    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, candidate_record,
+    catalog_reply, catalog_request,
 };
 
 pub mod client;
@@ -80,8 +80,12 @@ pub enum CatalogOperation {
     },
     /// Request a sampled farthest-hole proposal.
     DescriptorHole {
+        /// Current replica descriptor.
+        current: Vec<f64>,
         /// Number of unit-sphere samples.
         samples: u32,
+        /// Explicit deterministic random draw.
+        draw: u64,
     },
     /// Submit one replay-safe charged-work event.
     LedgerEvent {
@@ -145,8 +149,30 @@ pub struct CatalogSnapshot {
     pub active_entries: u32,
 }
 
+/// Seeded target-free descriptor-hole result.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DescriptorHoleProposal {
+    /// Selected unit-sphere descriptor target.
+    pub target: Vec<f64>,
+    /// Descriptor increment from the supplied current point.
+    pub increment: Vec<f64>,
+    /// Distance from the target to its nearest catalog descriptor.
+    pub nearest_catalog_distance: f64,
+}
+
+/// Optional scientific payload returned by an accepted operation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AcceptedPayload {
+    /// Snapshot or mutation response without an additional scientific record.
+    None,
+    /// Sampled validated catalog candidate.
+    Candidate(CatalogCandidate),
+    /// Seeded target-free descriptor-hole proposal.
+    DescriptorHole(DescriptorHoleProposal),
+}
+
 /// Accepted coordinator response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AcceptedReply {
     /// Request sequence being acknowledged.
     pub event_sequence: u64,
@@ -154,10 +180,12 @@ pub struct AcceptedReply {
     pub duplicate: bool,
     /// Coordinator state after the request.
     pub snapshot: CatalogSnapshot,
+    /// Operation-specific scientific result.
+    pub payload: AcceptedPayload,
 }
 
 /// Decoded coordinator response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CatalogReply {
     /// Request was accepted or replayed idempotently.
     Accepted(AcceptedReply),
@@ -251,7 +279,16 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             fill_candidate(operation.init_offer_candidate(), candidate);
         }
         CatalogOperation::Sample { draw } => operation.set_sample(*draw),
-        CatalogOperation::DescriptorHole { samples } => operation.set_descriptor_hole(*samples),
+        CatalogOperation::DescriptorHole {
+            current,
+            samples,
+            draw,
+        } => {
+            let mut hole = operation.init_descriptor_hole();
+            fill_f64(hole.reborrow().init_current(current.len() as u32), current);
+            hole.set_samples(*samples);
+            hole.set_draw(*draw);
+        }
         CatalogOperation::LedgerEvent {
             kind,
             charged_calls,
@@ -306,8 +343,13 @@ pub(crate) fn decode_request_reader(
             candidate: read_candidate(candidate.map_err(wire_error)?)?,
         },
         catalog_request::operation::Sample(draw) => CatalogOperation::Sample { draw },
-        catalog_request::operation::DescriptorHole(samples) => {
-            CatalogOperation::DescriptorHole { samples }
+        catalog_request::operation::DescriptorHole(hole) => {
+            let hole = hole.map_err(wire_error)?;
+            CatalogOperation::DescriptorHole {
+                current: list_f64(hole.get_current().map_err(wire_error)?),
+                samples: hole.get_samples(),
+                draw: hole.get_draw(),
+            }
         }
         catalog_request::operation::LedgerEvent(ledger) => {
             let ledger = ledger.map_err(wire_error)?;
@@ -339,6 +381,27 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
             body.set_duplicate(accepted.duplicate);
             body.set_census_visits(accepted.snapshot.census_visits);
             body.set_active_entries(accepted.snapshot.active_entries);
+            let mut payload = body.init_payload();
+            match &accepted.payload {
+                AcceptedPayload::None => payload.set_none(()),
+                AcceptedPayload::Candidate(candidate) => {
+                    fill_candidate(payload.init_candidate(), candidate);
+                }
+                AcceptedPayload::DescriptorHole(hole) => {
+                    let mut output = payload.init_descriptor_hole();
+                    fill_f64(
+                        output.reborrow().init_target(hole.target.len() as u32),
+                        &hole.target,
+                    );
+                    fill_f64(
+                        output
+                            .reborrow()
+                            .init_increment(hole.increment.len() as u32),
+                        &hole.increment,
+                    );
+                    output.set_nearest_catalog_distance(hole.nearest_catalog_distance);
+                }
+            }
         }
         CatalogReply::Rejected {
             event_sequence,
@@ -364,6 +427,20 @@ pub(crate) fn decode_reply_reader(
     match root.get_result().which().map_err(wire_error)? {
         catalog_reply::result::Accepted(body) => {
             let body = body.map_err(wire_error)?;
+            let payload = match body.get_payload().which().map_err(wire_error)? {
+                accepted_reply::payload::None(()) => AcceptedPayload::None,
+                accepted_reply::payload::Candidate(candidate) => {
+                    AcceptedPayload::Candidate(read_candidate(candidate.map_err(wire_error)?)?)
+                }
+                accepted_reply::payload::DescriptorHole(hole) => {
+                    let hole = hole.map_err(wire_error)?;
+                    AcceptedPayload::DescriptorHole(DescriptorHoleProposal {
+                        target: list_f64(hole.get_target().map_err(wire_error)?),
+                        increment: list_f64(hole.get_increment().map_err(wire_error)?),
+                        nearest_catalog_distance: hole.get_nearest_catalog_distance(),
+                    })
+                }
+            };
             Ok(CatalogReply::Accepted(AcceptedReply {
                 event_sequence,
                 duplicate: body.get_duplicate(),
@@ -372,6 +449,7 @@ pub(crate) fn decode_reply_reader(
                     census_visits: body.get_census_visits(),
                     active_entries: body.get_active_entries(),
                 },
+                payload,
             }))
         }
         catalog_reply::result::Rejected(reason) => Ok(CatalogReply::Rejected {
