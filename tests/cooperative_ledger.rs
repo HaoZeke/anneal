@@ -1,6 +1,7 @@
 use anneal_core::cooperative_search::ledger::{
     ChargeKind, CooperativeLedger, LedgerError, LedgerUpdate, ReplicaLedgerEvent,
 };
+use proptest::prelude::*;
 
 fn event(
     replica: u32,
@@ -143,4 +144,31 @@ fn first_encounter_freezes_the_complete_counter_vector() {
     assert_eq!(encounter.ensemble_total(), 8);
     assert_eq!(ledger.record_first_encounter(), &encounter);
     assert_eq!(ledger.ensemble_total(), 15);
+}
+
+proptest! {
+    #[test]
+    fn arbitrary_delivery_duplication_and_reconnect_preserve_exact_totals(
+        delivery in proptest::collection::vec(0usize..12, 0..80),
+    ) {
+        let mut ledger = CooperativeLedger::new([0, 1, 2, 3], 20).unwrap();
+        let mut events = Vec::new();
+        for replica in 0..4 {
+            events.push(event(replica, 1, ChargeKind::LocalProposal, 0, 0));
+            events.push(event(replica, 2, ChargeKind::AcceptedQuench, 3, 3));
+            events.push(event(replica, 3, ChargeKind::FreshValidation, 1, 4));
+        }
+        for index in delivery {
+            ledger.record(events[index]).unwrap();
+        }
+        for event in events.iter().rev().copied() {
+            ledger.record(event).unwrap();
+        }
+
+        prop_assert_eq!(ledger.event_count(), 12);
+        prop_assert_eq!(ledger.ensemble_total(), 16);
+        for replica in 0..4 {
+            prop_assert_eq!(ledger.replica_total(replica), Some(4));
+        }
+    }
 }
