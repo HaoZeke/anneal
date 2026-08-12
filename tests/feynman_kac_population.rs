@@ -1,5 +1,6 @@
 use anneal_core::methods::feynman_kac::{
-    BasinEvidence, SelectionCoefficients, ascending_fractional_ranks, reconfiguration_plan,
+    BasinEvidence, PopulationMember, SelectionCoefficients, ascending_fractional_ranks,
+    rank_population, reconfiguration_plan,
 };
 
 fn coefficients() -> SelectionCoefficients {
@@ -78,4 +79,42 @@ fn invalid_ranks_and_offsets_are_rejected() {
     let evidence = [BasinEvidence::new(0.5, 0.5, 0.5).unwrap(); 4];
     assert!(reconfiguration_plan(&evidence, coefficients(), 1.0, 2).is_err());
     assert!(reconfiguration_plan(&evidence, coefficients(), 0.5, 0).is_err());
+}
+
+#[test]
+fn coordinator_ranks_raw_population_evidence_once_per_epoch() {
+    let members = [
+        PopulationMember::new(11, -397.0, 0.2, 12.0).unwrap(),
+        PopulationMember::new(17, -399.0, 0.9, 2.0).unwrap(),
+        PopulationMember::new(23, -398.0, 0.6, 5.0).unwrap(),
+        PopulationMember::new(29, -396.0, 0.1, 20.0).unwrap(),
+    ];
+    let ranked = rank_population(&members).unwrap();
+
+    assert_eq!(ranked[0].replica(), 11);
+    assert_eq!(ranked[1].evidence().energy_rank(), 0.0);
+    assert_eq!(ranked[1].evidence().novelty_rank(), 1.0);
+    assert_eq!(ranked[1].evidence().scarcity_rank(), 1.0);
+    assert_eq!(ranked[3].evidence().energy_rank(), 1.0);
+    assert_eq!(ranked[3].evidence().scarcity_rank(), 0.0);
+}
+
+#[test]
+fn scarcity_is_inverse_visit_count_but_ranking_is_scale_free() {
+    let first = PopulationMember::new(0, -10.0, 0.5, 1.0).unwrap();
+    let second = PopulationMember::new(1, -10.0, 0.5, 50.0).unwrap();
+    let ranked = rank_population(&[first, second]).unwrap();
+
+    assert_eq!(ranked[0].evidence().scarcity_rank(), 1.0);
+    assert_eq!(ranked[1].evidence().scarcity_rank(), 0.0);
+}
+
+#[test]
+fn raw_population_rejects_duplicate_replicas_and_nonfinite_metrics() {
+    assert!(PopulationMember::new(0, f64::NAN, 0.5, 1.0).is_err());
+    assert!(PopulationMember::new(0, -1.0, -0.1, 1.0).is_err());
+    assert!(PopulationMember::new(0, -1.0, 0.1, 0.0).is_err());
+
+    let member = PopulationMember::new(3, -1.0, 0.1, 1.0).unwrap();
+    assert!(rank_population(&[member, member]).is_err());
 }
