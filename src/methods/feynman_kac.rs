@@ -7,7 +7,7 @@
 //! every slot. This is a population-management operator, not a Green-function
 //! approximation and not an electronic-structure convergence claim.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 /// Invalid evidence or reconfiguration parameters.
@@ -36,6 +36,28 @@ pub enum ReconfigurationError {
     #[error("duplicate population evidence for replica {replica}")]
     DuplicateReplica {
         /// Replica repeated in the submitted population.
+        replica: u32,
+    },
+    /// A submission names a replica outside the configured population.
+    #[error("unknown population replica {replica}")]
+    UnknownReplica {
+        /// Replica absent from the configured ensemble.
+        replica: u32,
+    },
+    /// A submission does not belong to the collector's open epoch.
+    #[error("population epoch {received} does not match open epoch {expected}")]
+    EpochMismatch {
+        /// Open synchronization epoch.
+        expected: u64,
+        /// Submitted synchronization epoch.
+        received: u64,
+    },
+    /// A replica changed its evidence within one immutable epoch.
+    #[error("replica {replica} submitted conflicting evidence for epoch {epoch}")]
+    ConflictingSubmission {
+        /// Synchronization epoch containing the conflict.
+        epoch: u64,
+        /// Replica that changed its submitted evidence.
         replica: u32,
     },
 }
@@ -265,6 +287,228 @@ pub struct ReconfigurationPlan {
     weights: Vec<f64>,
     parents: Vec<usize>,
     diagnostics: GenealogyDiagnostics,
+}
+
+/// Replica-addressed reconfiguration result for one complete epoch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopulationEpochPlan {
+    epoch: u64,
+    destinations: Vec<u32>,
+    parents: Vec<u32>,
+    weights: Vec<f64>,
+    diagnostics: GenealogyDiagnostics,
+}
+
+impl PopulationEpochPlan {
+    /// Synchronization epoch represented by this immutable plan.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// Destination replicas in stable ascending order.
+    pub fn destinations(&self) -> &[u32] {
+        &self.destinations
+    }
+
+    /// Parent replica for each destination at the same index.
+    pub fn parents(&self) -> &[u32] {
+        &self.parents
+    }
+
+    /// Normalized source weights in destination/source replica order.
+    pub fn weights(&self) -> &[f64] {
+        &self.weights
+    }
+
+    /// Weight and realized-family diagnostics.
+    pub fn diagnostics(&self) -> GenealogyDiagnostics {
+        self.diagnostics
+    }
+}
+
+/// Result of submitting one replica's evidence to a synchronous epoch.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EpochSubmissionOutcome {
+    /// The epoch remains open until every configured replica has submitted.
+    Pending {
+        /// Open synchronization epoch.
+        epoch: u64,
+        /// Unique replica submissions received.
+        submitted: usize,
+        /// Complete population size required.
+        required: usize,
+    },
+    /// All replicas submitted and the immutable parent plan is available.
+    Ready(PopulationEpochPlan),
+}
+
+#[derive(Clone, Debug)]
+struct CompletedEpoch {
+    submissions: BTreeMap<u32, PopulationMember>,
+    plan: PopulationEpochPlan,
+}
+
+/// Coordinator-owned barrier and replay state for fixed-population epochs.
+#[derive(Clone, Debug)]
+pub struct SynchronousPopulation {
+    replicas: Vec<u32>,
+    coefficients: SelectionCoefficients,
+    max_offspring: usize,
+    seed: u64,
+    open_epoch: u64,
+    submissions: BTreeMap<u32, PopulationMember>,
+    completed: BTreeMap<u64, CompletedEpoch>,
+}
+
+impl SynchronousPopulation {
+    /// Construct a collector for one isolated ensemble.
+    pub fn new(
+        replicas: impl IntoIterator<Item = u32>,
+        coefficients: SelectionCoefficients,
+        max_offspring: usize,
+        seed: u64,
+    ) -> Result<Self, ReconfigurationError> {
+        coefficients.validate()?;
+        if max_offspring == 0 {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "max_offspring",
+                value: 0.0,
+            });
+        }
+        let mut unique = BTreeSet::new();
+        for replica in replicas {
+            if !unique.insert(replica) {
+                return Err(ReconfigurationError::DuplicateReplica { replica });
+            }
+        }
+        if unique.is_empty() {
+            return Err(ReconfigurationError::EmptyPopulation);
+        }
+        Ok(Self {
+            replicas: unique.into_iter().collect(),
+            coefficients,
+            max_offspring,
+            seed,
+            open_epoch: 0,
+            submissions: BTreeMap::new(),
+            completed: BTreeMap::new(),
+        })
+    }
+
+    /// Submit one immutable replica representative to an epoch barrier.
+    pub fn submit(
+        &mut self,
+        epoch: u64,
+        member: PopulationMember,
+    ) -> Result<EpochSubmissionOutcome, ReconfigurationError> {
+        if !self.replicas.contains(&member.replica) {
+            return Err(ReconfigurationError::UnknownReplica {
+                replica: member.replica,
+            });
+        }
+        if epoch < self.open_epoch {
+            let Some(completed) = self.completed.get(&epoch) else {
+                return Err(ReconfigurationError::EpochMismatch {
+                    expected: self.open_epoch,
+                    received: epoch,
+                });
+            };
+            return if completed.submissions.get(&member.replica) == Some(&member) {
+                Ok(EpochSubmissionOutcome::Ready(completed.plan.clone()))
+            } else {
+                Err(ReconfigurationError::ConflictingSubmission {
+                    epoch,
+                    replica: member.replica,
+                })
+            };
+        }
+        if epoch > self.open_epoch {
+            return Err(ReconfigurationError::EpochMismatch {
+                expected: self.open_epoch,
+                received: epoch,
+            });
+        }
+        if let Some(stored) = self.submissions.get(&member.replica) {
+            return if stored == &member {
+                Ok(EpochSubmissionOutcome::Pending {
+                    epoch,
+                    submitted: self.submissions.len(),
+                    required: self.replicas.len(),
+                })
+            } else {
+                Err(ReconfigurationError::ConflictingSubmission {
+                    epoch,
+                    replica: member.replica,
+                })
+            };
+        }
+        self.submissions.insert(member.replica, member);
+        if self.submissions.len() < self.replicas.len() {
+            return Ok(EpochSubmissionOutcome::Pending {
+                epoch,
+                submitted: self.submissions.len(),
+                required: self.replicas.len(),
+            });
+        }
+
+        let members = self
+            .replicas
+            .iter()
+            .map(|replica| {
+                *self
+                    .submissions
+                    .get(replica)
+                    .expect("complete epoch contains every configured replica")
+            })
+            .collect::<Vec<_>>();
+        let ranked = rank_population(&members)?;
+        let evidence = ranked
+            .iter()
+            .map(|member| member.evidence())
+            .collect::<Vec<_>>();
+        let plan = reconfiguration_plan(
+            &evidence,
+            self.coefficients,
+            epoch_systematic_offset(self.seed, epoch),
+            self.max_offspring,
+        )?;
+        let epoch_plan = PopulationEpochPlan {
+            epoch,
+            destinations: self.replicas.clone(),
+            parents: plan
+                .parents()
+                .iter()
+                .map(|index| self.replicas[*index])
+                .collect(),
+            weights: plan.weights().to_vec(),
+            diagnostics: plan.diagnostics(),
+        };
+        let submissions = std::mem::take(&mut self.submissions);
+        self.completed.insert(
+            epoch,
+            CompletedEpoch {
+                submissions,
+                plan: epoch_plan.clone(),
+            },
+        );
+        self.open_epoch =
+            self.open_epoch
+                .checked_add(1)
+                .ok_or(ReconfigurationError::InvalidParameter {
+                    field: "epoch_overflow",
+                    value: self.open_epoch as f64,
+                })?;
+        Ok(EpochSubmissionOutcome::Ready(epoch_plan))
+    }
+}
+
+fn epoch_systematic_offset(seed: u64, epoch: u64) -> f64 {
+    let mut value = seed ^ epoch.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^= value >> 31;
+    (value >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64))
 }
 
 impl ReconfigurationPlan {
