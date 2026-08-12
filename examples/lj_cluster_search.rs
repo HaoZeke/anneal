@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: EI + explode SOAP kick until novel packing (Goedecker/Schoenborn)"
+                    "  bank explore: invert a SOAP-archive hole through ∂μ/∂x"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1139,10 +1139,12 @@ fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> 
     })
 }
 
-/// Goedecker/Schoenborn leave: escalate the SOAP kick until the quenched
-/// packing is outside every shared well. A single 0.35 kick quenches back
-/// onto Mackay (own LJ75 spectrum: 0/200 downhill; Schaefer: mode-following
-/// from ico cannot leave). Iwamatsu: a few unquenched kicks, then relax.
+/// Move the current packing mean into a hole of the shared SOAP cloud.
+///
+/// Cartesian 0.35 pullbacks sit inside one packing; the quench is a
+/// projector onto that packing. This inverts a far point on the unit
+/// sphere through `∂μ/∂x` with a SOAP step, then relaxes once. A second
+/// flow runs only if that quench landed back in the archive.
 #[cfg(feature = "bank-rpc")]
 fn leave_known_packing<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
@@ -1155,32 +1157,33 @@ fn leave_known_packing<R: rand::Rng + ?Sized>(
     #[cfg(feature = "featomic")]
     {
         let rcut = 3.5 * cfg.length_scale;
-        let mut amp = 0.35 * cfg.length_scale;
-        let mut cur = x.to_owned();
-        for _ in 0..10 {
-            if ledger.remaining() < 8 {
-                break;
-            }
-            let mut y = cur.clone();
-            for _ in 0..3 {
-                y = anneal_core::featomic_hop::step_away_featomic(
-                    y.view(),
-                    amp,
-                    rcut,
-                    cfg.species.as_deref(),
-                    None,
-                    rng,
-                );
-            }
-            let steps = cfg.relax_steps.min(ledger.remaining());
-            let (_e, q) = relax(ledger, y.view(), steps);
-            if !packing_is_known(q.view(), cfg, wells) {
-                return q;
-            }
-            amp = (amp * 1.15).min(3.0 * cfg.length_scale);
-            cur = q;
+        let mut y = anneal_core::featomic_hop::step_into_hole(
+            x,
+            wells,
+            anneal_core::featomic_hop::SOAP_PACK_MERGE,
+            rcut,
+            cfg.species.as_deref(),
+            None,
+            rng,
+        );
+        if ledger.remaining() < 8 {
+            return y;
         }
-        return cur;
+        let steps = cfg.relax_steps.min(ledger.remaining());
+        let (_e, q) = relax(ledger, y.view(), steps);
+        if !packing_is_known(q.view(), cfg, wells) {
+            return q;
+        }
+        y = anneal_core::featomic_hop::step_into_hole(
+            q.view(),
+            wells,
+            anneal_core::featomic_hop::SOAP_PACK_MERGE * 1.5,
+            rcut,
+            cfg.species.as_deref(),
+            None,
+            rng,
+        );
+        return y;
     }
     #[cfg(not(feature = "featomic"))]
     {
