@@ -1,6 +1,6 @@
 use anneal_core::methods::feynman_kac::{
-    BasinEvidence, PopulationMember, SelectionCoefficients, ascending_fractional_ranks,
-    rank_population, reconfiguration_plan,
+    BasinEvidence, EpochSubmissionOutcome, PopulationMember, SelectionCoefficients,
+    SynchronousPopulation, ascending_fractional_ranks, rank_population, reconfiguration_plan,
 };
 
 fn coefficients() -> SelectionCoefficients {
@@ -117,4 +117,67 @@ fn raw_population_rejects_duplicate_replicas_and_nonfinite_metrics() {
 
     let member = PopulationMember::new(3, -1.0, 0.1, 1.0).unwrap();
     assert!(rank_population(&[member, member]).is_err());
+}
+
+#[test]
+fn synchronous_epoch_waits_for_every_replica_and_returns_replica_parents() {
+    let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 91).unwrap();
+    let members = [
+        PopulationMember::new(0, -10.0, 0.2, 8.0).unwrap(),
+        PopulationMember::new(1, -11.0, 0.9, 1.0).unwrap(),
+        PopulationMember::new(2, -9.0, 0.5, 3.0).unwrap(),
+        PopulationMember::new(3, -8.0, 0.1, 13.0).unwrap(),
+    ];
+
+    for (submitted, member) in members.into_iter().enumerate() {
+        let outcome = population.submit(0, member).unwrap();
+        if submitted < 3 {
+            assert_eq!(
+                outcome,
+                EpochSubmissionOutcome::Pending {
+                    epoch: 0,
+                    submitted: submitted + 1,
+                    required: 4,
+                }
+            );
+        } else {
+            let EpochSubmissionOutcome::Ready(plan) = outcome else {
+                panic!("fourth replica must close the epoch")
+            };
+            assert_eq!(plan.epoch(), 0);
+            assert_eq!(plan.destinations(), &[0, 1, 2, 3]);
+            assert!(plan.parents().iter().all(|parent| *parent < 4));
+            assert!(plan.diagnostics().max_family_size <= 2);
+        }
+    }
+}
+
+#[test]
+fn synchronous_epoch_replay_is_idempotent_and_conflicts_are_rejected() {
+    let mut population = SynchronousPopulation::new([4, 9], coefficients(), 1, 71).unwrap();
+    let first = PopulationMember::new(4, -4.0, 0.4, 2.0).unwrap();
+
+    let pending = population.submit(0, first).unwrap();
+    assert_eq!(population.submit(0, first).unwrap(), pending);
+    let conflict = PopulationMember::new(4, -5.0, 0.4, 2.0).unwrap();
+    assert!(population.submit(0, conflict).is_err());
+
+    let second = PopulationMember::new(9, -3.0, 0.8, 1.0).unwrap();
+    let ready = population.submit(0, second).unwrap();
+    assert_eq!(population.submit(0, second).unwrap(), ready);
+}
+
+#[test]
+fn synchronous_epoch_rejects_unknown_replicas_and_skipped_epochs() {
+    let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 5).unwrap();
+    assert!(
+        population
+            .submit(0, PopulationMember::new(7, -1.0, 0.2, 1.0).unwrap())
+            .is_err()
+    );
+    assert!(
+        population
+            .submit(1, PopulationMember::new(0, -1.0, 0.2, 1.0).unwrap())
+            .is_err()
+    );
 }
