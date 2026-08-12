@@ -30,6 +30,8 @@ pub mod bias;
 pub mod calibrate;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
+/// Pure cooperative-catalog policy and target-free proposals.
+pub mod catalog_policy;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
