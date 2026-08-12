@@ -37,6 +37,7 @@ pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
 pub mod contextual;
 pub mod cool;
+pub mod cooperative_search;
 pub mod curvature;
 pub mod delayed;
 /// Versioned multiscale invariant coordinates for basin catalogs.
