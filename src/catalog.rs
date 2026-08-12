@@ -1,6 +1,7 @@
 //! Search catalogs with explicit event and descriptor-basin identities.
 
 pub mod basin;
+pub mod calibration;
 pub mod census;
 pub mod event;
 pub mod signature;
@@ -8,6 +9,10 @@ pub mod validator;
 
 pub use basin::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCatalogError,
+};
+pub use calibration::{
+    calibrate_census_radius, CalibrationError, CalibrationPair, CensusCalibration,
+    EmpiricalQuantileMethod, MINIMUM_CENSUS_CALIBRATION_PAIRS,
 };
 pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};
