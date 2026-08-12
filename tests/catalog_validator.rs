@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
     CandidateRecord, CandidateValidator, DescriptorSignature, EngineSignature, FreshEvaluation,
-    NumericField, QuenchStatus, SystemSignature, ValidationFailure, ValidatorConfig,
+    GradientSource, NumericField, QuenchStatus, SystemSignature, ValidationFailure,
+    ValidatorConfig,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -367,4 +368,101 @@ fn cell_presence_and_values_are_rejected_before_engine_evaluation() {
     });
     assert_eq!(result.unwrap_err(), ValidationFailure::CellMismatch);
     assert!(!called.get());
+}
+
+#[test]
+fn unconverged_quench_is_rejected_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.quench_status = QuenchStatus::Unconverged;
+
+    assert_rejected_before_fresh(record, ValidationFailure::UnconvergedQuench);
+}
+
+#[test]
+fn producer_gradient_above_threshold_is_rejected_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.gradient_norm = 1e-5;
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::GradientThreshold {
+            source: GradientSource::Producer,
+        },
+    );
+}
+
+#[test]
+fn fresh_gradient_above_threshold_is_rejected() {
+    let result = validator(signature()).validate(&candidate(signature()), |_| {
+        let mut forces = vec![0.0; 6];
+        forces[0] = 1e-5;
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces,
+        })
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::GradientThreshold {
+            source: GradientSource::Fresh,
+        }
+    );
+}
+
+#[test]
+fn producer_and_fresh_energies_must_agree() {
+    let result = validator(signature()).validate(&candidate(signature()), |_| {
+        Ok(FreshEvaluation {
+            energy: -0.9,
+            forces: vec![0.0; 6],
+        })
+    });
+
+    assert_eq!(result.unwrap_err(), ValidationFailure::EnergyMismatch);
+}
+
+#[test]
+fn engine_errors_are_classified_without_losing_the_message() {
+    let result = validator(signature()).validate(&candidate(signature()), |_| {
+        Err("potential unavailable".to_owned())
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::EngineEvaluation("potential unavailable".to_owned())
+    );
+}
+
+#[test]
+fn declared_numeric_boundaries_are_accepted() {
+    let expected = signature();
+    let mut record = candidate(expected.clone());
+    record.gradient_norm = 1.0;
+    let validator = CandidateValidator::new(
+        expected,
+        ValidatorConfig {
+            reference_coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+            descriptor_dim: 2,
+            min_separation: 1.2,
+            coordinate_tolerance: 1e-10,
+            max_gradient_norm: 1.0,
+            energy_abs_tolerance: 0.25,
+            energy_rel_tolerance: 0.0,
+        },
+    );
+
+    let accepted = validator
+        .validate(&record, |_| {
+            let mut forces = vec![0.0; 6];
+            forces[0] = 1.0;
+            Ok(FreshEvaluation {
+                energy: -0.75,
+                forces,
+            })
+        })
+        .unwrap();
+
+    assert_eq!(accepted.candidate.event_sequence, 7);
+    assert_eq!(accepted.fresh.energy, -0.75);
 }
