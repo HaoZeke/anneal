@@ -7,6 +7,7 @@
 //! every slot. This is a population-management operator, not a Green-function
 //! approximation and not an electronic-structure convergence claim.
 
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 /// Invalid evidence or reconfiguration parameters.
@@ -31,6 +32,12 @@ pub enum ReconfigurationError {
     /// Reconfiguration requires at least one chain.
     #[error("reconfiguration requires a nonempty population")]
     EmptyPopulation,
+    /// One synchronization epoch contains the same replica more than once.
+    #[error("duplicate population evidence for replica {replica}")]
+    DuplicateReplica {
+        /// Replica repeated in the submitted population.
+        replica: u32,
+    },
 }
 
 /// Target-free evidence attached to one chain at a synchronization epoch.
@@ -76,6 +83,125 @@ impl BasinEvidence {
     pub fn scarcity_rank(self) -> f64 {
         self.scarcity_rank
     }
+}
+
+/// Raw coordinator evidence for one replica at a synchronization epoch.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PopulationMember {
+    replica: u32,
+    energy: f64,
+    novelty: f64,
+    basin_visits: f64,
+}
+
+impl PopulationMember {
+    /// Construct one member from fresh energy, descriptor novelty, and the
+    /// exact visit count of its immutable census basin.
+    pub fn new(
+        replica: u32,
+        energy: f64,
+        novelty: f64,
+        basin_visits: f64,
+    ) -> Result<Self, ReconfigurationError> {
+        if !energy.is_finite() {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "member_energy",
+                value: energy,
+            });
+        }
+        if !novelty.is_finite() || novelty < 0.0 {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "member_novelty",
+                value: novelty,
+            });
+        }
+        if !basin_visits.is_finite() || basin_visits <= 0.0 {
+            return Err(ReconfigurationError::InvalidParameter {
+                field: "member_basin_visits",
+                value: basin_visits,
+            });
+        }
+        Ok(Self {
+            replica,
+            energy,
+            novelty,
+            basin_visits,
+        })
+    }
+
+    /// Replica identity within the isolated ensemble.
+    pub fn replica(self) -> u32 {
+        self.replica
+    }
+}
+
+/// One replica and its coordinator-derived rank evidence.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RankedPopulationMember {
+    replica: u32,
+    evidence: BasinEvidence,
+}
+
+impl RankedPopulationMember {
+    /// Replica identity retained from the raw epoch evidence.
+    pub fn replica(self) -> u32 {
+        self.replica
+    }
+
+    /// Target-free rank evidence derived across the complete population.
+    pub fn evidence(self) -> BasinEvidence {
+        self.evidence
+    }
+}
+
+/// Rank a complete synchronization population in stable input order.
+///
+/// Novelty is ranked directly. Scarcity is ranked through inverse exact basin
+/// visits, so a less-visited census basin receives a higher scarcity rank.
+pub fn rank_population(
+    members: &[PopulationMember],
+) -> Result<Vec<RankedPopulationMember>, ReconfigurationError> {
+    if members.is_empty() {
+        return Err(ReconfigurationError::EmptyPopulation);
+    }
+    let mut replicas = BTreeSet::new();
+    for member in members {
+        if !replicas.insert(member.replica) {
+            return Err(ReconfigurationError::DuplicateReplica {
+                replica: member.replica,
+            });
+        }
+    }
+    let energy = members
+        .iter()
+        .map(|member| member.energy)
+        .collect::<Vec<_>>();
+    let novelty = members
+        .iter()
+        .map(|member| member.novelty)
+        .collect::<Vec<_>>();
+    let scarcity = members
+        .iter()
+        .map(|member| 1.0 / member.basin_visits)
+        .collect::<Vec<_>>();
+    let energy_ranks = ascending_fractional_ranks(&energy)?;
+    let novelty_ranks = ascending_fractional_ranks(&novelty)?;
+    let scarcity_ranks = ascending_fractional_ranks(&scarcity)?;
+
+    members
+        .iter()
+        .enumerate()
+        .map(|(index, member)| {
+            Ok(RankedPopulationMember {
+                replica: member.replica,
+                evidence: BasinEvidence::new(
+                    energy_ranks[index],
+                    novelty_ranks[index],
+                    scarcity_ranks[index],
+                )?,
+            })
+        })
+        .collect()
 }
 
 fn validate_rank(field: &'static str, value: f64) -> Result<(), ReconfigurationError> {
