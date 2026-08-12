@@ -1,8 +1,8 @@
 #![cfg(feature = "bank-rpc")]
 
 use anneal_core::catalog_rpc::{
-    decode_request, encode_request, validate_identity, CatalogCandidate, CatalogIdentity,
-    CatalogOperation, CatalogRequest, ProtocolError, PROTOCOL_VERSION,
+    CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest, PROTOCOL_VERSION,
+    ProtocolError, decode_request, encode_request, validate_identity,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -46,6 +46,10 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             current: vec![0.1, 0.2, 0.3],
             samples: 4096,
             draw: 92,
+        },
+        CatalogOperation::PolicyState {
+            descriptor: vec![0.1, 0.2, 0.3],
+            energy: -396.282,
         },
         CatalogOperation::LedgerEvent {
             kind: 5,
