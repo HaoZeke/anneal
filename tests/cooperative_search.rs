@@ -306,6 +306,28 @@ fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
             .iter()
             .any(|event| event.kind == TraceKind::PopulationReady)
     );
+    let ready = run
+        .events()
+        .iter()
+        .rev()
+        .find(|event| event.kind == TraceKind::PopulationReady)
+        .unwrap()
+        .population
+        .unwrap();
+    assert_eq!(ready.epoch, 0);
+    assert_eq!(ready.parent, 0);
+    assert_eq!(ready.family_ordinal, 0);
+    assert_eq!(ready.family_size, 1);
+    assert!((ready.effective_sample_size - 4.0).abs() < 1e-12);
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"population_epoch\":0"));
+    assert!(trace.contains("\"population_parent\":0"));
+    assert!(trace.contains("\"population_family_size\":1"));
 }
 
 #[test]
