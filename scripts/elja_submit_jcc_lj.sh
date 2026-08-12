@@ -53,6 +53,6 @@ for n in 75 98 102 104; do
       --mem="${ELJA_MEM:-16G}" \
       --output="$log" \
       --export="ALL,CATALOG_CAMPAIGN=jcc-2026-${STAGE},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
-      "$RUNNER" "$n" 4000000 "$arm" '${SLURM_ARRAY_TASK_ID}' "$radius"
+      "$RUNNER" "$n" 4000000 "$arm" slurm-array "$radius"
   done
 done
