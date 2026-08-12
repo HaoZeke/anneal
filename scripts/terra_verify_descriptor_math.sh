@@ -4,6 +4,8 @@ set -euo pipefail
 descriptor_math_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${descriptor_math_root}"
 
+cargo test --locked --release --lib residual_field
+
 cargo test --locked --release \
   --test descriptor_invariance \
   --test descriptor_pullback \
