@@ -12,7 +12,8 @@ mod run {
     };
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
-        CatalogCandidate, CatalogRelation, CatalogSnapshot, PolicyState, ProtocolRejection,
+        CatalogCandidate, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
+        ProtocolRejection,
     };
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
@@ -117,6 +118,34 @@ mod run {
         /// Exact coordinator evidence mapped into the pure policy input.
         Remote(CatalogPolicyInput),
         /// The coordinator rejected the evidence request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
+    /// Result of requesting one active-catalog candidate.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CatalogSampleOutcome {
+        /// One validated candidate was sampled.
+        Candidate(CatalogCandidate),
+        /// The active catalog is empty.
+        Empty,
+        /// The coordinator rejected the request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
+    /// Result of requesting one descriptor-hole proposal.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CatalogHoleOutcome {
+        /// One seeded target-free proposal was returned.
+        Proposal(DescriptorHoleProposal),
+        /// The coordinator rejected the request.
         Rejected,
         /// Communication failed and local search remains authoritative.
         LocalFallback,
@@ -414,6 +443,83 @@ mod run {
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                     Ok(PolicyEvidenceOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Sample one validated active-catalog candidate.
+        pub fn sample_candidate(
+            &mut self,
+            replica: u32,
+            draw: u64,
+        ) -> Result<CatalogSampleOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => Some(client.sample_candidate(rpc_sequence, draw)),
+                    None => None,
+                }
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(CatalogSampleOutcome::SharingDisabled)
+                }
+                Some(Ok(Some(candidate))) => Ok(CatalogSampleOutcome::Candidate(candidate)),
+                Some(Ok(None)) => Ok(CatalogSampleOutcome::Empty),
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(CatalogSampleOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(CatalogSampleOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Request one seeded target-free descriptor-hole proposal.
+        pub fn descriptor_hole(
+            &mut self,
+            replica: u32,
+            current: Vec<f64>,
+            samples: u32,
+            draw: u64,
+        ) -> Result<CatalogHoleOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => {
+                        Some(client.descriptor_hole(rpc_sequence, current, samples, draw))
+                    }
+                    None => None,
+                }
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(CatalogHoleOutcome::SharingDisabled)
+                }
+                Some(Ok(proposal)) => Ok(CatalogHoleOutcome::Proposal(proposal)),
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(CatalogHoleOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(CatalogHoleOutcome::LocalFallback)
                 }
             }
         }
