@@ -103,7 +103,7 @@ pub fn policy(
             leave: true,
         };
     }
-    let role = role(
+    let role = catalog_role(
         my_energy,
         catalog_best,
         catalog_size,
