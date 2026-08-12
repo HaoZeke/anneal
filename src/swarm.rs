@@ -1,177 +1,137 @@
-//! Swarm roles on a shared packing catalog.
+//! How a leftover chain uses the shared packing catalog.
 //!
-//! Whale optimization (Mirjalili & Lewis 2016) and swallow swarm
-//! (Neshat et al. 2013) do not teleport every agent onto a random
-//! neighbour every step. They keep a live catalog and split the
-//! population:
+//! The hop is leftover SOAP. The catalog is the set of packing wells
+//! the chains have already published. This module only answers three
+//! questions that catalog already implies:
 //!
-//! * **Leader** (swallow) / encircling prey (whale): the deepest
-//!   class walks locally and publishes. It does not pull.
-//! * **Explorer**: mid-rank. Early in the budget (`|A| ≥ 1`) it
-//!   searches prey — another competitive packing, not the incumbent.
-//!   Late (`|A| < 1`) it encircles: only a win.
-//! * **Aimless**: the catalog of the occupied class is saturated.
-//!   The hop is a SOAP hole, not a redraw from the bank.
+//! * This chain holds the deepest published packing: keep walking it.
+//!   Do not redraw a member.
+//! * This chain is on another packing and the ledger is still open:
+//!   a competitive other class may be adopted. Late in the ledger,
+//!   only a deeper member.
+//! * The occupied packing is exhausted for this chain — Good-Turing
+//!   missing mass is low, or this chain has not deepened for
+//!   [`STALL_LEAVE`] slices: step into a SOAP hole. Do not redraw
+//!   the catalog incumbent.
 //!
-//! The leftover walk is still the hop. This module only decides
-//! whether to talk to the catalog.
+//! A chain that just deepened its own quench does not adopt. That is
+//! the same leftover walk, not a second method.
 
-/// Swallow role against the shared catalog.
+/// Where this chain sits relative to the published packings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    /// Deepest class. Local leftover only. Publish wins.
-    Leader,
-    /// Mid pack. May pull a competitive other funnel.
-    Explorer,
-    /// Raised / saturated class. Leave the archive.
-    Aimless,
+    /// Deepest published packing. Walk it. Publish if it deepens.
+    Occupant,
+    /// A different packing. May adopt a competitive class.
+    Other,
+    /// This packing is exhausted for the chain. Leave through a hole.
+    Leave,
 }
 
-/// Whale phase from remaining budget.
-///
-/// `a` falls from 2 to 0. `|A| ≥ 1` while `a` is large (first half
-/// of the budget): search prey. Then encircle.
+/// Open ledger: other packings. Closed ledger: only a deeper member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Phase {
-    /// Do not encircle the incumbent.
-    SearchPrey,
-    /// Close on a win.
-    Encircle,
+pub enum LedgerHalf {
+    /// First half of the charged budget.
+    Open,
+    /// Second half.
+    Closed,
 }
 
-/// What one chain does with the catalog this slice.
+/// Catalog action for one slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Decision {
-    /// Swallow role.
+    /// Relation to the published packings.
     pub role: Role,
-    /// Whale phase.
-    pub phase: Phase,
-    /// Take one sample from the bank.
+    /// Open or closed half of the ledger.
+    pub half: LedgerHalf,
+    /// Take one sample from the catalog.
     pub pull: bool,
-    /// That sample must be a win, not another class.
+    /// That sample must be deeper than this chain's quench.
     pub win_only: bool,
     /// Step into a SOAP hole of the occupied packing.
     pub leave: bool,
 }
 
-/// WOA `a(t)`: 2 → 0 as `progress` goes 0 → 1.
-pub fn whale_a(progress: f64) -> f64 {
-    2.0 * (1.0 - progress.clamp(0.0, 1.0))
-}
-
-/// Search-prey while `a ≥ 1` (first half of the budget).
-pub fn whale_phase(progress: f64) -> Phase {
-    if whale_a(progress) >= 1.0 {
-        Phase::SearchPrey
+/// First half of the budget is open.
+pub fn ledger_half(progress: f64) -> LedgerHalf {
+    if progress.clamp(0.0, 1.0) < 0.5 {
+        LedgerHalf::Open
     } else {
-        Phase::Encircle
+        LedgerHalf::Closed
     }
 }
 
-/// Swallow role from catalog rank and saturation.
-pub fn swallow_role(
+/// Role from catalog rank and whether the occupied packing is exhausted.
+pub fn catalog_role(
     my_energy: f64,
-    bank_best: f64,
-    bank_size: usize,
+    catalog_best: f64,
+    catalog_size: usize,
     catalog_saturated: bool,
     on_raised_packing: bool,
 ) -> Role {
     if catalog_saturated || on_raised_packing {
-        return Role::Aimless;
+        return Role::Leave;
     }
-    if bank_size > 0 && my_energy.is_finite() && my_energy <= bank_best + 0.05 {
-        return Role::Leader;
+    if catalog_size > 0 && my_energy.is_finite() && my_energy <= catalog_best + 0.05 {
+        return Role::Occupant;
     }
-    Role::Explorer
+    Role::Other
 }
 
-/// Slices without a personal-best improve before a hard besiege.
-///
-/// Harris Hawks (Heidari et al. 2019) switch from a soft close on the
-/// rabbit to a hard besiege when the escape energy is spent. ABC's
-/// scout does the same after a limit. On a packing catalog that is
-/// Good-Turing not-yet-saturated, this is what leaves an ico walk
-/// that is still finding isomers.
-pub const STALL_BESIEGE: u32 = 8;
+/// Slices without a deeper own quench before the packing is treated
+/// as exhausted for this chain.
+pub const STALL_LEAVE: u32 = 8;
 
-/// Combine whale phase, swallow role, SHADE personal best, and HHO stall.
-pub fn decide(
+/// Catalog policy. `stall` is slices since this chain last deepened.
+pub fn policy(
     progress: f64,
     my_energy: f64,
-    bank_best: f64,
-    bank_size: usize,
-    catalog_saturated: bool,
-    on_raised_packing: bool,
-) -> Decision {
-    decide_with_stall(
-        progress,
-        my_energy,
-        my_energy,
-        bank_best,
-        bank_size,
-        catalog_saturated,
-        on_raised_packing,
-        1,
-    )
-}
-
-/// Full swarm decision.
-///
-/// `pbest` is this chain's own deepest quench (SHADE / DE / PSO).
-/// `stall` is slices since that personal best last moved. A stall
-/// of [`STALL_BESIEGE`] is a hard besiege: leave, do not pull gbest.
-pub fn decide_with_stall(
-    progress: f64,
-    my_energy: f64,
-    pbest: f64,
-    bank_best: f64,
-    bank_size: usize,
+    own_best: f64,
+    catalog_best: f64,
+    catalog_size: usize,
     catalog_saturated: bool,
     on_raised_packing: bool,
     stall: u32,
 ) -> Decision {
-    let phase = whale_phase(progress);
-    if stall >= STALL_BESIEGE && bank_size > 0 {
+    let half = ledger_half(progress);
+    if stall >= STALL_LEAVE && catalog_size > 0 {
         return Decision {
-            role: Role::Aimless,
-            phase,
+            role: Role::Leave,
+            half,
             pull: false,
             win_only: true,
             leave: true,
         };
     }
-    let role = swallow_role(
+    let role = role(
         my_energy,
-        bank_best,
-        bank_size,
+        catalog_best,
+        catalog_size,
         catalog_saturated,
         on_raised_packing,
     );
     match role {
-        Role::Leader => Decision {
+        Role::Occupant => Decision {
             role,
-            phase,
+            half,
             pull: false,
             win_only: true,
             leave: false,
         },
-        Role::Aimless => Decision {
+        Role::Leave => Decision {
             role,
-            phase,
+            half,
             pull: false,
             win_only: true,
             leave: true,
         },
-        Role::Explorer => {
-            // Ride a live personal best (SHADE current-to-pbest). Do
-            // not restamp onto the catalog while this chain is still
-            // descending its own trajectory.
-            let riding_pbest = stall == 0 && pbest.is_finite() && my_energy <= pbest + 1e-12;
+        Role::Other => {
+            let descending = stall == 0 && own_best.is_finite() && my_energy <= own_best + 1e-12;
             Decision {
                 role,
-                phase,
-                pull: !riding_pbest,
-                win_only: phase == Phase::Encircle,
+                half,
+                pull: !descending,
+                win_only: half == LedgerHalf::Closed,
                 leave: false,
             }
         }
@@ -183,57 +143,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn early_budget_is_search_prey() {
-        assert_eq!(whale_phase(0.0), Phase::SearchPrey);
-        assert_eq!(whale_phase(0.4), Phase::SearchPrey);
+    fn the_first_half_of_the_ledger_is_open() {
+        assert_eq!(ledger_half(0.0), LedgerHalf::Open);
+        assert_eq!(ledger_half(0.4), LedgerHalf::Open);
     }
 
     #[test]
-    fn late_budget_is_encircle() {
-        assert_eq!(whale_phase(0.6), Phase::Encircle);
-        assert_eq!(whale_phase(1.0), Phase::Encircle);
+    fn the_second_half_of_the_ledger_is_closed() {
+        assert_eq!(ledger_half(0.6), LedgerHalf::Closed);
+        assert_eq!(ledger_half(1.0), LedgerHalf::Closed);
     }
 
     #[test]
-    fn a_leader_does_not_pull() {
-        let d = decide(0.2, -173.93, -173.93, 8, false, false);
-        assert_eq!(d.role, Role::Leader);
+    fn the_deepest_packing_is_walked_not_redrawn() {
+        let d = policy(0.2, -173.93, -173.93, -173.93, 8, false, false, 1);
+        assert_eq!(d.role, Role::Occupant);
         assert!(!d.pull);
         assert!(!d.leave);
     }
 
     #[test]
-    fn a_saturated_catalog_is_aimless() {
-        let d = decide(0.3, -396.28, -396.28, 18, true, false);
-        assert_eq!(d.role, Role::Aimless);
+    fn a_saturated_packing_is_left() {
+        let d = policy(0.3, -396.28, -396.28, -396.28, 18, true, false, 1);
+        assert_eq!(d.role, Role::Leave);
         assert!(d.leave);
         assert!(!d.pull);
     }
 
     #[test]
-    fn an_explorer_searches_prey_then_encircles() {
-        let early = decide(0.1, -390.0, -396.28, 5, false, false);
-        assert_eq!(early.role, Role::Explorer);
+    fn another_packing_adopts_a_class_then_only_a_win() {
+        let early = policy(0.1, -390.0, -390.0, -396.28, 5, false, false, 1);
+        assert_eq!(early.role, Role::Other);
         assert!(early.pull);
         assert!(!early.win_only);
-        let late = decide(0.8, -390.0, -396.28, 5, false, false);
-        assert_eq!(late.role, Role::Explorer);
+        let late = policy(0.8, -390.0, -390.0, -396.28, 5, false, false, 1);
+        assert_eq!(late.role, Role::Other);
         assert!(late.pull);
         assert!(late.win_only);
     }
 
     #[test]
-    fn a_stalled_explorer_hard_besieges() {
-        let d = decide_with_stall(0.2, -396.28, -396.28, -396.28, 10, false, false, 8);
-        assert_eq!(d.role, Role::Aimless);
+    fn a_stalled_chain_leaves_without_redrawing() {
+        let d = policy(0.2, -396.28, -396.28, -396.28, 10, false, false, 8);
+        assert_eq!(d.role, Role::Leave);
         assert!(d.leave);
         assert!(!d.pull);
     }
 
     #[test]
-    fn a_descending_explorer_rides_pbest() {
-        let d = decide_with_stall(0.2, -390.0, -390.0, -396.28, 5, false, false, 0);
-        assert_eq!(d.role, Role::Explorer);
+    fn a_descending_chain_is_not_restamped() {
+        let d = policy(0.2, -390.0, -390.0, -396.28, 5, false, false, 0);
+        assert_eq!(d.role, Role::Other);
         assert!(!d.pull);
     }
 }

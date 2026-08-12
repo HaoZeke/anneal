@@ -26,7 +26,7 @@ pub mod allocate;
 pub mod bias;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
-/// Whale / swallow roles on the shared packing catalog.
+/// How a leftover chain uses the shared packing catalog.
 pub mod swarm;
 /// Event catalogue keyed by local topology.
 pub mod catalog;

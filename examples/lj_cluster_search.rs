@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  swarm: swallow leader/explorer/aimless, whale search-prey then encircle"
+                    "  catalog: occupant walks, other packing while the ledger is open, leave on stall or Good-Turing"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1363,7 +1363,7 @@ fn run_capnp_bank(
         };
         let sat = catalog_saturated(&well_pairs, cfg.bias_height);
         let on_known = packing_is_known(start.view(), cfg, &wells);
-        let swarm = anneal_core::swarm::decide_with_stall(
+        let swarm = anneal_core::swarm::policy(
             progress,
             best,
             best,

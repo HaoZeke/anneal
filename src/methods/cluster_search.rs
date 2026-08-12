@@ -799,7 +799,7 @@ where
         };
         let sat = catalog_saturated(&well_pairs, cfg.bias_height);
         let on_known = packing_is_known(start.view(), cfg, &wells);
-        let swarm = crate::swarm::decide_with_stall(
+        let swarm = crate::swarm::policy(
             progress,
             best,
             best,
