@@ -1,7 +1,7 @@
 use anneal_core::catalog::{
     CandidateRecord, CandidateValidator, DescriptorSignature, EngineSignature, FreshEvaluation,
     GradientSource, NumericField, QuenchStatus, SystemSignature, ValidationFailure,
-    ValidatorConfig,
+    ValidatorConfig, euclidean_gradient_norm,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -408,6 +408,14 @@ fn fresh_gradient_above_threshold_is_rejected() {
             source: GradientSource::Fresh,
         }
     );
+}
+
+#[test]
+fn convergence_uses_the_full_euclidean_gradient_norm() {
+    let gradient = [0.9e-5, 0.9e-5];
+
+    assert!(gradient.iter().all(|component| component.abs() < 1e-5));
+    assert!(euclidean_gradient_norm(&gradient) > 1e-5);
 }
 
 #[test]
