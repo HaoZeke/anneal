@@ -91,6 +91,15 @@ pub enum NumericField {
     FreshForces,
 }
 
+/// Origin of gradient evidence checked by candidate validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GradientSource {
+    /// Norm reported by the candidate producer.
+    Producer,
+    /// Norm computed from receiving-side fresh forces.
+    Fresh,
+}
+
 /// Structured reason a candidate cannot cross the catalog boundary.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ValidationFailure {
@@ -172,6 +181,18 @@ pub enum ValidationFailure {
     /// The candidate cell is absent, unexpected, or differs from the signature.
     #[error("candidate cell does not match the system signature")]
     CellMismatch,
+    /// The producer quench did not satisfy its convergence contract.
+    #[error("candidate producer quench is unconverged")]
+    UnconvergedQuench,
+    /// Producer or receiving-side gradient evidence exceeds the threshold.
+    #[error("{source:?} gradient exceeds the validation threshold")]
+    GradientThreshold {
+        /// Side of the validation boundary that supplied the gradient.
+        source: GradientSource,
+    },
+    /// Producer and receiving-side energies disagree outside tolerance.
+    #[error("producer and fresh energies disagree")]
+    EnergyMismatch,
     /// The fresh potential evaluation failed.
     #[error("fresh engine evaluation failed: {0}")]
     EngineEvaluation(String),
@@ -263,6 +284,14 @@ impl CandidateValidator {
             &self.expected.group_labels,
             self.config.coordinate_tolerance,
         )?;
+        if candidate.quench_status != QuenchStatus::Converged {
+            return Err(ValidationFailure::UnconvergedQuench);
+        }
+        if candidate.gradient_norm > self.config.max_gradient_norm {
+            return Err(ValidationFailure::GradientThreshold {
+                source: GradientSource::Producer,
+            });
+        }
         let fresh =
             evaluate(&candidate.coordinates).map_err(ValidationFailure::EngineEvaluation)?;
         let fresh_force_dim = u64::try_from(fresh.forces.len()).unwrap_or(u64::MAX);
@@ -274,6 +303,22 @@ impl CandidateValidator {
         }
         require_finite_scalar(fresh.energy, NumericField::FreshEnergy)?;
         require_finite_slice(&fresh.forces, NumericField::FreshForces)?;
+        let fresh_gradient_norm = fresh
+            .forces
+            .iter()
+            .map(|force| force * force)
+            .sum::<f64>()
+            .sqrt();
+        if fresh_gradient_norm > self.config.max_gradient_norm {
+            return Err(ValidationFailure::GradientThreshold {
+                source: GradientSource::Fresh,
+            });
+        }
+        let energy_tolerance = self.config.energy_abs_tolerance
+            + self.config.energy_rel_tolerance * candidate.energy.abs().max(fresh.energy.abs());
+        if (candidate.energy - fresh.energy).abs() > energy_tolerance {
+            return Err(ValidationFailure::EnergyMismatch);
+        }
         Ok(ValidatedCandidate {
             candidate: candidate.clone(),
             fresh,

@@ -9,8 +9,8 @@ pub use basin::BasinCatalog;
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
-    CandidateRecord, CandidateValidator, FreshEvaluation, NumericField, QuenchStatus,
-    ValidatedCandidate, ValidationFailure, ValidatorConfig,
+    CandidateRecord, CandidateValidator, FreshEvaluation, GradientSource, NumericField,
+    QuenchStatus, ValidatedCandidate, ValidationFailure, ValidatorConfig,
 };
 
 /// Compatibility name for the local-topology event catalog.
