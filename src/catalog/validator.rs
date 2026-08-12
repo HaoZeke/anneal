@@ -12,7 +12,7 @@ pub enum QuenchStatus {
 }
 
 /// Immutable candidate offered to a descriptor-basin catalog.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CandidateRecord {
     /// Complete system and descriptor identity.
     pub signature: SystemSignature,
@@ -201,7 +201,7 @@ pub enum ValidationFailure {
 }
 
 /// Candidate paired with receiving-side potential evidence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedCandidate {
     /// Candidate record that passed validation.
     pub candidate: CandidateRecord,

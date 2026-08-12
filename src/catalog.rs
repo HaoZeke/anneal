@@ -6,7 +6,9 @@ pub mod event;
 pub mod signature;
 pub mod validator;
 
-pub use basin::BasinCatalog;
+pub use basin::{
+    ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCatalogError,
+};
 pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
