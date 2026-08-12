@@ -39,6 +39,18 @@ struct LedgerEvent {
   cumulativeCharged @2 :UInt64;
 }
 
+struct DescriptorHoleRequest {
+  current @0 :List(Float64);
+  samples @1 :UInt32;
+  draw @2 :UInt64;
+}
+
+struct DescriptorHoleReply {
+  target @0 :List(Float64);
+  increment @1 :List(Float64);
+  nearestCatalogDistance @2 :Float64;
+}
+
 struct CatalogRequest {
   protocolVersion @0 :UInt16;
   identity @1 :CatalogIdentity;
@@ -50,7 +62,7 @@ struct CatalogRequest {
     recordVisit @5 :CandidateRecord;
     offerCandidate @6 :CandidateRecord;
     sample @7 :UInt64;
-    descriptorHole @8 :UInt32;
+    descriptorHole @8 :DescriptorHoleRequest;
     ledgerEvent @9 :LedgerEvent;
   }
 }
@@ -83,4 +95,9 @@ struct AcceptedReply {
   duplicate @0 :Bool;
   censusVisits @1 :UInt64;
   activeEntries @2 :UInt32;
+  payload :union {
+    none @3 :Void;
+    candidate @4 :CandidateRecord;
+    descriptorHole @5 :DescriptorHoleReply;
+  }
 }
