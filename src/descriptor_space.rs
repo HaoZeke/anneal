@@ -206,6 +206,35 @@ impl DescriptorVector {
     pub fn blocks(&self) -> &[DescriptorBlockMetadata] {
         &self.blocks
     }
+
+    /// Euclidean pseudometric between vectors from the same descriptor schema.
+    pub fn distance(&self, other: &Self) -> Result<f64, DescriptorError> {
+        let compatible = self.schema_name == other.schema_name
+            && self.schema_version == other.schema_version
+            && self.values.len() == other.values.len()
+            && self.blocks.len() == other.blocks.len()
+            && self.blocks.iter().zip(&other.blocks).all(|(left, right)| {
+                left.kind == right.kind
+                    && left.n_max == right.n_max
+                    && left.l_max == right.l_max
+                    && left.cutoff == right.cutoff
+                    && left.offset == right.offset
+                    && left.len == right.len
+            });
+        if !compatible {
+            return Err(DescriptorError::IncompatibleDescriptorVectors);
+        }
+        Ok(self
+            .values
+            .iter()
+            .zip(&other.values)
+            .map(|(left, right)| {
+                let difference = left - right;
+                difference * difference
+            })
+            .sum::<f64>()
+            .sqrt())
+    }
 }
 
 /// Input or schema failure that prevents descriptor evaluation.
@@ -257,6 +286,9 @@ pub enum DescriptorError {
     /// Central differences require a finite, strictly positive Cartesian step.
     #[error("finite-difference step must be finite and positive")]
     InvalidFiniteDifferenceStep,
+    /// Distances require vectors from one exact descriptor schema.
+    #[error("descriptor vectors use incompatible schemas")]
+    IncompatibleDescriptorVectors,
 }
 
 /// Evaluator bound to one immutable descriptor schema.
