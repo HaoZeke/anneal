@@ -213,7 +213,7 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     );
 
     let outcome = run
-        .policy_input(0, admitted.descriptor, admitted.energy, 3, false)
+        .policy_input(0, admitted.descriptor.clone(), admitted.energy, 3, false)
         .unwrap();
     let PolicyEvidenceOutcome::Remote(input) = outcome else {
         panic!("scientific coordinator must return exact policy evidence")
