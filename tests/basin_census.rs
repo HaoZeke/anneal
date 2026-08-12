@@ -1,4 +1,6 @@
 use anneal_core::catalog::{BasinCensus, BasinId, CensusError};
+use proptest::prelude::*;
+use std::collections::BTreeMap;
 
 fn census(radius: f64) -> BasinCensus {
     BasinCensus::new(2, radius).unwrap()
@@ -111,4 +113,32 @@ fn fewer_than_twenty_visits_never_report_saturation() {
 
     assert_eq!(census.unseen_mass(), Some(0.0));
     assert!(!census.is_saturated());
+}
+
+proptest! {
+    #[test]
+    fn arbitrary_observation_streams_conserve_counts_and_medoids(
+        points in prop::collection::vec((-100i16..100, -100i16..100), 0..512)
+    ) {
+        let mut census = census(0.75);
+        let mut opening_descriptors = BTreeMap::new();
+
+        for &(x, y) in &points {
+            let descriptor = [f64::from(x), f64::from(y)];
+            let observation = census.observe(&descriptor).unwrap();
+            opening_descriptors
+                .entry(observation.basin_id)
+                .or_insert(descriptor);
+        }
+
+        prop_assert_eq!(census.total_visits(), points.len() as u64);
+        prop_assert_eq!(
+            census.entries().iter().map(|entry| entry.visits()).sum::<u64>(),
+            census.total_visits()
+        );
+        prop_assert_eq!(census.entries().len(), opening_descriptors.len());
+        for entry in census.entries() {
+            prop_assert_eq!(entry.medoid(), opening_descriptors[&entry.id()]);
+        }
+    }
 }
