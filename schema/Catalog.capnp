@@ -70,6 +70,8 @@ struct PolicyStateReply {
   localBasinVisits @2 :UInt64;
   globallySaturated @3 :Bool;
   relation @4 :CatalogRelation;
+  aggregateCharged @5 :UInt64;
+  aggregateBudget @6 :UInt64;
 }
 
 struct CatalogRequest {
@@ -123,4 +125,6 @@ struct AcceptedReply {
     descriptorHole @5 :DescriptorHoleReply;
     policyState @6 :PolicyStateReply;
   }
+  aggregateCharged @7 :UInt64;
+  aggregateBudget @8 :UInt64;
 }
