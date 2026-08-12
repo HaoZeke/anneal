@@ -9,8 +9,8 @@
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, optimize_with_gradient,
-    random_cluster, run_with_bias,
+    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, QuenchStatus,
+    optimize_with_gradient, random_cluster, run_with_bias,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -758,6 +758,7 @@ fn main() {
             seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(17),
         );
         let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+            let charged_before = led.spent();
             // Curvature is not carried between relaxations: measured on this
             // problem, retaining it across a structural change costs more than
             // it saves.
@@ -792,6 +793,7 @@ fn main() {
                     }
                 }
                 capped += 1;
+                led.record_quench_boundary(charged_before, f, cur.clone(), None);
                 return (f, cur);
             }
             let (f, xr, _) = if noise_eta > 0.0 && iters <= screen_steps {
@@ -799,16 +801,26 @@ fn main() {
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
+            let mut boundary_energy = f;
+            let mut validated_gradient = None;
             if led.charge() {
-                let (_, g) = lj(xr.view());
+                let (fresh_energy, g) = lj(xr.view());
+                boundary_energy = fresh_energy;
                 if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
                     converged += 1;
+                    validated_gradient = Some(g);
                 } else {
                     capped += 1;
                 }
             } else {
                 capped += 1;
             }
+            led.record_quench_boundary(
+                charged_before,
+                boundary_energy,
+                xr.clone(),
+                validated_gradient,
+            );
             (f, xr)
         };
         // The gradient the soft-mode escape needs, charged like everything
@@ -1349,10 +1361,21 @@ fn run_capnp_catalog(
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut slices = 0u64;
+    let mut candidate_sequence = 0u64;
     let mut stall = 0u32;
 
     while ledger.remaining() > 0 {
-        let mut slice_ledger = Ledger::new(slice.min(ledger.remaining()));
+        if ledger.remaining() <= 2 {
+            while ledger.charge() {
+                let _ = lj(current.view());
+                cooperative
+                    .record_work(replica, ChargeKind::AuxiliaryEvaluation, 1)
+                    .expect("terminal potential calls must enter the cooperative ledger");
+            }
+            break;
+        }
+        let slice_budget = slice.min((ledger.remaining() - 1) / 2).max(1);
+        let mut slice_ledger = Ledger::new(slice_budget);
         let output = run_with_bias(
             &run_cfg,
             current.view(),
@@ -1367,19 +1390,39 @@ fn run_capnp_catalog(
         if let Some(state) = slice_ledger.best_state.as_ref() {
             ledger.record(slice_ledger.best, state.view());
         }
-        cooperative
-            .record_work(
-                replica,
-                if slice_charged == 0 {
-                    ChargeKind::LocalProposal
-                } else if output.best_state.is_some() {
-                    ChargeKind::AcceptedQuench
-                } else {
-                    ChargeKind::RejectedQuench
-                },
-                u64::try_from(slice_charged).expect("slice charge must fit u64"),
-            )
-            .expect("coordinator must preserve the charged-work ledger");
+        let boundaries = slice_ledger.quench_boundaries().to_vec();
+        let boundary_charged = boundaries
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum::<usize>();
+        for boundary in &boundaries {
+            cooperative
+                .record_work(
+                    replica,
+                    match boundary.status() {
+                        QuenchStatus::Validated => ChargeKind::AcceptedQuench,
+                        QuenchStatus::Rejected => ChargeKind::RejectedQuench,
+                    },
+                    u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
+                )
+                .expect("each quench must enter the cooperative ledger exactly once");
+        }
+        let auxiliary_charged = slice_charged
+            .checked_sub(boundary_charged)
+            .expect("quench boundaries cannot exceed slice work");
+        if auxiliary_charged > 0 {
+            cooperative
+                .record_work(
+                    replica,
+                    ChargeKind::AuxiliaryEvaluation,
+                    u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
+                )
+                .expect("proposal evaluations must enter the cooperative ledger");
+        } else if slice_charged == 0 {
+            cooperative
+                .record_work(replica, ChargeKind::LocalProposal, 0)
+                .expect("uncharged local work must enter the cooperative ledger");
+        }
         hops += output.hops;
         basins += output.basins;
         screened_out += output.screened_out;
@@ -1400,32 +1443,38 @@ fn run_capnp_catalog(
             .unwrap_or(current);
         let policy_state = best_state.as_ref().unwrap_or(&current).clone();
 
-        let candidate = if ledger.remaining() > 0 && ledger.charge() {
-            cooperative
-                .record_work(replica, ChargeKind::FreshValidation, 1)
-                .expect("producer validation must enter the cooperative ledger");
-            lj_catalog_candidate(
-                &descriptor_space,
-                &signature.atomic_numbers,
-                replica,
-                slices,
-                seed,
-                ledger.spent(),
-                policy_state.view(),
-            )
-        } else {
-            None
-        };
-        if let Some(candidate) = candidate {
+        for boundary in boundaries
+            .iter()
+            .filter(|boundary| boundary.status() == QuenchStatus::Validated)
+        {
+            candidate_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
             cooperative
                 .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                 .expect("descriptor work must enter the cooperative ledger");
-            if ledger.remaining() > 0 && ledger.charge() {
-                cooperative
-                    .record_work(replica, ChargeKind::FreshValidation, 1)
-                    .expect("receiving validation must enter the cooperative ledger");
-                let _ = cooperative.offer_candidate(replica, candidate);
-            }
+            let candidate = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                ledger.spent(),
+                boundary.energy(),
+                boundary.state(),
+                boundary
+                    .gradient()
+                    .expect("validated quench must retain its fresh gradient"),
+            )
+            .expect("validated LJ quench must produce a catalog candidate");
+            assert!(
+                ledger.charge(),
+                "slice reservation must cover every receiving validation"
+            );
+            cooperative
+                .record_work(replica, ChargeKind::FreshValidation, 1)
+                .expect("receiving validation must enter the cooperative ledger");
+            let _ = cooperative.offer_candidate(replica, candidate);
         }
 
         let Ok(descriptor) =
@@ -1558,9 +1607,10 @@ fn lj_catalog_candidate(
     event_sequence: u64,
     seed: u64,
     charged_work: usize,
+    energy: f64,
     coordinates: ArrayView1<f64>,
+    gradient: ArrayView1<f64>,
 ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
-    let (energy, gradient) = lj(coordinates);
     let gradient_norm = gradient
         .iter()
         .map(|value| value * value)
