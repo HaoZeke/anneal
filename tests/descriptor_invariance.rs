@@ -1,5 +1,5 @@
 use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorError, DescriptorSchema, DescriptorSpace,
 };
 use ndarray::Array1;
 
@@ -148,5 +148,57 @@ fn lj75_mackay_and_marks_shelves_are_separated_without_runtime_labels() {
     assert!(
         separation > 0.05,
         "LJ75 competing shelves have descriptor distance {separation}"
+    );
+}
+
+#[test]
+fn descriptor_distance_obeys_the_pseudometric_laws() {
+    let (coordinates, species) = asymmetric_cluster();
+    let mut second_coordinates = coordinates.clone();
+    let mut third_coordinates = coordinates.clone();
+    second_coordinates[3] += 0.08;
+    third_coordinates[8] -= 0.11;
+    let descriptor_space = DescriptorSpace::new(schema());
+    let first = descriptor_space
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+    let second = descriptor_space
+        .describe(second_coordinates.view(), Some(&species))
+        .unwrap();
+    let third = descriptor_space
+        .describe(third_coordinates.view(), Some(&species))
+        .unwrap();
+
+    let d11 = first.distance(&first).unwrap();
+    let d12 = first.distance(&second).unwrap();
+    let d21 = second.distance(&first).unwrap();
+    let d13 = first.distance(&third).unwrap();
+    let d23 = second.distance(&third).unwrap();
+
+    assert_eq!(d11, 0.0);
+    assert!(d12 >= 0.0);
+    assert!((d12 - d21).abs() < 1e-15);
+    assert!(d13 <= d12 + d23 + 1e-15);
+}
+
+#[test]
+fn descriptor_distance_rejects_different_schemas() {
+    let (coordinates, species) = asymmetric_cluster();
+    let first = DescriptorSpace::new(schema())
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+    let other_schema = DescriptorSchema::new(
+        "another-schema",
+        1,
+        vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap()],
+    )
+    .unwrap();
+    let second = DescriptorSpace::new(other_schema)
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+
+    assert_eq!(
+        first.distance(&second).unwrap_err(),
+        DescriptorError::IncompatibleDescriptorVectors
     );
 }
