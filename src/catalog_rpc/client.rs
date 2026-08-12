@@ -11,7 +11,7 @@ use capnp::serialize;
 use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
     CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION,
-    ProtocolError, ProtocolRejection, decode_reply_reader, encode_request,
+    PolicyState, ProtocolError, ProtocolRejection, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 
@@ -249,10 +249,9 @@ impl CatalogClient {
         {
             AcceptedPayload::Candidate(candidate) => Ok(Some(candidate)),
             AcceptedPayload::None => Ok(None),
-            AcceptedPayload::DescriptorHole(_) => Err(ProtocolError::Malformed(
-                "sample returned a descriptor-hole payload".into(),
-            )
-            .into()),
+            AcceptedPayload::DescriptorHole(_) | AcceptedPayload::PolicyState(_) => Err(
+                ProtocolError::Malformed("sample returned a descriptor-hole payload".into()).into(),
+            ),
         }
     }
 
@@ -276,8 +275,34 @@ impl CatalogClient {
             .payload
         {
             AcceptedPayload::DescriptorHole(hole) => Ok(hole),
-            AcceptedPayload::None | AcceptedPayload::Candidate(_) => Err(ProtocolError::Malformed(
+            AcceptedPayload::None
+            | AcceptedPayload::Candidate(_)
+            | AcceptedPayload::PolicyState(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
+    /// Read exact census and active-catalog evidence for one candidate.
+    pub fn policy_state(
+        &mut self,
+        event_sequence: u64,
+        descriptor: Vec<f64>,
+        energy: f64,
+    ) -> Result<PolicyState, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::PolicyState { descriptor, energy },
+            )?
+            .payload
+        {
+            AcceptedPayload::PolicyState(state) => Ok(state),
+            AcceptedPayload::None
+            | AcceptedPayload::Candidate(_)
+            | AcceptedPayload::DescriptorHole(_) => Err(ProtocolError::Malformed(
+                "policy-state request returned an incompatible payload".into(),
             )
             .into()),
         }

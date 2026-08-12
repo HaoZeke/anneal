@@ -6,15 +6,15 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
 use crate::Catalog_capnp::{
-    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, candidate_record,
-    catalog_reply, catalog_request,
+    CatalogRelation as WireCatalogRelation, QuenchStatus as WireQuenchStatus, RejectionKind,
+    accepted_reply, candidate_record, catalog_reply, catalog_request,
 };
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +86,13 @@ pub enum CatalogOperation {
         samples: u32,
         /// Explicit deterministic random draw.
         draw: u64,
+    },
+    /// Read exact census and active-catalog evidence for one descriptor.
+    PolicyState {
+        /// Descriptor to classify against the fixed census and active catalog.
+        descriptor: Vec<f64>,
+        /// Candidate energy used to compare an unrelated incumbent anchor.
+        energy: f64,
     },
     /// Submit one replay-safe charged-work event.
     LedgerEvent {
@@ -160,6 +167,36 @@ pub struct DescriptorHoleProposal {
     pub nearest_catalog_distance: f64,
 }
 
+/// Relation between a replica candidate and the active catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogRelation {
+    /// The active catalog has no entries.
+    Empty,
+    /// The candidate belongs to the incumbent basin.
+    Incumbent,
+    /// The candidate belongs to another active basin.
+    SameBasin,
+    /// The candidate is unrelated and no lower incumbent anchors exploitation.
+    UnrelatedNoAnchor,
+    /// The candidate is unrelated and a lower incumbent anchors exploitation.
+    UnrelatedLowerAnchor,
+}
+
+/// Exact coordinator evidence used by the cooperative policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PolicyState {
+    /// Exact number of fixed-census observations.
+    pub total_visits: u64,
+    /// Exact number of singleton basins in the fixed census.
+    pub singleton_basins: u64,
+    /// Exact visits assigned to the candidate's basin, or zero if unassigned.
+    pub local_basin_visits: u64,
+    /// Whether the fixed census meets its declared saturation rule.
+    pub globally_saturated: bool,
+    /// Candidate relation to the active catalog.
+    pub relation: CatalogRelation,
+}
+
 /// Optional scientific payload returned by an accepted operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcceptedPayload {
@@ -169,6 +206,8 @@ pub enum AcceptedPayload {
     Candidate(CatalogCandidate),
     /// Seeded target-free descriptor-hole proposal.
     DescriptorHole(DescriptorHoleProposal),
+    /// Exact census and active-catalog policy evidence.
+    PolicyState(PolicyState),
 }
 
 /// Accepted coordinator response.
@@ -289,6 +328,14 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             hole.set_samples(*samples);
             hole.set_draw(*draw);
         }
+        CatalogOperation::PolicyState { descriptor, energy } => {
+            let mut state = operation.init_policy_state();
+            fill_f64(
+                state.reborrow().init_descriptor(descriptor.len() as u32),
+                descriptor,
+            );
+            state.set_energy(*energy);
+        }
         CatalogOperation::LedgerEvent {
             kind,
             charged_calls,
@@ -351,6 +398,13 @@ pub(crate) fn decode_request_reader(
                 draw: hole.get_draw(),
             }
         }
+        catalog_request::operation::PolicyState(state) => {
+            let state = state.map_err(wire_error)?;
+            CatalogOperation::PolicyState {
+                descriptor: list_f64(state.get_descriptor().map_err(wire_error)?),
+                energy: state.get_energy(),
+            }
+        }
         catalog_request::operation::LedgerEvent(ledger) => {
             let ledger = ledger.map_err(wire_error)?;
             CatalogOperation::LedgerEvent {
@@ -401,6 +455,14 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     );
                     output.set_nearest_catalog_distance(hole.nearest_catalog_distance);
                 }
+                AcceptedPayload::PolicyState(state) => {
+                    let mut output = payload.init_policy_state();
+                    output.set_total_visits(state.total_visits);
+                    output.set_singleton_basins(state.singleton_basins);
+                    output.set_local_basin_visits(state.local_basin_visits);
+                    output.set_globally_saturated(state.globally_saturated);
+                    output.set_relation(state.relation.into());
+                }
             }
         }
         CatalogReply::Rejected {
@@ -438,6 +500,16 @@ pub(crate) fn decode_reply_reader(
                         target: list_f64(hole.get_target().map_err(wire_error)?),
                         increment: list_f64(hole.get_increment().map_err(wire_error)?),
                         nearest_catalog_distance: hole.get_nearest_catalog_distance(),
+                    })
+                }
+                accepted_reply::payload::PolicyState(state) => {
+                    let state = state.map_err(wire_error)?;
+                    AcceptedPayload::PolicyState(PolicyState {
+                        total_visits: state.get_total_visits(),
+                        singleton_basins: state.get_singleton_basins(),
+                        local_basin_visits: state.get_local_basin_visits(),
+                        globally_saturated: state.get_globally_saturated(),
+                        relation: state.get_relation().map_err(wire_error)?.into(),
                     })
                 }
             };
@@ -490,6 +562,30 @@ impl From<RejectionKind> for ProtocolRejection {
             RejectionKind::SequenceRegression => Self::SequenceRegression,
             RejectionKind::SnapshotRegression => Self::SnapshotRegression,
             RejectionKind::ValidationRejected => Self::ValidationRejected,
+        }
+    }
+}
+
+impl From<CatalogRelation> for WireCatalogRelation {
+    fn from(value: CatalogRelation) -> Self {
+        match value {
+            CatalogRelation::Empty => Self::Empty,
+            CatalogRelation::Incumbent => Self::Incumbent,
+            CatalogRelation::SameBasin => Self::SameBasin,
+            CatalogRelation::UnrelatedNoAnchor => Self::UnrelatedNoAnchor,
+            CatalogRelation::UnrelatedLowerAnchor => Self::UnrelatedLowerAnchor,
+        }
+    }
+}
+
+impl From<WireCatalogRelation> for CatalogRelation {
+    fn from(value: WireCatalogRelation) -> Self {
+        match value {
+            WireCatalogRelation::Empty => Self::Empty,
+            WireCatalogRelation::Incumbent => Self::Incumbent,
+            WireCatalogRelation::SameBasin => Self::SameBasin,
+            WireCatalogRelation::UnrelatedNoAnchor => Self::UnrelatedNoAnchor,
+            WireCatalogRelation::UnrelatedLowerAnchor => Self::UnrelatedLowerAnchor,
         }
     }
 }
