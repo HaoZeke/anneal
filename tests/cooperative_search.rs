@@ -18,7 +18,8 @@ use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolRejection};
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
-    CatalogOfferOutcome, CooperativeRun, RunManifest, SynchronizationOutcome, TraceKind,
+    CatalogOfferOutcome, CooperativeRun, PolicyEvidenceOutcome, RunManifest,
+    SynchronizationOutcome, TraceKind,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -187,6 +188,46 @@ fn catalog_outputs_are_actionable_and_seeded() {
 }
 
 #[test]
+fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0, 1, 2, 3], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    assert_eq!(
+        run.offer_candidate(0, admitted.clone()).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    let outcome = run
+        .policy_input(
+            0,
+            admitted.descriptor,
+            admitted.energy,
+            AggregateProgress::new(20, 400).unwrap(),
+            3,
+            false,
+        )
+        .unwrap();
+    let PolicyEvidenceOutcome::Remote(input) = outcome else {
+        panic!("scientific coordinator must return exact policy evidence")
+    };
+    assert_eq!(input.validation, ValidationState::Validated);
+    assert_eq!(input.relation, ActiveCatalogRelation::Incumbent);
+    assert_eq!(input.census.total_visits(), 1);
+    assert_eq!(input.census.singleton_basins(), 1);
+    assert_eq!(input.census.local_basin_visits(), 1);
+    assert!(!input.census.globally_saturated());
+    assert_eq!(input.local_stall_slices, 3);
+    assert!(!input.local_deepened);
+}
+
+#[test]
 fn candidate_replica_must_match_while_producer_sequence_remains_independent() {
     let server = server();
     let digest = signature().digest();
@@ -342,6 +383,18 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
     assert_eq!(
         run.synchronize(0).unwrap(),
         SynchronizationOutcome::SharingDisabled
+    );
+    assert_eq!(
+        run.policy_input(
+            0,
+            vec![0.0; 9],
+            -1.0,
+            AggregateProgress::new(20, 400).unwrap(),
+            0,
+            false,
+        )
+        .unwrap(),
+        PolicyEvidenceOutcome::SharingDisabled
     );
     assert_eq!(run.ledger().ensemble_total(), 20);
     assert!(
