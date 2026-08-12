@@ -282,9 +282,12 @@ impl CatalogClient {
         {
             AcceptedPayload::Candidate(candidate) => Ok(Some(candidate)),
             AcceptedPayload::None => Ok(None),
-            AcceptedPayload::DescriptorHole(_) | AcceptedPayload::PolicyState(_) => Err(
-                ProtocolError::Malformed("sample returned a descriptor-hole payload".into()).into(),
-            ),
+            AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::PolicyState(_)
+            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
+                "sample returned an incompatible payload".into(),
+            )
+            .into()),
         }
     }
 
@@ -310,7 +313,8 @@ impl CatalogClient {
             AcceptedPayload::DescriptorHole(hole) => Ok(hole),
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
-            | AcceptedPayload::PolicyState(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::PolicyState(_)
+            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -347,7 +351,8 @@ impl CatalogClient {
             }),
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
-            | AcceptedPayload::DescriptorHole(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),

@@ -637,6 +637,13 @@ fn apply_request(
                     .map_or(0, CooperativeLedger::aggregate_budget),
             });
         }
+        CatalogOperation::PopulationSubmit { .. } | CatalogOperation::PopulationPlan { .. } => {
+            return rejected(
+                &state,
+                request.event_sequence,
+                ProtocolRejection::ValidationRejected,
+            );
+        }
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
                 let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)

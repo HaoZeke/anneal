@@ -74,6 +74,37 @@ struct PolicyStateReply {
   aggregateBudget @6 :UInt64;
 }
 
+struct PopulationSubmitRequest {
+  epoch @0 :UInt64;
+  candidate @1 :CandidateRecord;
+}
+
+struct PopulationPlanRequest {
+  epoch @0 :UInt64;
+}
+
+struct PopulationPlan {
+  epoch @0 :UInt64;
+  destinations @1 :List(UInt32);
+  parents @2 :List(UInt32);
+  weights @3 :List(Float64);
+  effectiveSampleSize @4 :Float64;
+  uniqueParents @5 :UInt32;
+  maxFamilySize @6 :UInt32;
+  offspringVariance @7 :Float64;
+  parentCandidates @8 :List(CandidateRecord);
+}
+
+struct PopulationEpochReply {
+  epoch @0 :UInt64;
+  submitted @1 :UInt32;
+  required @2 :UInt32;
+  result :union {
+    pending @3 :Void;
+    ready @4 :PopulationPlan;
+  }
+}
+
 struct CatalogRequest {
   protocolVersion @0 :UInt16;
   identity @1 :CatalogIdentity;
@@ -88,6 +119,8 @@ struct CatalogRequest {
     descriptorHole @8 :DescriptorHoleRequest;
     ledgerEvent @9 :LedgerEvent;
     policyState @10 :PolicyStateRequest;
+    populationSubmit @11 :PopulationSubmitRequest;
+    populationPlan @12 :PopulationPlanRequest;
   }
 }
 
@@ -124,6 +157,7 @@ struct AcceptedReply {
     candidate @4 :CandidateRecord;
     descriptorHole @5 :DescriptorHoleReply;
     policyState @6 :PolicyStateReply;
+    populationEpoch @9 :PopulationEpochReply;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
