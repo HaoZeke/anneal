@@ -516,7 +516,10 @@ mod tests {
         let first_after: Vec<f64> = b.first_bank().iter().map(|m| m.state[0]).collect();
         assert_eq!(first_before, first_after);
         assert_eq!(
-            b.first_bank().iter().map(|m| m.state[0]).collect::<Vec<_>>(),
+            b.first_bank()
+                .iter()
+                .map(|m| m.state[0])
+                .collect::<Vec<_>>(),
             vec![0.0, 10.0, 20.0, 30.0]
         );
     }

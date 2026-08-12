@@ -92,10 +92,7 @@ fn system_of(x: ArrayView1<f64>, species: Option<&[u32]>) -> Vec<Box<dyn System>
     let mut sys = SimpleSystem::new(UnitCell::infinite());
     for i in 0..n {
         let z = species.and_then(|s| s.get(i).copied()).unwrap_or(1) as i32;
-        sys.add_atom(
-            z,
-            Vector3D::new(x[3 * i], x[3 * i + 1], x[3 * i + 2]),
-        );
+        sys.add_atom(z, Vector3D::new(x[3 * i], x[3 * i + 1], x[3 * i + 2]));
     }
     vec![Box::new(sys) as Box<dyn System>]
 }
@@ -158,10 +155,7 @@ fn spectrum_keep(
         let n_f = shape[shape.len() - 1];
         let samples = block.samples();
         let sample_names = samples.names();
-        let atom_col = sample_names
-            .iter()
-            .position(|&s| s == "atom")
-            .unwrap_or(0);
+        let atom_col = sample_names.iter().position(|&s| s == "atom").unwrap_or(0);
         let props = block.properties();
         let names = props.names();
         let l_idx = names.iter().position(|&s| s == "l");
@@ -755,9 +749,9 @@ pub fn step_into_hole<R: Rng + ?Sized>(
         if mu.is_empty() || s.mean_jac.nrows() != mu.len() {
             break;
         }
-        let known = wells.iter().any(|w| {
-            w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE
-        });
+        let known = wells
+            .iter()
+            .any(|w| w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE);
         if !known && !wells.is_empty() {
             break;
         }
@@ -923,7 +917,10 @@ mod tests {
             "featomic leftover on ico13 is {rms}, want a packing defect"
         );
         let d = soap_bank_distance(x.view(), x.view(), 3.5, None, None);
-        assert!(d < 1e-12, "SOAP bank distance of a structure to itself is {d}");
+        assert!(
+            d < 1e-12,
+            "SOAP bank distance of a structure to itself is {d}"
+        );
         let morph = soap_morphology(x.view(), 3.5, None, None);
         assert!(!morph.is_empty());
         assert!(morph.iter().all(|v| v.is_finite()));
@@ -1000,7 +997,14 @@ mod tests {
             let mut rng = StdRng::seed_from_u64(seed);
             // ico13 fits inside the production 3.5 cutoff, so every patch
             // is the whole cluster. A first-shell cutoff splits vertices.
-            hops.push(step_away_featomic(x.view(), 0.35, 1.5, None, None, &mut rng));
+            hops.push(step_away_featomic(
+                x.view(),
+                0.35,
+                1.5,
+                None,
+                None,
+                &mut rng,
+            ));
         }
         let mut max_rms = 0.0_f64;
         for i in 0..hops.len() {
@@ -1221,7 +1225,10 @@ mod tests {
             "hole flow stayed in the ico packing, d={d}"
         );
         for i in 0..y.len() {
-            assert!(y[i].is_finite(), "packing hop produced a non-finite coordinate");
+            assert!(
+                y[i].is_finite(),
+                "packing hop produced a non-finite coordinate"
+            );
         }
     }
 

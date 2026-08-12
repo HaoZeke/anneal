@@ -81,11 +81,7 @@ fn neighbor_channels(species: Option<&[u32]>) -> Vec<u32> {
             let mut u = z.to_vec();
             u.sort_unstable();
             u.dedup();
-            if u.is_empty() {
-                vec![0]
-            } else {
-                u
-            }
+            if u.is_empty() { vec![0] } else { u }
         }
     }
 }
@@ -138,11 +134,7 @@ pub fn local_spectra(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 
 /// Per-atom power spectra. With `species`, one channel per observed
 /// neighbour atomic number, concatenated. Shape `(N, feat_dim)`.
-pub fn local_spectra_z(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn local_spectra_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let n_at = x.len() / 3;
     let dim = spec.feat_dim(species);
     let mut out = Array2::<f64>::zeros((n_at, dim));
@@ -174,11 +166,7 @@ pub fn local_nu3(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 }
 
 /// Species-aware SOAP plus the same 4-body scalars (all neighbors).
-pub fn local_nu3_z(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let soap = local_spectra_z(x, spec, species);
     let n_at = soap.nrows();
     let d0 = soap.ncols();
@@ -333,11 +321,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 /// Analytic Jacobian of the two 4-body triple invariants, shape `(N · nu3_dim, 3N)`.
-pub fn jacobian_four(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn jacobian_four(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let n_at = x.len() / 3;
     let d1 = 4 * spec.n_max;
     let mut j = Array2::<f64>::zeros((n_at * d1, n_at * 3));
@@ -564,11 +548,7 @@ fn accum_four(
 }
 
 /// Analytic Jacobian of the ACE ν=3 block, shape `(N · nu3_feat, 3N)`.
-pub fn jacobian_ace(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -651,11 +631,7 @@ pub fn jacobian_ace(
 }
 
 /// Stacked Jacobian of SOAP power spectrum and ACE ν=3 scalars.
-pub fn jacobian_nu3(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn jacobian_nu3(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let js = jacobian_z(x, spec, species);
     let ja = jacobian_ace(x, spec, species);
     let n_at = x.len() / 3;
@@ -684,11 +660,7 @@ pub fn jacobian(x: ArrayView1<f64>, spec: SoapSpec) -> Array2<f64> {
 }
 
 /// Analytic Jacobian of stacked local spectra, species channels included.
-pub fn jacobian_z(
-    x: ArrayView1<f64>,
-    spec: SoapSpec,
-    species: Option<&[u32]>,
-) -> Array2<f64> {
+pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -> Array2<f64> {
     let n_at = x.len() / 3;
     let channels = neighbor_channels(species);
     let n_chan = channels.len();
@@ -1209,9 +1181,8 @@ fn scale_support_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> A
     let mut moved = 0.0;
     let mut s = 0.0;
     for i in 0..n {
-        let t = dr[3 * i] * dr[3 * i]
-            + dr[3 * i + 1] * dr[3 * i + 1]
-            + dr[3 * i + 2] * dr[3 * i + 2];
+        let t =
+            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
         if t > 1e-24 {
             moved += 1.0;
             s += t;
@@ -1541,9 +1512,8 @@ fn concentrate_residual(dr: &mut Array1<f64>, keep: usize) {
     }
     let mut atom = vec![0.0; n];
     for i in 0..n {
-        atom[i] = dr[3 * i] * dr[3 * i]
-            + dr[3 * i + 1] * dr[3 * i + 1]
-            + dr[3 * i + 2] * dr[3 * i + 2];
+        atom[i] =
+            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
     }
     let mut order: Vec<usize> = (0..n).collect();
     order.sort_by(|a, b| atom[*b].partial_cmp(&atom[*a]).unwrap());
@@ -1640,9 +1610,8 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
     let mut atom = vec![0.0; n];
     let mut tot = 0.0;
     for i in 0..n {
-        let s = dr[3 * i] * dr[3 * i]
-            + dr[3 * i + 1] * dr[3 * i + 1]
-            + dr[3 * i + 2] * dr[3 * i + 2];
+        let s =
+            dr[3 * i] * dr[3 * i] + dr[3 * i + 1] * dr[3 * i + 1] + dr[3 * i + 2] * dr[3 * i + 2];
         atom[i] = s;
         tot += s;
     }
@@ -1721,11 +1690,7 @@ pub fn step_away_fivefold<R: Rng + ?Sized>(
 
 /// Fivefold residual hop about one named axis. Used to probe which
 /// pentagon opening leaves the icosahedral shelf.
-pub fn step_away_fivefold_about(
-    x: ArrayView1<f64>,
-    rmsd: f64,
-    axis: [f64; 3],
-) -> Array1<f64> {
+pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -> Array1<f64> {
     let (d5, mut dr) = residual_about(x, axis);
     if d5 < 1e-8 {
         dr = pentagon_break(x, axis);
@@ -1759,10 +1724,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     let packing = species.is_none() && mobile.is_none();
     if packing {
         let y = step_away_fivefold(x, rmsd, rng);
-        let moved = y
-            .iter()
-            .zip(x.iter())
-            .any(|(a, b)| (a - b).abs() > 1e-12);
+        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-12);
         if moved {
             return y;
         }
@@ -1772,97 +1734,98 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         let _ = spec;
         let _ = groups;
         return crate::featomic_hop::step_away_featomic(
-            x, rmsd, spec.rcut_nn, species, mobile, rng,
+            x,
+            rmsd,
+            spec.rcut_nn,
+            species,
+            mobile,
+            rng,
         );
     }
     #[cfg(not(feature = "featomic"))]
     {
-    if packing {
-        return x.to_owned();
-    }
-    let loc = local_nu3_z(x, spec, species);
-    let n_at = loc.nrows();
-    let dim = loc.ncols();
-    if n_at == 0 || dim == 0 {
-        return x.to_owned();
-    }
-    let keep = mobile_mask(n_at, mobile);
-    let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
-    let mut labels: Vec<u32> = Vec::new();
-    for i in 0..n_at {
-        if keep[i] {
-            let z = zi(i);
-            if !labels.contains(&z) {
-                labels.push(z);
+        if packing {
+            return x.to_owned();
+        }
+        let loc = local_nu3_z(x, spec, species);
+        let n_at = loc.nrows();
+        let dim = loc.ncols();
+        if n_at == 0 || dim == 0 {
+            return x.to_owned();
+        }
+        let keep = mobile_mask(n_at, mobile);
+        let zi = |i: usize| species.and_then(|z| z.get(i).copied()).unwrap_or(0);
+        let mut labels: Vec<u32> = Vec::new();
+        for i in 0..n_at {
+            if keep[i] {
+                let z = zi(i);
+                if !labels.contains(&z) {
+                    labels.push(z);
+                }
             }
         }
-    }
-    let nlab = labels.len();
-    let mut mu = vec![vec![0.0; dim]; nlab];
-    let mut cnt = vec![0.0; nlab];
-    for i in 0..n_at {
-        if !keep[i] {
-            continue;
-        }
-        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-        cnt[k] += 1.0;
-        for t in 0..dim {
-            mu[k][t] += loc[[i, t]];
-        }
-    }
-    for k in 0..nlab {
-        if cnt[k] > 0.0 {
+        let nlab = labels.len();
+        let mut mu = vec![vec![0.0; dim]; nlab];
+        let mut cnt = vec![0.0; nlab];
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+            cnt[k] += 1.0;
             for t in 0..dim {
-                mu[k][t] /= cnt[k];
+                mu[k][t] += loc[[i, t]];
             }
         }
-    }
-    let mut target = Array1::zeros(n_at * dim);
-    for i in 0..n_at {
-        if !keep[i] {
+        for k in 0..nlab {
+            if cnt[k] > 0.0 {
+                for t in 0..dim {
+                    mu[k][t] /= cnt[k];
+                }
+            }
+        }
+        let mut target = Array1::zeros(n_at * dim);
+        for i in 0..n_at {
+            if !keep[i] {
+                for t in 0..dim {
+                    target[i * dim + t] = loc[[i, t]];
+                }
+                continue;
+            }
+            let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
+            // SOAP l ≤ 3 is isotropic on a closed shell. Leftover is the
+            // ACE ν=3 / high-l block: pull those channels to the cloud mean.
             for t in 0..dim {
                 target[i * dim + t] = loc[[i, t]];
             }
-            continue;
-        }
-        let k = labels.iter().position(|&z| z == zi(i)).unwrap_or(0);
-        // SOAP l ≤ 3 is isotropic on a closed shell. Leftover is the
-        // ACE ν=3 / high-l block: pull those channels to the cloud mean.
-        for t in 0..dim {
-            target[i * dim + t] = loc[[i, t]];
+            let d0 = dim - spec.nu3_feat_dim(species);
+            for t in d0..dim {
+                target[i * dim + t] = mu[k][t];
+            }
         }
         let d0 = dim - spec.nu3_feat_dim(species);
-        for t in d0..dim {
-            target[i * dim + t] = mu[k][t];
+        let mut nu32 = 0.0;
+        let mut nnu = 0.0;
+        for i in 0..n_at {
+            if !keep[i] {
+                continue;
+            }
+            for t in d0..dim {
+                let d = target[i * dim + t] - loc[[i, t]];
+                nu32 += d * d;
+                nnu += 1.0;
+            }
         }
-    }
-    let d0 = dim - spec.nu3_feat_dim(species);
-    let mut nu32 = 0.0;
-    let mut nnu = 0.0;
-    for i in 0..n_at {
-        if !keep[i] {
-            continue;
+        let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
+        let _ = rng;
+        let _ = groups;
+        if nu3_rms < NU3_DEFECT {
+            return x.to_owned();
         }
-        for t in d0..dim {
-            let d = target[i * dim + t] - loc[[i, t]];
-            nu32 += d * d;
-            nnu += 1.0;
-        }
-    }
-    let nu3_rms = if nnu > 0.0 {
-        (nu32 / nnu).sqrt()
-    } else {
-        0.0
-    };
-    let _ = rng;
-    let _ = groups;
-    if nu3_rms < NU3_DEFECT {
-        return x.to_owned();
-    }
-    // Direction is J⁺ of the observed leftover. Amplitude is the
-    // caller's cap: Tikhonov otherwise leaves a near-identity.
-    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
-    scale_to_cap(x, dr, rmsd)
+        // Direction is J⁺ of the observed leftover. Amplitude is the
+        // caller's cap: Tikhonov otherwise leaves a near-identity.
+        let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+        scale_to_cap(x, dr, rmsd)
     }
 }
 
@@ -2631,10 +2594,7 @@ mod tests {
         let (dimer, zd) = water_dimer();
         let bd = four_body(dimer.view(), 0, 6, spec, Some(&zd));
         let sd: f64 = bd.iter().map(|v| v.abs()).sum();
-        assert!(
-            sd > 1e-6,
-            "intermolecular triples must remain: {bd:?}"
-        );
+        assert!(sd > 1e-6, "intermolecular triples must remain: {bd:?}");
     }
 
     #[test]
@@ -2746,11 +2706,7 @@ mod tests {
             *v *= nn;
         }
         let fr = crate::structure::atom_triplet_fracs(x.view(), 13, 1.2);
-        assert!(
-            fr[0][0] > 0.8,
-            "ico13 centre should be 555, fr {:?}",
-            fr[0]
-        );
+        assert!(fr[0][0] > 0.8, "ico13 centre should be 555, fr {:?}", fr[0]);
         let mean = mean_residual_rms(x.view(), spec);
         let class = class_residual_rms(x.view(), spec);
         assert!(class > 0.05, "555->421 residual vanished on ico: {class}");
@@ -2767,10 +2723,7 @@ mod tests {
         // prototype. That is the oracle. The recommended hop must not
         // use it.
         let fr_421: f64 = fr.iter().map(|a| a[1]).sum();
-        assert!(
-            fr_421 < 1e-9,
-            "ico13 should have no 421 mass, got {fr_421}"
-        );
+        assert!(fr_421 < 1e-9, "ico13 should have no 421 mass, got {fr_421}");
         let target = class_target(x.view(), spec);
         let proto = prototype_spectrum(1, spec);
         let dim = spec.dim();
@@ -2950,10 +2903,7 @@ mod tests {
         );
         for i in 3..6 {
             for k in 0..3 {
-                assert_eq!(
-                    y[3 * i + k], x[3 * i + k],
-                    "frozen atom {i} moved"
-                );
+                assert_eq!(y[3 * i + k], x[3 * i + k], "frozen atom {i} moved");
             }
         }
     }
@@ -3054,10 +3004,7 @@ mod tests {
             d2 += d * d;
         }
         let atom_rms = (d2 / 13.0).sqrt();
-        assert!(
-            (atom_rms - 0.4).abs() < 1e-8,
-            "fivefold hop rms {atom_rms}"
-        );
+        assert!((atom_rms - 0.4).abs() < 1e-8, "fivefold hop rms {atom_rms}");
         let cub = cuboct13();
         let d_ico = fivefold_length(ico.view());
         let d_cub = fivefold_length(cub.view());

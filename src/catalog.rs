@@ -11,8 +11,8 @@ pub use basin::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCatalogError,
 };
 pub use calibration::{
-    calibrate_census_radius, CalibrationError, CalibrationPair, CensusCalibration,
-    EmpiricalQuantileMethod, MINIMUM_CENSUS_CALIBRATION_PAIRS,
+    CalibrationError, CalibrationPair, CensusCalibration, EmpiricalQuantileMethod,
+    MINIMUM_CENSUS_CALIBRATION_PAIRS, calibrate_census_radius,
 };
 pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};

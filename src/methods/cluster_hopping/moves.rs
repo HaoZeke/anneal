@@ -359,7 +359,11 @@ pub enum ClusterMove {
     },
 }
 
-fn soap_arm(cfg: &Config, mobile: Option<Vec<usize>>, groups: Option<Vec<Vec<usize>>>) -> ClusterMove {
+fn soap_arm(
+    cfg: &Config,
+    mobile: Option<Vec<usize>>,
+    groups: Option<Vec<Vec<usize>>>,
+) -> ClusterMove {
     let packing = cfg.species.is_none() && cfg.active_region.is_none() && cfg.frozen.is_none();
     // The Jacobian hop is a leftover step, a fraction of a bond, on
     // every system. Contact-scale amplitude was for a rigid group
@@ -1420,13 +1424,16 @@ mod move_scaling_tests {
             "recommended SOAP must not ship the 555→421 / fcc oracle"
         );
         assert!(
-            rec.move_library.kernels(&rec).iter().any(|k| matches!(
-                k,
-                ClusterMove::Soap { class: false, .. }
-            )),
+            rec.move_library
+                .kernels(&rec)
+                .iter()
+                .any(|k| matches!(k, ClusterMove::Soap { class: false, .. })),
             "recommended SOAP arm is not the observed-cloud residual"
         );
-        assert!(rec.adaptive_height, "recommended must fill a packing over many revisits");
+        assert!(
+            rec.adaptive_height,
+            "recommended must fill a packing over many revisits"
+        );
         assert!(
             (rec.height_revisits - 20.0).abs() < 1e-12,
             "recommended N_f analogue is 20 revisits, got {}",
@@ -1473,11 +1480,7 @@ mod move_scaling_tests {
 
     #[test]
     fn slab_soap_arm_carries_the_mobile_mask() {
-        let mut rec = Config::recommended_molecular(
-            vec![29, 29, 1, 1],
-            vec![vec![2, 3]],
-            1.0,
-        );
+        let mut rec = Config::recommended_molecular(vec![29, 29, 1, 1], vec![vec![2, 3]], 1.0);
         rec.active_region = Some((vec![2, 3], 0));
         rec.n_points = 4;
         let soap = rec
