@@ -19,7 +19,8 @@ use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolReject
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
-    PolicyEvidenceOutcome, RunManifest, SynchronizationOutcome, TraceKind,
+    PolicyEvidenceOutcome, PopulationSynchronizationOutcome, RunManifest, SynchronizationOutcome,
+    TraceKind,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -236,6 +237,71 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
         assert_eq!(plan.parents, vec![0, 1, 2, 3]);
     }
     assert_eq!(clients[0].snapshot(4).unwrap().census_visits, 4);
+}
+
+#[test]
+fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0, 1, 2, 3], 100).unwrap();
+    for replica in 0..4 {
+        run.attach_client(
+            replica,
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            run.offer_candidate(replica, candidate(replica, 1, 1.2))
+                .unwrap(),
+            if replica == 0 {
+                CatalogOfferOutcome::Admitted
+            } else {
+                CatalogOfferOutcome::Rejected
+            }
+        );
+    }
+
+    for replica in 0..3 {
+        assert_eq!(
+            run.submit_population(replica, 0, candidate(replica, 2, 1.2))
+                .unwrap(),
+            PopulationSynchronizationOutcome::Pending {
+                submitted: replica + 1,
+                required: 4,
+            }
+        );
+    }
+    let PopulationSynchronizationOutcome::Ready { parent, plan } =
+        run.submit_population(3, 0, candidate(3, 2, 1.2)).unwrap()
+    else {
+        panic!("complete population must return the destination parent")
+    };
+    assert_eq!(parent.producer_replica, 3);
+    assert_eq!(plan.parents, vec![0, 1, 2, 3]);
+
+    let PopulationSynchronizationOutcome::Ready { parent, plan } =
+        run.poll_population(0, 0).unwrap()
+    else {
+        panic!("closed population epoch must remain pollable")
+    };
+    assert_eq!(parent.producer_replica, 0);
+    assert_eq!(plan.unique_parents, 4);
+    assert_eq!(plan.max_family_size, 1);
+    assert!(
+        run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::PopulationPending)
+    );
+    assert!(
+        run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::PopulationReady)
+    );
 }
 
 #[test]
