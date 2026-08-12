@@ -163,3 +163,55 @@ fn validation_failure_and_local_descent_preserve_local_search() {
 fn zero_aggregate_budget_is_rejected() {
     assert!(AggregateProgress::new(0, 0).is_err());
 }
+
+#[test]
+fn decision_table_covers_every_discrete_input_state() {
+    let (unsaturated, local_basin) = census_with_repeated_visits(1);
+    let (saturated, _) = census_with_repeated_visits(21);
+    let relations = [
+        ActiveCatalogRelation::Empty,
+        ActiveCatalogRelation::Incumbent,
+        ActiveCatalogRelation::SameBasin,
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: false,
+        },
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: true,
+        },
+    ];
+    let census_states = [
+        CensusEvidence::from_census(&unsaturated, Some(local_basin)),
+        CensusEvidence::from_census(&saturated, None),
+    ];
+    let progress_states = [
+        AggregateProgress::new(0, 100).unwrap(),
+        AggregateProgress::new(100, 100).unwrap(),
+    ];
+
+    for validation in [ValidationState::Validated, ValidationState::Rejected] {
+        for relation in relations {
+            for census in census_states {
+                for progress in progress_states {
+                    for local_stall_slices in [0, 8] {
+                        for local_deepened in [false, true] {
+                            let decision = CatalogPolicy::decide(CatalogPolicyInput {
+                                validation,
+                                relation,
+                                census,
+                                progress,
+                                local_stall_slices,
+                                local_deepened,
+                            });
+                            assert!(!decision.reason.code().is_empty());
+                            if relation == ActiveCatalogRelation::Incumbent
+                                && validation == ValidationState::Validated
+                            {
+                                assert_eq!(decision.action, PolicyAction::ContinueLocal);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
