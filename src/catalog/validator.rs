@@ -92,11 +92,13 @@ pub enum NumericField {
 }
 
 /// Origin of gradient evidence checked by candidate validation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum GradientSource {
     /// Norm reported by the candidate producer.
+    #[error("producer")]
     Producer,
     /// Norm computed from receiving-side fresh forces.
+    #[error("fresh evaluation")]
     Fresh,
 }
 
