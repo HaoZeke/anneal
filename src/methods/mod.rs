@@ -39,6 +39,8 @@ pub mod bayesian_mixing;
 pub mod bayesian_pilot;
 pub mod bfwt;
 pub mod dmc_population;
+/// Target-free Feynman--Kac reconfiguration for cooperative search chains.
+pub mod feynman_kac;
 pub mod gle_langevin;
 pub mod gpmd;
 pub mod local_polish;
