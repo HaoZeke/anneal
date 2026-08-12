@@ -10,20 +10,41 @@ use std::time::Duration;
 
 use capnp::message::ReaderOptions;
 use capnp::serialize;
+use ndarray::ArrayView1;
 
 use super::{
-    decode_request_reader, encode_reply, AcceptedReply, CatalogIdentity, CatalogOperation,
-    CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError, ProtocolRejection,
+    decode_request_reader, encode_reply, AcceptedReply, CatalogCandidate, CatalogIdentity,
+    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError,
+    ProtocolRejection,
 };
+use crate::catalog::{
+    BasinCatalog, BasinCensus, CandidateRecord, CandidateValidator, FreshEvaluation, QuenchStatus,
+    SystemSignature, ValidatedCandidate, ValidatorConfig,
+};
+use crate::descriptor_space::DescriptorSpace;
 use crate::Catalog_capnp::catalog_request;
 
+type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
+
 /// Immutable identity and allowed replicas for one coordinator.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct ServerConfig {
     campaign: String,
     ensemble: String,
     signature_digest: [u8; 32],
     replicas: BTreeSet<u32>,
+    scientific: Option<ScientificConfig>,
+}
+
+#[derive(Clone)]
+struct ScientificConfig {
+    signature: SystemSignature,
+    descriptor_space: DescriptorSpace,
+    validator: ValidatorConfig,
+    catalog_capacity: usize,
+    census_radius: f64,
+    total_charged_work: u64,
+    evaluate: Arc<FreshEvaluator>,
 }
 
 impl ServerConfig {
@@ -45,7 +66,57 @@ impl ServerConfig {
             ensemble,
             signature_digest,
             replicas,
+            scientific: None,
         })
+    }
+
+    /// Attach the scientific state and receiving-side engine validation.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_scientific_state<F>(
+        mut self,
+        signature: SystemSignature,
+        descriptor_space: DescriptorSpace,
+        validator: ValidatorConfig,
+        catalog_capacity: usize,
+        census_radius: f64,
+        total_charged_work: u64,
+        evaluate: F,
+    ) -> Result<Self, CatalogServerError>
+    where
+        F: Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync + 'static,
+    {
+        if signature.digest() != self.signature_digest
+            || signature.descriptor.schema != descriptor_space.schema().name()
+            || signature.descriptor.version != descriptor_space.schema().version()
+            || usize::try_from(signature.coordinate_dim).ok()
+                != Some(validator.reference_coordinates.len())
+            || catalog_capacity > u32::MAX as usize
+        {
+            return Err(CatalogServerError::InvalidScientificConfiguration);
+        }
+        let descriptor = descriptor_space
+            .describe(
+                ArrayView1::from(&validator.reference_coordinates),
+                Some(&signature.atomic_numbers),
+            )
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        if descriptor.values().len() != validator.descriptor_dim {
+            return Err(CatalogServerError::InvalidScientificConfiguration);
+        }
+        BasinCensus::new(validator.descriptor_dim, census_radius)
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        BasinCatalog::new(catalog_capacity, census_radius, total_charged_work)
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        self.scientific = Some(ScientificConfig {
+            signature,
+            descriptor_space,
+            validator,
+            catalog_capacity,
+            census_radius,
+            total_charged_work,
+            evaluate: Arc::new(evaluate),
+        });
+        Ok(self)
     }
 }
 
@@ -70,18 +141,69 @@ pub enum CatalogServerError {
     /// Campaign, ensemble, or replica set is empty.
     #[error("catalog server configuration is incomplete")]
     InvalidConfiguration,
+    /// Scientific signature, descriptor, validator, or catalog settings disagree.
+    #[error("catalog scientific configuration is inconsistent")]
+    InvalidScientificConfiguration,
     /// Listener setup failed.
     #[error("catalog server I/O failed: {0}")]
     Io(#[from] std::io::Error),
 }
 
-#[derive(Debug, Default)]
+struct ScientificState {
+    signature: SystemSignature,
+    descriptor_space: DescriptorSpace,
+    validator: CandidateValidator,
+    census: BasinCensus,
+    catalog: BasinCatalog,
+    evaluate: Arc<FreshEvaluator>,
+}
+
 struct CoordinatorState {
     snapshot_version: u64,
     census_visits: u64,
     active_entries: u32,
     requests: BTreeMap<(u32, u64), CatalogRequest>,
     maximum_sequence: BTreeMap<u32, u64>,
+    scientific: Option<ScientificState>,
+}
+
+impl CoordinatorState {
+    fn new(config: &ServerConfig) -> Result<Self, CatalogServerError> {
+        let scientific = config
+            .scientific
+            .as_ref()
+            .map(|scientific| {
+                Ok(ScientificState {
+                    signature: scientific.signature.clone(),
+                    descriptor_space: scientific.descriptor_space.clone(),
+                    validator: CandidateValidator::new(
+                        scientific.signature.clone(),
+                        scientific.validator.clone(),
+                    ),
+                    census: BasinCensus::new(
+                        scientific.validator.descriptor_dim,
+                        scientific.census_radius,
+                    )
+                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    catalog: BasinCatalog::new(
+                        scientific.catalog_capacity,
+                        scientific.census_radius,
+                        scientific.total_charged_work,
+                    )
+                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    evaluate: Arc::clone(&scientific.evaluate),
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            snapshot_version: 0,
+            census_visits: 0,
+            active_entries: 0,
+            requests: BTreeMap::new(),
+            maximum_sequence: BTreeMap::new(),
+            scientific,
+        })
+    }
 }
 
 /// Running localhost or remote coordinator.
@@ -107,7 +229,7 @@ impl CatalogServer {
         };
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let state = Arc::new(Mutex::new(CoordinatorState::default()));
+        let state = Arc::new(Mutex::new(CoordinatorState::new(&config)?));
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
@@ -233,13 +355,38 @@ fn process_request(
         CatalogOperation::Snapshot
         | CatalogOperation::Sample { .. }
         | CatalogOperation::DescriptorHole { .. } => {}
-        CatalogOperation::RecordVisit { .. } => {
-            let Some(census_visits) = state.census_visits.checked_add(1) else {
-                return rejected(
-                    &state,
+        CatalogOperation::RecordVisit { candidate } => {
+            let census_visits = if let Some(scientific) = state.scientific.as_mut() {
+                let Ok(validated) = validate_candidate(
+                    scientific,
+                    &request.identity,
                     request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                    candidate,
+                ) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
+                else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                observation.total_visits
+            } else {
+                let Some(census_visits) = state.census_visits.checked_add(1) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                census_visits
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
@@ -251,13 +398,54 @@ fn process_request(
             state.census_visits = census_visits;
             state.snapshot_version = snapshot_version;
         }
-        CatalogOperation::OfferCandidate { .. } => {
-            let Some(active_entries) = state.active_entries.checked_add(1) else {
-                return rejected(
-                    &state,
+        CatalogOperation::OfferCandidate { candidate } => {
+            let (census_visits, active_entries) = if let Some(scientific) =
+                state.scientific.as_mut()
+            {
+                let Ok(validated) = validate_candidate(
+                    scientific,
+                    &request.identity,
                     request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
+                    candidate,
+                ) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
+                else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                scientific
+                    .catalog
+                    .admit(observation.basin_id, observation.basin_visits, validated);
+                (
+                    observation.total_visits,
+                    u32::try_from(scientific.catalog.len())
+                        .expect("catalog capacity is checked against u32"),
+                )
+            } else {
+                let Some(active_entries) = state.active_entries.checked_add(1) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                let Some(census_visits) = state.census_visits.checked_add(1) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                (census_visits, active_entries)
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
@@ -266,6 +454,7 @@ fn process_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            state.census_visits = census_visits;
             state.active_entries = active_entries;
             state.snapshot_version = snapshot_version;
         }
@@ -298,6 +487,59 @@ fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
             ProtocolRejection::Malformed
         }
     }
+}
+
+fn validate_candidate(
+    scientific: &ScientificState,
+    identity: &CatalogIdentity,
+    event_sequence: u64,
+    candidate: &CatalogCandidate,
+) -> Result<ValidatedCandidate, ()> {
+    if candidate.producer_replica != identity.replica
+        || candidate.event_sequence != event_sequence
+        || candidate.descriptor_schema_version != scientific.signature.descriptor.version
+    {
+        return Err(());
+    }
+    let recomputed = scientific
+        .descriptor_space
+        .describe(
+            ArrayView1::from(&candidate.coordinates),
+            Some(&scientific.signature.atomic_numbers),
+        )
+        .map_err(|_| ())?;
+    if recomputed.values().len() != candidate.descriptor.len()
+        || recomputed
+            .values()
+            .iter()
+            .zip(&candidate.descriptor)
+            .any(|(expected, actual)| (expected - actual).abs() > 1e-12)
+    {
+        return Err(());
+    }
+    let record = CandidateRecord {
+        signature: scientific.signature.clone(),
+        producer_replica: candidate.producer_replica,
+        coordinates: candidate.coordinates.clone(),
+        cell: candidate.cell,
+        energy: candidate.energy,
+        forces: candidate.forces.clone(),
+        gradient_norm: candidate.gradient_norm,
+        descriptor: candidate.descriptor.clone(),
+        descriptor_schema_version: candidate.descriptor_schema_version,
+        quench_status: if candidate.quench_converged {
+            QuenchStatus::Converged
+        } else {
+            QuenchStatus::Unconverged
+        },
+        charged_work: candidate.charged_work,
+        event_sequence: candidate.event_sequence,
+        seed: candidate.seed,
+    };
+    scientific
+        .validator
+        .validate(&record, |coordinates| (scientific.evaluate)(coordinates))
+        .map_err(|_| ())
 }
 
 fn identity_rejection(

@@ -217,6 +217,22 @@ impl CatalogClient {
         })
     }
 
+    /// Validate, observe, and offer one candidate to the active catalog.
+    pub fn offer_candidate(
+        &mut self,
+        event_sequence: u64,
+        candidate: CatalogCandidate,
+    ) -> Result<MutationReceipt, CatalogClientError> {
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::OfferCandidate { candidate },
+        )?;
+        Ok(MutationReceipt {
+            version: reply.snapshot.version,
+            duplicate: reply.duplicate,
+        })
+    }
+
     fn call(
         &mut self,
         event_sequence: u64,
