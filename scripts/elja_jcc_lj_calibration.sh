@@ -29,8 +29,10 @@ PARTIAL_PAIR=$PAIR_DIR/.lj${N}.${SLURM_JOB_ID}.jsonl
 PARTIAL_SIGNATURE=$SIGNATURE_DIR/.lj${N}.${SLURM_JOB_ID}.json
 BINARY=$ANNEAL_ROOT/target/release/examples/lj_census_calibration
 REFERENCE_URL=https://www-wales.ch.cam.ac.uk/~jon/structures/LJ/points/${N}
+PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 
 [[ -x $BINARY ]] || { echo "missing calibration executable: $BINARY" >&2; exit 1; }
+[[ -x $PYTHON ]] || { echo "missing calibration Python: $PYTHON" >&2; exit 1; }
 [[ -f $REFERENCE ]] || { echo "missing reference: $REFERENCE" >&2; exit 1; }
 [[ ! -e $PAIR_OUTPUT ]] || { echo "immutable output exists: $PAIR_OUTPUT" >&2; exit 1; }
 [[ ! -e $SIGNATURE_OUTPUT ]] || { echo "immutable output exists: $SIGNATURE_OUTPUT" >&2; exit 1; }
@@ -50,8 +52,8 @@ export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
   "$PAIR_COUNT" "$BASE_SEED" "$SIGMA" \
   "$PARTIAL_PAIR" "$PARTIAL_SIGNATURE"
 
-python -m json.tool "$PARTIAL_SIGNATURE" >/dev/null
-python - "$PARTIAL_PAIR" "$PAIR_COUNT" <<'PY'
+"$PYTHON" -m json.tool "$PARTIAL_SIGNATURE" >/dev/null
+"$PYTHON" - "$PARTIAL_PAIR" "$PAIR_COUNT" <<'PY'
 import json
 import sys
 
