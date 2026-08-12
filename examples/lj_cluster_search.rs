@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: sync every slice — win or a new unfilled packing; hole-flow if full"
+                    "  bank explore: sync every slice; leave as soon as the packing is in the archive"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1119,13 +1119,22 @@ fn main() {
     }
 }
 
-#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
+#[cfg(feature = "bank-rpc")]
 fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> bool {
     if wells.is_empty() {
         return false;
     }
     let s = packing_of(x, cfg);
-    let merge = anneal_core::featomic_hop::SOAP_PACK_MERGE;
+    let merge = {
+        #[cfg(feature = "featomic")]
+        {
+            anneal_core::featomic_hop::SOAP_PACK_MERGE
+        }
+        #[cfg(not(feature = "featomic"))]
+        {
+            0.10
+        }
+    };
     wells.iter().any(|w| {
         if w.len() != s.len() || s.is_empty() {
             return false;
@@ -1248,7 +1257,6 @@ fn run_capnp_bank(
     let mut null_starts = 0usize;
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
-    let well_cap = cfg.bias_height * cfg.height_revisits.max(1.0);
     while ledger.remaining() > 0 {
         let snap = client.snapshot().ok();
         if let Some(s) = snap.as_ref() {
@@ -1318,19 +1326,18 @@ fn run_capnp_bank(
                     .sum::<f64>()
                     .sqrt()
                     <= merge;
-            let h = client.bias_of(theirs.view()).unwrap_or(0.0);
             if e < best - 0.05 {
                 start = x;
                 break;
             }
-            if !same && h < well_cap {
+            if !same {
                 start = x;
                 break;
             }
         }
-        let soap = packing_of(start.view(), cfg);
-        let h = client.bias_of(soap.view()).unwrap_or(0.0);
-        if h >= well_cap {
+        // Any shared well on this packing means the class is known.
+        // Waiting for height 5 kept every chain polishing Mackay.
+        if packing_is_known(start.view(), cfg, &wells) {
             null_starts += 1;
             start = leave_known_packing(start.view(), cfg, &wells, ledger, relax, &mut rng);
         }
