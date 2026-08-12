@@ -101,7 +101,7 @@ impl QuenchBoundary {
 
     /// Fresh gradient evidence, present only for a validated minimum.
     pub fn gradient(&self) -> Option<ArrayView1<'_, f64>> {
-        self.gradient.as_ref().map(Array1::view)
+        self.gradient.as_ref().map(|gradient| gradient.view())
     }
 }
 
