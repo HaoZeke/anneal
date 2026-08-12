@@ -1,6 +1,6 @@
 //! Replay-safe aggregate accounting for charged cooperative search work.
 
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::collections::{btree_map::Entry, BTreeMap};
 
 /// Boundary at which one replica records work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +21,8 @@ pub enum ChargeKind {
     Retry,
     /// Communication failure followed by independent local fallback.
     RpcFallback,
+    /// Potential or gradient calls used by proposal machinery outside a quench.
+    AuxiliaryEvaluation,
 }
 
 impl ChargeKind {
@@ -35,6 +37,7 @@ impl ChargeKind {
             Self::FreshValidation => 5,
             Self::Retry => 6,
             Self::RpcFallback => 7,
+            Self::AuxiliaryEvaluation => 8,
         }
     }
 
@@ -49,6 +52,7 @@ impl ChargeKind {
             5 => Some(Self::FreshValidation),
             6 => Some(Self::Retry),
             7 => Some(Self::RpcFallback),
+            8 => Some(Self::AuxiliaryEvaluation),
             _ => None,
         }
     }
@@ -56,7 +60,11 @@ impl ChargeKind {
     const fn carries_potential_calls(self) -> bool {
         matches!(
             self,
-            Self::AcceptedQuench | Self::RejectedQuench | Self::FreshValidation | Self::Retry
+            Self::AcceptedQuench
+                | Self::RejectedQuench
+                | Self::FreshValidation
+                | Self::Retry
+                | Self::AuxiliaryEvaluation
         )
     }
 }
