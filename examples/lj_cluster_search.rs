@@ -9,8 +9,8 @@
 
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
-    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, random_cluster,
-    run_with_bias, optimize_with_gradient,
+    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, optimize_with_gradient,
+    random_cluster, run_with_bias,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -528,7 +528,9 @@ fn main() {
             "  SOAP hop: SOFI C5 residual while fivefold, else featomic packing-mean kick / leftover, l>=5, no 421/fcc"
         );
         #[cfg(feature = "ira")]
-        println!("  IRA: libira_match Hausdorff on the shared bank, SOFI libira_try_mat on the hop");
+        println!(
+            "  IRA: libira_match Hausdorff on the shared bank, SOFI libira_try_mat on the hop"
+        );
         if cfg.keying == Keying::SoapPacking {
             println!(
                 "  SOAP superbasin: mean-SOAP merge {}, adaptive height N_f={}",
@@ -795,9 +797,13 @@ fn main() {
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))
             };
-            let (_, g) = lj(xr.view());
-            if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
-                converged += 1;
+            if led.charge() {
+                let (_, g) = lj(xr.view());
+                if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
+                    converged += 1;
+                } else {
+                    capped += 1;
+                }
             } else {
                 capped += 1;
             }
@@ -812,27 +818,24 @@ fn main() {
             }
             Some(lj(x).1)
         };
-        let mut out = if let Ok(sock) = std::env::var("BANK_RPC") {
+        let catalog_rpc = std::env::var("CATALOG_RPC")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                std::env::var("BANK_RPC")
+                    .ok()
+                    .filter(|value| !value.is_empty())
+            });
+        let mut out = if let Some(sock) = catalog_rpc {
             #[cfg(feature = "bank-rpc")]
             {
-                println!("  capnp bank {sock}");
-                #[cfg(feature = "featomic")]
-                println!(
-                    "  bank SOAP: soap_bank_distance / packing wells merge {}, Dcut fallback {}",
-                    anneal_core::featomic_hop::SOAP_PACK_MERGE,
-                    anneal_core::featomic_hop::SOAP_DCUT_FALLBACK
-                );
-                #[cfg(feature = "ira")]
-                println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
-                println!(
-                    "  catalog: occupant walks, other packing while the ledger is open, leave on stall or Good-Turing"
-                );
-                run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
+                println!("  isolated descriptor catalog {sock}");
+                run_capnp_catalog(&cfg, &mut ledger, &mut relax, &mut grad, seed, &sock)
             }
             #[cfg(not(feature = "bank-rpc"))]
             {
                 let _ = sock;
-                panic!("BANK_RPC set; rebuild with --features bank-rpc");
+                panic!("CATALOG_RPC set; rebuild with --features bank-rpc");
             }
         } else if use_bank {
             {
