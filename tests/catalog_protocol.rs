@@ -56,6 +56,11 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             charged_calls: 3,
             cumulative_charged: 81,
         },
+        CatalogOperation::PopulationSubmit {
+            epoch: 7,
+            candidate: candidate(),
+        },
+        CatalogOperation::PopulationPlan { epoch: 7 },
     ];
     for operation in operations {
         let request = CatalogRequest {
