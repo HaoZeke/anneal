@@ -1,6 +1,6 @@
 use anneal_core::catalog::lj::{
     accepts_calibration_minimum, descriptor_space, fresh_evaluation,
-    parse_reference_coordinates, system_signature, validator_config,
+    parse_reference_coordinates, perturb_reference, system_signature, validator_config,
 };
 use ndarray::ArrayView1;
 
@@ -89,4 +89,24 @@ fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
         8e-6,
         2e-5,
     ));
+}
+
+#[test]
+fn calibration_perturbations_are_seeded_independent_and_centred() {
+    let reference = vec![
+        -1.0, 0.5, 0.25, 0.0, -0.5, 0.5, 1.0, 0.0, -0.75,
+    ];
+    let left = perturb_reference(&reference, 3, 17, 0.01).unwrap();
+    let replay = perturb_reference(&reference, 3, 17, 0.01).unwrap();
+    let right = perturb_reference(&reference, 3, 18, 0.01).unwrap();
+
+    assert_eq!(left, replay);
+    assert_ne!(left, right);
+    for axis in 0..3 {
+        let reference_centroid = (0..3).map(|atom| reference[3 * atom + axis]).sum::<f64>() / 3.0;
+        let perturbed_centroid = (0..3).map(|atom| left[3 * atom + axis]).sum::<f64>() / 3.0;
+        assert!((perturbed_centroid - reference_centroid).abs() < 1e-14);
+    }
+    assert!(perturb_reference(&reference, 3, 19, 0.0).is_err());
+    assert!(perturb_reference(&reference[..6], 3, 19, 0.01).is_err());
 }
