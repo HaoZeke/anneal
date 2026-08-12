@@ -247,6 +247,17 @@ pub struct SelectionCoefficients {
     pub log_weight_clip: f64,
 }
 
+impl Default for SelectionCoefficients {
+    fn default() -> Self {
+        Self {
+            energy: 1.0,
+            novelty: 0.8,
+            scarcity: 0.6,
+            log_weight_clip: 4.0,
+        }
+    }
+}
+
 impl SelectionCoefficients {
     fn validate(self) -> Result<(), ReconfigurationError> {
         for (field, value) in [
@@ -393,6 +404,11 @@ impl SynchronousPopulation {
             submissions: BTreeMap::new(),
             completed: BTreeMap::new(),
         })
+    }
+
+    /// Epoch currently accepting one submission from every replica.
+    pub fn open_epoch(&self) -> u64 {
+        self.open_epoch
     }
 
     /// Submit one immutable replica representative to an epoch barrier.

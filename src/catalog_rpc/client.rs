@@ -11,7 +11,8 @@ use capnp::serialize;
 use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
     CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION,
-    PolicyState, ProtocolError, ProtocolRejection, decode_reply_reader, encode_request,
+    PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection, decode_reply_reader,
+    encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -359,6 +360,30 @@ impl CatalogClient {
         }
     }
 
+    /// Submit one validated representative to a synchronous population epoch.
+    pub fn submit_population(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+        candidate: CatalogCandidate,
+    ) -> Result<PopulationEpochState, CatalogClientError> {
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::PopulationSubmit { epoch, candidate },
+        )?;
+        population_epoch_payload(reply.payload, "population submission")
+    }
+
+    /// Poll a synchronous population epoch without resubmitting evidence.
+    pub fn population_plan(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+    ) -> Result<PopulationEpochState, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::PopulationPlan { epoch })?;
+        population_epoch_payload(reply.payload, "population plan")
+    }
+
     fn call(
         &mut self,
         event_sequence: u64,
@@ -389,5 +414,21 @@ impl CatalogClient {
             }
             CatalogReply::Rejected { reason, .. } => Err(CatalogClientError::Rejected(reason)),
         }
+    }
+}
+
+fn population_epoch_payload(
+    payload: AcceptedPayload,
+    operation: &str,
+) -> Result<PopulationEpochState, CatalogClientError> {
+    match payload {
+        AcceptedPayload::PopulationEpoch(state) => Ok(state),
+        AcceptedPayload::None
+        | AcceptedPayload::Candidate(_)
+        | AcceptedPayload::DescriptorHole(_)
+        | AcceptedPayload::PolicyState(_) => Err(ProtocolError::Malformed(format!(
+            "{operation} returned an incompatible payload"
+        ))
+        .into()),
     }
 }
