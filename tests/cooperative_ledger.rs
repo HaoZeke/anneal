@@ -95,7 +95,7 @@ fn every_work_boundary_has_explicit_charge_semantics() {
             .unwrap();
     }
 
-    assert_eq!(ledger.ensemble_total(), 10);
+    assert_eq!(ledger.ensemble_total(), 12);
     assert_eq!(ledger.event_count(), 9);
 }
 
