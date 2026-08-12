@@ -293,7 +293,11 @@ fn descriptor_pullback_contracts_the_actual_nonlinear_residual() {
     let moved = descriptor_space
         .describe(moved_coordinates.view(), None)
         .unwrap();
-    let initial_residual = desired.iter().map(|value| value * value).sum::<f64>().sqrt();
+    let initial_residual = desired
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
     let final_residual = moved
         .values()
         .iter()
