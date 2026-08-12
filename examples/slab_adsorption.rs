@@ -65,11 +65,9 @@ fn displace_adsorbate(
     for v in c.iter_mut() {
         *v /= nfree;
     }
-    let z_top = species
-        .iter()
-        .enumerate()
-        .filter(|(i, z)| *z != 1 && !free.contains(i))
-        .map(|(i, _)| base[3 * i + 2])
+    let z_top = (0..species.len())
+        .filter(|&i| species[i] != 1 && !free.contains(&i))
+        .map(|i| base[3 * i + 2])
         .fold(f64::NEG_INFINITY, f64::max);
     let lx = box_[0].abs().max(1.0);
     let ly = box_[4].abs().max(1.0);
