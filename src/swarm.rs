@@ -85,7 +85,16 @@ pub fn swallow_role(
     Role::Explorer
 }
 
-/// Combine whale phase and swallow role into one catalog action.
+/// Slices without a personal-best improve before a hard besiege.
+///
+/// Harris Hawks (Heidari et al. 2019) switch from a soft close on the
+/// rabbit to a hard besiege when the escape energy is spent. ABC's
+/// scout does the same after a limit. On a packing catalog that is
+/// Good-Turing not-yet-saturated, this is what leaves an ico walk
+/// that is still finding isomers.
+pub const STALL_BESIEGE: u32 = 8;
+
+/// Combine whale phase, swallow role, SHADE personal best, and HHO stall.
 pub fn decide(
     progress: f64,
     my_energy: f64,
@@ -94,7 +103,43 @@ pub fn decide(
     catalog_saturated: bool,
     on_raised_packing: bool,
 ) -> Decision {
+    decide_with_stall(
+        progress,
+        my_energy,
+        my_energy,
+        bank_best,
+        bank_size,
+        catalog_saturated,
+        on_raised_packing,
+        0,
+    )
+}
+
+/// Full swarm decision.
+///
+/// `pbest` is this chain's own deepest quench (SHADE / DE / PSO).
+/// `stall` is slices since that personal best last moved. A stall
+/// of [`STALL_BESIEGE`] is a hard besiege: leave, do not pull gbest.
+pub fn decide_with_stall(
+    progress: f64,
+    my_energy: f64,
+    pbest: f64,
+    bank_best: f64,
+    bank_size: usize,
+    catalog_saturated: bool,
+    on_raised_packing: bool,
+    stall: u32,
+) -> Decision {
     let phase = whale_phase(progress);
+    if stall >= STALL_BESIEGE && bank_size > 0 {
+        return Decision {
+            role: Role::Aimless,
+            phase,
+            pull: false,
+            win_only: true,
+            leave: true,
+        };
+    }
     let role = swallow_role(
         my_energy,
         bank_best,
@@ -117,13 +162,19 @@ pub fn decide(
             win_only: true,
             leave: true,
         },
-        Role::Explorer => Decision {
-            role,
-            phase,
-            pull: true,
-            win_only: phase == Phase::Encircle,
-            leave: false,
-        },
+        Role::Explorer => {
+            // Ride a live personal best (SHADE current-to-pbest). Do
+            // not restamp onto the catalog while this chain is still
+            // descending its own trajectory.
+            let riding_pbest = stall == 0 && pbest.is_finite() && my_energy <= pbest + 1e-12;
+            Decision {
+                role,
+                phase,
+                pull: !riding_pbest,
+                win_only: phase == Phase::Encircle,
+                leave: false,
+            }
+        }
     }
 }
 
@@ -169,5 +220,20 @@ mod tests {
         assert_eq!(late.role, Role::Explorer);
         assert!(late.pull);
         assert!(late.win_only);
+    }
+
+    #[test]
+    fn a_stalled_explorer_hard_besieges() {
+        let d = decide_with_stall(0.2, -396.28, -396.28, -396.28, 10, false, false, 8);
+        assert_eq!(d.role, Role::Aimless);
+        assert!(d.leave);
+        assert!(!d.pull);
+    }
+
+    #[test]
+    fn a_descending_explorer_rides_pbest() {
+        let d = decide_with_stall(0.2, -390.0, -390.0, -396.28, 5, false, false, 0);
+        assert_eq!(d.role, Role::Explorer);
+        assert!(!d.pull);
     }
 }
