@@ -10,18 +10,27 @@ struct CatalogIdentity {
   signatureDigest @3 :Data;
 }
 
-struct CensusObservation {
-  basinId @0 :UInt64;
-  created @1 :Bool;
-  descriptor @2 :List(Float64);
+struct CandidateRecord {
+  producerReplica @0 :UInt32;
+  coordinates @1 :List(Float64);
+  cell :union {
+    absent @2 :Void;
+    present @3 :List(Float64);
+  }
+  energy @4 :Float64;
+  forces @5 :List(Float64);
+  gradientNorm @6 :Float64;
+  descriptor @7 :List(Float64);
+  descriptorSchemaVersion @8 :UInt32;
+  quenchStatus @9 :QuenchStatus;
+  chargedWork @10 :UInt64;
+  eventSequence @11 :UInt64;
+  seed @12 :UInt64;
 }
 
-struct CandidateRecord {
-  basinId @0 :UInt64;
-  energy @1 :Float64;
-  coordinates @2 :List(Float64);
-  descriptor @3 :List(Float64);
-  provenance @4 :Text;
+enum QuenchStatus {
+  unconverged @0;
+  converged @1;
 }
 
 struct LedgerEvent {
@@ -38,7 +47,7 @@ struct CatalogRequest {
 
   operation :union {
     snapshot @4 :Void;
-    recordVisit @5 :CensusObservation;
+    recordVisit @5 :CandidateRecord;
     offerCandidate @6 :CandidateRecord;
     sample @7 :UInt64;
     descriptorHole @8 :UInt32;
