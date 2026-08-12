@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: invert a SOAP-archive hole through ∂μ/∂x"
+                    "  bank explore: own chain; adopt only a deeper shared member; hole-flow if the packing is full"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1281,19 +1281,26 @@ fn run_capnp_bank(
             .as_ref()
             .map(|s| s.wells.iter().map(|(w, _)| w.clone()).collect())
             .unwrap_or_default();
-        let start = match client.sample(rng.random()) {
-            Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => {
-                let soap = packing_of(x.view(), cfg);
-                let h = client.bias_of(soap.view()).unwrap_or(0.0);
-                if h >= well_cap {
-                    null_starts += 1;
-                    leave_known_packing(x.view(), cfg, &wells, ledger, relax, &mut rng)
-                } else {
-                    x
-                }
-            }
-            _ => random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng),
+        // One 4e6 walk. The bank publishes wells and a deeper member if
+        // another chain found one. Sampling the bank as the start every
+        // slice put every chain back on the ico shelf; leftover rec
+        // without that reset is the run that actually hit Marks.
+        let mut start = if let Some(bx) = best_state.as_ref() {
+            bx.clone()
+        } else {
+            random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng)
         };
+        if let Ok(Some((e, x))) = client.sample(rng.random()) {
+            if x.len() == 3 * cfg.n_points && e < best - 0.05 {
+                start = x;
+            }
+        }
+        let soap = packing_of(start.view(), cfg);
+        let h = client.bias_of(soap.view()).unwrap_or(0.0);
+        if h >= well_cap {
+            null_starts += 1;
+            start = leave_known_packing(start.view(), cfg, &wells, ledger, relax, &mut rng);
+        }
         let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
         let out = run_with_bias(
             cfg,
