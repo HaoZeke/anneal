@@ -13,6 +13,9 @@ use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
 use eindir_core::gradient::Gradient;
 use ndarray::{Array1, ArrayView1};
+use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use std::io::Write;
 use std::path::Path;
 
@@ -32,6 +35,62 @@ fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     let boxl = frame.header.boxl;
     let box_ = [boxl[0], 0.0, 0.0, 0.0, boxl[1], 0.0, 0.0, 0.0, boxl[2]];
     (Array1::from(pos), species, seeds, box_)
+}
+
+/// Place the free adsorbate at a seed-dependent site above the slab.
+///
+/// The con file is already a minimum. Eight seeds from that geometry
+/// all report the start energy and never search. A random in-plane
+/// site and height is a start the quench has to walk back from, so
+/// first-encounter charged evaluations are a real comparison.
+fn displace_adsorbate(
+    base: &Array1<f64>,
+    species: &[u32],
+    free: &[usize],
+    box_: [f64; 9],
+    seed: u64,
+) -> Array1<f64> {
+    if free.is_empty() {
+        return base.clone();
+    }
+    let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x9E37).wrapping_add(3));
+    let mut x = base.clone();
+    let nfree = free.len() as f64;
+    let mut c = [0.0; 3];
+    for &i in free {
+        for k in 0..3 {
+            c[k] += x[3 * i + k];
+        }
+    }
+    for v in c.iter_mut() {
+        *v /= nfree;
+    }
+    let z_top = species
+        .iter()
+        .enumerate()
+        .filter(|(i, &z)| z != 1 && !free.contains(i))
+        .map(|(i, _)| base[3 * i + 2])
+        .fold(f64::NEG_INFINITY, f64::max);
+    let lx = box_[0].abs().max(1.0);
+    let ly = box_[4].abs().max(1.0);
+    let target = [
+        rng.random::<f64>() * lx,
+        rng.random::<f64>() * ly,
+        z_top + 2.0 + rng.random::<f64>() * 5.0,
+    ];
+    let ang = rng.random::<f64>() * 2.0 * std::f64::consts::PI;
+    let (sa, ca) = ang.sin_cos();
+    for &i in free {
+        let rel = [
+            x[3 * i] - c[0],
+            x[3 * i + 1] - c[1],
+            x[3 * i + 2] - c[2],
+        ];
+        x[3 * i] = target[0] + ca * rel[0] - sa * rel[1];
+        x[3 * i + 1] = target[1] + sa * rel[0] + ca * rel[1];
+        x[3 * i + 2] = target[2] + rel[2];
+    }
+    x
 }
 
 fn symbol(z: u32) -> &'static str {
@@ -136,8 +195,9 @@ fn main() {
         seed0 + seeds
     );
     for seed in seed0..seed0 + seeds {
+        let x0 = displace_adsorbate(&base_x, &species, &free_seeds, box_, seed);
         let mut ledger = Ledger::new(budget);
-        let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, base_x.view(), seed);
+        let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed);
         let checked = verify(&obj, &out);
         println!(
             "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}  arm {}",
