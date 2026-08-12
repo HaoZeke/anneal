@@ -2,7 +2,7 @@
 
 pub mod pullback;
 
-use crate::soap::{SoapSpec, local_nu3_z, local_spectra_z};
+use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
 use ndarray::{Array2, ArrayView1};
 
 const NORMALIZATION_SCHEMA: &str = "l2-v1";
@@ -381,6 +381,115 @@ impl DescriptorSpace {
             minus[column] = coordinates[column];
         }
         Ok(jacobian)
+    }
+
+    /// Evaluate the analytic Cartesian Jacobian of every normalized block.
+    pub fn jacobian_analytic(
+        &self,
+        coordinates: ArrayView1<f64>,
+        species: Option<&[u32]>,
+    ) -> Result<Array2<f64>, DescriptorError> {
+        let descriptor = self.describe(coordinates, species)?;
+        let coordinate_dimension = coordinates.len();
+        let mut jacobian = Array2::zeros((descriptor.values.len(), coordinate_dimension));
+        let mut output_offset = 0;
+        for block in self.schema.blocks.iter().copied() {
+            let (raw, raw_jacobian) = match block.kind {
+                DescriptorBlockKind::SoapMean => {
+                    let local = local_spectra_z(coordinates, block.soap, species);
+                    let local_jacobian = jacobian_z(coordinates, block.soap, species);
+                    mean_with_jacobian(&local, 0, &local_jacobian, local.ncols())
+                }
+                DescriptorBlockKind::SoapVariance => {
+                    let local = local_spectra_z(coordinates, block.soap, species);
+                    let local_jacobian = jacobian_z(coordinates, block.soap, species);
+                    variance_with_jacobian(&local, &local_jacobian)
+                }
+                DescriptorBlockKind::AceNu3Mean => {
+                    let local = local_nu3_z(coordinates, block.soap, species);
+                    let soap_dimension = block.soap.feat_dim(species);
+                    let local_jacobian = jacobian_ace(coordinates, block.soap, species);
+                    mean_with_jacobian(
+                        &local,
+                        soap_dimension,
+                        &local_jacobian,
+                        local.ncols() - soap_dimension,
+                    )
+                }
+            };
+            debug_assert_eq!(raw_jacobian.ncols(), coordinate_dimension);
+            debug_assert_eq!(raw_jacobian.nrows(), raw.len());
+            write_normalized_jacobian(&raw, &raw_jacobian, &mut jacobian, output_offset);
+            output_offset += raw.len();
+        }
+        Ok(jacobian)
+    }
+}
+
+fn mean_with_jacobian(
+    local: &Array2<f64>,
+    local_start: usize,
+    local_jacobian: &Array2<f64>,
+    jacobian_stride: usize,
+) -> (Vec<f64>, Array2<f64>) {
+    let atoms = local.nrows();
+    let dimension = local.ncols() - local_start;
+    let coordinate_dimension = local_jacobian.ncols();
+    let raw = column_mean(local, local_start);
+    let mut jacobian = Array2::zeros((dimension, coordinate_dimension));
+    for atom in 0..atoms {
+        for row in 0..dimension {
+            for column in 0..coordinate_dimension {
+                jacobian[[row, column]] +=
+                    local_jacobian[[atom * jacobian_stride + row, column]] / atoms as f64;
+            }
+        }
+    }
+    (raw, jacobian)
+}
+
+fn variance_with_jacobian(
+    local: &Array2<f64>,
+    local_jacobian: &Array2<f64>,
+) -> (Vec<f64>, Array2<f64>) {
+    let atoms = local.nrows();
+    let dimension = local.ncols();
+    let coordinate_dimension = local_jacobian.ncols();
+    let mean = column_mean(local, 0);
+    let raw = column_variance(local);
+    let mut jacobian = Array2::zeros((dimension, coordinate_dimension));
+    for atom in 0..atoms {
+        for row in 0..dimension {
+            let scale = 2.0 * (local[[atom, row]] - mean[row]) / atoms as f64;
+            for column in 0..coordinate_dimension {
+                jacobian[[row, column]] += scale * local_jacobian[[atom * dimension + row, column]];
+            }
+        }
+    }
+    (raw, jacobian)
+}
+
+fn write_normalized_jacobian(
+    raw: &[f64],
+    raw_jacobian: &Array2<f64>,
+    output: &mut Array2<f64>,
+    offset: usize,
+) {
+    let norm_squared = raw.iter().map(|value| value * value).sum::<f64>();
+    if norm_squared == 0.0 {
+        return;
+    }
+    let norm = norm_squared.sqrt();
+    for column in 0..raw_jacobian.ncols() {
+        let radial_derivative = raw
+            .iter()
+            .enumerate()
+            .map(|(row, value)| value * raw_jacobian[[row, column]])
+            .sum::<f64>();
+        for row in 0..raw.len() {
+            output[[offset + row, column]] = raw_jacobian[[row, column]] / norm
+                - raw[row] * radial_derivative / (norm_squared * norm);
+        }
     }
 }
 
