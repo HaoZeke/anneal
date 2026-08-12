@@ -251,6 +251,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             "\n  \"calibration_reference_gradient_norm\": {:.17e},",
             "\n  \"calibration_reference_ira_distance\": {:.17e},",
             "\n  \"calibration_reference_evaluations\": {},\n  \"pair_count\": {},",
+            "\n  \"identity_contract\": {{\"energy_abs_tolerance\": 1e-7,",
+            "\"gradient_norm_tolerance\": 1e-5,\"ira_distance_tolerance\": 1e-4}},",
             "\n  \"attempt_count\": {},\n  \"quench_rejections\": {},",
             "\n  \"identity_rejections\": {},\n  \"base_seed\": {},",
             "\n  \"perturbation_sigma\": {:.17e}\n}}"
