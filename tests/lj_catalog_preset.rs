@@ -1,5 +1,6 @@
 use anneal_core::catalog::lj::{
-    descriptor_space, fresh_evaluation, system_signature, validator_config,
+    accepts_calibration_minimum, descriptor_space, fresh_evaluation,
+    parse_reference_coordinates, system_signature, validator_config,
 };
 use ndarray::ArrayView1;
 
@@ -40,4 +41,52 @@ fn invalid_lj_sizes_and_reference_dimensions_are_rejected() {
     assert!(system_signature(0).is_err());
     assert!(fresh_evaluation(3, &[0.0; 6]).is_err());
     assert!(validator_config(&[0.0; 5], 8).is_err());
+}
+
+#[test]
+fn development_reference_parser_requires_one_finite_xyz_row_per_site() {
+    let coordinates = parse_reference_coordinates(
+        "1.0 2.0 3.0\n-1.0 -2.0 -3.0\n",
+        2,
+    )
+    .unwrap();
+    assert_eq!(coordinates, vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0]);
+
+    assert!(parse_reference_coordinates("1 2 3 4\n0 0 0\n", 2).is_err());
+    assert!(parse_reference_coordinates("1 2 inf\n0 0 0\n", 2).is_err());
+    assert!(parse_reference_coordinates("1 2 3\n", 2).is_err());
+}
+
+#[test]
+fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
+    assert!(accepts_calibration_minimum(
+        -397.492331,
+        -397.492331 + 5e-8,
+        8e-6,
+        2e-5,
+    ));
+    assert!(!accepts_calibration_minimum(
+        -397.492331,
+        -397.492331 + 2e-6,
+        8e-6,
+        2e-5,
+    ));
+    assert!(!accepts_calibration_minimum(
+        -397.492331,
+        -397.492331,
+        2e-5,
+        2e-5,
+    ));
+    assert!(!accepts_calibration_minimum(
+        -397.492331,
+        -397.492331,
+        8e-6,
+        2e-4,
+    ));
+    assert!(!accepts_calibration_minimum(
+        -397.492331,
+        f64::NAN,
+        8e-6,
+        2e-5,
+    ));
 }
