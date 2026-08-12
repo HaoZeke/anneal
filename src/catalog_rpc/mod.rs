@@ -7,14 +7,14 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogRelation as WireCatalogRelation, QuenchStatus as WireQuenchStatus, RejectionKind,
-    accepted_reply, candidate_record, catalog_reply, catalog_request,
+    accepted_reply, candidate_record, catalog_reply, catalog_request, population_epoch_reply,
 };
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 4;
+pub const PROTOCOL_VERSION: u16 = 5;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +102,18 @@ pub enum CatalogOperation {
         charged_calls: u64,
         /// Replica counter including this event.
         cumulative_charged: u64,
+    },
+    /// Submit one validated representative to a synchronous population epoch.
+    PopulationSubmit {
+        /// Charged-work synchronization epoch.
+        epoch: u64,
+        /// Representative requiring receiving-side scientific validation.
+        candidate: CatalogCandidate,
+    },
+    /// Poll an immutable synchronous population plan.
+    PopulationPlan {
+        /// Charged-work synchronization epoch.
+        epoch: u64,
     },
 }
 
@@ -205,6 +217,42 @@ pub struct PolicyState {
     pub aggregate_budget: u64,
 }
 
+/// Replica-addressed fixed-population plan returned by the coordinator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopulationPlan {
+    /// Charged-work synchronization epoch.
+    pub epoch: u64,
+    /// Destination replicas in stable order.
+    pub destinations: Vec<u32>,
+    /// Parent replica paired with every destination.
+    pub parents: Vec<u32>,
+    /// Normalized source weights in stable replica order.
+    pub weights: Vec<f64>,
+    /// Kish effective sample size before resampling.
+    pub effective_sample_size: f64,
+    /// Number of represented source replicas.
+    pub unique_parents: u32,
+    /// Largest realized offspring family.
+    pub max_family_size: u32,
+    /// Population variance of offspring counts.
+    pub offspring_variance: f64,
+    /// Validated parent record paired with every destination.
+    pub parent_candidates: Vec<CatalogCandidate>,
+}
+
+/// Barrier state for one synchronous population epoch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopulationEpochState {
+    /// Charged-work synchronization epoch.
+    pub epoch: u64,
+    /// Unique replica submissions received.
+    pub submitted: u32,
+    /// Complete population size required.
+    pub required: u32,
+    /// Immutable plan once every replica has submitted.
+    pub plan: Option<PopulationPlan>,
+}
+
 /// Optional scientific payload returned by an accepted operation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcceptedPayload {
@@ -216,6 +264,8 @@ pub enum AcceptedPayload {
     DescriptorHole(DescriptorHoleProposal),
     /// Exact census and active-catalog policy evidence.
     PolicyState(PolicyState),
+    /// Pending barrier state or a complete synchronous population plan.
+    PopulationEpoch(PopulationEpochState),
 }
 
 /// Accepted coordinator response.
@@ -354,6 +404,14 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             ledger.set_charged_calls(*charged_calls);
             ledger.set_cumulative_charged(*cumulative_charged);
         }
+        CatalogOperation::PopulationSubmit { epoch, candidate } => {
+            let mut submission = operation.init_population_submit();
+            submission.set_epoch(*epoch);
+            fill_candidate(submission.init_candidate(), candidate);
+        }
+        CatalogOperation::PopulationPlan { epoch } => {
+            operation.init_population_plan().set_epoch(*epoch);
+        }
     }
     let mut bytes = Vec::new();
     serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
@@ -421,6 +479,19 @@ pub(crate) fn decode_request_reader(
                 cumulative_charged: ledger.get_cumulative_charged(),
             }
         }
+        catalog_request::operation::PopulationSubmit(submission) => {
+            let submission = submission.map_err(wire_error)?;
+            CatalogOperation::PopulationSubmit {
+                epoch: submission.get_epoch(),
+                candidate: read_candidate(submission.get_candidate().map_err(wire_error)?)?,
+            }
+        }
+        catalog_request::operation::PopulationPlan(plan) => {
+            let plan = plan.map_err(wire_error)?;
+            CatalogOperation::PopulationPlan {
+                epoch: plan.get_epoch(),
+            }
+        }
     };
     Ok(CatalogRequest {
         protocol_version,
@@ -475,6 +546,42 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_aggregate_charged(state.aggregate_charged);
                     output.set_aggregate_budget(state.aggregate_budget);
                 }
+                AcceptedPayload::PopulationEpoch(state) => {
+                    let mut output = payload.init_population_epoch();
+                    output.set_epoch(state.epoch);
+                    output.set_submitted(state.submitted);
+                    output.set_required(state.required);
+                    let mut result = output.init_result();
+                    if let Some(plan) = &state.plan {
+                        let mut wire = result.init_ready();
+                        wire.set_epoch(plan.epoch);
+                        fill_u32(
+                            wire.reborrow()
+                                .init_destinations(plan.destinations.len() as u32),
+                            &plan.destinations,
+                        );
+                        fill_u32(
+                            wire.reborrow().init_parents(plan.parents.len() as u32),
+                            &plan.parents,
+                        );
+                        fill_f64(
+                            wire.reborrow().init_weights(plan.weights.len() as u32),
+                            &plan.weights,
+                        );
+                        wire.set_effective_sample_size(plan.effective_sample_size);
+                        wire.set_unique_parents(plan.unique_parents);
+                        wire.set_max_family_size(plan.max_family_size);
+                        wire.set_offspring_variance(plan.offspring_variance);
+                        let mut candidates = wire
+                            .reborrow()
+                            .init_parent_candidates(plan.parent_candidates.len() as u32);
+                        for (index, candidate) in plan.parent_candidates.iter().enumerate() {
+                            fill_candidate(candidates.reborrow().get(index as u32), candidate);
+                        }
+                    } else {
+                        result.set_pending(());
+                    }
+                }
             }
         }
         CatalogReply::Rejected {
@@ -524,6 +631,40 @@ pub(crate) fn decode_reply_reader(
                         relation: state.get_relation().map_err(wire_error)?.into(),
                         aggregate_charged: state.get_aggregate_charged(),
                         aggregate_budget: state.get_aggregate_budget(),
+                    })
+                }
+                accepted_reply::payload::PopulationEpoch(state) => {
+                    let state = state.map_err(wire_error)?;
+                    let plan = match state.get_result().which().map_err(wire_error)? {
+                        population_epoch_reply::result::Pending(()) => None,
+                        population_epoch_reply::result::Ready(plan) => {
+                            let plan = plan.map_err(wire_error)?;
+                            let candidates = plan.get_parent_candidates().map_err(wire_error)?;
+                            let mut parent_candidates =
+                                Vec::with_capacity(candidates.len() as usize);
+                            for index in 0..candidates.len() {
+                                parent_candidates.push(read_candidate(candidates.get(index))?);
+                            }
+                            Some(PopulationPlan {
+                                epoch: plan.get_epoch(),
+                                destinations: list_u32(
+                                    plan.get_destinations().map_err(wire_error)?,
+                                ),
+                                parents: list_u32(plan.get_parents().map_err(wire_error)?),
+                                weights: list_f64(plan.get_weights().map_err(wire_error)?),
+                                effective_sample_size: plan.get_effective_sample_size(),
+                                unique_parents: plan.get_unique_parents(),
+                                max_family_size: plan.get_max_family_size(),
+                                offspring_variance: plan.get_offspring_variance(),
+                                parent_candidates,
+                            })
+                        }
+                    };
+                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch: state.get_epoch(),
+                        submitted: state.get_submitted(),
+                        required: state.get_required(),
+                        plan,
                     })
                 }
             };
@@ -623,6 +764,12 @@ fn fill_f64(mut output: capnp::primitive_list::Builder<'_, f64>, values: &[f64])
     }
 }
 
+fn fill_u32(mut output: capnp::primitive_list::Builder<'_, u32>, values: &[u32]) {
+    for (index, value) in values.iter().copied().enumerate() {
+        output.set(index as u32, value);
+    }
+}
+
 fn fill_candidate(mut output: candidate_record::Builder<'_>, candidate: &CatalogCandidate) {
     output.set_producer_replica(candidate.producer_replica);
     fill_f64(
@@ -691,6 +838,10 @@ fn read_candidate(input: candidate_record::Reader<'_>) -> Result<CatalogCandidat
 }
 
 fn list_f64(input: capnp::primitive_list::Reader<'_, f64>) -> Vec<f64> {
+    input.iter().collect()
+}
+
+fn list_u32(input: capnp::primitive_list::Reader<'_, u32>) -> Vec<u32> {
     input.iter().collect()
 }
 
