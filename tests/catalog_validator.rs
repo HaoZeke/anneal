@@ -153,3 +153,21 @@ fn descriptor_schema_version_is_checked_before_engine_evaluation() {
         },
     );
 }
+
+#[test]
+fn fresh_force_dimension_is_rejected() {
+    let result = validator(signature()).validate(&candidate(signature()), |_| {
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 5],
+        })
+    });
+
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::FreshForceDimension {
+            expected: 6,
+            actual: 5,
+        }
+    );
+}
