@@ -254,27 +254,12 @@ impl Inner {
             return None;
         }
         let merge = pack_merge();
-        // One packing in the whole bank: do not restamp it. The client
-        // treats None as a random start. First-bank even-sample was the
-        // ico restamp: 30 Mackay seeds, every other start on the shelf.
-        let distinct = {
-            let mut reps: Vec<&Array1<f64>> = Vec::new();
-            for s in &self.soaps {
-                if s.is_empty() {
-                    continue;
-                }
-                if !reps.iter().any(|r| soap_l2(s.view(), r.view()) <= merge) {
-                    reps.push(s);
-                }
-            }
-            reps.len()
-        };
-        if distinct <= 1 {
-            return None;
-        }
         // Shared GP over packing SOAP. EI says where to go (unvisited
         // morphology scores on variance). UCB on well height is the
-        // fallback before three distinct observations.
+        // fallback before three distinct observations. A raised well is
+        // skipped so another chain searches an open class. If every
+        // class is raised the client still gets a member and hops in
+        // the SOAP null of the archive — not a random cluster.
         let use_ei = self.funnel.len() >= 3;
         let e_best = self
             .bank
@@ -312,9 +297,6 @@ impl Inner {
                 quality + bonus
             };
             let jitter = ((seed.wrapping_mul(i as u64 + 1)) % 1000) as f64 * 1e-6;
-            // MCAMC: a raised well is absorbing. Do not start another
-            // slice inside it; the exit is a different packing or a
-            // random draw (client treats None as that escape).
             if h >= SUPERBASIN_HEIGHT {
                 continue;
             }
@@ -324,7 +306,22 @@ impl Inner {
             }
         }
         if best_s == f64::NEG_INFINITY {
-            return None;
+            // Every class is raised. Hand back the deepest member; the
+            // client archive-null hop leaves that packing.
+            let i = self
+                .bank
+                .members()
+                .iter()
+                .enumerate()
+                .min_by(|a, b| {
+                    a.1.energy
+                        .partial_cmp(&b.1.energy)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            let m = &self.bank.members()[i];
+            return Some((m.energy, m.state.clone()));
         }
         self.bank.mark_used(best_i);
         let m = &self.bank.members()[best_i];
