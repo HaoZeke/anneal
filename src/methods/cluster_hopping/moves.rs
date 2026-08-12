@@ -1324,8 +1324,8 @@ impl MoveKernel<f64> for ClusterProposal {
 #[cfg(test)]
 mod move_scaling_tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     /// The escape scale has to reach the step, which is the whole mechanism.
     /// It did not: the amplitude moves ignored the temperature argument, so a

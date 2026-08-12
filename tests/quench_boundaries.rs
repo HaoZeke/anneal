@@ -30,7 +30,10 @@ fn quench_boundaries_partition_charged_relaxation_work() {
     assert_eq!(boundaries[1].status(), QuenchStatus::Rejected);
     assert_eq!(boundaries[1].charged_calls(), 5);
     assert_eq!(
-        boundaries.iter().map(|event| event.charged_calls()).sum::<usize>(),
+        boundaries
+            .iter()
+            .map(|event| event.charged_calls())
+            .sum::<usize>(),
         ledger.spent()
     );
 }
@@ -38,11 +41,6 @@ fn quench_boundaries_partition_charged_relaxation_work() {
 #[test]
 fn an_uncharged_relaxation_is_not_a_quench_boundary() {
     let mut ledger = Ledger::new(3);
-    assert!(!ledger.record_quench_boundary(
-        ledger.spent(),
-        0.0,
-        array![0.0, 0.0, 0.0],
-        None,
-    ));
+    assert!(!ledger.record_quench_boundary(ledger.spent(), 0.0, array![0.0, 0.0, 0.0], None,));
     assert!(ledger.quench_boundaries().is_empty());
 }
