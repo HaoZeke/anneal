@@ -1258,7 +1258,20 @@ fn run_capnp_bank(
     let mut cfg = cfg.clone();
     cfg.budget_window = true;
     let cfg = &cfg;
-    let mut client = BankClient::connect(sock).unwrap_or_else(|e| panic!("BANK_RPC {sock}: {e}"));
+    // Kubelet: the walk owns the hop. The bank is optional. A refused
+    // connect (worker moved, login bank dead) is a solo leftover run.
+    let mut client = match BankClient::connect(sock) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            println!("  bank {sock} down ({e}); own walk");
+            None
+        }
+    };
+    let sync_every = std::env::var("BANK_SYNC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8usize)
+        .max(1);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(cfg, &Array1::zeros(0)),
         cfg.merge_radius,
@@ -1280,43 +1293,50 @@ fn run_capnp_bank(
     let mut null_starts = 0usize;
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
+    let mut well_pairs: Vec<(Array1<f64>, f64)> = Vec::new();
     while ledger.remaining() > 0 {
-        let snap = client.snapshot().ok();
-        if let Some(s) = snap.as_ref() {
-            for (soap, h) in &s.wells {
-                bias.import_well(soap.clone(), *h);
-            }
-            #[cfg(feature = "featomic")]
-            anneal_core::featomic_hop::set_packing_archive(
-                s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
-            );
-            if s.size >= 2 {
-                let sched = schedule.get_or_insert_with(|| {
-                    let floor = {
+        let pull = slices == 0 || slices.is_multiple_of(sync_every);
+        if pull && client.is_none() {
+            client = BankClient::connect(sock).ok();
+        }
+        if pull {
+            if let Some(c) = client.as_mut() {
+                match c.snapshot() {
+                    Ok(s) => {
+                        for (soap, h) in &s.wells {
+                            bias.import_well(soap.clone(), *h);
+                        }
                         #[cfg(feature = "featomic")]
-                        {
-                            anneal_core::featomic_hop::SOAP_PACK_MERGE
+                        anneal_core::featomic_hop::set_packing_archive(
+                            s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
+                        );
+                        well_pairs = s.wells.clone();
+                        if s.size >= 2 {
+                            let sched = schedule.get_or_insert_with(|| {
+                                let floor = {
+                                    #[cfg(feature = "featomic")]
+                                    {
+                                        anneal_core::featomic_hop::SOAP_PACK_MERGE
+                                    }
+                                    #[cfg(not(feature = "featomic"))]
+                                    {
+                                        0.10
+                                    }
+                                };
+                                DiversityAnnealer::from_initial(s.dcut.max(floor))
+                                    .with_final_fraction(0.4)
+                            });
+                            let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
+                            if c.set_dcut(sched.threshold(progress)).is_err() {
+                                client = None;
+                            }
                         }
-                        #[cfg(not(feature = "featomic"))]
-                        {
-                            0.10
-                        }
-                    };
-                    DiversityAnnealer::from_initial(s.dcut.max(floor)).with_final_fraction(0.4)
-                });
-                let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
-                let _ = client.set_dcut(sched.threshold(progress));
+                    }
+                    Err(_) => client = None,
+                }
             }
         }
-        let well_pairs: Vec<(Array1<f64>, f64)> = snap
-            .as_ref()
-            .map(|s| s.wells.clone())
-            .unwrap_or_default();
         let wells: Vec<Array1<f64>> = well_pairs.iter().map(|(w, _)| w.clone()).collect();
-        // Own walk, but pull the bank every slice: a deeper member is a
-        // win; a different unfilled packing is a class another chain
-        // opened. Same packing or a raised well is ignored so ico does
-        // not reset the chain.
         let mut start = if let Some(bx) = best_state.as_ref() {
             bx.clone()
         } else {
@@ -1333,38 +1353,33 @@ fn run_capnp_bank(
                 0.15
             }
         };
-        for _ in 0..3 {
-            let Ok(Some((e, x))) = client.sample(rng.random()) else {
-                continue;
-            };
-            if x.len() != 3 * cfg.n_points {
-                continue;
-            }
-            let theirs = packing_of(x.view(), cfg);
-            let dist = if mine.is_empty() || mine.len() != theirs.len() {
-                f64::INFINITY
-            } else {
-                mine.iter()
-                    .zip(theirs.iter())
-                    .map(|(a, b)| (a - b) * (a - b))
-                    .sum::<f64>()
-                    .sqrt()
-            };
-            // A win, or another funnel that is still competitive.
-            // SOAP 0.10 is an ico isomer, not Marks (0.163). Adopting
-            // that restamps the leftover walk onto the shelf.
-            if e < best - 0.05 || (dist > gap && e < best + 1.0) {
-                if e < best {
-                    best = e;
-                    best_state = Some(x.clone());
+        if pull {
+            if let Some(c) = client.as_mut() {
+                match c.sample(rng.random()) {
+                    Ok(Some((e, x))) if x.len() == 3 * cfg.n_points => {
+                        let theirs = packing_of(x.view(), cfg);
+                        let dist = if mine.is_empty() || mine.len() != theirs.len() {
+                            f64::INFINITY
+                        } else {
+                            mine.iter()
+                                .zip(theirs.iter())
+                                .map(|(a, b)| (a - b) * (a - b))
+                                .sum::<f64>()
+                                .sqrt()
+                        };
+                        if e < best - 0.05 || (dist > gap && e < best + 1.0) {
+                            if e < best {
+                                best = e;
+                                best_state = Some(x.clone());
+                            }
+                            start = x;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => client = None,
                 }
-                start = x;
-                break;
             }
         }
-        // eOn aKMC / Xu–Henkelman: stop searching a catalog when new
-        // processes dry up. Same statistic already in BasinBias: n1/N.
-        // Leave the packing cloud only when that missing mass is small.
         if catalog_saturated(&well_pairs, cfg.bias_height)
             && packing_is_known(start.view(), cfg, &wells)
         {
@@ -1390,14 +1405,24 @@ fn run_capnp_bank(
         screened_out += out.screened_out;
         returned += out.returned;
         slices += 1;
-        if out.best < best {
+        let improved = out.best < best;
+        if improved {
             best = out.best;
             best_state = out.best_state.clone();
         }
-        if let Some(st) = out.best_state.as_ref() {
-            let soap = packing_of(st.view(), cfg);
-            let _ = client.offer(out.best, st.view(), soap.view());
-            let _ = client.deposit(soap.view(), cfg.bias_height);
+        // Publish a win only. Depositing every slice is 48 chains
+        // IRA-matching on the login node.
+        if improved {
+            if let Some(st) = out.best_state.as_ref() {
+                if let Some(c) = client.as_mut() {
+                    let soap = packing_of(st.view(), cfg);
+                    if c.offer(out.best, st.view(), soap.view()).is_err()
+                        || c.deposit(soap.view(), cfg.bias_height).is_err()
+                    {
+                        client = None;
+                    }
+                }
+            }
         }
         println!(
             "      slice {slices} spent {} best {best:.6} null {null_starts}",

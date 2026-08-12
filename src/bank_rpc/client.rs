@@ -1,7 +1,13 @@
-//! Blocking Cap'n Proto client over a Unix socket.
+//! Optional informer, not the walk.
+//!
+//! The chain is a kubelet: it owns its leftover search. The bank is
+//! the control plane. If the plane is down, slow, or on the login
+//! node under IRA load, the walk continues. A refused connect is
+//! not a panic; a hung snapshot is a dropped client, not a blocked hop.
 
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::time::Duration;
 
 use capnp::message::{Builder, HeapAllocator, ReaderOptions};
 use capnp::serialize;
@@ -9,16 +15,28 @@ use ndarray::{Array1, ArrayView1};
 
 use crate::Bank_capnp::{bank_reply, bank_request};
 
+const CONNECT: Duration = Duration::from_secs(2);
+const IO: Duration = Duration::from_secs(5);
+
 /// One connection to the shared bank.
 pub struct BankClient {
     stream: TcpStream,
 }
 
 impl BankClient {
-    /// Connect to `host:port`.
+    /// Connect to `host:port` with a short timeout.
     pub fn connect(addr: impl AsRef<str>) -> std::io::Result<Self> {
-        let stream = TcpStream::connect(addr.as_ref())?;
+        let addr = addr.as_ref();
+        let sock = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::NotFound, format!("no address for {addr}"))
+            })?;
+        let stream = TcpStream::connect_timeout(&sock, CONNECT)?;
         stream.set_nodelay(true)?;
+        stream.set_read_timeout(Some(IO))?;
+        stream.set_write_timeout(Some(IO))?;
         Ok(Self { stream })
     }
 
@@ -196,4 +214,22 @@ fn write_msg(stream: &mut TcpStream, message: &Builder<HeapAllocator>) -> Result
     serialize::write_message(&mut *stream, message).map_err(|e| format!("bank write: {e}"))?;
     stream.flush().map_err(|e| format!("bank flush: {e}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BankClient;
+    use std::time::Instant;
+
+    #[test]
+    fn a_closed_port_fails_fast() {
+        let t = Instant::now();
+        let r = BankClient::connect("127.0.0.1:1");
+        assert!(r.is_err(), "closed port must not hang");
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(3),
+            "connect took {:?}",
+            t.elapsed()
+        );
+    }
 }
