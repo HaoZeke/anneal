@@ -1,0 +1,192 @@
+#+title: Descriptor catalog geometry
+#+author: anneal contributors
+#+options: toc:2 num:t
+
+* Scope
+
+This note records the mathematical contracts implemented by
+=DescriptorSpace=, =regularized_pullback=, =BasinCatalog=, and =BasinCensus=.
+The descriptor has no reference energy, named target structure, or runtime
+morphology label.  System signatures determine which transformations and
+records are admissible.
+
+* D20: quotient descriptor pseudometric
+
+For one system signature =s=, let =X_s= contain the valid Cartesian
+configurations and let =G_s= contain exactly the signature-preserving
+translations, proper rotations, and like-species permutations.  The physical
+configuration space is
+
+\[
+  {\cal Q}_s = X_s/G_s.
+\]
+
+The versioned descriptor map is =p_s : X_s -> R^m=.  Every block is an
+invariant aggregate of local SOAP or ACE features and is normalized
+independently.  The catalog distance is
+
+\[
+  d_s([x],[y]) = ||p_s(x)-p_s(y)||_2.
+\]
+
+The local SOAP power spectrum and ACE contractions are unchanged by proper
+rotations.  Mean and diagonal central-moment aggregation are unchanged by atom
+reordering.  Species channels restrict that reordering to like species.
+Therefore =p_s(gx)=p_s(x)= for every =g in G_s=, and =d_s= is well-defined on
+the quotient.
+
+Nonnegativity and symmetry follow from the Euclidean norm.  The Euclidean
+triangle inequality gives =d_s(a,c) <= d_s(a,b)+d_s(b,c)=.  Distinct quotient
+points can have the same finite descriptor, so identity of indiscernibles is
+not asserted.  The result is a pseudometric.  Exact minimum identity remains
+separate validation evidence.
+
+The implementation rejects distance evaluation unless the schema name,
+version, block ordering, cutoffs, dimensions, and normalization layout agree.
+=tests/descriptor_invariance.rs= checks allowed transformations, schema
+isolation, the pseudometric laws, and separation of named LJ75 diagnostic
+fixtures without consulting their labels during descriptor evaluation.
+
+* Normalized multiscale blocks
+
+Let =q_i in R^r= denote a local invariant vector for atom =i= and let =N= be
+the atom count.  The mean and diagonal second central moment are
+
+\[
+  \mu = {1\over N}\sum_i q_i,
+  \qquad
+  v = {1\over N}\sum_i (q_i-\mu)\odot(q_i-\mu).
+\]
+
+An ACE nu=3 block uses the corresponding mean of the local contracted
+features.  For every raw block =b != 0=, the stored block is
+=\widehat b=b/||b||_2=.  Zero raw blocks remain zero.  Block metadata records
+the aggregation kind, radial and angular resolutions, cutoff, vector interval,
+raw norm, and normalization convention.
+
+* Analytic descriptor Jacobian
+
+Let =L_i = partial q_i / partial x= be the analytic local SOAP or ACE
+Jacobian.  The raw mean and diagonal-variance derivatives are
+
+\[
+  {\partial \mu\over\partial x}={1\over N}\sum_i L_i,
+  \qquad
+  {\partial v\over\partial x}={2\over N}\sum_i
+  \mathop{diag}(q_i-\mu)L_i.
+\]
+
+The second identity uses =sum_i(q_i-mu)=0=.  For a nonzero raw block =b= with
+Jacobian =B=, differentiation of its L2 normalization gives
+
+\[
+  {\partial \widehat b\over\partial x}
+  = {B\over ||b||_2}-{b(b^T B)\over ||b||_2^3}.
+\]
+
+=DescriptorSpace::jacobian_analytic= applies these equations block by block.
+=DescriptorSpace::jacobian_fd= supplies an independent central-difference
+check.  =tests/descriptor_pullback.rs= compares the full normalized,
+species-aware multiscale Jacobian with central differences.
+
+* D21: constrained regularized pullback
+
+For desired descriptor increment =Delta p=, positive diagonal weight =W=,
+damping =lambda > 0=, and allowed Cartesian subspace projector =P=, define
+=A=J P=.  The Cartesian increment minimizes
+
+\[
+  ||A z-\Delta p||_W^2 + \lambda^2||z||_2^2,
+  \qquad \Delta x=Pz.
+\]
+
+The first-order condition is
+
+\[
+  (A^T W A+\lambda^2 I)z=A^T W\Delta p.
+\]
+
+Positive damping makes the normal matrix positive definite, so the
+implementation uses Cholesky factorization.  The projector removes frozen
+coordinate axes, global translation when allowed by the signature, and
+first-order pair stretches inside rigid groups.
+
+For =W^(1/2) A = U Sigma V^T=, the realized descriptor component along a left
+singular vector is multiplied by
+
+\[
+  {\sigma_i^2\over\sigma_i^2+\lambda^2} \in [0,1).
+\]
+
+Thus the linearized map cannot amplify an attainable requested component.
+This does not imply global contraction of the nonlinear descriptor.  The
+implementation bounds =||Delta x||_2/L_0= by a trust radius and measures the
+descriptor after applying the step; noncontraction is a classified proposal
+rejection at the policy boundary.
+
+=proofs/tests/test_descriptor_pullback.py= checks the normal equations and
+singular attenuation.  =tests/descriptor_pullback.rs= checks analytic and
+finite-difference Jacobians, rank deficiency, frozen coordinates, rigid modes,
+trust clipping, and measured nonlinear contraction.
+
+* D22: active-catalog packing and incumbent invariants
+
+Let =C_t= be the finite active catalog and let =D_t= be its coordinator-owned
+packing threshold.  Admission maintains
+
+\[
+  i \ne j \Longrightarrow d_s(c_i,c_j) \ge D_t.
+\]
+
+The threshold schedule is nonincreasing.  A candidate conflicting with active
+entries replaces the complete conflict set only when its energy is lower than
+every conflicting representative.  Removing that set eliminates all candidate
+conflicts, while distances among retained entries are unchanged.  A separated
+candidate is added when capacity permits.  At capacity it can replace the
+worst nonincumbent only when it has lower energy.  These cases preserve
+capacity and pairwise packing.
+
+Same-neighborhood updates retain only the lower-energy representative.  The
+incumbent is the least-energy validated representative and therefore has
+monotone nonincreasing energy.  Every active record retains its census basin
+identifier and provenance.
+
+The initial-population scale is
+
+\[
+  \overline D={2\over M(M-1)}\sum_{i<j}d_s(p_i,p_j),
+  \qquad D_0=\min(\overline D,D_{\min}).
+\]
+
+Using =D_0 <= D_min= makes the initial set packing-safe.  The schedule decreases
+geometrically over charged ensemble work to
+=min(D_0,max(D_census,0.4D_0))=.  =tests/basin_catalog.rs= checks these cases
+and their invariants under generated admission streams.
+
+* D23: fixed-census Good--Turing saturation
+
+The census assigns every validated charged quench to exactly one immutable
+descriptor neighborhood.  Let =n_j= be the visit count for census basin =j=,
+=n=sum_j n_j=, and =N_1=sum_j 1[n_j=1]=.  The unseen-mass estimator is
+
+\[
+  \widehat P_0={N_1\over n}.
+\]
+
+It is undefined for =n=0=.  The policy declares saturation only when =n >= 20=
+and =N_1/n < 0.20=.  Active-catalog replacement does not change census
+medoids, membership, or counts, so eviction cannot erase visits or change the
+statistical species being counted.  =tests/basin_census.rs= checks exact count
+conservation, immutable medoids, deterministic assignment, and saturation from
+census visits only.
+
+* Executable verification
+
+On Terra, run:
+
+#+begin_src sh
+scripts/terra_verify_descriptor_math.sh
+#+end_src
+
+The verifier runs the D20--D23 Rust suites in release mode with the lockfile and
+the D21/D27 Python witnesses in the Pixi =verify= environment.
