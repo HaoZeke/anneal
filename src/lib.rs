@@ -18,6 +18,8 @@ pub mod Bank_capnp {
 
 /// The acceptance-rule trait: `(delta_e, T) -> p`.
 pub mod accept;
+/// ACE ν=3 / λ-SOAP CG contraction of a spherical expansion.
+pub mod ace;
 /// Stan-style windowed adaptation: `trait Adapter<T, S>`.
 pub mod adapter;
 /// Cost-augmenting bias operators (well-tempered metadynamics, etc.).
@@ -26,8 +28,6 @@ pub mod allocate;
 pub mod bias;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
-/// How a leftover chain uses the shared packing catalog.
-pub mod swarm;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
 /// Collective variables from the spectrum of the visited-basin graph.
@@ -46,6 +46,9 @@ pub mod dos;
 pub mod error;
 /// Parallel-tempering exchange operator for multi-temperature ensembles.
 pub mod exchange;
+/// featomic SOAP power-spectrum leftover hop.
+#[cfg(feature = "featomic")]
+pub mod featomic_hop;
 /// Energy-floor flicker components and record EI.
 pub mod floors;
 /// Free-energy estimators (Bennett's BAR + descendants).
@@ -91,15 +94,12 @@ pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
 pub mod screen;
-/// ACE ν=3 / λ-SOAP CG contraction of a spherical expansion.
-pub mod ace;
 /// SOAP power spectrum and Cartesian pullback through `∂p/∂R`.
 pub mod soap;
-/// featomic SOAP power-spectrum leftover hop.
-#[cfg(feature = "featomic")]
-pub mod featomic_hop;
 pub mod spectral;
 pub mod structure;
+/// How a leftover chain uses the shared packing catalog.
+pub mod swarm;
 pub mod symmetrise;
 pub mod terminate;
 pub mod twin;

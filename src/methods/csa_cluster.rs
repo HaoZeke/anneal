@@ -36,7 +36,12 @@ fn morphology(x: ArrayView1<f64>, cfg: &Config, bond_cutoff: f64) -> Array1<f64>
     #[cfg(feature = "featomic")]
     {
         let _ = bond_cutoff;
-        crate::featomic_hop::soap_morphology(x, 3.5 * cfg.length_scale, cfg.species.as_deref(), None)
+        crate::featomic_hop::soap_morphology(
+            x,
+            3.5 * cfg.length_scale,
+            cfg.species.as_deref(),
+            None,
+        )
     }
     #[cfg(not(feature = "featomic"))]
     {
@@ -336,10 +341,7 @@ where
         returned += out.returned;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(
-                    morphology(s.view(), cfg, bond_cutoff).view(),
-                    out.best,
-                );
+                funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
             }
             bank.seed(s.view(), out.best);
         }
@@ -402,12 +404,7 @@ where
         };
         bank.mark_used(i);
 
-        let min_hits = bank
-            .members()
-            .iter()
-            .map(|m| m.hits)
-            .min()
-            .unwrap_or(0);
+        let min_hits = bank.members().iter().map(|m| m.hits).min().unwrap_or(0);
         if min_hits > passes {
             passes = min_hits;
             if bank_cfg.deadlock_inject > 0
@@ -420,8 +417,7 @@ where
                     if ledger.remaining() == 0 {
                         break;
                     }
-                    let start =
-                        random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+                    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
                     let (e, x) = relax(ledger, start.view(), cfg.relax_steps);
                     ledger.record(e, x.view());
                     if bank.inject(x.view(), e) {
@@ -541,10 +537,7 @@ where
         returned += out.returned;
         if let Some(s) = out.best_state.as_ref() {
             if bank_cfg.acquisition {
-                funnel.observe(
-                    morphology(s.view(), cfg, bond_cutoff).view(),
-                    out.best,
-                );
+                funnel.observe(morphology(s.view(), cfg, bond_cutoff).view(), out.best);
             }
             match bank.offer(s.view(), out.best, &mut distance) {
                 Admission::Improved(_) => improved += 1,
@@ -961,11 +954,7 @@ mod tests {
             spectrum_distance(8),
             11,
         );
-        assert!(
-            out.deadlocks >= 1,
-            "no deadlock fired, bank {:?}",
-            out.bank
-        );
+        assert!(out.deadlocks >= 1, "no deadlock fired, bank {:?}", out.bank);
         assert!(
             out.injected >= 1,
             "deadlock injected nothing, bank {:?}",

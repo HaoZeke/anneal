@@ -27,12 +27,12 @@ impl BankClient {
     /// Connect to `host:port` with a short timeout.
     pub fn connect(addr: impl AsRef<str>) -> std::io::Result<Self> {
         let addr = addr.as_ref();
-        let sock = addr
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, format!("no address for {addr}"))
-            })?;
+        let sock = addr.to_socket_addrs()?.next().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no address for {addr}"),
+            )
+        })?;
         let stream = TcpStream::connect_timeout(&sock, CONNECT)?;
         stream.set_nodelay(true)?;
         stream.set_read_timeout(Some(IO))?;
@@ -40,10 +40,7 @@ impl BankClient {
         Ok(Self { stream })
     }
 
-    fn call(
-        &mut self,
-        build: impl FnOnce(bank_request::Builder<'_>),
-    ) -> Result<Reply, String> {
+    fn call(&mut self, build: impl FnOnce(bank_request::Builder<'_>)) -> Result<Reply, String> {
         let mut message = Builder::new_default();
         build(message.init_root::<bank_request::Builder>());
         write_msg(&mut self.stream, &message)?;
@@ -65,8 +62,14 @@ impl BankClient {
         let reply = self.call(|mut req| {
             let mut o = req.reborrow().init_offer();
             o.set_energy(energy);
-            fill_list(o.reborrow().init_coords(coords.len() as u32), coords.as_slice().unwrap_or(&[]));
-            fill_list(o.init_soap(soap.len() as u32), soap.as_slice().unwrap_or(&[]));
+            fill_list(
+                o.reborrow().init_coords(coords.len() as u32),
+                coords.as_slice().unwrap_or(&[]),
+            );
+            fill_list(
+                o.init_soap(soap.len() as u32),
+                soap.as_slice().unwrap_or(&[]),
+            );
         })?;
         Ok((reply.kind, reply.dcut))
     }

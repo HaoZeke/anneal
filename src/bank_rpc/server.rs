@@ -84,7 +84,13 @@ impl Inner {
                 .position(|s| soap_l2(soap.view(), s.view()) <= merge)
             {
                 // Same packing: one first-bank slot, keep the deeper energy.
-                if energy < self.bank.members().get(i).map(|m| m.energy).unwrap_or(f64::INFINITY)
+                if energy
+                    < self
+                        .bank
+                        .members()
+                        .get(i)
+                        .map(|m| m.energy)
+                        .unwrap_or(f64::INFINITY)
                 {
                     self.bank.overwrite(i, coords.view(), energy);
                     self.observe(soap.view(), energy);
@@ -107,8 +113,12 @@ impl Inner {
         } else {
             let soaps = self.soaps.clone();
             let cand = soap.clone();
-            let states: Vec<Array1<f64>> =
-                self.bank.members().iter().map(|m| m.state.clone()).collect();
+            let states: Vec<Array1<f64>> = self
+                .bank
+                .members()
+                .iter()
+                .map(|m| m.state.clone())
+                .collect();
             let admission = self.bank.offer(coords.view(), energy, |p, q| {
                 // IRA: same geometry under rotation/permutation (a length).
                 // SOAP: Lee Dcut among distinct packings (unit mean-SOAP).
@@ -128,9 +138,7 @@ impl Inner {
                 let _ = p;
                 states
                     .iter()
-                    .position(|s| {
-                        s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b)
-                    })
+                    .position(|s| s.len() == q.len() && s.iter().zip(q.iter()).all(|(a, b)| a == b))
                     .and_then(|i| soaps.get(i))
                     .filter(|s| !s.is_empty() && !cand.is_empty())
                     .map(|s| soap_l2(cand.view(), s.view()))
@@ -394,12 +402,9 @@ fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String>
                 bank_request::Offer(o) => {
                     let o = o.map_err(|e| e.to_string())?;
                     let energy = o.get_energy();
-                    let coords = Array1::from_iter(
-                        o.get_coords().map_err(|e| e.to_string())?.iter(),
-                    );
-                    let soap = Array1::from_iter(
-                        o.get_soap().map_err(|e| e.to_string())?.iter(),
-                    );
+                    let coords =
+                        Array1::from_iter(o.get_coords().map_err(|e| e.to_string())?.iter());
+                    let soap = Array1::from_iter(o.get_soap().map_err(|e| e.to_string())?.iter());
                     let (kind, dcut) = g.offer(energy, coords, soap);
                     out.set_kind(kind);
                     out.set_dcut(dcut);
@@ -414,9 +419,7 @@ fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String>
                 }
                 bank_request::Deposit(d) => {
                     let d = d.map_err(|e| e.to_string())?;
-                    let soap = Array1::from_iter(
-                        d.get_soap().map_err(|e| e.to_string())?.iter(),
-                    );
+                    let soap = Array1::from_iter(d.get_soap().map_err(|e| e.to_string())?.iter());
                     let h = g.deposit(soap, d.get_increment());
                     out.set_height(h);
                     out.set_dcut(g.bank.dcut);

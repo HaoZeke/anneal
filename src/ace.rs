@@ -77,9 +77,7 @@ fn wigner_3j(l1: i32, l2: i32, l3: i32, m1: i32, m2: i32, m3: i32) -> f64 {
     if (l1 + l2 + l3) % 2 != 0 && m1 == 0 && m2 == 0 && m3 == 0 {
         return 0.0;
     }
-    let tmin = 0
-        .max(l2 - l3 - m1)
-        .max(l1 - l3 + m2);
+    let tmin = 0.max(l2 - l3 - m1).max(l1 - l3 + m2);
     let tmax = (l1 + l2 - l3).min(l1 - m1).min(l2 + m2);
     if tmin > tmax {
         return 0.0;
@@ -99,10 +97,8 @@ fn wigner_3j(l1: i32, l2: i32, l3: i32, m1: i32, m2: i32, m3: i32) -> f64 {
         }
         t += 1;
     }
-    let pref = fact(l1 + l2 - l3)
-        * fact(l1 - l2 + l3)
-        * fact(-l1 + l2 + l3)
-        / fact(l1 + l2 + l3 + 1);
+    let pref =
+        fact(l1 + l2 - l3) * fact(l1 - l2 + l3) * fact(-l1 + l2 + l3) / fact(l1 + l2 + l3 + 1);
     let pref = (pref
         * fact(l1 - m1)
         * fact(l1 + m1)
