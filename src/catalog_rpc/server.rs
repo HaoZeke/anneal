@@ -10,19 +10,21 @@ use std::time::Duration;
 
 use capnp::message::ReaderOptions;
 use capnp::serialize;
-use ndarray::ArrayView1;
+use ndarray::{Array1, ArrayView1};
+use rand::SeedableRng;
 
 use super::{
-    decode_request_reader, encode_reply, AcceptedReply, CatalogCandidate, CatalogIdentity,
-    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError,
-    ProtocolRejection,
+    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
+    CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, ProtocolError,
+    ProtocolRejection, decode_request_reader, encode_reply,
 };
+use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     BasinCatalog, BasinCensus, CandidateRecord, CandidateValidator, FreshEvaluation, QuenchStatus,
     SystemSignature, ValidatedCandidate, ValidatorConfig,
 };
+use crate::catalog_policy::proposal::farthest_hole;
 use crate::descriptor_space::DescriptorSpace;
-use crate::Catalog_capnp::catalog_request;
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 
@@ -162,7 +164,7 @@ struct CoordinatorState {
     snapshot_version: u64,
     census_visits: u64,
     active_entries: u32,
-    requests: BTreeMap<(u32, u64), CatalogRequest>,
+    requests: BTreeMap<(u32, u64), (CatalogRequest, AcceptedPayload)>,
     maximum_sequence: BTreeMap<u32, u64>,
     scientific: Option<ScientificState>,
 }
@@ -329,9 +331,9 @@ fn process_request(
         return rejected(&state, request.event_sequence, reason);
     }
     let key = (request.identity.replica, request.event_sequence);
-    if let Some(stored) = state.requests.get(&key) {
+    if let Some((stored, payload)) = state.requests.get(&key) {
         return if stored == &request {
-            accepted(&state, request.event_sequence, true)
+            accepted_with_payload(&state, request.event_sequence, true, payload.clone())
         } else {
             rejected(
                 &state,
@@ -351,10 +353,64 @@ fn process_request(
             ProtocolRejection::SequenceRegression,
         );
     }
+    let mut payload = AcceptedPayload::None;
     match &request.operation {
-        CatalogOperation::Snapshot
-        | CatalogOperation::Sample { .. }
-        | CatalogOperation::DescriptorHole { .. } => {}
+        CatalogOperation::Snapshot => {}
+        CatalogOperation::Sample { draw } => {
+            if let Some(scientific) = state.scientific.as_ref()
+                && !scientific.catalog.is_empty()
+            {
+                let index = usize::try_from(*draw % scientific.catalog.len() as u64)
+                    .expect("sample index is bounded by catalog length");
+                payload = AcceptedPayload::Candidate(candidate_from_validated(
+                    scientific.catalog.entries()[index].validated(),
+                ));
+            }
+        }
+        CatalogOperation::DescriptorHole {
+            current,
+            samples,
+            draw,
+        } => {
+            let Some(scientific) = state.scientific.as_ref() else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let catalog = scientific
+                .catalog
+                .entries()
+                .iter()
+                .map(|entry| Array1::from_vec(entry.descriptor().to_vec()))
+                .collect::<Vec<_>>();
+            let Ok(sample_count) = usize::try_from(*samples) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let mut rng = rand::rngs::StdRng::seed_from_u64(*draw);
+            let Ok(hole) = farthest_hole(
+                &Array1::from_vec(current.clone()),
+                &catalog,
+                sample_count,
+                &mut rng,
+            ) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            payload = AcceptedPayload::DescriptorHole(DescriptorHoleProposal {
+                target: hole.target().to_vec(),
+                increment: hole.increment().to_vec(),
+                nearest_catalog_distance: hole.nearest_catalog_distance(),
+            });
+        }
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
                 let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
@@ -464,8 +520,8 @@ fn process_request(
     state
         .maximum_sequence
         .insert(request.identity.replica, request.event_sequence);
-    state.requests.insert(key, request);
-    accepted(&state, key.1, false)
+    state.requests.insert(key, (request, payload.clone()));
+    accepted_with_payload(&state, key.1, false, payload)
 }
 
 fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
@@ -532,6 +588,29 @@ fn validate_candidate(
         .map_err(|_| ())
 }
 
+fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate {
+    CatalogCandidate {
+        producer_replica: validated.candidate.producer_replica,
+        coordinates: validated.candidate.coordinates.clone(),
+        cell: validated.candidate.cell,
+        energy: validated.fresh.energy,
+        forces: validated.fresh.forces.clone(),
+        gradient_norm: validated
+            .fresh
+            .forces
+            .iter()
+            .map(|force| force * force)
+            .sum::<f64>()
+            .sqrt(),
+        descriptor: validated.candidate.descriptor.clone(),
+        descriptor_schema_version: validated.candidate.descriptor_schema_version,
+        quench_converged: true,
+        charged_work: validated.candidate.charged_work,
+        event_sequence: validated.candidate.event_sequence,
+        seed: validated.candidate.seed,
+    }
+}
+
 fn identity_rejection(
     config: &ServerConfig,
     identity: &CatalogIdentity,
@@ -549,7 +628,12 @@ fn identity_rejection(
     }
 }
 
-fn accepted(state: &CoordinatorState, event_sequence: u64, duplicate: bool) -> CatalogReply {
+fn accepted_with_payload(
+    state: &CoordinatorState,
+    event_sequence: u64,
+    duplicate: bool,
+    payload: AcceptedPayload,
+) -> CatalogReply {
     CatalogReply::Accepted(AcceptedReply {
         event_sequence,
         duplicate,
@@ -558,6 +642,7 @@ fn accepted(state: &CoordinatorState, event_sequence: u64, duplicate: bool) -> C
             census_visits: state.census_visits,
             active_entries: state.active_entries,
         },
+        payload,
     })
 }
 
