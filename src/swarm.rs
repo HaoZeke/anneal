@@ -163,8 +163,16 @@ mod tests {
     }
 
     #[test]
-    fn a_saturated_packing_is_left() {
-        let d = policy(0.3, -396.28, -396.28, -396.28, 18, true, false, 1);
+    fn global_saturation_does_not_make_an_unrelated_replica_leave() {
+        let d = policy(0.3, -390.0, -390.0, -396.28, 18, true, false, 1);
+        assert_eq!(d.role, Role::Other);
+        assert!(!d.leave);
+        assert!(d.pull);
+    }
+
+    #[test]
+    fn an_occupied_raised_packing_is_left() {
+        let d = policy(0.3, -396.28, -396.28, -396.28, 18, false, true, 1);
         assert_eq!(d.role, Role::Leave);
         assert!(d.leave);
         assert!(!d.pull);
