@@ -9,10 +9,9 @@
 //! * This chain is on another packing and the ledger is still open:
 //!   a competitive other class may be adopted. Late in the ledger,
 //!   only a deeper member.
-//! * The occupied packing is exhausted for this chain — Good-Turing
-//!   missing mass is low, or this chain has not deepened for
-//!   [`STALL_LEAVE`] slices: step into a SOAP hole. Do not redraw
-//!   the catalog incumbent.
+//! * The occupied packing is exhausted for this chain — it is locally
+//!   raised, or this chain has not deepened for [`STALL_LEAVE`] slices:
+//!   step into a SOAP hole. Do not redraw the catalog incumbent.
 //!
 //! A chain that just deepened its own quench does not adopt. That is
 //! the same leftover walk, not a second method.
@@ -66,10 +65,10 @@ pub fn catalog_role(
     my_energy: f64,
     catalog_best: f64,
     catalog_size: usize,
-    catalog_saturated: bool,
+    _catalog_saturated: bool,
     on_raised_packing: bool,
 ) -> Role {
-    if catalog_saturated || on_raised_packing {
+    if on_raised_packing {
         return Role::Leave;
     }
     if catalog_size > 0 && my_energy.is_finite() && my_energy <= catalog_best + 0.05 {
