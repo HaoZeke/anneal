@@ -65,6 +65,8 @@ pub struct MutationReceipt {
     pub version: u64,
     /// Whether the coordinator recognized an identical replay.
     pub duplicate: bool,
+    /// Coordinator counters after the mutation or replay.
+    pub snapshot: CatalogSnapshot,
 }
 
 /// Result of a coordinator read when local execution remains available.
@@ -214,6 +216,7 @@ impl CatalogClient {
         Ok(MutationReceipt {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
+            snapshot: reply.snapshot,
         })
     }
 
@@ -230,6 +233,7 @@ impl CatalogClient {
         Ok(MutationReceipt {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
+            snapshot: reply.snapshot,
         })
     }
 
