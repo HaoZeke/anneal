@@ -1,8 +1,10 @@
 //! Serialized coordinator for one campaign ensemble and system signature.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -16,7 +18,8 @@ use rand::SeedableRng;
 use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
     CatalogRelation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
-    PolicyState, ProtocolError, ProtocolRejection, decode_request_reader, encode_reply,
+    PolicyState, ProtocolError, ProtocolRejection, decode_request, decode_request_reader,
+    encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -38,6 +41,7 @@ pub struct ServerConfig {
     replicas: BTreeSet<u32>,
     scientific: Option<ScientificConfig>,
     per_replica_budget: Option<u64>,
+    state_directory: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -72,6 +76,7 @@ impl ServerConfig {
             replicas,
             scientific: None,
             per_replica_budget: None,
+            state_directory: None,
         })
     }
 
@@ -83,6 +88,19 @@ impl ServerConfig {
         CooperativeLedger::new(self.replicas.iter().copied(), per_replica_budget)
             .map_err(|_| CatalogServerError::InvalidConfiguration)?;
         self.per_replica_budget = Some(per_replica_budget);
+        Ok(self)
+    }
+
+    /// Persist accepted requests under one isolated ensemble directory.
+    pub fn with_state_directory(
+        mut self,
+        directory: impl Into<PathBuf>,
+    ) -> Result<Self, CatalogServerError> {
+        let directory = directory.into();
+        if directory.as_os_str().is_empty() {
+            return Err(CatalogServerError::InvalidConfiguration);
+        }
+        self.state_directory = Some(directory);
         Ok(self)
     }
 
@@ -171,8 +189,12 @@ pub enum CatalogServerError {
     /// Listener setup failed.
     #[error("catalog server I/O failed: {0}")]
     Io(#[from] std::io::Error),
+    /// A durable request journal is truncated, corrupt, or inconsistent.
+    #[error("catalog request journal is invalid: {0}")]
+    InvalidJournal(String),
 }
 
+#[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
     descriptor_space: DescriptorSpace,
@@ -182,6 +204,7 @@ struct ScientificState {
     evaluate: Arc<FreshEvaluator>,
 }
 
+#[derive(Clone)]
 struct CoordinatorState {
     snapshot_version: u64,
     census_visits: u64,
@@ -237,6 +260,104 @@ impl CoordinatorState {
     }
 }
 
+const JOURNAL_FILE: &str = "catalog-requests-v4.bin";
+const MAX_JOURNAL_FRAME: usize = 256 * 1024 * 1024;
+
+fn journal_path(config: &ServerConfig) -> Option<PathBuf> {
+    config
+        .state_directory
+        .as_ref()
+        .map(|directory| directory.join(JOURNAL_FILE))
+}
+
+fn append_journal(
+    config: &ServerConfig,
+    request: &CatalogRequest,
+) -> Result<(), CatalogServerError> {
+    let Some(path) = journal_path(config) else {
+        return Ok(());
+    };
+    let directory = path
+        .parent()
+        .ok_or_else(|| CatalogServerError::InvalidJournal("journal path has no parent".into()))?;
+    fs::create_dir_all(directory)?;
+    let bytes = encode_request(request)
+        .map_err(|error| CatalogServerError::InvalidJournal(error.to_string()))?;
+    let length = u64::try_from(bytes.len())
+        .map_err(|_| CatalogServerError::InvalidJournal("journal frame is too large".into()))?;
+    let mut journal = OpenOptions::new().create(true).append(true).open(path)?;
+    journal.write_all(&length.to_le_bytes())?;
+    journal.write_all(&bytes)?;
+    journal.flush()?;
+    Ok(())
+}
+
+fn replay_journal(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+) -> Result<(), CatalogServerError> {
+    let Some(path) = journal_path(config) else {
+        return Ok(());
+    };
+    fs::create_dir_all(
+        path.parent().ok_or_else(|| {
+            CatalogServerError::InvalidJournal("journal path has no parent".into())
+        })?,
+    )?;
+    if !Path::new(&path).exists() {
+        return Ok(());
+    }
+    let mut journal = File::open(path)?;
+    loop {
+        let mut length_bytes = [0u8; 8];
+        let first = journal.read(&mut length_bytes)?;
+        if first == 0 {
+            return Ok(());
+        }
+        if first != length_bytes.len() {
+            return Err(CatalogServerError::InvalidJournal(
+                "truncated frame length".into(),
+            ));
+        }
+        let length = usize::try_from(u64::from_le_bytes(length_bytes))
+            .map_err(|_| CatalogServerError::InvalidJournal("frame length overflow".into()))?;
+        if length > MAX_JOURNAL_FRAME {
+            return Err(CatalogServerError::InvalidJournal(format!(
+                "frame length {length} exceeds the journal limit"
+            )));
+        }
+        let mut bytes = vec![0u8; length];
+        journal.read_exact(&mut bytes).map_err(|error| {
+            CatalogServerError::InvalidJournal(format!("truncated request frame: {error}"))
+        })?;
+        let request = decode_request(&bytes)
+            .map_err(|error| CatalogServerError::InvalidJournal(error.to_string()))?;
+        if !matches!(
+            apply_request(config, state, request),
+            CatalogReply::Accepted(AcceptedReply {
+                duplicate: false,
+                ..
+            })
+        ) {
+            return Err(CatalogServerError::InvalidJournal(
+                "persisted request cannot be replayed".into(),
+            ));
+        }
+    }
+}
+
+fn state_is_empty(state: &CoordinatorState) -> bool {
+    state.snapshot_version == 0
+        && state.census_visits == 0
+        && state.active_entries == 0
+        && state.requests.is_empty()
+        && state.maximum_sequence.is_empty()
+        && state
+            .ledger
+            .as_ref()
+            .is_none_or(|ledger| ledger.ensemble_total() == 0 && ledger.event_count() == 0)
+}
+
 /// Running localhost or remote coordinator.
 pub struct CatalogServer {
     addr: SocketAddr,
@@ -248,6 +369,8 @@ pub struct CatalogServer {
 impl CatalogServer {
     /// Bind and start a coordinator for one isolated ensemble.
     pub fn start(addr: &str, config: ServerConfig) -> Result<Self, CatalogServerError> {
+        let mut initial_state = CoordinatorState::new(&config)?;
+        replay_journal(&config, &mut initial_state)?;
         let listener = TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
         let addr = listener.local_addr()?;
@@ -255,12 +378,12 @@ impl CatalogServer {
             campaign: config.campaign.clone(),
             ensemble: config.ensemble.clone(),
             replicas: config.replicas.iter().copied().collect(),
-            initial_snapshot_version: 0,
-            empty_state_proof: true,
+            initial_snapshot_version: initial_state.snapshot_version,
+            empty_state_proof: state_is_empty(&initial_state),
         };
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
-        let state = Arc::new(Mutex::new(CoordinatorState::new(&config)?));
+        let state = Arc::new(Mutex::new(initial_state));
         let thread = thread::spawn(move || {
             while !thread_stop.load(Ordering::Acquire) {
                 match listener.accept() {
@@ -338,7 +461,7 @@ fn handle_connection(
                 continue;
             }
         };
-        let reply = process_request(config, &state, request);
+        let reply = process_request(config, &state, request)?;
         write_reply(&mut stream, reply)?;
     }
 }
@@ -347,11 +470,31 @@ fn process_request(
     config: &ServerConfig,
     state: &Arc<Mutex<CoordinatorState>>,
     request: CatalogRequest,
-) -> CatalogReply {
+) -> Result<CatalogReply, String> {
     let mut state = match state.lock() {
         Ok(state) => state,
         Err(poisoned) => poisoned.into_inner(),
     };
+    let mut next = state.clone();
+    let reply = apply_request(config, &mut next, request.clone());
+    if matches!(
+        reply,
+        CatalogReply::Accepted(AcceptedReply {
+            duplicate: false,
+            ..
+        })
+    ) {
+        append_journal(config, &request).map_err(|error| error.to_string())?;
+        *state = next;
+    }
+    Ok(reply)
+}
+
+fn apply_request(
+    config: &ServerConfig,
+    state: &mut CoordinatorState,
+    request: CatalogRequest,
+) -> CatalogReply {
     let rejection = identity_rejection(config, &request.identity).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
             .then_some(ProtocolRejection::SnapshotRegression)
