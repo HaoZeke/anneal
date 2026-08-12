@@ -1,5 +1,7 @@
 //! Versioned multiscale invariant descriptor spaces for catalog geometry.
 
+pub mod pullback;
+
 use crate::soap::{SoapSpec, local_nu3_z, local_spectra_z};
 use ndarray::{Array2, ArrayView1};
 
