@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compute-node Elja build of lj_cluster_search + bank_server.
+# Compute-node Elja build of LJ search and coordinator executables.
 # rustup lives in ~/.cargo/bin and is off the non-interactive PATH.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
@@ -46,7 +46,10 @@ if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
   exit 1
 fi
 # Registry is on NFS from the login fetch. Compute may have no outbound net.
-cargo build --offline --release --features featomic,ira,bank-rpc --example lj_cluster_search --example bank_server
+cargo build --offline --release --features featomic,ira,bank-rpc \
+  --example lj_cluster_search \
+  --example catalog_server \
+  --example bank_server
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec
