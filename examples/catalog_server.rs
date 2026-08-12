@@ -8,6 +8,7 @@ use anneal_core::catalog::lj::{
     descriptor_space, fresh_evaluation, reference_coordinates, system_signature, validator_config,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().collect::<Vec<_>>();
@@ -61,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         header.initial_snapshot_version,
         header.empty_state_proof
     );
+    std::io::stdout().flush()?;
     loop {
         std::thread::park();
     }
