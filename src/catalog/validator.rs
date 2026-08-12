@@ -145,6 +145,33 @@ pub enum ValidationFailure {
         /// Element index for arrays, or no index for a scalar.
         index: Option<usize>,
     },
+    /// Two atoms are closer than the configured physical floor.
+    #[error("atoms {first_atom} and {second_atom} violate the minimum separation")]
+    MinimumSeparation {
+        /// Lower atom index in the first violating pair.
+        first_atom: usize,
+        /// Higher atom index in the first violating pair.
+        second_atom: usize,
+    },
+    /// A frozen atom differs from its reference coordinate.
+    #[error("frozen atom {atom} differs on Cartesian axis {axis}")]
+    FrozenCoordinate {
+        /// Atom whose frozen coordinate differs.
+        atom: usize,
+        /// Cartesian axis whose frozen coordinate differs.
+        axis: usize,
+    },
+    /// A rigid-group pair differs from its reference distance.
+    #[error("rigid-group distance differs between atoms {first_atom} and {second_atom}")]
+    RigidGroupDistance {
+        /// Lower atom index in the first violating pair.
+        first_atom: usize,
+        /// Higher atom index in the first violating pair.
+        second_atom: usize,
+    },
+    /// The candidate cell is absent, unexpected, or differs from the signature.
+    #[error("candidate cell does not match the system signature")]
+    CellMismatch,
     /// The fresh potential evaluation failed.
     #[error("fresh engine evaluation failed: {0}")]
     EngineEvaluation(String),
@@ -218,6 +245,24 @@ impl CandidateValidator {
         }
         require_finite_scalar(candidate.energy, NumericField::Energy)?;
         require_finite_scalar(candidate.gradient_norm, NumericField::GradientNorm)?;
+        validate_cell(
+            self.expected.cell.as_ref(),
+            candidate.cell.as_ref(),
+            self.config.coordinate_tolerance,
+        )?;
+        validate_minimum_separation(&candidate.coordinates, self.config.min_separation)?;
+        validate_frozen_coordinates(
+            &candidate.coordinates,
+            &self.config.reference_coordinates,
+            &self.expected.frozen_mask,
+            self.config.coordinate_tolerance,
+        )?;
+        validate_rigid_groups(
+            &candidate.coordinates,
+            &self.config.reference_coordinates,
+            &self.expected.group_labels,
+            self.config.coordinate_tolerance,
+        )?;
         let fresh =
             evaluate(&candidate.coordinates).map_err(ValidationFailure::EngineEvaluation)?;
         let fresh_force_dim = u64::try_from(fresh.forces.len()).unwrap_or(u64::MAX);
@@ -234,6 +279,93 @@ impl CandidateValidator {
             fresh,
         })
     }
+}
+
+fn validate_cell(
+    expected: Option<&[f64; 9]>,
+    actual: Option<&[f64; 9]>,
+    tolerance: f64,
+) -> Result<(), ValidationFailure> {
+    match (expected, actual) {
+        (None, None) => Ok(()),
+        (Some(expected), Some(actual))
+            if expected
+                .iter()
+                .zip(actual)
+                .all(|(expected, actual)| (expected - actual).abs() <= tolerance) =>
+        {
+            Ok(())
+        }
+        _ => Err(ValidationFailure::CellMismatch),
+    }
+}
+
+fn validate_minimum_separation(coordinates: &[f64], minimum: f64) -> Result<(), ValidationFailure> {
+    let minimum_squared = minimum * minimum;
+    for first_atom in 0..coordinates.len() / 3 {
+        for second_atom in first_atom + 1..coordinates.len() / 3 {
+            if squared_distance(coordinates, first_atom, second_atom) < minimum_squared {
+                return Err(ValidationFailure::MinimumSeparation {
+                    first_atom,
+                    second_atom,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_frozen_coordinates(
+    coordinates: &[f64],
+    reference: &[f64],
+    frozen_mask: &[bool],
+    tolerance: f64,
+) -> Result<(), ValidationFailure> {
+    for (atom, &frozen) in frozen_mask.iter().enumerate() {
+        if !frozen {
+            continue;
+        }
+        for axis in 0..3 {
+            let index = 3 * atom + axis;
+            if (coordinates[index] - reference[index]).abs() > tolerance {
+                return Err(ValidationFailure::FrozenCoordinate { atom, axis });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_rigid_groups(
+    coordinates: &[f64],
+    reference: &[f64],
+    group_labels: &[u32],
+    tolerance: f64,
+) -> Result<(), ValidationFailure> {
+    for first_atom in 0..group_labels.len() {
+        for second_atom in first_atom + 1..group_labels.len() {
+            if group_labels[first_atom] != group_labels[second_atom] {
+                continue;
+            }
+            let actual = squared_distance(coordinates, first_atom, second_atom).sqrt();
+            let expected = squared_distance(reference, first_atom, second_atom).sqrt();
+            if (actual - expected).abs() > tolerance {
+                return Err(ValidationFailure::RigidGroupDistance {
+                    first_atom,
+                    second_atom,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn squared_distance(coordinates: &[f64], first_atom: usize, second_atom: usize) -> f64 {
+    (0..3)
+        .map(|axis| {
+            let delta = coordinates[3 * first_atom + axis] - coordinates[3 * second_atom + axis];
+            delta * delta
+        })
+        .sum()
 }
 
 fn require_finite_scalar(value: f64, field: NumericField) -> Result<(), ValidationFailure> {
