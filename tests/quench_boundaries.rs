@@ -1,5 +1,5 @@
 use anneal_core::methods::cluster_hopping::{Ledger, QuenchStatus};
-use ndarray::array;
+use ndarray::{array, Array1};
 
 #[test]
 fn quench_boundaries_partition_charged_relaxation_work() {
@@ -11,7 +11,7 @@ fn quench_boundaries_partition_charged_relaxation_work() {
         first,
         -4.0,
         array![0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        Some(array![0.0; 6]),
+        Some(Array1::zeros(6)),
     ));
 
     let second = ledger.spent();
