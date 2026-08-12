@@ -1297,7 +1297,10 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
-        RunManifest,
+        PopulationSynchronizationOutcome, RunManifest,
+    };
+    use anneal_core::methods::feynman_kac::{
+        population_family_position, population_rejuvenation_draw,
     };
     use rand::Rng;
 
@@ -1362,10 +1365,12 @@ fn run_capnp_catalog(
     let mut returned = 0usize;
     let mut slices = 0u64;
     let mut candidate_sequence = 0u64;
+    let mut population_epoch = 0u64;
+    let mut population_representative = None;
     let mut stall = 0u32;
 
     while ledger.remaining() > 0 {
-        if ledger.remaining() <= 2 {
+        if ledger.remaining() <= 4 {
             while ledger.charge() {
                 let _ = lj(current.view());
                 cooperative
@@ -1374,7 +1379,7 @@ fn run_capnp_catalog(
             }
             break;
         }
-        let slice_budget = slice.min((ledger.remaining() - 1) / 2).max(1);
+        let slice_budget = slice.min((ledger.remaining() - 2) / 2).max(1);
         let mut slice_ledger = Ledger::new(slice_budget);
         let output = run_with_bias(
             &run_cfg,
@@ -1467,6 +1472,13 @@ fn run_capnp_catalog(
                     .expect("validated quench must retain its fresh gradient"),
             )
             .expect("validated LJ quench must produce a catalog candidate");
+            if population_representative.as_ref().is_none_or(
+                |incumbent: &anneal_core::catalog_rpc::CatalogCandidate| {
+                    candidate.energy < incumbent.energy
+                },
+            ) {
+                population_representative = Some(candidate.clone());
+            }
             assert!(
                 ledger.charge(),
                 "slice reservation must cover every receiving validation"
@@ -1555,6 +1567,73 @@ fn run_capnp_catalog(
                         current = proposed;
                     }
                 }
+            }
+        }
+
+        if let Some(representative) = population_representative.clone() {
+            assert!(
+                ledger.charge(),
+                "slice reservation must cover population receiving validation"
+            );
+            cooperative
+                .record_work(replica, ChargeKind::FreshValidation, 1)
+                .expect("population validation must enter the cooperative ledger");
+            let mut population = cooperative
+                .submit_population(replica, population_epoch, representative)
+                .expect("population submission must preserve cooperative invariants");
+            while matches!(population, PopulationSynchronizationOutcome::Pending { .. }) {
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                population = cooperative
+                    .poll_population(replica, population_epoch)
+                    .expect("population polling must preserve cooperative invariants");
+            }
+            match population {
+                PopulationSynchronizationOutcome::Ready { parent, plan } => {
+                    let family =
+                        population_family_position(&plan.destinations, &plan.parents, replica)
+                            .expect("validated population plan must address this replica");
+                    let parent_coordinates = Array1::from_vec(parent.coordinates.clone());
+                    current = if family.family_size() > 1 {
+                        let draw = population_rejuvenation_draw(
+                            seed,
+                            population_epoch,
+                            replica,
+                            family.ordinal(),
+                        );
+                        match cooperative
+                            .descriptor_hole(replica, parent.descriptor.clone(), hole_samples, draw)
+                            .expect("population rejuvenation must preserve local execution")
+                        {
+                            CatalogHoleOutcome::Proposal(hole) => {
+                                cooperative
+                                    .record_work(replica, ChargeKind::RemoteProposal, 0)
+                                    .expect("rejuvenation proposal must enter the ledger");
+                                pullback_lj_hole(
+                                    &descriptor_space,
+                                    &signature.atomic_numbers,
+                                    parent_coordinates.view(),
+                                    &hole.increment,
+                                    true,
+                                )
+                                .unwrap_or(parent_coordinates)
+                            }
+                            _ => parent_coordinates,
+                        }
+                    } else {
+                        parent_coordinates
+                    };
+                    population_epoch = population_epoch
+                        .checked_add(1)
+                        .expect("population epoch must fit u64");
+                }
+                PopulationSynchronizationOutcome::Rejected => {
+                    panic!("coordinator rejected a catalog-validated population representative")
+                }
+                PopulationSynchronizationOutcome::LocalFallback
+                | PopulationSynchronizationOutcome::SharingDisabled => {}
+                PopulationSynchronizationOutcome::Pending { .. } => unreachable!(
+                    "population polling loop exits only after the barrier leaves pending state"
+                ),
             }
         }
         println!(
