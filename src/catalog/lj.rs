@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 
 use ndarray::ArrayView1;
+use rand::SeedableRng;
+use rand_distr::{Distribution, Normal};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -28,6 +30,9 @@ pub enum LjCatalogPresetError {
     /// A development reference does not contain exactly one finite XYZ row per site.
     #[error("invalid Lennard-Jones reference coordinates")]
     ReferenceCoordinates,
+    /// A development perturbation has invalid dimensions or scale.
+    #[error("invalid Lennard-Jones calibration perturbation")]
+    CalibrationPerturbation,
 }
 
 /// Maximum energy difference used by the development-only exact-minimum check.
@@ -64,6 +69,44 @@ pub fn parse_reference_coordinates(
         return Err(LjCatalogPresetError::ReferenceCoordinates);
     }
     Ok(coordinates)
+}
+
+/// Apply a deterministic independent Gaussian perturbation while preserving
+/// the reference centroid exactly on each Cartesian axis.
+pub fn perturb_reference(
+    reference: &[f64],
+    n_points: usize,
+    seed: u64,
+    sigma: f64,
+) -> Result<Vec<f64>, LjCatalogPresetError> {
+    if n_points < 2
+        || reference.len() != 3 * n_points
+        || reference.iter().any(|value| !value.is_finite())
+        || !sigma.is_finite()
+        || sigma <= 0.0
+    {
+        return Err(LjCatalogPresetError::CalibrationPerturbation);
+    }
+    let distribution =
+        Normal::new(0.0, sigma).map_err(|_| LjCatalogPresetError::CalibrationPerturbation)?;
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut displacement = (0..reference.len())
+        .map(|_| distribution.sample(&mut rng))
+        .collect::<Vec<f64>>();
+    for axis in 0..3 {
+        let mean = (0..n_points)
+            .map(|atom| displacement[3 * atom + axis])
+            .sum::<f64>()
+            / n_points as f64;
+        for atom in 0..n_points {
+            displacement[3 * atom + axis] -= mean;
+        }
+    }
+    Ok(reference
+        .iter()
+        .zip(displacement)
+        .map(|(coordinate, delta)| coordinate + delta)
+        .collect())
 }
 
 /// Whether a development quench has independent evidence for the declared
