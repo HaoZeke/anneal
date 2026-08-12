@@ -70,6 +70,27 @@ pub struct ValidatorConfig {
     pub energy_rel_tolerance: f64,
 }
 
+/// Numeric field inspected by candidate validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericField {
+    /// Candidate Cartesian coordinates.
+    Coordinates,
+    /// Candidate producer forces.
+    Forces,
+    /// Candidate descriptor vector.
+    Descriptor,
+    /// Candidate cell matrix.
+    Cell,
+    /// Candidate producer energy.
+    Energy,
+    /// Candidate producer gradient norm.
+    GradientNorm,
+    /// Receiving-side energy.
+    FreshEnergy,
+    /// Receiving-side forces.
+    FreshForces,
+}
+
 /// Structured reason a candidate cannot cross the catalog boundary.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ValidationFailure {
@@ -115,6 +136,14 @@ pub enum ValidationFailure {
         expected: u32,
         /// Version carried by the candidate.
         actual: u32,
+    },
+    /// A candidate or receiving-side numeric field contains NaN or infinity.
+    #[error("nonfinite value in {field:?} at {index:?}")]
+    NonFinite {
+        /// Field containing the invalid value.
+        field: NumericField,
+        /// Element index for arrays, or no index for a scalar.
+        index: Option<usize>,
     },
     /// The fresh potential evaluation failed.
     #[error("fresh engine evaluation failed: {0}")]
@@ -181,6 +210,14 @@ impl CandidateValidator {
                 actual: candidate.descriptor_schema_version,
             });
         }
+        require_finite_slice(&candidate.coordinates, NumericField::Coordinates)?;
+        require_finite_slice(&candidate.forces, NumericField::Forces)?;
+        require_finite_slice(&candidate.descriptor, NumericField::Descriptor)?;
+        if let Some(cell) = candidate.cell.as_ref() {
+            require_finite_slice(cell, NumericField::Cell)?;
+        }
+        require_finite_scalar(candidate.energy, NumericField::Energy)?;
+        require_finite_scalar(candidate.gradient_norm, NumericField::GradientNorm)?;
         let fresh =
             evaluate(&candidate.coordinates).map_err(ValidationFailure::EngineEvaluation)?;
         let fresh_force_dim = u64::try_from(fresh.forces.len()).unwrap_or(u64::MAX);
@@ -190,9 +227,29 @@ impl CandidateValidator {
                 actual: fresh_force_dim,
             });
         }
+        require_finite_scalar(fresh.energy, NumericField::FreshEnergy)?;
+        require_finite_slice(&fresh.forces, NumericField::FreshForces)?;
         Ok(ValidatedCandidate {
             candidate: candidate.clone(),
             fresh,
         })
+    }
+}
+
+fn require_finite_scalar(value: f64, field: NumericField) -> Result<(), ValidationFailure> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(ValidationFailure::NonFinite { field, index: None })
+    }
+}
+
+fn require_finite_slice(values: &[f64], field: NumericField) -> Result<(), ValidationFailure> {
+    match values.iter().position(|value| !value.is_finite()) {
+        Some(index) => Err(ValidationFailure::NonFinite {
+            field,
+            index: Some(index),
+        }),
+        None => Ok(()),
     }
 }
