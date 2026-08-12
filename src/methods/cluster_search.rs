@@ -381,6 +381,66 @@ where
     }
 }
 
+/// Shortest pair distance in a 3N Cartesian state.
+pub fn min_pair_distance(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return f64::INFINITY;
+    }
+    let mut best = f64::INFINITY;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            let r2 = dx * dx + dy * dy + dz * dz;
+            if r2 < best {
+                best = r2;
+            }
+        }
+    }
+    best.sqrt()
+}
+
+/// A bank member is usable only if every coordinate is finite and no
+/// two atoms sit on top of each other.
+///
+/// EAM and xTB both reward overlap with a huge negative energy. Adopting
+/// that as a win fills the bank with a catastrophe and every later chain
+/// copies it.
+pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
+    x.iter().all(|v| v.is_finite()) && min_pair_distance(x) >= min_sep
+}
+
+/// Keep adsorbate atoms above the frozen slab after a SOAP hole step.
+#[cfg(feature = "bank-rpc")]
+fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
+    let Some((seeds, _)) = cfg.active_region.as_ref() else {
+        return;
+    };
+    let n = x.len() / 3;
+    let mut z_top = f64::NEG_INFINITY;
+    for i in 0..n {
+        if seeds.contains(&i) {
+            continue;
+        }
+        z_top = z_top.max(x[3 * i + 2]);
+    }
+    if !z_top.is_finite() {
+        return;
+    }
+    let floor = z_top + 0.8;
+    for &i in seeds {
+        if x[3 * i + 2] < floor {
+            x[3 * i + 2] = floor;
+        }
+    }
+}
+
+fn sane_sep(cfg: &Config) -> f64 {
+    cfg.min_separation.max(0.4) * 0.5
+}
+
 /// Mobile atom indices: the active region, or the complement of `frozen`.
 #[cfg(feature = "bank-rpc")]
 fn mobile_of(cfg: &Config) -> Option<Vec<usize>> {
@@ -481,7 +541,7 @@ fn leave_known_packing(
     {
         let rcut = 3.5 * cfg.length_scale;
         let mobile = mobile_of(cfg);
-        let y = crate::featomic_hop::step_into_hole(
+        let mut y = crate::featomic_hop::step_into_hole(
             x,
             wells,
             crate::featomic_hop::SOAP_PACK_MERGE,
@@ -490,15 +550,17 @@ fn leave_known_packing(
             mobile.as_deref(),
             rng,
         );
+        pin_adsorbate_above_slab(&mut y, cfg);
         if ledger.remaining() < 8 {
             return y;
         }
         let steps = cfg.relax_steps.min(ledger.remaining());
-        let (_e, q) = relax(ledger, y.view(), steps);
-        if !packing_is_known(q.view(), cfg, wells) {
+        let (_e, mut q) = relax(ledger, y.view(), steps);
+        pin_adsorbate_above_slab(&mut q, cfg);
+        if !packing_is_known(q.view(), cfg, wells) && structure_is_sane(q.view(), sane_sep(cfg)) {
             return q;
         }
-        crate::featomic_hop::step_into_hole(
+        let mut y2 = crate::featomic_hop::step_into_hole(
             q.view(),
             wells,
             crate::featomic_hop::SOAP_PACK_MERGE * 1.5,
@@ -506,7 +568,9 @@ fn leave_known_packing(
             cfg.species.as_deref(),
             mobile.as_deref(),
             rng,
-        )
+        );
+        pin_adsorbate_above_slab(&mut y2, cfg);
+        y2
     }
     #[cfg(not(feature = "featomic"))]
     {
@@ -685,6 +749,9 @@ where
             if x.len() != expected {
                 continue;
             }
+            if !structure_is_sane(x.view(), sane_sep(cfg)) {
+                continue;
+            }
             let theirs = packing_of(x.view(), cfg);
             let same = !mine.is_empty()
                 && mine.len() == theirs.len()
@@ -741,13 +808,19 @@ where
             improvements.push((h + hops_before, c + charged_before, b, e));
         }
         if out.best < best {
-            best = out.best;
-            best_state = out.best_state.clone();
+            if let Some(st) = out.best_state.as_ref() {
+                if structure_is_sane(st.view(), sane_sep(cfg)) {
+                    best = out.best;
+                    best_state = out.best_state.clone();
+                }
+            }
         }
         if let Some(st) = out.best_state.as_ref() {
-            let soap = packing_of(st.view(), cfg);
-            let _ = client.offer(out.best, st.view(), soap.view());
-            let _ = client.deposit(soap.view(), cfg.bias_height);
+            if structure_is_sane(st.view(), sane_sep(cfg)) {
+                let soap = packing_of(st.view(), cfg);
+                let _ = client.offer(out.best, st.view(), soap.view());
+                let _ = client.deposit(soap.view(), cfg.bias_height);
+            }
         }
     }
     println!(
@@ -884,6 +957,7 @@ where
 mod tests {
     use super::*;
     use crate::potentials::PairPotential;
+    use ndarray::Array1;
 
     /// The search runs against a potential passed as a trait object, which is
     /// the whole point: an rgpot potential arrives the same way.
@@ -1022,6 +1096,22 @@ mod tests {
         let mut ledger = Ledger::new(5_000);
         let (_, _) = search(&pot, &cfg, &mut ledger, 1);
         assert!(ledger.spent() <= 5_000, "spent {}", ledger.spent());
+    }
+
+    #[test]
+    fn overlapping_atoms_are_not_sane() {
+        let mut x = Array1::zeros(6);
+        x[3] = 0.01;
+        assert!(!structure_is_sane(x.view(), 0.4));
+        assert!(min_pair_distance(x.view()) < 0.02);
+    }
+
+    #[test]
+    fn a_separated_pair_is_sane() {
+        let mut x = Array1::zeros(6);
+        x[3] = 1.0;
+        assert!(structure_is_sane(x.view(), 0.4));
+        assert!((min_pair_distance(x.view()) - 1.0).abs() < 1e-12);
     }
 
     #[cfg(feature = "bank-rpc")]
