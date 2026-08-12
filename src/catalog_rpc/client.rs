@@ -14,6 +14,7 @@ use super::{
     PolicyState, ProtocolError, ProtocolRejection, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
+use crate::cooperative_search::ledger::ChargeKind;
 
 /// Connection and I/O deadlines for a catalog client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,6 +239,29 @@ impl CatalogClient {
         let reply = self.call(
             event_sequence,
             CatalogOperation::OfferCandidate { candidate },
+        )?;
+        Ok(MutationReceipt {
+            version: reply.snapshot.version,
+            duplicate: reply.duplicate,
+            snapshot: reply.snapshot,
+        })
+    }
+
+    /// Submit one exact replay-safe charged-work boundary.
+    pub fn record_ledger_event(
+        &mut self,
+        event_sequence: u64,
+        kind: ChargeKind,
+        charged_calls: u64,
+        cumulative_charged: u64,
+    ) -> Result<MutationReceipt, CatalogClientError> {
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::LedgerEvent {
+                kind: kind.wire_code(),
+                charged_calls,
+                cumulative_charged,
+            },
         )?;
         Ok(MutationReceipt {
             version: reply.snapshot.version,

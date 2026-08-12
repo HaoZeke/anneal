@@ -14,7 +14,7 @@ pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +154,10 @@ pub struct CatalogSnapshot {
     pub census_visits: u64,
     /// Number of finite active entries.
     pub active_entries: u32,
+    /// Sum of the latest exact charged counters from all replicas.
+    pub aggregate_charged: u64,
+    /// Declared ensemble charged-work budget.
+    pub aggregate_budget: u64,
 }
 
 /// Seeded target-free descriptor-hole result.
@@ -195,6 +199,10 @@ pub struct PolicyState {
     pub globally_saturated: bool,
     /// Candidate relation to the active catalog.
     pub relation: CatalogRelation,
+    /// Sum of the latest exact charged counters from all replicas.
+    pub aggregate_charged: u64,
+    /// Declared ensemble charged-work budget.
+    pub aggregate_budget: u64,
 }
 
 /// Optional scientific payload returned by an accepted operation.
@@ -435,6 +443,8 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
             body.set_duplicate(accepted.duplicate);
             body.set_census_visits(accepted.snapshot.census_visits);
             body.set_active_entries(accepted.snapshot.active_entries);
+            body.set_aggregate_charged(accepted.snapshot.aggregate_charged);
+            body.set_aggregate_budget(accepted.snapshot.aggregate_budget);
             let mut payload = body.init_payload();
             match &accepted.payload {
                 AcceptedPayload::None => payload.set_none(()),
@@ -462,6 +472,8 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_local_basin_visits(state.local_basin_visits);
                     output.set_globally_saturated(state.globally_saturated);
                     output.set_relation(state.relation.into());
+                    output.set_aggregate_charged(state.aggregate_charged);
+                    output.set_aggregate_budget(state.aggregate_budget);
                 }
             }
         }
@@ -510,6 +522,8 @@ pub(crate) fn decode_reply_reader(
                         local_basin_visits: state.get_local_basin_visits(),
                         globally_saturated: state.get_globally_saturated(),
                         relation: state.get_relation().map_err(wire_error)?.into(),
+                        aggregate_charged: state.get_aggregate_charged(),
+                        aggregate_budget: state.get_aggregate_budget(),
                     })
                 }
             };
@@ -520,6 +534,8 @@ pub(crate) fn decode_reply_reader(
                     version: snapshot_version,
                     census_visits: body.get_census_visits(),
                     active_entries: body.get_active_entries(),
+                    aggregate_charged: body.get_aggregate_charged(),
+                    aggregate_budget: body.get_aggregate_budget(),
                 },
                 payload,
             }))
