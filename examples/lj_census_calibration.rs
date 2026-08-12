@@ -15,7 +15,6 @@ use anneal_core::catalog::lj::{
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use anneal_core::shape::match_shapes;
-use anneal_core::DifferentiableObjective;
 use ndarray::{Array1, ArrayView1};
 use sha2::{Digest, Sha256};
 
