@@ -25,9 +25,9 @@
 //! stage is decided online rather than fixed.
 
 use ndarray::{Array1, ArrayView1};
-use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
@@ -37,10 +37,10 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
-use crate::methods::activation::{activate, Activation};
+use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
-use crate::path::{interpolate_path, StallDetector};
+use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
 mod config;
@@ -2454,8 +2454,8 @@ mod connectivity_tests {
 #[cfg(test)]
 mod group_move_tests {
     use super::*;
-    use rand::rngs::StdRng;
     use rand::SeedableRng;
+    use rand::rngs::StdRng;
 
     /// Six rigid three-atom groups in a blob.
     fn waterish() -> (Array1<f64>, Vec<Vec<usize>>) {
