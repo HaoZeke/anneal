@@ -5,12 +5,13 @@ use std::net::TcpStream;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
+use anneal_core::Catalog_capnp::{RejectionKind, catalog_reply, catalog_request};
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, ProtocolRejection, PROTOCOL_VERSION,
+    CatalogCandidate, CatalogIdentity, PROTOCOL_VERSION, ProtocolRejection,
 };
-use anneal_core::Catalog_capnp::{catalog_reply, catalog_request, RejectionKind};
+use anneal_core::cooperative_search::ledger::ChargeKind;
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
@@ -98,6 +99,47 @@ fn duplicate_mutation_is_idempotent_and_snapshot_versions_are_monotone() {
     assert!(replay.duplicate);
     assert_eq!(snapshot.version, 1);
     assert_eq!(snapshot.census_visits, 1);
+}
+
+#[test]
+fn coordinator_aggregates_replayed_ledger_events_exactly_once() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-ledger", [0x5a; 32], [0, 1])
+            .unwrap()
+            .with_ledger_budget(100)
+            .unwrap(),
+    )
+    .unwrap();
+    let mut first = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-ledger", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let recorded = first
+        .record_ledger_event(1, ChargeKind::AcceptedQuench, 7, 7)
+        .unwrap();
+    let replayed = first
+        .record_ledger_event(1, ChargeKind::AcceptedQuench, 7, 7)
+        .unwrap();
+    assert_eq!(recorded.snapshot.aggregate_charged, 7);
+    assert_eq!(recorded.snapshot.aggregate_budget, 200);
+    assert!(!recorded.duplicate);
+    assert_eq!(replayed.snapshot.aggregate_charged, 7);
+    assert!(replayed.duplicate);
+
+    let mut second = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-ledger", 1),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let aggregate = second
+        .record_ledger_event(1, ChargeKind::RejectedQuench, 11, 11)
+        .unwrap();
+    assert_eq!(aggregate.snapshot.aggregate_charged, 18);
+    assert_eq!(aggregate.snapshot.aggregate_budget, 200);
 }
 
 #[test]

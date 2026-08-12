@@ -192,12 +192,20 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     let server = server();
     let digest = signature().digest();
     let mut run = CooperativeRun::new([0, 1, 2, 3], 100).unwrap();
-    run.attach_client(
-        0,
-        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+    for replica in 0..4 {
+        run.attach_client(
+            replica,
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
             .unwrap(),
-    )
-    .unwrap();
+        )
+        .unwrap();
+        run.record_work(replica, ChargeKind::AcceptedQuench, 60)
+            .unwrap();
+    }
     let admitted = candidate(0, 1, 1.2);
     assert_eq!(
         run.offer_candidate(0, admitted.clone()).unwrap(),
@@ -205,14 +213,7 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     );
 
     let outcome = run
-        .policy_input(
-            0,
-            admitted.descriptor,
-            admitted.energy,
-            AggregateProgress::new(20, 400).unwrap(),
-            3,
-            false,
-        )
+        .policy_input(0, admitted.descriptor, admitted.energy, 3, false)
         .unwrap();
     let PolicyEvidenceOutcome::Remote(input) = outcome else {
         panic!("scientific coordinator must return exact policy evidence")
@@ -223,6 +224,7 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     assert_eq!(input.census.singleton_basins(), 1);
     assert_eq!(input.census.local_basin_visits(), 1);
     assert!(!input.census.globally_saturated());
+    assert!(input.progress.win_only());
     assert_eq!(input.local_stall_slices, 3);
     assert!(!input.local_deepened);
 }
@@ -385,15 +387,7 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
         SynchronizationOutcome::SharingDisabled
     );
     assert_eq!(
-        run.policy_input(
-            0,
-            vec![0.0; 9],
-            -1.0,
-            AggregateProgress::new(20, 400).unwrap(),
-            0,
-            false,
-        )
-        .unwrap(),
+        run.policy_input(0, vec![0.0; 9], -1.0, 0, false,).unwrap(),
         PolicyEvidenceOutcome::SharingDisabled
     );
     assert_eq!(run.ledger().ensemble_total(), 20);
