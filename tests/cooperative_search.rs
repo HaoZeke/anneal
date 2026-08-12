@@ -188,6 +188,57 @@ fn catalog_outputs_are_actionable_and_seeded() {
 }
 
 #[test]
+fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
+    let server = server();
+    let digest = signature().digest();
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    for (replica, client) in clients.iter_mut().enumerate() {
+        client
+            .offer_candidate(1, candidate(replica as u32, 1, 1.2))
+            .unwrap();
+    }
+    for (replica, client) in clients.iter_mut().enumerate() {
+        let state = client
+            .submit_population(2, 0, candidate(replica as u32, 2, 1.2))
+            .unwrap();
+        assert_eq!(state.epoch, 0);
+        assert_eq!(state.required, 4);
+        if replica < 3 {
+            assert_eq!(state.submitted, replica as u32 + 1);
+            assert!(state.plan.is_none());
+        } else {
+            let plan = state.plan.expect("fourth submission closes the epoch");
+            assert_eq!(plan.destinations, vec![0, 1, 2, 3]);
+            assert_eq!(plan.parents, vec![0, 1, 2, 3]);
+            assert_eq!(plan.parent_candidates.len(), 4);
+            assert_eq!(plan.unique_parents, 4);
+            assert_eq!(plan.max_family_size, 1);
+        }
+    }
+
+    for client in clients.iter_mut().take(3) {
+        let plan = client
+            .population_plan(3, 0)
+            .unwrap()
+            .plan
+            .expect("completed epoch must be pollable by every replica");
+        assert_eq!(plan.destinations, vec![0, 1, 2, 3]);
+        assert_eq!(plan.parents, vec![0, 1, 2, 3]);
+    }
+    assert_eq!(clients[0].snapshot(4).unwrap().census_visits, 4);
+}
+
+#[test]
 fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     let server = server();
     let digest = signature().digest();
