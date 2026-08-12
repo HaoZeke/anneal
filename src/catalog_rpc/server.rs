@@ -24,6 +24,7 @@ use crate::catalog::{
     SystemSignature, ValidatedCandidate, ValidatorConfig,
 };
 use crate::catalog_policy::proposal::farthest_hole;
+use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::DescriptorSpace;
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
@@ -36,6 +37,7 @@ pub struct ServerConfig {
     signature_digest: [u8; 32],
     replicas: BTreeSet<u32>,
     scientific: Option<ScientificConfig>,
+    per_replica_budget: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -69,7 +71,19 @@ impl ServerConfig {
             signature_digest,
             replicas,
             scientific: None,
+            per_replica_budget: None,
         })
+    }
+
+    /// Attach an equal charged-work budget for every configured replica.
+    pub fn with_ledger_budget(
+        mut self,
+        per_replica_budget: u64,
+    ) -> Result<Self, CatalogServerError> {
+        CooperativeLedger::new(self.replicas.iter().copied(), per_replica_budget)
+            .map_err(|_| CatalogServerError::InvalidConfiguration)?;
+        self.per_replica_budget = Some(per_replica_budget);
+        Ok(self)
     }
 
     /// Attach the scientific state and receiving-side engine validation.
@@ -108,6 +122,14 @@ impl ServerConfig {
         BasinCensus::new(validator.descriptor_dim, census_radius)
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         BasinCatalog::new(catalog_capacity, census_radius, total_charged_work)
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        let replica_count = u64::try_from(self.replicas.len())
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        if !total_charged_work.is_multiple_of(replica_count) {
+            return Err(CatalogServerError::InvalidScientificConfiguration);
+        }
+        self = self
+            .with_ledger_budget(total_charged_work / replica_count)
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         self.scientific = Some(ScientificConfig {
             signature,
@@ -166,6 +188,7 @@ struct CoordinatorState {
     active_entries: u32,
     requests: BTreeMap<(u32, u64), (CatalogRequest, AcceptedPayload)>,
     maximum_sequence: BTreeMap<u32, u64>,
+    ledger: Option<CooperativeLedger>,
     scientific: Option<ScientificState>,
 }
 
@@ -197,12 +220,18 @@ impl CoordinatorState {
                 })
             })
             .transpose()?;
+        let ledger = config
+            .per_replica_budget
+            .map(|budget| CooperativeLedger::new(config.replicas.iter().copied(), budget))
+            .transpose()
+            .map_err(|_| CatalogServerError::InvalidConfiguration)?;
         Ok(Self {
             snapshot_version: 0,
             census_visits: 0,
             active_entries: 0,
             requests: BTreeMap::new(),
             maximum_sequence: BTreeMap::new(),
+            ledger,
             scientific,
         })
     }
@@ -455,6 +484,14 @@ fn process_request(
                 local_basin_visits,
                 globally_saturated: scientific.census.is_saturated(),
                 relation,
+                aggregate_charged: state
+                    .ledger
+                    .as_ref()
+                    .map_or(0, CooperativeLedger::ensemble_total),
+                aggregate_budget: state
+                    .ledger
+                    .as_ref()
+                    .map_or(0, CooperativeLedger::aggregate_budget),
             });
         }
         CatalogOperation::RecordVisit { candidate } => {
@@ -552,7 +589,45 @@ fn process_request(
             state.active_entries = active_entries;
             state.snapshot_version = snapshot_version;
         }
-        CatalogOperation::LedgerEvent { .. } => {
+        CatalogOperation::LedgerEvent {
+            kind,
+            charged_calls,
+            cumulative_charged,
+        } => {
+            let Some(kind) = ChargeKind::from_wire_code(*kind) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(ledger) = state.ledger.as_mut() else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            if ledger
+                .record(ReplicaLedgerEvent {
+                    replica: request.identity.replica,
+                    sequence: request.event_sequence,
+                    kind,
+                    charged_calls: *charged_calls,
+                    cumulative_charged: *cumulative_charged,
+                })
+                .is_err()
+            {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let aggregate_charged = ledger.ensemble_total();
+            if let Some(scientific) = state.scientific.as_mut() {
+                scientific.catalog.update_threshold(aggregate_charged);
+            }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
                     &state,
@@ -687,6 +762,14 @@ fn accepted_with_payload(
             version: state.snapshot_version,
             census_visits: state.census_visits,
             active_entries: state.active_entries,
+            aggregate_charged: state
+                .ledger
+                .as_ref()
+                .map_or(0, CooperativeLedger::ensemble_total),
+            aggregate_budget: state
+                .ledger
+                .as_ref()
+                .map_or(0, CooperativeLedger::aggregate_budget),
         },
         payload,
     })

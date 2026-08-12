@@ -133,6 +133,9 @@ mod run {
         /// Exact coordinator evidence is internally inconsistent.
         #[error("cooperative policy input failed: {0}")]
         PolicyInput(#[from] PolicyInputError),
+        /// The coordinator rejected a charged-work ledger boundary.
+        #[error("coordinator rejected cooperative ledger event: {0:?}")]
+        CoordinatorLedgerRejected(ProtocolRejection),
         /// An operation names a replica outside the run manifest.
         #[error("unknown cooperative replica {replica}")]
         UnknownReplica {
@@ -227,7 +230,44 @@ mod run {
                 charged_calls,
                 cumulative_charged,
             })?;
-            self.push_event(replica, TraceKind::LocalWork, None, None)?;
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => Some(client.record_ledger_event(
+                        rpc_sequence,
+                        kind,
+                        charged_calls,
+                        cumulative_charged,
+                    )),
+                    None => None,
+                }
+            };
+            match result {
+                None => self.push_event(replica, TraceKind::LocalWork, None, None)?,
+                Some(Ok(receipt)) => {
+                    self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                    self.push_event(
+                        replica,
+                        TraceKind::LocalWork,
+                        Some(receipt.snapshot.version),
+                        None,
+                    )?;
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    return Err(CooperativeRunError::CoordinatorLedgerRejected(reason));
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::LocalWork, None, None)?;
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                }
+            }
             Ok(())
         }
 
@@ -332,7 +372,6 @@ mod run {
             replica: u32,
             descriptor: Vec<f64>,
             energy: f64,
-            progress: AggregateProgress,
             local_stall_slices: u32,
             local_deepened: bool,
         ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
@@ -352,12 +391,8 @@ mod run {
                     Ok(PolicyEvidenceOutcome::SharingDisabled)
                 }
                 Some(Ok(receipt)) => {
-                    let input = policy_input_from_state(
-                        receipt.state,
-                        progress,
-                        local_stall_slices,
-                        local_deepened,
-                    )?;
+                    let input =
+                        policy_input_from_state(receipt.state, local_stall_slices, local_deepened)?;
                     self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                     self.push_event(
                         replica,
@@ -498,7 +533,6 @@ mod run {
 
     fn policy_input_from_state(
         state: PolicyState,
-        progress: AggregateProgress,
         local_stall_slices: u32,
         local_deepened: bool,
     ) -> Result<CatalogPolicyInput, PolicyInputError> {
@@ -522,7 +556,7 @@ mod run {
                 state.local_basin_visits,
                 state.globally_saturated,
             )?,
-            progress,
+            progress: AggregateProgress::new(state.aggregate_charged, state.aggregate_budget)?,
             local_stall_slices,
             local_deepened,
         })
