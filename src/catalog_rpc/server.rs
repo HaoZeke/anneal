@@ -357,12 +357,8 @@ fn process_request(
         | CatalogOperation::DescriptorHole { .. } => {}
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
-                let Ok(validated) = validate_candidate(
-                    scientific,
-                    &request.identity,
-                    request.event_sequence,
-                    candidate,
-                ) else {
+                let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
+                else {
                     return rejected(
                         &state,
                         request.event_sequence,
@@ -402,12 +398,8 @@ fn process_request(
             let (census_visits, active_entries) = if let Some(scientific) =
                 state.scientific.as_mut()
             {
-                let Ok(validated) = validate_candidate(
-                    scientific,
-                    &request.identity,
-                    request.event_sequence,
-                    candidate,
-                ) else {
+                let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
+                else {
                     return rejected(
                         &state,
                         request.event_sequence,
@@ -492,11 +484,9 @@ fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
 fn validate_candidate(
     scientific: &ScientificState,
     identity: &CatalogIdentity,
-    event_sequence: u64,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
     if candidate.producer_replica != identity.replica
-        || candidate.event_sequence != event_sequence
         || candidate.descriptor_schema_version != scientific.signature.descriptor.version
     {
         return Err(());
