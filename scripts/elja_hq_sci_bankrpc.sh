@@ -61,11 +61,12 @@ submit_arm() {
     --name "n${n}-lj${n}-rec" \
     --array="0-${last}" \
     --cpus 1 \
-    --time-limit=8h \
+    --time-limit=${HQ_TIME:-24h} \
     --cwd "$out" \
     --stdout "$out/lj${n}_rec_%{TASK_ID}.out" \
     --stderr "$out/lj${n}_rec_%{TASK_ID}.err" \
-    -- bash -lc "export BANK_RPC=${HOST}:${port} LJ_BIN=${BIN} BANK_SLICE=${BANK_SLICE:-500}; exec ${ONE} ${n} ${budget} rec" \
+    -- bash -lc "export BANK_RPC=${HOST}:${port} LJ_BIN=${BIN} BANK_SLICE=${BANK_SLICE:-500} BANK_SYNC=${BANK_SYNC:-8}
+exec ${ONE} ${n} ${budget} rec" \
     | tee -a "$out/hq_submit.log"
 }
 
