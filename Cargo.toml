@@ -46,6 +46,7 @@ num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
 rayon       = "1.10"
+sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
