@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
     CandidateRecord, CandidateValidator, DescriptorSignature, EngineSignature, FreshEvaluation,
-    QuenchStatus, SystemSignature, ValidationFailure, ValidatorConfig,
+    NumericField, QuenchStatus, SystemSignature, ValidationFailure, ValidatorConfig,
 };
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -168,6 +168,106 @@ fn fresh_force_dimension_is_rejected() {
         ValidationFailure::FreshForceDimension {
             expected: 6,
             actual: 5,
+        }
+    );
+}
+
+#[test]
+fn nonfinite_candidate_arrays_are_rejected_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.coordinates[2] = f64::NAN;
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::Coordinates,
+            index: Some(2),
+        },
+    );
+
+    let mut record = candidate(signature());
+    record.forces[4] = f64::INFINITY;
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::Forces,
+            index: Some(4),
+        },
+    );
+
+    let mut record = candidate(signature());
+    record.descriptor[1] = f64::NEG_INFINITY;
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::Descriptor,
+            index: Some(1),
+        },
+    );
+
+    let mut record = candidate(signature());
+    record.cell = Some([10.0, 0.0, 0.0, f64::NAN, 10.0, 0.0, 0.0, 0.0, 10.0]);
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::Cell,
+            index: Some(3),
+        },
+    );
+}
+
+#[test]
+fn nonfinite_candidate_scalars_are_rejected_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.energy = f64::NAN;
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::Energy,
+            index: None,
+        },
+    );
+
+    let mut record = candidate(signature());
+    record.gradient_norm = f64::INFINITY;
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::NonFinite {
+            field: NumericField::GradientNorm,
+            index: None,
+        },
+    );
+}
+
+#[test]
+fn nonfinite_fresh_evaluation_is_rejected() {
+    let record = candidate(signature());
+    let result = validator(signature()).validate(&record, |_| {
+        Ok(FreshEvaluation {
+            energy: f64::NAN,
+            forces: vec![0.0; 6],
+        })
+    });
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::NonFinite {
+            field: NumericField::FreshEnergy,
+            index: None,
+        }
+    );
+
+    let result = validator(signature()).validate(&record, |_| {
+        let mut forces = vec![0.0; 6];
+        forces[3] = f64::INFINITY;
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces,
+        })
+    });
+    assert_eq!(
+        result.unwrap_err(),
+        ValidationFailure::NonFinite {
+            field: NumericField::FreshForces,
+            index: Some(3),
         }
     );
 }
