@@ -9,11 +9,16 @@ fi
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
 SYS=${IRA_SYSROOT:-$HOME/ira/sysroot}
+CMAKE_BIN=${CMAKE_BIN:-$HOME/rgpot/.pixi/envs/xtbbld/bin/cmake}
+if [[ ! -x $CMAKE_BIN ]]; then
+  echo "missing compute-node CMake executable: $CMAKE_BIN" >&2
+  exit 1
+fi
 mkdir -p "$SYS/bin"
 ln -sfn "$GCC/bin/gcc" "$SYS/bin/cc"
 ln -sfn "$GCC/bin/gcc" "$SYS/bin/gcc"
 ln -sfn "$GCC/bin/g++" "$SYS/bin/g++"
-export PATH="${SYS}/bin:${GCC}/bin:${HOME}/.cargo/bin:${PATH}"
+export PATH="$(dirname "$CMAKE_BIN"):${SYS}/bin:${GCC}/bin:${HOME}/.cargo/bin:${PATH}"
 export CC="${GCC}/bin/gcc"
 export CXX="${GCC}/bin/g++"
 export FC="${GCC}/bin/gfortran"
@@ -32,6 +37,7 @@ if [[ -e "$BIN" ]] && ! ldd "$BIN" >/dev/null 2>&1; then
 fi
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
+echo "cmake=$($CMAKE_BIN --version | head -1) path=$(command -v cmake)"
 echo "glibc=$(ldd --version | head -1)"
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
