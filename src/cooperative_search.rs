@@ -596,18 +596,21 @@ mod run {
             catalog_version: Option<u64>,
             reason: Option<&'static str>,
         ) -> Result<(), CooperativeRunError> {
-            let sequence = {
+            let (sequence, remote_aggregate) = {
                 let state = self.replica_mut(replica)?;
                 state.trace_sequence = state
                     .trace_sequence
                     .checked_add(1)
                     .ok_or(CooperativeRunError::CounterOverflow)?;
-                state.trace_sequence
+                (
+                    state.trace_sequence,
+                    state.snapshot.map(|snapshot| snapshot.aggregate_charged),
+                )
             };
             self.events.push(TraceEvent {
                 replica,
                 sequence,
-                aggregate_charged: self.ledger.ensemble_total(),
+                aggregate_charged: remote_aggregate.unwrap_or_else(|| self.ledger.ensemble_total()),
                 catalog_version,
                 kind,
                 reason,
