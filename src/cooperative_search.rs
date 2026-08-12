@@ -13,7 +13,7 @@ mod run {
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
         CatalogCandidate, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
-        ProtocolRejection,
+        PopulationEpochState, PopulationPlan, ProtocolRejection,
     };
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
@@ -37,6 +37,10 @@ mod run {
         PolicyExplore,
         /// Policy selected a descriptor-hole leave proposal.
         PolicyLeave,
+        /// A synchronous population epoch is waiting for other replicas.
+        PopulationPending,
+        /// A synchronous population epoch returned an immutable parent plan.
+        PopulationReady,
         /// Coordinator communication failed and local execution remained active.
         RpcFallback,
         /// The run has no sharing transport by construction.
@@ -54,6 +58,8 @@ mod run {
                 Self::PolicyExploit => "policy_exploit",
                 Self::PolicyExplore => "policy_explore",
                 Self::PolicyLeave => "policy_leave",
+                Self::PopulationPending => "population_pending",
+                Self::PopulationReady => "population_ready",
                 Self::RpcFallback => "rpc_fallback",
                 Self::SharingDisabled => "sharing_disabled",
             }
@@ -153,6 +159,31 @@ mod run {
         SharingDisabled,
     }
 
+    /// Result of one synchronous population submission or poll.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum PopulationSynchronizationOutcome {
+        /// The coordinator has not received every replica representative.
+        Pending {
+            /// Unique representatives received for this epoch.
+            submitted: u32,
+            /// Complete population size required to close the epoch.
+            required: u32,
+        },
+        /// The epoch is closed and this destination has a validated parent.
+        Ready {
+            /// Parent candidate assigned to the requesting replica.
+            parent: CatalogCandidate,
+            /// Immutable full-population plan and genealogy diagnostics.
+            plan: PopulationPlan,
+        },
+        /// The coordinator rejected the representative or epoch request.
+        Rejected,
+        /// Communication failed and the local trajectory remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
     /// Invalid cooperative-run operation.
     #[derive(Debug, thiserror::Error)]
     pub enum CooperativeRunError {
@@ -174,6 +205,14 @@ mod run {
         /// A replica counter cannot be represented.
         #[error("cooperative replica counter overflow")]
         CounterOverflow,
+        /// A completed population plan cannot be addressed safely.
+        #[error("invalid population plan for epoch {epoch}: {reason}")]
+        InvalidPopulationPlan {
+            /// Epoch carrying the malformed plan.
+            epoch: u64,
+            /// Stable invariant violated by the plan.
+            reason: &'static str,
+        },
     }
 
     struct ReplicaState {
@@ -524,6 +563,43 @@ mod run {
             }
         }
 
+        /// Submit one validated chain representative to a population epoch.
+        pub fn submit_population(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+            candidate: CatalogCandidate,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => {
+                        Some(client.submit_population_with_snapshot(rpc_sequence, epoch, candidate))
+                    }
+                    None => None,
+                }
+            };
+            self.handle_population_result(replica, epoch, result)
+        }
+
+        /// Poll an existing population epoch without changing its evidence.
+        pub fn poll_population(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                match state.client.as_mut() {
+                    Some(client) => Some(client.population_plan_with_snapshot(rpc_sequence, epoch)),
+                    None => None,
+                }
+            };
+            self.handle_population_result(replica, epoch, result)
+        }
+
         /// Evaluate and record one pure catalog policy decision.
         pub fn decide(
             &mut self,
@@ -587,6 +663,116 @@ mod run {
                 .checked_add(1)
                 .ok_or(CooperativeRunError::CounterOverflow)?;
             Ok(state.rpc_sequence)
+        }
+
+        fn handle_population_result(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+            result: Option<
+                Result<crate::catalog_rpc::client::PopulationEpochReceipt, CatalogClientError>,
+            >,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(PopulationSynchronizationOutcome::SharingDisabled)
+                }
+                Some(Ok(receipt)) => {
+                    self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                    self.population_outcome(replica, epoch, receipt.state, receipt.snapshot.version)
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(PopulationSynchronizationOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(PopulationSynchronizationOutcome::LocalFallback)
+                }
+            }
+        }
+
+        fn population_outcome(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+            state: PopulationEpochState,
+            catalog_version: u64,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            if state.epoch != epoch {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "barrier epoch does not match the request",
+                });
+            }
+            let Some(plan) = state.plan else {
+                if state.required == 0 || state.submitted >= state.required {
+                    return Err(CooperativeRunError::InvalidPopulationPlan {
+                        epoch,
+                        reason: "pending barrier has invalid submission counts",
+                    });
+                }
+                self.push_event(
+                    replica,
+                    TraceKind::PopulationPending,
+                    Some(catalog_version),
+                    None,
+                )?;
+                return Ok(PopulationSynchronizationOutcome::Pending {
+                    submitted: state.submitted,
+                    required: state.required,
+                });
+            };
+            let population_size = plan.destinations.len();
+            if plan.epoch != epoch
+                || population_size != state.required as usize
+                || state.submitted != state.required
+                || plan.parents.len() != population_size
+                || plan.parent_candidates.len() != population_size
+                || plan.weights.len() != population_size
+            {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "completed barrier vectors or counts are inconsistent",
+                });
+            }
+            let mut destinations = plan
+                .destinations
+                .iter()
+                .enumerate()
+                .filter(|(_, destination)| **destination == replica);
+            let Some((index, _)) = destinations.next() else {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "requesting replica has no destination",
+                });
+            };
+            if destinations.next().is_some() {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "requesting replica has multiple destinations",
+                });
+            }
+            let parent = plan.parent_candidates[index].clone();
+            if parent.producer_replica != plan.parents[index] {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "parent candidate identity does not match genealogy",
+                });
+            }
+            self.push_event(
+                replica,
+                TraceKind::PopulationReady,
+                Some(catalog_version),
+                None,
+            )?;
+            Ok(PopulationSynchronizationOutcome::Ready { parent, plan })
         }
 
         fn push_event(
