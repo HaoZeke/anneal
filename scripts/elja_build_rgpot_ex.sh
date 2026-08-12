@@ -72,7 +72,7 @@ build_engines() {
 build_examples() {
   export PATH="${HOME}/.cargo/bin:${PATH}"
   cd "$ROOT"
-  cargo build --offline --release --features rgpot-ex,featomic \
+  cargo build --offline --release --features rgpot-ex,featomic,bank-rpc \
     --example molecular_cluster --example slab_adsorption
   local mol slab
   mol=$ROOT/target/release/examples/molecular_cluster

@@ -8,7 +8,8 @@ mod common;
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, MoveLibrary, repack_rigid_groups,
 };
-use anneal_core::methods::cluster_search::{search_from, verify};
+use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
+use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
 use ndarray::Array1;
 use rand::SeedableRng;
@@ -47,7 +48,8 @@ fn main() {
     cfg.screen_steps = 6;
     cfg.relax_steps = 60;
     println!(
-        "(H2O){m} through eindir/rgpot xtb, budget {budget}, seeds {seed0}..{}",
+        "(H2O){m} through eindir/rgpot xtb, arm {}, budget {budget}, seeds {seed0}..{}",
+        bank_label(),
         seed0 + seeds
     );
     for seed in seed0..seed0 + seeds {
@@ -62,19 +64,21 @@ fn main() {
         }
         let x0 = repack_rigid_groups(template.view(), &groups, cfg.length_scale, &mut rng);
         let mut ledger = Ledger::new(budget);
-        let (out, stats) = search_from(&obj, &cfg, &mut ledger, x0.view(), seed);
+        let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, x0.view(), seed);
         let checked = verify(&obj, &out);
         println!(
-            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}{}",
+            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}  arm {}",
             out.best,
             out.hops,
             ledger.spent(),
             stats.converged,
             stats.total(),
-            checked
-                .map(|(e, g)| format!("  verify e={e:.6} |g|={g:.3e}"))
-                .unwrap_or_default()
+            bank_label()
         );
+        if let Some((e, g)) = checked {
+            println!("    verify e={e:.6} |g|={g:.3e}");
+        }
+        report_trace(&out, ledger.spent());
         if let Some(bx) = out.best_state {
             let path = format!("best_h2o{m}_eindir_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");

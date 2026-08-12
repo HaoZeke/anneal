@@ -6,7 +6,8 @@
 mod common;
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger, covalent_radius};
-use anneal_core::methods::cluster_search::{search_from, verify};
+use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
+use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
@@ -111,6 +112,13 @@ fn main() {
     }
     cfg.screen_steps = 10;
     cfg.relax_steps = 150;
+    if !free_seeds.is_empty() && free_seeds.len() < n {
+        let mut frozen = vec![true; n];
+        for &i in &free_seeds {
+            frozen[i] = false;
+        }
+        cfg.frozen = Some(frozen);
+    }
     let pot = RgpotObjective::cuh2(&atmnrs, box_);
     let inner = pot.wrapper();
     let mut active = vec![false; n];
@@ -122,25 +130,28 @@ fn main() {
         active,
     };
     println!(
-        "{con}: {n} atoms through eindir/rgpot cuh2, {} free, budget {budget}, seeds {seed0}..{}",
+        "{con}: {n} atoms through eindir/rgpot cuh2, {} free, arm {}, budget {budget}, seeds {seed0}..{}",
         free_seeds.len(),
+        bank_label(),
         seed0 + seeds
     );
     for seed in seed0..seed0 + seeds {
         let mut ledger = Ledger::new(budget);
-        let (out, stats) = search_from(&obj, &cfg, &mut ledger, base_x.view(), seed);
+        let (out, stats) = search_from_maybe_bank(&obj, &cfg, &mut ledger, base_x.view(), seed);
         let checked = verify(&obj, &out);
         println!(
-            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}{}",
+            "  seed {seed}: best {:.6} eV  hops {}  charged {}  converged {}/{}  arm {}",
             out.best,
             out.hops,
             ledger.spent(),
             stats.converged,
             stats.total(),
-            checked
-                .map(|(e, g)| format!("  verify e={e:.6} |g|_mobile={g:.3e}"))
-                .unwrap_or_default()
+            bank_label()
         );
+        if let Some((e, g)) = checked {
+            println!("    verify e={e:.6} |g|_mobile={g:.3e}");
+        }
+        report_trace(&out, ledger.spent());
         if let Some(bx) = out.best_state {
             let path = format!("best_slab_eindir_s{seed}.xyz");
             let mut f = std::fs::File::create(&path).expect("xyz");
