@@ -192,17 +192,21 @@ validated quenched representative each.  The empirical search population is
 The local perturbation and quench executed by a replica is the mutation kernel
 =K_t=.  Selection uses no target structure, published reference energy, or
 morphology label.  For energy rank =r_E in [0,1]=, descriptor-novelty rank
-=r_N in [0,1]=, and census-scarcity rank =r_S in [0,1]=, define
+=r_N in [0,1]=, census-scarcity rank =r_S in [0,1]=, and transition-field
+uncertainty rank =r_U in [0,1]=, define
 
 \[
-  \log G_{t,i}=-\beta_t r_E(i)+\lambda_t r_N(i)+\gamma_t r_S(i).
+  \log G_{t,i}=-\beta_t r_E(i)+\lambda_t r_N(i)+\gamma_t r_S(i)
+                  +\kappa_t r_U(i).
 \]
 
-Lower energy rank is favorable, while higher novelty and scarcity ranks are
-favorable.  Within-epoch fractional ranks are invariant under positive affine
-changes of energy units.  Subtracting =max_i log G_{t,i}= and clipping the
-remaining log weights to =[-c,0]= bounds the normalized weight ratio by
-=exp(c)= and prevents numerical extinction.
+Lower energy rank is favorable, while higher novelty, scarcity, and posterior
+uncertainty ranks are favorable.  The scarcity rank is derived only from the
+inverse exact census visit count.  The uncertainty rank is derived separately
+from the latent Gaussian basin-transition graph.  Within-epoch fractional
+ranks are invariant under positive affine changes of energy units.  Subtracting
+=max_i log G_{t,i}= and clipping the remaining log weights to =[-c,0]= bounds
+the normalized weight ratio by =exp(c)= and prevents numerical extinction.
 
 The normalized weights are
 
@@ -231,13 +235,53 @@ This borrows the interacting-particle bookkeeping of fixed-population
 diffusion Monte Carlo.  It does not import imaginary-time propagation, a trial
 wavefunction, a fixed-node constraint, or a Green-function convergence claim.
 The exact census remains the statistical species counted by Good--Turing;
-structured latent-field uncertainty can only contribute to =r_S= and cannot
+structured latent-field uncertainty contributes only through =r_U= and cannot
 change census membership or visit totals.
 
 =tests/feynman_kac_population.rs= checks energy-unit invariance, fixed
 population size, deterministic replay, family-cap preservation, genealogy
-diagnostics, and the ability of novelty plus scarcity to protect a second
-funnel from energy-only collapse.
+diagnostics, sibling rejuvenation, and the ability of novelty, scarcity, and
+transition uncertainty to protect alternatives from energy-only collapse.
+
+* D29: Bayesian layers and the latent Gaussian transition field
+
+Each validated catalog observation gives a basin =b_t=, a fresh quenched energy,
+and a replica identity.  Consecutive observations from the same replica create
+an undirected edge =(b_{t-1},b_t)=.  On the bounded transition graph, the latent
+floor vector has Gaussian precision
+
+\[
+  Q=\tau_0 I+L_G+\tau_y I_{\rm observed},
+\]
+
+where =L_G= is the graph Laplacian.  The coordinator caches the Cholesky factor
+of =Q=.  Its uncertainty score for basin =b= is
+
+\[
+  u_b={(Q^{-1})_{bb}\over 1+n_b},
+\]
+
+where =n_b= is effort recorded at that graph node.  Nodes outside the bounded
+field receive the prior residual-cell variance.  Population selection ranks
+=u_b= across the synchronous replicas to obtain =r_U=.  This is the useful
+latent-GMRF component of an INLA-style construction.  Because both prior and
+likelihood are Gaussian, the conditional posterior is exact and no Laplace
+approximation or R-INLA runtime is required.
+
+The Bayesian mechanisms have distinct conditioning information and therefore
+remain separate.  Discounted Thompson allocation in
+=methods/cluster_hopping= chooses local perturbation kernels.  The
+cost-asymmetric Bayesian screen chooses whether a proposed quench receives
+full work.  The GMRF contributes transition uncertainty to the cross-chain
+selection potential.  Exact Good--Turing counts retain the unseen-mass and
+saturation semantics.
+
+Nested sampling in =methods/nested= replaces the search population with a
+descending likelihood ceiling and its own volume process.  It remains a
+matched-budget comparison arm because combining its live-point weights with
+the Feynman--Kac genealogy would destroy both methods' weight semantics.  The
+large-cluster result determines whether that arm is competitive; its presence
+in the code does not make it part of the cooperative production stack.
 
 * Executable verification
 
@@ -247,5 +291,5 @@ On Terra, run:
 scripts/terra_verify_descriptor_math.sh
 #+end_src
 
-The verifier runs the D20--D23 and D28 Rust suites in release mode with the
+The verifier runs the D20--D23 and D28--D29 Rust suites in release mode with the
 lockfile and the D21/D27 Python witnesses in the Pixi =verify= environment.
