@@ -744,7 +744,10 @@ where
     let expected = 3 * cfg.n_points;
 
     let mut well_pairs: Vec<(Array1<f64>, f64)> = Vec::new();
+    let mut catalog_best = f64::INFINITY;
+    let mut catalog_size = 0usize;
     while ledger.remaining() > 0 {
+        let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
         let pull = slices == 0 || slices.is_multiple_of(sync_every);
         if pull && client.is_none() {
             client = BankClient::connect(sock).ok();
@@ -761,6 +764,10 @@ where
                             s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
                         );
                         well_pairs = s.wells.clone();
+                        catalog_size = s.size as usize;
+                        if !s.energies.is_empty() {
+                            catalog_best = s.energies.iter().copied().fold(f64::INFINITY, f64::min);
+                        }
                         if s.size >= 2 {
                             let sched = schedule.get_or_insert_with(|| {
                                 DiversityAnnealer::from_initial(s.dcut.max(pack_merge()))
@@ -789,7 +796,17 @@ where
                 0.15
             }
         };
-        if pull {
+        let sat = catalog_saturated(&well_pairs, cfg.bias_height);
+        let on_known = packing_is_known(start.view(), cfg, &wells);
+        let swarm = crate::swarm::decide(
+            progress,
+            best,
+            catalog_best,
+            catalog_size,
+            sat,
+            on_known && sat,
+        );
+        if pull && swarm.pull {
             if let Some(c) = client.as_mut() {
                 match c.sample(rng.random()) {
                     Ok(Some((e, x)))
@@ -805,7 +822,12 @@ where
                                 .sum::<f64>()
                                 .sqrt()
                         };
-                        if e < best - 0.05 || (dist > gap && e < best + 1.0) {
+                        let take = if swarm.win_only {
+                            e < best - 0.05
+                        } else {
+                            e < best - 0.05 || (dist > gap && e < best + 1.0)
+                        };
+                        if take {
                             if e < best {
                                 best = e;
                                 best_state = Some(x.clone());
@@ -821,9 +843,7 @@ where
                 }
             }
         }
-        if catalog_saturated(&well_pairs, cfg.bias_height)
-            && packing_is_known(start.view(), cfg, &wells)
-        {
+        if swarm.leave {
             null_starts += 1;
             start = leave_known_packing(start.view(), cfg, &wells, ledger, &mut relax, &mut rng);
         }
