@@ -116,3 +116,7 @@ required-features = ["bank-rpc"]
 [[example]]
 name = "catalog_server"
 required-features = ["bank-rpc"]
+
+[[example]]
+name = "lj_census_calibration"
+required-features = ["ira"]
