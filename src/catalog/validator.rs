@@ -92,6 +92,14 @@ pub enum ValidationFailure {
         /// Dimension carried by the candidate.
         actual: u64,
     },
+    /// Fresh force length differs from the signature.
+    #[error("fresh force dimension is {actual}, expected {expected}")]
+    FreshForceDimension {
+        /// Dimension declared by the signature.
+        expected: u64,
+        /// Dimension returned by the fresh evaluation.
+        actual: u64,
+    },
     /// Descriptor length differs from the validator contract.
     #[error("descriptor dimension is {actual}, expected {expected}")]
     DescriptorDimension {
@@ -175,6 +183,13 @@ impl CandidateValidator {
         }
         let fresh =
             evaluate(&candidate.coordinates).map_err(ValidationFailure::EngineEvaluation)?;
+        let fresh_force_dim = u64::try_from(fresh.forces.len()).unwrap_or(u64::MAX);
+        if fresh_force_dim != self.expected.coordinate_dim {
+            return Err(ValidationFailure::FreshForceDimension {
+                expected: self.expected.coordinate_dim,
+                actual: fresh_force_dim,
+            });
+        }
         Ok(ValidatedCandidate {
             candidate: candidate.clone(),
             fresh,
