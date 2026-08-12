@@ -9,9 +9,9 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    AcceptedReply, CatalogIdentity, CatalogOperation, CatalogReply, CatalogRequest,
-    CatalogSnapshot, PROTOCOL_VERSION, ProtocolError, ProtocolRejection, decode_reply_reader,
-    encode_request,
+    decode_reply_reader, encode_request, AcceptedReply, CatalogIdentity, CatalogOperation,
+    CatalogReply, CatalogRequest, CatalogSnapshot, ProtocolError, ProtocolRejection,
+    PROTOCOL_VERSION,
 };
 use crate::Catalog_capnp::catalog_reply;
 
@@ -67,6 +67,89 @@ pub struct MutationReceipt {
     pub duplicate: bool,
 }
 
+/// Result of a coordinator read when local execution remains available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogAccess {
+    /// The coordinator returned a current snapshot.
+    Remote(CatalogSnapshot),
+    /// The coordinator was unavailable within the configured deadline.
+    LocalFallback,
+}
+
+/// Observable client-side events that affect cooperative execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogClientEvent {
+    /// A coordinator operation failed and execution continued locally.
+    LocalFallback {
+        /// Replica event sequence associated with the failed operation.
+        event_sequence: u64,
+    },
+}
+
+/// Invalid cooperative synchronization schedule or slice charge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SyncScheduleError {
+    /// Synchronization bounds must be nonzero.
+    #[error("synchronization bounds must be nonzero")]
+    ZeroBound,
+    /// One slice exceeded the declared maximum catalog calls.
+    #[error("slice charged {charged} catalog calls, maximum is {maximum}")]
+    SliceChargeExceeded { charged: u64, maximum: u64 },
+    /// The staleness bound cannot be represented as a `u64`.
+    #[error("synchronization staleness bound overflowed")]
+    BoundOverflow,
+}
+
+/// Counter-based synchronization schedule with a declared staleness bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncSchedule {
+    interval_slices: u64,
+    maximum_calls_per_slice: u64,
+    slices_since_sync: u64,
+}
+
+impl SyncSchedule {
+    /// Construct a schedule from a slice interval and per-slice call bound.
+    pub fn new(
+        interval_slices: u64,
+        maximum_calls_per_slice: u64,
+    ) -> Result<Self, SyncScheduleError> {
+        if interval_slices == 0 || maximum_calls_per_slice == 0 {
+            return Err(SyncScheduleError::ZeroBound);
+        }
+        interval_slices
+            .checked_mul(maximum_calls_per_slice)
+            .ok_or(SyncScheduleError::BoundOverflow)?;
+        Ok(Self {
+            interval_slices,
+            maximum_calls_per_slice,
+            slices_since_sync: 0,
+        })
+    }
+
+    /// Maximum catalog calls a replica can make between synchronizations.
+    pub fn maximum_staleness_calls(&self) -> u64 {
+        self.interval_slices * self.maximum_calls_per_slice
+    }
+
+    /// Charge one completed slice and report whether synchronization is due.
+    pub fn record_slice(&mut self, charged_calls: u64) -> Result<bool, SyncScheduleError> {
+        if charged_calls > self.maximum_calls_per_slice {
+            return Err(SyncScheduleError::SliceChargeExceeded {
+                charged: charged_calls,
+                maximum: self.maximum_calls_per_slice,
+            });
+        }
+        self.slices_since_sync = self.slices_since_sync.saturating_add(1);
+        Ok(self.slices_since_sync >= self.interval_slices)
+    }
+
+    /// Reset the staleness counter after a successful synchronization.
+    pub fn synchronized(&mut self) {
+        self.slices_since_sync = 0;
+    }
+}
+
 /// Persistent client bound to one replica identity.
 pub struct CatalogClient {
     stream: TcpStream,
@@ -99,6 +182,21 @@ impl CatalogClient {
         Ok(self
             .call(event_sequence, CatalogOperation::Snapshot)?
             .snapshot)
+    }
+
+    /// Read a snapshot or record an explicit local-fallback event.
+    pub fn snapshot_or_fallback(
+        &mut self,
+        event_sequence: u64,
+        events: &mut Vec<CatalogClientEvent>,
+    ) -> CatalogAccess {
+        match self.snapshot(event_sequence) {
+            Ok(snapshot) => CatalogAccess::Remote(snapshot),
+            Err(_) => {
+                events.push(CatalogClientEvent::LocalFallback { event_sequence });
+                CatalogAccess::LocalFallback
+            }
+        }
     }
 
     /// Record one exact census observation.
