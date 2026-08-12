@@ -7,7 +7,9 @@ use std::thread;
 
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
-use anneal_core::catalog_rpc::{CatalogIdentity, ProtocolRejection, PROTOCOL_VERSION};
+use anneal_core::catalog_rpc::{
+    CatalogCandidate, CatalogIdentity, ProtocolRejection, PROTOCOL_VERSION,
+};
 use anneal_core::Catalog_capnp::{catalog_reply, catalog_request, RejectionKind};
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
@@ -18,6 +20,23 @@ fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
         ensemble: ensemble.into(),
         replica,
         signature_digest: [0x5a; 32],
+    }
+}
+
+fn candidate(replica: u32, sequence: u64, basin_marker: f64) -> CatalogCandidate {
+    CatalogCandidate {
+        producer_replica: replica,
+        coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+        cell: None,
+        energy: -1.0,
+        forces: vec![0.0; 6],
+        gradient_norm: 0.0,
+        descriptor: vec![basin_marker, 0.2],
+        descriptor_schema_version: 1,
+        quench_converged: true,
+        charged_work: sequence,
+        event_sequence: sequence,
+        seed: 100 + u64::from(replica),
     }
 }
 
@@ -69,12 +88,8 @@ fn duplicate_mutation_is_idempotent_and_snapshot_versions_are_monotone() {
     )
     .unwrap();
 
-    let first = client
-        .record_visit(1, 17, true, vec![0.1, 0.2, 0.3])
-        .unwrap();
-    let replay = client
-        .record_visit(1, 17, true, vec![0.1, 0.2, 0.3])
-        .unwrap();
+    let first = client.record_visit(1, candidate(0, 1, 0.1)).unwrap();
+    let replay = client.record_visit(1, candidate(0, 1, 0.1)).unwrap();
     let snapshot = client.snapshot(2).unwrap();
 
     assert_eq!(first.version, 1);
@@ -106,7 +121,7 @@ fn concurrent_replicas_observe_one_serialized_mutation_order() {
             .unwrap();
             barrier.wait();
             client
-                .record_visit(1, u64::from(replica), true, vec![f64::from(replica)])
+                .record_visit(1, candidate(replica, 1, f64::from(replica)))
                 .unwrap()
                 .version
         }));
@@ -143,10 +158,7 @@ fn reconnect_replays_exact_requests_and_rejects_conflicting_content() {
     )
     .unwrap();
     assert_eq!(
-        first
-            .record_visit(1, 7, true, vec![0.1, 0.2])
-            .unwrap()
-            .version,
+        first.record_visit(1, candidate(0, 1, 0.1)).unwrap().version,
         1
     );
     drop(first);
@@ -159,7 +171,7 @@ fn reconnect_replays_exact_requests_and_rejects_conflicting_content() {
     .unwrap();
     assert!(
         replay
-            .record_visit(1, 7, true, vec![0.1, 0.2])
+            .record_visit(1, candidate(0, 1, 0.1))
             .unwrap()
             .duplicate
     );
@@ -172,9 +184,7 @@ fn reconnect_replays_exact_requests_and_rejects_conflicting_content() {
     )
     .unwrap();
     assert_eq!(
-        conflict
-            .record_visit(1, 8, false, vec![0.3, 0.4])
-            .unwrap_err(),
+        conflict.record_visit(1, candidate(0, 1, 0.3)).unwrap_err(),
         CatalogClientError::Rejected(ProtocolRejection::SequenceReplay)
     );
 }

@@ -4,11 +4,11 @@ use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
-use anneal_core::catalog_rpc::CatalogIdentity;
 use anneal_core::catalog_rpc::client::{
     CatalogAccess, CatalogClient, CatalogClientEvent, ClientConfig, SyncSchedule,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity};
 
 fn identity() -> CatalogIdentity {
     CatalogIdentity {
@@ -16,6 +16,23 @@ fn identity() -> CatalogIdentity {
         ensemble: "fault-ensemble".into(),
         replica: 0,
         signature_digest: [0x6b; 32],
+    }
+}
+
+fn candidate() -> CatalogCandidate {
+    CatalogCandidate {
+        producer_replica: 0,
+        coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+        cell: None,
+        energy: -1.0,
+        forces: vec![0.0; 6],
+        gradient_norm: 0.0,
+        descriptor: vec![0.1, 0.2],
+        descriptor_schema_version: 1,
+        quench_converged: true,
+        charged_work: 1,
+        event_sequence: 1,
+        seed: 100,
     }
 }
 
@@ -85,13 +102,7 @@ fn server_restart_constructs_a_new_empty_ensemble_state() {
         .unwrap();
         let addr = server.addr();
         let mut client = CatalogClient::connect(addr, identity(), ClientConfig::default()).unwrap();
-        assert_eq!(
-            client
-                .record_visit(1, 3, true, vec![0.1, 0.2])
-                .unwrap()
-                .version,
-            1
-        );
+        assert_eq!(client.record_visit(1, candidate()).unwrap().version, 1);
         drop(client);
         drop(server);
         addr
