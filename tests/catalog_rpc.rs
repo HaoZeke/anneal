@@ -1,8 +1,16 @@
 #![cfg(feature = "bank-rpc")]
 
+use std::io::Write;
+use std::net::TcpStream;
+use std::sync::{Arc, Barrier};
+use std::thread;
+
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
-use anneal_core::catalog_rpc::{CatalogIdentity, ProtocolRejection};
+use anneal_core::catalog_rpc::{CatalogIdentity, ProtocolRejection, PROTOCOL_VERSION};
+use anneal_core::Catalog_capnp::{catalog_reply, catalog_request, RejectionKind};
+use capnp::message::{Builder, ReaderOptions};
+use capnp::serialize;
 
 fn identity(ensemble: &str, replica: u32) -> CatalogIdentity {
     CatalogIdentity {
@@ -75,4 +83,159 @@ fn duplicate_mutation_is_idempotent_and_snapshot_versions_are_monotone() {
     assert!(replay.duplicate);
     assert_eq!(snapshot.version, 1);
     assert_eq!(snapshot.census_visits, 1);
+}
+
+#[test]
+fn concurrent_replicas_observe_one_serialized_mutation_order() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-21", [0x5a; 32], 0..4).unwrap(),
+    )
+    .unwrap();
+    let barrier = Arc::new(Barrier::new(4));
+    let mut workers = Vec::new();
+    for replica in 0..4 {
+        let barrier = Arc::clone(&barrier);
+        let addr = server.addr();
+        workers.push(thread::spawn(move || {
+            let mut client = CatalogClient::connect(
+                addr,
+                identity("ensemble-21", replica),
+                ClientConfig::default(),
+            )
+            .unwrap();
+            barrier.wait();
+            client
+                .record_visit(1, u64::from(replica), true, vec![f64::from(replica)])
+                .unwrap()
+                .version
+        }));
+    }
+    let mut versions = workers
+        .into_iter()
+        .map(|worker| worker.join().unwrap())
+        .collect::<Vec<_>>();
+    versions.sort_unstable();
+    assert_eq!(versions, vec![1, 2, 3, 4]);
+
+    let mut observer = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-21", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let snapshot = observer.snapshot(2).unwrap();
+    assert_eq!(snapshot.version, 4);
+    assert_eq!(snapshot.census_visits, 4);
+}
+
+#[test]
+fn reconnect_replays_exact_requests_and_rejects_conflicting_content() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-31", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut first = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-31", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        first
+            .record_visit(1, 7, true, vec![0.1, 0.2])
+            .unwrap()
+            .version,
+        1
+    );
+    drop(first);
+
+    let mut replay = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-31", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert!(
+        replay
+            .record_visit(1, 7, true, vec![0.1, 0.2])
+            .unwrap()
+            .duplicate
+    );
+    drop(replay);
+
+    let mut conflict = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-31", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        conflict
+            .record_visit(1, 8, false, vec![0.3, 0.4])
+            .unwrap_err(),
+        CatalogClientError::Rejected(ProtocolRejection::SequenceReplay)
+    );
+}
+
+#[test]
+fn parseable_wire_failures_are_structured_and_do_not_mutate_state() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-41", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        raw_rejection(server.addr(), PROTOCOL_VERSION + 1, &[0x5a; 32]),
+        (41, 0, RejectionKind::UnsupportedVersion)
+    );
+    assert_eq!(
+        raw_rejection(server.addr(), PROTOCOL_VERSION, &[0x5a; 31]),
+        (41, 0, RejectionKind::Malformed)
+    );
+
+    let mut observer = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-41", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(observer.snapshot(1).unwrap().version, 0);
+}
+
+fn raw_rejection(
+    addr: std::net::SocketAddr,
+    version: u16,
+    digest: &[u8],
+) -> (u64, u64, RejectionKind) {
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let mut message = Builder::new_default();
+    let mut root = message.init_root::<catalog_request::Builder>();
+    root.set_protocol_version(version);
+    root.set_event_sequence(41);
+    root.set_snapshot_version(0);
+    {
+        let mut wire_identity = root.reborrow().init_identity();
+        wire_identity.set_campaign("jcc-2026");
+        wire_identity.set_ensemble("ensemble-41");
+        wire_identity.set_replica(0);
+        wire_identity.set_signature_digest(digest);
+    }
+    root.init_operation().set_snapshot(());
+    serialize::write_message(&mut stream, &message).unwrap();
+    stream.flush().unwrap();
+
+    let reply = serialize::read_message(&mut stream, ReaderOptions::new()).unwrap();
+    let root = reply.get_root::<catalog_reply::Reader>().unwrap();
+    let reason = match root.get_result().which().unwrap() {
+        catalog_reply::result::Rejected(reason) => reason.unwrap(),
+        catalog_reply::result::Accepted(_) => panic!("invalid request was accepted"),
+    };
+    (
+        root.get_event_sequence(),
+        root.get_snapshot_version(),
+        reason,
+    )
 }
