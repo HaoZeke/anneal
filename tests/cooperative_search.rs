@@ -255,6 +255,10 @@ fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
             .unwrap(),
         )
         .unwrap();
+        assert!(matches!(
+            run.synchronize(replica).unwrap(),
+            SynchronizationOutcome::Refreshed(_)
+        ));
         assert_eq!(
             run.offer_candidate(replica, candidate(replica, 1, 1.2))
                 .unwrap(),
