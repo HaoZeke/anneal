@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: own chain; adopt only a deeper shared member; hole-flow if the packing is full"
+                    "  bank explore: sync every slice — win or a new unfilled packing; hole-flow if full"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1236,10 +1236,10 @@ fn run_capnp_bank(
     let slice = std::env::var("BANK_SLICE")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(3_000);
+        .unwrap_or(500);
     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
     let mut best = f64::INFINITY;
-    let mut best_state = None;
+    let mut best_state: Option<Array1<f64>> = None;
     let mut hops = 0usize;
     let mut basins = 0usize;
     let mut screened_out = 0usize;
@@ -1281,18 +1281,51 @@ fn run_capnp_bank(
             .as_ref()
             .map(|s| s.wells.iter().map(|(w, _)| w.clone()).collect())
             .unwrap_or_default();
-        // One 4e6 walk. The bank publishes wells and a deeper member if
-        // another chain found one. Sampling the bank as the start every
-        // slice put every chain back on the ico shelf; leftover rec
-        // without that reset is the run that actually hit Marks.
+        // Own walk, but pull the bank every slice: a deeper member is a
+        // win; a different unfilled packing is a class another chain
+        // opened. Same packing or a raised well is ignored so ico does
+        // not reset the chain.
         let mut start = if let Some(bx) = best_state.as_ref() {
             bx.clone()
         } else {
             random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng)
         };
-        if let Ok(Some((e, x))) = client.sample(rng.random()) {
-            if x.len() == 3 * cfg.n_points && e < best - 0.05 {
+        let mine = packing_of(start.view(), cfg);
+        let merge = {
+            #[cfg(feature = "featomic")]
+            {
+                anneal_core::featomic_hop::SOAP_PACK_MERGE
+            }
+            #[cfg(not(feature = "featomic"))]
+            {
+                0.10
+            }
+        };
+        for _ in 0..3 {
+            let Ok(Some((e, x))) = client.sample(rng.random()) else {
+                continue;
+            };
+            if x.len() != 3 * cfg.n_points {
+                continue;
+            }
+            let theirs = packing_of(x.view(), cfg);
+            let same = !mine.is_empty()
+                && mine.len() == theirs.len()
+                && mine
+                    .iter()
+                    .zip(theirs.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    <= merge;
+            let h = client.bias_of(theirs.view()).unwrap_or(0.0);
+            if e < best - 0.05 {
                 start = x;
+                break;
+            }
+            if !same && h < well_cap {
+                start = x;
+                break;
             }
         }
         let soap = packing_of(start.view(), cfg);
