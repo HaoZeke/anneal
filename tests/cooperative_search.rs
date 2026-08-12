@@ -18,8 +18,8 @@ use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolRejection};
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
-    CatalogOfferOutcome, CooperativeRun, PolicyEvidenceOutcome, RunManifest,
-    SynchronizationOutcome, TraceKind,
+    CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
+    PolicyEvidenceOutcome, RunManifest, SynchronizationOutcome, TraceKind,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -227,6 +227,18 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
     assert!(input.progress.win_only());
     assert_eq!(input.local_stall_slices, 3);
     assert!(!input.local_deepened);
+
+    let CatalogSampleOutcome::Candidate(sampled) = run.sample_candidate(0, 91).unwrap() else {
+        panic!("active scientific catalog must return a sampled candidate")
+    };
+    assert_eq!(sampled.coordinates, admitted.coordinates);
+    let CatalogHoleOutcome::Proposal(hole) = run
+        .descriptor_hole(0, admitted.descriptor, 128, 73)
+        .unwrap()
+    else {
+        panic!("active scientific catalog must return a descriptor-hole proposal")
+    };
+    assert!(hole.nearest_catalog_distance.is_finite());
 }
 
 #[test]
@@ -389,6 +401,14 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
     assert_eq!(
         run.policy_input(0, vec![0.0; 9], -1.0, 0, false,).unwrap(),
         PolicyEvidenceOutcome::SharingDisabled
+    );
+    assert_eq!(
+        run.sample_candidate(0, 91).unwrap(),
+        CatalogSampleOutcome::SharingDisabled
+    );
+    assert_eq!(
+        run.descriptor_hole(0, vec![0.0; 9], 128, 73).unwrap(),
+        CatalogHoleOutcome::SharingDisabled
     );
     assert_eq!(run.ledger().ensemble_total(), 20);
     assert!(
