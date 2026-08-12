@@ -15,8 +15,8 @@ use rand::SeedableRng;
 
 use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
-    CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, ProtocolError,
-    ProtocolRejection, decode_request_reader, encode_reply,
+    CatalogRelation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
+    PolicyState, ProtocolError, ProtocolRejection, decode_request_reader, encode_reply,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -409,6 +409,52 @@ fn process_request(
                 target: hole.target().to_vec(),
                 increment: hole.increment().to_vec(),
                 nearest_catalog_distance: hole.nearest_catalog_distance(),
+            });
+        }
+        CatalogOperation::PolicyState { descriptor, energy } => {
+            let Some(scientific) = state.scientific.as_ref() else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            if !energy.is_finite() {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Ok(local_basin) = scientific.census.basin_for(descriptor) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let local_basin_visits = local_basin
+                .and_then(|id| scientific.census.entry(id))
+                .map_or(0, |entry| entry.visits());
+            let relation = match scientific.catalog.incumbent() {
+                None => CatalogRelation::Empty,
+                Some(incumbent) if local_basin.is_some_and(|id| id == incumbent.census_id()) => {
+                    CatalogRelation::Incumbent
+                }
+                Some(_) if local_basin.is_some_and(|id| scientific.catalog.entry(id).is_some()) => {
+                    CatalogRelation::SameBasin
+                }
+                Some(incumbent) if incumbent.energy() < *energy => {
+                    CatalogRelation::UnrelatedLowerAnchor
+                }
+                Some(_) => CatalogRelation::UnrelatedNoAnchor,
+            };
+            payload = AcceptedPayload::PolicyState(PolicyState {
+                total_visits: scientific.census.total_visits(),
+                singleton_basins: scientific.census.singleton_count(),
+                local_basin_visits,
+                globally_saturated: scientific.census.is_saturated(),
+                relation,
             });
         }
         CatalogOperation::RecordVisit { candidate } => {
