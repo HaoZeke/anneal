@@ -165,6 +165,18 @@ fn zero_aggregate_budget_is_rejected() {
 }
 
 #[test]
+fn exact_remote_census_counts_reject_impossible_evidence() {
+    let evidence = CensusEvidence::from_exact_counts(5, 2, 4, false).unwrap();
+    assert_eq!(evidence.total_visits(), 5);
+    assert_eq!(evidence.singleton_basins(), 2);
+    assert_eq!(evidence.local_basin_visits(), 4);
+    assert!(!evidence.globally_saturated());
+
+    assert!(CensusEvidence::from_exact_counts(5, 6, 0, false).is_err());
+    assert!(CensusEvidence::from_exact_counts(5, 2, 6, false).is_err());
+}
+
+#[test]
 fn decision_table_covers_every_discrete_input_state() {
     let (unsaturated, local_basin) = census_with_repeated_visits(1);
     let (saturated, _) = census_with_repeated_visits(21);
