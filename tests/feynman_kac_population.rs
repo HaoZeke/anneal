@@ -1,6 +1,7 @@
 use anneal_core::methods::feynman_kac::{
     BasinEvidence, EpochSubmissionOutcome, PopulationMember, SelectionCoefficients,
-    SynchronousPopulation, ascending_fractional_ranks, rank_population, reconfiguration_plan,
+    SynchronousPopulation, ascending_fractional_ranks, population_family_position,
+    population_rejuvenation_draw, rank_population, reconfiguration_plan,
 };
 
 fn coefficients() -> SelectionCoefficients {
@@ -180,4 +181,29 @@ fn synchronous_epoch_rejects_unknown_replicas_and_skipped_epochs() {
             .submit(1, PopulationMember::new(0, -1.0, 0.2, 1.0).unwrap())
             .is_err()
     );
+}
+
+#[test]
+fn cloned_offspring_receive_stable_distinct_rejuvenation_draws() {
+    let destinations = [0, 1, 2, 3];
+    let parents = [2, 2, 1, 3];
+    let first = population_family_position(&destinations, &parents, 0).unwrap();
+    let second = population_family_position(&destinations, &parents, 1).unwrap();
+
+    assert_eq!(first.parent(), 2);
+    assert_eq!(first.ordinal(), 0);
+    assert_eq!(first.family_size(), 2);
+    assert_eq!(second.parent(), 2);
+    assert_eq!(second.ordinal(), 1);
+    assert_eq!(second.family_size(), 2);
+    assert_ne!(
+        population_rejuvenation_draw(91, 7, 0, first.ordinal()),
+        population_rejuvenation_draw(91, 7, 1, second.ordinal())
+    );
+    assert_eq!(
+        population_rejuvenation_draw(91, 7, 0, first.ordinal()),
+        population_rejuvenation_draw(91, 7, 0, first.ordinal())
+    );
+    assert!(population_family_position(&destinations, &parents[..3], 0).is_none());
+    assert!(population_family_position(&destinations, &parents, 9).is_none());
 }
