@@ -1296,6 +1296,7 @@ fn run_capnp_bank(
     let mut well_pairs: Vec<(Array1<f64>, f64)> = Vec::new();
     let mut catalog_best = f64::INFINITY;
     let mut catalog_size = 0usize;
+    let mut stall = 0u32;
     while ledger.remaining() > 0 {
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
         let pull = slices == 0 || slices.is_multiple_of(sync_every);
@@ -1362,13 +1363,15 @@ fn run_capnp_bank(
         };
         let sat = catalog_saturated(&well_pairs, cfg.bias_height);
         let on_known = packing_is_known(start.view(), cfg, &wells);
-        let swarm = anneal_core::swarm::decide(
+        let swarm = anneal_core::swarm::decide_with_stall(
             progress,
+            best,
             best,
             catalog_best,
             catalog_size,
             sat,
             on_known && sat,
+            stall,
         );
         if pull && swarm.pull {
             if let Some(c) = client.as_mut() {
@@ -1429,6 +1432,9 @@ fn run_capnp_bank(
         if improved {
             best = out.best;
             best_state = out.best_state.clone();
+            stall = 0;
+        } else {
+            stall = stall.saturating_add(1);
         }
         // Publish a win only. Depositing every slice is 48 chains
         // IRA-matching on the login node.

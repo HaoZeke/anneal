@@ -746,6 +746,7 @@ where
     let mut well_pairs: Vec<(Array1<f64>, f64)> = Vec::new();
     let mut catalog_best = f64::INFINITY;
     let mut catalog_size = 0usize;
+    let mut stall = 0u32;
     while ledger.remaining() > 0 {
         let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
         let pull = slices == 0 || slices.is_multiple_of(sync_every);
@@ -798,13 +799,15 @@ where
         };
         let sat = catalog_saturated(&well_pairs, cfg.bias_height);
         let on_known = packing_is_known(start.view(), cfg, &wells);
-        let swarm = crate::swarm::decide(
+        let swarm = crate::swarm::decide_with_stall(
             progress,
+            best,
             best,
             catalog_best,
             catalog_size,
             sat,
             on_known && sat,
+            stall,
         );
         if pull && swarm.pull {
             if let Some(c) = client.as_mut() {
@@ -875,6 +878,11 @@ where
             improvements.push((h + hops_before, c + charged_before, b, e));
         }
         let improved = matches!(out.best_state.as_ref(), Some(st) if out.best < best && structure_is_sane(st.view(), sane_sep(cfg)));
+        if improved {
+            stall = 0;
+        } else {
+            stall = stall.saturating_add(1);
+        }
         if improved {
             best = out.best;
             best_state = out.best_state.clone();
