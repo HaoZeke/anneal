@@ -55,7 +55,6 @@ mod run {
                 Self::PolicyExplore => "policy_explore",
                 Self::PolicyLeave => "policy_leave",
                 Self::RpcFallback => "rpc_fallback",
-                Self::AuxiliaryEvaluation => "auxiliary_evaluation",
                 Self::SharingDisabled => "sharing_disabled",
             }
         }
