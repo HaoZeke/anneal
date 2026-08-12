@@ -63,7 +63,7 @@ start_bank() {
 }
 
 submit_mol() {
-  local arm=$1 m=$2 budget=$3 seeds=$4 port=$5
+  local arm=$1 m=$2 budget=$3 seeds=$4 port=$5 target=$6
   local out=${BASE}-h2o${m}-${arm}
   local last=$((seeds - 1))
   local rpc=""
@@ -72,7 +72,7 @@ submit_mol() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
+  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} target=${target} rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "h2o${m}-${arm}" \
     --array="0-${last}" \
@@ -83,6 +83,8 @@ submit_mol() {
     --stderr "$out/h2o${m}_${arm}_%{TASK_ID}.err" \
     -- bash -lc "export SEED_OFFSET=\${HQ_TASK_ID:-0}
 export RGPOT_XTB_ENGINE=${ROOT}/engines/libxtb_engine.so
+export TARGET_ENERGY=${target}
+export TARGET_TOL=1e-3
 export LD_LIBRARY_PATH=${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:\${LD_LIBRARY_PATH:-}
 ${rpc}
 exec ${MOL} ${m} ${budget} 1" \
@@ -99,7 +101,7 @@ submit_slab() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
+  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} target=-415.971529 rpc=${HOST}:${port}" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "cuh2-${arm}" \
     --array="0-${last}" \
@@ -110,6 +112,8 @@ submit_slab() {
     --stderr "$out/cuh2_${arm}_%{TASK_ID}.err" \
     -- bash -lc "export SEED_OFFSET=\${HQ_TASK_ID:-0}
 export RGPOT_CUH2_LIBRARY=${ROOT}/engines/librgpot_cuh2.so
+export TARGET_ENERGY=-415.971529
+export TARGET_TOL=1e-3
 export LD_LIBRARY_PATH=${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:\${LD_LIBRARY_PATH:-}
 ${rpc}
 exec ${SLAB} ${CON} ${budget} 1" \
@@ -125,17 +129,17 @@ start_all() {
 }
 
 submit_bank() {
-  submit_mol bank 2 2500 8 7402
-  submit_mol bank 4 2500 8 7404
-  submit_mol bank 6 4000 8 7406
+  submit_mol bank 2 2500 8 7402 -276.168547
+  submit_mol bank 4 2500 8 7404 -553.064301
+  submit_mol bank 6 4000 8 7406 -829.846965
   submit_slab bank 2500 8 7412
   echo "submitted bank arms"
 }
 
 submit_ctrl() {
-  submit_mol ctrl 2 2500 8 7402
-  submit_mol ctrl 4 2500 8 7404
-  submit_mol ctrl 6 4000 8 7406
+  submit_mol ctrl 2 2500 8 7402 -276.168547
+  submit_mol ctrl 4 2500 8 7404 -553.064301
+  submit_mol ctrl 6 4000 8 7406 -829.846965
   submit_slab ctrl 2500 8 7412
   echo "submitted no-bank control"
 }
