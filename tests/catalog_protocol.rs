@@ -1,8 +1,8 @@
 #![cfg(feature = "bank-rpc")]
 
 use anneal_core::catalog_rpc::{
-    CatalogIdentity, CatalogOperation, CatalogRequest, PROTOCOL_VERSION, ProtocolError,
-    decode_request, encode_request, validate_identity,
+    decode_request, encode_request, validate_identity, CatalogCandidate, CatalogIdentity,
+    CatalogOperation, CatalogRequest, ProtocolError, PROTOCOL_VERSION,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -14,21 +14,32 @@ fn identity(ensemble: &str) -> CatalogIdentity {
     }
 }
 
+fn candidate() -> CatalogCandidate {
+    CatalogCandidate {
+        producer_replica: 2,
+        coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+        cell: Some([8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0]),
+        energy: -396.282,
+        forces: vec![0.0; 6],
+        gradient_norm: 1.2e-9,
+        descriptor: vec![0.1, 0.2, 0.3],
+        descriptor_schema_version: 7,
+        quench_converged: true,
+        charged_work: 81,
+        event_sequence: 42,
+        seed: 91,
+    }
+}
+
 #[test]
 fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
     let operations = vec![
         CatalogOperation::Snapshot,
         CatalogOperation::RecordVisit {
-            basin_id: 17,
-            created: true,
-            descriptor: vec![0.1, 0.2, 0.3],
+            candidate: candidate(),
         },
         CatalogOperation::OfferCandidate {
-            basin_id: 17,
-            energy: -396.282,
-            coordinates: vec![0.0, 1.0, 2.0],
-            descriptor: vec![0.1, 0.2, 0.3],
-            provenance: "replica-2/quench-41".into(),
+            candidate: candidate(),
         },
         CatalogOperation::Sample { draw: 91 },
         CatalogOperation::DescriptorHole { samples: 4096 },
