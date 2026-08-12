@@ -173,7 +173,7 @@ impl CoordinatorState {
             .scientific
             .as_ref()
             .map(|scientific| {
-                Ok(ScientificState {
+                Ok::<ScientificState, CatalogServerError>(ScientificState {
                     signature: scientific.signature.clone(),
                     descriptor_space: scientific.descriptor_space.clone(),
                     validator: CandidateValidator::new(
