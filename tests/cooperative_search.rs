@@ -140,7 +140,7 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 }
 
 #[test]
-fn candidate_identity_must_match_the_authenticated_replica_and_event() {
+fn candidate_replica_must_match_while_producer_sequence_remains_independent() {
     let server = server();
     let digest = signature().digest();
     let mut client =
@@ -152,11 +152,14 @@ fn candidate_identity_must_match_the_authenticated_replica_and_event() {
         CatalogClientError::Rejected(ProtocolRejection::ValidationRejected)
     );
     assert_eq!(
-        client.offer_candidate(2, candidate(1, 8, 1.2)).unwrap_err(),
-        CatalogClientError::Rejected(ProtocolRejection::ValidationRejected)
+        client
+            .offer_candidate(2, candidate(1, 8, 1.2))
+            .unwrap()
+            .version,
+        1
     );
     let snapshot = client.snapshot(3).unwrap();
-    assert_eq!(snapshot.version, 0);
-    assert_eq!(snapshot.census_visits, 0);
-    assert_eq!(snapshot.active_entries, 0);
+    assert_eq!(snapshot.version, 1);
+    assert_eq!(snapshot.census_visits, 1);
+    assert_eq!(snapshot.active_entries, 1);
 }
