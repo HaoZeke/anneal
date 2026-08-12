@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: sync every slice; leave as soon as the packing is in the archive"
+                    "  bank explore: leave when Good-Turing missing mass on shared packings is low"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1119,6 +1119,29 @@ fn main() {
     }
 }
 
+/// Good-Turing missing mass on shared packings. Each well height is
+/// `visits * w0`. n1/N is the chance the next deposit is a new packing.
+/// Saturated: enough observations and few singletons — the catalog is
+/// as complete as aKMC's confidence test, so the next start should
+/// leave rather than redraw the same cloud.
+#[cfg(feature = "bank-rpc")]
+fn catalog_saturated(wells: &[(Array1<f64>, f64)], w0: f64) -> bool {
+    let w0 = w0.max(1e-9);
+    let mut n = 0u32;
+    let mut n1 = 0u32;
+    for (_, h) in wells {
+        let v = (*h / w0).round().max(0.0) as u32;
+        if v == 0 {
+            continue;
+        }
+        n += v;
+        if v == 1 {
+            n1 += 1;
+        }
+    }
+    n >= 12 && (n1 as f64 / n as f64) < 0.20
+}
+
 #[cfg(feature = "bank-rpc")]
 fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> bool {
     if wells.is_empty() {
@@ -1285,10 +1308,11 @@ fn run_capnp_bank(
                 let _ = client.set_dcut(sched.threshold(progress));
             }
         }
-        let wells: Vec<Array1<f64>> = snap
+        let well_pairs: Vec<(Array1<f64>, f64)> = snap
             .as_ref()
-            .map(|s| s.wells.iter().map(|(w, _)| w.clone()).collect())
+            .map(|s| s.wells.clone())
             .unwrap_or_default();
+        let wells: Vec<Array1<f64>> = well_pairs.iter().map(|(w, _)| w.clone()).collect();
         // Own walk, but pull the bank every slice: a deeper member is a
         // win; a different unfilled packing is a class another chain
         // opened. Same packing or a raised well is ignored so ico does
@@ -1335,9 +1359,12 @@ fn run_capnp_bank(
                 break;
             }
         }
-        // Any shared well on this packing means the class is known.
-        // Waiting for height 5 kept every chain polishing Mackay.
-        if packing_is_known(start.view(), cfg, &wells) {
+        // eOn aKMC / Xu–Henkelman: stop searching a catalog when new
+        // processes dry up. Same statistic already in BasinBias: n1/N.
+        // Leave the packing cloud only when that missing mass is small.
+        if catalog_saturated(&well_pairs, cfg.bias_height)
+            && packing_is_known(start.view(), cfg, &wells)
+        {
             null_starts += 1;
             start = leave_known_packing(start.view(), cfg, &wells, ledger, relax, &mut rng);
         }
