@@ -102,7 +102,10 @@ fn every_work_boundary_has_explicit_charge_semantics() {
 #[test]
 fn auxiliary_evaluations_have_a_stable_charged_wire_code() {
     assert_eq!(ChargeKind::AuxiliaryEvaluation.wire_code(), 8);
-    assert_eq!(ChargeKind::from_wire_code(8), Some(ChargeKind::AuxiliaryEvaluation));
+    assert_eq!(
+        ChargeKind::from_wire_code(8),
+        Some(ChargeKind::AuxiliaryEvaluation)
+    );
 }
 
 #[test]
