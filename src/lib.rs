@@ -15,6 +15,13 @@ pub mod bank_rpc;
 pub mod Bank_capnp {
     include!("bank_rpc/Bank_capnp.rs");
 }
+/// Generated Cap'n Proto schema for [`catalog_rpc`].
+#[cfg(feature = "bank-rpc")]
+#[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
+#[rustfmt::skip]
+pub mod Catalog_capnp {
+    include!("catalog_rpc/Catalog_capnp.rs");
+}
 
 /// The acceptance-rule trait: `(delta_e, T) -> p`.
 pub mod accept;
@@ -32,6 +39,9 @@ pub mod calibrate;
 pub mod catalog;
 /// Pure cooperative-catalog policy and target-free proposals.
 pub mod catalog_policy;
+/// Versioned cooperative catalog protocol.
+#[cfg(feature = "bank-rpc")]
+pub mod catalog_rpc;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
