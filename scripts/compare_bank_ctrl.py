@@ -7,8 +7,6 @@ and mean best energy. The target is the deeper of the two cohort
 bests unless --target is set.
 """
 
-from __future__ import annotations
-
 import argparse
 import math
 import re
@@ -24,7 +22,7 @@ IMPROVE = re.compile(
 )
 
 
-def parse_dir(path: Path) -> list[dict]:
+def parse_dir(path):
     runs = []
     for fp in sorted(path.glob("*.out")):
         text = fp.read_text(errors="replace")
@@ -48,7 +46,7 @@ def parse_dir(path: Path) -> list[dict]:
     return runs
 
 
-def first_encounter(run: dict, target: float, tol: float) -> tuple[bool, int]:
+def first_encounter(run, target, tol):
     for _h, charged, _b, e in run["improvements"]:
         if e < target + tol:
             return True, charged
@@ -57,7 +55,7 @@ def first_encounter(run: dict, target: float, tol: float) -> tuple[bool, int]:
     return False, run["charged"]
 
 
-def km_median(events: list[tuple[int, bool]]) -> int | None:
+def km_median(events):
     if not events:
         return None
     events = sorted(events, key=lambda t: t[0])
@@ -74,11 +72,11 @@ def km_median(events: list[tuple[int, bool]]) -> int | None:
     return None
 
 
-def mean(xs: list[float]) -> float:
+def mean(xs):
     return sum(xs) / len(xs) if xs else float("nan")
 
 
-def report(name: str, runs: list[dict], target: float, tol: float) -> dict:
+def report(name, runs, target, tol):
     enc = [first_encounter(r, target, tol) for r in runs]
     hits = sum(1 for f, _ in enc if f)
     med = km_median([(c, f) for f, c in enc])
@@ -93,7 +91,7 @@ def report(name: str, runs: list[dict], target: float, tol: float) -> dict:
     return {"hits": hits, "n": len(runs), "median": med, "mean_best": mean(bests)}
 
 
-def main() -> int:
+def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("ctrl", type=Path, help="no-bank output directory")
     ap.add_argument("bank", type=Path, help="bank output directory")
