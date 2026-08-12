@@ -94,7 +94,12 @@ pub enum SyncScheduleError {
     ZeroBound,
     /// One slice exceeded the declared maximum catalog calls.
     #[error("slice charged {charged} catalog calls, maximum is {maximum}")]
-    SliceChargeExceeded { charged: u64, maximum: u64 },
+    SliceChargeExceeded {
+        /// Catalog calls charged to the completed slice.
+        charged: u64,
+        /// Declared maximum catalog calls per slice.
+        maximum: u64,
+    },
     /// The staleness bound cannot be represented as a `u64`.
     #[error("synchronization staleness bound overflowed")]
     BoundOverflow,
