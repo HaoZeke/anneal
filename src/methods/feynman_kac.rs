@@ -310,6 +310,85 @@ pub struct PopulationEpochPlan {
     diagnostics: GenealogyDiagnostics,
 }
 
+/// Stable position of one destination within its realized parent family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PopulationFamilyPosition {
+    parent: u32,
+    ordinal: usize,
+    family_size: usize,
+}
+
+impl PopulationFamilyPosition {
+    /// Source replica assigned to this destination.
+    pub fn parent(self) -> u32 {
+        self.parent
+    }
+
+    /// Zero-based position among destinations sharing the same parent.
+    pub fn ordinal(self) -> usize {
+        self.ordinal
+    }
+
+    /// Number of destinations assigned to this parent.
+    pub fn family_size(self) -> usize {
+        self.family_size
+    }
+}
+
+/// Locate a destination within an immutable replica-addressed genealogy.
+///
+/// Malformed vector lengths, absent destinations, and duplicate destination
+/// identities return `None` so a caller cannot silently adopt the wrong
+/// parent.
+pub fn population_family_position(
+    destinations: &[u32],
+    parents: &[u32],
+    destination: u32,
+) -> Option<PopulationFamilyPosition> {
+    if destinations.len() != parents.len() {
+        return None;
+    }
+    let matches = destinations
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| **candidate == destination)
+        .collect::<Vec<_>>();
+    if matches.len() != 1 {
+        return None;
+    }
+    let index = matches[0].0;
+    let parent = parents[index];
+    let ordinal = parents[..index]
+        .iter()
+        .filter(|candidate| **candidate == parent)
+        .count();
+    let family_size = parents
+        .iter()
+        .filter(|candidate| **candidate == parent)
+        .count();
+    Some(PopulationFamilyPosition {
+        parent,
+        ordinal,
+        family_size,
+    })
+}
+
+/// Deterministic descriptor-space rejuvenation draw for one offspring.
+///
+/// Destination identity and family ordinal remain explicit even when several
+/// offspring share the same parent, preventing cloned chains from requesting
+/// the same catalog-space perturbation.
+pub fn population_rejuvenation_draw(
+    seed: u64,
+    epoch: u64,
+    destination: u32,
+    family_ordinal: usize,
+) -> u64 {
+    let mut value = splitmix64(seed ^ epoch.rotate_left(17));
+    value = splitmix64(value ^ u64::from(destination).rotate_left(31));
+    splitmix64(value ^ (family_ordinal as u64).rotate_left(47))
+}
+
 impl PopulationEpochPlan {
     /// Synchronization epoch represented by this immutable plan.
     pub fn epoch(&self) -> u64 {
@@ -519,12 +598,15 @@ impl SynchronousPopulation {
 }
 
 fn epoch_systematic_offset(seed: u64, epoch: u64) -> f64 {
-    let mut value = seed ^ epoch.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let value = splitmix64(seed ^ epoch.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+    (value >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64))
+}
+
+fn splitmix64(mut value: u64) -> u64 {
     value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
     value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^= value >> 31;
-    (value >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64))
+    value ^ (value >> 31)
 }
 
 impl ReconfigurationPlan {
