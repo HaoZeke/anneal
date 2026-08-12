@@ -4,8 +4,11 @@ set -euo pipefail
 
 STAGE=${1:?development, qualification, or production}
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 RUNNER=$ROOT/scripts/elja_jcc_lj_ensemble.sh
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
+PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
+RADIUS_READER=$REPRO_ROOT/workflow/jcc/read_census_radius.py
 
 case "$STAGE" in
   development)
@@ -30,6 +33,11 @@ if [[ ! -x $RUNNER ]]; then
   echo "missing ensemble runner: $RUNNER" >&2
   exit 1
 fi
+if [[ ! -x $PYTHON || ! -f $RADIUS_READER ]]; then
+  echo "missing census-radius validator or its Python interpreter" >&2
+  exit 1
+fi
+(cd "$REPRO_ROOT" && sha256sum --check --strict results_jcc/calibration/SHA256SUMS)
 
 mkdir -p "$OUT_ROOT/submissions"
 last=$((ENSEMBLES - 1))
@@ -37,8 +45,8 @@ for n in 75 98 102 104; do
   radius_variable="LJ${n}_CENSUS_RADIUS"
   radius=${!radius_variable:-}
   if [[ -z $radius ]]; then
-    echo "$radius_variable must contain the calibrated radius" >&2
-    exit 1
+    radius=$("$PYTHON" "$RADIUS_READER" \
+      "$REPRO_ROOT/results_jcc/calibration/lj${n}.json")
   fi
   for arm in shared control; do
     log="$OUT_ROOT/submissions/${STAGE}-lj${n}-${arm}-%A_%a.out"
