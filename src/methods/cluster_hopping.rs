@@ -25,9 +25,9 @@
 //! stage is decided online rather than fixed.
 
 use ndarray::{Array1, ArrayView1};
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
@@ -37,10 +37,10 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
-use crate::methods::activation::{Activation, activate};
+use crate::methods::activation::{activate, Activation};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
-use crate::path::{StallDetector, interpolate_path};
+use crate::path::{interpolate_path, StallDetector};
 use crate::screen::Screen;
 
 mod config;
@@ -60,6 +60,51 @@ use preset::LennardJonesPreset;
 /// is the accounting that makes methods with different internal structure
 /// comparable. Published cluster success rates are quoted per hopping step,
 /// with the relaxation inside each step uncounted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuenchStatus {
+    /// The relaxation ended at a freshly checked minimum.
+    Validated,
+    /// The relaxation was screened, capped, or failed its fresh gradient check.
+    Rejected,
+}
+
+/// One relaxation boundary and the exact potential work it consumed.
+#[derive(Debug, Clone)]
+pub struct QuenchBoundary {
+    status: QuenchStatus,
+    charged_calls: usize,
+    energy: f64,
+    state: Array1<f64>,
+    gradient: Option<Array1<f64>>,
+}
+
+impl QuenchBoundary {
+    /// Scientific status assigned by the caller's fresh convergence check.
+    pub fn status(&self) -> QuenchStatus {
+        self.status
+    }
+
+    /// Potential calls consumed from entry through the fresh check.
+    pub fn charged_calls(&self) -> usize {
+        self.charged_calls
+    }
+
+    /// Fresh energy when validated, or the relaxation's terminal energy.
+    pub fn energy(&self) -> f64 {
+        self.energy
+    }
+
+    /// Terminal Cartesian state.
+    pub fn state(&self) -> ArrayView1<'_, f64> {
+        self.state.view()
+    }
+
+    /// Fresh gradient evidence, present only for a validated minimum.
+    pub fn gradient(&self) -> Option<ArrayView1<'_, f64>> {
+        self.gradient.as_ref().map(Array1::view)
+    }
+}
+
 pub struct Ledger {
     budget: usize,
     spent: usize,
@@ -70,6 +115,7 @@ pub struct Ledger {
     pub best: f64,
     /// State attaining [`Ledger::best`].
     pub best_state: Option<Array1<f64>>,
+    quench_boundaries: Vec<QuenchBoundary>,
 }
 
 impl Ledger {
@@ -81,6 +127,7 @@ impl Ledger {
             fract: 0.0,
             best: f64::INFINITY,
             best_state: None,
+            quench_boundaries: Vec::new(),
         }
     }
 
@@ -149,6 +196,44 @@ impl Ledger {
     /// Charged evaluations spent.
     pub fn spent(&self) -> usize {
         self.spent
+    }
+
+    /// Record one charged relaxation after its caller-owned convergence check.
+    ///
+    /// `gradient` is fresh validated evidence. Its absence classifies the
+    /// boundary as rejected. An invocation that consumed no potential calls is
+    /// not a quench boundary and returns `false`.
+    pub fn record_quench_boundary(
+        &mut self,
+        charged_before: usize,
+        energy: f64,
+        state: Array1<f64>,
+        gradient: Option<Array1<f64>>,
+    ) -> bool {
+        let Some(charged_calls) = self.spent.checked_sub(charged_before) else {
+            return false;
+        };
+        if charged_calls == 0 {
+            return false;
+        }
+        let status = if gradient.is_some() {
+            QuenchStatus::Validated
+        } else {
+            QuenchStatus::Rejected
+        };
+        self.quench_boundaries.push(QuenchBoundary {
+            status,
+            charged_calls,
+            energy,
+            state,
+            gradient,
+        });
+        true
+    }
+
+    /// Relaxation boundaries recorded against this ledger in execution order.
+    pub fn quench_boundaries(&self) -> &[QuenchBoundary] {
+        &self.quench_boundaries
     }
 }
 
@@ -2368,8 +2453,8 @@ mod connectivity_tests {
 #[cfg(test)]
 mod group_move_tests {
     use super::*;
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use rand::SeedableRng;
 
     /// Six rigid three-atom groups in a blob.
     fn waterish() -> (Array1<f64>, Vec<Vec<usize>>) {
