@@ -151,6 +151,32 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 }
 
 #[test]
+fn catalog_outputs_are_actionable_and_seeded() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    client.offer_candidate(1, admitted.clone()).unwrap();
+
+    let sampled = client.sample_candidate(2, 91).unwrap().unwrap();
+    assert_eq!(sampled.coordinates, admitted.coordinates);
+    assert_eq!(sampled.descriptor, admitted.descriptor);
+
+    let first = client
+        .descriptor_hole(3, admitted.descriptor.clone(), 128, 73)
+        .unwrap();
+    let second = client
+        .descriptor_hole(4, admitted.descriptor.clone(), 128, 73)
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first.target.len(), admitted.descriptor.len());
+    assert_eq!(first.increment.len(), admitted.descriptor.len());
+    assert!(first.nearest_catalog_distance.is_finite());
+}
+
+#[test]
 fn candidate_replica_must_match_while_producer_sequence_remains_independent() {
     let server = server();
     let digest = signature().digest();
