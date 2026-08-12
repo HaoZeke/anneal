@@ -2,6 +2,7 @@
 
 use std::io::Write;
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 use std::thread;
 
@@ -140,6 +141,56 @@ fn coordinator_aggregates_replayed_ledger_events_exactly_once() {
         .unwrap();
     assert_eq!(aggregate.snapshot.aggregate_charged, 18);
     assert_eq!(aggregate.snapshot.aggregate_budget, 200);
+}
+
+#[test]
+fn coordinator_restart_replays_its_durable_request_journal() {
+    let directory = PathBuf::from(format!(
+        "/tmp/anneal-catalog-journal-{}-{}-{}",
+        std::process::id(),
+        std::thread::current().name().unwrap_or("catalog-rpc"),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = ServerConfig::new("jcc-2026", "ensemble-durable", [0x5a; 32], [0])
+        .unwrap()
+        .with_ledger_budget(100)
+        .unwrap()
+        .with_state_directory(&directory)
+        .unwrap();
+    {
+        let server = CatalogServer::start("127.0.0.1:0", config.clone()).unwrap();
+        let mut client = CatalogClient::connect(
+            server.addr(),
+            identity("ensemble-durable", 0),
+            ClientConfig::default(),
+        )
+        .unwrap();
+        let receipt = client
+            .record_ledger_event(1, ChargeKind::AcceptedQuench, 7, 7)
+            .unwrap();
+        assert_eq!(receipt.snapshot.aggregate_charged, 7);
+    }
+
+    let restarted = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    assert!(!restarted.header().empty_state_proof);
+    assert_eq!(restarted.header().initial_snapshot_version, 1);
+    let mut replay = CatalogClient::connect(
+        restarted.addr(),
+        identity("ensemble-durable", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let receipt = replay
+        .record_ledger_event(1, ChargeKind::AcceptedQuench, 7, 7)
+        .unwrap();
+    assert!(receipt.duplicate);
+    assert_eq!(receipt.snapshot.aggregate_charged, 7);
+    assert_eq!(replay.snapshot(2).unwrap().version, 1);
+
+    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
