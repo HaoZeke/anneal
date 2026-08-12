@@ -85,6 +85,7 @@ fn every_work_boundary_has_explicit_charge_semantics() {
         (ChargeKind::FreshValidation, 1),
         (ChargeKind::Retry, 2),
         (ChargeKind::RpcFallback, 0),
+        (ChargeKind::AuxiliaryEvaluation, 2),
     ];
     let mut cumulative = 0;
     for (index, (kind, calls)) in records.into_iter().enumerate() {
@@ -95,7 +96,13 @@ fn every_work_boundary_has_explicit_charge_semantics() {
     }
 
     assert_eq!(ledger.ensemble_total(), 10);
-    assert_eq!(ledger.event_count(), 8);
+    assert_eq!(ledger.event_count(), 9);
+}
+
+#[test]
+fn auxiliary_evaluations_have_a_stable_charged_wire_code() {
+    assert_eq!(ChargeKind::AuxiliaryEvaluation.wire_code(), 8);
+    assert_eq!(ChargeKind::from_wire_code(8), Some(ChargeKind::AuxiliaryEvaluation));
 }
 
 #[test]
