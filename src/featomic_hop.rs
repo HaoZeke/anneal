@@ -651,6 +651,131 @@ fn orthonormal(basis: &mut Vec<Array1<f64>>) {
     *basis = out;
 }
 
+/// A packing on the unit sphere that is far from every well and from `mu`.
+///
+/// The shared bank is a point cloud of occupied means. The next start
+/// is a hole in that cloud, not a random Cartesian shove and not a
+/// louder version of the last kick. Forty-eight unit samples, kept in
+/// the open hemisphere away from the well centroid, scored by the
+/// nearest well.
+fn hole_on_sphere<R: Rng + ?Sized>(
+    mu: &Array1<f64>,
+    wells: &[Array1<f64>],
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut centroid = Array1::<f64>::zeros(mu.len());
+    let mut n = 0.0;
+    for w in wells {
+        if w.len() != mu.len() || w.iter().all(|v| *v == 0.0) {
+            continue;
+        }
+        let u = unit(w);
+        for (c, x) in centroid.iter_mut().zip(u.iter()) {
+            *c += *x;
+        }
+        n += 1.0;
+    }
+    if n > 0.0 {
+        centroid /= n;
+        centroid = unit(&centroid);
+    } else {
+        centroid = mu.clone();
+    }
+    let mut best = mu.clone();
+    let mut best_score = -1.0_f64;
+    for _ in 0..48 {
+        let mut u = Array1::<f64>::zeros(mu.len());
+        for v in u.iter_mut() {
+            let a: f64 = rng.random();
+            let b: f64 = rng.random();
+            let r = (-2.0 * a.max(1e-15).ln()).sqrt();
+            *v = r * (2.0 * std::f64::consts::PI * b).cos();
+        }
+        let nn = u.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if nn < 1e-15 {
+            continue;
+        }
+        u /= nn;
+        let toward_cloud: f64 = u.iter().zip(centroid.iter()).map(|(a, c)| a * c).sum();
+        if toward_cloud > 0.0 {
+            for v in u.iter_mut() {
+                *v = -*v;
+            }
+        }
+        let mut score = soap_l2_pack(u.view(), mu.view());
+        for w in wells {
+            if w.len() == u.len() {
+                score = score.min(soap_l2_pack(u.view(), w.view()));
+            }
+        }
+        if score > best_score {
+            best_score = score;
+            best = u;
+        }
+    }
+    best
+}
+
+/// Walk coordinates so the packing mean moves toward a hole in the
+/// shared SOAP archive.
+///
+/// `J = ∂μ/∂x` is already built for the leftover hop. The Cartesian
+/// 0.35 cap keeps `μ` inside one packing and the quench is a projector
+/// back onto that packing. The step size here is in SOAP: each
+/// microstep asks for `soap_step` of mean-spectrum change, with only a
+/// loose Cartesian guard. Repeat until `μ` sits outside every well.
+pub fn step_into_hole<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    wells: &[Array1<f64>],
+    soap_step: f64,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let mut cur = x.to_owned();
+    let step = soap_step.max(SOAP_PACK_MERGE);
+    let cart_guard = 2.0;
+    let target = {
+        let s0 = spectrum(cur.view(), rcut, species, mobile);
+        let mu = unit(&s0.cloud_mean);
+        if mu.is_empty() {
+            return cur;
+        }
+        hole_on_sphere(&mu, wells, rng)
+    };
+    for _ in 0..8 {
+        let s = spectrum(cur.view(), rcut, species, mobile);
+        let mu = unit(&s.cloud_mean);
+        if mu.is_empty() || s.mean_jac.nrows() != mu.len() {
+            break;
+        }
+        let known = wells.iter().any(|w| {
+            w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE
+        });
+        if !known && !wells.is_empty() {
+            break;
+        }
+        let mut dp = Array1::<f64>::zeros(mu.len());
+        for i in 0..mu.len() {
+            dp[i] = target[i] - mu[i];
+        }
+        let dn = dp.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if dn < 1e-12 {
+            break;
+        }
+        dp *= step / dn;
+        let mut dr = tikhonov(&s.mean_jac, dp.view(), LAMBDA);
+        let n = (cur.len() / 3).max(1) as f64;
+        let cart = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+        if cart > cart_guard && cart > 1e-15 {
+            dr *= cart_guard / cart;
+        }
+        cur = pin_frozen(cur.view(), &cur + &dr, mobile);
+    }
+    cur
+}
+
 /// Kick mean SOAP in the null space of the occupied packing *and*
 /// of the shared-bank archive (known packings).
 fn packing_kick<R: Rng + ?Sized>(
@@ -722,6 +847,10 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     let nnu = (s.n_at * s.n_feat).max(1) as f64;
     let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
     if rms < DEFECT || shell_leftover(&s) {
+        let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
+        if !archive.is_empty() {
+            return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+        }
         return packing_kick(x, &s, rmsd, mobile, rng);
     }
     focus_patch(&mut s, x, rcut, rng);
@@ -1060,6 +1189,27 @@ mod tests {
         assert!(
             d > SOAP_DCUT_FALLBACK,
             "packing hop left mean SOAP unchanged, d={d}"
+        );
+    }
+
+    #[test]
+    fn hole_flow_moves_lj75_packing_mean_past_merge() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
+        let mut rng = StdRng::seed_from_u64(11);
+        let y = step_into_hole(
+            ico75.view(),
+            std::slice::from_ref(&mu),
+            SOAP_PACK_MERGE,
+            3.5,
+            None,
+            None,
+            &mut rng,
+        );
+        let d = soap_bank_distance(ico75.view(), y.view(), 3.5, None, None);
+        assert!(
+            d > SOAP_PACK_MERGE * 0.5,
+            "hole flow stayed in the ico packing, d={d}"
         );
         for i in 0..y.len() {
             assert!(y[i].is_finite(), "packing hop produced a non-finite coordinate");
