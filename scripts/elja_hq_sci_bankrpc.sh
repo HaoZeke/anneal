@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# One Cap'n Proto bank per size. LJ38 must not offer into an LJ75 bank.
-# Does not cancel running HQ jobs.
+# The LJ production path: one SOAP bank per N, no cut-and-splice.
+# Chains share wells over Cap'n; a raised class is left by archive-null
+# hop, not a random cluster.
+#
+#   start   — banks only (7438/7455/7475)
+#   submit  — clients only (does not start banks)
+#   all     — start then submit
+#
+# Default is start (safe). Does not cancel running HQ jobs.
 set -euo pipefail
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 BASE=${LJ_OUT:-$HOME/ljwork/hq-sci-n}
@@ -62,12 +69,33 @@ submit_arm() {
     | tee -a "$out/hq_submit.log"
 }
 
-# Ports encode N so a mis-set BANK_RPC is obvious.
-start_bank 7438 "${BASE}38"
-start_bank 7455 "${BASE}55"
-start_bank 7475 "${BASE}75"
-submit_arm 38 400000 72 7438
-submit_arm 55 1000000 48 7455
-submit_arm 75 4000000 48 7475
-echo "submitted per-N banks 7438/7455/7475"
-hq job list
+cmd=${1:-start}
+case $cmd in
+  start)
+    start_bank 7438 "${BASE}38"
+    start_bank 7455 "${BASE}55"
+    start_bank 7475 "${BASE}75"
+    echo "banks 7438/7455/7475"
+    ;;
+  submit)
+    submit_arm 38 400000 72 7438
+    submit_arm 55 1000000 48 7455
+    submit_arm 75 4000000 48 7475
+    echo "submitted 38/55/75 SOAP clients"
+    hq job list
+    ;;
+  all)
+    start_bank 7438 "${BASE}38"
+    start_bank 7455 "${BASE}55"
+    start_bank 7475 "${BASE}75"
+    submit_arm 38 400000 72 7438
+    submit_arm 55 1000000 48 7455
+    submit_arm 75 4000000 48 7475
+    echo "banks + clients"
+    hq job list
+    ;;
+  *)
+    echo "usage: $0 start|submit|all" >&2
+    exit 2
+    ;;
+esac
