@@ -14,6 +14,8 @@
 //! The score is variance / (1 + effort), so a well-sampled uncertain node
 //! loses to an empty hole.
 
+use std::cell::RefCell;
+
 use ndarray::{Array1, Array2};
 
 /// Field on the class graph.
@@ -29,6 +31,8 @@ pub struct ResidualField {
     nugget: f64,
     /// Likelihood precision.
     noise: f64,
+    /// Cached Cholesky factor of the graph posterior precision.
+    factor: RefCell<Option<Array2<f64>>>,
 }
 
 impl ResidualField {
@@ -49,6 +53,7 @@ impl ResidualField {
         self.y.resize(n, f64::NAN);
         self.effort.resize(n, 0.0);
         self.n = n;
+        self.invalidate();
     }
 
     /// Observe class `i` at energy `e` and count one unit of effort.
@@ -56,6 +61,7 @@ impl ResidualField {
         self.resize(i + 1);
         self.y[i] = e;
         self.effort[i] += 1.0;
+        self.invalidate();
     }
 
     /// Record a hop between classes `a` and `b`.
@@ -67,6 +73,7 @@ impl ResidualField {
         let (u, v) = if a < b { (a, b) } else { (b, a) };
         if !self.edges.iter().any(|&e| e == (u, v)) {
             self.edges.push((u, v));
+            self.invalidate();
         }
     }
 
@@ -76,30 +83,22 @@ impl ResidualField {
         if n == 0 {
             return None;
         }
-        let mut q = Array2::<f64>::zeros((n, n));
-        for i in 0..n {
-            q[[i, i]] = self.nugget;
-        }
-        for &(a, b) in &self.edges {
-            q[[a, a]] += 1.0;
-            q[[b, b]] += 1.0;
-            q[[a, b]] -= 1.0;
-            q[[b, a]] -= 1.0;
-        }
+        self.ensure_factor()?;
+        let factor = self.factor.borrow();
+        let factor = factor.as_ref()?;
         let mut rhs = Array1::<f64>::zeros(n);
         for i in 0..n {
             if self.y[i].is_finite() {
-                q[[i, i]] += self.noise;
                 rhs[i] = self.noise * self.y[i];
             }
         }
-        let mean = chol_solve(&q, &rhs)?;
+        let mean = solve_factor(factor, &rhs)?;
         // Marginal variances: diagonal of Q^{-1}, by solving Q e_i.
         let mut var = Array1::<f64>::zeros(n);
         for i in 0..n {
             let mut e = Array1::<f64>::zeros(n);
             e[i] = 1.0;
-            let z = chol_solve(&q, &e)?;
+            let z = solve_factor(factor, &e)?;
             var[i] = z[i].max(1e-12);
         }
         Some((mean, var))
@@ -107,14 +106,13 @@ impl ResidualField {
 
     /// Residual score of class `i` (high = worth a start).
     pub fn score(&self, i: usize) -> f64 {
-        let (_, var) = match self.posterior() {
-            Some(p) => p,
-            None => return 1.0,
-        };
-        if i >= var.len() {
+        if i >= self.n {
             return self.prior_var();
         }
-        var[i] / (1.0 + self.effort.get(i).copied().unwrap_or(0.0))
+        let Some(variance) = self.marginal_variance(i) else {
+            return self.prior_var();
+        };
+        variance / (1.0 + self.effort.get(i).copied().unwrap_or(0.0))
     }
 
     /// Score of the unassigned residual cell `U`.
@@ -124,6 +122,46 @@ impl ResidualField {
 
     fn prior_var(&self) -> f64 {
         1.0 / self.nugget.max(1e-12)
+    }
+
+    fn marginal_variance(&self, i: usize) -> Option<f64> {
+        self.ensure_factor()?;
+        let factor = self.factor.borrow();
+        let factor = factor.as_ref()?;
+        let mut basis = Array1::<f64>::zeros(self.n);
+        basis[i] = 1.0;
+        solve_factor(factor, &basis).map(|solution| solution[i].max(1e-12))
+    }
+
+    fn ensure_factor(&self) -> Option<()> {
+        if self.factor.borrow().is_none() {
+            let factor = cholesky(&self.precision())?;
+            *self.factor.borrow_mut() = Some(factor);
+        }
+        Some(())
+    }
+
+    fn precision(&self) -> Array2<f64> {
+        let mut precision = Array2::<f64>::zeros((self.n, self.n));
+        for i in 0..self.n {
+            precision[[i, i]] = self.nugget;
+        }
+        for &(a, b) in &self.edges {
+            precision[[a, a]] += 1.0;
+            precision[[b, b]] += 1.0;
+            precision[[a, b]] -= 1.0;
+            precision[[b, a]] -= 1.0;
+        }
+        for i in 0..self.n {
+            if self.y[i].is_finite() {
+                precision[[i, i]] += self.noise;
+            }
+        }
+        precision
+    }
+
+    fn invalidate(&mut self) {
+        *self.factor.get_mut() = None;
     }
 
     /// Class with the highest residual score, or `None` if `U` wins.
@@ -145,8 +183,11 @@ impl ResidualField {
     }
 }
 
-fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
-    let n = b.len();
+fn cholesky(a: &Array2<f64>) -> Option<Array2<f64>> {
+    let n = a.nrows();
+    if a.ncols() != n {
+        return None;
+    }
     let mut l = Array2::<f64>::zeros((n, n));
     for i in 0..n {
         for j in 0..=i {
@@ -163,6 +204,14 @@ fn chol_solve(a: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
                 l[[i, j]] = s / l[[j, j]];
             }
         }
+    }
+    Some(l)
+}
+
+fn solve_factor(l: &Array2<f64>, b: &Array1<f64>) -> Option<Array1<f64>> {
+    let n = b.len();
+    if l.nrows() != n || l.ncols() != n {
+        return None;
     }
     let mut y = Array1::<f64>::zeros(n);
     for i in 0..n {
