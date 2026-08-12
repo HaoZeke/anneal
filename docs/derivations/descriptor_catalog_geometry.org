@@ -180,6 +180,65 @@ statistical species being counted.  =tests/basin_census.rs= checks exact count
 conservation, immutable medoids, deterministic assignment, and saturation from
 census visits only.
 
+* D28: target-free Feynman--Kac population reconfiguration
+
+At one charged-work synchronization epoch, let the =N= replicas provide one
+validated quenched representative each.  The empirical search population is
+
+\[
+  \eta_t^N={1\over N}\sum_{i=1}^N\delta_{x_{t,i}}.
+\]
+
+The local perturbation and quench executed by a replica is the mutation kernel
+=K_t=.  Selection uses no target structure, published reference energy, or
+morphology label.  For energy rank =r_E in [0,1]=, descriptor-novelty rank
+=r_N in [0,1]=, and census-scarcity rank =r_S in [0,1]=, define
+
+\[
+  \log G_{t,i}=-\beta_t r_E(i)+\lambda_t r_N(i)+\gamma_t r_S(i).
+\]
+
+Lower energy rank is favorable, while higher novelty and scarcity ranks are
+favorable.  Within-epoch fractional ranks are invariant under positive affine
+changes of energy units.  Subtracting =max_i log G_{t,i}= and clipping the
+remaining log weights to =[-c,0]= bounds the normalized weight ratio by
+=exp(c)= and prevents numerical extinction.
+
+The normalized weights are
+
+\[
+  w_{t,i}={G_{t,i}\over\sum_jG_{t,j}},
+  \qquad
+  N_{\rm eff}={1\over\sum_iw_{t,i}^2}.
+\]
+
+A stored offset drives systematic resampling, making a coordinator snapshot
+and its parent assignment exactly replayable.  The offspring population has
+the same size as the source population.  A declared family cap repairs any
+assignment that would let one observed funnel occupy every replica.  The event
+records =N_eff=, the number of unique parents, the largest family, and the
+offspring-count variance.  Replicas sharing a parent require distinct
+descriptor-space rejuvenation proposals before their next local epoch.
+
+The resulting composition is
+
+\[
+  \eta_{t+1}^N={\cal R}_{N,c}(\eta_t^N G_t)K_t,
+\]
+
+where =R_{N,c}= is fixed-population systematic resampling with family cap =c=.
+This borrows the interacting-particle bookkeeping of fixed-population
+diffusion Monte Carlo.  It does not import imaginary-time propagation, a trial
+wavefunction, a fixed-node constraint, or a Green-function convergence claim.
+The exact census remains the statistical species counted by Good--Turing;
+structured latent-field uncertainty can only contribute to =r_S= and cannot
+change census membership or visit totals.
+
+=tests/feynman_kac_population.rs= checks energy-unit invariance, fixed
+population size, deterministic replay, family-cap preservation, genealogy
+diagnostics, and the ability of novelty plus scarcity to protect a second
+funnel from energy-only collapse.
+
 * Executable verification
 
 On Terra, run:
@@ -188,5 +247,5 @@ On Terra, run:
 scripts/terra_verify_descriptor_math.sh
 #+end_src
 
-The verifier runs the D20--D23 Rust suites in release mode with the lockfile and
-the D21/D27 Python witnesses in the Pixi =verify= environment.
+The verifier runs the D20--D23 and D28 Rust suites in release mode with the
+lockfile and the D21/D27 Python witnesses in the Pixi =verify= environment.
