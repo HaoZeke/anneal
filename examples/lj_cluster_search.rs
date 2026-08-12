@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: FunnelModel EI, well-UCB, archive-null hop off raised SOAP classes, AS-KMC α=2"
+                    "  bank explore: EI + explode SOAP kick until novel packing (Goedecker/Schoenborn)"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1119,28 +1119,72 @@ fn main() {
     }
 }
 
+#[cfg(all(feature = "bank-rpc", feature = "featomic"))]
+fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> bool {
+    if wells.is_empty() {
+        return false;
+    }
+    let s = packing_of(x, cfg);
+    let merge = anneal_core::featomic_hop::SOAP_PACK_MERGE;
+    wells.iter().any(|w| {
+        if w.len() != s.len() || s.is_empty() {
+            return false;
+        }
+        s.iter()
+            .zip(w.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt()
+            <= merge
+    })
+}
+
+/// Goedecker/Schoenborn leave: escalate the SOAP kick until the quenched
+/// packing is outside every shared well. A single 0.35 kick quenches back
+/// onto Mackay (own LJ75 spectrum: 0/200 downhill; Schaefer: mode-following
+/// from ico cannot leave). Iwamatsu: a few unquenched kicks, then relax.
 #[cfg(feature = "bank-rpc")]
 fn leave_known_packing<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
     cfg: &Config,
+    wells: &[Array1<f64>],
+    ledger: &mut Ledger,
+    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
     rng: &mut R,
 ) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
-        let rmsd = 0.35 * cfg.length_scale;
         let rcut = 3.5 * cfg.length_scale;
-        return anneal_core::featomic_hop::step_away_featomic(
-            x,
-            rmsd,
-            rcut,
-            cfg.species.as_deref(),
-            None,
-            rng,
-        );
+        let mut amp = 0.35 * cfg.length_scale;
+        let mut cur = x.to_owned();
+        for _ in 0..10 {
+            if ledger.remaining() < 8 {
+                break;
+            }
+            let mut y = cur.clone();
+            for _ in 0..3 {
+                y = anneal_core::featomic_hop::step_away_featomic(
+                    y.view(),
+                    amp,
+                    rcut,
+                    cfg.species.as_deref(),
+                    None,
+                    rng,
+                );
+            }
+            let steps = cfg.relax_steps.min(ledger.remaining());
+            let (_e, q) = relax(ledger, y.view(), steps);
+            if !packing_is_known(q.view(), cfg, wells) {
+                return q;
+            }
+            amp = (amp * 1.15).min(3.0 * cfg.length_scale);
+            cur = q;
+        }
+        return cur;
     }
     #[cfg(not(feature = "featomic"))]
     {
-        let _ = (cfg, rng);
+        let _ = (cfg, wells, ledger, relax, rng);
         x.to_owned()
     }
 }
@@ -1230,16 +1274,17 @@ fn run_capnp_bank(
                 let _ = client.set_dcut(sched.threshold(progress));
             }
         }
+        let wells: Vec<Array1<f64>> = snap
+            .as_ref()
+            .map(|s| s.wells.iter().map(|(w, _)| w.clone()).collect())
+            .unwrap_or_default();
         let start = match client.sample(rng.random()) {
             Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => {
                 let soap = packing_of(x.view(), cfg);
                 let h = client.bias_of(soap.view()).unwrap_or(0.0);
                 if h >= well_cap {
-                    // Occupied class: leave it in the SOAP null of the
-                    // shared archive. That is the multi-chain signal.
-                    // A random cluster throws the map away.
                     null_starts += 1;
-                    leave_known_packing(x.view(), cfg, &mut rng)
+                    leave_known_packing(x.view(), cfg, &wells, ledger, relax, &mut rng)
                 } else {
                     x
                 }
