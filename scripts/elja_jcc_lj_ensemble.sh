@@ -11,6 +11,9 @@ N=${1:?LJ site count}
 PER_REPLICA_BUDGET=${2:?per-replica charged budget}
 ARM=${3:?shared or control}
 ENSEMBLE_INDEX=${4:?ensemble index}
+if [[ $ENSEMBLE_INDEX == slurm-array ]]; then
+  ENSEMBLE_INDEX=${SLURM_ARRAY_TASK_ID:?Slurm array index}
+fi
 CENSUS_RADIUS=${5:?calibrated census radius}
 
 case "$ARM" in
@@ -156,7 +159,7 @@ for replica in 0 1 2 3; do
 done
 
 if [[ $ARM == shared ]]; then
-  rg -h '"aggregate_charged":' "$OUT"/traces/replica-*.jsonl \
+  rg --no-filename '"aggregate_charged":' "$OUT"/traces/replica-*.jsonl \
     | rg -q "\"aggregate_charged\":${TOTAL_BUDGET}"
 fi
 
