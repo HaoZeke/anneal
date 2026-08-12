@@ -12,6 +12,7 @@ use anneal_core::catalog_policy::{
     ActiveCatalogRelation, AggregateProgress, CatalogPolicyInput, CensusEvidence, PolicyAction,
     ValidationState,
 };
+use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolRejection};
@@ -174,6 +175,15 @@ fn catalog_outputs_are_actionable_and_seeded() {
     assert_eq!(first.target.len(), admitted.descriptor.len());
     assert_eq!(first.increment.len(), admitted.descriptor.len());
     assert!(first.nearest_catalog_distance.is_finite());
+
+    let policy = client
+        .policy_state(5, admitted.descriptor.clone(), admitted.energy)
+        .unwrap();
+    assert_eq!(policy.total_visits, 1);
+    assert_eq!(policy.singleton_basins, 1);
+    assert_eq!(policy.local_basin_visits, 1);
+    assert!(!policy.globally_saturated);
+    assert_eq!(policy.relation, CatalogRelation::Incumbent);
 }
 
 #[test]
@@ -334,8 +344,9 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
         SynchronizationOutcome::SharingDisabled
     );
     assert_eq!(run.ledger().ensemble_total(), 20);
-    assert!(!run
-        .events()
-        .iter()
-        .any(|event| event.kind == TraceKind::RpcFallback));
+    assert!(
+        !run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::RpcFallback)
+    );
 }
