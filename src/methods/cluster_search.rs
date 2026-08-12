@@ -481,7 +481,7 @@ fn leave_known_packing(
     {
         let rcut = 3.5 * cfg.length_scale;
         let mobile = mobile_of(cfg);
-        let mut y = crate::featomic_hop::step_into_hole(
+        let y = crate::featomic_hop::step_into_hole(
             x,
             wells,
             crate::featomic_hop::SOAP_PACK_MERGE,
