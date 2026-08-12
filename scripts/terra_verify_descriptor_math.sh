@@ -10,7 +10,8 @@ cargo test --locked --release \
   --test census_calibration \
   --test basin_census \
   --test basin_catalog \
-  --test catalog_proposals
+  --test catalog_proposals \
+  --test feynman_kac_population
 
 descriptor_math_pixi="${PIXI_BIN:-pixi}"
 "${descriptor_math_pixi}" run -e verify pytest \
