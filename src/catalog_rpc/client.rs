@@ -80,6 +80,15 @@ pub struct PolicyStateReceipt {
     pub snapshot: CatalogSnapshot,
 }
 
+/// Synchronous population state and the coordinator snapshot that carried it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopulationEpochReceipt {
+    /// Pending barrier evidence or a complete parent plan.
+    pub state: PopulationEpochState,
+    /// Coordinator snapshot observed with the evidence.
+    pub snapshot: CatalogSnapshot,
+}
+
 /// Result of a coordinator read when local execution remains available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogAccess {
@@ -367,11 +376,26 @@ impl CatalogClient {
         epoch: u64,
         candidate: CatalogCandidate,
     ) -> Result<PopulationEpochState, CatalogClientError> {
+        Ok(self
+            .submit_population_with_snapshot(event_sequence, epoch, candidate)?
+            .state)
+    }
+
+    /// Submit population evidence and retain its coordinator snapshot.
+    pub fn submit_population_with_snapshot(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+        candidate: CatalogCandidate,
+    ) -> Result<PopulationEpochReceipt, CatalogClientError> {
         let reply = self.call(
             event_sequence,
             CatalogOperation::PopulationSubmit { epoch, candidate },
         )?;
-        population_epoch_payload(reply.payload, "population submission")
+        Ok(PopulationEpochReceipt {
+            state: population_epoch_payload(reply.payload, "population submission")?,
+            snapshot: reply.snapshot,
+        })
     }
 
     /// Poll a synchronous population epoch without resubmitting evidence.
@@ -380,8 +404,22 @@ impl CatalogClient {
         event_sequence: u64,
         epoch: u64,
     ) -> Result<PopulationEpochState, CatalogClientError> {
+        Ok(self
+            .population_plan_with_snapshot(event_sequence, epoch)?
+            .state)
+    }
+
+    /// Poll a population plan and retain its coordinator snapshot.
+    pub fn population_plan_with_snapshot(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+    ) -> Result<PopulationEpochReceipt, CatalogClientError> {
         let reply = self.call(event_sequence, CatalogOperation::PopulationPlan { epoch })?;
-        population_epoch_payload(reply.payload, "population plan")
+        Ok(PopulationEpochReceipt {
+            state: population_epoch_payload(reply.payload, "population plan")?,
+            snapshot: reply.snapshot,
+        })
     }
 
     fn call(
