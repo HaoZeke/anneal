@@ -65,7 +65,7 @@ submit_arm() {
     --cwd "$out" \
     --stdout "$out/lj${n}_rec_%{TASK_ID}.out" \
     --stderr "$out/lj${n}_rec_%{TASK_ID}.err" \
-    -- bash -lc "export BANK_RPC=${HOST}:${port} LJ_BIN=${BIN} BANK_SLICE=${BANK_SLICE:-3000}; exec ${ONE} ${n} ${budget} rec" \
+    -- bash -lc "export BANK_RPC=${HOST}:${port} LJ_BIN=${BIN} BANK_SLICE=${BANK_SLICE:-500}; exec ${ONE} ${n} ${budget} rec" \
     | tee -a "$out/hq_submit.log"
 }
 
