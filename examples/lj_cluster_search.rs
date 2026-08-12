@@ -820,12 +820,10 @@ fn main() {
         };
         let catalog_rpc = std::env::var("CATALOG_RPC")
             .ok()
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                std::env::var("BANK_RPC")
-                    .ok()
-                    .filter(|value| !value.is_empty())
-            });
+            .filter(|value| !value.is_empty());
+        let bank_rpc = std::env::var("BANK_RPC")
+            .ok()
+            .filter(|value| !value.is_empty());
         let catalog_control = opts.contains(&"catalog");
         let mut out = if catalog_rpc.is_some() || catalog_control {
             #[cfg(feature = "bank-rpc")]
@@ -848,6 +846,17 @@ fn main() {
             {
                 let _ = catalog_rpc;
                 panic!("catalog mode requires --features bank-rpc");
+            }
+        } else if let Some(endpoint) = bank_rpc {
+            #[cfg(feature = "bank-rpc")]
+            {
+                println!("  capnp compatibility bank {endpoint}");
+                run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed, &endpoint)
+            }
+            #[cfg(not(feature = "bank-rpc"))]
+            {
+                let _ = endpoint;
+                panic!("BANK_RPC requires --features bank-rpc");
             }
         } else if use_bank {
             {
