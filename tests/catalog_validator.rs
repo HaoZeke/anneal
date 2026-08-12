@@ -64,6 +64,20 @@ fn validator(expected: SystemSignature) -> CandidateValidator {
     )
 }
 
+fn assert_rejected_before_fresh(record: CandidateRecord, expected: ValidationFailure) {
+    let called = Cell::new(false);
+    let result = validator(signature()).validate(&record, |_| {
+        called.set(true);
+        Ok(FreshEvaluation {
+            energy: -1.0,
+            forces: vec![0.0; 6],
+        })
+    });
+
+    assert_eq!(result.unwrap_err(), expected);
+    assert!(!called.get());
+}
+
 #[test]
 fn signature_mismatch_is_rejected_before_engine_evaluation() {
     let expected = signature();
@@ -82,4 +96,60 @@ fn signature_mismatch_is_rejected_before_engine_evaluation() {
 
     assert_eq!(result.unwrap_err(), ValidationFailure::SignatureMismatch);
     assert!(!called.get());
+}
+
+#[test]
+fn coordinate_dimension_is_checked_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.coordinates.pop();
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::CoordinateDimension {
+            expected: 6,
+            actual: 5,
+        },
+    );
+}
+
+#[test]
+fn force_dimension_is_checked_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.forces.pop();
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::ForceDimension {
+            expected: 6,
+            actual: 5,
+        },
+    );
+}
+
+#[test]
+fn descriptor_dimension_is_checked_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.descriptor.pop();
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::DescriptorDimension {
+            expected: 2,
+            actual: 1,
+        },
+    );
+}
+
+#[test]
+fn descriptor_schema_version_is_checked_before_engine_evaluation() {
+    let mut record = candidate(signature());
+    record.descriptor_schema_version = 2;
+
+    assert_rejected_before_fresh(
+        record,
+        ValidationFailure::DescriptorSchemaVersion {
+            expected: 1,
+            actual: 2,
+        },
+    );
 }
