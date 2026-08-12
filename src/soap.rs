@@ -30,7 +30,7 @@ use rand::Rng;
 use std::f64::consts::PI;
 
 /// Radial and angular resolution, and the cutoff in nearest-neighbour units.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SoapSpec {
     /// Radial functions `n = 0..n_max`.
     pub n_max: usize,

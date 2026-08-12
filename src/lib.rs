@@ -37,6 +37,8 @@ pub mod contextual;
 pub mod cool;
 pub mod curvature;
 pub mod delayed;
+/// Versioned multiscale invariant coordinates for basin catalogs.
+pub mod descriptor_space;
 /// Annealing the distance at which two solutions count as one.
 pub mod diversity;
 /// A posterior over the density of minima, and acceptance by entropy rather
