@@ -32,6 +32,7 @@ use crate::descriptor_space::DescriptorSpace;
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationMember, SelectionCoefficients, SynchronousPopulation,
 };
+use crate::residual_field::ResidualField;
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 
@@ -204,6 +205,10 @@ struct ScientificState {
     validator: CandidateValidator,
     census: BasinCensus,
     catalog: BasinCatalog,
+    transition_field: ResidualField,
+    transition_nodes: BTreeMap<BasinId, usize>,
+    last_basin_by_replica: BTreeMap<u32, BasinId>,
+    transition_capacity: usize,
     population: SynchronousPopulation,
     population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
     population_plans: BTreeMap<u64, PopulationPlan>,
@@ -245,6 +250,10 @@ impl CoordinatorState {
                         scientific.total_charged_work,
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    transition_field: ResidualField::new(),
+                    transition_nodes: BTreeMap::new(),
+                    last_basin_by_replica: BTreeMap::new(),
+                    transition_capacity: scientific.catalog_capacity,
                     population: SynchronousPopulation::new(
                         config.replicas.iter().copied(),
                         SelectionCoefficients::default(),
@@ -372,7 +381,10 @@ fn state_is_empty(state: &CoordinatorState) -> bool {
         && state.requests.is_empty()
         && state.maximum_sequence.is_empty()
         && state.scientific.as_ref().is_none_or(|scientific| {
-            scientific.population_candidates.is_empty() && scientific.population_plans.is_empty()
+            scientific.transition_nodes.is_empty()
+                && scientific.last_basin_by_replica.is_empty()
+                && scientific.population_candidates.is_empty()
+                && scientific.population_plans.is_empty()
         })
         && state
             .ledger
@@ -708,11 +720,13 @@ fn apply_request(
                     true
                 }
             };
-            let Ok(member) = PopulationMember::new(
+            let residual_uncertainty = transition_uncertainty(scientific, basin_id);
+            let Ok(member) = PopulationMember::new_with_uncertainty(
                 request.identity.replica,
                 validated.fresh.energy,
                 novelty,
                 basin_visits as f64,
+                residual_uncertainty,
             ) else {
                 return rejected(
                     &state,
@@ -845,6 +859,12 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
+                observe_transition(
+                    scientific,
+                    request.identity.replica,
+                    observation.basin_id,
+                    validated.fresh.energy,
+                );
                 observation.total_visits
             } else {
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
@@ -886,6 +906,12 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
+                observe_transition(
+                    scientific,
+                    request.identity.replica,
+                    observation.basin_id,
+                    validated.fresh.energy,
+                );
                 scientific
                     .catalog
                     .admit(observation.basin_id, observation.basin_visits, validated);
@@ -1063,6 +1089,40 @@ fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate 
         event_sequence: validated.candidate.event_sequence,
         seed: validated.candidate.seed,
     }
+}
+
+fn observe_transition(scientific: &mut ScientificState, replica: u32, basin: BasinId, energy: f64) {
+    let previous = scientific.last_basin_by_replica.insert(replica, basin);
+    let current_node = transition_node(scientific, basin);
+    if let Some(current_node) = current_node {
+        scientific.transition_field.observe(current_node, energy);
+        if let Some(previous_node) =
+            previous.and_then(|previous| scientific.transition_nodes.get(&previous).copied())
+        {
+            scientific
+                .transition_field
+                .edge(previous_node, current_node);
+        }
+    }
+}
+
+fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<usize> {
+    if let Some(node) = scientific.transition_nodes.get(&basin) {
+        return Some(*node);
+    }
+    if scientific.transition_nodes.len() >= scientific.transition_capacity {
+        return None;
+    }
+    let node = scientific.transition_nodes.len();
+    scientific.transition_nodes.insert(basin, node);
+    Some(node)
+}
+
+fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
+    scientific.transition_nodes.get(&basin).map_or_else(
+        || scientific.transition_field.residual_score(),
+        |node| scientific.transition_field.score(*node),
+    )
 }
 
 fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descriptor: &[f64]) -> f64 {
