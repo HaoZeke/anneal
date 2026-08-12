@@ -111,7 +111,7 @@ pub fn decide(
         bank_size,
         catalog_saturated,
         on_raised_packing,
-        0,
+        1,
     )
 }
 
