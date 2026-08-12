@@ -1323,14 +1323,14 @@ fn run_capnp_bank(
             random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng)
         };
         let mine = packing_of(start.view(), cfg);
-        let merge = {
+        let gap = {
             #[cfg(feature = "featomic")]
             {
-                anneal_core::featomic_hop::SOAP_PACK_MERGE
+                anneal_core::featomic_hop::SOAP_PACK_GAP
             }
             #[cfg(not(feature = "featomic"))]
             {
-                0.10
+                0.15
             }
         };
         for _ in 0..3 {
@@ -1341,20 +1341,23 @@ fn run_capnp_bank(
                 continue;
             }
             let theirs = packing_of(x.view(), cfg);
-            let same = !mine.is_empty()
-                && mine.len() == theirs.len()
-                && mine
-                    .iter()
+            let dist = if mine.is_empty() || mine.len() != theirs.len() {
+                f64::INFINITY
+            } else {
+                mine.iter()
                     .zip(theirs.iter())
                     .map(|(a, b)| (a - b) * (a - b))
                     .sum::<f64>()
                     .sqrt()
-                    <= merge;
-            if e < best - 0.05 {
-                start = x;
-                break;
-            }
-            if !same {
+            };
+            // A win, or another funnel that is still competitive.
+            // SOAP 0.10 is an ico isomer, not Marks (0.163). Adopting
+            // that restamps the leftover walk onto the shelf.
+            if e < best - 0.05 || (dist > gap && e < best + 1.0) {
+                if e < best {
+                    best = e;
+                    best_state = Some(x.clone());
+                }
                 start = x;
                 break;
             }
@@ -1396,6 +1399,11 @@ fn run_capnp_bank(
             let _ = client.offer(out.best, st.view(), soap.view());
             let _ = client.deposit(soap.view(), cfg.bias_height);
         }
+        println!(
+            "      slice {slices} spent {} best {best:.6} null {null_starts}",
+            ledger.spent()
+        );
+        let _ = std::io::stdout().flush();
     }
     println!(
         "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
