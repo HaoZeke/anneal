@@ -184,11 +184,6 @@ impl FirstEncounter {
     pub fn ensemble_total(&self) -> u64 {
         self.ensemble_total
     }
-
-    /// Declared aggregate charged-work budget.
-    pub fn aggregate_budget(&self) -> u64 {
-        self.per_replica_budget * self.replicas.len() as u64
-    }
 }
 
 /// Isolated ensemble ledger with idempotent event ingestion.
@@ -289,6 +284,13 @@ impl CooperativeLedger {
     /// Sum of the latest counter from every replica.
     pub fn ensemble_total(&self) -> u64 {
         self.replicas.values().map(ReplicaLedger::total).sum()
+    }
+
+    /// Declared aggregate charged-work budget.
+    pub fn aggregate_budget(&self) -> u64 {
+        let replicas = u64::try_from(self.replicas.len())
+            .expect("replica count is checked when the ledger is constructed");
+        self.per_replica_budget * replicas
     }
 
     /// Number of unique recorded events across replicas.
