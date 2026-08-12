@@ -755,7 +755,16 @@ where
         let wells: Vec<Array1<f64>> = well_pairs.iter().map(|(w, _)| w.clone()).collect();
         let mut start = best_state.clone().unwrap_or_else(|| start.to_owned());
         let mine = packing_of(start.view(), cfg);
-        let merge = pack_merge();
+        let gap = {
+            #[cfg(feature = "featomic")]
+            {
+                crate::featomic_hop::SOAP_PACK_GAP
+            }
+            #[cfg(not(feature = "featomic"))]
+            {
+                0.15
+            }
+        };
         for _ in 0..3 {
             let Ok(Some((e, x))) = client.sample(rng.random()) else {
                 continue;
@@ -767,16 +776,16 @@ where
                 continue;
             }
             let theirs = packing_of(x.view(), cfg);
-            let same = !mine.is_empty()
-                && mine.len() == theirs.len()
-                && mine
-                    .iter()
+            let dist = if mine.is_empty() || mine.len() != theirs.len() {
+                f64::INFINITY
+            } else {
+                mine.iter()
                     .zip(theirs.iter())
                     .map(|(a, b)| (a - b) * (a - b))
                     .sum::<f64>()
                     .sqrt()
-                    <= merge;
-            if e < best - 0.05 || !same {
+            };
+            if e < best - 0.05 || (dist > gap && e < best + 1.0) {
                 if e < best {
                     best = e;
                     best_state = Some(x.clone());

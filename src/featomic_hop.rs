@@ -37,6 +37,11 @@ pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
 /// packing gap, so a well-tempered deposit fills the occupied
 /// superbasin and not the other funnel.
 pub const SOAP_PACK_MERGE: f64 = 0.10;
+/// Packing-class gap on unit mean SOAP. Ico isomers sit under
+/// [`SOAP_PACK_MERGE`]. Mackay vs Marks is 0.163. A bank sample
+/// closer than this is the same funnel, not a class another chain
+/// opened, and adopting it restamps the walk onto ico.
+pub const SOAP_PACK_GAP: f64 = 0.15;
 thread_local! {
     /// Shared-bank packing means. The hop steps in the SOAP null
     /// space of this archive (MAP-Elites coverage + null-space
@@ -1170,6 +1175,10 @@ mod tests {
         assert!(
             d_marks > SOAP_PACK_MERGE,
             "ico-Marks {d_marks} must stay outside the packing well {SOAP_PACK_MERGE}"
+        );
+        assert!(
+            d_iso < SOAP_PACK_GAP && d_marks > SOAP_PACK_GAP,
+            "adopt gap {SOAP_PACK_GAP} must sit between ico isomer {d_iso} and Marks {d_marks}"
         );
     }
 
