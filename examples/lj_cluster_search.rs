@@ -1245,6 +1245,424 @@ fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     }
 }
 
+/// One independently budgeted LJ replica against an isolated descriptor catalog.
+#[cfg(feature = "bank-rpc")]
+fn run_capnp_catalog(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    seed: u64,
+    endpoint: &str,
+) -> Outcome {
+    use anneal_core::catalog::lj::{descriptor_space, system_signature};
+    use anneal_core::catalog_policy::PolicyAction;
+    use anneal_core::catalog_rpc::CatalogIdentity;
+    use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
+    use anneal_core::cooperative_search::ledger::ChargeKind;
+    use anneal_core::cooperative_search::{
+        CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
+        RunManifest,
+    };
+    use rand::Rng;
+
+    let campaign = required_catalog_env("CATALOG_CAMPAIGN");
+    let ensemble = required_catalog_env("CATALOG_ENSEMBLE");
+    let replica = required_catalog_env("CATALOG_REPLICA")
+        .parse::<u32>()
+        .expect("CATALOG_REPLICA must be an unsigned integer");
+    let address = endpoint
+        .parse()
+        .expect("CATALOG_RPC must be a host:port socket address");
+    let signature = system_signature(cfg.n_points).expect("LJ catalog signature must be valid");
+    let descriptor_space = descriptor_space();
+    let identity = CatalogIdentity {
+        campaign: campaign.clone(),
+        ensemble: ensemble.clone(),
+        replica,
+        signature_digest: signature.digest(),
+    };
+    let mut cooperative = CooperativeRun::new(
+        [replica],
+        u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
+    )
+    .expect("single-replica local ledger must be valid");
+    match CatalogClient::connect(address, identity, ClientConfig::default()) {
+        Ok(client) => cooperative
+            .attach_client(replica, client)
+            .expect("configured replica must accept its catalog client"),
+        Err(error) => {
+            eprintln!("catalog {endpoint} unavailable ({error}); local execution remains active")
+        }
+    }
+
+    let mut run_cfg = cfg.clone();
+    run_cfg.budget_window = true;
+    let slice = std::env::var("CATALOG_SLICE")
+        .or_else(|_| std::env::var("BANK_SLICE"))
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(500)
+        .max(1);
+    let hole_samples = std::env::var("CATALOG_HOLE_SAMPLES")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(256)
+        .max(1);
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
+        run_cfg.merge_radius,
+        run_cfg.bias_height,
+        run_cfg.bias_gamma,
+    );
+    let mut current = random_cluster(run_cfg.n_points, 0.7, run_cfg.min_separation, &mut rng);
+    let mut best = f64::INFINITY;
+    let mut best_state = None;
+    let mut hops = 0usize;
+    let mut basins = 0usize;
+    let mut screened_out = 0usize;
+    let mut returned = 0usize;
+    let mut slices = 0u64;
+    let mut stall = 0u32;
+
+    while ledger.remaining() > 0 {
+        let mut slice_ledger = Ledger::new(slice.min(ledger.remaining()));
+        let output = run_with_bias(
+            &run_cfg,
+            current.view(),
+            &mut slice_ledger,
+            relax,
+            Some(grad),
+            &mut bias,
+            &mut rng,
+        );
+        let slice_charged = slice_ledger.spent();
+        ledger.charge_many(slice_charged);
+        if let Some(state) = slice_ledger.best_state.as_ref() {
+            ledger.record(slice_ledger.best, state.view());
+        }
+        cooperative
+            .record_work(
+                replica,
+                if slice_charged == 0 {
+                    ChargeKind::LocalProposal
+                } else if output.best_state.is_some() {
+                    ChargeKind::AcceptedQuench
+                } else {
+                    ChargeKind::RejectedQuench
+                },
+                u64::try_from(slice_charged).expect("slice charge must fit u64"),
+            )
+            .expect("coordinator must preserve the charged-work ledger");
+        hops += output.hops;
+        basins += output.basins;
+        screened_out += output.screened_out;
+        returned += output.returned;
+        slices += 1;
+
+        let local_deepened = output.best < best;
+        if local_deepened {
+            best = output.best;
+            best_state = output.best_state.clone();
+            stall = 0;
+        } else {
+            stall = stall.saturating_add(1);
+        }
+        current = output
+            .final_state
+            .or_else(|| output.best_state.clone())
+            .unwrap_or(current);
+        let policy_state = best_state.as_ref().unwrap_or(&current).clone();
+
+        let candidate = if ledger.remaining() > 0 && ledger.charge() {
+            cooperative
+                .record_work(replica, ChargeKind::FreshValidation, 1)
+                .expect("producer validation must enter the cooperative ledger");
+            lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                slices,
+                seed,
+                ledger.spent(),
+                policy_state.view(),
+            )
+        } else {
+            None
+        };
+        if let Some(candidate) = candidate {
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("descriptor work must enter the cooperative ledger");
+            if ledger.remaining() > 0 && ledger.charge() {
+                cooperative
+                    .record_work(replica, ChargeKind::FreshValidation, 1)
+                    .expect("receiving validation must enter the cooperative ledger");
+                let _ = cooperative.offer_candidate(replica, candidate);
+            }
+        }
+
+        let Ok(descriptor) =
+            descriptor_space.describe(policy_state.view(), Some(&signature.atomic_numbers))
+        else {
+            continue;
+        };
+        cooperative
+            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+            .expect("policy descriptor work must enter the cooperative ledger");
+        let policy_energy = if best.is_finite() {
+            best
+        } else {
+            continue;
+        };
+        let PolicyEvidenceOutcome::Remote(input) = cooperative
+            .policy_input(
+                replica,
+                descriptor.values().to_vec(),
+                policy_energy,
+                stall,
+                local_deepened,
+            )
+            .expect("coordinator policy evidence must preserve local invariants")
+        else {
+            continue;
+        };
+        let decision = cooperative
+            .decide(replica, input)
+            .expect("pure policy decision must name the configured replica");
+        match decision.action {
+            PolicyAction::ContinueLocal => {}
+            PolicyAction::Exploit { win_only } => {
+                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                    .sample_candidate(replica, rng.random())
+                    .expect("catalog sampling must preserve local execution")
+                    && ledger.remaining() > 0
+                    && ledger.charge()
+                {
+                    cooperative
+                        .record_work(replica, ChargeKind::FreshValidation, 1)
+                        .expect("sample validation must enter the cooperative ledger");
+                    if let Some((energy, coordinates)) = validate_sampled_lj(
+                        &candidate,
+                        &descriptor_space,
+                        &signature.atomic_numbers,
+                    ) && (!win_only || energy < best)
+                    {
+                        current = coordinates.clone();
+                        if energy < best {
+                            best = energy;
+                            best_state = Some(coordinates);
+                            stall = 0;
+                        }
+                    }
+                }
+            }
+            PolicyAction::Explore | PolicyAction::Leave => {
+                if let CatalogHoleOutcome::Proposal(hole) = cooperative
+                    .descriptor_hole(
+                        replica,
+                        descriptor.values().to_vec(),
+                        hole_samples,
+                        rng.random(),
+                    )
+                    .expect("descriptor-hole access must preserve local execution")
+                {
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("remote proposal work must enter the cooperative ledger");
+                    if let Some(proposed) = pullback_lj_hole(
+                        &descriptor_space,
+                        &signature.atomic_numbers,
+                        policy_state.view(),
+                        &hole.increment,
+                        matches!(decision.action, PolicyAction::Leave),
+                    ) {
+                        current = proposed;
+                    }
+                }
+            }
+        }
+        println!(
+            "      catalog slice {slices} spent {} best {best:.6} stall {stall}",
+            ledger.spent()
+        );
+        let _ = io::stdout().flush();
+    }
+
+    let trace = cooperative.json_lines(&RunManifest {
+        campaign,
+        ensemble,
+        sharing: true,
+    });
+    if let Ok(path) = std::env::var("CATALOG_TRACE") {
+        let mut output = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("CATALOG_TRACE must be writable");
+        output
+            .write_all(trace.as_bytes())
+            .expect("catalog trace write must succeed");
+    } else {
+        eprint!("{trace}");
+    }
+    Outcome {
+        best,
+        best_state,
+        final_state: Some(current),
+        hops,
+        basins,
+        charged: ledger.spent(),
+        screened_out,
+        returned,
+        ..Outcome::default()
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
+fn required_catalog_env(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|_| panic!("{name} is required with CATALOG_RPC"))
+}
+
+#[cfg(feature = "bank-rpc")]
+fn lj_catalog_candidate(
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+    replica: u32,
+    event_sequence: u64,
+    seed: u64,
+    charged_work: usize,
+    coordinates: ArrayView1<f64>,
+) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
+    let (energy, gradient) = lj(coordinates);
+    let gradient_norm = gradient
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    if !energy.is_finite() || !gradient_norm.is_finite() || gradient_norm > 1e-5 {
+        return None;
+    }
+    let descriptor = descriptor_space.describe(coordinates, Some(species)).ok()?;
+    Some(anneal_core::catalog_rpc::CatalogCandidate {
+        producer_replica: replica,
+        coordinates: coordinates.to_vec(),
+        cell: None,
+        energy,
+        forces: gradient.iter().map(|value| -*value).collect(),
+        gradient_norm,
+        descriptor: descriptor.values().to_vec(),
+        descriptor_schema_version: descriptor.schema_version(),
+        quench_converged: true,
+        charged_work: u64::try_from(charged_work).ok()?,
+        event_sequence,
+        seed,
+    })
+}
+
+#[cfg(feature = "bank-rpc")]
+fn validate_sampled_lj(
+    candidate: &anneal_core::catalog_rpc::CatalogCandidate,
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+) -> Option<(f64, Array1<f64>)> {
+    if candidate.coordinates.len() != 3 * species.len()
+        || candidate.cell.is_some()
+        || !candidate.quench_converged
+        || minimum_pair_distance(&candidate.coordinates) < 0.5
+    {
+        return None;
+    }
+    let coordinates = Array1::from_vec(candidate.coordinates.clone());
+    let descriptor = descriptor_space
+        .describe(coordinates.view(), Some(species))
+        .ok()?
+        .values()
+        .to_vec();
+    if descriptor.len() != candidate.descriptor.len()
+        || descriptor
+            .iter()
+            .zip(&candidate.descriptor)
+            .any(|(left, right)| (left - right).abs() > 1e-10)
+    {
+        return None;
+    }
+    let (energy, gradient) = lj(coordinates.view());
+    let gradient_norm = gradient
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    let energy_tolerance = 1e-9 + 1e-10 * energy.abs().max(candidate.energy.abs());
+    if (energy - candidate.energy).abs() > energy_tolerance
+        || gradient_norm > 1e-5
+        || candidate.forces.len() != gradient.len()
+        || candidate
+            .forces
+            .iter()
+            .zip(gradient.iter())
+            .any(|(force, gradient)| (force + gradient).abs() > 1e-9)
+    {
+        return None;
+    }
+    Some((energy, coordinates))
+}
+
+#[cfg(feature = "bank-rpc")]
+fn pullback_lj_hole(
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+    coordinates: ArrayView1<f64>,
+    increment: &[f64],
+    leave: bool,
+) -> Option<Array1<f64>> {
+    use anneal_core::catalog_policy::proposal::pullback_increment;
+    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
+
+    let jacobian = descriptor_space
+        .jacobian_analytic(coordinates, Some(species))
+        .ok()?;
+    let desired = Array1::from_vec(increment.to_vec());
+    let constraints = PullbackConstraints {
+        frozen_coordinates: vec![false; coordinates.len()],
+        rigid_group_labels: Vec::new(),
+        remove_translation: true,
+    };
+    let result = pullback_increment(
+        jacobian.view(),
+        desired.view(),
+        Array1::ones(desired.len()).view(),
+        None,
+        &constraints,
+        PullbackConfig {
+            damping: 1e-3,
+            trust_radius: if leave { 0.60 } else { 0.35 },
+            length_scale: 1.0,
+        },
+    )
+    .ok()?;
+    let proposed = coordinates.to_owned() + result.step();
+    (minimum_pair_distance(proposed.as_slice()?) >= 0.5).then_some(proposed)
+}
+
+#[cfg(feature = "bank-rpc")]
+fn minimum_pair_distance(coordinates: &[f64]) -> f64 {
+    let mut minimum = f64::INFINITY;
+    for first in 0..coordinates.len() / 3 {
+        for second in first + 1..coordinates.len() / 3 {
+            let squared = (0..3)
+                .map(|axis| {
+                    let difference = coordinates[3 * first + axis] - coordinates[3 * second + axis];
+                    difference * difference
+                })
+                .sum::<f64>();
+            minimum = minimum.min(squared.sqrt());
+        }
+    }
+    minimum
+}
+
 /// One HQ chain against the Cap'n Proto bank: slice, offer, deposit, repeat.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_bank(
