@@ -51,6 +51,27 @@ struct DescriptorHoleReply {
   nearestCatalogDistance @2 :Float64;
 }
 
+struct PolicyStateRequest {
+  descriptor @0 :List(Float64);
+  energy @1 :Float64;
+}
+
+enum CatalogRelation {
+  empty @0;
+  incumbent @1;
+  sameBasin @2;
+  unrelatedNoAnchor @3;
+  unrelatedLowerAnchor @4;
+}
+
+struct PolicyStateReply {
+  totalVisits @0 :UInt64;
+  singletonBasins @1 :UInt64;
+  localBasinVisits @2 :UInt64;
+  globallySaturated @3 :Bool;
+  relation @4 :CatalogRelation;
+}
+
 struct CatalogRequest {
   protocolVersion @0 :UInt16;
   identity @1 :CatalogIdentity;
@@ -64,6 +85,7 @@ struct CatalogRequest {
     sample @7 :UInt64;
     descriptorHole @8 :DescriptorHoleRequest;
     ledgerEvent @9 :LedgerEvent;
+    policyState @10 :PolicyStateRequest;
   }
 }
 
@@ -99,5 +121,6 @@ struct AcceptedReply {
     none @3 :Void;
     candidate @4 :CandidateRecord;
     descriptorHole @5 :DescriptorHoleReply;
+    policyState @6 :PolicyStateReply;
   }
 }
