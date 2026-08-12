@@ -826,16 +826,28 @@ fn main() {
                     .ok()
                     .filter(|value| !value.is_empty())
             });
-        let mut out = if let Some(sock) = catalog_rpc {
+        let catalog_control = opts.contains(&"catalog");
+        let mut out = if catalog_rpc.is_some() || catalog_control {
             #[cfg(feature = "bank-rpc")]
             {
-                println!("  isolated descriptor catalog {sock}");
-                run_capnp_catalog(&cfg, &mut ledger, &mut relax, &mut grad, seed, &sock)
+                if let Some(endpoint) = catalog_rpc.as_deref() {
+                    println!("  isolated descriptor catalog {endpoint}");
+                } else {
+                    println!("  descriptor-catalog control with sharing disabled");
+                }
+                run_capnp_catalog(
+                    &cfg,
+                    &mut ledger,
+                    &mut relax,
+                    &mut grad,
+                    seed,
+                    catalog_rpc.as_deref(),
+                )
             }
             #[cfg(not(feature = "bank-rpc"))]
             {
-                let _ = sock;
-                panic!("CATALOG_RPC set; rebuild with --features bank-rpc");
+                let _ = catalog_rpc;
+                panic!("catalog mode requires --features bank-rpc");
             }
         } else if use_bank {
             {
@@ -1253,7 +1265,7 @@ fn run_capnp_catalog(
     relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
     grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
     seed: u64,
-    endpoint: &str,
+    endpoint: Option<&str>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::PolicyAction;
@@ -1271,28 +1283,30 @@ fn run_capnp_catalog(
     let replica = required_catalog_env("CATALOG_REPLICA")
         .parse::<u32>()
         .expect("CATALOG_REPLICA must be an unsigned integer");
-    let address = endpoint
-        .parse()
-        .expect("CATALOG_RPC must be a host:port socket address");
     let signature = system_signature(cfg.n_points).expect("LJ catalog signature must be valid");
     let descriptor_space = descriptor_space();
-    let identity = CatalogIdentity {
-        campaign: campaign.clone(),
-        ensemble: ensemble.clone(),
-        replica,
-        signature_digest: signature.digest(),
-    };
     let mut cooperative = CooperativeRun::new(
         [replica],
         u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
     )
     .expect("single-replica local ledger must be valid");
-    match CatalogClient::connect(address, identity, ClientConfig::default()) {
-        Ok(client) => cooperative
-            .attach_client(replica, client)
-            .expect("configured replica must accept its catalog client"),
-        Err(error) => {
-            eprintln!("catalog {endpoint} unavailable ({error}); local execution remains active")
+    if let Some(endpoint) = endpoint {
+        let address = endpoint
+            .parse()
+            .expect("CATALOG_RPC must be a host:port socket address");
+        let identity = CatalogIdentity {
+            campaign: campaign.clone(),
+            ensemble: ensemble.clone(),
+            replica,
+            signature_digest: signature.digest(),
+        };
+        match CatalogClient::connect(address, identity, ClientConfig::default()) {
+            Ok(client) => cooperative
+                .attach_client(replica, client)
+                .expect("configured replica must accept its catalog client"),
+            Err(error) => eprintln!(
+                "catalog {endpoint} unavailable ({error}); local execution remains active"
+            ),
         }
     }
 
@@ -1493,7 +1507,7 @@ fn run_capnp_catalog(
     let trace = cooperative.json_lines(&RunManifest {
         campaign,
         ensemble,
-        sharing: true,
+        sharing: endpoint.is_some(),
     });
     if let Ok(path) = std::env::var("CATALOG_TRACE") {
         let mut output = std::fs::OpenOptions::new()
