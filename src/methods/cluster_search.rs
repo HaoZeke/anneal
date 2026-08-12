@@ -349,6 +349,424 @@ where
     (out, stats)
 }
 
+/// [`search_from`] when `BANK_RPC` is unset; [`search_from_bank`] when it is.
+///
+/// One binary, two arms. The control is the same walk without the shared
+/// catalog. First-encounter charged evaluations are what says which is
+/// cheaper, not whether both finished.
+pub fn search_from_maybe_bank<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    match std::env::var("BANK_RPC") {
+        Ok(sock) if !sock.is_empty() => {
+            #[cfg(feature = "bank-rpc")]
+            {
+                println!("  capnp bank {sock}");
+                search_from_bank(objective, cfg, ledger, start, seed, &sock)
+            }
+            #[cfg(not(feature = "bank-rpc"))]
+            {
+                let _ = sock;
+                panic!("BANK_RPC set; rebuild with --features bank-rpc");
+            }
+        }
+        _ => search_from(objective, cfg, ledger, start, seed),
+    }
+}
+
+/// Mobile atom indices: the active region, or the complement of `frozen`.
+#[cfg(feature = "bank-rpc")]
+fn mobile_of(cfg: &Config) -> Option<Vec<usize>> {
+    if let Some((seeds, _)) = cfg.active_region.as_ref() {
+        return Some(seeds.clone());
+    }
+    cfg.frozen.as_ref().map(|f| {
+        f.iter()
+            .enumerate()
+            .filter(|(_, on)| !**on)
+            .map(|(i, _)| i)
+            .collect()
+    })
+}
+
+#[cfg(feature = "bank-rpc")]
+fn pack_merge() -> f64 {
+    #[cfg(feature = "featomic")]
+    {
+        crate::featomic_hop::SOAP_PACK_MERGE
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        0.10
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
+fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        let mobile = mobile_of(cfg);
+        crate::featomic_hop::soap_cloud_mean(
+            x,
+            3.5 * cfg.length_scale,
+            cfg.species.as_deref(),
+            mobile.as_deref(),
+        )
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (x, cfg);
+        Array1::zeros(0)
+    }
+}
+
+/// Good-Turing missing mass on shared packings. Saturated: enough
+/// observations and few singletons, so the next start should leave.
+#[cfg(feature = "bank-rpc")]
+pub fn catalog_saturated(wells: &[(Array1<f64>, f64)], w0: f64) -> bool {
+    let w0 = w0.max(1e-9);
+    let mut n = 0u32;
+    let mut n1 = 0u32;
+    for (_, h) in wells {
+        let v = (*h / w0).round().max(0.0) as u32;
+        if v == 0 {
+            continue;
+        }
+        n += v;
+        if v == 1 {
+            n1 += 1;
+        }
+    }
+    n >= 12 && (n1 as f64 / n as f64) < 0.20
+}
+
+#[cfg(feature = "bank-rpc")]
+fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> bool {
+    if wells.is_empty() {
+        return false;
+    }
+    let s = packing_of(x, cfg);
+    let merge = pack_merge();
+    wells.iter().any(|w| {
+        if w.len() != s.len() || s.is_empty() {
+            return false;
+        }
+        s.iter()
+            .zip(w.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt()
+            <= merge
+    })
+}
+
+/// Move the current packing mean into a hole of the shared SOAP cloud.
+#[cfg(feature = "bank-rpc")]
+fn leave_known_packing(
+    x: ArrayView1<f64>,
+    cfg: &Config,
+    wells: &[Array1<f64>],
+    ledger: &mut Ledger,
+    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    rng: &mut impl rand::Rng,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        let rcut = 3.5 * cfg.length_scale;
+        let mobile = mobile_of(cfg);
+        let mut y = crate::featomic_hop::step_into_hole(
+            x,
+            wells,
+            crate::featomic_hop::SOAP_PACK_MERGE,
+            rcut,
+            cfg.species.as_deref(),
+            mobile.as_deref(),
+            rng,
+        );
+        if ledger.remaining() < 8 {
+            return y;
+        }
+        let steps = cfg.relax_steps.min(ledger.remaining());
+        let (_e, q) = relax(ledger, y.view(), steps);
+        if !packing_is_known(q.view(), cfg, wells) {
+            return q;
+        }
+        crate::featomic_hop::step_into_hole(
+            q.view(),
+            wells,
+            crate::featomic_hop::SOAP_PACK_MERGE * 1.5,
+            rcut,
+            cfg.species.as_deref(),
+            mobile.as_deref(),
+            rng,
+        )
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (cfg, wells, ledger, relax, rng);
+        x.to_owned()
+    }
+}
+
+/// One HQ chain against the Cap'n Proto bank: own walk, pull a win or
+/// a new packing, leave when the shared catalog is saturated.
+///
+/// The start is the caller's geometry (a packed water cluster, a slab
+/// plus adsorbate), not a random LJ sphere.
+#[cfg(feature = "bank-rpc")]
+pub fn search_from_bank<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    sock: &str,
+) -> (Outcome, RelaxStats)
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    use crate::bank_rpc::BankClient;
+    use crate::bias::BasinBias;
+    use crate::diversity::DiversityAnnealer;
+    use crate::methods::cluster_hopping::{ClusterFingerprint, run_with_bias};
+    use rand::Rng;
+
+    let mut stats = RelaxStats::default();
+    let mut opt = WarmLbfgs::default();
+    let screen_iters = cfg.screen_steps;
+    let adaptive = cfg.adaptive_screen;
+    let probe = cfg.probe_screen;
+    let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iters: usize| {
+        opt.forget();
+        let before = led.spent();
+        let screening = iters <= screen_iters;
+        let mut pred = QuenchPredictor::new();
+        pred.warmup = cfg.quench_warmup;
+        pred.confidence = cfg.quench_confidence;
+        let mut early = false;
+        let mut probe_at: Option<(usize, f64)> = None;
+        let target = led.best;
+        let (f, xr, _) = opt.minimize_watched(
+            x,
+            iters,
+            |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(objective.value_and_gradient(v))
+            },
+            |_, fv| {
+                if screening && probe {
+                    pred.observe(fv);
+                    if probe_at.is_none() && pred.verdict(target) == Verdict::Hopeless {
+                        probe_at = pred.predict().map(|p| (pred.len(), p.limit));
+                    }
+                    return true;
+                }
+                if !(screening && adaptive) {
+                    return true;
+                }
+                pred.observe(fv);
+                if pred.verdict(target) != Verdict::Hopeless {
+                    return true;
+                }
+                early = true;
+                false
+            },
+        );
+        if let Some((at, claim)) = probe_at {
+            stats.probe_stops += 1;
+            stats.probe_steps += at;
+            stats.probe_error += (claim - f).abs();
+        }
+        let cost = led.spent() - before;
+        if screening {
+            stats.screen_charged += cost;
+            stats.screen_steps_taken += pred.len();
+            stats.screens += 1;
+        } else {
+            stats.full_charged += cost;
+        }
+        let f = if early {
+            pred.stopped_energy(target, f)
+        } else {
+            f
+        };
+        if early {
+            stats.capped += 1;
+            return (f, xr);
+        }
+        let converged = if led.charge() {
+            stats.check_charged += 1;
+            let g = objective.grad(xr.view());
+            g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
+        } else {
+            false
+        };
+        if converged {
+            stats.converged += 1;
+        } else {
+            stats.capped += 1;
+        }
+        (f, xr)
+    };
+    let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| -> Option<Array1<f64>> {
+        if !led.charge() {
+            return None;
+        }
+        Some(objective.grad(x))
+    };
+
+    let mut cfg = cfg.clone();
+    cfg.budget_window = true;
+    let cfg = &cfg;
+    let mut client = BankClient::connect(sock).unwrap_or_else(|e| panic!("BANK_RPC {sock}: {e}"));
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(cfg, &start.to_owned()),
+        cfg.merge_radius,
+        cfg.bias_height,
+        cfg.bias_gamma,
+    );
+    let slice = std::env::var("BANK_SLICE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(500);
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut best = f64::INFINITY;
+    let mut best_state: Option<Array1<f64>> = Some(start.to_owned());
+    let mut hops = 0usize;
+    let mut basins = 0usize;
+    let mut screened_out = 0usize;
+    let mut returned = 0usize;
+    let mut slices = 0usize;
+    let mut null_starts = 0usize;
+    let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
+    let total = ledger.remaining();
+    let mut schedule: Option<DiversityAnnealer> = None;
+    let expected = 3 * cfg.n_points;
+
+    while ledger.remaining() > 0 {
+        let snap = client.snapshot().ok();
+        if let Some(s) = snap.as_ref() {
+            for (soap, h) in &s.wells {
+                bias.import_well(soap.clone(), *h);
+            }
+            #[cfg(feature = "featomic")]
+            crate::featomic_hop::set_packing_archive(
+                s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
+            );
+            if s.size >= 2 {
+                let sched = schedule.get_or_insert_with(|| {
+                    DiversityAnnealer::from_initial(s.dcut.max(pack_merge())).with_final_fraction(0.4)
+                });
+                let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
+                let _ = client.set_dcut(sched.threshold(progress));
+            }
+        }
+        let well_pairs: Vec<(Array1<f64>, f64)> = snap
+            .as_ref()
+            .map(|s| s.wells.clone())
+            .unwrap_or_default();
+        let wells: Vec<Array1<f64>> = well_pairs.iter().map(|(w, _)| w.clone()).collect();
+        let mut start = best_state.clone().unwrap_or_else(|| start.to_owned());
+        let mine = packing_of(start.view(), cfg);
+        let merge = pack_merge();
+        for _ in 0..3 {
+            let Ok(Some((e, x))) = client.sample(rng.random()) else {
+                continue;
+            };
+            if x.len() != expected {
+                continue;
+            }
+            let theirs = packing_of(x.view(), cfg);
+            let same = !mine.is_empty()
+                && mine.len() == theirs.len()
+                && mine
+                    .iter()
+                    .zip(theirs.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    <= merge;
+            if e < best - 0.05 || !same {
+                if e < best {
+                    best = e;
+                    best_state = Some(x.clone());
+                    if improvements.len() < 512 {
+                        improvements.push((hops, ledger.spent(), bias.n_basins(), e));
+                    }
+                }
+                start = x;
+                break;
+            }
+        }
+        if catalog_saturated(&well_pairs, cfg.bias_height)
+            && packing_is_known(start.view(), cfg, &wells)
+        {
+            null_starts += 1;
+            start = leave_known_packing(start.view(), cfg, &wells, ledger, &mut relax, &mut rng);
+        }
+        let charged_before = ledger.spent();
+        let hops_before = hops;
+        let mut slice_led = Ledger::new(slice.min(ledger.remaining()));
+        let out = run_with_bias(
+            cfg,
+            start.view(),
+            &mut slice_led,
+            &mut relax,
+            Some(&mut grad),
+            &mut bias,
+            &mut rng,
+        );
+        ledger.charge_many(slice_led.spent());
+        if let Some(st) = slice_led.best_state.as_ref() {
+            ledger.record(slice_led.best, st.view());
+        }
+        hops += out.hops;
+        basins += out.basins;
+        screened_out += out.screened_out;
+        returned += out.returned;
+        slices += 1;
+        for (h, c, b, e) in out.improvements {
+            if improvements.len() >= 512 {
+                break;
+            }
+            improvements.push((h + hops_before, c + charged_before, b, e));
+        }
+        if out.best < best {
+            best = out.best;
+            best_state = out.best_state.clone();
+        }
+        if let Some(st) = out.best_state.as_ref() {
+            let soap = packing_of(st.view(), cfg);
+            let _ = client.offer(out.best, st.view(), soap.view());
+            let _ = client.deposit(soap.view(), cfg.bias_height);
+        }
+    }
+    println!(
+        "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
+    );
+    let out = Outcome {
+        best,
+        best_state,
+        hops,
+        basins,
+        screened_out,
+        returned,
+        charged: ledger.spent(),
+        improvements,
+        ..Outcome::default()
+    };
+    (out, stats)
+}
+
 /// Work spent before a run first reached `target`, or how much it spent
 /// without reaching it.
 ///
@@ -604,5 +1022,27 @@ mod tests {
         let mut ledger = Ledger::new(5_000);
         let (_, _) = search(&pot, &cfg, &mut ledger, 1);
         assert!(ledger.spent() <= 5_000, "spent {}", ledger.spent());
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn a_sparse_catalog_is_not_saturated() {
+        let wells = vec![
+            (Array1::from(vec![1.0]), 1.0),
+            (Array1::from(vec![0.0]), 1.0),
+        ];
+        assert!(!catalog_saturated(&wells, 1.0));
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn a_full_catalog_with_few_singletons_is_saturated() {
+        let mut wells = Vec::new();
+        for i in 0..10 {
+            wells.push((Array1::from(vec![i as f64]), 2.0));
+        }
+        wells.push((Array1::from(vec![99.0]), 1.0));
+        // 10*2 + 1 = 21 observations, one singleton: n1/N = 1/21 < 0.2
+        assert!(catalog_saturated(&wells, 1.0));
     }
 }
