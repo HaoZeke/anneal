@@ -13,7 +13,7 @@ use capnp::serialize;
 
 use super::{
     AcceptedReply, CatalogIdentity, CatalogOperation, CatalogReply, CatalogRequest,
-    CatalogSnapshot, PROTOCOL_VERSION, ProtocolRejection, decode_request_reader, encode_reply,
+    CatalogSnapshot, ProtocolRejection, decode_request_reader, encode_reply,
 };
 use crate::Catalog_capnp::catalog_request;
 
