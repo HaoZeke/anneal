@@ -103,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let n_points: usize = required(&args, 1, "N")?;
     let reference_path = Path::new(&args[2]);
     let reference_url = &args[3];
-    let reference_energy: f64 = required(&args, 4, "reference energy")?;
+    let published_reference_energy: f64 = required(&args, 4, "reference energy")?;
     let pair_count: usize = required(&args, 5, "pair count")?;
     let base_seed: u64 = required(&args, 6, "base seed")?;
     let perturbation_sigma: f64 = required(&args, 7, "perturbation sigma")?;
@@ -124,6 +124,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let descriptor = descriptor_space();
     let potential = PairPotential::lennard_jones(n_points);
+    let reference_quench = quench(&potential, reference.view(), reference.view())?;
+    if (reference_quench.energy - published_reference_energy).abs() > 5e-6 {
+        return Err(format!(
+            "published energy {published_reference_energy:.12} disagrees with the quenched reference {:.12}",
+            reference_quench.energy
+        )
+        .into());
+    }
     let minimum_id = format!("ccd-lj{n_points}-global-minimum");
     let pair_path = Path::new(&args[8]);
     let manifest_path = Path::new(&args[9]);
@@ -136,6 +144,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut pairs = BufWriter::new(fs::File::create(pair_path)?);
     let mut accepted = 0usize;
     let mut attempt = 0u64;
+    let mut quench_rejections = 0u64;
+    let mut identity_rejections = 0u64;
     let maximum_attempts = u64::try_from(pair_count)?.saturating_mul(100);
     while accepted < pair_count && attempt < maximum_attempts {
         let left_seed = base_seed
@@ -157,19 +167,28 @@ fn main() -> Result<(), Box<dyn Error>> {
             right_seed,
             perturbation_sigma,
         )?;
-        let left = quench(&potential, ArrayView1::from(&left_start), reference.view())?;
-        let right = quench(&potential, ArrayView1::from(&right_start), reference.view())?;
+        let (left, right) = match (
+            quench(&potential, ArrayView1::from(&left_start), reference.view()),
+            quench(&potential, ArrayView1::from(&right_start), reference.view()),
+        ) {
+            (Ok(left), Ok(right)) => (left, right),
+            _ => {
+                quench_rejections += 1;
+                continue;
+            }
+        };
         if !accepts_calibration_minimum(
-            reference_energy,
+            reference_quench.energy,
             left.energy,
             left.gradient_norm,
             left.ira_distance,
         ) || !accepts_calibration_minimum(
-            reference_energy,
+            reference_quench.energy,
             right.energy,
             right.gradient_norm,
             right.ira_distance,
         ) {
+            identity_rejections += 1;
             continue;
         }
         let left_descriptor =
@@ -228,16 +247,29 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{{\n  \"artifact_schema_version\": 1,\n  \"system\": \"lj{}\",",
             "\n  \"signature_digest\": \"{}\",\n  \"descriptor_schema\": {},",
             "\n  \"reference_source\": \"{}\",\n  \"reference_sha256\": \"{}\",",
-            "\n  \"reference_energy\": {:.17e},\n  \"pair_count\": {},",
-            "\n  \"base_seed\": {},\n  \"perturbation_sigma\": {:.17e}\n}}"
+            "\n  \"published_reference_energy\": {:.17e},",
+            "\n  \"calibration_reference_energy\": {:.17e},",
+            "\n  \"calibration_reference_gradient_norm\": {:.17e},",
+            "\n  \"calibration_reference_ira_distance\": {:.17e},",
+            "\n  \"calibration_reference_evaluations\": {},\n  \"pair_count\": {},",
+            "\n  \"attempt_count\": {},\n  \"quench_rejections\": {},",
+            "\n  \"identity_rejections\": {},\n  \"base_seed\": {},",
+            "\n  \"perturbation_sigma\": {:.17e}\n}}"
         ),
         n_points,
         signature_digest,
         schema_json,
         reference_url,
         reference_sha256,
-        reference_energy,
+        published_reference_energy,
+        reference_quench.energy,
+        reference_quench.gradient_norm,
+        reference_quench.ira_distance,
+        reference_quench.evaluations,
         pair_count,
+        attempt,
+        quench_rejections,
+        identity_rejections,
         base_seed,
         perturbation_sigma,
     )?;
