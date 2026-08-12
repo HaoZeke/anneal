@@ -105,6 +105,7 @@ impl QuenchBoundary {
     }
 }
 
+/// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     budget: usize,
     spent: usize,
