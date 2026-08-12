@@ -25,6 +25,66 @@ pub enum LjCatalogPresetError {
     /// Descriptor dimension must be positive.
     #[error("Lennard-Jones descriptor dimension must be positive")]
     DescriptorDimension,
+    /// A development reference does not contain exactly one finite XYZ row per site.
+    #[error("invalid Lennard-Jones reference coordinates")]
+    ReferenceCoordinates,
+}
+
+/// Maximum energy difference used by the development-only exact-minimum check.
+pub const CALIBRATION_ENERGY_TOLERANCE: f64 = 1e-7;
+
+/// Maximum gradient norm used by the development-only exact-minimum check.
+pub const CALIBRATION_GRADIENT_TOLERANCE: f64 = 1e-5;
+
+/// Maximum IRA Hausdorff distance used by the development-only identity check.
+pub const CALIBRATION_IRA_TOLERANCE: f64 = 1e-4;
+
+/// Parse the whitespace-separated three-column coordinate format used by the
+/// Cambridge Cluster Database Lennard-Jones reference files.
+pub fn parse_reference_coordinates(
+    text: &str,
+    n_points: usize,
+) -> Result<Vec<f64>, LjCatalogPresetError> {
+    if n_points < 2 {
+        return Err(LjCatalogPresetError::InvalidSiteCount);
+    }
+    let mut coordinates = Vec::with_capacity(3 * n_points);
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let values = line
+            .split_whitespace()
+            .map(str::parse::<f64>)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| LjCatalogPresetError::ReferenceCoordinates)?;
+        if values.len() != 3 || values.iter().any(|value| !value.is_finite()) {
+            return Err(LjCatalogPresetError::ReferenceCoordinates);
+        }
+        coordinates.extend(values);
+    }
+    if coordinates.len() != 3 * n_points {
+        return Err(LjCatalogPresetError::ReferenceCoordinates);
+    }
+    Ok(coordinates)
+}
+
+/// Whether a development quench has independent evidence for the declared
+/// Lennard-Jones minimum used to calibrate a descriptor census radius.
+pub fn accepts_calibration_minimum(
+    reference_energy: f64,
+    candidate_energy: f64,
+    gradient_norm: f64,
+    ira_distance: f64,
+) -> bool {
+    [
+        reference_energy,
+        candidate_energy,
+        gradient_norm,
+        ira_distance,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
+        && (candidate_energy - reference_energy).abs() <= CALIBRATION_ENERGY_TOLERANCE
+        && gradient_norm <= CALIBRATION_GRADIENT_TOLERANCE
+        && ira_distance <= CALIBRATION_IRA_TOLERANCE
 }
 
 /// Versioned multiscale SOAP/ACE space used by every LJ catalog size.
