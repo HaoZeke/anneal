@@ -76,6 +76,38 @@ pub enum ValidationFailure {
     /// Candidate and catalog signatures differ.
     #[error("candidate system signature does not match the catalog")]
     SignatureMismatch,
+    /// Cartesian coordinate length differs from the signature.
+    #[error("coordinate dimension is {actual}, expected {expected}")]
+    CoordinateDimension {
+        /// Dimension declared by the signature.
+        expected: u64,
+        /// Dimension carried by the candidate.
+        actual: u64,
+    },
+    /// Producer force length differs from the signature.
+    #[error("force dimension is {actual}, expected {expected}")]
+    ForceDimension {
+        /// Dimension declared by the signature.
+        expected: u64,
+        /// Dimension carried by the candidate.
+        actual: u64,
+    },
+    /// Descriptor length differs from the validator contract.
+    #[error("descriptor dimension is {actual}, expected {expected}")]
+    DescriptorDimension {
+        /// Dimension required by the validator.
+        expected: usize,
+        /// Dimension carried by the candidate.
+        actual: usize,
+    },
+    /// Candidate descriptor version differs from the signature.
+    #[error("descriptor schema version is {actual}, expected {expected}")]
+    DescriptorSchemaVersion {
+        /// Version declared by the signature.
+        expected: u32,
+        /// Version carried by the candidate.
+        actual: u32,
+    },
     /// The fresh potential evaluation failed.
     #[error("fresh engine evaluation failed: {0}")]
     EngineEvaluation(String),
@@ -115,9 +147,34 @@ impl CandidateValidator {
         if candidate.signature != self.expected {
             return Err(ValidationFailure::SignatureMismatch);
         }
+        let coordinate_dim = u64::try_from(candidate.coordinates.len()).unwrap_or(u64::MAX);
+        if coordinate_dim != self.expected.coordinate_dim {
+            return Err(ValidationFailure::CoordinateDimension {
+                expected: self.expected.coordinate_dim,
+                actual: coordinate_dim,
+            });
+        }
+        let force_dim = u64::try_from(candidate.forces.len()).unwrap_or(u64::MAX);
+        if force_dim != self.expected.coordinate_dim {
+            return Err(ValidationFailure::ForceDimension {
+                expected: self.expected.coordinate_dim,
+                actual: force_dim,
+            });
+        }
+        if candidate.descriptor.len() != self.config.descriptor_dim {
+            return Err(ValidationFailure::DescriptorDimension {
+                expected: self.config.descriptor_dim,
+                actual: candidate.descriptor.len(),
+            });
+        }
+        if candidate.descriptor_schema_version != self.expected.descriptor.version {
+            return Err(ValidationFailure::DescriptorSchemaVersion {
+                expected: self.expected.descriptor.version,
+                actual: candidate.descriptor_schema_version,
+            });
+        }
         let fresh =
             evaluate(&candidate.coordinates).map_err(ValidationFailure::EngineEvaluation)?;
-        let _ = &self.config;
         Ok(ValidatedCandidate {
             candidate: candidate.clone(),
             fresh,
