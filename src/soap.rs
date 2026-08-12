@@ -1631,7 +1631,7 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
     let n = (x.len() / 3).max(1);
     let nf = n as f64;
     let cur = (dr.iter().map(|v| v * v).sum::<f64>() / nf).sqrt();
-    let gated = n_axes < FIVEFOLD_MIN_AXES;
+    let gated = n < 5 || n_axes < FIVEFOLD_MIN_AXES;
     let mut used_pentagon = false;
     if !gated && cur < 1e-8 {
         dr = pentagon_break(x, axis);
