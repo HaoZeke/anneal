@@ -1,6 +1,6 @@
 use anneal_core::catalog::lj::{
-    accepts_calibration_minimum, descriptor_space, fresh_evaluation,
-    parse_reference_coordinates, perturb_reference, system_signature, validator_config,
+    accepts_calibration_minimum, descriptor_space, fresh_evaluation, parse_reference_coordinates,
+    perturb_reference, system_signature, validator_config,
 };
 use ndarray::ArrayView1;
 
@@ -45,11 +45,7 @@ fn invalid_lj_sizes_and_reference_dimensions_are_rejected() {
 
 #[test]
 fn development_reference_parser_requires_one_finite_xyz_row_per_site() {
-    let coordinates = parse_reference_coordinates(
-        "1.0 2.0 3.0\n-1.0 -2.0 -3.0\n",
-        2,
-    )
-    .unwrap();
+    let coordinates = parse_reference_coordinates("1.0 2.0 3.0\n-1.0 -2.0 -3.0\n", 2).unwrap();
     assert_eq!(coordinates, vec![1.0, 2.0, 3.0, -1.0, -2.0, -3.0]);
 
     assert!(parse_reference_coordinates("1 2 3 4\n0 0 0\n", 2).is_err());
@@ -93,9 +89,7 @@ fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
 
 #[test]
 fn calibration_perturbations_are_seeded_independent_and_centred() {
-    let reference = vec![
-        -1.0, 0.5, 0.25, 0.0, -0.5, 0.5, 1.0, 0.0, -0.75,
-    ];
+    let reference = vec![-1.0, 0.5, 0.25, 0.0, -0.5, 0.5, 1.0, 0.0, -0.75];
     let left = perturb_reference(&reference, 3, 17, 0.01).unwrap();
     let replay = perturb_reference(&reference, 3, 17, 0.01).unwrap();
     let right = perturb_reference(&reference, 3, 18, 0.01).unwrap();
