@@ -1,6 +1,6 @@
 //! Replay-safe aggregate accounting for charged cooperative search work.
 
-use std::collections::{BTreeMap, btree_map::Entry};
+use std::collections::{btree_map::Entry, BTreeMap};
 
 /// Boundary at which one replica records work.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
