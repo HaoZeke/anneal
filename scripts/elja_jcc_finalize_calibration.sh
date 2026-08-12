@@ -16,13 +16,13 @@ cd "$REPRO_ROOT"
   --config config/jcc/census_calibration.json
 
 for n in 75 98 102 104; do
-  "$PYTHON" -m json.tool "results/jcc/calibration/lj${n}.json" >/dev/null
+  "$PYTHON" -m json.tool "results_jcc/calibration/lj${n}.json" >/dev/null
 done
 sha256sum \
-  results/jcc/calibration/lj75.json \
-  results/jcc/calibration/lj98.json \
-  results/jcc/calibration/lj102.json \
-  results/jcc/calibration/lj104.json \
-  > results/jcc/calibration/SHA256SUMS
-touch results/jcc/calibration/TERMINAL_OK
+  results_jcc/calibration/lj75.json \
+  results_jcc/calibration/lj98.json \
+  results_jcc/calibration/lj102.json \
+  results_jcc/calibration/lj104.json \
+  > results_jcc/calibration/SHA256SUMS
+touch results_jcc/calibration/TERMINAL_OK
 echo "CALIBRATION_FINALIZE_OK job=${SLURM_JOB_ID}"
