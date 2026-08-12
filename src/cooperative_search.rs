@@ -15,6 +15,7 @@ mod run {
         CatalogCandidate, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
         PopulationEpochState, PopulationPlan, ProtocolRejection,
     };
+    use crate::methods::feynman_kac::population_family_position;
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
 
@@ -67,7 +68,7 @@ mod run {
     }
 
     /// One deterministic newline-delimited run event.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq)]
     pub struct TraceEvent {
         /// Replica identity within the isolated ensemble.
         pub replica: u32,
@@ -81,6 +82,23 @@ mod run {
         pub kind: TraceKind,
         /// Stable policy or rejection reason.
         pub reason: Option<&'static str>,
+        /// Genealogy evidence attached to a completed population epoch.
+        pub population: Option<PopulationTrace>,
+    }
+
+    /// Genealogy evidence for one destination at a completed epoch.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct PopulationTrace {
+        /// Immutable synchronization epoch.
+        pub epoch: u64,
+        /// Source replica assigned to this destination.
+        pub parent: u32,
+        /// Zero-based position among destinations sharing this parent.
+        pub family_ordinal: u32,
+        /// Realized number of offspring sharing this parent.
+        pub family_size: u32,
+        /// Kish effective sample size of source selection weights.
+        pub effective_sample_size: f64,
     }
 
     /// Required manifest identity emitted before run events.
@@ -643,14 +661,40 @@ mod run {
                     || "null".to_owned(),
                     |value| format!("\"{}\"", json_escape(value)),
                 );
+                let (population_epoch, population_parent, family_ordinal, family_size, ess) =
+                    event.population.map_or_else(
+                        || {
+                            (
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                            )
+                        },
+                        |population| {
+                            (
+                                population.epoch.to_string(),
+                                population.parent.to_string(),
+                                population.family_ordinal.to_string(),
+                                population.family_size.to_string(),
+                                population.effective_sample_size.to_string(),
+                            )
+                        },
+                    );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
                 event.aggregate_charged,
                 version,
-                reason
+                reason,
+                population_epoch,
+                population_parent,
+                family_ordinal,
+                family_size,
+                ess,
             ));
             }
             output
@@ -766,12 +810,51 @@ mod run {
                     reason: "parent candidate identity does not match genealogy",
                 });
             }
+            let Some(family) =
+                population_family_position(&plan.destinations, &plan.parents, replica)
+            else {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "destination family cannot be resolved",
+                });
+            };
+            if !plan.effective_sample_size.is_finite()
+                || plan.effective_sample_size < 1.0
+                || plan.effective_sample_size > population_size as f64
+            {
+                return Err(CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "effective sample size is outside population bounds",
+                });
+            }
+            let family_ordinal = u32::try_from(family.ordinal()).map_err(|_| {
+                CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "family ordinal exceeds protocol range",
+                }
+            })?;
+            let family_size = u32::try_from(family.family_size()).map_err(|_| {
+                CooperativeRunError::InvalidPopulationPlan {
+                    epoch,
+                    reason: "family size exceeds protocol range",
+                }
+            })?;
             self.push_event(
                 replica,
                 TraceKind::PopulationReady,
                 Some(catalog_version),
                 None,
             )?;
+            self.events
+                .last_mut()
+                .expect("population-ready push appends one trace event")
+                .population = Some(PopulationTrace {
+                epoch,
+                parent: family.parent(),
+                family_ordinal,
+                family_size,
+                effective_sample_size: plan.effective_sample_size,
+            });
             Ok(PopulationSynchronizationOutcome::Ready { parent, plan })
         }
 
@@ -800,6 +883,7 @@ mod run {
                 catalog_version,
                 kind,
                 reason,
+                population: None,
             });
             Ok(())
         }
