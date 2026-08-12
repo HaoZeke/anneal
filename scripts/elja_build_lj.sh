@@ -48,6 +48,7 @@ fi
 # Registry is on NFS from the login fetch. Compute may have no outbound net.
 cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
+  --example lj_census_calibration \
   --example catalog_server \
   --example bank_server
 ldd "$BIN"
