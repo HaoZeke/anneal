@@ -65,7 +65,13 @@ struct CatalogReply {
   snapshotVersion @2 :UInt64;
 
   result :union {
-    accepted @3 :Data;
+    accepted @3 :AcceptedReply;
     rejected @4 :RejectionKind;
   }
+}
+
+struct AcceptedReply {
+  duplicate @0 :Bool;
+  censusVisits @1 :UInt64;
+  activeEntries @2 :UInt32;
 }

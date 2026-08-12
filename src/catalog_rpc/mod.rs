@@ -5,7 +5,10 @@ use std::io::Cursor;
 use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
-use crate::Catalog_capnp::catalog_request;
+use crate::Catalog_capnp::{RejectionKind, catalog_reply, catalog_request};
+
+pub mod client;
+pub mod server;
 
 /// Wire protocol version accepted by this release.
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -84,6 +87,69 @@ pub struct CatalogRequest {
     pub snapshot_version: u64,
     /// Requested operation.
     pub operation: CatalogOperation,
+}
+
+/// Typed coordinator rejection returned on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolRejection {
+    /// Request bytes do not satisfy the schema.
+    Malformed,
+    /// Protocol version is unsupported.
+    UnsupportedVersion,
+    /// Campaign identity differs.
+    CampaignMismatch,
+    /// Ensemble identity differs.
+    EnsembleMismatch,
+    /// Replica is outside the configured ensemble.
+    ReplicaMismatch,
+    /// System signature differs.
+    SignatureMismatch,
+    /// Sequence was already used by different content.
+    SequenceReplay,
+    /// Sequence moves backward.
+    SequenceRegression,
+    /// Client snapshot version exceeds coordinator state.
+    SnapshotRegression,
+    /// Scientific validation rejected the record.
+    ValidationRejected,
+}
+
+/// Snapshot counters returned by every accepted request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogSnapshot {
+    /// Monotone coordinator snapshot version.
+    pub version: u64,
+    /// Exact fixed-census visit total.
+    pub census_visits: u64,
+    /// Number of finite active entries.
+    pub active_entries: u32,
+}
+
+/// Accepted coordinator response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AcceptedReply {
+    /// Request sequence being acknowledged.
+    pub event_sequence: u64,
+    /// Whether an identical request was replayed.
+    pub duplicate: bool,
+    /// Coordinator state after the request.
+    pub snapshot: CatalogSnapshot,
+}
+
+/// Decoded coordinator response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogReply {
+    /// Request was accepted or replayed idempotently.
+    Accepted(AcceptedReply),
+    /// Request was rejected without state mutation.
+    Rejected {
+        /// Request sequence being rejected.
+        event_sequence: u64,
+        /// Coordinator version at rejection.
+        snapshot_version: u64,
+        /// Stable rejection reason.
+        reason: ProtocolRejection,
+    },
 }
 
 /// Protocol validation or decoding failure.
@@ -217,6 +283,12 @@ pub fn decode_request(bytes: &[u8]) -> Result<CatalogRequest, ProtocolError> {
     let root = message
         .get_root::<catalog_request::Reader>()
         .map_err(wire_error)?;
+    decode_request_reader(root)
+}
+
+pub(crate) fn decode_request_reader(
+    root: catalog_request::Reader<'_>,
+) -> Result<CatalogRequest, ProtocolError> {
     let protocol_version = root.get_protocol_version();
     check_version(protocol_version)?;
     let identity_reader = root.get_identity().map_err(wire_error)?;
@@ -273,6 +345,95 @@ pub fn decode_request(bytes: &[u8]) -> Result<CatalogRequest, ProtocolError> {
         snapshot_version: root.get_snapshot_version(),
         operation,
     })
+}
+
+pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError> {
+    let mut message = Builder::new_default();
+    let mut root = message.init_root::<catalog_reply::Builder>();
+    root.set_protocol_version(PROTOCOL_VERSION);
+    match reply {
+        CatalogReply::Accepted(accepted) => {
+            root.set_event_sequence(accepted.event_sequence);
+            root.set_snapshot_version(accepted.snapshot.version);
+            let mut body = root.init_result().init_accepted();
+            body.set_duplicate(accepted.duplicate);
+            body.set_census_visits(accepted.snapshot.census_visits);
+            body.set_active_entries(accepted.snapshot.active_entries);
+        }
+        CatalogReply::Rejected {
+            event_sequence,
+            snapshot_version,
+            reason,
+        } => {
+            root.set_event_sequence(event_sequence);
+            root.set_snapshot_version(snapshot_version);
+            root.init_result().set_rejected(reason.into());
+        }
+    }
+    let mut bytes = Vec::new();
+    serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
+    Ok(bytes)
+}
+
+pub(crate) fn decode_reply_reader(
+    root: catalog_reply::Reader<'_>,
+) -> Result<CatalogReply, ProtocolError> {
+    check_version(root.get_protocol_version())?;
+    let event_sequence = root.get_event_sequence();
+    let snapshot_version = root.get_snapshot_version();
+    match root.get_result().which().map_err(wire_error)? {
+        catalog_reply::result::Accepted(body) => {
+            let body = body.map_err(wire_error)?;
+            Ok(CatalogReply::Accepted(AcceptedReply {
+                event_sequence,
+                duplicate: body.get_duplicate(),
+                snapshot: CatalogSnapshot {
+                    version: snapshot_version,
+                    census_visits: body.get_census_visits(),
+                    active_entries: body.get_active_entries(),
+                },
+            }))
+        }
+        catalog_reply::result::Rejected(reason) => Ok(CatalogReply::Rejected {
+            event_sequence,
+            snapshot_version,
+            reason: reason.map_err(wire_error)?.into(),
+        }),
+    }
+}
+
+impl From<ProtocolRejection> for RejectionKind {
+    fn from(value: ProtocolRejection) -> Self {
+        match value {
+            ProtocolRejection::Malformed => Self::Malformed,
+            ProtocolRejection::UnsupportedVersion => Self::UnsupportedVersion,
+            ProtocolRejection::CampaignMismatch => Self::CampaignMismatch,
+            ProtocolRejection::EnsembleMismatch => Self::EnsembleMismatch,
+            ProtocolRejection::ReplicaMismatch => Self::ReplicaMismatch,
+            ProtocolRejection::SignatureMismatch => Self::SignatureMismatch,
+            ProtocolRejection::SequenceReplay => Self::SequenceReplay,
+            ProtocolRejection::SequenceRegression => Self::SequenceRegression,
+            ProtocolRejection::SnapshotRegression => Self::SnapshotRegression,
+            ProtocolRejection::ValidationRejected => Self::ValidationRejected,
+        }
+    }
+}
+
+impl From<RejectionKind> for ProtocolRejection {
+    fn from(value: RejectionKind) -> Self {
+        match value {
+            RejectionKind::Malformed => Self::Malformed,
+            RejectionKind::UnsupportedVersion => Self::UnsupportedVersion,
+            RejectionKind::CampaignMismatch => Self::CampaignMismatch,
+            RejectionKind::EnsembleMismatch => Self::EnsembleMismatch,
+            RejectionKind::ReplicaMismatch => Self::ReplicaMismatch,
+            RejectionKind::SignatureMismatch => Self::SignatureMismatch,
+            RejectionKind::SequenceReplay => Self::SequenceReplay,
+            RejectionKind::SequenceRegression => Self::SequenceRegression,
+            RejectionKind::SnapshotRegression => Self::SnapshotRegression,
+            RejectionKind::ValidationRejected => Self::ValidationRejected,
+        }
+    }
 }
 
 fn check_version(received: u16) -> Result<(), ProtocolError> {
