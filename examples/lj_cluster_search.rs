@@ -825,7 +825,7 @@ fn main() {
                 #[cfg(feature = "ira")]
                 println!("  bank IRA: Hausdorff same-state, then SOAP Lee Dcut");
                 println!(
-                    "  bank explore: FunnelModel EI, well-UCB, archive-null SOAP hop, AS-KMC α=2 / MCAMC absorb at N_f"
+                    "  bank explore: FunnelModel EI, well-UCB, archive-null hop off raised SOAP classes, AS-KMC α=2"
                 );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed as u64, &sock)
             }
@@ -1120,6 +1120,32 @@ fn main() {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn leave_known_packing<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    cfg: &Config,
+    rng: &mut R,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        let rmsd = 0.35 * cfg.length_scale;
+        let rcut = 3.5 * cfg.length_scale;
+        return anneal_core::featomic_hop::step_away_featomic(
+            x,
+            rmsd,
+            rcut,
+            cfg.species.as_deref(),
+            None,
+            rng,
+        );
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (cfg, rng);
+        x.to_owned()
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -1172,7 +1198,7 @@ fn run_capnp_bank(
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut slices = 0usize;
-    let mut random_starts = 0usize;
+    let mut null_starts = 0usize;
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
     let well_cap = cfg.bias_height * cfg.height_revisits.max(1.0);
@@ -1208,10 +1234,12 @@ fn run_capnp_bank(
             Ok(Some((_, x))) if x.len() == 3 * cfg.n_points => {
                 let soap = packing_of(x.view(), cfg);
                 let h = client.bias_of(soap.view()).unwrap_or(0.0);
-                // Known packing already filled: do not start there again.
                 if h >= well_cap {
-                    random_starts += 1;
-                    random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng)
+                    // Occupied class: leave it in the SOAP null of the
+                    // shared archive. That is the multi-chain signal.
+                    // A random cluster throws the map away.
+                    null_starts += 1;
+                    leave_known_packing(x.view(), cfg, &mut rng)
                 } else {
                     x
                 }
@@ -1248,7 +1276,7 @@ fn run_capnp_bank(
         }
     }
     println!(
-        "      capnp bank: {slices} slices, {random_starts} novel SOAP starts, best {best:.6}"
+        "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
     );
     Outcome {
         best,
