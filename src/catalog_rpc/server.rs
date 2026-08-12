@@ -18,17 +18,20 @@ use rand::SeedableRng;
 use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
     CatalogRelation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
-    PolicyState, ProtocolError, ProtocolRejection, decode_request, decode_request_reader,
-    encode_reply, encode_request,
+    PolicyState, PopulationEpochState, PopulationPlan, ProtocolError, ProtocolRejection,
+    decode_request, decode_request_reader, encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    BasinCatalog, BasinCensus, CandidateRecord, CandidateValidator, FreshEvaluation, QuenchStatus,
-    SystemSignature, ValidatedCandidate, ValidatorConfig,
+    BasinCatalog, BasinCensus, BasinId, CandidateRecord, CandidateValidator, FreshEvaluation,
+    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::DescriptorSpace;
+use crate::methods::feynman_kac::{
+    EpochSubmissionOutcome, PopulationMember, SelectionCoefficients, SynchronousPopulation,
+};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 
@@ -201,6 +204,9 @@ struct ScientificState {
     validator: CandidateValidator,
     census: BasinCensus,
     catalog: BasinCatalog,
+    population: SynchronousPopulation,
+    population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
+    population_plans: BTreeMap<u64, PopulationPlan>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -239,6 +245,19 @@ impl CoordinatorState {
                         scientific.total_charged_work,
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    population: SynchronousPopulation::new(
+                        config.replicas.iter().copied(),
+                        SelectionCoefficients::default(),
+                        config.replicas.len().div_ceil(2),
+                        u64::from_le_bytes(
+                            config.signature_digest[..8]
+                                .try_into()
+                                .expect("signature prefix has eight bytes"),
+                        ),
+                    )
+                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    population_candidates: BTreeMap::new(),
+                    population_plans: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -260,7 +279,7 @@ impl CoordinatorState {
     }
 }
 
-const JOURNAL_FILE: &str = "catalog-requests-v4.bin";
+const JOURNAL_FILE: &str = "catalog-requests-v5.bin";
 const MAX_JOURNAL_FRAME: usize = 256 * 1024 * 1024;
 
 fn journal_path(config: &ServerConfig) -> Option<PathBuf> {
@@ -352,6 +371,9 @@ fn state_is_empty(state: &CoordinatorState) -> bool {
         && state.active_entries == 0
         && state.requests.is_empty()
         && state.maximum_sequence.is_empty()
+        && state.scientific.as_ref().is_none_or(|scientific| {
+            scientific.population_candidates.is_empty() && scientific.population_plans.is_empty()
+        })
         && state
             .ledger
             .as_ref()
@@ -637,12 +659,173 @@ fn apply_request(
                     .map_or(0, CooperativeLedger::aggregate_budget),
             });
         }
-        CatalogOperation::PopulationSubmit { .. } | CatalogOperation::PopulationPlan { .. } => {
-            return rejected(
-                &state,
-                request.event_sequence,
-                ProtocolRejection::ValidationRejected,
+        CatalogOperation::PopulationSubmit { epoch, candidate } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Ok(validated) = validate_candidate(scientific, &request.identity, candidate) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Ok(Some(basin_id)) = scientific.census.basin_for(&validated.candidate.descriptor)
+            else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let basin_visits = scientific
+                .census
+                .entry(basin_id)
+                .expect("classified census basin exists")
+                .visits();
+            let novelty = nearest_other_census_distance(
+                &scientific.census,
+                basin_id,
+                &validated.candidate.descriptor,
             );
+            let canonical = candidate_from_validated(&validated);
+            let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
+            let inserted = match epoch_candidates.get(&request.identity.replica) {
+                Some(stored) if stored == &canonical => false,
+                Some(_) => {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
+                None => {
+                    epoch_candidates.insert(request.identity.replica, canonical);
+                    true
+                }
+            };
+            let Ok(member) = PopulationMember::new(
+                request.identity.replica,
+                validated.fresh.energy,
+                novelty,
+                basin_visits as f64,
+            ) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Ok(outcome) = scientific.population.submit(*epoch, member) else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let required = u32::try_from(config.replicas.len())
+                .expect("replica count is bounded by the protocol");
+            payload = match outcome {
+                EpochSubmissionOutcome::Pending { submitted, .. } => {
+                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch: *epoch,
+                        submitted: u32::try_from(submitted)
+                            .expect("submission count is bounded by replica count"),
+                        required,
+                        plan: None,
+                    })
+                }
+                EpochSubmissionOutcome::Ready(plan) => {
+                    let source_candidates = scientific
+                        .population_candidates
+                        .get(epoch)
+                        .expect("complete epoch retains every source candidate");
+                    let parent_candidates = plan
+                        .parents()
+                        .iter()
+                        .map(|parent| {
+                            source_candidates
+                                .get(parent)
+                                .expect("parent replica submitted a validated candidate")
+                                .clone()
+                        })
+                        .collect::<Vec<_>>();
+                    let diagnostics = plan.diagnostics();
+                    let wire_plan = PopulationPlan {
+                        epoch: plan.epoch(),
+                        destinations: plan.destinations().to_vec(),
+                        parents: plan.parents().to_vec(),
+                        weights: plan.weights().to_vec(),
+                        effective_sample_size: diagnostics.effective_sample_size,
+                        unique_parents: u32::try_from(diagnostics.unique_parents)
+                            .expect("unique parents are bounded by replica count"),
+                        max_family_size: u32::try_from(diagnostics.max_family_size)
+                            .expect("family size is bounded by replica count"),
+                        offspring_variance: diagnostics.offspring_variance,
+                        parent_candidates,
+                    };
+                    scientific
+                        .population_plans
+                        .insert(*epoch, wire_plan.clone());
+                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch: *epoch,
+                        submitted: required,
+                        required,
+                        plan: Some(wire_plan),
+                    })
+                }
+            };
+            if inserted {
+                let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                    return rejected(
+                        &state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                state.snapshot_version = snapshot_version;
+            }
+        }
+        CatalogOperation::PopulationPlan { epoch } => {
+            let Some(scientific) = state.scientific.as_ref() else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let required = u32::try_from(config.replicas.len())
+                .expect("replica count is bounded by the protocol");
+            if let Some(plan) = scientific.population_plans.get(epoch) {
+                payload = AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: required,
+                    required,
+                    plan: Some(plan.clone()),
+                });
+            } else if *epoch == scientific.population.open_epoch() {
+                let submitted = scientific
+                    .population_candidates
+                    .get(epoch)
+                    .map_or(0, BTreeMap::len);
+                payload = AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: u32::try_from(submitted)
+                        .expect("submission count is bounded by replica count"),
+                    required,
+                    plan: None,
+                });
+            } else {
+                return rejected(
+                    &state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
         }
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
@@ -880,6 +1063,28 @@ fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate 
         event_sequence: validated.candidate.event_sequence,
         seed: validated.candidate.seed,
     }
+}
+
+fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descriptor: &[f64]) -> f64 {
+    census
+        .entries()
+        .iter()
+        .filter(|entry| entry.id() != local)
+        .map(|entry| {
+            descriptor
+                .iter()
+                .zip(entry.medoid())
+                .map(|(left, right)| {
+                    let delta = left - right;
+                    delta * delta
+                })
+                .sum::<f64>()
+                .sqrt()
+        })
+        .fold(None, |nearest, distance| {
+            Some(nearest.map_or(distance, |current: f64| current.min(distance)))
+        })
+        .unwrap_or(0.0)
 }
 
 fn identity_rejection(
