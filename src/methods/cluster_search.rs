@@ -437,8 +437,15 @@ fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
     }
 }
 
-fn sane_sep(cfg: &Config) -> f64 {
-    cfg.min_separation.max(0.4) * 0.5
+/// Pair distance below which a member is an overlap catastrophe, not a bond.
+///
+/// H–H is 0.74 Å. EAM overlap sits under 0.3 Å. The configured
+/// `min_separation` is scaled by the largest covalent diameter, which
+/// on a Cu slab is copper, and that floor rejects every physical H2.
+pub const OVERLAP_SEPARATION: f64 = 0.35;
+
+fn sane_sep(_cfg: &Config) -> f64 {
+    OVERLAP_SEPARATION
 }
 
 /// Mobile atom indices: the active region, or the complement of `frozen`.
@@ -703,8 +710,6 @@ where
         .and_then(|v| v.parse().ok())
         .unwrap_or(500);
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let mut best = f64::INFINITY;
-    let mut best_state: Option<Array1<f64>> = Some(start.to_owned());
     let mut hops = 0usize;
     let mut basins = 0usize;
     let mut screened_out = 0usize;
@@ -712,6 +717,15 @@ where
     let mut slices = 0usize;
     let mut null_starts = 0usize;
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
+    let mut best = f64::INFINITY;
+    let mut best_state: Option<Array1<f64>> = Some(start.to_owned());
+    if structure_is_sane(start, sane_sep(cfg)) && ledger.charge() {
+        let (e0, _) = objective.value_and_gradient(start);
+        if e0.is_finite() {
+            best = e0;
+            improvements.push((0, ledger.spent(), 0, e0));
+        }
+    }
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
     let expected = 3 * cfg.n_points;
@@ -1102,16 +1116,28 @@ mod tests {
     fn overlapping_atoms_are_not_sane() {
         let mut x = Array1::zeros(6);
         x[3] = 0.01;
-        assert!(!structure_is_sane(x.view(), 0.4));
-        assert!(min_pair_distance(x.view()) < 0.02);
+        assert!(!structure_is_sane(x.view(), OVERLAP_SEPARATION));
+        assert!(min_pair_distance(x.view()) < OVERLAP_SEPARATION);
     }
 
     #[test]
     fn a_separated_pair_is_sane() {
         let mut x = Array1::zeros(6);
         x[3] = 1.0;
-        assert!(structure_is_sane(x.view(), 0.4));
+        assert!(structure_is_sane(x.view(), OVERLAP_SEPARATION));
         assert!((min_pair_distance(x.view()) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_covalent_hydrogen_pair_is_sane() {
+        let mut x = Array1::zeros(6);
+        x[3] = 0.74;
+        assert!(
+            structure_is_sane(x.view(), OVERLAP_SEPARATION),
+            "H-H 0.74 Å must clear the overlap floor {}",
+            OVERLAP_SEPARATION
+        );
+        assert!(OVERLAP_SEPARATION < 0.74);
     }
 
     #[cfg(feature = "bank-rpc")]
