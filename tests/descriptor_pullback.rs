@@ -33,6 +33,21 @@ fn nonlinear_descriptor_space() -> DescriptorSpace {
     )
 }
 
+fn derivative_descriptor_space() -> DescriptorSpace {
+    DescriptorSpace::new(
+        DescriptorSchema::new(
+            "pullback-multiscale",
+            1,
+            vec![
+                DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.5).unwrap(),
+                DescriptorBlockSpec::new(DescriptorBlockKind::SoapVariance, 2, 2, 3.5).unwrap(),
+                DescriptorBlockSpec::new(DescriptorBlockKind::AceNu3Mean, 2, 2, 3.5).unwrap(),
+            ],
+        )
+        .unwrap(),
+    )
+}
+
 #[test]
 fn diagonal_problem_matches_the_weighted_tikhonov_solution() {
     let jacobian = array![[2.0, 0.0], [0.0, 1.0]];
@@ -309,5 +324,98 @@ fn descriptor_pullback_contracts_the_actual_nonlinear_residual() {
     assert!(
         final_residual < initial_residual,
         "nonlinear residual did not contract: {initial_residual} -> {final_residual}"
+    );
+}
+
+#[test]
+fn analytic_multiscale_jacobian_matches_central_differences() {
+    let descriptor_space = derivative_descriptor_space();
+    let coordinates = array![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5
+    ];
+    let species = [6, 8, 6, 8];
+    let analytic = descriptor_space
+        .jacobian_analytic(coordinates.view(), Some(&species))
+        .unwrap();
+    let finite_difference = descriptor_space
+        .jacobian_fd(coordinates.view(), Some(&species), 1e-6)
+        .unwrap();
+    let maximum_reference = finite_difference
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let maximum_error = analytic
+        .iter()
+        .zip(finite_difference.iter())
+        .map(|(analytic, finite_difference)| (analytic - finite_difference).abs())
+        .fold(0.0_f64, f64::max);
+
+    assert_eq!(analytic.dim(), finite_difference.dim());
+    assert!(
+        maximum_error < 2e-4 * maximum_reference.max(1e-6) + 2e-6,
+        "analytic descriptor Jacobian disagrees with central differences: {maximum_error}"
+    );
+}
+
+#[test]
+fn analytic_pullback_contracts_with_frozen_coordinates() {
+    let descriptor_space = nonlinear_descriptor_space();
+    let coordinates = array![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5
+    ];
+    let mut target_coordinates = coordinates.clone();
+    target_coordinates[4] += 1e-3;
+    target_coordinates[8] -= 2e-3;
+    let current = descriptor_space.describe(coordinates.view(), None).unwrap();
+    let target = descriptor_space
+        .describe(target_coordinates.view(), None)
+        .unwrap();
+    let desired = Array1::from_iter(
+        target
+            .values()
+            .iter()
+            .zip(current.values())
+            .map(|(target, current)| target - current),
+    );
+    let jacobian = descriptor_space
+        .jacobian_analytic(coordinates.view(), None)
+        .unwrap();
+    let constraints = PullbackConstraints {
+        frozen_coordinates: vec![
+            true, true, true, false, false, false, false, false, false, false, false, false,
+        ],
+        rigid_group_labels: Vec::new(),
+        remove_translation: false,
+    };
+    let result = regularized_pullback(
+        jacobian.view(),
+        desired.view(),
+        Array1::ones(desired.len()).view(),
+        None,
+        &constraints,
+        config(1e-5, 0.01),
+    )
+    .unwrap();
+    assert_eq!(&result.step().as_slice().unwrap()[..3], &[0.0, 0.0, 0.0]);
+    let moved_coordinates = &coordinates + result.step();
+    let moved = descriptor_space
+        .describe(moved_coordinates.view(), None)
+        .unwrap();
+    let initial_residual = desired
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    let final_residual = moved
+        .values()
+        .iter()
+        .zip(target.values())
+        .map(|(moved, target)| (moved - target).powi(2))
+        .sum::<f64>()
+        .sqrt();
+
+    assert!(
+        final_residual < initial_residual,
+        "frozen nonlinear residual did not contract: {initial_residual} -> {final_residual}"
     );
 }
