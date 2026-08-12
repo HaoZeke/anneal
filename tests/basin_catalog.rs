@@ -1,8 +1,9 @@
 use anneal_core::catalog::{
-    AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinId, CandidateRecord,
+    AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCensus, BasinId, CandidateRecord,
     DescriptorSignature, EngineSignature, FreshEvaluation, QuenchStatus, SystemSignature,
     ValidatedCandidate,
 };
+use proptest::prelude::*;
 use std::collections::BTreeMap;
 
 fn signature() -> SystemSignature {
@@ -188,6 +189,55 @@ fn packing_threshold_is_initialized_safely_and_never_increases() {
             if left.census_id() < right.census_id() {
                 let distance = (left.descriptor()[0] - right.descriptor()[0]).abs();
                 assert!(distance >= catalog.packing_threshold().unwrap());
+            }
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn arbitrary_admissions_preserve_catalog_and_census_invariants(
+        observations in prop::collection::vec((0u8..32, -100i16..100), 1..256)
+    ) {
+        let mut census = BasinCensus::new(1, 0.2).unwrap();
+        let mut catalog = BasinCatalog::new(4, 0.2, 256).unwrap();
+        let mut incumbent_energy = f64::INFINITY;
+        let mut packing_threshold = f64::INFINITY;
+
+        for (index, &(descriptor, energy)) in observations.iter().enumerate() {
+            let descriptor = f64::from(descriptor);
+            let observed = census.observe(&[descriptor]).unwrap();
+            catalog.admit(
+                observed.basin_id,
+                observed.basin_visits,
+                candidate(descriptor, f64::from(energy), index as u32, index as u64 + 1),
+            );
+            catalog.update_threshold(index as u64 + 1);
+
+            prop_assert_eq!(census.total_visits(), index as u64 + 1);
+            prop_assert_eq!(
+                census.entries().iter().map(|entry| entry.visits()).sum::<u64>(),
+                census.total_visits()
+            );
+            prop_assert!(catalog.len() <= catalog.capacity());
+            for entry in catalog.entries() {
+                prop_assert!(census.entry(entry.census_id()).is_some());
+            }
+            for left in catalog.entries() {
+                for right in catalog.entries() {
+                    if left.census_id() < right.census_id() {
+                        let distance = (left.descriptor()[0] - right.descriptor()[0]).abs();
+                        let threshold = catalog.packing_threshold().unwrap_or(0.2);
+                        prop_assert!(distance >= threshold);
+                    }
+                }
+            }
+            let current_incumbent = catalog.incumbent().unwrap().energy();
+            prop_assert!(current_incumbent <= incumbent_energy);
+            incumbent_energy = current_incumbent;
+            if let Some(current_threshold) = catalog.packing_threshold() {
+                prop_assert!(current_threshold <= packing_threshold);
+                packing_threshold = current_threshold;
             }
         }
     }
