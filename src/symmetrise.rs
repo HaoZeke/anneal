@@ -606,9 +606,6 @@ mod tests {
         assert!(d > 0.1, "a five-fold axis gave {d}, which is too small");
     }
 
-    /// Detection has to find the axis the structure actually has, which is the
-    /// difference between this and symmetrising about a random direction.
-    #[test]
     /// The groups the hard structures actually have, which proper rotations alone
     /// cannot express. Tetrahedral order is 24 and octahedral is 48; the
     /// rotation subgroups are 12 and 24, so a generator set closed under proper

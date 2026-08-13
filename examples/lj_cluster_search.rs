@@ -10,8 +10,8 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::methods::cluster_hopping::{
-    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, QuenchStatus,
-    optimize_with_gradient, random_cluster, run_with_bias,
+    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster,
+    run_with_bias,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -19,7 +19,7 @@ use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
 
-#[cfg(feature = "ira")]
+#[cfg(all(feature = "ira", not(feature = "featomic")))]
 use anneal_core::shape::IraMetric;
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
@@ -1033,8 +1033,8 @@ fn main() {
                     "seed {seed} returned {} coordinates for {n} points",
                     x.len()
                 );
-                let (mut e, g) = lj(x.view());
-                let mut gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
+                let (e, g) = lj(x.view());
+                let gmax = g.iter().fold(0.0_f64, |a, v| a.max(v.abs()));
                 // A hop quench can stop short of a minimum and still be
                 // recorded when the driver did not pass a gradient to the
                 // recordable guard. Finish the relaxation off the ledger

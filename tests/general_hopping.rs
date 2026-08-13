@@ -46,13 +46,11 @@ fn gradient_quench(
     rate: f64,
     value_gradient: fn(ArrayView1<f64>) -> (f64, Array1<f64>),
 ) -> FPair<f64> {
-    let mut value = f64::INFINITY;
     for _ in 0..steps {
-        let (next_value, gradient) = value_gradient(position.view());
-        value = next_value;
+        let (_, gradient) = value_gradient(position.view());
         position.scaled_add(-rate, &gradient);
     }
-    value = value_gradient(position.view()).0;
+    let value = value_gradient(position.view()).0;
     FPair {
         pos: position,
         val: value,

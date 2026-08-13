@@ -443,31 +443,6 @@ mod tests {
         ])
     }
 
-    fn ico12(scale: f64) -> Array1<f64> {
-        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-        let verts: [[f64; 3]; 12] = [
-            [0.0, 1.0, phi],
-            [0.0, 1.0, -phi],
-            [0.0, -1.0, phi],
-            [0.0, -1.0, -phi],
-            [1.0, phi, 0.0],
-            [1.0, -phi, 0.0],
-            [-1.0, phi, 0.0],
-            [-1.0, -phi, 0.0],
-            [phi, 0.0, 1.0],
-            [-phi, 0.0, 1.0],
-            [phi, 0.0, -1.0],
-            [-phi, 0.0, -1.0],
-        ];
-        let mut x = Array1::<f64>::zeros(36);
-        for (i, v) in verts.iter().enumerate() {
-            for k in 0..3 {
-                x[3 * i + k] = scale * v[k];
-            }
-        }
-        x
-    }
-
     fn relabel(x: ArrayView1<f64>, shift: usize) -> Array1<f64> {
         let n = x.len() / 3;
         let mut y = Array1::<f64>::zeros(x.len());
