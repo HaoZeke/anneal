@@ -73,15 +73,16 @@ build_examples() {
   export PATH="${HOME}/.cargo/bin:${PATH}"
   cd "$ROOT"
   cargo build --offline --release --features rgpot-ex,featomic,bank-rpc \
-    --example molecular_cluster --example slab_adsorption
-  local mol slab
+    --example molecular_cluster --example slab_adsorption --example bank_server
+  local mol slab bank
   mol=$ROOT/target/release/examples/molecular_cluster
   slab=$ROOT/target/release/examples/slab_adsorption
-  [[ -x $mol && -x $slab ]] || {
+  bank=$ROOT/target/release/examples/bank_server
+  [[ -x $mol && -x $slab && -x $bank ]] || {
     echo "examples missing" >&2
     exit 1
   }
-  echo "EXAMPLES_OK $mol $slab"
+  echo "EXAMPLES_OK $mol $slab $bank"
 }
 
 smoke() {
