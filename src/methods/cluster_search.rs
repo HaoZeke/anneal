@@ -519,7 +519,7 @@ fn validate_bank_sample<O>(
     objective: &O,
     cfg: &Config,
     ledger: &mut Ledger,
-    stats: &mut RelaxStats,
+    charged_validations: &mut usize,
     reported_energy: f64,
     state: ArrayView1<f64>,
 ) -> Option<f64>
@@ -532,7 +532,7 @@ where
     if !ledger.charge() {
         return None;
     }
-    stats.check_charged += 1;
+    *charged_validations += 1;
     let (fresh_energy, gradient) = objective.value_and_gradient(state);
     if !fresh_energy.is_finite()
         || gradient.len() != state.len()
@@ -629,6 +629,7 @@ where
     use rand::Rng;
 
     let mut stats = RelaxStats::default();
+    let mut bank_validation_charged = 0usize;
     let mut opt = WarmLbfgs::default();
     let screen_iters = cfg.screen_steps;
     let adaptive = cfg.adaptive_screen;
@@ -848,7 +849,7 @@ where
                                     objective,
                                     cfg,
                                     ledger,
-                                    &mut stats,
+                                    &mut bank_validation_charged,
                                     reported_energy,
                                     x.view(),
                                 )
@@ -941,6 +942,7 @@ where
     println!(
         "      capnp bank: {slices} slices, {null_starts} archive-null starts, best {best:.6}"
     );
+    stats.check_charged += bank_validation_charged;
     let out = Outcome {
         best,
         best_state,
@@ -1097,32 +1099,32 @@ mod tests {
         let radius = 2.0_f64.powf(1.0 / 6.0) / 2.0;
         let minimum = Array1::from_vec(vec![-radius, 0.0, 0.0, radius, 0.0, 0.0]);
         let mut ledger = Ledger::new(3);
-        let mut stats = RelaxStats::default();
+        let mut charged_validations = 0usize;
 
         let accepted = validate_bank_sample(
             &potential,
             &config,
             &mut ledger,
-            &mut stats,
+            &mut charged_validations,
             -1.0,
             minimum.view(),
         );
 
         assert!((accepted.expect("validated minimum was rejected") + 1.0).abs() < 1e-12);
         assert_eq!(ledger.spent(), 1);
-        assert_eq!(stats.check_charged, 1);
+        assert_eq!(charged_validations, 1);
 
         let rejected = validate_bank_sample(
             &potential,
             &config,
             &mut ledger,
-            &mut stats,
+            &mut charged_validations,
             -0.5,
             minimum.view(),
         );
         assert!(rejected.is_none(), "a peer energy mismatch was adopted");
         assert_eq!(ledger.spent(), 2);
-        assert_eq!(stats.check_charged, 2);
+        assert_eq!(charged_validations, 2);
 
         let separated = 1.2_f64;
         let displaced =
@@ -1133,25 +1135,25 @@ mod tests {
             &potential,
             &config,
             &mut ledger,
-            &mut stats,
+            &mut charged_validations,
             displaced_energy,
             displaced.view(),
         );
         assert!(unquenched.is_none(), "a nonminimum bank sample was adopted");
         assert_eq!(ledger.spent(), 3);
-        assert_eq!(stats.check_charged, 3);
+        assert_eq!(charged_validations, 3);
 
         let unaffordable = validate_bank_sample(
             &potential,
             &config,
             &mut ledger,
-            &mut stats,
+            &mut charged_validations,
             -1.0,
             minimum.view(),
         );
         assert!(unaffordable.is_none());
         assert_eq!(ledger.spent(), 3);
-        assert_eq!(stats.check_charged, 3);
+        assert_eq!(charged_validations, 3);
     }
 
     #[test]
