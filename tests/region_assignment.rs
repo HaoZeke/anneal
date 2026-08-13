@@ -50,6 +50,20 @@ fn distinct_regions_receive_coverage_before_duplicate_families() {
 }
 
 #[test]
+fn equivalent_region_candidates_use_unused_families_before_cloning() {
+    let candidates = vec![
+        candidate(0, 7, 1.0),
+        candidate(1, 7, 1.0),
+        candidate(2, 7, 1.0),
+        candidate(3, 7, 1.0),
+    ];
+
+    let assigned = diversity_constrained_assignment(&candidates, 4, 2).unwrap();
+
+    assert_eq!(assigned, vec![0, 1, 2, 3]);
+}
+
+#[test]
 fn utility_combines_frontier_uncertainty_occupancy_compatibility_and_cost() {
     let preferred = RegionUtility {
         transition_uncertainty: 0.8,
