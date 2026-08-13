@@ -529,7 +529,7 @@ fn main() {
         cfg.soap_class_residual = false;
         println!("  SOAP residual: mean (2p-mu)");
     }
-    if cfg.soap_hop {
+    if cfg.soap_mode != anneal_core::methods::cluster_hopping::SoapProposalMode::Off {
         #[cfg(feature = "featomic")]
         println!(
             "  SOAP hop: SOFI C5 residual while fivefold, else featomic packing-mean kick / leftover, l>=5, no 421/fcc"

@@ -19,9 +19,10 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian. Molecular steps are retracted by the nearest rigid motion
-//! of each observed group, so the pullback cannot spend a quench repairing
-//! covalent geometry. The hop fingerprint is SOAP at `l_max = 6` plus the ACE
+//! Jacobian. Molecular steps are ambient Cartesian proposals by default, so
+//! the physical relaxation decides whether internal deformation survives.
+//! A rigid-group retraction is available as a diagnostic mode. The hop
+//! fingerprint is SOAP at `l_max = 6` plus the ACE
 //! ν=3 / λ-SOAP CG contraction of the same spherical expansion.
 //! Ih is silent in the power spectrum until `l = 6`. Surface
 //! coordination is SOFI/IRA (a length), not this map. The 555→421 /
@@ -1716,8 +1717,9 @@ pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -
 /// On a packing cluster the hop is the SOFI fivefold residual: it
 /// fires only while the fivefold length is small and the step
 /// increases that length. Molecules and slabs keep the ACE leftover.
-/// Declared molecular groups retract the ambient pullback onto their
-/// product rigid-body manifold by the nearest Kabsch motions.
+/// Supplying molecular groups retracts the ambient pullback onto their product
+/// rigid-body manifold by the nearest Kabsch motions. Production flexible mode
+/// supplies no groups; rigid diagnostic mode supplies the declared groups.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,

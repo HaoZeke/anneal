@@ -3,7 +3,9 @@
 //! Cluster control is the Elja paper-budget table, not this file.
 //! This drives molecule and slab through `run_with_gradient`.
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, run_with_gradient};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, SoapProposalMode, run_with_gradient,
+};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -169,7 +171,7 @@ fn soap_rmsd(cfg: &Config) -> f64 {
 
 fn rec_off(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
     let mut cfg = Config::recommended_molecular(species, groups, 1.0);
-    cfg.soap_hop = false;
+    cfg.soap_mode = SoapProposalMode::Off;
     cfg
 }
 
@@ -205,7 +207,7 @@ fn soap_on_vs_off_water4_eight_seeds() {
         soap_draws += a.soap_draws;
         hops_on += a.hops;
         hops_off += b.hops;
-        assert_eq!(b.soap_draws, 0, "soap_hop=false still drew SOAP");
+        assert_eq!(b.soap_draws, 0, "SOAP off still drew SOAP");
         assert!(a.best.is_finite() && b.best.is_finite());
         let d = a.best - b.best;
         if d < -1e-6 {
@@ -300,7 +302,11 @@ fn ico_cluster(n: usize, seed: u64) -> Array1<f64> {
 
 fn rec_cluster(n: usize, soap: bool) -> Config {
     let mut cfg = Config::recommended(n);
-    cfg.soap_hop = soap;
+    cfg.soap_mode = if soap {
+        SoapProposalMode::Flexible
+    } else {
+        SoapProposalMode::Off
+    };
     cfg
 }
 
@@ -322,7 +328,7 @@ fn soap_on_vs_off_lj38_eight_seeds() {
         sum_on += a.best;
         sum_off += b.best;
         soap_draws += a.soap_draws;
-        assert_eq!(b.soap_draws, 0, "soap_hop=false still drew SOAP");
+        assert_eq!(b.soap_draws, 0, "SOAP off still drew SOAP");
         assert!(a.best.is_finite() && b.best.is_finite());
         let d = a.best - b.best;
         if d < -1e-6 {
