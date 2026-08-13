@@ -14,8 +14,9 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::methods::cluster_hopping::{
-    AcceptedTransition, ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome,
-    QuenchStatus, random_cluster, run_with_bias,
+    AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
+    Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
+    run_with_bias_at_checkpoints,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -222,7 +223,10 @@ mod option_tests {
 
         assert_eq!(sequence, 23);
         assert_eq!(operations.len(), 3);
-        assert!(matches!(operations[0], AdaptiveCatalogOperation::RegisterCurrent(_)));
+        assert!(matches!(
+            operations[0],
+            AdaptiveCatalogOperation::RegisterCurrent(_)
+        ));
         assert!(matches!(
             &operations[1],
             AdaptiveCatalogOperation::Adopt { action, .. } if action == "surface_relocate"
@@ -246,14 +250,8 @@ mod option_tests {
         let current = Array1::from(vec![3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 2.0, 4.0, 0.0]);
         let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
 
-        let proposal = boundary_crossing_trial(
-            current.view(),
-            &crossing,
-            0.0,
-            10.0,
-            &mut rng,
-        )
-        .unwrap();
+        let proposal =
+            boundary_crossing_trial(current.view(), &crossing, 0.0, 10.0, &mut rng).unwrap();
 
         let expected = [3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 1.0, 4.0, 0.0];
         for (actual, expected) in proposal.iter().zip(expected) {
@@ -1740,9 +1738,374 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome,
-        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
-        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole, ProposalFamily,
+        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
+    };
+    use rand::{Rng, SeedableRng};
+
+    let campaign = required_catalog_env("CATALOG_CAMPAIGN");
+    let ensemble = required_catalog_env("CATALOG_ENSEMBLE");
+    let replica = required_catalog_env("CATALOG_REPLICA")
+        .parse::<u32>()
+        .expect("CATALOG_REPLICA must be an unsigned integer");
+    let signature = system_signature(cfg.n_points).expect("LJ catalog signature must be valid");
+    let descriptor_space = descriptor_space();
+    let mut cooperative = CooperativeRun::new(
+        [replica],
+        u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
+    )
+    .expect("single-replica local ledger must be valid");
+    if let Some(endpoint) = endpoint {
+        let address = endpoint
+            .parse()
+            .expect("CATALOG_RPC must be a host:port socket address");
+        let identity = CatalogIdentity {
+            campaign: campaign.clone(),
+            ensemble: ensemble.clone(),
+            replica,
+            signature_digest: signature.digest(),
+        };
+        match CatalogClient::connect(address, identity, ClientConfig::default()) {
+            Ok(client) => cooperative
+                .attach_client(replica, client)
+                .expect("configured replica must accept its catalog client"),
+            Err(error) => eprintln!(
+                "catalog {endpoint} unavailable ({error}); local execution remains active"
+            ),
+        }
+    }
+
+    let mut run_cfg = cfg.clone();
+    run_cfg.budget_window = true;
+    let checkpoint_interval = std::env::var("CATALOG_SLICE")
+        .or_else(|_| std::env::var("BANK_SLICE"))
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(500)
+        .max(1);
+    let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(0.05 * run_cfg.length_scale);
+    let transport_radius = std::env::var("CATALOG_TRANSPORT_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
+    let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let mut coordination_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
+    let mut bias = BasinBias::new(
+        ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
+        run_cfg.merge_radius,
+        run_cfg.bias_height,
+        run_cfg.bias_gamma,
+    );
+    let start = random_cluster(
+        run_cfg.n_points,
+        0.7,
+        run_cfg.min_separation,
+        &mut local_rng,
+    );
+    let mut candidate_sequence = 0u64;
+    let mut checkpoint_sequence = 0u64;
+    let mut last_charged = 0usize;
+    let mut best_at_checkpoint = f64::INFINITY;
+    let mut stall = 0u32;
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        checkpoint_sequence = checkpoint_sequence
+            .checked_add(1)
+            .expect("checkpoint sequence must fit u64");
+        let boundary_charged = snapshot
+            .quench_boundaries()
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum::<usize>();
+        for boundary in snapshot.quench_boundaries() {
+            cooperative
+                .record_work(
+                    replica,
+                    match boundary.status() {
+                        QuenchStatus::Validated => ChargeKind::AcceptedQuench,
+                        QuenchStatus::Rejected => ChargeKind::RejectedQuench,
+                    },
+                    u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
+                )
+                .expect("checkpoint quench work must enter the cooperative ledger");
+        }
+        let checkpoint_charged = snapshot.charged().saturating_sub(last_charged);
+        let auxiliary_charged = checkpoint_charged
+            .checked_sub(boundary_charged)
+            .expect("quench boundaries cannot exceed checkpoint work");
+        if auxiliary_charged > 0 {
+            cooperative
+                .record_work(
+                    replica,
+                    ChargeKind::AuxiliaryEvaluation,
+                    u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
+                )
+                .expect("checkpoint auxiliary work must enter the cooperative ledger");
+        } else if checkpoint_charged == 0 {
+            cooperative
+                .record_work(replica, ChargeKind::LocalProposal, 0)
+                .expect("uncharged checkpoint must enter the cooperative ledger");
+        }
+        last_charged = snapshot.charged();
+
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            replica,
+            &mut candidate_sequence,
+            seed,
+            snapshot.charged(),
+            snapshot.accepted_transitions(),
+        );
+        let mut path_active = false;
+        for operation in operations {
+            match operation {
+                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
+                    cooperative
+                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                        .expect("source descriptor work must enter the cooperative ledger");
+                    path_active = cooperative
+                        .record_current(replica, candidate)
+                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
+                        .unwrap_or(false);
+                }
+                AdaptiveCatalogOperation::Adopt {
+                    action,
+                    destination,
+                } if path_active => {
+                    cooperative
+                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                        .expect("destination descriptor work must enter the cooperative ledger");
+                    path_active = cooperative
+                        .record_transition(
+                            replica,
+                            action,
+                            TransitionDestination::Resolved(destination),
+                            true,
+                        )
+                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
+                        .unwrap_or(false);
+                }
+                AdaptiveCatalogOperation::Adopt { .. } => {}
+            }
+        }
+
+        for boundary in snapshot
+            .quench_boundaries()
+            .iter()
+            .filter(|boundary| boundary.status() == QuenchStatus::Validated)
+        {
+            let Some(gradient) = boundary.gradient() else {
+                continue;
+            };
+            candidate_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("quench descriptor work must enter the cooperative ledger");
+            if let Some(candidate) = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                snapshot.charged(),
+                boundary.energy(),
+                boundary.state(),
+                gradient,
+            ) {
+                let _ = cooperative.offer_candidate(replica, candidate);
+            }
+        }
+
+        let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;
+        if local_deepened {
+            best_at_checkpoint = snapshot.best_energy();
+            stall = 0;
+        } else {
+            stall = stall.saturating_add(1);
+        }
+        let Some(current_gradient) = snapshot.current_gradient() else {
+            return CheckpointAction::Continue;
+        };
+        candidate_sequence = candidate_sequence
+            .checked_add(1)
+            .expect("candidate sequence must fit u64");
+        cooperative
+            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+            .expect("current descriptor work must enter the cooperative ledger");
+        let Some(current_candidate) = lj_catalog_candidate(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            replica,
+            candidate_sequence,
+            seed,
+            snapshot.charged(),
+            snapshot.current_energy(),
+            snapshot.current_state(),
+            current_gradient,
+        ) else {
+            return CheckpointAction::Continue;
+        };
+        let descriptor = current_candidate.descriptor.clone();
+        if cooperative.record_current(replica, current_candidate).ok()
+            != Some(TransitionRecordOutcome::Recorded)
+        {
+            return CheckpointAction::Continue;
+        }
+        let policy = match cooperative
+            .policy_input(
+                replica,
+                descriptor.clone(),
+                snapshot.current_energy(),
+                stall,
+                local_deepened,
+            )
+            .expect("coordinator policy evidence must preserve local invariants")
+        {
+            PolicyEvidenceOutcome::Remote(input) => input,
+            PolicyEvidenceOutcome::Rejected
+            | PolicyEvidenceOutcome::LocalFallback
+            | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
+        };
+        let decision = cooperative
+            .decide(replica, policy)
+            .expect("policy decision must name the configured replica");
+        let mut trace = SliceTrace {
+            slice: checkpoint_sequence,
+            current_basin: cooperative
+                .events()
+                .last()
+                .and_then(|event| event.policy)
+                .and_then(|policy| policy.local_basin),
+            active_relation: cooperative
+                .events()
+                .last()
+                .and_then(|event| event.policy)
+                .map(|policy| policy.relation),
+            policy_role: PolicyRole::Local,
+            policy_reason: decision.reason.code(),
+            proposal_family: ProposalFamily::Local,
+            sampled_basin: None,
+            descriptor_step_norm: None,
+            cartesian_step_norm: None,
+            validation: SliceValidation::Accepted,
+            quench: SliceQuench::Converged,
+            adoption: SliceAdoption::NotAttempted,
+            novelty: cooperative
+                .events()
+                .last()
+                .and_then(|event| event.policy)
+                .map(|policy| policy.novelty),
+            energy: Some(snapshot.current_energy()),
+            charged_work: u64::try_from(checkpoint_charged)
+                .expect("checkpoint charge must fit u64"),
+        };
+        match decision.action {
+            PolicyAction::ContinueLocal => {}
+            PolicyAction::Exploit { .. } | PolicyAction::Explore | PolicyAction::Leave => {
+                trace.policy_role = match decision.action {
+                    PolicyAction::Leave => PolicyRole::Leave,
+                    _ => PolicyRole::Explore,
+                };
+                trace.proposal_family = ProposalFamily::BoundaryTransport;
+                if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
+                    .boundary_crossing(replica, descriptor, coordination_rng.random())
+                    .expect("boundary-crossing access must preserve local execution")
+                {
+                    trace.sampled_basin = Some(crossing.destination_basin);
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("remote proposal work must enter the cooperative ledger");
+                    if let Some(state) = boundary_crossing_trial(
+                        snapshot.current_state(),
+                        &crossing,
+                        transport_noise,
+                        transport_radius,
+                        &mut coordination_rng,
+                    ) {
+                        trace.cartesian_step_norm = Some(vector_distance(
+                            snapshot
+                                .current_state()
+                                .as_slice()
+                                .expect("LJ state is contiguous"),
+                            state.as_slice().expect("LJ proposal is contiguous"),
+                        ));
+                        trace.adoption = SliceAdoption::Adopted;
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state,
+                            action: "boundary_transport".to_owned(),
+                        };
+                    }
+                }
+                trace.adoption = SliceAdoption::Rejected;
+            }
+        }
+        cooperative
+            .record_slice(replica, trace)
+            .expect("checkpoint trace must remain complete");
+        CheckpointAction::Continue
+    };
+    let outcome = run_with_bias_at_checkpoints(
+        &run_cfg,
+        start.view(),
+        ledger,
+        relax,
+        Some(grad),
+        &mut bias,
+        &mut local_rng,
+        checkpoint_interval,
+        &mut checkpoint,
+    );
+    let trace = cooperative.json_lines(&RunManifest {
+        campaign,
+        ensemble,
+        sharing: endpoint.is_some(),
+    });
+    if let Ok(path) = std::env::var("CATALOG_TRACE") {
+        let mut output = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("CATALOG_TRACE must be writable");
+        output
+            .write_all(trace.as_bytes())
+            .expect("catalog trace write must succeed");
+    } else {
+        eprint!("{trace}");
+    }
+    outcome
+}
+
+/// Legacy sliced catalog runner retained for replaying archived campaigns.
+#[cfg(feature = "bank-rpc")]
+#[allow(dead_code)]
+fn run_capnp_catalog_sliced(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
+    seed: u64,
+    endpoint: Option<&str>,
+) -> Outcome {
+    use anneal_core::catalog::lj::{descriptor_space, system_signature};
+    use anneal_core::catalog_policy::PolicyAction;
+    use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
+    use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
+    use anneal_core::cooperative_search::ledger::ChargeKind;
+    use anneal_core::cooperative_search::{
+        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
