@@ -15,13 +15,13 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
+#[cfg(feature = "bank-rpc")]
+use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::structure_is_sane;
-use crate::methods::cluster_hopping::{
-    Config, Ledger, OVERLAP_SEPARATION, Outcome, optimize_with_gradient,
-};
+use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_gradient};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
