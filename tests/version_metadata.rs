@@ -60,3 +60,14 @@ fn citation_exposes_the_software_concept_doi() {
         citation.contains("identifiers:\n  - type: doi\n    value: \"10.5281/zenodo.10672746\"")
     );
 }
+
+#[test]
+fn changelog_has_release_notes_for_the_public_version() {
+    let package_version = toml_value(include_str!("../Cargo.toml"), "[package]", "version");
+    let changelog = include_str!("../CHANGELOG.md");
+
+    assert!(
+        changelog.contains(&format!("## [{package_version}]")),
+        "CHANGELOG.md has no release section for package version {package_version}"
+    );
+}
