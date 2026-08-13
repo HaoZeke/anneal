@@ -14,8 +14,8 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::methods::cluster_hopping::{
-    ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster,
-    run_with_bias,
+    AcceptedTransition, ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome,
+    QuenchStatus, random_cluster, run_with_bias,
 };
 use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
@@ -121,6 +121,49 @@ mod option_tests {
             let mean = (0..4).map(|atom| first[3 * atom + axis]).sum::<f64>() / 4.0;
             assert!(mean.abs() < 1e-12);
         }
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn validated_adaptive_edge_builds_both_coordinator_endpoints() {
+        let cfg = Config::for_cluster(2);
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let source = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let destination = Array1::from(vec![0.0, 0.0, 0.0, 0.0, separation, 0.0]);
+        let (source_energy, source_gradient) = lj(source.view());
+        let (destination_energy, destination_gradient) = lj(destination.view());
+        let transition = AcceptedTransition {
+            hop: 3,
+            action: "surface_relocate".into(),
+            from_energy: source_energy,
+            to_energy: destination_energy,
+            from_state: source.clone(),
+            from_gradient: Some(source_gradient),
+            to_state: destination.clone(),
+            to_gradient: Some(destination_gradient),
+            validated: true,
+        };
+
+        let (from, to) = lj_transition_candidates(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            11,
+            12,
+            71,
+            400,
+            &transition,
+        )
+        .unwrap();
+
+        assert_eq!(from.coordinates, source.to_vec());
+        assert_eq!(to.coordinates, destination.to_vec());
+        assert_eq!(from.event_sequence, 11);
+        assert_eq!(to.event_sequence, 12);
+        assert!(from.gradient_norm < cfg.record_gradient);
+        assert!(to.gradient_norm < cfg.record_gradient);
     }
 }
 
