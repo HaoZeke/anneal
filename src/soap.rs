@@ -19,7 +19,9 @@
 //! is a Dirac the residual vanishes and SOAP yields rather than
 //! inventing a packing. The Cartesian step is the Tikhonov pullback
 //! of the stacked leftover `[Δp; Δχ]` through the stacked analytic
-//! Jacobian. The hop fingerprint is SOAP at `l_max = 6` plus the ACE
+//! Jacobian. Molecular steps are retracted by the nearest rigid motion
+//! of each observed group, so the pullback cannot spend a quench repairing
+//! covalent geometry. The hop fingerprint is SOAP at `l_max = 6` plus the ACE
 //! ν=3 / λ-SOAP CG contraction of the same spherical expansion.
 //! Ih is silent in the power spectrum until `l = 6`. Surface
 //! coordination is SOFI/IRA (a length), not this map. The 555→421 /
@@ -1714,7 +1716,8 @@ pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -
 /// On a packing cluster the hop is the SOFI fivefold residual: it
 /// fires only while the fivefold length is small and the step
 /// increases that length. Molecules and slabs keep the ACE leftover.
-/// `groups` is accepted for call-site compatibility.
+/// Declared molecular groups retract the ambient pullback onto their
+/// product rigid-body manifold by the nearest Kabsch motions.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1736,8 +1739,9 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     #[cfg(feature = "featomic")]
     {
         let _ = spec;
-        let _ = groups;
-        crate::featomic_hop::step_away_featomic(x, rmsd, spec.rcut_nn, species, mobile, rng)
+        let y =
+            crate::featomic_hop::step_away_featomic(x, rmsd, spec.rcut_nn, species, mobile, rng);
+        retract_rigid_groups(x, y, groups)
     }
     #[cfg(not(feature = "featomic"))]
     {
@@ -1815,20 +1819,36 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         }
         let nu3_rms = if nnu > 0.0 { (nu32 / nnu).sqrt() } else { 0.0 };
         let _ = rng;
-        let _ = groups;
         if nu3_rms < NU3_DEFECT {
             return x.to_owned();
         }
         // Direction is J⁺ of the observed leftover. Amplitude is the
         // caller's cap: Tikhonov otherwise leaves a near-identity.
         let dr = pullback_nu3(x, target.view(), spec, species, mobile);
-        scale_to_cap(x, dr, rmsd)
+        let y = scale_to_cap(x, dr, rmsd);
+        retract_rigid_groups(x, y, groups)
     }
+}
+
+/// Retract an ambient Cartesian proposal onto the product rigid-body manifold.
+///
+/// Kabsch gives the nearest finite rigid motion for each declared group. The
+/// identity map covers atomic systems and preserves the analytic pullback.
+fn retract_rigid_groups(
+    x: ArrayView1<f64>,
+    y: Array1<f64>,
+    groups: Option<&[Vec<usize>]>,
+) -> Array1<f64> {
+    let Some(groups) = groups else {
+        return y;
+    };
+    let mut dr = &y - &x;
+    project_rigid_groups(x, &mut dr, groups);
+    &x.to_owned() + &dr
 }
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best
 /// matches it. Atoms not in a group are left as the atomic pullback.
-#[allow(dead_code)]
 fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<usize>]) {
     let n_at = x.len() / 3;
     for g in groups {
@@ -1897,7 +1917,6 @@ fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<
 /// Optimal rotation taking centred `from` onto centred `to` (Horn 1987).
 /// The Newton polar factor of the covariance is singular for a planar
 /// water; the quaternion eigenproblem is not.
-#[allow(dead_code)]
 fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
     let mut s = [[0.0_f64; 3]; 3];
     for (p, q) in from.iter().zip(to.iter()) {
