@@ -661,6 +661,7 @@ impl Config {
         cfg
     }
 
+    /// Creates the reduced-unit Lennard-Jones cluster configuration.
     pub fn for_cluster(n_points: usize) -> Self {
         Self::with_scales(
             n_points,

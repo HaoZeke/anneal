@@ -116,6 +116,7 @@ struct HopAcc {
 }
 
 /// Push a near-miss onto its approximate point group and quench.
+#[cfg(test)]
 fn symmetry_polish(
     cfg: &Config,
     x: ArrayView1<f64>,

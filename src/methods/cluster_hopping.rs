@@ -36,7 +36,7 @@ use crate::bias::{
 use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
-use crate::exchange::{Exchange, MetropolisExchange};
+use crate::exchange::MetropolisExchange;
 use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
@@ -426,6 +426,7 @@ pub(crate) fn contain(x: &mut Array1<f64>, n: usize, radius: f64) {
 /// A configuration with two points on top of each other has an enormous value
 /// under any repulsive potential, and a quasi-Newton relaxation started there
 /// fails on its first line search and returns the configuration unchanged.
+#[cfg(test)]
 fn repair(x: &mut Array1<f64>, n: usize, min_sep: f64) {
     for _ in 0..40 {
         let mut moved = false;
@@ -680,9 +681,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         None
     };
     let mut surrogate_here: Option<f64> = None;
-    let mut delayed_skipped = 0usize;
     let mut unconverged_records = usize::from(!initial_recordable);
-    let mut pending_surrogate: Option<(f64, f64)> = None;
     let mut pending_raw: Option<(f64, f64)> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
     // The allocator decides which move; this decides the move's parameters,
@@ -785,15 +784,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut flat_since = 0usize;
     let flat_sweep = cfg.flat_sweep.max(32);
     let mut ebias: Option<crate::dos::EnergyBias> = None;
-    let mut stat_temp_sum = 0.0_f64;
     let mut soft_cache: Option<(f64, Vec<f64>, Vec<Array1<f64>>)> = None;
     // Ring buffer of accepted quenched displacements for the learned proposal.
     let mut cov_buf: Vec<Array1<f64>> = Vec::new();
     let mut cov_next = 0usize;
-    let mut cov_fired = 0usize;
     let mut soft_fired = 0usize;
     let mut soft_recomputes = 0usize;
-    let mut stat_temp_n = 0usize;
     // The basin the *chain* stands in, not the one the last quench produced.
     // A rejected trial leaves the chain where it was, so keying "same" on the
     // previous quench counts a rejected excursion as a departure and the
@@ -853,8 +849,6 @@ fn run_full<'g, R: Rng + ?Sized>(
             let (t, _) = d.temperature(e);
             if t.is_finite() && t > 0.0 {
                 temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
-                stat_temp_sum += temperature;
-                stat_temp_n += 1;
             }
         }
 
@@ -983,7 +977,6 @@ fn run_full<'g, R: Rng + ?Sized>(
         // cent of the budget when the chain has stopped improving, not the
         // default proposal.
         let mut trial = if cov_fire {
-            cov_fired += 1;
             let dim = x.len();
             let m = cov_buf.len();
             // Evidence weight: nothing at a cold start, most of the draw once
@@ -1148,7 +1141,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         // costs the chain a hop and costs the ledger nothing beyond that
         // evaluation, which is the whole saving: the quench is never paid.
         let mut stage_one_reject = false;
-        pending_surrogate = None;
+        let mut pending_surrogate = None;
         if let Some(sur) = surrogate.as_mut() {
             // A zero-step relaxation is the raw energy for the price of the
             // evaluation the stage is allowed.
@@ -1202,7 +1195,6 @@ fn run_full<'g, R: Rng + ?Sized>(
             // chain stands, exactly as a rejection through the ordinary
             // acceptance test does, so the bias accumulates at the same rate.
             hops += 1;
-            delayed_skipped += 1;
             bias.deposit(x.view(), temperature);
             continue;
         }
@@ -2375,6 +2367,7 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
     (s / n).sqrt() < 1e-8
 }
 
+/// Samples a non-overlapping cluster uniformly inside a sphere.
 pub fn random_cluster_in_radius<R: Rng + ?Sized>(
     n: usize,
     radius: f64,
@@ -3209,7 +3202,9 @@ pub enum ClusterFingerprint {
     /// Unit high-`l` mean SOAP. Packing superbasin, not an isomer.
     #[cfg(feature = "featomic")]
     SoapMean {
+        /// SOAP neighbour cutoff in the coordinate units.
         rcut: f64,
+        /// Optional atomic numbers, one per point.
         species: Option<Vec<u32>>,
     },
 }
@@ -3246,6 +3241,8 @@ impl ClusterFingerprint {
 
     /// The descriptor for a named keying, against `reference`.
     pub fn of_with(n_points: usize, keying: Keying, reference: &Array1<f64>) -> Self {
+        #[cfg(not(feature = "ira"))]
+        let _ = reference;
         match keying {
             Keying::Shape => ClusterFingerprint::Coordinates,
             Keying::Distances => ClusterFingerprint::Spectrum(SortedPairs { n_points }),

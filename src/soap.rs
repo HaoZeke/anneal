@@ -269,6 +269,7 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
+#[cfg(test)]
 fn four_body(
     x: ArrayView1<f64>,
     i: usize,
@@ -1203,6 +1204,7 @@ fn scale_support_to_cap(x: ArrayView1<f64>, mut dr: Array1<f64>, rmsd: f64) -> A
 ///
 /// On a Mackay 13-mer the fivefold core sits well above this. A
 /// regular tetrahedron sits at zero. Below the floor the hop yields.
+#[cfg_attr(feature = "featomic", allow(dead_code))]
 const NU3_DEFECT: f64 = 0.05;
 
 /// Oracle residual: 555 toward 421 / fcc prototype, pulled back by analytic `J`.
@@ -1326,6 +1328,7 @@ fn ico_axes() -> [[f64; 3]; 6] {
     ]
 }
 
+#[cfg_attr(feature = "ira", allow(dead_code))]
 fn nearest_perm(x: ArrayView1<f64>, y: &[f64]) -> Vec<usize> {
     let n = x.len() / 3;
     let mut used = vec![false; n];
@@ -1824,6 +1827,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best
 /// matches it. Atoms not in a group are left as the atomic pullback.
+#[allow(dead_code)]
 fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<usize>]) {
     let n_at = x.len() / 3;
     for g in groups {
@@ -1892,6 +1896,7 @@ fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<
 /// Optimal rotation taking centred `from` onto centred `to` (Horn 1987).
 /// The Newton polar factor of the covariance is singular for a planar
 /// water; the quaternion eigenproblem is not.
+#[allow(dead_code)]
 fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
     let mut s = [[0.0_f64; 3]; 3];
     for (p, q) in from.iter().zip(to.iter()) {

@@ -842,6 +842,7 @@ impl ClusterMove {
         v
     }
 
+    /// Builds the reduced-unit lean Lennard-Jones move library.
     pub fn library_lean(n: usize) -> Vec<ClusterMove> {
         Self::library_lean_scaled(
             n,
