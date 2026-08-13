@@ -211,7 +211,6 @@ pub struct BankOutcome {
 /// budget-window temperature above all, see the whole campaign's budget rather
 /// than the slice it was given.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn slice_run_inner<'g>(
     cfg: &Config,
     ledger: &mut Ledger,

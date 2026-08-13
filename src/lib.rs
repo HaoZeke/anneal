@@ -12,6 +12,7 @@ pub mod bank_rpc;
 #[cfg(feature = "bank-rpc")]
 #[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
 #[rustfmt::skip]
+#[allow(non_snake_case)]
 pub mod Bank_capnp {
     include!("bank_rpc/Bank_capnp.rs");
 }
@@ -19,6 +20,7 @@ pub mod Bank_capnp {
 #[cfg(feature = "bank-rpc")]
 #[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
 #[rustfmt::skip]
+#[allow(non_snake_case)]
 pub mod Catalog_capnp {
     include!("catalog_rpc/Catalog_capnp.rs");
 }

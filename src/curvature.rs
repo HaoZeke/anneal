@@ -166,6 +166,7 @@ pub fn project_rigid_with(v: &mut Array1<f64>, basis: &[Array1<f64>]) {
 }
 
 /// Removes translations and rotations of `x` from `v`, in place.
+#[cfg(test)]
 fn project_rigid(v: &mut Array1<f64>, x: ArrayView1<f64>) {
     let basis = rigid_basis(x);
     project_rigid_with(v, &basis);
@@ -268,6 +269,10 @@ where
     Some((alphas, betas, basis))
 }
 
+/// Estimates the lowest non-rigid curvature modes and their spectral gap.
+///
+/// The gradient callback is charged by its caller. `steps` controls the Krylov
+/// dimension and `epsilon` is the central-difference displacement.
 pub fn curvature_features<G>(
     x: ArrayView1<f64>,
     mut grad: G,

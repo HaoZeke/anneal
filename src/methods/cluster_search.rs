@@ -423,6 +423,7 @@ fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
 /// H–H is 0.74 Å. EAM overlap sits under 0.3 Å. The configured
 /// `min_separation` is scaled by the largest covalent diameter, which
 /// on a Cu slab is copper, and that floor rejects every physical H2.
+#[cfg(feature = "bank-rpc")]
 fn sane_sep(_cfg: &Config) -> f64 {
     OVERLAP_SEPARATION
 }

@@ -204,23 +204,6 @@ impl Inner {
             .fold(f64::INFINITY, f64::min)
     }
 
-    fn nearest_state(&self, coords: ArrayView1<f64>) -> f64 {
-        #[cfg(feature = "ira")]
-        {
-            let ira = crate::shape::IraMetric::default();
-            self.bank
-                .members()
-                .iter()
-                .map(|m| ira.distance(coords, m.state.view()))
-                .fold(f64::INFINITY, f64::min)
-        }
-        #[cfg(not(feature = "ira"))]
-        {
-            let _ = coords;
-            f64::INFINITY
-        }
-    }
-
     fn deposit(&mut self, soap: Array1<f64>, increment: f64) -> f64 {
         if !(increment.is_finite() && increment > 0.0) || soap.is_empty() {
             return 0.0;
