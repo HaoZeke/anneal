@@ -51,3 +51,12 @@ fn all_public_version_metadata_matches_manifest() {
         package_version
     );
 }
+
+#[test]
+fn citation_exposes_the_software_concept_doi() {
+    let citation = include_str!("../CITATION.cff");
+
+    assert!(citation.contains(
+        "identifiers:\n  - type: doi\n    value: \"10.5281/zenodo.10672746\""
+    ));
+}

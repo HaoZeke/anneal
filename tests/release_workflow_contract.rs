@@ -18,6 +18,17 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
 }
 
 #[test]
+fn release_tags_match_every_public_package_version() {
+    let workflow = include_str!("../.github/workflows/release.yml");
+
+    assert!(workflow.contains("Validate release metadata"));
+    assert!(workflow.contains("${GITHUB_REF_NAME#v}"));
+    assert!(workflow.contains("Cargo.toml"));
+    assert!(workflow.contains("pyproject.toml"));
+    assert!(workflow.contains("CITATION.cff"));
+}
+
+#[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");
 
