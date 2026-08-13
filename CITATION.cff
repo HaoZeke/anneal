@@ -2,8 +2,7 @@ cff-version: 1.2.0
 title: "anneal: typed simulated-annealing components"
 message: "If you use anneal, please cite the paper and the software."
 type: software
-version: 0.7.2
-date-released: "2026-06-26"
+version: 0.9.0
 authors:
   - family-names: "Goswami"
     given-names: "Rohit"
@@ -24,7 +23,7 @@ url: "https://anneal.rgoswami.me"
 license: MIT
 references:
   - type: article
-    title: "Typed Component Algebras for Simulated Annealing: Mechanized Equivalences, a Safety-Liveness Specification, and Finite-Precision Effects"
+    title: "anneal: A Library for Global Search from Energy and Forces"
     authors:
       - family-names: "Goswami"
         given-names: "Rohit"
@@ -39,8 +38,8 @@ references:
       - family-names: "Goswami"
         given-names: "Debabrata"
     year: 2026
-    journal: "ACM Transactions on Mathematical Software (in preparation)"
-    notes: "Software DOI 10.5281/zenodo.10672746; reproducibility archive 10.5281/zenodo.20672621"
+    journal: "Journal of Computational Chemistry (in preparation)"
+    notes: "Software DOI 10.5281/zenodo.10672746; reproducibility archive concept DOI 10.5281/zenodo.20672620"
   - type: article
     title: "Unified Software Design Patterns for Simulated Annealing"
     authors:
