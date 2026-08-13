@@ -1,7 +1,7 @@
 //! Single-threaded acceptor; each client is a thread sharing the bank.
 
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
 use capnp::message::{Builder, ReaderOptions};
@@ -350,10 +350,9 @@ fn featomic_hop_fallback() -> f64 {
 
 /// Listen on `addr` (`host:port`).
 pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
-    let listener = TcpListener::bind(addr.as_ref())?;
-    listener.set_nonblocking(false)?;
+    let (listener, bound_address) = bind_bank_listener(addr.as_ref())?;
     let inner = Arc::new(Mutex::new(Inner::new(capacity.max(1))));
-    eprintln!("bank listening on {} capacity {capacity}", addr.as_ref());
+    eprintln!("bank listening on {bound_address} capacity {capacity}");
     #[cfg(all(feature = "ira", feature = "featomic"))]
     eprintln!(
         "bank identity: IRA Hausdorff same-state (<={IRA_SAME}), SOAP L2 Lee Dcut, SOAP wells merge {}, FunnelModel EI, AS-KMC/MCAMC raise at {SUPERBASIN_HEIGHT}",
@@ -383,6 +382,13 @@ pub fn serve(addr: impl AsRef<str>, capacity: usize) -> std::io::Result<()> {
         });
     }
     Ok(())
+}
+
+fn bind_bank_listener(addr: &str) -> std::io::Result<(TcpListener, SocketAddr)> {
+    let listener = TcpListener::bind(addr)?;
+    listener.set_nonblocking(false)?;
+    let bound_address = listener.local_addr()?;
+    Ok((listener, bound_address))
 }
 
 fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String> {
