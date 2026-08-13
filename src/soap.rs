@@ -1731,6 +1731,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
         if moved {
             return y;
         }
+        return x.to_owned();
     }
     #[cfg(feature = "featomic")]
     {
