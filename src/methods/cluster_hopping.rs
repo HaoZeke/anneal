@@ -2511,6 +2511,21 @@ where
         }
     }
 
+    if checkpoint_interval.is_some() && hops > checkpoint_hops {
+        let snapshot = ChainCheckpoint {
+            current_state: x.view(),
+            current_energy: e,
+            current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
+            best_state: ledger.best_state.as_ref().map(|state| state.view()),
+            best_energy: ledger.best,
+            quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
+            accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+            charged: ledger.spent(),
+            hops,
+        };
+        let _ = checkpoint(snapshot);
+    }
+
     let n_basins = bias.n_basins();
     let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
