@@ -1639,6 +1639,21 @@ fn population_boundary_trial(
     boundary_crossing_trial(current, crossing, noise_scale, trust_radius, &mut rng)
 }
 
+#[cfg(feature = "bank-rpc")]
+fn population_region_trial(
+    current: ArrayView1<f64>,
+    crossing: Option<&anneal_core::catalog_rpc::BoundaryCrossingRecord>,
+    noise_scale: f64,
+    trust_radius: f64,
+    draw: u64,
+) -> Array1<f64> {
+    crossing
+        .and_then(|crossing| {
+            population_boundary_trial(current, crossing, noise_scale, trust_radius, draw)
+        })
+        .unwrap_or_else(|| current.to_owned())
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -2349,37 +2364,35 @@ fn run_capnp_catalog(
                     let family =
                         population_family_position(&plan.destinations, &plan.parents, replica)
                             .expect("validated population plan must address this replica");
-                    let parent_coordinates = Array1::from_vec(parent.coordinates.clone());
-                    let (next_state, next_energy) = if family.family_size() > 1 {
-                        let draw = population_rejuvenation_draw(
-                            seed,
-                            population_epoch,
-                            replica,
-                            family.ordinal(),
-                        );
-                        match cooperative
-                            .boundary_crossing(replica, parent.descriptor.clone(), draw)
-                            .expect("population rejuvenation must preserve local execution")
-                        {
-                            CatalogBoundaryOutcome::Crossing(crossing) => {
-                                cooperative
-                                    .record_work(replica, ChargeKind::RemoteProposal, 0)
-                                    .expect("rejuvenation proposal must enter the ledger");
-                                match population_boundary_trial(
-                                    parent_coordinates.view(),
-                                    &crossing,
-                                    transport_noise,
-                                    transport_radius,
-                                    draw,
-                                ) {
-                                    Some(proposed) => (proposed, f64::NAN),
-                                    None => (parent_coordinates, parent.energy),
-                                }
-                            }
-                            _ => (parent_coordinates, parent.energy),
+                    let draw = population_rejuvenation_draw(
+                        seed,
+                        population_epoch,
+                        replica,
+                        family.ordinal(),
+                    );
+                    let crossing = match cooperative
+                        .boundary_crossing(replica, parent.descriptor.clone(), draw)
+                        .expect("population frontier access must preserve local execution")
+                    {
+                        CatalogBoundaryOutcome::Crossing(crossing) => {
+                            cooperative
+                                .record_work(replica, ChargeKind::RemoteProposal, 0)
+                                .expect("population frontier proposal must enter the ledger");
+                            Some(crossing)
                         }
+                        _ => None,
+                    };
+                    let next_state = population_region_trial(
+                        current.view(),
+                        crossing.as_ref(),
+                        transport_noise,
+                        transport_radius,
+                        draw,
+                    );
+                    let next_energy = if next_state == current {
+                        current_energy
                     } else {
-                        (parent_coordinates, parent.energy)
+                        f64::NAN
                     };
                     current = next_state;
                     current_energy = next_energy;
