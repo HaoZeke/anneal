@@ -443,11 +443,11 @@ impl<F: Fingerprint> SpectralBias<F> {
         // chain sitting still (or rejecting a trial); including it densifies
         // every basin into a clique with itself and washes out the cut the
         // Fiedler vector is meant to find.
-        if let Some(prev) = self.last_basin {
-            if prev != basin {
-                self.graph.record(prev, basin, 1.0);
-                self.since_refit += 1;
-            }
+        if let Some(prev) = self.last_basin
+            && prev != basin
+        {
+            self.graph.record(prev, basin, 1.0);
+            self.since_refit += 1;
         }
         self.last_basin = Some(basin);
         if self.graph.len() >= self.min_nodes && self.since_refit >= self.refit_every {

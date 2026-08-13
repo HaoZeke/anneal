@@ -39,7 +39,7 @@ use crate::diversity::DiversityAnnealer;
 use crate::exchange::{Exchange, MetropolisExchange};
 use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
-use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise, TsallisVisit};
+use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 use crate::path::{StallDetector, interpolate_path};
 use crate::screen::Screen;
 
@@ -50,7 +50,6 @@ mod preset;
 pub use config::{Config, Keying};
 pub use moves::*;
 
-use moves::group_relocate;
 #[cfg(test)]
 use preset::LennardJonesPreset;
 
@@ -629,7 +628,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     // Geometric ladder, so swap acceptance is spaced evenly rather than
     // bunched at one end.
     let temps: Vec<f64> = (0..n_rep).map(rung_temp).collect();
-    let exchange = MetropolisExchange;
+    let _exchange = MetropolisExchange;
     let mut swaps_tried = 0usize;
     let mut swaps_accepted = 0usize;
     let mut rep = 0usize;
@@ -847,16 +846,15 @@ fn run_full<'g, R: Rng + ?Sized>(
         // freeze the chain or boil it. The band is wide enough that the
         // adaptation has somewhere to go and narrow enough that a bad estimate
         // is survivable.
-        if cfg.statistical_temperature {
-            if let Some(d) = dos.as_ref() {
-                if d.refreshes > 0 {
-                    let (t, _) = d.temperature(e);
-                    if t.is_finite() && t > 0.0 {
-                        temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
-                        stat_temp_sum += temperature;
-                        stat_temp_n += 1;
-                    }
-                }
+        if cfg.statistical_temperature
+            && let Some(d) = dos.as_ref()
+            && d.refreshes > 0
+        {
+            let (t, _) = d.temperature(e);
+            if t.is_finite() && t > 0.0 {
+                temperature = t.clamp(0.2 * cfg.temperature, 5.0 * cfg.temperature);
+                stat_temp_sum += temperature;
+                stat_temp_n += 1;
             }
         }
 
@@ -961,19 +959,17 @@ fn run_full<'g, R: Rng + ?Sized>(
                 .as_ref()
                 .map(|(ce, _, _)| *ce != e)
                 .unwrap_or(true);
-            if stale {
-                if let Some(g) = grad.as_deref_mut() {
-                    let got = crate::curvature::soft_subspace(
-                        x.view(),
-                        |p| g(ledger, p),
-                        cfg.soft_steps,
-                        1e-4,
-                        cfg.soft_modes,
-                    );
-                    if let Some((l, v, _ev)) = got {
-                        soft_recomputes += 1;
-                        soft_cache = Some((e, l, v));
-                    }
+            if stale && let Some(g) = grad.as_deref_mut() {
+                let got = crate::curvature::soft_subspace(
+                    x.view(),
+                    |p| g(ledger, p),
+                    cfg.soft_steps,
+                    1e-4,
+                    cfg.soft_modes,
+                );
+                if let Some((l, v, _ev)) = got {
+                    soft_recomputes += 1;
+                    soft_cache = Some((e, l, v));
                 }
             }
         }
@@ -1091,12 +1087,12 @@ fn run_full<'g, R: Rng + ?Sized>(
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
-        if cfg.staged_quench {
-            if let Some(st) = settle.as_deref_mut() {
-                let moved = crate::neighbors::NeighborTable::moved_between(x.view(), trial.view());
-                if !moved.is_empty() && moved.len() * 8 <= n {
-                    trial = st(ledger, trial.view(), &moved, cfg.settle_iters);
-                }
+        if cfg.staged_quench
+            && let Some(st) = settle.as_deref_mut()
+        {
+            let moved = crate::neighbors::NeighborTable::moved_between(x.view(), trial.view());
+            if !moved.is_empty() && moved.len() * 8 <= n {
+                trial = st(ledger, trial.view(), &moved, cfg.settle_iters);
             }
         }
         // A frozen frame is the frame: no recentring, since that drags the
@@ -1350,9 +1346,7 @@ fn run_full<'g, R: Rng + ?Sized>(
         } else {
             match grad.as_deref_mut() {
                 Some(g) => g(ledger, x_new.view())
-                    .map(|v| {
-                        v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
-                    })
+                    .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
                     .unwrap_or(false),
                 None => true,
             }
@@ -1496,7 +1490,8 @@ fn run_full<'g, R: Rng + ?Sized>(
                 }
                 ok
             }
-        } else if let (Some(sur), Some((pred_y, raw_y))) = (surrogate.as_mut(), pending_surrogate) {
+        } else if let (Some(sur), Some((pred_y, _raw_y))) = (surrogate.as_mut(), pending_surrogate)
+        {
             // Second stage. The surrogate difference is subtracted back out, so
             // what is tested is the error the surrogate made on this pair, and
             // the composite step is reversible with respect to the true target
@@ -1524,7 +1519,8 @@ fn run_full<'g, R: Rng + ?Sized>(
             // coordinate that drifts as deposits accumulate, so the bias enters
             // the exponent additively the way it does under Metropolis rather
             // than moving the axis.
-            let ok = match flat_weight.as_ref() {
+
+            match flat_weight.as_ref() {
                 Some(w) => {
                     let bias_delta = (v_new - v_old) / temperature.max(1e-12);
                     rng.random::<f64>() < w.accept_prob(e, e_new, bias_delta)
@@ -1535,8 +1531,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 None => {
                     delta < 0.0 || rng.random::<f64>() < (-delta / temperature.max(1e-12)).exp()
                 }
-            };
-            ok
+            }
         } else {
             // The energy bias enters the exponent alongside the per-basin one,
             // so the two compose rather than one replacing the other.
@@ -1886,12 +1881,10 @@ fn run_full<'g, R: Rng + ?Sized>(
             // Accepted hops only. A rejected proposal says the chain declined
             // to move, which is a statement about the acceptance rule rather
             // than about reachability.
-            if accept {
-                if let Some(prev) = here_before {
-                    let now = identity.basin_of(x.view());
-                    funnels.record(prev, now);
-                    here = Some(now);
-                }
+            if accept && let Some(prev) = here_before {
+                let now = identity.basin_of(x.view());
+                funnels.record(prev, now);
+                here = Some(now);
             }
             if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
                 funnel_split = funnels.split().ok();
@@ -2132,10 +2125,10 @@ fn run_full<'g, R: Rng + ?Sized>(
             }
         }
 
-        if let Some(cap) = cfg.max_hops {
-            if hops >= cap {
-                break;
-            }
+        if let Some(cap) = cfg.max_hops
+            && hops >= cap
+        {
+            break;
         }
 
         if cfg.path_on_stall {
@@ -2977,9 +2970,7 @@ mod tests {
             assert!(ledger.charge());
             (-10.0, x.to_owned())
         };
-        let mut grad = |_ledger: &mut Ledger, x: ArrayView1<f64>| {
-            Some(Array1::ones(x.len()))
-        };
+        let mut grad = |_ledger: &mut Ledger, x: ArrayView1<f64>| Some(Array1::ones(x.len()));
         let mut ledger = Ledger::new(1);
         let mut rng = StdRng::seed_from_u64(43);
 

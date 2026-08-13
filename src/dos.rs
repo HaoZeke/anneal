@@ -347,11 +347,11 @@ impl DensityOfStates {
         // likelihood rather than fixed, so the amount of smoothing is set by
         // how much the histogram actually supports.
         for step in 0..7 {
-            let tau = 0.05 * 4.0_f64.powi(step as i32 - 3);
-            if let Some((ev, mean, sd)) = self.fit(tau) {
-                if ev > best.0 {
-                    best = (ev, tau, mean, sd);
-                }
+            let tau = 0.05 * 4.0_f64.powi(step - 3);
+            if let Some((ev, mean, sd)) = self.fit(tau)
+                && ev > best.0
+            {
+                best = (ev, tau, mean, sd);
             }
         }
         if best.0 == f64::NEG_INFINITY {

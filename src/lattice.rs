@@ -283,11 +283,11 @@ pub fn candidate_keeping<R: Rng + ?Sized>(
         seed = order.into_iter().map(|i| pts[i]).collect();
     }
 
-    let mut sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
+    let sites = grow_from(&seed, &offsets, (n * 6).max(n + 32));
     if sites.len() < n {
         return x.to_owned();
     }
-    let centre = [
+    let _centre = [
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,
         rng.random::<f64>() - 0.5,

@@ -373,10 +373,10 @@ impl<F: Fingerprint> BasinIndex<F> {
             // Exact, not a heuristic: the reverse triangle inequality says a
             // centre whose key differs by more than the radius is further away
             // than the radius, so skipping it cannot change the answer.
-            if let (Some(k), Some(ck)) = (dk, self.keys[i]) {
-                if (k - ck).abs() > self.merge_radius {
-                    continue;
-                }
+            if let (Some(k), Some(ck)) = (dk, self.keys[i])
+                && (k - ck).abs() > self.merge_radius
+            {
+                continue;
             }
             if self.metric.distance_bounded(c.view(), d, self.merge_radius) <= self.merge_radius {
                 return Some(i);

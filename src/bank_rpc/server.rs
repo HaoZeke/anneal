@@ -208,12 +208,11 @@ impl Inner {
         #[cfg(feature = "ira")]
         {
             let ira = crate::shape::IraMetric::default();
-            return self
-                .bank
+            self.bank
                 .members()
                 .iter()
                 .map(|m| ira.distance(coords, m.state.view()))
-                .fold(f64::INFINITY, f64::min);
+                .fold(f64::INFINITY, f64::min)
         }
         #[cfg(not(feature = "ira"))]
         {

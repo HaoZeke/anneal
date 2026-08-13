@@ -536,15 +536,15 @@ fn apply_request(
             .then_some(ProtocolRejection::SnapshotRegression)
     });
     if let Some(reason) = rejection {
-        return rejected(&state, request.event_sequence, reason);
+        return rejected(state, request.event_sequence, reason);
     }
     let key = (request.identity.replica, request.event_sequence);
     if let Some((stored, payload)) = state.requests.get(&key) {
         return if stored == &request {
-            accepted_with_payload(&state, request.event_sequence, true, payload.clone())
+            accepted_with_payload(state, request.event_sequence, true, payload.clone())
         } else {
             rejected(
-                &state,
+                state,
                 request.event_sequence,
                 ProtocolRejection::SequenceReplay,
             )
@@ -556,7 +556,7 @@ fn apply_request(
         .is_some_and(|maximum| request.event_sequence <= *maximum)
     {
         return rejected(
-            &state,
+            state,
             request.event_sequence,
             ProtocolRejection::SequenceRegression,
         );
@@ -584,7 +584,7 @@ fn apply_request(
         } => {
             let Some(scientific) = state.scientific.as_ref() else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -597,7 +597,7 @@ fn apply_request(
                 .collect::<Vec<_>>();
             let Ok(sample_count) = usize::try_from(*samples) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -610,7 +610,7 @@ fn apply_request(
                 &mut rng,
             ) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -624,21 +624,21 @@ fn apply_request(
         CatalogOperation::PolicyState { descriptor, energy } => {
             let Some(scientific) = state.scientific.as_ref() else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
             };
             if !energy.is_finite() {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
             }
             let Ok(local_basin) = scientific.census.basin_for(descriptor) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -693,14 +693,14 @@ fn apply_request(
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
             };
             let Ok(validated) = validate_candidate(scientific, &request.identity, candidate) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -708,7 +708,7 @@ fn apply_request(
             let Ok(Some(basin_id)) = scientific.census.basin_for(&validated.candidate.descriptor)
             else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -729,7 +729,7 @@ fn apply_request(
                 Some(stored) if stored == &canonical => false,
                 Some(_) => {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -748,14 +748,14 @@ fn apply_request(
                 residual_uncertainty,
             ) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
             };
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -815,7 +815,7 @@ fn apply_request(
             if inserted {
                 let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -826,7 +826,7 @@ fn apply_request(
         CatalogOperation::PopulationPlan { epoch } => {
             let Some(scientific) = state.scientific.as_ref() else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -854,7 +854,7 @@ fn apply_request(
                 });
             } else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -865,7 +865,7 @@ fn apply_request(
                 let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
                 else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -873,7 +873,7 @@ fn apply_request(
                 let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
                 else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -888,7 +888,7 @@ fn apply_request(
             } else {
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -897,7 +897,7 @@ fn apply_request(
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -912,7 +912,7 @@ fn apply_request(
                 let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
                 else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -920,7 +920,7 @@ fn apply_request(
                 let Ok(observation) = scientific.census.observe(&validated.candidate.descriptor)
                 else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -949,14 +949,14 @@ fn apply_request(
             } else {
                 let Some(active_entries) = state.active_entries.checked_add(1) else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
                 };
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
                     return rejected(
-                        &state,
+                        state,
                         request.event_sequence,
                         ProtocolRejection::ValidationRejected,
                     );
@@ -965,7 +965,7 @@ fn apply_request(
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -984,14 +984,14 @@ fn apply_request(
         } => {
             let Some(kind) = ChargeKind::from_wire_code(*kind) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
             };
             let Some(ledger) = state.ledger.as_mut() else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -1007,7 +1007,7 @@ fn apply_request(
                 .is_err()
             {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -1018,7 +1018,7 @@ fn apply_request(
             }
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
-                    &state,
+                    state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
@@ -1030,7 +1030,7 @@ fn apply_request(
         .maximum_sequence
         .insert(request.identity.replica, request.event_sequence);
     state.requests.insert(key, (request, payload.clone()));
-    accepted_with_payload(&state, key.1, false, payload)
+    accepted_with_payload(state, key.1, false, payload)
 }
 
 fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {

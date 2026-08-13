@@ -123,10 +123,7 @@ fn assemble(
 ) -> (Vec<[f64; 3]>, usize, usize) {
     let ca = centroid(a, n);
     let cb = centroid(b, n);
-    let nrm = match normalise(normal) {
-        Some(v) => v,
-        None => [0.0, 0.0, 1.0],
-    };
+    let nrm = normalise(normal).unwrap_or([0.0, 0.0, 1.0]);
 
     let label = |i: usize| species.map(|s| s[i]).unwrap_or(0);
     let mut types: Vec<u32> = (0..n).map(label).collect();

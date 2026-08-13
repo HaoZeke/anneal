@@ -314,7 +314,7 @@ impl DescriptorSpace {
         coordinates: ArrayView1<f64>,
         species: Option<&[u32]>,
     ) -> Result<DescriptorVector, DescriptorError> {
-        if coordinates.is_empty() || coordinates.len() % 3 != 0 {
+        if coordinates.is_empty() || !coordinates.len().is_multiple_of(3) {
             return Err(DescriptorError::CoordinateDimension {
                 actual: coordinates.len(),
             });
@@ -323,13 +323,13 @@ impl DescriptorSpace {
             return Err(DescriptorError::NonFiniteCoordinate { index });
         }
         let atoms = coordinates.len() / 3;
-        if let Some(species) = species {
-            if species.len() != atoms {
-                return Err(DescriptorError::SpeciesDimension {
-                    expected: atoms,
-                    actual: species.len(),
-                });
-            }
+        if let Some(species) = species
+            && species.len() != atoms
+        {
+            return Err(DescriptorError::SpeciesDimension {
+                expected: atoms,
+                actual: species.len(),
+            });
         }
 
         let mut values = Vec::new();

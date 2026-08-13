@@ -175,7 +175,7 @@ pub fn regularized_pullback(
 
     let geometric_constraints =
         constraints.remove_translation || !constraints.rigid_group_labels.is_empty();
-    if geometric_constraints && (coordinate_dim == 0 || coordinate_dim % 3 != 0) {
+    if geometric_constraints && (coordinate_dim == 0 || !coordinate_dim.is_multiple_of(3)) {
         return Err(PullbackError::CartesianDimension {
             actual: coordinate_dim,
         });

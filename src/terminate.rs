@@ -115,17 +115,17 @@ impl Terminator {
         if let Some(prev) = self.last {
             let d = prev - e;
             if d > 0.0 {
-                if let Some(pd) = self.last_decrement {
-                    if pd > 0.0 {
-                        // Welford on the log ratio: a multiplicative process is
-                        // additive there, and the variance means something.
-                        let lr = (d / pd).ln();
-                        if lr.is_finite() {
-                            self.ratios += 1;
-                            let delta = lr - self.log_mean;
-                            self.log_mean += delta / self.ratios as f64;
-                            self.log_m2 += delta * (lr - self.log_mean);
-                        }
+                if let Some(pd) = self.last_decrement
+                    && pd > 0.0
+                {
+                    // Welford on the log ratio: a multiplicative process is
+                    // additive there, and the variance means something.
+                    let lr = (d / pd).ln();
+                    if lr.is_finite() {
+                        self.ratios += 1;
+                        let delta = lr - self.log_mean;
+                        self.log_mean += delta / self.ratios as f64;
+                        self.log_m2 += delta * (lr - self.log_mean);
                     }
                 }
                 self.last_decrement = Some(d);
