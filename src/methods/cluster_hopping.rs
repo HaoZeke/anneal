@@ -2871,6 +2871,42 @@ mod tests {
     }
 
     #[test]
+    fn overlapping_quench_is_not_recorded_or_reported_as_an_improvement() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(1);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let overlap = Array1::zeros(6);
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            if calls == 1 {
+                (0.0, start.clone())
+            } else {
+                (-298_303.448_809, overlap.clone())
+            }
+        };
+        let mut ledger = Ledger::new(16);
+        let mut rng = StdRng::seed_from_u64(41);
+        let out = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng);
+
+        assert_eq!(ledger.best, 0.0);
+        assert_eq!(out.best, 0.0);
+        assert!(
+            out.improvements
+                .iter()
+                .all(|(_, _, _, energy)| *energy > -1_000.0),
+            "overlap catastrophe entered the trace: {:?}",
+            out.improvements
+        );
+    }
+
+    #[test]
     fn respects_the_ledger() {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(500);
