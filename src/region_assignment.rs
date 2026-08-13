@@ -134,7 +134,7 @@ pub fn diversity_constrained_assignment(
     let mut ordered = candidates
         .iter()
         .copied()
-        .filter(RegionCandidate::is_admissible)
+        .filter(|candidate| candidate.is_admissible())
         .collect::<Vec<_>>();
     if ordered.is_empty() {
         return Err(RegionAssignmentError::NoAdmissibleSource);
@@ -155,7 +155,9 @@ pub fn diversity_constrained_assignment(
         if selected.len() == slots {
             break;
         }
-        if covered_regions.insert(candidate.region) {
+        if family_sizes.get(&candidate.source).copied().unwrap_or(0) < max_family_size
+            && covered_regions.insert(candidate.region)
+        {
             selected.push(candidate.source);
             *family_sizes.entry(candidate.source).or_default() += 1;
         }
