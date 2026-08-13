@@ -8,6 +8,7 @@ REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 RUNNER=$ROOT/scripts/elja_jcc_lj_ensemble.sh
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
 PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
+QUALIFIER_PYTHON=${JCC_QUALIFIER_PYTHON:-$PYTHON}
 RADIUS_READER=$REPRO_ROOT/workflow/jcc/read_census_radius.py
 CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}
 
@@ -38,6 +39,10 @@ if [[ ! -x $PYTHON || ! -f $RADIUS_READER ]]; then
   echo "missing census-radius validator or its Python interpreter" >&2
   exit 1
 fi
+if [[ ! -x $QUALIFIER_PYTHON ]]; then
+  echo "missing hard-LJ qualification Python: $QUALIFIER_PYTHON" >&2
+  exit 1
+fi
 (cd "$REPRO_ROOT" && sha256sum --check --strict results_jcc/calibration/SHA256SUMS)
 
 mkdir -p "$OUT_ROOT/submissions"
@@ -61,7 +66,7 @@ for n in 75 98 102 104; do
       --cpus-per-task=5 \
       --mem="${ELJA_MEM:-16G}" \
       --output="$log" \
-      --export="ALL,CATALOG_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
+      --export="ALL,CATALOG_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE},JCC_QUALIFIER_PYTHON=${QUALIFIER_PYTHON}" \
       "$RUNNER" "$n" 4000000 "$arm" slurm-array "$radius"
   done
 done
