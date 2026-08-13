@@ -178,7 +178,7 @@ jobs:
             echo "anneal-core ${ver} already on crates.io; nothing to upload."
             exit 0
           fi
-          cargo publish --no-verify
+          cargo publish
 
   github-release:
     name: GitHub Release
