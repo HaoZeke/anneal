@@ -95,7 +95,9 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
     for required in [
         r#"REPLICAS=4"#,
         r#"127.0.0.1:0"#,
-        r#"unset BANK_RPC"#,
+        r#"private_endpoints"#,
+        r#"BANK_SHARING=$ARM"#,
+        r#"BANK_RPC=${private_endpoints[$replica]}"#,
         r#"source_commit=%s\n"#,
         r#"bank_sync=charged_slices\n"#,
         r#"touch "$OUT/TERMINAL_OK""#,
