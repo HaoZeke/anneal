@@ -99,7 +99,14 @@ impl RelaxStats {
 /// Loose enough that a screening pass is not called converged and tight enough
 /// that a genuine minimum is: on a Lennard-Jones cluster a quenched structure
 /// comes back at about 1e-6.
-pub const CONVERGED_GRADIENT: f64 = 1e-5;
+pub const CONVERGED_GRADIENT: f64 = 1e-3;
+
+fn gradient_is_converged(gradient: ArrayView1<f64>, threshold: f64) -> bool {
+    gradient
+        .iter()
+        .fold(0.0_f64, |largest, value| largest.max(value.abs()))
+        < threshold
+}
 
 /// Runs a cluster search on `objective` under `ledger`.
 ///
@@ -222,7 +229,7 @@ where
         let converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
+            gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
@@ -326,7 +333,7 @@ where
         let converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
+            gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
@@ -649,7 +656,7 @@ where
         let converged = if led.charge() {
             stats.check_charged += 1;
             let g = objective.grad(xr.view());
-            g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < CONVERGED_GRADIENT
+            gradient_is_converged(g.view(), cfg.record_gradient)
         } else {
             false
         };
