@@ -22,3 +22,16 @@ fn ci_cancels_superseded_main_branch_runs() {
 
     assert!(workflow.contains("cancel-in-progress: true"));
 }
+
+#[test]
+fn ci_provisions_pinned_all_feature_dependencies() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+
+    assert!(workflow.contains("Luthaf/vesin"));
+    assert!(workflow.contains("976b5dbbdf392db5197353037eefc01a46e9e667"));
+    assert!(workflow.contains("mammasmias/IterativeRotationsAssignments"));
+    assert!(workflow.contains("2b2fc312569a5a50183ca82b2f260ebaaf87c508"));
+    assert!(workflow.contains("VESIN_SRC"));
+    assert!(workflow.contains("IRA_LIB_DIR"));
+    assert!(workflow.contains("cmake --build"));
+}
