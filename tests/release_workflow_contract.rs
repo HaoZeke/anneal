@@ -7,6 +7,17 @@ fn crate_publication_keeps_cargo_verification_enabled() {
 }
 
 #[test]
+fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
+    let manifest = include_str!("../Cargo.toml");
+    let workflow = include_str!("../.github/workflows/ci.yml");
+
+    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git ="));
+    assert!(manifest.contains("rev = \"75896909589cb595a251271851e7c31bc6a9936e\""));
+    assert!(workflow.contains("cargo publish --dry-run"));
+    assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
+}
+
+#[test]
 fn scientific_tests_optimize_kernels_without_disabling_debug_checks() {
     let manifest = include_str!("../Cargo.toml");
 
