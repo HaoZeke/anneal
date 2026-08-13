@@ -93,6 +93,11 @@ asset = [{ from = "include/anneal-core.hpp", to = "." }]
 inherits = "release"
 lto      = "thin"
 
+[profile.test]
+opt-level = 2
+debug-assertions = true
+overflow-checks = true
+
 [[bench]]
 name    = "sa_bench"
 harness = false
