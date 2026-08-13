@@ -1027,7 +1027,7 @@ mod tests {
         let config = Config::for_cluster(2);
         let radius = 2.0_f64.powf(1.0 / 6.0) / 2.0;
         let minimum = Array1::from_vec(vec![-radius, 0.0, 0.0, radius, 0.0, 0.0]);
-        let mut ledger = Ledger::new(2);
+        let mut ledger = Ledger::new(3);
         let mut stats = RelaxStats::default();
 
         let accepted = validate_bank_sample(
@@ -1055,6 +1055,29 @@ mod tests {
         assert_eq!(ledger.spent(), 2);
         assert_eq!(stats.check_charged, 2);
 
+        let separated = 1.2_f64;
+        let displaced = Array1::from_vec(vec![
+            -separated / 2.0,
+            0.0,
+            0.0,
+            separated / 2.0,
+            0.0,
+            0.0,
+        ]);
+        let inverse_sixth = separated.powi(-6);
+        let displaced_energy = 4.0 * (inverse_sixth * inverse_sixth - inverse_sixth);
+        let unquenched = validate_bank_sample(
+            &potential,
+            &config,
+            &mut ledger,
+            &mut stats,
+            displaced_energy,
+            displaced.view(),
+        );
+        assert!(unquenched.is_none(), "a nonminimum bank sample was adopted");
+        assert_eq!(ledger.spent(), 3);
+        assert_eq!(stats.check_charged, 3);
+
         let unaffordable = validate_bank_sample(
             &potential,
             &config,
@@ -1064,8 +1087,8 @@ mod tests {
             minimum.view(),
         );
         assert!(unaffordable.is_none());
-        assert_eq!(ledger.spent(), 2);
-        assert_eq!(stats.check_charged, 2);
+        assert_eq!(ledger.spent(), 3);
+        assert_eq!(stats.check_charged, 3);
     }
 
     #[test]
