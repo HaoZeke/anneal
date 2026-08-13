@@ -175,8 +175,10 @@ for replica in 0 1 2 3; do
 done
 
 if [[ $ARM == shared ]]; then
-  grep -h '"aggregate_charged":' "$OUT"/traces/replica-*.jsonl \
-    | grep -q "\"aggregate_charged\":${TOTAL_BUDGET}"
+  awk -v expected="\"aggregate_charged\":${TOTAL_BUDGET}" '
+    index($0, expected) { found = 1 }
+    END { exit !found }
+  ' "$OUT"/traces/replica-*.jsonl
 fi
 
 {
