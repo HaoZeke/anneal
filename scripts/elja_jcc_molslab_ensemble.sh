@@ -11,6 +11,7 @@ SYSTEM=${1:?h2o2, h2o4, h2o6, or cuh2}
 PER_REPLICA_BUDGET=${2:?per-replica charged budget}
 ARM=${3:?shared or control}
 ENSEMBLE_INDEX=${4:?ensemble index}
+SOAP_MODE=${5:?flexible, rigid, or off}
 if [[ $ENSEMBLE_INDEX == slurm-array ]]; then
   ENSEMBLE_INDEX=${SLURM_ARRAY_TASK_ID:?Slurm array index}
 fi
@@ -18,6 +19,13 @@ case $ARM in
   shared|control) ;;
   *)
     echo "arm must be shared or control" >&2
+    exit 2
+    ;;
+esac
+case $SOAP_MODE in
+  flexible|rigid|off) ;;
+  *)
+    echo "SOAP mode must be flexible, rigid, or off" >&2
     exit 2
     ;;
 esac
@@ -32,7 +40,7 @@ SYNC_INTERVAL=${BANK_SYNC:-1}
 REPLICAS=4
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$((${SEED_OFFSET_BASE:-0} + ENSEMBLE_INDEX * REPLICAS))
-ENSEMBLE="${SYSTEM}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
+ENSEMBLE="${SYSTEM}-${SOAP_MODE}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT="$OUT_ROOT/$CAMPAIGN/$SYSTEM/$ARM/$ENSEMBLE"
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
 SERVER=$ROOT/target/release/examples/bank_server
@@ -180,6 +188,8 @@ for replica in 0 1 2 3; do
     export BANK_SLICE=$SLICE
     export BANK_SYNC=$SYNC_INTERVAL
     export BANK_SHARING=$ARM
+    export ANNEAL_SOAP_MODE=$SOAP_MODE
+    export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
     if [[ $SYSTEM == h2o2 || $SYSTEM == h2o4 || $SYSTEM == h2o6 ]]; then
       export RGPOT_XTB_ENGINE=$ENGINE
       export RGPOT_XTB_TRACE=$worker/last-request.txt
@@ -233,6 +243,7 @@ for replica in 0 1 2 3; do
   grep -q "charged ${PER_REPLICA_BUDGET}" "$output"
   grep -q "arm ${label}" "$output"
   grep -q "encounter target=" "$output"
+  test -s "$worker/resolved-config.json"
   if grep -q "best inf eV" "$output"; then
     if find "$worker" -maxdepth 1 -name 'best_*.xyz' -print -quit | grep -q .; then
       echo "replica $replica wrote an unvalidated infinite-best structure" >&2
@@ -242,13 +253,26 @@ for replica in 0 1 2 3; do
     grep -q "verify e=" "$output"
   fi
 done
+for replica in 1 2 3; do
+  cmp -s "$OUT/workers/replica-0/resolved-config.json" \
+    "$OUT/workers/replica-$replica/resolved-config.json"
+done
 
 grep -h "encounter target=" "$OUT"/workers/replica-*/stdout.log >"$OUT/encounters.txt"
 grep -h "verify e=" "$OUT"/workers/replica-*/stdout.log >"$OUT/verifications.txt" || true
+cp "$OUT/workers/replica-0/resolved-config.json" "$OUT/resolved-config.json"
+resolved_config_sha256=$(sha256sum "$OUT/resolved-config.json" | awk '{print $1}')
+binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
+engine_sha256=$(sha256sum "$ENGINE" | awk '{print $1}')
+runner_sha256=$(sha256sum "$0" | awk '{print $1}')
+server_sha256=$(sha256sum "$SERVER" | awk '{print $1}')
+peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
 {
   printf 'campaign=%s\n' "$CAMPAIGN"
   printf 'system=%s\n' "$SYSTEM"
   printf 'arm=%s\n' "$ARM"
+  printf 'soap_mode=%s\n' "$SOAP_MODE"
+  printf 'requested_options=%s\n' "soap_mode=$SOAP_MODE,sharing=$ARM"
   printf 'ensemble=%s\n' "$ENSEMBLE"
   printf 'replicas=%s\n' "$REPLICAS"
   printf 'per_replica_budget=%s\n' "$PER_REPLICA_BUDGET"
@@ -261,16 +285,17 @@ grep -h "verify e=" "$OUT"/workers/replica-*/stdout.log >"$OUT/verifications.txt
   printf 'bank_sync=charged_slices\n'
   printf 'bank_sync_interval=%s\n' "$SYNC_INTERVAL"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+  printf 'resolved_config_sha256=%s\n' "$resolved_config_sha256"
+  printf 'binary_sha256=%s\n' "$binary_sha256"
+  printf 'engine_sha256=%s\n' "$engine_sha256"
+  printf 'runner_sha256=%s\n' "$runner_sha256"
+  printf 'server_sha256=%s\n' "$server_sha256"
+  printf 'peek_sha256=%s\n' "$peek_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
-  sha256sum "$BIN"
-  sha256sum "$ENGINE"
-  sha256sum "$0"
   if [[ $SYSTEM == cuh2 ]]; then
-    sha256sum "$CON"
+    printf 'input_sha256=%s\n' "$(sha256sum "$CON" | awk '{print $1}')"
   fi
-  sha256sum "$SERVER"
-  sha256sum "$PEEK"
 } >"$OUT/run.manifest"
 
 touch "$OUT/TERMINAL_OK"

@@ -135,6 +135,7 @@ fi
 pids=()
 for replica in 0 1 2 3; do
   seed=$((SEED_BASE + replica))
+  worker=$OUT/workers/replica-${replica}
   args=rec
   if [[ $ARM == control ]]; then
     args=rec,catalog
@@ -147,6 +148,7 @@ for replica in 0 1 2 3; do
     export CATALOG_HOLE_SAMPLES="$HOLE_SAMPLES"
     export CATALOG_POPULATION_INTERVAL="$POPULATION_INTERVAL"
     export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
+    export ANNEAL_RESOLVED_CONFIG=$worker.resolved-config.json
     export SEED_OFFSET="$seed"
     if [[ $ARM == shared ]]; then
       export CATALOG_RPC="$endpoint"
@@ -168,6 +170,13 @@ if (( status != 0 )); then
   echo "at least one LJ replica failed" >&2
   exit "$status"
 fi
+for replica in 0 1 2 3; do
+  test -s "$OUT/workers/replica-${replica}.resolved-config.json"
+done
+for replica in 1 2 3; do
+  cmp -s "$OUT/workers/replica-0.resolved-config.json" \
+    "$OUT/workers/replica-${replica}.resolved-config.json"
+done
 
 if [[ $ARM == shared ]] && ! kill -0 "$server_pid" 2>/dev/null; then
   wait "$server_pid" || true
@@ -214,6 +223,13 @@ fi
   "$OUT/traces/replica-2.jsonl" \
   "$OUT/traces/replica-3.jsonl"
 
+cp "$OUT/workers/replica-0.resolved-config.json" "$OUT/resolved-config.json"
+resolved_config_sha256=$(sha256sum "$OUT/resolved-config.json" | awk '{print $1}')
+binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
+runner_sha256=$(sha256sum "$0" | awk '{print $1}')
+qualifier_sha256=$(sha256sum "$QUALIFIER" | awk '{print $1}')
+calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
+
 {
   printf 'campaign=%s\n' "$CAMPAIGN"
   printf 'system=lj%s\n' "$N"
@@ -229,14 +245,16 @@ fi
   printf 'hole_samples=%s\n' "$HOLE_SAMPLES"
   printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+  printf 'requested_options=%s\n' "$args"
+  printf 'resolved_config_sha256=%s\n' "$resolved_config_sha256"
+  printf 'binary_sha256=%s\n' "$binary_sha256"
+  printf 'runner_sha256=%s\n' "$runner_sha256"
+  printf 'qualifier_sha256=%s\n' "$qualifier_sha256"
+  printf 'calibration_sha256=%s\n' "$calibration_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
-  sha256sum "$BIN"
-  sha256sum "$0"
-  sha256sum "$QUALIFIER"
-  sha256sum "$CALIBRATION"
   if [[ $ARM == shared ]]; then
-    sha256sum "$SERVER"
+    printf 'server_sha256=%s\n' "$(sha256sum "$SERVER" | awk '{print $1}')"
   fi
 } >"$OUT/run.manifest"
 

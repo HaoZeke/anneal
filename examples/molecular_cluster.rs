@@ -5,7 +5,9 @@
 
 mod common;
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, repack_rigid_groups};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, MoveLibrary, SoapProposalMode, repack_rigid_groups,
+};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
@@ -19,6 +21,23 @@ const WATER: [[f64; 3]; 3] = [
     [0.7572, 0.5865, 0.0],
     [-0.7572, 0.5865, 0.0],
 ];
+
+fn soap_mode_from_env() -> SoapProposalMode {
+    match std::env::var("ANNEAL_SOAP_MODE").as_deref() {
+        Ok("flexible") | Err(_) => SoapProposalMode::Flexible,
+        Ok("rigid") => SoapProposalMode::Rigid,
+        Ok("off") => SoapProposalMode::Off,
+        Ok(value) => panic!("ANNEAL_SOAP_MODE must be flexible, rigid, or off; got {value}"),
+    }
+}
+
+fn write_resolved_config(cfg: &Config) {
+    let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") else {
+        return;
+    };
+    std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
+        .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -40,6 +59,8 @@ fn main() {
         groups: groups.clone(),
         reactive: false,
     };
+    cfg.soap_mode = soap_mode_from_env();
+    write_resolved_config(&cfg);
     println!(
         "(H2O){m} through eindir/rgpot xtb, arm {}, budget {budget}, seeds {seed0}..{}",
         bank_label(),
