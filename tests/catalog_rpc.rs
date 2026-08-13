@@ -5,6 +5,7 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
 use std::thread;
+use std::time::Duration;
 
 use anneal_core::Catalog_capnp::{RejectionKind, catalog_reply, catalog_request};
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
@@ -75,6 +76,25 @@ fn isolated_server_starts_with_a_verifiable_empty_snapshot() {
         foreign.snapshot(1).unwrap_err(),
         CatalogClientError::Rejected(ProtocolRejection::EnsembleMismatch)
     );
+}
+
+#[test]
+fn accepted_connection_remains_open_between_requests() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "ensemble-idle", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        identity("ensemble-idle", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+
+    assert_eq!(client.snapshot(1).unwrap().version, 0);
+    thread::sleep(Duration::from_millis(20));
+    assert_eq!(client.snapshot(2).unwrap().version, 0);
 }
 
 #[test]
