@@ -12,9 +12,9 @@ mod run {
     };
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
-        CatalogCandidate, CatalogMutation, CatalogRelation, CatalogSnapshot,
-        DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-        ProtocolRejection, TransitionDestination,
+        BoundaryCrossingRecord, CatalogCandidate, CatalogMutation, CatalogRelation,
+        CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
+        PopulationPlan, ProtocolRejection, TransitionDestination,
     };
     use crate::methods::feynman_kac::population_family_position;
 
@@ -331,6 +331,21 @@ mod run {
     pub enum CatalogHoleOutcome {
         /// One seeded target-free proposal was returned.
         Proposal(DescriptorHoleProposal),
+        /// The coordinator rejected the request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
+    /// Result of requesting an observed attraction-region boundary crossing.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CatalogBoundaryOutcome {
+        /// A validated adopted inter-basin crossing was returned.
+        Crossing(BoundaryCrossingRecord),
+        /// No crossing leaves the query's inferred attraction region.
+        Empty,
         /// The coordinator rejected the request.
         Rejected,
         /// Communication failed and local search remains authoritative.
@@ -798,6 +813,44 @@ mod run {
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                     Ok(CatalogHoleOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Request one observed crossing leaving the current attraction region.
+        pub fn boundary_crossing(
+            &mut self,
+            replica: u32,
+            current: Vec<f64>,
+            draw: u64,
+        ) -> Result<CatalogBoundaryOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.boundary_crossing(rpc_sequence, current, draw))
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(CatalogBoundaryOutcome::SharingDisabled)
+                }
+                Some(Ok(Some(crossing))) => Ok(CatalogBoundaryOutcome::Crossing(crossing)),
+                Some(Ok(None)) => Ok(CatalogBoundaryOutcome::Empty),
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(CatalogBoundaryOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(CatalogBoundaryOutcome::LocalFallback)
                 }
             }
         }
