@@ -8,6 +8,7 @@
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
 use anneal_core::bias::BasinBias;
+use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::methods::cluster_hopping::{
     ClusterFingerprint, Config, Keying, Ledger, MoveLibrary, Outcome, QuenchStatus,
     optimize_with_gradient, random_cluster, run_with_bias,
@@ -806,7 +807,8 @@ fn main() {
             if led.charge() {
                 let (fresh_energy, g) = lj(xr.view());
                 boundary_energy = fresh_energy;
-                if g.iter().fold(0.0_f64, |a, v| a.max(v.abs())) < 1e-5 {
+                if euclidean_gradient_norm(g.as_slice().expect("LJ gradient is contiguous")) < 1e-5
+                {
                     converged += 1;
                     validated_gradient = Some(g);
                 } else {
@@ -1715,11 +1717,11 @@ fn lj_catalog_candidate(
     coordinates: ArrayView1<f64>,
     gradient: ArrayView1<f64>,
 ) -> Option<anneal_core::catalog_rpc::CatalogCandidate> {
-    let gradient_norm = gradient
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
+    let gradient_norm = euclidean_gradient_norm(
+        gradient
+            .as_slice()
+            .expect("validated LJ gradient is contiguous"),
+    );
     if !energy.is_finite() || !gradient_norm.is_finite() || gradient_norm > 1e-5 {
         return None;
     }
@@ -1768,11 +1770,11 @@ fn validate_sampled_lj(
         return None;
     }
     let (energy, gradient) = lj(coordinates.view());
-    let gradient_norm = gradient
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
+    let gradient_norm = euclidean_gradient_norm(
+        gradient
+            .as_slice()
+            .expect("fresh LJ gradient is contiguous"),
+    );
     let energy_tolerance = 1e-9 + 1e-10 * energy.abs().max(candidate.energy.abs());
     if (energy - candidate.energy).abs() > energy_tolerance
         || gradient_norm > 1e-5
