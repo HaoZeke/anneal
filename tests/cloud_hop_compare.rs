@@ -175,6 +175,7 @@ fn rec_off(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
 
 #[test]
 fn soap_on_vs_off_water4_eight_seeds() {
+    const M: usize = 4;
     const SEEDS: u64 = 8;
     const BUDGET: usize = 2_500;
     let mut on_better = 0usize;

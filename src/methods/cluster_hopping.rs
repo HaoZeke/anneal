@@ -3108,9 +3108,7 @@ mod tests {
         assert!(out.hops > 0, "no hop completed");
         assert_eq!(out.screened_out, out.hops);
         assert!(
-            relaxation_steps
-                .iter()
-                .any(|&steps| steps == cfg.screen_steps),
+            relaxation_steps.contains(&cfg.screen_steps),
             "the short screen never ran"
         );
         assert_eq!(
