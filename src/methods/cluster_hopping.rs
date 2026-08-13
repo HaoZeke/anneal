@@ -599,11 +599,12 @@ fn run_full<'g, R: Rng + ?Sized>(
     // geometry and gradient contract as every subsequent quench.
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
     let initial_recordable = quench_is_sane(cfg, e, x.view())
-        && grad
-            .as_deref_mut()
-            .and_then(|g| g(ledger, x.view()))
-            .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
-            .unwrap_or(true);
+        && match grad.as_deref_mut() {
+            Some(g) => g(ledger, x.view())
+                .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
+                .unwrap_or(false),
+            None => true,
+        };
     if initial_recordable {
         ledger.record(e, x.view());
     }
@@ -1344,12 +1345,18 @@ fn run_full<'g, R: Rng + ?Sized>(
         // later inherits the guarantee. Anything not converged still moves the
         // chain and still deposits bias; it is only barred from being recorded
         // as an answer, which is the one thing it cannot be.
-        let recordable = !unquenched
-            && grad
-                .as_deref_mut()
-                .and_then(|g| g(ledger, x_new.view()))
-                .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
-                .unwrap_or(true);
+        let recordable = if unquenched {
+            false
+        } else {
+            match grad.as_deref_mut() {
+                Some(g) => g(ledger, x_new.view())
+                    .map(|v| {
+                        v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                    })
+                    .unwrap_or(false),
+                None => true,
+            }
+        };
         if recordable {
             ledger.record(e_new, x_new.view());
         } else {
