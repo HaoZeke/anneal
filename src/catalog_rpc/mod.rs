@@ -16,7 +16,7 @@ pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 8;
+pub const PROTOCOL_VERSION: u16 = 9;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +155,13 @@ pub enum CatalogOperation {
         current: Vec<f64>,
         /// Number of unit-sphere samples.
         samples: u32,
+        /// Explicit deterministic random draw.
+        draw: u64,
+    },
+    /// Request an observed crossing usable from the query's attraction region.
+    BoundaryCrossing {
+        /// Current replica descriptor under the fixed catalogue schema.
+        current: Vec<f64>,
         /// Explicit deterministic random draw.
         draw: u64,
     },
@@ -476,6 +483,14 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             hole.set_samples(*samples);
             hole.set_draw(*draw);
         }
+        CatalogOperation::BoundaryCrossing { current, draw } => {
+            let mut crossing = operation.init_boundary_crossing();
+            fill_f64(
+                crossing.reborrow().init_current(current.len() as u32),
+                current,
+            );
+            crossing.set_draw(*draw);
+        }
         CatalogOperation::PolicyState { descriptor, energy } => {
             let mut state = operation.init_policy_state();
             fill_f64(
@@ -568,6 +583,13 @@ pub(crate) fn decode_request_reader(
                 current: list_f64(hole.get_current().map_err(wire_error)?),
                 samples: hole.get_samples(),
                 draw: hole.get_draw(),
+            }
+        }
+        catalog_request::operation::BoundaryCrossing(crossing) => {
+            let crossing = crossing.map_err(wire_error)?;
+            CatalogOperation::BoundaryCrossing {
+                current: list_f64(crossing.get_current().map_err(wire_error)?),
+                draw: crossing.get_draw(),
             }
         }
         catalog_request::operation::PolicyState(state) => {
