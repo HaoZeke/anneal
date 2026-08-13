@@ -273,6 +273,33 @@ mod option_tests {
         assert_eq!(first, second);
         assert_ne!(first, parent);
     }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn quenched_transport_destination_keeps_its_action_label() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let state = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let (energy, gradient) = lj(state.view());
+
+        let (action, candidate) = boundary_transition_destination(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            11,
+            71,
+            400,
+            energy,
+            state.view(),
+            gradient.view(),
+        )
+        .unwrap();
+
+        assert_eq!(action, "boundary_transport");
+        assert_eq!(candidate.coordinates, state.to_vec());
+        assert!(candidate.quench_converged);
+    }
 }
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
