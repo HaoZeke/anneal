@@ -1535,6 +1535,7 @@ mod move_scaling_tests {
         };
 
         let mut flexible = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        flexible.length_scale = 1.0;
         flexible.soap_mode = SoapProposalMode::Flexible;
         let flexible_move = flexible
             .move_library
