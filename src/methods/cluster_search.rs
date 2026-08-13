@@ -15,7 +15,10 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-use crate::methods::cluster_hopping::{Config, Ledger, Outcome, optimize_with_gradient};
+use crate::methods::cluster_hopping::{
+    Config, Ledger, OVERLAP_SEPARATION, Outcome, min_pair_distance, optimize_with_gradient,
+    structure_is_sane,
+};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
@@ -380,37 +383,6 @@ where
     }
 }
 
-/// Shortest pair distance in a 3N Cartesian state.
-pub fn min_pair_distance(x: ArrayView1<f64>) -> f64 {
-    let n = x.len() / 3;
-    if n < 2 {
-        return f64::INFINITY;
-    }
-    let mut best = f64::INFINITY;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let dx = x[3 * i] - x[3 * j];
-            let dy = x[3 * i + 1] - x[3 * j + 1];
-            let dz = x[3 * i + 2] - x[3 * j + 2];
-            let r2 = dx * dx + dy * dy + dz * dz;
-            if r2 < best {
-                best = r2;
-            }
-        }
-    }
-    best.sqrt()
-}
-
-/// A bank member is usable only if every coordinate is finite and no
-/// two atoms sit on top of each other.
-///
-/// EAM and xTB both reward overlap with a huge negative energy. Adopting
-/// that as a win fills the bank with a catastrophe and every later chain
-/// copies it.
-pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
-    x.iter().all(|v| v.is_finite()) && min_pair_distance(x) >= min_sep
-}
-
 /// Keep adsorbate atoms above the frozen slab after a SOAP hole step.
 #[cfg(feature = "bank-rpc")]
 fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
@@ -441,8 +413,6 @@ fn pin_adsorbate_above_slab(x: &mut Array1<f64>, cfg: &Config) {
 /// H–H is 0.74 Å. EAM overlap sits under 0.3 Å. The configured
 /// `min_separation` is scaled by the largest covalent diameter, which
 /// on a Cu slab is copper, and that floor rejects every physical H2.
-pub const OVERLAP_SEPARATION: f64 = 0.35;
-
 fn sane_sep(_cfg: &Config) -> f64 {
     OVERLAP_SEPARATION
 }
