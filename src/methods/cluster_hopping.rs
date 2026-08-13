@@ -77,6 +77,28 @@ pub struct QuenchBoundary {
     gradient: Option<Array1<f64>>,
 }
 
+/// One state-changing perturb--quench step taken by the live chain.
+///
+/// The record is deliberately separate from the best-minimum ledger. Funnel
+/// entry commonly requires accepted uphill motion, so a history containing
+/// only record improvements cannot reconstruct the region the chain occupies
+/// or the boundary crossings it has demonstrated.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcceptedTransition {
+    /// Completed hop index within this run.
+    pub hop: usize,
+    /// Target-blind proposal mechanism that generated the trial.
+    pub action: String,
+    /// Quenched energy at the source occupied by the chain.
+    pub from_energy: f64,
+    /// Quenched energy adopted by the chain.
+    pub to_energy: f64,
+    /// Quenched source coordinates.
+    pub from_state: Array1<f64>,
+    /// Quenched destination coordinates.
+    pub to_state: Array1<f64>,
+}
+
 impl QuenchBoundary {
     /// Scientific status assigned by the caller's fresh convergence check.
     pub fn status(&self) -> QuenchStatus {
@@ -246,6 +268,10 @@ pub struct Outcome {
     pub best_state: Option<Array1<f64>>,
     /// Live chain at the end of the run, which a later hop can continue.
     pub final_state: Option<Array1<f64>>,
+    /// Energy belonging to [`Outcome::final_state`].
+    pub final_energy: f64,
+    /// Accepted live-chain edges in execution order.
+    pub accepted_transitions: Vec<AcceptedTransition>,
     /// Hops taken.
     pub hops: usize,
     /// Trials rejected by screening before a full relaxation.
@@ -824,6 +850,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut screened_out = 0usize;
     let mut returned = 0usize;
     let mut accepted = 0usize;
+    let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
 
     loop {
@@ -1077,6 +1104,15 @@ fn run_full<'g, R: Rng + ?Sized>(
                 continue;
             }
         }
+        let proposal_action = if cov_fire {
+            "covariance".to_owned()
+        } else if soft_fire && soft_cache.is_some() {
+            "soft_mode".to_owned()
+        } else if angular {
+            "angular".to_owned()
+        } else {
+            kernels[k].name().to_owned()
+        };
         // Stage one of the staged quench: settle the moved atoms against the
         // frozen environment at fractional price, before recentring shifts
         // every coordinate and hides which atoms the move touched.
@@ -1831,6 +1867,14 @@ fn run_full<'g, R: Rng + ?Sized>(
                     let _ = writeln!(fh, "{} {e_new:.8}", ledger.spent());
                 }
             }
+            accepted_transitions.push(AcceptedTransition {
+                hop: hops,
+                action: proposal_action,
+                from_energy: e,
+                to_energy: e_new,
+                from_state: x.clone(),
+                to_state: x_new.clone(),
+            });
             e = e_new;
             x = x_new;
         } else if cfg.budget_window {
@@ -2209,6 +2253,8 @@ fn run_full<'g, R: Rng + ?Sized>(
         best: ledger.best,
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
+        final_energy: e,
+        accepted_transitions,
         hops,
         screened_out,
         basins: n_basins,
