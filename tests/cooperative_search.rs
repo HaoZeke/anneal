@@ -21,7 +21,8 @@ use anneal_core::catalog_rpc::{
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
-    CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
+    CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome,
+    CooperativeRun,
     PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
     RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation, SynchronizationOutcome,
     TraceKind, TransitionRecordOutcome,
@@ -341,6 +342,42 @@ fn observed_adopted_crossing_is_available_to_another_replica() {
     assert_eq!(crossing.action, "surface_relocate");
     assert_eq!(crossing.from, source.coordinates);
     assert_eq!(crossing.to, destination.coordinates);
+    assert_ne!(crossing.source_basin, crossing.destination_basin);
+}
+
+#[test]
+fn cooperative_run_exposes_an_observed_boundary_crossing() {
+    let server = server();
+    let digest = signature().digest();
+    let mut producer =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let source = candidate(0, 1, 1.2);
+    let source_descriptor = source.descriptor.clone();
+    producer.record_visit(1, source).unwrap();
+    producer
+        .record_transition(
+            2,
+            "surface_relocate",
+            TransitionDestination::Resolved(candidate(0, 2, 4.0)),
+            true,
+        )
+        .unwrap();
+    let mut run = CooperativeRun::new([1], 100).unwrap();
+    run.attach_client(
+        1,
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let CatalogBoundaryOutcome::Crossing(crossing) =
+        run.boundary_crossing(1, source_descriptor, 71).unwrap()
+    else {
+        panic!("cooperative run must expose the shared crossing")
+    };
+
+    assert_eq!(crossing.action, "surface_relocate");
     assert_ne!(crossing.source_basin, crossing.destination_basin);
 }
 
