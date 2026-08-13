@@ -60,6 +60,14 @@ struct BoundaryCrossingRequest {
   draw @1 :UInt64;
 }
 
+struct BoundaryCrossingReply {
+  action @0 :Text;
+  from @1 :List(Float64);
+  to @2 :List(Float64);
+  sourceBasin @3 :UInt64;
+  destinationBasin @4 :UInt64;
+}
+
 struct PolicyStateRequest {
   descriptor @0 :List(Float64);
   energy @1 :Float64;
@@ -206,6 +214,7 @@ struct AcceptedReply {
     policyState @6 :PolicyStateReply;
     populationEpoch @9 :PopulationEpochReply;
     catalogMutation @10 :CatalogMutationReply;
+    boundaryCrossing @11 :BoundaryCrossingReply;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;

@@ -270,6 +270,21 @@ pub struct DescriptorHoleProposal {
     pub nearest_catalog_distance: f64,
 }
 
+/// One validated adopted crossing shared across cooperative replicas.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BoundaryCrossingRecord {
+    /// Target-blind move family that generated the crossing.
+    pub action: String,
+    /// Validated source minimum coordinates.
+    pub from: Vec<f64>,
+    /// Validated destination minimum coordinates.
+    pub to: Vec<f64>,
+    /// Fixed-census source basin.
+    pub source_basin: u64,
+    /// Fixed-census destination basin.
+    pub destination_basin: u64,
+}
+
 /// Relation between a replica candidate and the active catalog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CatalogRelation {
@@ -357,6 +372,8 @@ pub enum AcceptedPayload {
     Candidate(CatalogCandidate),
     /// Seeded target-free descriptor-hole proposal.
     DescriptorHole(DescriptorHoleProposal),
+    /// Observed crossing selected from the current attraction region.
+    BoundaryCrossing(BoundaryCrossingRecord),
     /// Exact census and active-catalog policy evidence.
     PolicyState(PolicyState),
     /// Pending barrier state or a complete synchronous population plan.
@@ -678,6 +695,20 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     );
                     output.set_nearest_catalog_distance(hole.nearest_catalog_distance);
                 }
+                AcceptedPayload::BoundaryCrossing(crossing) => {
+                    let mut output = payload.init_boundary_crossing();
+                    output.set_action(crossing.action.as_str());
+                    fill_f64(
+                        output.reborrow().init_from(crossing.from.len() as u32),
+                        &crossing.from,
+                    );
+                    fill_f64(
+                        output.reborrow().init_to(crossing.to.len() as u32),
+                        &crossing.to,
+                    );
+                    output.set_source_basin(crossing.source_basin);
+                    output.set_destination_basin(crossing.destination_basin);
+                }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
                     output.set_total_visits(state.total_visits);
@@ -787,6 +818,16 @@ pub(crate) fn decode_reply_reader(
                         target: list_f64(hole.get_target().map_err(wire_error)?),
                         increment: list_f64(hole.get_increment().map_err(wire_error)?),
                         nearest_catalog_distance: hole.get_nearest_catalog_distance(),
+                    })
+                }
+                accepted_reply::payload::BoundaryCrossing(crossing) => {
+                    let crossing = crossing.map_err(wire_error)?;
+                    AcceptedPayload::BoundaryCrossing(BoundaryCrossingRecord {
+                        action: text_value(crossing.get_action().map_err(wire_error)?)?,
+                        from: list_f64(crossing.get_from().map_err(wire_error)?),
+                        to: list_f64(crossing.get_to().map_err(wire_error)?),
+                        source_basin: crossing.get_source_basin(),
+                        destination_basin: crossing.get_destination_basin(),
                     })
                 }
                 accepted_reply::payload::PolicyState(state) => {
