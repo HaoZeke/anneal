@@ -39,6 +39,11 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let noclimb = opts.contains(&"noclimb");
     assert!(!(climb && noclimb), "climb and noclimb are contradictory");
     cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;
+
+    let sym = opts.contains(&"sym");
+    let nosym = opts.contains(&"nosym");
+    assert!(!(sym && nosym), "sym and nosym are contradictory");
+    cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;
 }
 
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
