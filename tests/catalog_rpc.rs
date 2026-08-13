@@ -39,6 +39,7 @@ fn candidate(replica: u32, sequence: u64, basin_marker: f64) -> CatalogCandidate
         charged_work: sequence,
         event_sequence: sequence,
         seed: 100 + u64::from(replica),
+        census_basin: None,
     }
 }
 

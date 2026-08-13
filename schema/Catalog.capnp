@@ -26,6 +26,10 @@ struct CandidateRecord {
   chargedWork @10 :UInt64;
   eventSequence @11 :UInt64;
   seed @12 :UInt64;
+  censusBasin :union {
+    unassigned @13 :Void;
+    assigned @14 :UInt64;
+  }
 }
 
 enum QuenchStatus {
@@ -79,6 +83,26 @@ struct PolicyStateReply {
   localBasinDistance @9 :Float64;
   novelty @10 :Float64;
   transitionUncertainty @11 :Float64;
+}
+
+enum CatalogMutationKind {
+  added @0;
+  replacedSameBasin @1;
+  replacedConflicts @2;
+  replacedCapacity @3;
+  rejectedSameBasin @4;
+  rejectedConflict @5;
+  rejectedCapacity @6;
+}
+
+struct CatalogMutationReply {
+  basinId @0 :UInt64;
+  kind @1 :CatalogMutationKind;
+  evicted @2 :List(UInt64);
+  incumbentBasin :union {
+    absent @3 :Void;
+    present @4 :UInt64;
+  }
 }
 
 struct PopulationSubmitRequest {
@@ -165,6 +189,7 @@ struct AcceptedReply {
     descriptorHole @5 :DescriptorHoleReply;
     policyState @6 :PolicyStateReply;
     populationEpoch @9 :PopulationEpochReply;
+    catalogMutation @10 :CatalogMutationReply;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;

@@ -16,15 +16,17 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 
 use super::{
-    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
-    CatalogRelation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
-    PolicyState, PopulationEpochState, PopulationPlan, ProtocolError, ProtocolRejection,
-    decode_request, decode_request_reader, encode_reply, encode_request,
+    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
+    CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply, CatalogRequest,
+    CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
+    ProtocolError, ProtocolRejection, decode_request, decode_request_reader, encode_reply,
+    encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    BasinCatalog, BasinCensus, BasinId, CandidateRecord, CandidateValidator, FreshEvaluation,
-    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
+    AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCensus, BasinId, CandidateRecord,
+    CandidateValidator, FreshEvaluation, QuenchStatus, SystemSignature, ValidatedCandidate,
+    ValidatorConfig, euclidean_gradient_norm,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -568,8 +570,10 @@ fn apply_request(
             {
                 let index = usize::try_from(*draw % scientific.catalog.len() as u64)
                     .expect("sample index is bounded by catalog length");
+                let entry = &scientific.catalog.entries()[index];
                 payload = AcceptedPayload::Candidate(candidate_from_validated(
-                    scientific.catalog.entries()[index].validated(),
+                    entry.validated(),
+                    Some(entry.census_id()),
                 ));
             }
         }
@@ -719,7 +723,7 @@ fn apply_request(
                 basin_id,
                 &validated.candidate.descriptor,
             );
-            let canonical = candidate_from_validated(&validated);
+            let canonical = candidate_from_validated(&validated, Some(basin_id));
             let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
             let inserted = match epoch_candidates.get(&request.identity.replica) {
                 Some(stored) if stored == &canonical => false,
@@ -902,7 +906,7 @@ fn apply_request(
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::OfferCandidate { candidate } => {
-            let (census_visits, active_entries) = if let Some(scientific) =
+            let (census_visits, active_entries, mutation) = if let Some(scientific) =
                 state.scientific.as_mut()
             {
                 let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
@@ -927,13 +931,20 @@ fn apply_request(
                     observation.basin_id,
                     validated.fresh.energy,
                 );
-                scientific
+                let outcome = scientific.catalog.admit(
+                    observation.basin_id,
+                    observation.basin_visits,
+                    validated,
+                );
+                let incumbent = scientific
                     .catalog
-                    .admit(observation.basin_id, observation.basin_visits, validated);
+                    .incumbent()
+                    .map(|entry| entry.census_id());
                 (
                     observation.total_visits,
                     u32::try_from(scientific.catalog.len())
                         .expect("catalog capacity is checked against u32"),
+                    Some(catalog_mutation(outcome, observation.basin_id, incumbent)),
                 )
             } else {
                 let Some(active_entries) = state.active_entries.checked_add(1) else {
@@ -950,7 +961,7 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                (census_visits, active_entries)
+                (census_visits, active_entries, None)
             };
             let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
                 return rejected(
@@ -962,6 +973,9 @@ fn apply_request(
             state.census_visits = census_visits;
             state.active_entries = active_entries;
             state.snapshot_version = snapshot_version;
+            if let Some(mutation) = mutation {
+                payload = AcceptedPayload::CatalogMutation(mutation);
+            }
         }
         CatalogOperation::LedgerEvent {
             kind,
@@ -1039,6 +1053,7 @@ fn validate_candidate(
 ) -> Result<ValidatedCandidate, ()> {
     if candidate.producer_replica != identity.replica
         || candidate.descriptor_schema_version != scientific.signature.descriptor.version
+        || candidate.census_basin.is_some()
     {
         return Err(());
     }
@@ -1083,7 +1098,10 @@ fn validate_candidate(
         .map_err(|_| ())
 }
 
-fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate {
+fn candidate_from_validated(
+    validated: &ValidatedCandidate,
+    census_basin: Option<BasinId>,
+) -> CatalogCandidate {
     CatalogCandidate {
         producer_replica: validated.candidate.producer_replica,
         coordinates: validated.candidate.coordinates.clone(),
@@ -1097,6 +1115,43 @@ fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate 
         charged_work: validated.candidate.charged_work,
         event_sequence: validated.candidate.event_sequence,
         seed: validated.candidate.seed,
+        census_basin: census_basin.map(BasinId::as_raw),
+    }
+}
+
+fn catalog_mutation(
+    outcome: AdmissionOutcome,
+    offered_basin: BasinId,
+    incumbent_basin: Option<BasinId>,
+) -> CatalogMutation {
+    let (kind, evicted) = match outcome {
+        AdmissionOutcome::Added { .. } => (CatalogMutationKind::Added, Vec::new()),
+        AdmissionOutcome::ReplacedSameBasin { .. } => {
+            (CatalogMutationKind::ReplacedSameBasin, Vec::new())
+        }
+        AdmissionOutcome::ReplacedConflicts { evicted, .. } => (
+            CatalogMutationKind::ReplacedConflicts,
+            evicted.into_iter().map(BasinId::as_raw).collect(),
+        ),
+        AdmissionOutcome::ReplacedCapacity { evicted, .. } => (
+            CatalogMutationKind::ReplacedCapacity,
+            vec![evicted.as_raw()],
+        ),
+        AdmissionOutcome::Rejected {
+            reason: AdmissionRejection::SameBasinNotLower,
+        } => (CatalogMutationKind::RejectedSameBasin, Vec::new()),
+        AdmissionOutcome::Rejected {
+            reason: AdmissionRejection::ConflictNotLower,
+        } => (CatalogMutationKind::RejectedConflict, Vec::new()),
+        AdmissionOutcome::Rejected {
+            reason: AdmissionRejection::CapacityNotLower,
+        } => (CatalogMutationKind::RejectedCapacity, Vec::new()),
+    };
+    CatalogMutation {
+        basin_id: offered_basin.as_raw(),
+        kind,
+        evicted,
+        incumbent_basin: incumbent_basin.map(BasinId::as_raw),
     }
 }
 

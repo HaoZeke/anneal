@@ -6,16 +6,17 @@ use capnp::message::{Builder, ReaderOptions};
 use capnp::serialize;
 
 use crate::Catalog_capnp::{
-    CatalogRelation as WireCatalogRelation, QuenchStatus as WireQuenchStatus, RejectionKind,
-    accepted_reply, candidate_record, catalog_reply, catalog_request, population_epoch_reply,
-    policy_state_reply,
+    CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
+    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, candidate_record,
+    catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
+    population_epoch_reply,
 };
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 6;
+pub const PROTOCOL_VERSION: u16 = 7;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,66 @@ pub struct CatalogCandidate {
     pub event_sequence: u64,
     /// Producer random-seed identity.
     pub seed: u64,
+    /// Coordinator-assigned fixed-census basin for returned representatives.
+    pub census_basin: Option<u64>,
+}
+
+/// Exact serialized outcome of one active-catalog admission attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogMutationKind {
+    /// Candidate filled an available active slot.
+    Added,
+    /// Candidate improved its basin's active representative.
+    ReplacedSameBasin,
+    /// Candidate replaced its complete packing-conflict set.
+    ReplacedConflicts,
+    /// Candidate replaced the eligible entry at capacity.
+    ReplacedCapacity,
+    /// Same-basin representative had lower or equal energy.
+    RejectedSameBasin,
+    /// A packing-conflict representative had lower or equal energy.
+    RejectedConflict,
+    /// The eligible entry at capacity had lower or equal energy.
+    RejectedCapacity,
+}
+
+impl CatalogMutationKind {
+    /// Whether the active catalog changed.
+    pub const fn admitted(self) -> bool {
+        matches!(
+            self,
+            Self::Added
+                | Self::ReplacedSameBasin
+                | Self::ReplacedConflicts
+                | Self::ReplacedCapacity
+        )
+    }
+
+    /// Stable event-stream code.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::ReplacedSameBasin => "replaced_same_basin",
+            Self::ReplacedConflicts => "replaced_conflicts",
+            Self::ReplacedCapacity => "replaced_capacity",
+            Self::RejectedSameBasin => "rejected_same_basin",
+            Self::RejectedConflict => "rejected_conflict",
+            Self::RejectedCapacity => "rejected_capacity",
+        }
+    }
+}
+
+/// Catalog identity changes returned by a serialized admission attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogMutation {
+    /// Fixed-census basin assigned to the offered candidate.
+    pub basin_id: u64,
+    /// Exact admission or rejection class.
+    pub kind: CatalogMutationKind,
+    /// Fixed-census basins removed from the active catalog.
+    pub evicted: Vec<u64>,
+    /// Active incumbent after the attempt.
+    pub incumbent_basin: Option<u64>,
 }
 
 /// Mutation or read operation carried by a catalog request.
@@ -275,6 +336,8 @@ pub enum AcceptedPayload {
     PolicyState(PolicyState),
     /// Pending barrier state or a complete synchronous population plan.
     PopulationEpoch(PopulationEpochState),
+    /// Exact active-catalog admission result.
+    CatalogMutation(CatalogMutation),
 }
 
 /// Accepted coordinator response.
@@ -601,6 +664,22 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                         result.set_pending(());
                     }
                 }
+                AcceptedPayload::CatalogMutation(mutation) => {
+                    let mut output = payload.init_catalog_mutation();
+                    output.set_basin_id(mutation.basin_id);
+                    output.set_kind(mutation.kind.into());
+                    fill_u64(
+                        output
+                            .reborrow()
+                            .init_evicted(mutation.evicted.len() as u32),
+                        &mutation.evicted,
+                    );
+                    let mut incumbent = output.init_incumbent_basin();
+                    match mutation.incumbent_basin {
+                        Some(identifier) => incumbent.set_present(identifier),
+                        None => incumbent.set_absent(()),
+                    }
+                }
             }
         }
         CatalogReply::Rejected {
@@ -694,6 +773,22 @@ pub(crate) fn decode_reply_reader(
                         plan,
                     })
                 }
+                accepted_reply::payload::CatalogMutation(mutation) => {
+                    let mutation = mutation.map_err(wire_error)?;
+                    let incumbent_basin =
+                        match mutation.get_incumbent_basin().which().map_err(wire_error)? {
+                            catalog_mutation_reply::incumbent_basin::Absent(()) => None,
+                            catalog_mutation_reply::incumbent_basin::Present(identifier) => {
+                                Some(identifier)
+                            }
+                        };
+                    AcceptedPayload::CatalogMutation(CatalogMutation {
+                        basin_id: mutation.get_basin_id(),
+                        kind: mutation.get_kind().map_err(wire_error)?.into(),
+                        evicted: list_u64(mutation.get_evicted().map_err(wire_error)?),
+                        incumbent_basin,
+                    })
+                }
             };
             Ok(CatalogReply::Accepted(AcceptedReply {
                 event_sequence,
@@ -774,6 +869,34 @@ impl From<WireCatalogRelation> for CatalogRelation {
     }
 }
 
+impl From<CatalogMutationKind> for WireCatalogMutationKind {
+    fn from(value: CatalogMutationKind) -> Self {
+        match value {
+            CatalogMutationKind::Added => Self::Added,
+            CatalogMutationKind::ReplacedSameBasin => Self::ReplacedSameBasin,
+            CatalogMutationKind::ReplacedConflicts => Self::ReplacedConflicts,
+            CatalogMutationKind::ReplacedCapacity => Self::ReplacedCapacity,
+            CatalogMutationKind::RejectedSameBasin => Self::RejectedSameBasin,
+            CatalogMutationKind::RejectedConflict => Self::RejectedConflict,
+            CatalogMutationKind::RejectedCapacity => Self::RejectedCapacity,
+        }
+    }
+}
+
+impl From<WireCatalogMutationKind> for CatalogMutationKind {
+    fn from(value: WireCatalogMutationKind) -> Self {
+        match value {
+            WireCatalogMutationKind::Added => Self::Added,
+            WireCatalogMutationKind::ReplacedSameBasin => Self::ReplacedSameBasin,
+            WireCatalogMutationKind::ReplacedConflicts => Self::ReplacedConflicts,
+            WireCatalogMutationKind::ReplacedCapacity => Self::ReplacedCapacity,
+            WireCatalogMutationKind::RejectedSameBasin => Self::RejectedSameBasin,
+            WireCatalogMutationKind::RejectedConflict => Self::RejectedConflict,
+            WireCatalogMutationKind::RejectedCapacity => Self::RejectedCapacity,
+        }
+    }
+}
+
 fn check_version(received: u16) -> Result<(), ProtocolError> {
     if received == PROTOCOL_VERSION {
         Ok(())
@@ -792,6 +915,12 @@ fn fill_f64(mut output: capnp::primitive_list::Builder<'_, f64>, values: &[f64])
 }
 
 fn fill_u32(mut output: capnp::primitive_list::Builder<'_, u32>, values: &[u32]) {
+    for (index, value) in values.iter().copied().enumerate() {
+        output.set(index as u32, value);
+    }
+}
+
+fn fill_u64(mut output: capnp::primitive_list::Builder<'_, u64>, values: &[u64]) {
     for (index, value) in values.iter().copied().enumerate() {
         output.set(index as u32, value);
     }
@@ -833,6 +962,11 @@ fn fill_candidate(mut output: candidate_record::Builder<'_>, candidate: &Catalog
     output.set_charged_work(candidate.charged_work);
     output.set_event_sequence(candidate.event_sequence);
     output.set_seed(candidate.seed);
+    let mut basin = output.init_census_basin();
+    match candidate.census_basin {
+        Some(identifier) => basin.set_assigned(identifier),
+        None => basin.set_unassigned(()),
+    }
 }
 
 fn read_candidate(input: candidate_record::Reader<'_>) -> Result<CatalogCandidate, ProtocolError> {
@@ -844,6 +978,10 @@ fn read_candidate(input: candidate_record::Reader<'_>) -> Result<CatalogCandidat
                 ProtocolError::Malformed(format!("cell length is {}, expected 9", values.len()))
             })?)
         }
+    };
+    let census_basin = match input.get_census_basin().which().map_err(wire_error)? {
+        candidate_record::census_basin::Unassigned(()) => None,
+        candidate_record::census_basin::Assigned(identifier) => Some(identifier),
     };
     Ok(CatalogCandidate {
         producer_replica: input.get_producer_replica(),
@@ -861,6 +999,7 @@ fn read_candidate(input: candidate_record::Reader<'_>) -> Result<CatalogCandidat
         charged_work: input.get_charged_work(),
         event_sequence: input.get_event_sequence(),
         seed: input.get_seed(),
+        census_basin,
     })
 }
 
@@ -869,6 +1008,10 @@ fn list_f64(input: capnp::primitive_list::Reader<'_, f64>) -> Vec<f64> {
 }
 
 fn list_u32(input: capnp::primitive_list::Reader<'_, u32>) -> Vec<u32> {
+    input.iter().collect()
+}
+
+fn list_u64(input: capnp::primitive_list::Reader<'_, u64>) -> Vec<u64> {
     input.iter().collect()
 }
 

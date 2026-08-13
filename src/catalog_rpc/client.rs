@@ -9,10 +9,10 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogOperation,
-    CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION,
-    PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection, decode_reply_reader,
-    encode_request,
+    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
+    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
+    PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
+    decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -61,7 +61,7 @@ impl PartialEq for CatalogClientError {
 }
 
 /// Version and replay classification for one accepted mutation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationReceipt {
     /// Coordinator snapshot version after the mutation.
     pub version: u64,
@@ -69,6 +69,8 @@ pub struct MutationReceipt {
     pub duplicate: bool,
     /// Coordinator counters after the mutation or replay.
     pub snapshot: CatalogSnapshot,
+    /// Exact active-catalog result for an offer operation.
+    pub catalog: Option<CatalogMutation>,
 }
 
 /// Exact policy evidence and the coordinator snapshot that carried it.
@@ -237,6 +239,7 @@ impl CatalogClient {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
             snapshot: reply.snapshot,
+            catalog: None,
         })
     }
 
@@ -250,10 +253,21 @@ impl CatalogClient {
             event_sequence,
             CatalogOperation::OfferCandidate { candidate },
         )?;
+        let catalog = match reply.payload {
+            AcceptedPayload::CatalogMutation(mutation) => Some(mutation),
+            AcceptedPayload::None => None,
+            _ => {
+                return Err(ProtocolError::Malformed(
+                    "catalog offer returned an incompatible payload".into(),
+                )
+                .into());
+            }
+        };
         Ok(MutationReceipt {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
             snapshot: reply.snapshot,
+            catalog,
         })
     }
 
@@ -277,6 +291,7 @@ impl CatalogClient {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
             snapshot: reply.snapshot,
+            catalog: None,
         })
     }
 
@@ -294,7 +309,8 @@ impl CatalogClient {
             AcceptedPayload::None => Ok(None),
             AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::PolicyState(_)
-            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -324,7 +340,8 @@ impl CatalogClient {
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::PolicyState(_)
-            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -362,7 +379,8 @@ impl CatalogClient {
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
-            | AcceptedPayload::PopulationEpoch(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -464,7 +482,8 @@ fn population_epoch_payload(
         AcceptedPayload::None
         | AcceptedPayload::Candidate(_)
         | AcceptedPayload::DescriptorHole(_)
-        | AcceptedPayload::PolicyState(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::PolicyState(_)
+        | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),

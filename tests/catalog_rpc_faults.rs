@@ -33,6 +33,7 @@ fn candidate() -> CatalogCandidate {
         charged_work: 1,
         event_sequence: 1,
         seed: 100,
+        census_basin: None,
     }
 }
 

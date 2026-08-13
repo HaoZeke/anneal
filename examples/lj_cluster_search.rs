@@ -1636,6 +1636,7 @@ fn run_capnp_catalog(
                     && ledger.remaining() > 0
                     && ledger.charge()
                 {
+                    slice_trace.sampled_basin = candidate.census_basin;
                     slice_trace.descriptor_step_norm =
                         Some(vector_distance(descriptor.values(), &candidate.descriptor));
                     slice_trace.cartesian_step_norm = Some(vector_distance(
@@ -1926,6 +1927,7 @@ fn lj_catalog_candidate(
         charged_work: u64::try_from(charged_work).ok()?,
         event_sequence,
         seed,
+        census_basin: None,
     })
 }
 
