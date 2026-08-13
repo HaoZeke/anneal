@@ -67,7 +67,12 @@ fn molecular_build_produces_every_paired_campaign_executable() {
     let source = fs::read_to_string(&script)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
 
-    for example in ["molecular_cluster", "slab_adsorption", "bank_server"] {
+    for example in [
+        "molecular_cluster",
+        "slab_adsorption",
+        "bank_server",
+        "bank_peek",
+    ] {
         assert!(
             source.contains(&format!("--example {example}")),
             "Elja molecular build must compile {example}"
@@ -77,6 +82,48 @@ fn molecular_build_produces_every_paired_campaign_executable() {
             "Elja molecular build must verify {example}"
         );
     }
+}
+
+#[test]
+fn molecular_ensembles_are_isolated_paired_slurm_runs() {
+    let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_molslab_ensemble.sh");
+    let source = fs::read_to_string(&runner)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", runner.display()));
+
+    for required in [
+        r#"REPLICAS=4"#,
+        r#"127.0.0.1:0"#,
+        r#"unset BANK_RPC"#,
+        r#"source_commit=%s\n"#,
+        r#"bank_sync=charged_slices\n"#,
+        r#"touch "$OUT/TERMINAL_OK""#,
+        r#"xargs -0 sha256sum >SHA256SUMS"#,
+    ] {
+        assert!(
+            source.contains(required),
+            "molecule/slab ensemble runner is missing contract {required}"
+        );
+    }
+}
+
+#[test]
+fn molecular_submission_pairs_every_system_and_arm() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_submit_jcc_molslab.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for system in ["h2o2", "h2o4", "h2o6", "cuh2"] {
+        assert!(
+            source.contains(&format!("{system}:")),
+            "molecule/slab submission omits {system}"
+        );
+    }
+    assert!(source.contains("for arm in shared control"));
+    assert!(source.contains(r#"CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}"#));
 }
 
 #[test]
