@@ -104,7 +104,7 @@ fn local_stall_triggers_leave_only_from_the_related_basin() {
 }
 
 #[test]
-fn aggregate_progress_tightens_catalog_exploitation() {
+fn lower_remote_energy_requests_exploration_without_minimum_adoption() {
     let (census, _) = census_with_repeated_visits(2);
     let relation = ActiveCatalogRelation::Unrelated {
         lower_energy_anchor: true,
@@ -122,11 +122,19 @@ fn aggregate_progress_tightens_catalog_exploitation() {
 
     assert_eq!(
         CatalogPolicy::decide(early).action,
-        PolicyAction::Exploit { win_only: false }
+        PolicyAction::Explore
     );
     assert_eq!(
         CatalogPolicy::decide(late).action,
-        PolicyAction::Exploit { win_only: true }
+        PolicyAction::Explore
+    );
+    assert_eq!(
+        CatalogPolicy::decide(early).reason,
+        PolicyReason::UnrelatedCatalogExplore
+    );
+    assert_eq!(
+        CatalogPolicy::decide(late).reason,
+        PolicyReason::UnrelatedCatalogExplore
     );
 }
 
