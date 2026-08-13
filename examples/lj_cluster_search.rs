@@ -2477,6 +2477,33 @@ fn lj_transition_candidates(
 }
 
 #[cfg(feature = "bank-rpc")]
+#[allow(clippy::too_many_arguments)]
+fn boundary_transition_destination(
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+    replica: u32,
+    event_sequence: u64,
+    seed: u64,
+    charged_work: usize,
+    energy: f64,
+    coordinates: ArrayView1<f64>,
+    gradient: ArrayView1<f64>,
+) -> Option<(&'static str, anneal_core::catalog_rpc::CatalogCandidate)> {
+    lj_catalog_candidate(
+        descriptor_space,
+        species,
+        replica,
+        event_sequence,
+        seed,
+        charged_work,
+        energy,
+        coordinates,
+        gradient,
+    )
+    .map(|candidate| ("boundary_transport", candidate))
+}
+
+#[cfg(feature = "bank-rpc")]
 enum AdaptiveCatalogOperation {
     RegisterCurrent(anneal_core::catalog_rpc::CatalogCandidate),
     Adopt {
