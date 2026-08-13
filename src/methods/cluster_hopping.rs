@@ -115,6 +115,7 @@ pub struct ChainCheckpoint<'a> {
     current_gradient: Option<ArrayView1<'a, f64>>,
     best_state: Option<ArrayView1<'a, f64>>,
     best_energy: f64,
+    quench_boundaries: &'a [QuenchBoundary],
     accepted_transitions: &'a [AcceptedTransition],
     charged: usize,
     hops: usize,
@@ -144,6 +145,11 @@ impl<'a> ChainCheckpoint<'a> {
     /// Lowest recordable energy found under this ledger.
     pub fn best_energy(&self) -> f64 {
         self.best_energy
+    }
+
+    /// Relaxation boundaries completed since the preceding checkpoint.
+    pub fn quench_boundaries(&self) -> &'a [QuenchBoundary] {
+        self.quench_boundaries
     }
 
     /// Accepted transitions completed since the preceding checkpoint.
@@ -1022,6 +1028,7 @@ where
     let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
     let mut checkpoint_hops = 0usize;
+    let mut checkpoint_quench_start = 0usize;
     let mut checkpoint_transition_start = 0usize;
     let mut next_checkpoint = checkpoint_interval;
 
@@ -1036,12 +1043,14 @@ where
                 current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
                 best_state: ledger.best_state.as_ref().map(|state| state.view()),
                 best_energy: ledger.best,
+                quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
                 accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
                 charged: ledger.spent(),
                 hops,
             };
             let checkpoint_action = checkpoint(snapshot);
             checkpoint_hops = hops;
+            checkpoint_quench_start = ledger.quench_boundaries.len();
             checkpoint_transition_start = accepted_transitions.len();
             next_checkpoint = ledger
                 .spent()
