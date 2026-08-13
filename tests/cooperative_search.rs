@@ -227,7 +227,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
         CatalogOfferOutcome::Admitted
     );
     assert_eq!(
-        run.offer_candidate(0, candidate(0, 2, 2.0)).unwrap(),
+        run.offer_candidate(0, candidate(0, 2, 1.0)).unwrap(),
         CatalogOfferOutcome::Admitted
     );
     assert!(matches!(
