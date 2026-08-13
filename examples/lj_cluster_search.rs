@@ -2007,6 +2007,12 @@ fn run_capnp_catalog(
             charged_work: u64::try_from(checkpoint_charged)
                 .expect("checkpoint charge must fit u64"),
         };
+        if snapshot.remaining() == 0 {
+            cooperative
+                .record_slice(replica, trace)
+                .expect("terminal checkpoint trace must remain complete");
+            return CheckpointAction::Continue;
+        }
         match decision.action {
             PolicyAction::ContinueLocal => {}
             PolicyAction::Exploit { .. } | PolicyAction::Explore | PolicyAction::Leave => {

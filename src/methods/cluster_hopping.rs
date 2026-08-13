@@ -118,6 +118,7 @@ pub struct ChainCheckpoint<'a> {
     quench_boundaries: &'a [QuenchBoundary],
     accepted_transitions: &'a [AcceptedTransition],
     charged: usize,
+    remaining: usize,
     hops: usize,
 }
 
@@ -160,6 +161,11 @@ impl<'a> ChainCheckpoint<'a> {
     /// Charged objective work completed by this checkpoint.
     pub fn charged(&self) -> usize {
         self.charged
+    }
+
+    /// Charged objective work still available after this checkpoint.
+    pub fn remaining(&self) -> usize {
+        self.remaining
     }
 
     /// Perturb--quench hops completed by this checkpoint.
@@ -1046,6 +1052,7 @@ where
                 quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
                 accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
                 charged: ledger.spent(),
+                remaining: ledger.remaining(),
                 hops,
             };
             let checkpoint_action = checkpoint(snapshot);
@@ -2521,6 +2528,7 @@ where
             quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
             accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
             charged: ledger.spent(),
+            remaining: ledger.remaining(),
             hops,
         };
         let _ = checkpoint(snapshot);
