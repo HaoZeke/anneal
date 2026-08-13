@@ -45,8 +45,6 @@ fn main() {
         groups: groups.clone(),
         reactive: false,
     };
-    cfg.screen_steps = 6;
-    cfg.relax_steps = 60;
     println!(
         "(H2O){m} through eindir/rgpot xtb, arm {}, budget {budget}, seeds {seed0}..{}",
         bank_label(),
@@ -74,6 +72,14 @@ fn main() {
             stats.converged,
             stats.total(),
             bank_label()
+        );
+        println!(
+            "    quench charged screen/full/check {}/{}/{}  screens {}  capped {}",
+            stats.screen_charged,
+            stats.full_charged,
+            stats.check_charged,
+            stats.screens,
+            stats.capped
         );
         if let Some((e, g)) = checked {
             println!("    verify e={e:.6} |g|={g:.3e}");
