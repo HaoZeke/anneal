@@ -9,6 +9,7 @@ RUNNER=$ROOT/scripts/elja_jcc_lj_ensemble.sh
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
 PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 RADIUS_READER=$REPRO_ROOT/workflow/jcc/read_census_radius.py
+CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}
 
 case "$STAGE" in
   development)
@@ -60,7 +61,7 @@ for n in 75 98 102 104; do
       --cpus-per-task=5 \
       --mem="${ELJA_MEM:-16G}" \
       --output="$log" \
-      --export="ALL,CATALOG_CAMPAIGN=jcc-2026-${STAGE},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
+      --export="ALL,CATALOG_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
       "$RUNNER" "$n" 4000000 "$arm" slurm-array "$radius"
   done
 done
