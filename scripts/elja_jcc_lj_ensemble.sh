@@ -30,6 +30,8 @@ BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
 QUALIFIER=${JCC_QUALIFIER:-$REPRO_ROOT/workflow/jcc/validate_hard_lj_qualification.py}
 QUALIFIER_PYTHON=${JCC_QUALIFIER_PYTHON:-$REPRO_ROOT/.pixi/envs/default/bin/python}
+SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
+CALIBRATION=$REPRO_ROOT/results_jcc/calibration/lj${N}.json
 CAMPAIGN=${CATALOG_CAMPAIGN:-jcc-2026-development}
 ENSEMBLE="lj${N}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
@@ -73,6 +75,19 @@ if [[ ! -f $QUALIFIER ]]; then
 fi
 if [[ ! -x $QUALIFIER_PYTHON ]]; then
   echo "missing qualification Python: $QUALIFIER_PYTHON" >&2
+  exit 1
+fi
+if [[ ! -f $SOURCE_COMMIT_FILE ]]; then
+  echo "missing source commit record: $SOURCE_COMMIT_FILE" >&2
+  exit 1
+fi
+if [[ ! -f $CALIBRATION ]]; then
+  echo "missing census-radius calibration: $CALIBRATION" >&2
+  exit 1
+fi
+IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
+if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+  echo "source commit record must contain one full Git object ID" >&2
   exit 1
 fi
 
@@ -213,9 +228,13 @@ fi
   printf 'slice=%s\n' "$SLICE"
   printf 'hole_samples=%s\n' "$HOLE_SAMPLES"
   printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
+  printf 'source_commit=%s\n' "$SOURCE_COMMIT"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
   sha256sum "$BIN"
+  sha256sum "$0"
+  sha256sum "$QUALIFIER"
+  sha256sum "$CALIBRATION"
   if [[ $ARM == shared ]]; then
     sha256sum "$SERVER"
   fi
