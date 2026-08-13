@@ -6,6 +6,64 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.9.0](https://github.com/HaoZeke/anneal/tree/0.9.0) - 2026-08-13
+
+### Added
+
+- A durable cooperative-search protocol with replica identity, monotone event
+  sequences, idempotent replay, snapshot-version checks, validated candidate
+  ingress, descriptor-hole proposals, policy-state queries, and an append-only
+  charged-work ledger.  The Cap'n Proto client and coordinator expose the same
+  catalogue operations in process and over RPC.
+- Cut-and-splice mixing for the CSA bank: a random plane cut between two
+  members, with atom-count repair, as the ``mix_fraction`` step.
+- Elja campaign drivers pin a full source object ID, verify calibrated inputs,
+  record the complete run contract, require terminal markers, and seal every
+  result package with a closed ``SHA256SUMS`` manifest.  Shared and private-bank
+  arms use the same ensemble budget and provenance contract.
+- Event-catalogue residual search (``graphkey``): local NAUTY topology keys,
+  a ``log n`` event catalogue, energy-floor flicker classes with record EI,
+  a remaining-drop screen predictor, a GMRF residual on the class graph, and
+  ``archive_search`` (CLI token ``ras`` / ``pair``). Large-budget ras is one
+  ungated polish hop for ``N >= 70`` (LJ75 Marks) and a 30/70 skip-return
+  then polish split for smaller clusters (LJ38/55). Small-budget molecular
+  and slab walks stay on their own branch. Archive search schedules its
+  return-polish stages on cloned configurations and does not mutate the caller's
+  preset.
+- Persistent in-process minimum-profile adapters for molecular-cluster and slab
+  searches. ``nwchemc`` and ``cpmdc`` load once, reuse the same ``ProfileEngine``
+  for the complete hop loop, and require neither an RPC server nor a result
+  cache. Molecular requests omit a cell while periodic slab requests carry it
+  through the same request type.
+- Synchronous, fixed-population Feynman--Kac reconfiguration for cooperative
+  chains.  Complete epochs rank energy, basin scarcity, and GMRF residual
+  uncertainty, then return a replayable systematic-resampling plan with parent,
+  family-size, rejuvenation, and effective-sample-size diagnostics.
+
+### Changed
+
+- Cluster proposal libraries implement the general ``MoveKernel`` interface and
+  ``Config::proposal_kernel`` plugs them into the same ``HoppingSampler`` used by
+  ordinary bounded objectives. Length- and energy-bearing preset values,
+  including restart and rigid-group repacking geometry, derive from declared
+  ``length_scale`` and ``energy_scale`` values rather than Lennard-Jones units.
+- Shared-bank samples cross a charged local validation boundary before they can
+  affect a receiving chain.  Molecular and slab campaign drivers support one
+  shared bank or one private bank per replica, record the selected topology, and
+  retain per-replica validation and snapshot evidence.
+- ``Config::recommended`` is the complete scientific hop: Thompson-allocated
+  LeanBurst includes the analytic SOAP pullback alongside the atomic proposals,
+  the return screen rejects basin returns before a full quench, and stall
+  symmetrisation is enabled. ``Config::for_cluster`` remains the plain
+  Wales--Doye comparison preset.
+
+### Fixed
+
+- The recommended SOAP pullback scales both its Cartesian RMSD and descriptor
+  cutoff from the preset's declared ``length_scale`` instead of assuming
+  Lennard-Jones coordinate units.
+
+
 ## [0.8.0](https://github.com/HaoZeke/anneal/tree/0.8.0) - 2026-08-08
 
 ### Added
