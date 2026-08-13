@@ -1,4 +1,19 @@
 #![warn(missing_docs)]
+// Fixed-axis tensor contractions are written with index notation so each loop
+// follows the corresponding equation and preserves its bounds visibly.
+#![allow(clippy::needless_range_loop)]
+// Numerical kernels keep physical inputs explicit; packing them into transport
+// structs would obscure the equations without reducing the required state.
+#![allow(clippy::too_many_arguments)]
+// Callback and evidence tuples encode coupled numerical contracts at their use
+// sites, where aliases would hide rather than clarify their components.
+#![allow(clippy::type_complexity)]
+// Protocol enums keep payloads inline to avoid allocation in the cooperative
+// search path; variant size is part of that performance choice.
+#![allow(clippy::large_enum_variant)]
+// Negated floating-point bounds intentionally classify NaN as invalid. Rewriting
+// them as ordered comparisons silently admits NaN.
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
 //! anneal-core: simulated-annealing components on the eindir typed primitives.
 //!
 //! This crate ships the typed component algebra (Cool / Neigh / Move / Accept
