@@ -20,7 +20,7 @@ pub use event::{Event, EventCatalog, TopologyRecord};
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
     CandidateRecord, CandidateValidator, FreshEvaluation, GradientSource, NumericField,
-    QuenchStatus, ValidatedCandidate, ValidationFailure, ValidatorConfig,
+    QuenchStatus, ValidatedCandidate, ValidationFailure, ValidatorConfig, euclidean_gradient_norm,
 };
 
 /// Compatibility name for the local-topology event catalog.

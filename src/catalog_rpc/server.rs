@@ -24,7 +24,7 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     BasinCatalog, BasinCensus, BasinId, CandidateRecord, CandidateValidator, FreshEvaluation,
-    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig,
+    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -1075,13 +1075,7 @@ fn candidate_from_validated(validated: &ValidatedCandidate) -> CatalogCandidate 
         cell: validated.candidate.cell,
         energy: validated.fresh.energy,
         forces: validated.fresh.forces.clone(),
-        gradient_norm: validated
-            .fresh
-            .forces
-            .iter()
-            .map(|force| force * force)
-            .sum::<f64>()
-            .sqrt(),
+        gradient_norm: euclidean_gradient_norm(&validated.fresh.forces),
         descriptor: validated.candidate.descriptor.clone(),
         descriptor_schema_version: validated.candidate.descriptor_schema_version,
         quench_converged: true,

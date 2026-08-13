@@ -51,6 +51,15 @@ pub struct FreshEvaluation {
     pub forces: Vec<f64>,
 }
 
+/// Euclidean norm used by producer and receiver convergence contracts.
+pub fn euclidean_gradient_norm(gradient: &[f64]) -> f64 {
+    gradient
+        .iter()
+        .map(|component| component * component)
+        .sum::<f64>()
+        .sqrt()
+}
+
 /// Numeric and geometric thresholds for candidate validation.
 #[derive(Debug, Clone)]
 pub struct ValidatorConfig {
@@ -305,12 +314,7 @@ impl CandidateValidator {
         }
         require_finite_scalar(fresh.energy, NumericField::FreshEnergy)?;
         require_finite_slice(&fresh.forces, NumericField::FreshForces)?;
-        let fresh_gradient_norm = fresh
-            .forces
-            .iter()
-            .map(|force| force * force)
-            .sum::<f64>()
-            .sqrt();
+        let fresh_gradient_norm = euclidean_gradient_norm(&fresh.forces);
         if fresh_gradient_norm > self.config.max_gradient_norm {
             return Err(ValidationFailure::GradientThreshold {
                 source: GradientSource::Fresh,
