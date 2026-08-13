@@ -1962,7 +1962,7 @@ pub(crate) fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3]
         n[i][i] += shift;
     }
     let mut q = [1.0, 0.0, 0.0, 0.0];
-    for _ in 0..40 {
+    for _ in 0..128 {
         let mut nq = [0.0; 4];
         for i in 0..4 {
             for j in 0..4 {
@@ -1974,8 +1974,14 @@ pub(crate) fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3]
             norm += v * v;
         }
         let norm = norm.sqrt().max(1e-15);
+        let mut change = 0.0_f64;
         for i in 0..4 {
-            q[i] = nq[i] / norm;
+            let next = nq[i] / norm;
+            change = change.max((next - q[i]).abs());
+            q[i] = next;
+        }
+        if change < 1e-14 {
+            break;
         }
     }
     let (w, x, y, z) = (q[0], q[1], q[2], q[3]);
