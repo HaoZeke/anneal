@@ -592,3 +592,63 @@ fn no_sharing_run_executes_without_a_server_and_preserves_local_accounting() {
             .any(|event| event.kind == TraceKind::RpcFallback)
     );
 }
+
+#[test]
+fn server_loss_preserves_independent_local_trajectory_and_ledger() {
+    let mut independent = CooperativeRun::new([0], 100).unwrap();
+    let mut disconnected = CooperativeRun::new([0], 100).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let peer = thread::spawn(move || drop(listener.accept().unwrap()));
+    let client = CatalogClient::connect(
+        address,
+        identity(0, signature().digest()),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    peer.join().unwrap();
+    disconnected.attach_client(0, client).unwrap();
+
+    let mut independent_state = 1.0_f64;
+    let mut disconnected_state = 1.0_f64;
+    for (step, charged_calls) in [3_u64, 5, 7].into_iter().enumerate() {
+        let local_transition = |state: f64| state.mul_add(0.5, -(step as f64 + 1.0));
+        independent_state = local_transition(independent_state);
+        disconnected_state = local_transition(disconnected_state);
+
+        independent
+            .record_work(0, ChargeKind::AcceptedQuench, charged_calls)
+            .unwrap();
+        disconnected
+            .record_work(0, ChargeKind::AcceptedQuench, charged_calls)
+            .unwrap();
+
+        assert_eq!(
+            independent.synchronize(0).unwrap(),
+            SynchronizationOutcome::SharingDisabled
+        );
+        assert_eq!(
+            disconnected.synchronize(0).unwrap(),
+            SynchronizationOutcome::LocalFallback
+        );
+    }
+
+    assert_eq!(disconnected_state, independent_state);
+    assert_eq!(
+        disconnected.ledger().replica_total(0),
+        independent.ledger().replica_total(0)
+    );
+    assert_eq!(
+        disconnected.ledger().ensemble_total(),
+        independent.ledger().ensemble_total()
+    );
+    assert_eq!(
+        disconnected.ledger().event_count(),
+        independent.ledger().event_count()
+    );
+    assert!(disconnected
+        .events()
+        .iter()
+        .any(|event| event.kind == TraceKind::RpcFallback));
+}
