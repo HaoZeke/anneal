@@ -38,7 +38,8 @@ OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
 OUT="$OUT_ROOT/$CAMPAIGN/lj${N}/$ARM/$ENSEMBLE"
 CAPACITY=${CATALOG_CAPACITY:-30}
 SLICE=${CATALOG_SLICE:-500}
-HOLE_SAMPLES=${CATALOG_HOLE_SAMPLES:-256}
+TRANSPORT_NOISE=${CATALOG_TRANSPORT_NOISE:-0.05}
+TRANSPORT_RADIUS=${CATALOG_TRANSPORT_RADIUS:-$(awk -v n="$N" 'BEGIN { printf "%.17g", sqrt(n) }')}
 POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 MINIMUM_POPULATION_INTERVAL=$((2 * SLICE + 2))
 if (( POPULATION_INTERVAL < MINIMUM_POPULATION_INTERVAL )); then
@@ -146,7 +147,8 @@ for replica in 0 1 2 3; do
     export CATALOG_ENSEMBLE="$ENSEMBLE"
     export CATALOG_REPLICA="$replica"
     export CATALOG_SLICE="$SLICE"
-    export CATALOG_HOLE_SAMPLES="$HOLE_SAMPLES"
+    export CATALOG_TRANSPORT_NOISE="$TRANSPORT_NOISE"
+    export CATALOG_TRANSPORT_RADIUS="$TRANSPORT_RADIUS"
     export CATALOG_POPULATION_INTERVAL="$POPULATION_INTERVAL"
     export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
     export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
@@ -243,7 +245,8 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'catalog_capacity=%s\n' "$CAPACITY"
   printf 'census_radius=%s\n' "$CENSUS_RADIUS"
   printf 'slice=%s\n' "$SLICE"
-  printf 'hole_samples=%s\n' "$HOLE_SAMPLES"
+  printf 'transport_noise=%s\n' "$TRANSPORT_NOISE"
+  printf 'transport_radius=%s\n' "$TRANSPORT_RADIUS"
   printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
   printf 'requested_options=%s\n' "$args"
