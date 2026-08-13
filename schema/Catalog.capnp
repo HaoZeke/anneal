@@ -114,6 +114,14 @@ struct PopulationPlanRequest {
   epoch @0 :UInt64;
 }
 
+struct TransitionRecord {
+  action @0 :Text;
+  destination :union {
+    unresolved @1 :Void;
+    resolved @2 :CandidateRecord;
+  }
+}
+
 struct PopulationPlan {
   epoch @0 :UInt64;
   destinations @1 :List(UInt32);
@@ -152,6 +160,7 @@ struct CatalogRequest {
     policyState @10 :PolicyStateRequest;
     populationSubmit @11 :PopulationSubmitRequest;
     populationPlan @12 :PopulationPlanRequest;
+    recordTransition @13 :TransitionRecord;
   }
 }
 
