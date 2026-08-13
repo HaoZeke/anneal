@@ -3133,6 +3133,7 @@ mod tests {
         assert_eq!(last.to_energy, out.final_energy);
         assert_eq!(&last.to_state, final_state);
         assert!(!last.action.is_empty());
+        assert!(last.validated);
 
         for pair in out.accepted_transitions.windows(2) {
             assert_eq!(pair[0].to_energy, pair[1].from_energy);
