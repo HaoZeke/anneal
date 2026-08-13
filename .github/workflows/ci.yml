@@ -60,8 +60,22 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
+      - name: Install Cocogitto
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cocogitto
+
       - name: Conventional commits check
-        uses: cocogitto/cocogitto-action@v3
+        shell: bash
+        env:
+          COG_FROM: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          COG_TO: ${{ github.sha }}
+        run: |
+          if [[ -z "$COG_FROM" || "$COG_FROM" =~ ^0+$ ]] || \
+             ! git cat-file -e "$COG_FROM^{commit}"; then
+            COG_FROM=$(git rev-parse "$COG_TO^")
+          fi
+          cog check "$COG_FROM..$COG_TO"
 
       - name: Audit for large files
         uses: HaoZeke/large-file-auditor@v0.1.0
