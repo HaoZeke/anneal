@@ -13,29 +13,36 @@ Simulated-annealing components on the [eindir](https://github.com/HaoZeke/eindir
 | Docs | https://anneal.rgoswami.me |
 | License | MIT |
 | Software DOI | https://zenodo.org/doi/10.5281/zenodo.10672746 |
-| Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672621](https://doi.org/10.5281/zenodo.20672621) |
+| Paper reproducibility | https://github.com/HaoZeke/anneal_repro — Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620) |
 | History | Continuous development since **2023-02** (see git log); multi-author `CITATION.cff` |
 
-## Cluster search: the measured configuration
+## Cluster search and cooperative production
 
-`Config::recommended(n)` is the measured configuration for cluster global
-minimisation: composed surface relocations paying one acceptance test for a
-whole excursion, Normal-Gamma Thompson allocation over move arms rewarded
-by the depth reached, and tabu on stall. The algorithm is the contribution;
-its generality is measured, not assumed: one configuration across four
-Lennard-Jones morphologies and, with the rigid-group move library, across
-molecular clusters under tight-binding and machine-learned potentials,
-where an engine swap reproduces the known functional ordering of the water
-hexamer with nothing about water in the search. Accuracy means reaching the
-literature global minima, which it does on every solved run to 1e-6.
-Efficiency is reported under evaluation-matched comparisons as the honest
-protocol: against reference GMIN under its own documented settings, this
-stack solves the 75- and 98-point double-funnel systems that the reference
-does not reach at the same number of potential calls, with Beta-Binomial
-posterior comparisons and Bayes factors throughout.
-`Config::for_cluster(n)` keeps the plain Wales-Doye protocol as the
-comparison baseline, and every mechanism that measured null or harmful is
-recorded with its failure mechanism rather than shipped.
+`Config::recommended(n)` composes surface relocations that pay one acceptance
+test for a whole excursion, Normal-Gamma Thompson allocation over move arms,
+and tabu response to a stalled walk. `Config::for_cluster(n)` retains the plain
+Wales-Doye protocol as a comparison baseline. Accuracy and efficiency claims
+come from sealed, evaluation-matched ensembles rather than reference energies
+or morphology labels supplied to the search.
+
+Large-cluster production uses four synchronously cooperating replicas. Each
+replica spends an independently auditable charged-work sequence and submits a
+freshly validated quenched representative. The coordinator updates an exact
+basin census and bounded descriptor catalogue, then closes a population epoch
+only after all replicas submit. A target-free Feynman--Kac potential ranks
+energy, descriptor novelty, census scarcity, and latent-Gaussian transition
+uncertainty. Replayable systematic resampling assigns parents at fixed
+population size; family caps and distinct descriptor-space rejuvenation keep
+one funnel from consuming every processor element.
+
+This population layer borrows fixed-population bookkeeping from diffusion
+Monte Carlo, not imaginary-time quantum propagation or fixed-node physics.
+The latent transition field is the Gaussian part of an INLA-style model; its
+Gaussian posterior is solved directly, so no Laplace approximation or R-INLA
+runtime is involved. Bayesian move allocation and quench screening retain
+their own evidence, while nested sampling remains a matched-budget comparison
+with separate live-point weights. Shared-catalogue and one-private-catalogue-
+per-replica ensembles form the causal communication comparison.
 
 ```rust
 use anneal_core::methods::cluster_hopping::{optimize, Config, Ledger};
@@ -147,4 +154,4 @@ See `pixi.toml` and `docs/export.el` (modeled on rgpycrumbs/rsx-rs patterns).
 
 ## License and citation
 
-MIT (see `LICENSE.txt`). Citation: `CITATION.cff` or the software Zenodo DOI. Multi-author software citation lists six authors. Project history since February 2023. Reproducibility package for paper tables and figures: [HaoZeke/anneal_repro](https://github.com/HaoZeke/anneal_repro) (Zenodo [10.5281/zenodo.20672621](https://doi.org/10.5281/zenodo.20672621)).
+MIT (see `LICENSE.txt`). Citation: `CITATION.cff` or the software Zenodo DOI. Multi-author software citation lists six authors. Project history since February 2023. Reproducibility package for paper tables and figures: [HaoZeke/anneal_repro](https://github.com/HaoZeke/anneal_repro) (Zenodo [10.5281/zenodo.20672620](https://doi.org/10.5281/zenodo.20672620)).

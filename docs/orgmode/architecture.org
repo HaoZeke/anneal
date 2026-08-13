@@ -44,6 +44,75 @@ In one sentence each:
 
 L1 symmetry, L2 support, L3 downhill=1, L4 monotone in T. Each is required both for the TLA+ safety invariants (TypeOK, BestMonotone, SymmetricNeighbors, MonotoneCooling) and for the "one change serves all" property.
 
+* Cooperative cluster population
+
+Four replicas divide the charged-work budget across processor elements without
+turning the search into four unrelated restarts.  Each replica owns a monotone
+event sequence and a local hop ledger.  The coordinator admits a candidate only
+after a fresh quench and descriptor validation, deduplicates replayed events,
+and maintains per-replica plus aggregate work totals.  A disconnected replica
+continues locally; its fallback is explicit in the trace rather than silently
+changing the accounting.
+
+At a synchronization boundary, every replica submits one validated quenched
+representative.  The final submission closes the epoch.  The coordinator ranks
+the population by energy, descriptor novelty, exact-census scarcity, and
+latent-Gaussian transition uncertainty.  A target-free Feynman--Kac potential
+converts those ranks to bounded weights.  Systematic resampling then produces
+one immutable parent assignment with the same population size.  A family cap
+prevents a single parent from occupying every processor element, and siblings
+receive distinct deterministic descriptor-space rejuvenation draws.
+
+#+BEGIN_EXAMPLE
+local hop + charged ledger (one per replica)
+                  |
+                  v
+fresh quench -> validator -> census/catalogue coordinator
+                                  |
+                    all replicas reach epoch barrier
+                                  |
+                                  v
+                 energy + novelty + scarcity + GMRF uncertainty
+                                  |
+                                  v
+             systematic parents + family cap + rejuvenation
+                                  |
+                                  v
+                  next local epoch on all processor elements
+#+END_EXAMPLE
+
+The shared-catalogue ensemble and an ensemble with one private catalogue per
+replica use identical local budgets and seeds.  Their difference is therefore
+the communication treatment: shared validated evidence versus independent
+catalogues.  The population barrier coordinates division of work; it does not
+pool unvalidated structures or let one replica spend another replica's ledger.
+
+This layer takes inspiration from fixed-population diffusion Monte Carlo and
+the walker-management architecture used by QMC codes.  The correspondence is
+mutation, weighting, resampling, and genealogy.  There is no trial wavefunction,
+imaginary-time Green function, fixed-node constraint, or quantum-energy
+estimator, so it is not a classical analogue of quantum propagation.
+
+The transition residual field has sparse Gaussian precision equal to a graph
+Laplacian plus prior and observation terms.  Its conditional posterior and
+marginal variances are Gaussian and are solved directly.  This is the
+latent-GMRF component that an INLA construction would contain, but there is no
+non-Gaussian likelihood or hyperparameter integral requiring a Laplace
+approximation.  Calling it full INLA would overstate the implementation.
+
+The Bayesian layers retain separate conditioning information: discounted
+Thompson allocation chooses local move arms, a cost-asymmetric screen assigns
+full quench work, and the GMRF supplies only the cross-replica uncertainty rank.
+Nested sampling also remains separate because its descending ceiling and
+live-point volume weights have different semantics from Feynman--Kac
+genealogy.  It is a matched-budget comparison arm, not another weight folded
+into the cooperative population.
+
+Source: =src/cooperative_search.rs=, =src/cooperative_search/ledger.rs=,
+=src/methods/feynman_kac.rs=, =src/residual_field.rs=,
+=src/catalog_rpc/server.rs=, and =src/methods/nested.rs=.  The mathematical
+specification is in =docs/derivations/descriptor_catalog_geometry.org=.
+
 * Method Families (detailed)
 
 ** Classical presets (Boltzmann, Fast, Gsa)
