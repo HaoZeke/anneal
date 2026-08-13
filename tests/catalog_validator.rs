@@ -412,7 +412,7 @@ fn fresh_gradient_above_threshold_is_rejected() {
 
 #[test]
 fn convergence_uses_the_full_euclidean_gradient_norm() {
-    let gradient = [0.9e-5, 0.9e-5];
+    let gradient: [f64; 2] = [0.9e-5, 0.9e-5];
 
     assert!(gradient.iter().all(|component| component.abs() < 1e-5));
     assert!(euclidean_gradient_norm(&gradient) > 1e-5);
