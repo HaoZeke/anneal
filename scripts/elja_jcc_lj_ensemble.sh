@@ -25,8 +25,11 @@ case "$ARM" in
 esac
 
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
+QUALIFIER=${JCC_QUALIFIER:-$REPRO_ROOT/workflow/jcc/validate_hard_lj_qualification.py}
+QUALIFIER_PYTHON=${JCC_QUALIFIER_PYTHON:-$REPRO_ROOT/.pixi/envs/default/bin/python}
 CAMPAIGN=${CATALOG_CAMPAIGN:-jcc-2026-development}
 ENSEMBLE="lj${N}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
@@ -64,6 +67,14 @@ for executable in "$BIN" "$SERVER"; do
     exit 1
   fi
 done
+if [[ ! -f $QUALIFIER ]]; then
+  echo "missing hard-LJ qualifier: $QUALIFIER" >&2
+  exit 1
+fi
+if [[ ! -x $QUALIFIER_PYTHON ]]; then
+  echo "missing qualification Python: $QUALIFIER_PYTHON" >&2
+  exit 1
+fi
 
 server_pid=
 stop_server() {
@@ -180,6 +191,13 @@ if [[ $ARM == shared ]]; then
     END { exit !found }
   ' "$OUT"/traces/replica-*.jsonl
 fi
+
+"$QUALIFIER_PYTHON" "$QUALIFIER" \
+  --output "$OUT/qualification.json" \
+  "$OUT/traces/replica-0.jsonl" \
+  "$OUT/traces/replica-1.jsonl" \
+  "$OUT/traces/replica-2.jsonl" \
+  "$OUT/traces/replica-3.jsonl"
 
 {
   printf 'campaign=%s\n' "$CAMPAIGN"
