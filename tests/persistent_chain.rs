@@ -97,13 +97,14 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
 
 #[test]
 fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
-    let cfg = Config::recommended(6);
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 1;
     let mut rng = StdRng::seed_from_u64(0xb0_0d_a7);
     let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
     let mut ledger = Ledger::new(4_000);
     let mut bias = fresh_bias(&cfg);
     let mut relax = toy_relax;
-    let proposed = Array1::from_elem(start.len(), 2.0);
+    let proposed = start.mapv(|value| 1.1 * value);
     let mut offered = false;
     let mut observed_after_transport = false;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
