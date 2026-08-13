@@ -26,6 +26,18 @@ use std::io::{self, Write};
 #[cfg(all(feature = "ira", not(feature = "featomic")))]
 use anneal_core::shape::IraMetric;
 
+fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
+    let height = opts.contains(&"height");
+    let noheight = opts.contains(&"noheight");
+    assert!(!(height && noheight), "height and noheight are contradictory");
+    cfg.adaptive_height = (cfg.adaptive_height || height) && !noheight;
+
+    let climb = opts.contains(&"climb");
+    let noclimb = opts.contains(&"noclimb");
+    assert!(!(climb && noclimb), "climb and noclimb are contradictory");
+    cfg.escape_on_stall = (cfg.escape_on_stall || climb) && !noclimb;
+}
+
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
@@ -542,7 +554,7 @@ fn main() {
     cfg.shape_keyed = opts.contains(&"shape");
     cfg.budget_window = opts.contains(&"bfwt");
     cfg.allocate_moves = cfg.allocate_moves || opts.contains(&"thompson");
-    cfg.adaptive_height = opts.contains(&"height");
+    apply_boolean_options(&mut cfg, &opts);
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     // Do not clobber Config::recommended: that hop already turns the
@@ -577,7 +589,6 @@ fn main() {
         println!("  SOAP hop: in-crate leftover (rebuild with --features featomic)");
     }
     cfg.minima_hopping = opts.contains(&"mh");
-    cfg.escape_on_stall = opts.contains(&"climb");
     // The radius read off the search's own step length rather than swept.
     cfg.calibrate_radius = opts.contains(&"calib");
     // The walker restarted, the landscape memory kept.
