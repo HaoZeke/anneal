@@ -692,6 +692,22 @@ mod tests {
             f64::INFINITY
         );
     }
+
+    #[test]
+    fn basisless_degenerate_pair_is_a_structured_refusal() {
+        let a = Array1::zeros(3 * 75);
+        let mut b = Array1::zeros(3 * 75);
+        b[0] = 1.0;
+
+        assert!(matches!(
+            match_shapes(a.view(), b.view(), 1.8),
+            Err(ShapeError::Library(_)) | Err(ShapeError::NonBijectivePermutation)
+        ));
+        assert_eq!(
+            IraMetric::default().distance(a.view(), b.view()),
+            f64::INFINITY
+        );
+    }
 }
 
 /// Deviation of a structure from invariance under one operation.
