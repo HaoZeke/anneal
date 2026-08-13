@@ -7,6 +7,10 @@
 //!
 //! Usage: `cargo run --release --example lj_cluster_search -- <n> <budget> <seeds>`
 
+// The driver keeps charged relax/gradient callbacks and complete catalog
+// evidence explicit at their call sites so campaign accounting stays visible.
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 use anneal_core::methods::cluster_hopping::{
@@ -599,17 +603,17 @@ fn main() {
     }
     // The screening pass is the quench, so its length is the one number that
     // decides whether the chain moves on the transformed landscape at all.
-    if let Ok(v) = std::env::var("SCREEN_STEPS") {
-        if let Ok(k) = v.parse::<usize>() {
-            cfg.screen_steps = k;
-            println!("  screen steps {k}");
-        }
+    if let Ok(v) = std::env::var("SCREEN_STEPS")
+        && let Ok(k) = v.parse::<usize>()
+    {
+        cfg.screen_steps = k;
+        println!("  screen steps {k}");
     }
-    if let Ok(v) = std::env::var("FLAT_QUANTILE") {
-        if let Ok(q) = v.parse::<f64>() {
-            cfg.flat_quantile = q;
-            println!("  flat below the {q} quantile of each sweep");
-        }
+    if let Ok(v) = std::env::var("FLAT_QUANTILE")
+        && let Ok(q) = v.parse::<f64>()
+    {
+        cfg.flat_quantile = q;
+        println!("  flat below the {q} quantile of each sweep");
     }
     // The move chosen from the structure the chain is standing on.
     cfg.contextual_moves = opts.contains(&"ctx");
@@ -649,17 +653,17 @@ fn main() {
     // icosahedral funnel never fills: a run can spend ninety-eight thousand
     // hops inside it without a single improvement. A radius that merges the
     // variants of a funnel into one basin puts the same deposits in one place.
-    if let Ok(v) = std::env::var("MERGE_RADIUS") {
-        if let Ok(r) = v.parse::<f64>() {
-            cfg.merge_radius = r;
-            println!("  merge radius {r}");
-        }
+    if let Ok(v) = std::env::var("MERGE_RADIUS")
+        && let Ok(r) = v.parse::<f64>()
+    {
+        cfg.merge_radius = r;
+        println!("  merge radius {r}");
     }
-    if let Ok(h) = std::env::var("BIAS_HEIGHT") {
-        if let Ok(v) = h.parse::<f64>() {
-            cfg.bias_height = v;
-            println!("  bias height {v}");
-        }
+    if let Ok(h) = std::env::var("BIAS_HEIGHT")
+        && let Ok(v) = h.parse::<f64>()
+    {
+        cfg.bias_height = v;
+        println!("  bias height {v}");
     }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));
@@ -1255,7 +1259,7 @@ fn leave_known_packing<R: rand::Rng + ?Sized>(
             None,
             rng,
         );
-        return y;
+        y
     }
     #[cfg(not(feature = "featomic"))]
     {
@@ -2094,45 +2098,43 @@ fn run_capnp_bank(
         if pull && client.is_none() {
             client = BankClient::connect(sock).ok();
         }
-        if pull {
-            if let Some(c) = client.as_mut() {
-                match c.snapshot() {
-                    Ok(s) => {
-                        for (soap, h) in &s.wells {
-                            bias.import_well(soap.clone(), *h);
-                        }
-                        #[cfg(feature = "featomic")]
-                        anneal_core::featomic_hop::set_packing_archive(
-                            s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
-                        );
-                        well_pairs = s.wells.clone();
-                        catalog_size = s.size as usize;
-                        if !s.energies.is_empty() {
-                            catalog_best = s.energies.iter().copied().fold(f64::INFINITY, f64::min);
-                        }
-                        if s.size >= 2 {
-                            let sched = schedule.get_or_insert_with(|| {
-                                let floor = {
-                                    #[cfg(feature = "featomic")]
-                                    {
-                                        anneal_core::featomic_hop::SOAP_PACK_MERGE
-                                    }
-                                    #[cfg(not(feature = "featomic"))]
-                                    {
-                                        0.10
-                                    }
-                                };
-                                DiversityAnnealer::from_initial(s.dcut.max(floor))
-                                    .with_final_fraction(0.4)
-                            });
-                            let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
-                            if c.set_dcut(sched.threshold(progress)).is_err() {
-                                client = None;
-                            }
+        if pull && let Some(c) = client.as_mut() {
+            match c.snapshot() {
+                Ok(s) => {
+                    for (soap, h) in &s.wells {
+                        bias.import_well(soap.clone(), *h);
+                    }
+                    #[cfg(feature = "featomic")]
+                    anneal_core::featomic_hop::set_packing_archive(
+                        s.wells.iter().map(|(soap, _)| soap.clone()).collect(),
+                    );
+                    well_pairs = s.wells.clone();
+                    catalog_size = s.size as usize;
+                    if !s.energies.is_empty() {
+                        catalog_best = s.energies.iter().copied().fold(f64::INFINITY, f64::min);
+                    }
+                    if s.size >= 2 {
+                        let sched = schedule.get_or_insert_with(|| {
+                            let floor = {
+                                #[cfg(feature = "featomic")]
+                                {
+                                    anneal_core::featomic_hop::SOAP_PACK_MERGE
+                                }
+                                #[cfg(not(feature = "featomic"))]
+                                {
+                                    0.10
+                                }
+                            };
+                            DiversityAnnealer::from_initial(s.dcut.max(floor))
+                                .with_final_fraction(0.4)
+                        });
+                        let progress = 1.0 - ledger.remaining() as f64 / total.max(1) as f64;
+                        if c.set_dcut(sched.threshold(progress)).is_err() {
+                            client = None;
                         }
                     }
-                    Err(_) => client = None,
                 }
+                Err(_) => client = None,
             }
         }
         let wells: Vec<Array1<f64>> = well_pairs.iter().map(|(w, _)| w.clone()).collect();
@@ -2164,36 +2166,37 @@ fn run_capnp_bank(
             on_known && sat,
             stall,
         );
-        if pull && swarm.pull {
-            if let Some(c) = client.as_mut() {
-                match c.sample(rng.random()) {
-                    Ok(Some((e, x))) if x.len() == 3 * cfg.n_points => {
-                        let theirs = packing_of(x.view(), cfg);
-                        let dist = if mine.is_empty() || mine.len() != theirs.len() {
-                            f64::INFINITY
-                        } else {
-                            mine.iter()
-                                .zip(theirs.iter())
-                                .map(|(a, b)| (a - b) * (a - b))
-                                .sum::<f64>()
-                                .sqrt()
-                        };
-                        let take = if swarm.win_only {
-                            e < best - 0.05
-                        } else {
-                            e < best - 0.05 || (dist > gap && e < best + 1.0)
-                        };
-                        if take {
-                            if e < best {
-                                best = e;
-                                best_state = Some(x.clone());
-                            }
-                            start = x;
+        if pull
+            && swarm.pull
+            && let Some(c) = client.as_mut()
+        {
+            match c.sample(rng.random()) {
+                Ok(Some((e, x))) if x.len() == 3 * cfg.n_points => {
+                    let theirs = packing_of(x.view(), cfg);
+                    let dist = if mine.is_empty() || mine.len() != theirs.len() {
+                        f64::INFINITY
+                    } else {
+                        mine.iter()
+                            .zip(theirs.iter())
+                            .map(|(a, b)| (a - b) * (a - b))
+                            .sum::<f64>()
+                            .sqrt()
+                    };
+                    let take = if swarm.win_only {
+                        e < best - 0.05
+                    } else {
+                        e < best - 0.05 || (dist > gap && e < best + 1.0)
+                    };
+                    if take {
+                        if e < best {
+                            best = e;
+                            best_state = Some(x.clone());
                         }
+                        start = x;
                     }
-                    Ok(_) => {}
-                    Err(_) => client = None,
                 }
+                Ok(_) => {}
+                Err(_) => client = None,
             }
         }
         if swarm.leave {
@@ -2229,16 +2232,15 @@ fn run_capnp_bank(
         }
         // Publish a win only. Depositing every slice is 48 chains
         // IRA-matching on the login node.
-        if improved {
-            if let Some(st) = out.best_state.as_ref() {
-                if let Some(c) = client.as_mut() {
-                    let soap = packing_of(st.view(), cfg);
-                    if c.offer(out.best, st.view(), soap.view()).is_err()
-                        || c.deposit(soap.view(), cfg.bias_height).is_err()
-                    {
-                        client = None;
-                    }
-                }
+        if improved
+            && let Some(st) = out.best_state.as_ref()
+            && let Some(c) = client.as_mut()
+        {
+            let soap = packing_of(st.view(), cfg);
+            if c.offer(out.best, st.view(), soap.view()).is_err()
+                || c.deposit(soap.view(), cfg.bias_height).is_err()
+            {
+                client = None;
             }
         }
         println!(

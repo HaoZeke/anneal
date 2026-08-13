@@ -8,9 +8,13 @@
 //! and the size of J⁺(μ_Marks − μ_ico) on the ico (the leftover that
 //! would have to exist for a Jacobian hop to leave Ih toward Marks).
 
+// Fixed-size atom and descriptor correspondences use explicit indices so the
+// two structures' matched rows remain visible in the diagnostic equations.
+#![allow(clippy::needless_range_loop)]
+
 use anneal_core::soap::{
-    SoapSpec, class_masses, ih_dominated, jacobian_z, local_nu3, local_spectra_z, mean_residual_rms,
-    power_spectrum,
+    SoapSpec, class_masses, ih_dominated, jacobian_z, local_nu3, local_spectra_z,
+    mean_residual_rms, power_spectrum,
 };
 use ndarray::{Array1, ArrayView1};
 use std::env;
@@ -151,10 +155,7 @@ fn report(label: &str, x: ArrayView1<f64>, spec: SoapSpec) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let marks_path = args
-        .get(1)
-        .map(String::as_str)
-        .unwrap_or("points/75");
+    let marks_path = args.get(1).map(String::as_str).unwrap_or("points/75");
     let ico_path = args.get(2).map(String::as_str).unwrap_or("points/75i");
     let spec = SoapSpec::default();
     let marks = load_points(marks_path, 75);
@@ -217,10 +218,10 @@ fn main() {
     let d_rem = (2.0 - 2.0 * k_rem).max(0.0).sqrt();
     let k_best = best_match(&qi, &qm, 4.0);
     let d_best = (2.0 - 2.0 * k_best).max(0.0).sqrt();
+    println!("Caro-q AVG ζ=1  K {k_avg:.6}  D {d_avg:.6}   AVG ζ=4  K {k_avg4:.6}  D {d_avg4:.6}");
     println!(
-        "Caro-q AVG ζ=1  K {k_avg:.6}  D {d_avg:.6}   AVG ζ=4  K {k_avg4:.6}  D {d_avg4:.6}"
+        "REMatch ζ=4 γ=0.05  K {k_rem:.6}  D {d_rem:.6}   best-match ζ=4  K {k_best:.6}  D {d_best:.6}"
     );
-    println!("REMatch ζ=4 γ=0.05  K {k_rem:.6}  D {d_rem:.6}   best-match ζ=4  K {k_best:.6}  D {d_best:.6}");
 
     let fr_m = anneal_core::structure::atom_triplet_fracs(marks.view(), 75, 1.35);
     let fr_i = anneal_core::structure::atom_triplet_fracs(ico.view(), 75, 1.35);
@@ -352,7 +353,13 @@ fn caro_q(loc: &ndarray::Array2<f64>) -> ndarray::Array2<f64> {
     q
 }
 
-fn kernel_zeta(a: &ndarray::Array2<f64>, i: usize, b: &ndarray::Array2<f64>, j: usize, zeta: f64) -> f64 {
+fn kernel_zeta(
+    a: &ndarray::Array2<f64>,
+    i: usize,
+    b: &ndarray::Array2<f64>,
+    j: usize,
+    zeta: f64,
+) -> f64 {
     let mut s = 0.0;
     for t in 0..a.ncols() {
         s += a[[i, t]] * b[[j, t]];
@@ -396,7 +403,13 @@ fn best_match(a: &ndarray::Array2<f64>, b: &ndarray::Array2<f64>, zeta: f64) -> 
 }
 
 /// De/Ceriotti REMatch: Sinkhorn on C_ij = 1 − k^ζ, entropy γ.
-fn rematch(a: &ndarray::Array2<f64>, b: &ndarray::Array2<f64>, zeta: f64, gamma: f64, iters: usize) -> f64 {
+fn rematch(
+    a: &ndarray::Array2<f64>,
+    b: &ndarray::Array2<f64>,
+    zeta: f64,
+    gamma: f64,
+    iters: usize,
+) -> f64 {
     let n = a.nrows();
     let m = b.nrows();
     if n == 0 || m == 0 {
