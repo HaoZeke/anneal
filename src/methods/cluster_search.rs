@@ -513,6 +513,46 @@ fn packing_is_known(x: ArrayView1<f64>, cfg: &Config, wells: &[Array1<f64>]) -> 
     })
 }
 
+/// Recompute a bank member on the receiving engine before it can affect the walk.
+#[cfg(feature = "bank-rpc")]
+fn validate_bank_sample<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    stats: &mut RelaxStats,
+    reported_energy: f64,
+    state: ArrayView1<f64>,
+) -> Option<f64>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    if !reported_energy.is_finite() || state.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    if !ledger.charge() {
+        return None;
+    }
+    stats.check_charged += 1;
+    let (fresh_energy, gradient) = objective.value_and_gradient(state);
+    if !fresh_energy.is_finite()
+        || gradient.len() != state.len()
+        || gradient.iter().any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    let gradient_max = gradient
+        .iter()
+        .fold(0.0_f64, |largest, value| largest.max(value.abs()));
+    if gradient_max >= cfg.record_gradient {
+        return None;
+    }
+    let energy_tolerance = 1.0e-6 + 1.0e-10 * reported_energy.abs().max(fresh_energy.abs());
+    if (reported_energy - fresh_energy).abs() > energy_tolerance {
+        return None;
+    }
+    Some(fresh_energy)
+}
+
 /// Move the current packing mean into a hole of the shared SOAP cloud.
 #[cfg(feature = "bank-rpc")]
 fn leave_known_packing(
@@ -783,7 +823,7 @@ where
         if pull && swarm.pull {
             if let Some(c) = client.as_mut() {
                 match c.sample(rng.random()) {
-                    Ok(Some((e, x)))
+                    Ok(Some((reported_energy, x)))
                         if x.len() == expected && structure_is_sane(x.view(), sane_sep(cfg)) =>
                     {
                         let theirs = packing_of(x.view(), cfg);
@@ -796,17 +836,43 @@ where
                                 .sum::<f64>()
                                 .sqrt()
                         };
-                        let take = if swarm.win_only {
-                            e < best - 0.05
+                        let worth_validating = if swarm.win_only {
+                            reported_energy < best - 0.05
                         } else {
-                            e < best - 0.05 || (dist > gap && e < best + 1.0)
+                            reported_energy < best - 0.05
+                                || (dist > gap && reported_energy < best + 1.0)
                         };
+                        let fresh_energy = worth_validating
+                            .then(|| {
+                                validate_bank_sample(
+                                    objective,
+                                    cfg,
+                                    ledger,
+                                    &mut stats,
+                                    reported_energy,
+                                    x.view(),
+                                )
+                            })
+                            .flatten();
+                        let take = fresh_energy.is_some_and(|energy| {
+                            if swarm.win_only {
+                                energy < best - 0.05
+                            } else {
+                                energy < best - 0.05 || (dist > gap && energy < best + 1.0)
+                            }
+                        });
                         if take {
-                            if e < best {
-                                best = e;
+                            let energy = fresh_energy.expect("take requires fresh bank evidence");
+                            if energy < best {
+                                best = energy;
                                 best_state = Some(x.clone());
                                 if improvements.len() < 512 {
-                                    improvements.push((hops, ledger.spent(), bias.n_basins(), e));
+                                    improvements.push((
+                                        hops,
+                                        ledger.spent(),
+                                        bias.n_basins(),
+                                        energy,
+                                    ));
                                 }
                             }
                             start = x;
@@ -816,6 +882,9 @@ where
                     Err(_) => client = None,
                 }
             }
+        }
+        if ledger.remaining() == 0 {
+            break;
         }
         if swarm.leave {
             null_starts += 1;
@@ -1056,14 +1125,8 @@ mod tests {
         assert_eq!(stats.check_charged, 2);
 
         let separated = 1.2_f64;
-        let displaced = Array1::from_vec(vec![
-            -separated / 2.0,
-            0.0,
-            0.0,
-            separated / 2.0,
-            0.0,
-            0.0,
-        ]);
+        let displaced =
+            Array1::from_vec(vec![-separated / 2.0, 0.0, 0.0, separated / 2.0, 0.0, 0.0]);
         let inverse_sixth = separated.powi(-6);
         let displaced_energy = 4.0 * (inverse_sixth * inverse_sixth - inverse_sixth);
         let unquenched = validate_bank_sample(
