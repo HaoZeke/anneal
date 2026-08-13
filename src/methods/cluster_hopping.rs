@@ -95,6 +95,8 @@ pub struct AcceptedTransition {
     pub to_energy: f64,
     /// Quenched source coordinates.
     pub from_state: Array1<f64>,
+    /// Fresh source gradient retained when validation requires one.
+    pub from_gradient: Option<Array1<f64>>,
     /// Quenched destination coordinates.
     pub to_state: Array1<f64>,
     /// Fresh destination gradient retained when validation requires one.
@@ -628,16 +630,22 @@ fn run_full<'g, R: Rng + ?Sized>(
     // is built. Reporting it as a minimum additionally requires the same
     // geometry and gradient contract as every subsequent quench.
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
-    let initial_recordable = quench_is_sane(cfg, e, x.view())
-        && match grad.as_deref_mut() {
-            Some(g) => g(ledger, x.view())
-                .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
-                .unwrap_or(false),
-            None => true,
-        };
+    let initial_sane = quench_is_sane(cfg, e, x.view());
+    let gradient_required = grad.is_some();
+    let initial_validation_gradient = initial_sane.then(|| {
+        grad.as_deref_mut().and_then(|g| {
+            g(ledger, x.view()).filter(|values| {
+                values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+            })
+        })
+    });
+    let initial_validation_gradient = initial_validation_gradient.flatten();
+    let initial_recordable =
+        initial_sane && (!gradient_required || initial_validation_gradient.is_some());
     if initial_recordable {
         ledger.record(e, x.view());
     }
+    let mut current_validation_gradient = initial_validation_gradient;
     let canonical_reference = x.clone();
     let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
         .map(|k| {
@@ -1878,12 +1886,14 @@ fn run_full<'g, R: Rng + ?Sized>(
                 from_energy: e,
                 to_energy: e_new,
                 from_state: x.clone(),
+                from_gradient: current_validation_gradient.clone(),
                 to_state: x_new.clone(),
                 to_gradient: validation_gradient.clone(),
                 validated: recordable,
             });
             e = e_new;
             x = x_new;
+            current_validation_gradient = validation_gradient;
         } else if cfg.budget_window {
             // The biased delta, which is what the chain actually declined, not
             // the raw energy difference. The bias is part of the barrier the
