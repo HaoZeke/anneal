@@ -19,7 +19,8 @@ use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolReject
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
-    PolicyEvidenceOutcome, PopulationSynchronizationOutcome, RunManifest, SynchronizationOutcome,
+    PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
+    RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation, SynchronizationOutcome,
     TraceKind,
 };
 use anneal_core::descriptor_space::{
@@ -262,6 +263,64 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(trace.contains("\"policy_total_visits\":2"));
     assert!(trace.contains("\"policy_transition_uncertainty\":"));
     assert!(trace.contains("\"policy_query_energy\":-1.2"));
+}
+
+#[test]
+fn every_slice_has_one_complete_transition_diagnostic() {
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.record_work(0, ChargeKind::AcceptedQuench, 7).unwrap();
+    run.record_slice(
+        0,
+        SliceTrace {
+            slice: 1,
+            current_basin: Some(3),
+            active_relation: Some(CatalogRelation::SameBasin),
+            policy_role: PolicyRole::Explore,
+            policy_reason: "farthest_hole",
+            proposal_family: ProposalFamily::DescriptorHole,
+            sampled_basin: None,
+            descriptor_step_norm: Some(0.25),
+            cartesian_step_norm: Some(0.5),
+            validation: SliceValidation::Accepted,
+            quench: SliceQuench::Converged,
+            adoption: SliceAdoption::Adopted,
+            novelty: Some(0.75),
+            energy: -397.492,
+            charged_work: 7,
+        },
+    )
+    .unwrap();
+
+    let event = run.events().last().unwrap();
+    assert_eq!(event.kind, TraceKind::Slice);
+    let slice = event
+        .slice
+        .expect("a slice event must retain its complete diagnostic");
+    assert_eq!(slice.slice, 1);
+    assert_eq!(slice.current_basin, Some(3));
+    assert_eq!(slice.policy_role, PolicyRole::Explore);
+    assert_eq!(slice.proposal_family, ProposalFamily::DescriptorHole);
+    assert_eq!(slice.validation, SliceValidation::Accepted);
+    assert_eq!(slice.quench, SliceQuench::Converged);
+    assert_eq!(slice.adoption, SliceAdoption::Adopted);
+    assert_eq!(slice.charged_work, 7);
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"kind\":\"slice\""));
+    assert!(trace.contains("\"slice\":1"));
+    assert!(trace.contains("\"slice_current_basin\":3"));
+    assert!(trace.contains("\"slice_policy_role\":\"explore\""));
+    assert!(trace.contains("\"slice_proposal_family\":\"descriptor_hole\""));
+    assert!(trace.contains("\"slice_validation\":\"accepted\""));
+    assert!(trace.contains("\"slice_quench\":\"converged\""));
+    assert!(trace.contains("\"slice_adoption\":\"adopted\""));
+    assert!(trace.contains("\"slice_novelty\":0.75"));
+    assert!(trace.contains("\"slice_energy\":-397.492"));
+    assert!(trace.contains("\"slice_charged_work\":7"));
 }
 
 #[test]
