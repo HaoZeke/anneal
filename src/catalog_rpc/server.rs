@@ -34,7 +34,8 @@ use crate::descriptor_space::DescriptorSpace;
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationMember, SelectionCoefficients, SynchronousPopulation,
 };
-use crate::transition_graph::{TransitionGraph, TransitionOutcome};
+use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
+use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 
@@ -780,8 +781,14 @@ fn apply_request(
                         .population_candidates
                         .get(epoch)
                         .expect("complete epoch retains every source candidate");
-                    let parent_candidates = plan
-                        .parents()
+                    let (parents, weights) = region_population_assignment(
+                        scientific,
+                        plan.destinations(),
+                        source_candidates,
+                        config.replicas.len().div_ceil(2),
+                    )
+                    .unwrap_or_else(|| (plan.parents().to_vec(), plan.weights().to_vec()));
+                    let parent_candidates = parents
                         .iter()
                         .map(|parent| {
                             source_candidates
@@ -790,18 +797,18 @@ fn apply_request(
                                 .clone()
                         })
                         .collect::<Vec<_>>();
-                    let diagnostics = plan.diagnostics();
+                    let diagnostics = population_diagnostics(&weights, &parents, &config.replicas);
                     let wire_plan = PopulationPlan {
                         epoch: plan.epoch(),
                         destinations: plan.destinations().to_vec(),
-                        parents: plan.parents().to_vec(),
-                        weights: plan.weights().to_vec(),
-                        effective_sample_size: diagnostics.effective_sample_size,
-                        unique_parents: u32::try_from(diagnostics.unique_parents)
+                        parents,
+                        weights,
+                        effective_sample_size: diagnostics.0,
+                        unique_parents: u32::try_from(diagnostics.1)
                             .expect("unique parents are bounded by replica count"),
-                        max_family_size: u32::try_from(diagnostics.max_family_size)
+                        max_family_size: u32::try_from(diagnostics.2)
                             .expect("family size is bounded by replica count"),
-                        offspring_variance: diagnostics.offspring_variance,
+                        offspring_variance: diagnostics.3,
                         parent_candidates,
                     };
                     scientific
@@ -1243,6 +1250,135 @@ fn catalog_mutation(
         evicted,
         incumbent_basin: incumbent_basin.map(BasinId::as_raw),
     }
+}
+
+fn region_population_assignment(
+    scientific: &ScientificState,
+    destinations: &[u32],
+    source_candidates: &BTreeMap<u32, CatalogCandidate>,
+    max_family_size: usize,
+) -> Option<(Vec<u32>, Vec<f64>)> {
+    let region_config = AttractionRegionConfig {
+        probe_action: "probe".into(),
+        concentration: 0.5,
+        diffusion_steps: 2,
+        maximum_distance: 0.35,
+        minimum_probes: 8,
+    };
+    let regions = scientific
+        .transition_graph
+        .attraction_regions(&region_config)
+        .ok()?;
+    let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
+    for (region, nodes) in regions.iter().enumerate() {
+        for node in nodes {
+            node_region[*node] = region;
+        }
+    }
+    let mut fallback_regions = BTreeMap::new();
+    let mut next_region = regions.len();
+    let source_regions = destinations
+        .iter()
+        .map(|replica| {
+            let candidate = source_candidates.get(replica)?;
+            let basin = BasinId::from_raw(candidate.census_basin?);
+            if let Some(node) = scientific.transition_nodes.get(&basin)
+                && node_region.get(*node).copied().unwrap_or(usize::MAX) != usize::MAX
+            {
+                return Some(node_region[*node]);
+            }
+            Some(*fallback_regions.entry(basin).or_insert_with(|| {
+                let region = next_region;
+                next_region += 1;
+                region
+            }))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let mut occupancy = BTreeMap::<usize, usize>::new();
+    for region in &source_regions {
+        *occupancy.entry(*region).or_default() += 1;
+    }
+    let probe = scientific
+        .transition_graph
+        .posterior_matrix("probe", 0.5)
+        .ok()?;
+    let candidates = destinations
+        .iter()
+        .enumerate()
+        .map(|(index, replica)| {
+            let region = source_regions[index];
+            let basin = BasinId::from_raw(source_candidates.get(replica)?.census_basin?);
+            let node = scientific.transition_nodes.get(&basin).copied();
+            let transition_uncertainty = node
+                .and_then(|node| scientific.transition_graph.uncertainty("probe", node, 0.5))
+                .unwrap_or(1.0);
+            let outgoing_frontier = node.map_or(0.0, |source| {
+                (0..scientific.transition_graph.node_count())
+                    .filter(|destination| {
+                        node_region.get(*destination).copied().unwrap_or(usize::MAX) != region
+                    })
+                    .map(|destination| probe[[source, destination]])
+                    .sum::<f64>()
+            });
+            RegionCandidate::new(
+                *replica,
+                region,
+                RegionUtility {
+                    transition_uncertainty,
+                    inverse_occupancy: 1.0 / occupancy[&region] as f64,
+                    outgoing_frontier,
+                    geometry_compatibility: 1.0,
+                    access_cost: 0.0,
+                },
+            )
+            .ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let parents =
+        diversity_constrained_assignment(&candidates, destinations.len(), max_family_size).ok()?;
+    let scores = candidates
+        .iter()
+        .map(|candidate| candidate.score())
+        .collect::<Vec<_>>();
+    let maximum = scores.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let mut weights = scores
+        .iter()
+        .map(|score| (score - maximum).clamp(-4.0, 0.0).exp())
+        .collect::<Vec<_>>();
+    let total = weights.iter().sum::<f64>();
+    for weight in &mut weights {
+        *weight /= total;
+    }
+    Some((parents, weights))
+}
+
+fn population_diagnostics(
+    weights: &[f64],
+    parents: &[u32],
+    replicas: &BTreeSet<u32>,
+) -> (f64, usize, usize, f64) {
+    let effective_sample_size = 1.0 / weights.iter().map(|weight| weight * weight).sum::<f64>();
+    let mut counts = BTreeMap::<u32, usize>::new();
+    for parent in parents {
+        *counts.entry(*parent).or_default() += 1;
+    }
+    let unique_parents = counts.len();
+    let max_family_size = counts.values().copied().max().unwrap_or(0);
+    let mean = parents.len() as f64 / replicas.len() as f64;
+    let offspring_variance = replicas
+        .iter()
+        .map(|replica| {
+            let difference = counts.get(replica).copied().unwrap_or(0) as f64 - mean;
+            difference * difference
+        })
+        .sum::<f64>()
+        / replicas.len() as f64;
+    (
+        effective_sample_size,
+        unique_parents,
+        max_family_size,
+        offspring_variance,
+    )
 }
 
 fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<usize> {
