@@ -2991,6 +2991,33 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_initial_gradient_is_not_validation() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(1);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            (-10.0, x.to_owned())
+        };
+        let mut grad = |_ledger: &mut Ledger, _x: ArrayView1<f64>| None;
+        let mut ledger = Ledger::new(1);
+        let mut rng = StdRng::seed_from_u64(45);
+
+        let out = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        );
+
+        assert!(out.best.is_infinite());
+        assert!(out.best_state.is_none());
+        assert!(out.improvements.is_empty());
+    }
+
+    #[test]
     fn unconverged_trial_is_not_an_improvement_or_first_encounter() {
         let mut cfg = Config::for_cluster(2);
         cfg.max_hops = Some(1);
