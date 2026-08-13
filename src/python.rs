@@ -2307,7 +2307,6 @@ fn cluster_archive_search(
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
-    use crate::methods::cluster_search::CONVERGED_GRADIENT;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use eindir_core::gradient::{DifferentiableObjective, Gradient};
     use rand::SeedableRng;
@@ -2327,7 +2326,7 @@ fn cluster_archive_search(
                 let _ = Gradient::grad(obj, xr.view())
                     .iter()
                     .fold(0.0_f64, |a, v| a.max(v.abs()))
-                    < CONVERGED_GRADIENT;
+                    < cfg.record_gradient;
             }
             (f, xr)
         };
