@@ -149,3 +149,25 @@ fn molecular_driver_keeps_the_measured_quench_defaults() {
         "molecular campaign output must expose where charged quench work went"
     );
 }
+
+#[test]
+fn slab_driver_reports_quench_accounting() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("slab_adsorption.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    for field in [
+        "stats.screen_charged",
+        "stats.full_charged",
+        "stats.check_charged",
+        "stats.screens",
+        "stats.capped",
+    ] {
+        assert!(
+            source.contains(field),
+            "slab driver must report quench accounting field {field}"
+        );
+    }
+}
