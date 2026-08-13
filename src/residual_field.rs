@@ -59,7 +59,9 @@ impl ResidualField {
     /// Observe class `i` at energy `e` and count one unit of effort.
     pub fn observe(&mut self, i: usize, e: f64) {
         self.resize(i + 1);
-        self.y[i] = e;
+        if !self.y[i].is_finite() || e < self.y[i] {
+            self.y[i] = e;
+        }
         self.effort[i] += 1.0;
         self.invalidate();
     }
