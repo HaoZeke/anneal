@@ -519,6 +519,47 @@ fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
 }
 
 #[test]
+fn population_barrier_covers_distinct_regions_before_duplicate_families() {
+    let server = server();
+    let digest = signature().digest();
+    let mut clients = (0..4)
+        .map(|replica| {
+            CatalogClient::connect(
+                server.addr(),
+                identity(replica, digest),
+                ClientConfig::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let separations = [4.0, 4.0, 1.0, 1.2];
+
+    for (replica, client) in clients.iter_mut().enumerate() {
+        let _ = client
+            .offer_candidate(1, candidate(replica as u32, 1, separations[replica]))
+            .unwrap();
+    }
+    let mut completed = None;
+    for (replica, client) in clients.iter_mut().enumerate() {
+        let state = client
+            .submit_population(2, 0, candidate(replica as u32, 2, separations[replica]))
+            .unwrap();
+        if let Some(plan) = state.plan {
+            completed = Some(plan);
+        }
+    }
+    let plan = completed.expect("complete barrier must return a plan");
+    let represented = plan
+        .parent_candidates
+        .iter()
+        .map(|candidate| candidate.census_basin.unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    assert_eq!(represented.len(), 3);
+    assert!(plan.max_family_size <= 2);
+}
+
+#[test]
 fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
     let server = server();
     let digest = signature().digest();
