@@ -1714,12 +1714,11 @@ pub fn step_away_fivefold_about(x: ArrayView1<f64>, rmsd: f64, axis: [f64; 3]) -
 /// Observed-cloud residual, partitioned by observed atomic number and
 /// restricted to the mobile set. Frozen atoms are neighbours, not movers.
 ///
-/// On a packing cluster the hop is the SOFI fivefold residual: it
-/// fires only while the fivefold length is small and the step
-/// increases that length. Molecules and slabs keep the ACE leftover.
-/// Supplying molecular groups retracts the ambient pullback onto their product
-/// rigid-body manifold by the nearest Kabsch motions. Production flexible mode
-/// supplies no groups; rigid diagnostic mode supplies the declared groups.
+/// Every system uses its observed descriptor cloud; no structural prototype or
+/// named morphology selects the direction. Supplying molecular groups retracts
+/// the ambient pullback onto their product rigid-body manifold by the nearest
+/// Kabsch motions. Production flexible mode supplies no groups; rigid
+/// diagnostic mode supplies the declared groups.
 pub fn step_away_cloud<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
@@ -1729,15 +1728,6 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     groups: Option<&[Vec<usize>]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let packing = species.is_none() && mobile.is_none();
-    if packing {
-        let y = step_away_fivefold(x, rmsd, rng);
-        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-12);
-        if moved {
-            return y;
-        }
-        return x.to_owned();
-    }
     #[cfg(feature = "featomic")]
     {
         let _ = spec;
@@ -1747,9 +1737,6 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     }
     #[cfg(not(feature = "featomic"))]
     {
-        if packing {
-            return x.to_owned();
-        }
         let loc = local_nu3_z(x, spec, species);
         let n_at = loc.nrows();
         let dim = loc.ncols();
