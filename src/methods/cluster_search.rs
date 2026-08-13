@@ -1007,6 +1007,13 @@ mod tests {
     use crate::potentials::PairPotential;
     use ndarray::Array1;
 
+    #[test]
+    fn convergence_uses_the_configured_recording_threshold() {
+        let gradient = Array1::from_vec(vec![7.2e-5, -3.0e-5]);
+        assert!(gradient_is_converged(gradient.view(), 1.0e-3));
+        assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
+    }
+
     /// The search runs against a potential passed as a trait object, which is
     /// the whole point: an rgpot potential arrives the same way.
     #[test]
