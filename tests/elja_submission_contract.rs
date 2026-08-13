@@ -14,3 +14,23 @@ fn hard_lj_arrays_default_to_the_partition_limit() {
         "hard-LJ arrays must default to the s-normal two-day limit"
     );
 }
+
+#[test]
+fn molecular_build_produces_every_paired_campaign_executable() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_build_rgpot_ex.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for example in ["molecular_cluster", "slab_adsorption", "bank_server"] {
+        assert!(
+            source.contains(&format!("--example {example}")),
+            "Elja molecular build must compile {example}"
+        );
+        assert!(
+            source.contains(&format!("target/release/examples/{example}")),
+            "Elja molecular build must verify {example}"
+        );
+    }
+}
