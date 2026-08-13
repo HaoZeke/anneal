@@ -594,13 +594,19 @@ fn run_full<'g, R: Rng + ?Sized>(
             cfg.temperature * cfg.ladder_top.powf(k as f64 / (n_rep - 1) as f64)
         }
     };
-    // The chain's first minimum, taken before the bias is built because a
-    // canonical order needs a reference and a reference has to be a minimum.
-    // Matching against an unrelaxed start would fix the frame to a structure
-    // the search never revisits, and the match quality against it would decide
-    // how many later structures can be ordered at all.
+    // The first quench supplies a stable canonical reference before the bias
+    // is built. Reporting it as a minimum additionally requires the same
+    // geometry and gradient contract as every subsequent quench.
     let (mut e, mut x) = relax(ledger, start, cfg.relax_steps);
-    ledger.record(e, x.view());
+    let initial_recordable = quench_is_sane(cfg, e, x.view())
+        && grad
+            .as_deref_mut()
+            .and_then(|g| g(ledger, x.view()))
+            .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
+            .unwrap_or(true);
+    if initial_recordable {
+        ledger.record(e, x.view());
+    }
     let canonical_reference = x.clone();
     let mut biases: Vec<BasinBias<ClusterFingerprint>> = (0..n_rep)
         .map(|k| {
@@ -675,7 +681,7 @@ fn run_full<'g, R: Rng + ?Sized>(
     };
     let mut surrogate_here: Option<f64> = None;
     let mut delayed_skipped = 0usize;
-    let mut unconverged_records = 0usize;
+    let mut unconverged_records = usize::from(!initial_recordable);
     let mut pending_surrogate: Option<(f64, f64)> = None;
     let mut pending_raw: Option<(f64, f64)> = None;
     // A posterior over what to build, consulted when a growth move is drawn.
@@ -707,6 +713,9 @@ fn run_full<'g, R: Rng + ?Sized>(
         DiversityAnnealer::from_initial(cfg.merge_radius).with_final_fraction(cfg.diversity_floor);
     let mut stall = StallDetector::new(cfg.stall_patience);
     let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
+    if initial_recordable {
+        improvements.push((0, ledger.spent(), 0, e));
+    }
     let mut soft_escapes = 0usize;
     let mut soft_crossed = 0usize;
     // Kept here rather than in a StallDetector because the threshold is not a
@@ -1347,7 +1356,7 @@ fn run_full<'g, R: Rng + ?Sized>(
             unconverged_records += 1;
         }
         hops += 1;
-        if improved && improvements.len() < 512 {
+        if recordable && improved && improvements.len() < 512 {
             improvements.push((hops, ledger.spent(), bias.n_basins(), e_new));
             // The anatomy of the draw that produced a new best, for the
             // question no mechanism arm has answered: what does a crossing
