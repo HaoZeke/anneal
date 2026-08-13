@@ -1359,7 +1359,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=6e50d838ef75940f3776c36bf4fa6f90f23d4347#6e50d838ef75940f3776c36bf4fa6f90f23d4347"
+source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=75896909589cb595a251271851e7c31bc6a9936e#75896909589cb595a251271851e7c31bc6a9936e"
 dependencies = [
  "dlpk",
  "eindir-core",
