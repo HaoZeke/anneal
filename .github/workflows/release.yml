@@ -17,8 +17,27 @@ permissions:
 # - GH Release uses --generate-notes (supplements the towncrier history).
 
 jobs:
+  validate-release:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate release metadata
+        shell: bash
+        run: |
+          cargo_version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          python_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          citation_version=$(awk '$1 == "version:" { gsub(/"/, "", $2); print $2; exit }' CITATION.cff)
+          test "$cargo_version" = "$python_version"
+          test "$cargo_version" = "$citation_version"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "${GITHUB_REF_NAME#v}" = "$cargo_version"
+          fi
+
   native-libs:
     name: Native libs (${{ matrix.os }}, ${{ matrix.target }})
+    needs: validate-release
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -80,6 +99,7 @@ jobs:
 
   sdist:
     name: Build sdist
+    needs: validate-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -100,6 +120,7 @@ jobs:
 
   wheels:
     name: Wheels (${{ matrix.os }}, ${{ matrix.target }})
+    needs: validate-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
