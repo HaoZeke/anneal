@@ -12,8 +12,9 @@ mod run {
     };
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
-        CatalogCandidate, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
-        PopulationEpochState, PopulationPlan, ProtocolRejection,
+        CatalogCandidate, CatalogMutation, CatalogRelation, CatalogSnapshot,
+        DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
+        ProtocolRejection,
     };
     use crate::methods::feynman_kac::population_family_position;
 
@@ -71,7 +72,7 @@ mod run {
     }
 
     /// One deterministic newline-delimited run event.
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Clone, PartialEq)]
     pub struct TraceEvent {
         /// Replica identity within the isolated ensemble.
         pub replica: u32,
@@ -91,6 +92,8 @@ mod run {
         pub policy: Option<PolicyTrace>,
         /// Complete diagnostic attached to a local slice boundary.
         pub slice: Option<SliceTrace>,
+        /// Exact active-catalog mutation attached to an offer event.
+        pub catalog: Option<CatalogMutation>,
     }
 
     /// Catalog, policy, and latent-field evidence for one policy query.
@@ -517,13 +520,17 @@ mod run {
                     Ok(CatalogOfferOutcome::SharingDisabled)
                 }
                 Some(Ok(receipt)) => {
-                    let admitted = self
-                        .replicas
-                        .get(&replica)
-                        .and_then(|state| state.snapshot)
-                        .is_none_or(|snapshot| {
-                            receipt.snapshot.active_entries > snapshot.active_entries
-                        });
+                    let admitted = receipt.catalog.as_ref().map_or_else(
+                        || {
+                            self.replicas
+                                .get(&replica)
+                                .and_then(|state| state.snapshot)
+                                .is_none_or(|snapshot| {
+                                    receipt.snapshot.active_entries > snapshot.active_entries
+                                })
+                        },
+                        |mutation| mutation.kind.admitted(),
+                    );
                     self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                     self.push_event(
                         replica,
@@ -535,6 +542,10 @@ mod run {
                         Some(receipt.version),
                         None,
                     )?;
+                    self.events
+                        .last_mut()
+                        .expect("catalog-offer push appends one trace event")
+                        .catalog = receipt.catalog;
                     Ok(if admitted {
                         CatalogOfferOutcome::Admitted
                     } else {
@@ -950,8 +961,35 @@ mod run {
                     )
                     .try_into()
                     .expect("slice JSON field count is fixed");
+                let (catalog_basin, catalog_mutation, catalog_evicted, catalog_incumbent) =
+                    event.catalog.as_ref().map_or_else(
+                        || {
+                            (
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                            )
+                        },
+                        |catalog| {
+                            (
+                                catalog.basin_id.to_string(),
+                                format!("\"{}\"", catalog.kind.code()),
+                                format!(
+                                    "[{}]",
+                                    catalog
+                                        .evicted
+                                        .iter()
+                                        .map(u64::to_string)
+                                        .collect::<Vec<_>>()
+                                        .join(",")
+                                ),
+                                optional_u64(catalog.incumbent_basin),
+                            )
+                        },
+                    );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -988,6 +1026,10 @@ mod run {
                 slice_novelty,
                 slice_energy,
                 slice_charged_work,
+                catalog_basin,
+                catalog_mutation,
+                catalog_evicted,
+                catalog_incumbent,
             ));
             }
             output
@@ -1179,6 +1221,7 @@ mod run {
                 population: None,
                 policy: None,
                 slice: None,
+                catalog: None,
             });
             Ok(())
         }

@@ -96,6 +96,7 @@ fn candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandidate {
         charged_work: sequence * 5,
         event_sequence: sequence,
         seed: 1000 + u64::from(replica),
+        census_basin: None,
     }
 }
 

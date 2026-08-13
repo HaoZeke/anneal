@@ -28,6 +28,7 @@ fn candidate() -> CatalogCandidate {
         charged_work: 81,
         event_sequence: 42,
         seed: 91,
+        census_basin: None,
     }
 }
 
