@@ -114,6 +114,10 @@ name = "bank_server"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "bank_peek"
+required-features = ["bank-rpc"]
+
+[[example]]
 name = "catalog_server"
 required-features = ["bank-rpc"]
 
