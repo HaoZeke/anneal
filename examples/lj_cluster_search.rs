@@ -226,6 +226,34 @@ mod option_tests {
             AdaptiveCatalogOperation::Adopt { action, .. } if action == "shell_rotate"
         ));
     }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn shared_crossing_is_aligned_into_the_live_lj_frame() {
+        let crossing = anneal_core::catalog_rpc::BoundaryCrossingRecord {
+            action: "surface_relocate".into(),
+            from: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            to: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0],
+            source_basin: 3,
+            destination_basin: 7,
+        };
+        let current = Array1::from(vec![3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 2.0, 4.0, 0.0]);
+        let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
+
+        let proposal = boundary_crossing_trial(
+            current.view(),
+            &crossing,
+            0.0,
+            10.0,
+            &mut rng,
+        )
+        .unwrap();
+
+        let expected = [3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 1.0, 4.0, 0.0];
+        for (actual, expected) in proposal.iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-8);
+        }
+    }
 }
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
