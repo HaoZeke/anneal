@@ -268,4 +268,16 @@ mod tests {
             mean[1]
         );
     }
+
+    #[test]
+    fn repeated_observations_retain_the_lowest_floor_and_count_effort() {
+        let mut f = ResidualField::new();
+        f.observe(0, -10.0);
+        f.observe(0, -8.0);
+
+        assert_eq!(f.y[0], -10.0);
+        assert_eq!(f.effort[0], 2.0);
+        let (mean, _) = f.posterior().expect("observed node has a posterior");
+        assert!((mean[0] + 8.0).abs() < 1e-12);
+    }
 }
