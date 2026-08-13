@@ -1021,6 +1021,14 @@ mod tests {
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
     }
 
+    #[test]
+    fn bank_search_does_not_report_its_unquenched_start() {
+        let (best, best_state, improvements) = empty_validated_record();
+        assert!(best.is_infinite() && best.is_sign_positive());
+        assert!(best_state.is_none());
+        assert!(improvements.is_empty());
+    }
+
     /// The search runs against a potential passed as a trait object, which is
     /// the whole point: an rgpot potential arrives the same way.
     #[test]
