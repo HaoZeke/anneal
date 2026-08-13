@@ -11,6 +11,8 @@ use rgpot_core::status::rgpot_status_t;
 use rgpot_core::tensor::{rgpot_tensor_data, rgpot_tensor_owned_cpu_f64_2d};
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
 use std::ffi::c_void;
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 
 const GFN2: i32 = 3;
@@ -45,6 +47,7 @@ struct XtbKernel {
     pot: *mut c_void,
     force: Symbol<'static, XtbForce>,
     destroy: Symbol<'static, XtbDestroy>,
+    evaluations: usize,
 }
 
 impl Drop for XtbKernel {
@@ -77,7 +80,7 @@ unsafe extern "C" fn xtb_callback(
     input: *const rgpot_force_input_t,
     output: *mut rgpot_force_out_t,
 ) -> rgpot_status_t {
-    let kernel = unsafe { &*(user as *const XtbKernel) };
+    let kernel = unsafe { &mut *(user as *mut XtbKernel) };
     let inp = unsafe { &*input };
     let out = unsafe { &mut *output };
     let n = match unsafe { inp.n_atoms() } {
@@ -93,6 +96,25 @@ unsafe extern "C" fn xtb_callback(
     let mut forces = vec![0.0; 3 * n];
     let mut energy = 0.0;
     let mut var = 0.0;
+    kernel.evaluations += 1;
+    if let Some(path) = env_path("RGPOT_XTB_TRACE") {
+        if let Ok(mut trace) = File::create(path) {
+            let positions = unsafe { std::slice::from_raw_parts(pos, 3 * n) };
+            let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
+            let _ = writeln!(trace, "{n}");
+            let _ = writeln!(trace, "rgpot xtb evaluation {}", kernel.evaluations);
+            for i in 0..n {
+                let _ = writeln!(
+                    trace,
+                    "{} {:.17e} {:.17e} {:.17e}",
+                    atomic_numbers[i],
+                    positions[3 * i],
+                    positions[3 * i + 1],
+                    positions[3 * i + 2]
+                );
+            }
+        }
+    }
     let rc = unsafe {
         (kernel.force)(
             kernel.pot,
@@ -221,6 +243,7 @@ impl RgpotObjective {
             pot,
             force,
             destroy,
+            evaluations: 0,
         });
         let n = atmnrs.len();
         let low = vec![-80.0; 3 * n];
