@@ -46,6 +46,8 @@ mod run {
         RpcFallback,
         /// The run has no sharing transport by construction.
         SharingDisabled,
+        /// One complete local-slice and transition diagnostic.
+        Slice,
     }
 
     impl TraceKind {
@@ -63,6 +65,7 @@ mod run {
                 Self::PopulationReady => "population_ready",
                 Self::RpcFallback => "rpc_fallback",
                 Self::SharingDisabled => "sharing_disabled",
+                Self::Slice => "slice",
             }
         }
     }
@@ -86,6 +89,8 @@ mod run {
         pub population: Option<PopulationTrace>,
         /// Exact coordinator evidence attached to a policy-state refresh.
         pub policy: Option<PolicyTrace>,
+        /// Complete diagnostic attached to a local slice boundary.
+        pub slice: Option<SliceTrace>,
     }
 
     /// Catalog, policy, and latent-field evidence for one policy query.
@@ -111,6 +116,104 @@ mod run {
         pub transition_uncertainty: f64,
         /// Energy used to classify the query against the active catalog.
         pub query_energy: f64,
+    }
+
+    /// Cooperative role selected for one local slice.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PolicyRole {
+        /// Continue the independent local trajectory.
+        Local,
+        /// Adopt a validated active-catalog anchor subject to policy conditions.
+        Exploit,
+        /// Explore a target-free descriptor-space direction.
+        Explore,
+        /// Leave a locally exhausted basin through a target-free proposal.
+        Leave,
+        /// No remote policy evidence was available.
+        Unavailable,
+    }
+
+    /// Proposal family dispatched during one slice.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ProposalFamily {
+        /// Independent local quenched search.
+        Local,
+        /// Active-catalog anchor sampling.
+        CatalogSample,
+        /// Farthest-hole descriptor proposal and Cartesian pullback.
+        DescriptorHole,
+        /// Synchronous fixed-population reconfiguration.
+        PopulationReconfiguration,
+    }
+
+    /// Receiving validation result for a slice transition.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SliceValidation {
+        /// The transition did not require receiving validation.
+        NotAttempted,
+        /// Receiving validation accepted the transition state.
+        Accepted,
+        /// Receiving validation rejected the transition state.
+        Rejected,
+    }
+
+    /// Quench result associated with a slice transition.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SliceQuench {
+        /// No transition quench was attempted.
+        NotAttempted,
+        /// The transition quench converged and met its validity contract.
+        Converged,
+        /// The transition quench or its validity contract failed.
+        Rejected,
+    }
+
+    /// Adoption result for a proposed slice transition.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum SliceAdoption {
+        /// No nonlocal adoption was attempted.
+        NotAttempted,
+        /// The validated transition became the local state.
+        Adopted,
+        /// A valid transition did not meet the policy's adoption condition.
+        NotImproved,
+        /// Proposal construction or receiving validation rejected the transition.
+        Rejected,
+    }
+
+    /// Complete evidence recorded exactly once for one local-search slice.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct SliceTrace {
+        /// One-based slice index within the replica trajectory.
+        pub slice: u64,
+        /// Current fixed-census basin identifier, when assigned.
+        pub current_basin: Option<u64>,
+        /// Relation between the current state and active catalog.
+        pub active_relation: Option<CatalogRelation>,
+        /// Cooperative role selected for the slice.
+        pub policy_role: PolicyRole,
+        /// Stable policy or availability reason.
+        pub policy_reason: &'static str,
+        /// Proposal family dispatched by the slice.
+        pub proposal_family: ProposalFamily,
+        /// Sampled census basin, when an active-catalog anchor was requested.
+        pub sampled_basin: Option<u64>,
+        /// Norm of the requested target-free descriptor increment.
+        pub descriptor_step_norm: Option<f64>,
+        /// Norm of the realized Cartesian increment.
+        pub cartesian_step_norm: Option<f64>,
+        /// Receiving validation result.
+        pub validation: SliceValidation,
+        /// Transition quench result.
+        pub quench: SliceQuench,
+        /// Whether the proposed transition entered the local trajectory.
+        pub adoption: SliceAdoption,
+        /// Target-independent novelty supplied to the policy.
+        pub novelty: Option<f64>,
+        /// Best local energy at the slice boundary.
+        pub energy: f64,
+        /// Exact charged work consumed by the slice.
+        pub charged_work: u64,
     }
 
     /// Genealogy evidence for one destination at a completed epoch.
@@ -258,6 +361,14 @@ mod run {
             /// Stable invariant violated by the plan.
             reason: &'static str,
         },
+        /// A per-slice diagnostic is incomplete, non-finite, or out of order.
+        #[error("invalid diagnostic for cooperative slice {slice}: {reason}")]
+        InvalidSliceDiagnostic {
+            /// Slice carrying invalid evidence.
+            slice: u64,
+            /// Stable invariant violated by the diagnostic.
+            reason: &'static str,
+        },
     }
 
     struct ReplicaState {
@@ -267,6 +378,7 @@ mod run {
         cumulative_charged: u64,
         client: Option<CatalogClient>,
         snapshot: Option<CatalogSnapshot>,
+        last_slice: u64,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -296,6 +408,7 @@ mod run {
                             cumulative_charged: 0,
                             client: None,
                             snapshot: None,
+                            last_slice: 0,
                         },
                     )
                 })
@@ -676,6 +789,45 @@ mod run {
             &self.events
         }
 
+        /// Record one complete, ordered local-slice diagnostic.
+        pub fn record_slice(
+            &mut self,
+            replica: u32,
+            diagnostic: SliceTrace,
+        ) -> Result<(), CooperativeRunError> {
+            validate_slice_trace(diagnostic)?;
+            let (expected, cumulative_charged, catalog_version) = {
+                let state = self.replica_mut(replica)?;
+                (
+                    state
+                        .last_slice
+                        .checked_add(1)
+                        .ok_or(CooperativeRunError::CounterOverflow)?,
+                    state.cumulative_charged,
+                    state.snapshot.map(|snapshot| snapshot.version),
+                )
+            };
+            if diagnostic.slice != expected {
+                return Err(CooperativeRunError::InvalidSliceDiagnostic {
+                    slice: diagnostic.slice,
+                    reason: "slice indices must be contiguous and unique per replica",
+                });
+            }
+            if diagnostic.charged_work > cumulative_charged {
+                return Err(CooperativeRunError::InvalidSliceDiagnostic {
+                    slice: diagnostic.slice,
+                    reason: "slice work exceeds the replica cumulative charged work",
+                });
+            }
+            self.push_event(replica, TraceKind::Slice, catalog_version, None)?;
+            self.replica_mut(replica)?.last_slice = diagnostic.slice;
+            self.events
+                .last_mut()
+                .expect("slice push appends one trace event")
+                .slice = Some(diagnostic);
+            Ok(())
+        }
+
         /// Encode a manifest header followed by one JSON object per trace event.
         pub fn json_lines(&self, manifest: &RunManifest) -> String {
             let mut output = format!(
@@ -756,8 +908,50 @@ mod run {
                         )
                     },
                 );
+                let [
+                    slice,
+                    slice_current_basin,
+                    slice_active_relation,
+                    slice_policy_role,
+                    slice_policy_reason,
+                    slice_proposal_family,
+                    slice_sampled_basin,
+                    slice_descriptor_step_norm,
+                    slice_cartesian_step_norm,
+                    slice_validation,
+                    slice_quench,
+                    slice_adoption,
+                    slice_novelty,
+                    slice_energy,
+                    slice_charged_work,
+                ] = event
+                    .slice
+                    .map_or_else(
+                        || vec!["null".to_owned(); 15],
+                        |slice| {
+                            vec![
+                                slice.slice.to_string(),
+                                optional_u64(slice.current_basin),
+                                optional_catalog_relation(slice.active_relation),
+                                format!("\"{}\"", policy_role_code(slice.policy_role)),
+                                format!("\"{}\"", json_escape(slice.policy_reason)),
+                                format!("\"{}\"", proposal_family_code(slice.proposal_family)),
+                                optional_u64(slice.sampled_basin),
+                                optional_f64(slice.descriptor_step_norm),
+                                optional_f64(slice.cartesian_step_norm),
+                                format!("\"{}\"", slice_validation_code(slice.validation)),
+                                format!("\"{}\"", slice_quench_code(slice.quench)),
+                                format!("\"{}\"", slice_adoption_code(slice.adoption)),
+                                optional_f64(slice.novelty),
+                                slice.energy.to_string(),
+                                slice.charged_work.to_string(),
+                            ]
+                        },
+                    )
+                    .try_into()
+                    .expect("slice JSON field count is fixed");
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -779,6 +973,21 @@ mod run {
                 policy_novelty,
                 policy_transition_uncertainty,
                 policy_query_energy,
+                slice,
+                slice_current_basin,
+                slice_active_relation,
+                slice_policy_role,
+                slice_policy_reason,
+                slice_proposal_family,
+                slice_sampled_basin,
+                slice_descriptor_step_norm,
+                slice_cartesian_step_norm,
+                slice_validation,
+                slice_quench,
+                slice_adoption,
+                slice_novelty,
+                slice_energy,
+                slice_charged_work,
             ));
             }
             output
@@ -969,6 +1178,7 @@ mod run {
                 reason,
                 population: None,
                 policy: None,
+                slice: None,
             });
             Ok(())
         }
@@ -1003,6 +1213,92 @@ mod run {
             CatalogRelation::UnrelatedNoAnchor => "unrelated_no_anchor",
             CatalogRelation::UnrelatedLowerAnchor => "unrelated_lower_anchor",
         }
+    }
+
+    fn policy_role_code(role: PolicyRole) -> &'static str {
+        match role {
+            PolicyRole::Local => "local",
+            PolicyRole::Exploit => "exploit",
+            PolicyRole::Explore => "explore",
+            PolicyRole::Leave => "leave",
+            PolicyRole::Unavailable => "unavailable",
+        }
+    }
+
+    fn proposal_family_code(family: ProposalFamily) -> &'static str {
+        match family {
+            ProposalFamily::Local => "local",
+            ProposalFamily::CatalogSample => "catalog_sample",
+            ProposalFamily::DescriptorHole => "descriptor_hole",
+            ProposalFamily::PopulationReconfiguration => "population_reconfiguration",
+        }
+    }
+
+    fn slice_validation_code(result: SliceValidation) -> &'static str {
+        match result {
+            SliceValidation::NotAttempted => "not_attempted",
+            SliceValidation::Accepted => "accepted",
+            SliceValidation::Rejected => "rejected",
+        }
+    }
+
+    fn slice_quench_code(result: SliceQuench) -> &'static str {
+        match result {
+            SliceQuench::NotAttempted => "not_attempted",
+            SliceQuench::Converged => "converged",
+            SliceQuench::Rejected => "rejected",
+        }
+    }
+
+    fn slice_adoption_code(result: SliceAdoption) -> &'static str {
+        match result {
+            SliceAdoption::NotAttempted => "not_attempted",
+            SliceAdoption::Adopted => "adopted",
+            SliceAdoption::NotImproved => "not_improved",
+            SliceAdoption::Rejected => "rejected",
+        }
+    }
+
+    fn optional_u64(value: Option<u64>) -> String {
+        value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+    }
+
+    fn optional_f64(value: Option<f64>) -> String {
+        value.map_or_else(|| "null".to_owned(), |value| value.to_string())
+    }
+
+    fn optional_catalog_relation(value: Option<CatalogRelation>) -> String {
+        value.map_or_else(
+            || "null".to_owned(),
+            |value| format!("\"{}\"", catalog_relation_code(value)),
+        )
+    }
+
+    fn validate_slice_trace(diagnostic: SliceTrace) -> Result<(), CooperativeRunError> {
+        let finite_nonnegative =
+            |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value >= 0.0);
+        if diagnostic.slice == 0 {
+            return Err(CooperativeRunError::InvalidSliceDiagnostic {
+                slice: diagnostic.slice,
+                reason: "slice indices are one-based",
+            });
+        }
+        if !diagnostic.energy.is_finite() {
+            return Err(CooperativeRunError::InvalidSliceDiagnostic {
+                slice: diagnostic.slice,
+                reason: "slice energy must be finite",
+            });
+        }
+        if !finite_nonnegative(diagnostic.descriptor_step_norm)
+            || !finite_nonnegative(diagnostic.cartesian_step_norm)
+            || !finite_nonnegative(diagnostic.novelty)
+        {
+            return Err(CooperativeRunError::InvalidSliceDiagnostic {
+                slice: diagnostic.slice,
+                reason: "slice norms and novelty must be finite and nonnegative",
+            });
+        }
+        Ok(())
     }
 
     fn policy_trace(state: PolicyState, query_energy: f64) -> PolicyTrace {
