@@ -19,7 +19,10 @@ fn observed_crossing_displacement_aligns_to_the_current_frame() {
 
     let expected = Array1::from(vec![3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 1.0, 4.0, 0.0]);
     for (actual, expected) in proposal.iter().zip(expected.iter()) {
-        assert!((actual - expected).abs() < 1e-8);
+        assert!(
+            (actual - expected).abs() < 1e-8,
+            "aligned coordinate {actual} differs from {expected}; proposal={proposal:?}"
+        );
     }
 }
 
