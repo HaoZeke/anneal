@@ -3145,6 +3145,39 @@ mod tests {
     }
 
     #[test]
+    fn validated_accepted_transitions_retain_their_fresh_gradient() {
+        let cfg = Config::for_cluster(6);
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let mut grad = |ledger: &mut Ledger, x: ArrayView1<f64>| {
+            ledger.charge().then(|| Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(19);
+
+        let out = run_with_gradient(
+            &cfg,
+            random_cluster(6, 0.7, cfg.min_separation, &mut rng).view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        );
+
+        let validated = out
+            .accepted_transitions
+            .iter()
+            .filter(|transition| transition.validated)
+            .collect::<Vec<_>>();
+        assert!(!validated.is_empty());
+        assert!(validated.iter().all(|transition| {
+            transition
+                .to_gradient
+                .as_ref()
+                .is_some_and(|gradient| gradient.len() == transition.to_state.len())
+        }));
+    }
+
+    #[test]
     fn spectral_funnel_bias_runs_under_the_ledger() {
         // track_funnels must not change the charge contract: SpectralBias is an
         // extra term on the Metropolis delta and a graph update on hop identity,
