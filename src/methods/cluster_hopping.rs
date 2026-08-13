@@ -3069,6 +3069,32 @@ mod tests {
     }
 
     #[test]
+    fn outcome_keeps_live_energy_and_accepted_trajectory_edges() {
+        let cfg = Config::for_cluster(6);
+        let mut ledger = Ledger::new(4000);
+        let mut relax = toy_relax;
+        let out = optimize(&cfg, &mut ledger, &mut relax, 19);
+
+        assert!(out.final_energy.is_finite());
+        let final_state = out
+            .final_state
+            .as_ref()
+            .expect("a completed hopping run must retain its live state");
+        let last = out
+            .accepted_transitions
+            .last()
+            .expect("the accepted trajectory must not be reduced to its best minimum");
+        assert_eq!(last.to_energy, out.final_energy);
+        assert_eq!(&last.to_state, final_state);
+        assert!(!last.action.is_empty());
+
+        for pair in out.accepted_transitions.windows(2) {
+            assert_eq!(pair[0].to_energy, pair[1].from_energy);
+            assert_eq!(pair[0].to_state, pair[1].from_state);
+        }
+    }
+
+    #[test]
     fn spectral_funnel_bias_runs_under_the_ledger() {
         // track_funnels must not change the charge contract: SpectralBias is an
         // extra term on the Metropolis delta and a graph update on hop identity,
