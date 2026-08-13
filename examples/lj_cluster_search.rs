@@ -781,7 +781,7 @@ fn main() {
     if cfg.soap_mode != anneal_core::methods::cluster_hopping::SoapProposalMode::Off {
         #[cfg(feature = "featomic")]
         println!(
-            "  SOAP hop: SOFI C5 residual while fivefold, else featomic packing-mean kick / leftover, l>=5, no 421/fcc"
+            "  SOAP hop: observed-cloud featomic leftover / packing-mean kick, l>=5, no named morphology or prototype"
         );
         #[cfg(feature = "ira")]
         println!(
