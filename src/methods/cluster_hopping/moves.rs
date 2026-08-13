@@ -1455,6 +1455,7 @@ mod move_scaling_tests {
     #[test]
     fn recommended_molecular_offers_soap_with_species() {
         let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        assert_eq!(rec.soap_mode, SoapProposalMode::Flexible);
         assert!(
             !rec.packing_cna_applies(),
             "CNA 555 must not apply to a molecule"
@@ -1476,6 +1477,80 @@ mod move_scaling_tests {
                 .iter()
                 .map(|k| k.name())
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn molecular_soap_modes_control_internal_deformation() {
+        let species = vec![8, 1, 1, 8, 1, 1];
+        let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 3.10, 0.15, 0.08, 3.98,
+            0.40, -0.05, 2.82, 1.05, 0.18,
+        ]);
+        let internal = |y: &Array1<f64>| {
+            groups
+                .iter()
+                .flat_map(|group| {
+                    (0..group.len()).flat_map(move |a| {
+                        ((a + 1)..group.len()).map(move |b| {
+                            let i = group[a];
+                            let j = group[b];
+                            (0..3)
+                                .map(|axis| {
+                                    let d = y[3 * i + axis] - y[3 * j + axis];
+                                    d * d
+                                })
+                                .sum::<f64>()
+                                .sqrt()
+                        })
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+
+        let mut flexible = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
+        flexible.soap_mode = SoapProposalMode::Flexible;
+        let flexible_move = flexible
+            .move_library
+            .kernels(&flexible)
+            .into_iter()
+            .find(|kernel| matches!(kernel, ClusterMove::Soap { .. }))
+            .expect("flexible mode has no SOAP proposal");
+
+        let mut rigid = flexible.clone();
+        rigid.soap_mode = SoapProposalMode::Rigid;
+        let rigid_move = rigid
+            .move_library
+            .kernels(&rigid)
+            .into_iter()
+            .find(|kernel| matches!(kernel, ClusterMove::Soap { .. }))
+            .expect("rigid mode has no SOAP proposal");
+
+        let mut rng_flexible = StdRng::seed_from_u64(17);
+        let mut rng_rigid = StdRng::seed_from_u64(17);
+        let y_flexible = flexible_move.propose(x.view(), 0.8, &mut rng_flexible);
+        let y_rigid = rigid_move.propose(x.view(), 0.8, &mut rng_rigid);
+        let d0 = internal(&x);
+        let df = internal(&y_flexible);
+        let dr = internal(&y_rigid);
+
+        assert!(
+            df.iter().zip(&d0).any(|(after, before)| (after - before).abs() > 1e-8),
+            "flexible SOAP did not deform any internal distance"
+        );
+        for (after, before) in dr.iter().zip(&d0) {
+            assert!((after - before).abs() < 1e-10, "rigid SOAP changed {before} to {after}");
+        }
+
+        let mut off = flexible;
+        off.soap_mode = SoapProposalMode::Off;
+        assert!(
+            off.move_library
+                .kernels(&off)
+                .iter()
+                .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
+            "off mode retained a SOAP proposal"
         );
     }
 
