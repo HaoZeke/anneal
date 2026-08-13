@@ -186,7 +186,7 @@ pub fn dense_planes(x: ArrayView1<f64>, n: usize, layer: f64) -> Vec<Plane> {
             }
         }
     }
-    out.sort_by(|a, b| b.population.cmp(&a.population));
+    out.sort_by_key(|item| std::cmp::Reverse(item.population));
     out
 }
 
