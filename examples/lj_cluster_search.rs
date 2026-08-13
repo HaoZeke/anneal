@@ -1582,6 +1582,18 @@ fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     .ok()
 }
 
+#[cfg(feature = "bank-rpc")]
+fn population_boundary_trial(
+    current: ArrayView1<f64>,
+    crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
+    noise_scale: f64,
+    trust_radius: f64,
+    draw: u64,
+) -> Option<Array1<f64>> {
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(draw);
+    boundary_crossing_trial(current, crossing, noise_scale, trust_radius, &mut rng)
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
