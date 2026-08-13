@@ -26,6 +26,9 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+      - name: Verify crate publication package
+        run: cargo publish --dry-run
+
       - name: Checkout Vesin
         uses: actions/checkout@v6
         with:
