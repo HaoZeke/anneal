@@ -312,6 +312,51 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
 }
 
 #[test]
+fn policy_relation_uses_fixed_probe_attraction_regions() {
+    let server = server();
+    let digest = signature().digest();
+    let mut first =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut second =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+    let first_state = candidate(0, 1, 1.2);
+    let second_state = candidate(1, 1, 2.0);
+
+    first.record_visit(1, first_state.clone()).unwrap();
+    second.record_visit(1, second_state.clone()).unwrap();
+    for sequence in 2..10 {
+        first
+            .record_transition(
+                sequence,
+                "probe",
+                TransitionDestination::Resolved(candidate(0, sequence, 2.0)),
+                false,
+            )
+            .unwrap();
+        second
+            .record_transition(
+                sequence,
+                "probe",
+                TransitionDestination::Resolved(candidate(1, sequence, 2.0)),
+                false,
+            )
+            .unwrap();
+    }
+
+    let relation = first
+        .policy_state(10, first_state.descriptor, first_state.energy)
+        .unwrap()
+        .relation;
+    assert_eq!(
+        relation,
+        CatalogRelation::SameBasin,
+        "replicas with the same fixed-probe return dynamics must share an attraction region"
+    );
+}
+
+#[test]
 fn observed_adopted_crossing_is_available_to_another_replica() {
     let server = server();
     let digest = signature().digest();
