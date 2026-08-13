@@ -2178,9 +2178,43 @@ fn run_capnp_catalog(
             }
             PolicyAction::Explore | PolicyAction::Leave => {
                 slice_trace.proposal_family = ProposalFamily::BoundaryTransport;
-                if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                    .boundary_crossing(replica, descriptor.values().to_vec(), rng.random())
-                    .expect("boundary-crossing access must preserve local execution")
+                let source_registered = if ledger.remaining() >= 2 && ledger.charge() {
+                    let (source_energy, source_gradient) = lj(policy_state.view());
+                    cooperative
+                        .record_work(replica, ChargeKind::FreshValidation, 1)
+                        .expect("transport source validation must enter the ledger");
+                    candidate_sequence = candidate_sequence
+                        .checked_add(1)
+                        .expect("candidate sequence must fit u64");
+                    let source = lj_catalog_candidate(
+                        &descriptor_space,
+                        &signature.atomic_numbers,
+                        replica,
+                        candidate_sequence,
+                        seed,
+                        ledger.spent(),
+                        source_energy,
+                        policy_state.view(),
+                        source_gradient.view(),
+                    );
+                    if let Some(source) = source
+                        && ledger.charge()
+                    {
+                        cooperative
+                            .record_work(replica, ChargeKind::FreshValidation, 1)
+                            .expect("transport source receiving validation must enter the ledger");
+                        cooperative.record_current(replica, source).ok()
+                            == Some(TransitionRecordOutcome::Recorded)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+                if source_registered
+                    && let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
+                        .boundary_crossing(replica, descriptor.values().to_vec(), rng.random())
+                        .expect("boundary-crossing access must preserve local execution")
                 {
                     slice_trace.sampled_basin = Some(crossing.destination_basin);
                     cooperative
@@ -2197,9 +2231,66 @@ fn run_capnp_catalog(
                             policy_state.as_slice().expect("LJ state is contiguous"),
                             proposed.as_slice().expect("LJ proposal is contiguous"),
                         ));
-                        slice_trace.adoption = SliceAdoption::Adopted;
-                        current = proposed;
-                        current_energy = f64::NAN;
+                        let transport_start = ledger.spent();
+                        let (transport_energy, transport_state) =
+                            relax(ledger, proposed.view(), run_cfg.relax_steps);
+                        let transport_gradient = grad(ledger, transport_state.view());
+                        let transport_charged = ledger.spent().saturating_sub(transport_start);
+                        candidate_sequence = candidate_sequence
+                            .checked_add(1)
+                            .expect("candidate sequence must fit u64");
+                        let destination = transport_gradient.as_ref().and_then(|gradient| {
+                            boundary_transition_destination(
+                                &descriptor_space,
+                                &signature.atomic_numbers,
+                                replica,
+                                candidate_sequence,
+                                seed,
+                                ledger.spent(),
+                                transport_energy,
+                                transport_state.view(),
+                                gradient.view(),
+                            )
+                        });
+                        cooperative
+                            .record_work(
+                                replica,
+                                if destination.is_some() {
+                                    ChargeKind::AcceptedQuench
+                                } else {
+                                    ChargeKind::RejectedQuench
+                                },
+                                u64::try_from(transport_charged)
+                                    .expect("transport quench charge must fit u64"),
+                            )
+                            .expect("transport quench must enter the cooperative ledger");
+                        if let Some((action, destination)) = destination
+                            && ledger.charge()
+                        {
+                            cooperative
+                                .record_work(replica, ChargeKind::FreshValidation, 1)
+                                .expect("transport receiving validation must enter the ledger");
+                            let _ = cooperative.record_transition(
+                                replica,
+                                action,
+                                TransitionDestination::Resolved(destination),
+                                true,
+                            );
+                            slice_trace.validation = SliceValidation::Accepted;
+                            slice_trace.quench = SliceQuench::Converged;
+                            slice_trace.adoption = SliceAdoption::Adopted;
+                            current = transport_state.clone();
+                            current_energy = transport_energy;
+                            if transport_energy < best {
+                                best = transport_energy;
+                                best_state = Some(transport_state);
+                                stall = 0;
+                            }
+                        } else {
+                            slice_trace.validation = SliceValidation::Rejected;
+                            slice_trace.quench = SliceQuench::Rejected;
+                            slice_trace.adoption = SliceAdoption::Rejected;
+                        }
                     } else {
                         slice_trace.adoption = SliceAdoption::Rejected;
                     }
