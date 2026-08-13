@@ -26,6 +26,37 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all -- --check
 
+      - name: Checkout Vesin
+        uses: actions/checkout@v6
+        with:
+          repository: Luthaf/vesin
+          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          path: .ci/vesin
+          persist-credentials: false
+
+      - name: Checkout IRA
+        uses: actions/checkout@v6
+        with:
+          repository: mammasmias/IterativeRotationsAssignments
+          ref: 2b2fc312569a5a50183ca82b2f260ebaaf87c508
+          path: .ci/ira
+          persist-credentials: false
+
+      - name: Build all-feature dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gfortran liblapack-dev
+          cmake -S .ci/ira -B .ci/ira/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER=gfortran
+          cmake --build .ci/ira/build --parallel 2
+          test -f .ci/ira/lib/libira.so
+          echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
+          echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
       - name: cargo clippy
         run: cargo clippy --all-features --all-targets -- -D warnings
 
@@ -55,6 +86,57 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Checkout Vesin
+        uses: actions/checkout@v6
+        with:
+          repository: Luthaf/vesin
+          ref: 976b5dbbdf392db5197353037eefc01a46e9e667
+          path: .ci/vesin
+          persist-credentials: false
+
+      - name: Checkout IRA
+        uses: actions/checkout@v6
+        with:
+          repository: mammasmias/IterativeRotationsAssignments
+          ref: 2b2fc312569a5a50183ca82b2f260ebaaf87c508
+          path: .ci/ira
+          persist-credentials: false
+
+      - name: Build all-feature dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gfortran liblapack-dev
+            fortran=gfortran
+            lapack=Generic
+          else
+            for candidate in gfortran gfortran-15 gfortran-14 gfortran-13; do
+              if command -v "$candidate" >/dev/null 2>&1; then
+                fortran=$candidate
+                break
+              fi
+            done
+            test -n "${fortran:-}"
+            lapack=Apple
+          fi
+          cmake -S .ci/ira -B .ci/ira/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_Fortran_COMPILER="$fortran" \
+            -DBLA_VENDOR="$lapack"
+          cmake --build .ci/ira/build --parallel 2
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            test -f .ci/ira/lib/libira.so
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${LD_LIBRARY_PATH:-}" \
+              >> "$GITHUB_ENV"
+          else
+            test -f .ci/ira/lib/libira.dylib
+            echo "DYLD_FALLBACK_LIBRARY_PATH=$GITHUB_WORKSPACE/.ci/ira/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" \
+              >> "$GITHUB_ENV"
+          fi
+          echo "VESIN_SRC=$GITHUB_WORKSPACE/.ci/vesin" >> "$GITHUB_ENV"
+          echo "IRA_LIB_DIR=$GITHUB_WORKSPACE/.ci/ira/lib" >> "$GITHUB_ENV"
 
       - name: cargo test
         if: runner.os != 'macOS'
