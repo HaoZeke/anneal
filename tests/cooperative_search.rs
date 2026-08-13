@@ -311,6 +311,40 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
 }
 
 #[test]
+fn observed_adopted_crossing_is_available_to_another_replica() {
+    let server = server();
+    let digest = signature().digest();
+    let mut producer =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut consumer =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+    let source = candidate(0, 1, 1.2);
+    let source_descriptor = source.descriptor.clone();
+    let destination = candidate(0, 2, 4.0);
+
+    producer.record_visit(1, source.clone()).unwrap();
+    producer
+        .record_transition(
+            2,
+            "surface_relocate",
+            TransitionDestination::Resolved(destination.clone()),
+            true,
+        )
+        .unwrap();
+    let crossing = consumer
+        .boundary_crossing(1, source_descriptor, 71)
+        .unwrap()
+        .expect("an adopted inter-basin edge must be shareable");
+
+    assert_eq!(crossing.action, "surface_relocate");
+    assert_eq!(crossing.from, source.coordinates);
+    assert_eq!(crossing.to, destination.coordinates);
+    assert_ne!(crossing.source_basin, crossing.destination_basin);
+}
+
+#[test]
 fn cooperative_run_traces_explicit_transition_records() {
     let server = server();
     let digest = signature().digest();
