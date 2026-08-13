@@ -1623,9 +1623,10 @@ where
             }
             continue;
         }
-        // Under MH a screened structure is not a minimum; under Metropolis it
-        // is still a legal chain state (cheaper step, same deposit).
-        let unquenched = cfg.minima_hopping && (screened_this || returning);
+        // A screened or returning structure has only a partial relaxation.
+        // It can train screens and count as a rejected attempt, but the live
+        // chain remains on the quenched landscape under every acceptance law.
+        let unquenched = screened_this || returning;
         // Every quench trains the surrogate, including the ones taken before
         // it had an opinion. This is where its training data comes from.
         if let (Some(sur), Some((raw_y, gnorm))) = (surrogate.as_mut(), pending_raw.take()) {
@@ -1798,24 +1799,23 @@ where
                 .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
                 .unwrap_or(0.0);
         let delta = (e_new + v_new) - (e + v_old);
-        let accept = if cfg.minima_hopping {
-            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-            if unquenched {
-                // No quenched destination: count as a return for the escape
-                // scale and stay put. Do not register the partial structure.
+        let accept = if !recordable {
+            if cfg.minima_hopping {
+                let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
                 feedback.observe(Some(from), from);
-                false
-            } else {
-                // Threshold on the *biased* rise. Adapts like Goedecker's
-                // E_diff while still feeling the per-basin deposits.
-                let reached = identity.basin_of(x_new.view());
-                feedback.observe(Some(from), reached);
-                let ok = feedback.accept(delta);
-                if ok {
-                    here = Some(reached);
-                }
-                ok
             }
+            false
+        } else if cfg.minima_hopping {
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
+            // while still feeling the per-basin deposits.
+            let reached = identity.basin_of(x_new.view());
+            feedback.observe(Some(from), reached);
+            let ok = feedback.accept(delta);
+            if ok {
+                here = Some(reached);
+            }
+            ok
         } else if let (Some(sur), Some((pred_y, _raw_y))) = (surrogate.as_mut(), pending_surrogate)
         {
             // Second stage. The surrogate difference is subtracted back out, so
