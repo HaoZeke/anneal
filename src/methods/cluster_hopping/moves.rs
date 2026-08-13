@@ -7,7 +7,8 @@ use super::*;
 ///
 /// The adaptive allocator may still choose among the kernels inside the
 /// selected library.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MoveLibrary {
     /// Wales-Doye atomic moves.
     Atomic,
