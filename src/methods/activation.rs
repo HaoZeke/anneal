@@ -401,16 +401,15 @@ mod tests {
             inner(x)
         };
         let out = activate(w.view(), g, &Activation::default(), -1.0);
-        match out {
-            Some(o) => assert!(
+        if let Some(o) = out {
+            assert!(
                 o.evaluations <= 40,
                 "spent {} gradients against a budget of 40",
                 o.evaluations
-            ),
-            // Refusing before the first curvature pass completes is also
-            // correct; what would not be is climbing past the budget.
-            None => {}
+            );
         }
+        // Refusing before the first curvature pass completes is also correct;
+        // what would not be is climbing past the budget.
     }
 
     /// The sign argument has to mean something: the two ends of a soft
