@@ -192,6 +192,8 @@ pub enum CatalogOperation {
         action: String,
         /// Resolved validated endpoint or explicit unresolved outcome.
         destination: TransitionDestination,
+        /// Whether the reached endpoint became the replica's live state.
+        adopted: bool,
     },
 }
 
@@ -503,9 +505,11 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::RecordTransition {
             action,
             destination,
+            adopted,
         } => {
             let mut transition = operation.init_record_transition();
             transition.set_action(action.as_str());
+            transition.set_adopted(*adopted);
             let mut wire_destination = transition.init_destination();
             match destination {
                 TransitionDestination::Unresolved => wire_destination.set_unresolved(()),
@@ -605,6 +609,7 @@ pub(crate) fn decode_request_reader(
             CatalogOperation::RecordTransition {
                 action: text_value(transition.get_action().map_err(wire_error)?)?,
                 destination,
+                adopted: transition.get_adopted(),
             }
         }
     };

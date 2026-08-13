@@ -294,6 +294,7 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
             5,
             "probe",
             TransitionDestination::Resolved(candidate(0, 3, 1.2)),
+            false,
         )
         .unwrap();
     let after_probe = client
@@ -302,7 +303,7 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
     assert!(after_probe.transition_uncertainty < after_offer.transition_uncertainty);
 
     client
-        .record_transition(7, "probe", TransitionDestination::Unresolved)
+        .record_transition(7, "probe", TransitionDestination::Unresolved, false)
         .unwrap();
     let after_unresolved = client.policy_state(8, descriptor, current.energy).unwrap();
     assert!(after_unresolved.transition_uncertainty < after_probe.transition_uncertainty);

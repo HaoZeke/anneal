@@ -975,6 +975,7 @@ fn apply_request(
         CatalogOperation::RecordTransition {
             action,
             destination,
+            adopted,
         } => {
             let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
@@ -1037,9 +1038,11 @@ fn apply_request(
                             ProtocolRejection::ValidationRejected,
                         );
                     };
-                    scientific
-                        .last_basin_by_replica
-                        .insert(request.identity.replica, observation.basin_id);
+                    if *adopted {
+                        scientific
+                            .last_basin_by_replica
+                            .insert(request.identity.replica, observation.basin_id);
+                    }
                     state.census_visits = observation.total_visits;
                     TransitionOutcome::Resolved(destination_node)
                 }

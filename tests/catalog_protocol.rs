@@ -65,10 +65,12 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
         CatalogOperation::RecordTransition {
             action: "probe".into(),
             destination: TransitionDestination::Resolved(candidate()),
+            adopted: true,
         },
         CatalogOperation::RecordTransition {
             action: "probe".into(),
             destination: TransitionDestination::Unresolved,
+            adopted: false,
         },
     ];
     for operation in operations {

@@ -277,12 +277,14 @@ impl CatalogClient {
         event_sequence: u64,
         action: impl Into<String>,
         destination: TransitionDestination,
+        adopted: bool,
     ) -> Result<MutationReceipt, CatalogClientError> {
         let reply = self.call(
             event_sequence,
             CatalogOperation::RecordTransition {
                 action: action.into(),
                 destination,
+                adopted,
             },
         )?;
         Ok(MutationReceipt {
