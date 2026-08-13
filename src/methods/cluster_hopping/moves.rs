@@ -1486,13 +1486,33 @@ mod move_scaling_tests {
 
     #[test]
     fn molecular_soap_modes_control_internal_deformation() {
-        // An asymmetric grouped cloud with no covalent-neighbour exclusions
-        // keeps this test about the proposal constraint, not a bond classifier.
-        let species = vec![1, 1, 1, 1];
-        let groups = vec![vec![0, 1], vec![2, 3]];
-        let x = Array1::from_vec(vec![
-            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
-        ]);
+        // The fivefold cloud has an ACE residual above the proposal floor.
+        // One declared group isolates ambient deformation from its Kabsch
+        // retraction without changing the descriptor or its activation gate.
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let vertices = [
+            [0.0, 1.0, phi],
+            [0.0, 1.0, -phi],
+            [0.0, -1.0, phi],
+            [0.0, -1.0, -phi],
+            [1.0, phi, 0.0],
+            [1.0, -phi, 0.0],
+            [-1.0, phi, 0.0],
+            [-1.0, -phi, 0.0],
+            [phi, 0.0, 1.0],
+            [-phi, 0.0, 1.0],
+            [phi, 0.0, -1.0],
+            [-phi, 0.0, -1.0],
+        ];
+        let scale = 2.0_f64.powf(1.0 / 6.0) / (1.0 + phi * phi).sqrt();
+        let mut x = Array1::zeros(39);
+        for (index, vertex) in vertices.iter().enumerate() {
+            for axis in 0..3 {
+                x[3 * (index + 1) + axis] = scale * vertex[axis];
+            }
+        }
+        let species = vec![1; 13];
+        let groups = vec![(0..13).collect::<Vec<_>>()];
         let internal = |y: &Array1<f64>| {
             groups
                 .iter()
