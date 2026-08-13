@@ -90,6 +90,20 @@ impl TransitionGraph {
         self.nodes
     }
 
+    /// Ensure that a structural microstate exists before it has outgoing data.
+    pub fn register_node(&mut self, node: usize) -> Result<(), TransitionGraphError> {
+        let required = node
+            .checked_add(1)
+            .ok_or(TransitionGraphError::NodeIndexOverflow)?;
+        if required > self.nodes {
+            self.nodes = required;
+            for counts in self.actions.values_mut() {
+                counts.resize(self.nodes);
+            }
+        }
+        Ok(())
+    }
+
     /// Record one source, action, and resolved or unresolved destination.
     pub fn observe(
         &mut self,
@@ -103,16 +117,9 @@ impl TransitionGraph {
                 .ok_or(TransitionGraphError::NodeIndexOverflow)?,
             TransitionOutcome::Unresolved => 0,
         };
-        let required = from
-            .checked_add(1)
-            .ok_or(TransitionGraphError::NodeIndexOverflow)?
-            .max(destination_nodes);
-        if required > self.nodes {
-            self.nodes = required;
-            for counts in self.actions.values_mut() {
-                counts.resize(self.nodes);
-            }
-        }
+        self.register_node(
+            from.max(destination_nodes.saturating_sub(1)),
+        )?;
 
         let counts = self.actions.entry(action.into()).or_default();
         counts.resize(self.nodes);
