@@ -74,3 +74,25 @@ fn molecular_build_produces_every_paired_campaign_executable() {
         );
     }
 }
+
+#[test]
+fn molecular_driver_keeps_the_measured_quench_defaults() {
+    let example = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("molecular_cluster.rs");
+    let source = fs::read_to_string(&example)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", example.display()));
+
+    assert!(
+        !source.contains("cfg.screen_steps = 6;"),
+        "the molecular driver must not replace the measured screening quench with six steps"
+    );
+    assert!(
+        !source.contains("cfg.relax_steps = 60;"),
+        "the molecular driver must not cap a full molecular quench at sixty steps"
+    );
+    assert!(
+        source.contains("screen/full/check"),
+        "molecular campaign output must expose where charged quench work went"
+    );
+}
