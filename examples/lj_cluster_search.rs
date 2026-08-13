@@ -92,6 +92,16 @@ mod option_tests {
         assert!(cfg.adaptive_height);
         assert!(cfg.escape_on_stall);
     }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn cooperative_policy_point_is_the_live_chain_endpoint() {
+        let current = Array1::from(vec![1.0, 2.0, 3.0]);
+        let (state, energy) = cooperative_policy_point(current.view(), -7.5);
+
+        assert_eq!(state, current);
+        assert_eq!(energy, -7.5);
+    }
 }
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
