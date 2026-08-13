@@ -2953,6 +2953,85 @@ mod tests {
     }
 
     #[test]
+    fn unconverged_initial_quench_is_not_a_reported_minimum() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(1);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut relax = |ledger: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            (-10.0, x.to_owned())
+        };
+        let mut grad = |_ledger: &mut Ledger, x: ArrayView1<f64>| {
+            Some(Array1::ones(x.len()))
+        };
+        let mut ledger = Ledger::new(1);
+        let mut rng = StdRng::seed_from_u64(43);
+
+        let out = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        );
+
+        assert!(out.best.is_infinite());
+        assert!(out.best_state.is_none());
+        assert!(out.improvements.is_empty());
+    }
+
+    #[test]
+    fn unconverged_trial_is_not_an_improvement_or_first_encounter() {
+        let mut cfg = Config::for_cluster(2);
+        cfg.max_hops = Some(1);
+        cfg.screen_steps = 1;
+        cfg.relax_steps = 1;
+        cfg.screen_margin = f64::INFINITY;
+        cfg.return_screen = false;
+
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let trial = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let mut calls = 0usize;
+        let mut relax = |ledger: &mut Ledger, _x: ArrayView1<f64>, _steps: usize| {
+            assert!(ledger.charge());
+            calls += 1;
+            if calls == 1 {
+                (0.0, start.clone())
+            } else {
+                (-10.0, trial.clone())
+            }
+        };
+        let mut grad = |_ledger: &mut Ledger, x: ArrayView1<f64>| {
+            if x[3] < 1.5 {
+                Some(Array1::zeros(x.len()))
+            } else {
+                Some(Array1::ones(x.len()))
+            }
+        };
+        let mut ledger = Ledger::new(16);
+        let mut rng = StdRng::seed_from_u64(47);
+
+        let out = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        );
+
+        assert_eq!(out.best, 0.0);
+        assert!(
+            out.improvements
+                .iter()
+                .all(|(_, _, _, energy)| *energy >= 0.0),
+            "unconverged trial entered the encounter trace: {:?}",
+            out.improvements
+        );
+    }
+
+    #[test]
     fn respects_the_ledger() {
         let cfg = Config::for_cluster(6);
         let mut ledger = Ledger::new(500);
