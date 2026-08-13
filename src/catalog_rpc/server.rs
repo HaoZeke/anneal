@@ -59,6 +59,7 @@ struct ScientificConfig {
     catalog_capacity: usize,
     census_radius: f64,
     total_charged_work: u64,
+    attraction_regions: AttractionRegionConfig,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -163,8 +164,30 @@ impl ServerConfig {
             catalog_capacity,
             census_radius,
             total_charged_work,
+            attraction_regions: AttractionRegionConfig {
+                probe_action: "probe".into(),
+                concentration: 0.5,
+                diffusion_steps: 2,
+                maximum_distance: 0.35,
+                minimum_probes: 8,
+            },
             evaluate: Arc::new(evaluate),
         });
+        Ok(self)
+    }
+
+    /// Configure the fixed-probe posterior used to define attraction regions.
+    pub fn with_attraction_region_config(
+        mut self,
+        config: AttractionRegionConfig,
+    ) -> Result<Self, CatalogServerError> {
+        TransitionGraph::new()
+            .attraction_regions(&config)
+            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
+        let Some(scientific) = self.scientific.as_mut() else {
+            return Err(CatalogServerError::InvalidScientificConfiguration);
+        };
+        scientific.attraction_regions = config;
         Ok(self)
     }
 }
@@ -209,6 +232,7 @@ struct ScientificState {
     census: BasinCensus,
     catalog: BasinCatalog,
     transition_graph: TransitionGraph,
+    attraction_regions: AttractionRegionConfig,
     transition_nodes: BTreeMap<BasinId, usize>,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
@@ -256,6 +280,7 @@ impl CoordinatorState {
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     transition_graph: TransitionGraph::new(),
+                    attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
                     last_basin_by_replica: BTreeMap::new(),
                     last_candidate_by_replica: BTreeMap::new(),
@@ -1297,16 +1322,9 @@ fn region_population_assignment(
     source_candidates: &BTreeMap<u32, CatalogCandidate>,
     max_family_size: usize,
 ) -> Option<(Vec<u32>, Vec<f64>)> {
-    let region_config = AttractionRegionConfig {
-        probe_action: "probe".into(),
-        concentration: 0.5,
-        diffusion_steps: 2,
-        maximum_distance: 0.35,
-        minimum_probes: 8,
-    };
     let regions = scientific
         .transition_graph
-        .attraction_regions(&region_config)
+        .attraction_regions(&scientific.attraction_regions)
         .ok()?;
     let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
     for (region, nodes) in regions.iter().enumerate() {
@@ -1339,7 +1357,10 @@ fn region_population_assignment(
     }
     let probe = scientific
         .transition_graph
-        .posterior_matrix("probe", 0.5)
+        .posterior_matrix(
+            &scientific.attraction_regions.probe_action,
+            scientific.attraction_regions.concentration,
+        )
         .ok()?;
     let candidates = destinations
         .iter()
@@ -1349,7 +1370,13 @@ fn region_population_assignment(
             let basin = BasinId::from_raw(source_candidates.get(replica)?.census_basin?);
             let node = scientific.transition_nodes.get(&basin).copied();
             let transition_uncertainty = node
-                .and_then(|node| scientific.transition_graph.uncertainty("probe", node, 0.5))
+                .and_then(|node| {
+                    scientific.transition_graph.uncertainty(
+                        &scientific.attraction_regions.probe_action,
+                        node,
+                        scientific.attraction_regions.concentration,
+                    )
+                })
                 .unwrap_or(1.0);
             let outgoing_frontier = node.map_or(0.0, |source| {
                 (0..scientific.transition_graph.node_count())
@@ -1400,13 +1427,7 @@ fn sample_boundary_crossing(
     let query_node = *scientific.transition_nodes.get(&query_basin)?;
     let regions = scientific
         .transition_graph
-        .attraction_regions(&AttractionRegionConfig {
-            probe_action: "probe".into(),
-            concentration: 0.5,
-            diffusion_steps: 2,
-            maximum_distance: 0.35,
-            minimum_probes: 8,
-        })
+        .attraction_regions(&scientific.attraction_regions)
         .ok()?;
     let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
     for (region, nodes) in regions.iter().enumerate() {
@@ -1508,13 +1529,7 @@ fn attraction_region_relation(
     };
     let Ok(regions) = scientific
         .transition_graph
-        .attraction_regions(&AttractionRegionConfig {
-            probe_action: "probe".into(),
-            concentration: 0.5,
-            diffusion_steps: 2,
-            maximum_distance: 0.35,
-            minimum_probes: 8,
-        })
+        .attraction_regions(&scientific.attraction_regions)
     else {
         return CatalogRelation::Empty;
     };
