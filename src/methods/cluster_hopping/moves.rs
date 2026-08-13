@@ -353,8 +353,8 @@ pub enum ClusterMove {
         species: Option<Vec<u32>>,
         /// Mobile atom indices. `None` is all atoms. Frozen stay as neighbours.
         mobile: Option<Vec<usize>>,
-        /// Rigid groups, forwarded for call-site compatibility. The
-        /// hop is `J⁺` of the stacked leftover, not a post-hoc fit.
+        /// Rigid groups. The ambient `J⁺` step is retracted to their
+        /// nearest finite rigid motions before the proposal is returned.
         groups: Option<Vec<Vec<usize>>>,
     },
 }
