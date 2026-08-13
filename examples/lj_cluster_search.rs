@@ -165,6 +165,67 @@ mod option_tests {
         assert!(from.gradient_norm < cfg.record_gradient);
         assert!(to.gradient_norm < cfg.record_gradient);
     }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn contiguous_adaptive_path_registers_one_source_then_adopts_each_edge() {
+        let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
+        let descriptor_space = anneal_core::catalog::lj::descriptor_space();
+        let separation = 2.0_f64.powf(1.0 / 6.0);
+        let first = Array1::from(vec![0.0, 0.0, 0.0, separation, 0.0, 0.0]);
+        let second = Array1::from(vec![0.0, 0.0, 0.0, 0.0, separation, 0.0]);
+        let third = Array1::from(vec![0.0, 0.0, 0.0, -separation, 0.0, 0.0]);
+        let (first_energy, first_gradient) = lj(first.view());
+        let (second_energy, second_gradient) = lj(second.view());
+        let (third_energy, third_gradient) = lj(third.view());
+        let transitions = vec![
+            AcceptedTransition {
+                hop: 3,
+                action: "surface_relocate".into(),
+                from_energy: first_energy,
+                to_energy: second_energy,
+                from_state: first,
+                from_gradient: Some(first_gradient),
+                to_state: second.clone(),
+                to_gradient: Some(second_gradient.clone()),
+                validated: true,
+            },
+            AcceptedTransition {
+                hop: 4,
+                action: "shell_rotate".into(),
+                from_energy: second_energy,
+                to_energy: third_energy,
+                from_state: second,
+                from_gradient: Some(second_gradient),
+                to_state: third,
+                to_gradient: Some(third_gradient),
+                validated: true,
+            },
+        ];
+        let mut sequence = 20;
+
+        let operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            0,
+            &mut sequence,
+            71,
+            400,
+            &transitions,
+        );
+
+        assert_eq!(sequence, 23);
+        assert_eq!(operations.len(), 3);
+        assert!(matches!(operations[0], AdaptiveCatalogOperation::RegisterCurrent(_)));
+        assert!(matches!(
+            &operations[1],
+            AdaptiveCatalogOperation::Adopt { action, .. } if action == "surface_relocate"
+        ));
+        assert!(matches!(
+            &operations[2],
+            AdaptiveCatalogOperation::Adopt { action, .. } if action == "shell_rotate"
+        ));
+    }
 }
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
