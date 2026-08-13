@@ -164,6 +164,21 @@ On the output of a short Bayesian mixer run the polish typically recovers anothe
 Payoff: the same Armijo logic and low-discrepancy generator are used whether you call =polish=, =qmc_polish=, or =shifted_qmc_polish=.
 Source: =src/methods/local_polish.rs= and =python/anneal/__init__.py= wrappers.
 
+** Observed-cloud SOAP/ACE residual hop (soap.rs)
+
+Slots: Move proposes an ambient analytic-Jacobian pullback of the stacked
+SOAP plus ACE =nu=3= leftover and scales it to the caller's Cartesian cap.
+Atomic packing systems use the fivefold residual instead.  For molecular and
+surface systems, every declared movable molecule is retracted by its nearest
+finite proper rigid motion after scaling; ungrouped atoms keep the ambient
+step and frozen atoms remain pinned.  The Kabsch objective is solved through
+Horn's quaternion eigenproblem so planar molecules do not require an
+invertible covariance.  The retraction preserves all intragroup distances
+while retaining the translation and rotation requested by the descriptor
+direction.
+Source: =src/soap.rs= and
+=docs/derivations/descriptor_catalog_geometry.org=, D21a.
+
 ** Residual archive search (archive_search.rs)
 
 Slots: the molecular hop on a *clone* of the caller's config. Turns on
