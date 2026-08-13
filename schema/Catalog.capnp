@@ -116,6 +116,7 @@ struct PopulationPlanRequest {
 
 struct TransitionRecord {
   action @0 :Text;
+  adopted @3 :Bool;
   destination :union {
     unresolved @1 :Void;
     resolved @2 :CandidateRecord;
