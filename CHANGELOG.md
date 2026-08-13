@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
-## [0.9.0](https://github.com/HaoZeke/anneal/tree/0.9.0) - 2026-08-13
+## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 
 ### Added
 
@@ -59,12 +59,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Accepted coordinator sockets are normalized to blocking mode so framed RPC
+  connections remain open across multiple requests on BSD, macOS, and Linux.
 - The recommended SOAP pullback scales both its Cartesian RMSD and descriptor
   cutoff from the preset's declared ``length_scale`` instead of assuming
   Lennard-Jones coordinate units.
 
 
-## [0.8.0](https://github.com/HaoZeke/anneal/tree/0.8.0) - 2026-08-08
+## [0.8.0](https://github.com/HaoZeke/anneal/tree/v0.8.0) - 2026-08-08
 
 ### Added
 
@@ -107,7 +109,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   the early-gated screen.
 
 
-## [0.7.2](https://github.com/HaoZeke/anneal/tree/0.7.2) - 2026-08-01
+## [0.7.2](https://github.com/HaoZeke/anneal/tree/v0.7.2) - 2026-08-01
 
 ### Changed
 
@@ -120,7 +122,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Commit lint in CI now checks from the latest tag; the pre-convention
   legacy history is no longer linted.
 
-## [0.7.1](https://github.com/HaoZeke/anneal/tree/0.7.1) - 2026-07-18
+## [0.7.1](https://github.com/HaoZeke/anneal/tree/v0.7.1) - 2026-07-18
 
 ### Added
 
@@ -132,7 +134,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   portfolio's behaviour is unchanged.
 
 
-## [0.7.0](https://github.com/HaoZeke/anneal/tree/0.7.0) - 2026-07-18
+## [0.7.0](https://github.com/HaoZeke/anneal/tree/v0.7.0) - 2026-07-18
 
 ### Added
 
@@ -156,7 +158,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `rgpot_minimize` example gated behind the `capi` feature with
   `eindir-core/capi` forwarded, restoring plain `cargo test`.
 
-## [0.6.0](https://github.com/HaoZeke/anneal/tree/0.6.0) - 2026-07-18
+## [0.6.0](https://github.com/HaoZeke/anneal/tree/v0.6.0) - 2026-07-18
 
 ### Added
 
@@ -190,7 +192,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - `eindir-core` requirement raised to 0.5.2 for the parallel
   `eval_batch` and Halton design paths.
 
-## [0.5.0](https://github.com/HaoZeke/anneal/tree/0.5.0) - 2026-06-26
+## [0.5.0](https://github.com/HaoZeke/anneal/tree/v0.5.0) - 2026-06-26
 
 ### Removed
 
@@ -228,7 +230,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   example dependency from crates.io instead of git/path pins, unblocking
   registry publication of ``anneal-core``.
 
-## [0.4.0](https://github.com/HaoZeke/anneal/tree/0.4.0) - 2026-04-26
+## [0.4.0](https://github.com/HaoZeke/anneal/tree/v0.4.0) - 2026-04-26
 
 ### Added
 
@@ -237,14 +239,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - bGSA (Bayesian-pilot + q-deformed HMC + parallel tempering) with Gelman-Rubin termination, MCMC-SA method, CUTEst benchmark catalog, Dolan-More/More-Wild/Pareto figures, and HMC/Bayesian-pilot drivers integrated into the typed algebra (including PyGradient + run_hmc).
 
 
-## [0.3.1](https://github.com/HaoZeke/anneal/tree/0.3.1) - 2026-04-26
+## [0.3.1](https://github.com/HaoZeke/anneal/tree/v0.3.1) - 2026-04-26
 
 ### Added
 
 - Added finite-precision experiments runner plus four manuscript studies (underflow, cancellation, trajectory bias, compensated summation).
 
 
-## [0.3.0](https://github.com/HaoZeke/anneal/tree/0.3.0) - 2026-04-26
+## [0.3.0](https://github.com/HaoZeke/anneal/tree/v0.3.0) - 2026-04-26
 
 ### Added
 
@@ -256,7 +258,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - BREAKING refactor: hard-broke legacy quencher API. New pure-Rust SA driver (run_rs), criterion benches, and tests now use SaVariant + run().
 
 
-## [0.2.0](https://github.com/HaoZeke/anneal/tree/0.2.0) - 2026-04-26
+## [0.2.0](https://github.com/HaoZeke/anneal/tree/v0.2.0) - 2026-04-26
 
 ### Added
 
@@ -271,7 +273,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - BREAKING: build system migrated from PDM to maturin mixed mode. Python sources moved under python/anneal/; wheel now ships Rust extension anneal._core.
 
 
-## [0.1.0](https://github.com/HaoZeke/anneal/tree/0.1.0) - 17-02-2024
+## [0.1.0](https://github.com/HaoZeke/anneal/tree/v0.1.0) - 17-02-2024
 
 
 No significant changes.
