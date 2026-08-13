@@ -31,6 +31,10 @@ fn hard_lj_arrays_accept_an_isolated_campaign_name() {
         source.contains(r#"CATALOG_CAMPAIGN=${CAMPAIGN}"#),
         "the selected namespace must reach every ensemble array"
     );
+    assert!(
+        source.contains(r#"JCC_QUALIFIER_PYTHON=${QUALIFIER_PYTHON}"#),
+        "the validated launcher Python must reach every ensemble qualifier"
+    );
 }
 
 #[test]
