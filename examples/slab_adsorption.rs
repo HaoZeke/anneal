@@ -206,6 +206,14 @@ fn main() {
             stats.total(),
             bank_label()
         );
+        println!(
+            "    quench charged screen/full/check {}/{}/{}  screens {}  capped {}",
+            stats.screen_charged,
+            stats.full_charged,
+            stats.check_charged,
+            stats.screens,
+            stats.capped
+        );
         if let Some((e, g)) = checked {
             println!("    verify e={e:.6} |g|_mobile={g:.3e}");
         }
