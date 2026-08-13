@@ -1637,7 +1637,7 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
+        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome,
         PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
         SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
@@ -2125,58 +2125,14 @@ fn run_capnp_catalog(
             .expect("pure policy decision must name the configured replica");
         slice_trace.policy_role = match decision.action {
             PolicyAction::ContinueLocal => PolicyRole::Local,
-            PolicyAction::Exploit { .. } => PolicyRole::Exploit,
+            PolicyAction::Exploit { .. } => PolicyRole::Explore,
             PolicyAction::Explore => PolicyRole::Explore,
             PolicyAction::Leave => PolicyRole::Leave,
         };
         slice_trace.policy_reason = decision.reason.code();
         match decision.action {
             PolicyAction::ContinueLocal => {}
-            PolicyAction::Exploit { win_only } => {
-                slice_trace.proposal_family = ProposalFamily::CatalogSample;
-                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
-                    .sample_candidate(replica, rng.random())
-                    .expect("catalog sampling must preserve local execution")
-                    && ledger.remaining() > 0
-                    && ledger.charge()
-                {
-                    slice_trace.sampled_basin = candidate.census_basin;
-                    slice_trace.descriptor_step_norm =
-                        Some(vector_distance(descriptor.values(), &candidate.descriptor));
-                    slice_trace.cartesian_step_norm = Some(vector_distance(
-                        policy_state.as_slice().expect("LJ state is contiguous"),
-                        &candidate.coordinates,
-                    ));
-                    cooperative
-                        .record_work(replica, ChargeKind::FreshValidation, 1)
-                        .expect("sample validation must enter the cooperative ledger");
-                    if let Some((energy, coordinates)) = validate_sampled_lj(
-                        &candidate,
-                        &descriptor_space,
-                        &signature.atomic_numbers,
-                    ) {
-                        slice_trace.validation = SliceValidation::Accepted;
-                        if !win_only || energy < best {
-                            slice_trace.adoption = SliceAdoption::Adopted;
-                            current = coordinates.clone();
-                            current_energy = energy;
-                            if energy < best {
-                                best = energy;
-                                best_state = Some(coordinates);
-                                stall = 0;
-                            }
-                        } else {
-                            slice_trace.adoption = SliceAdoption::NotImproved;
-                        }
-                    } else {
-                        slice_trace.validation = SliceValidation::Rejected;
-                        slice_trace.adoption = SliceAdoption::Rejected;
-                    }
-                } else {
-                    slice_trace.adoption = SliceAdoption::Rejected;
-                }
-            }
-            PolicyAction::Explore | PolicyAction::Leave => {
+            PolicyAction::Exploit { .. } | PolicyAction::Explore | PolicyAction::Leave => {
                 slice_trace.proposal_family = ProposalFamily::BoundaryTransport;
                 let source_registered = if ledger.remaining() >= 2 && ledger.charge() {
                     let (source_energy, source_gradient) = lj(policy_state.view());
@@ -2681,71 +2637,6 @@ fn adaptive_catalog_operations(
         registered_state = Some(transition.to_state.clone());
     }
     operations
-}
-
-#[cfg(feature = "bank-rpc")]
-fn validate_sampled_lj(
-    candidate: &anneal_core::catalog_rpc::CatalogCandidate,
-    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
-    species: &[u32],
-) -> Option<(f64, Array1<f64>)> {
-    if candidate.coordinates.len() != 3 * species.len()
-        || candidate.cell.is_some()
-        || !candidate.quench_converged
-        || minimum_pair_distance(&candidate.coordinates) < 0.5
-    {
-        return None;
-    }
-    let coordinates = Array1::from_vec(candidate.coordinates.clone());
-    let descriptor = descriptor_space
-        .describe(coordinates.view(), Some(species))
-        .ok()?
-        .values()
-        .to_vec();
-    if descriptor.len() != candidate.descriptor.len()
-        || descriptor
-            .iter()
-            .zip(&candidate.descriptor)
-            .any(|(left, right)| (left - right).abs() > 1e-10)
-    {
-        return None;
-    }
-    let (energy, gradient) = lj(coordinates.view());
-    let gradient_norm = euclidean_gradient_norm(
-        gradient
-            .as_slice()
-            .expect("fresh LJ gradient is contiguous"),
-    );
-    let energy_tolerance = 1e-9 + 1e-10 * energy.abs().max(candidate.energy.abs());
-    if (energy - candidate.energy).abs() > energy_tolerance
-        || gradient_norm > 1e-5
-        || candidate.forces.len() != gradient.len()
-        || candidate
-            .forces
-            .iter()
-            .zip(gradient.iter())
-            .any(|(force, gradient)| (force + gradient).abs() > 1e-9)
-    {
-        return None;
-    }
-    Some((energy, coordinates))
-}
-
-#[cfg(feature = "bank-rpc")]
-fn minimum_pair_distance(coordinates: &[f64]) -> f64 {
-    let mut minimum = f64::INFINITY;
-    for first in 0..coordinates.len() / 3 {
-        for second in first + 1..coordinates.len() / 3 {
-            let squared = (0..3)
-                .map(|axis| {
-                    let difference = coordinates[3 * first + axis] - coordinates[3 * second + axis];
-                    difference * difference
-                })
-                .sum::<f64>();
-            minimum = minimum.min(squared.sqrt());
-        }
-    }
-    minimum
 }
 
 /// One HQ chain against the Cap'n Proto bank: slice, offer, deposit, repeat.
