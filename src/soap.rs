@@ -2951,6 +2951,42 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "featomic")]
+    #[test]
+    fn packing_cloud_uses_observed_descriptor_residual() {
+        let spec = SoapSpec {
+            l_max: 6,
+            ..SoapSpec::default()
+        };
+        let x = squashed();
+        crate::featomic_hop::set_packing_archive(Vec::new());
+        let mut expected_rng = StdRng::seed_from_u64(19);
+        let expected = crate::featomic_hop::step_away_featomic(
+            x.view(),
+            0.4,
+            spec.rcut_nn,
+            None,
+            None,
+            &mut expected_rng,
+        );
+        let mut actual_rng = StdRng::seed_from_u64(19);
+        let actual = step_away_cloud(
+            x.view(),
+            spec,
+            0.4,
+            None,
+            None,
+            None,
+            &mut actual_rng,
+        );
+        for index in 0..x.len() {
+            assert!(
+                (actual[index] - expected[index]).abs() < 1e-12,
+                "packing cloud selected a morphology-specific path at {index}"
+            );
+        }
+    }
+
     #[test]
     fn nu3_leftover_on_ico_fivefold_is_nonzero() {
         let spec = SoapSpec {
