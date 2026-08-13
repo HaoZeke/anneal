@@ -277,6 +277,14 @@ graph of validated basins rather than on the =3N= coordinate space and is
 solved exactly by the cached Cholesky factor, so no factorized mean-field
 closure is introduced.
 
+=methods/additive_independence= is a separate rank-1 mean-field construction.
+It factorizes a coordinate-space surrogate to draw an independence proposal,
+then applies the true-objective Metropolis correction.  That mechanism is
+useful for approximately separable bounded objectives; it is not an
+approximation to =G_Q=.  Replacing the graph solve by that factorization would
+discard the off-diagonal cross-basin covariance that supplies the cooperative
+uncertainty signal.
+
 The Bayesian mechanisms have distinct conditioning information and therefore
 remain separate.  Discounted Thompson allocation in
 =methods/cluster_hopping= chooses local perturbation kernels.  The
