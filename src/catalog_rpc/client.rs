@@ -72,7 +72,7 @@ pub struct MutationReceipt {
 }
 
 /// Exact policy evidence and the coordinator snapshot that carried it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PolicyStateReceipt {
     /// Exact census and active-catalog evidence.
     pub state: PolicyState,
