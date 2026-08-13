@@ -1851,7 +1851,11 @@ fn retract_rigid_groups(
 
 /// Replace `dr` on each group by the rigid motion (Kabsch) that best
 /// matches it. Atoms not in a group are left as the atomic pullback.
-fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<usize>]) {
+pub(crate) fn project_rigid_groups(
+    x: ArrayView1<f64>,
+    dr: &mut Array1<f64>,
+    groups: &[Vec<usize>],
+) {
     let n_at = x.len() / 3;
     for g in groups {
         if g.len() < 2 {
@@ -1919,7 +1923,7 @@ fn project_rigid_groups(x: ArrayView1<f64>, dr: &mut Array1<f64>, groups: &[Vec<
 /// Optimal rotation taking centred `from` onto centred `to` (Horn 1987).
 /// The Newton polar factor of the covariance is singular for a planar
 /// water; the quaternion eigenproblem is not.
-fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
+pub(crate) fn horn_rotation(from: &[[f64; 3]], to: &[[f64; 3]]) -> [[f64; 3]; 3] {
     let mut s = [[0.0_f64; 3]; 3];
     for (p, q) in from.iter().zip(to.iter()) {
         for i in 0..3 {

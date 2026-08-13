@@ -50,6 +50,8 @@ pub mod adapter;
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
 pub mod bias;
+/// Transport proposals from observed attraction-region crossings.
+pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
 /// Event catalogue keyed by local topology.
