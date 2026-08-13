@@ -97,6 +97,8 @@ pub struct AcceptedTransition {
     pub from_state: Array1<f64>,
     /// Quenched destination coordinates.
     pub to_state: Array1<f64>,
+    /// Fresh destination gradient retained when validation requires one.
+    pub to_gradient: Option<Array1<f64>>,
     /// Whether the destination met the run's fresh quench-validity contract.
     pub validated: bool,
 }
@@ -1371,16 +1373,17 @@ fn run_full<'g, R: Rng + ?Sized>(
         // later inherits the guarantee. Anything not converged still moves the
         // chain and still deposits bias; it is only barred from being recorded
         // as an answer, which is the one thing it cannot be.
-        let recordable = if unquenched {
-            false
+        let gradient_required = grad.is_some();
+        let validation_gradient = if unquenched {
+            None
         } else {
-            match grad.as_deref_mut() {
-                Some(g) => g(ledger, x_new.view())
-                    .map(|v| v.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient)
-                    .unwrap_or(false),
-                None => true,
-            }
+            grad.as_deref_mut().and_then(|g| {
+                g(ledger, x_new.view()).filter(|values| {
+                    values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                })
+            })
         };
+        let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
         if recordable {
             ledger.record(e_new, x_new.view());
         } else {
@@ -1876,6 +1879,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 to_energy: e_new,
                 from_state: x.clone(),
                 to_state: x_new.clone(),
+                to_gradient: validation_gradient.clone(),
                 validated: recordable,
             });
             e = e_new;
