@@ -30,6 +30,7 @@ use anneal_core::cooperative_search::{
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
+use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
 
 fn descriptor_space() -> DescriptorSpace {
@@ -107,6 +108,10 @@ fn server() -> CatalogServer {
 }
 
 fn server_with_capacity(capacity: usize) -> CatalogServer {
+    server_with_region_evidence(capacity, 8)
+}
+
+fn server_with_region_evidence(capacity: usize, minimum_probes: u64) -> CatalogServer {
     let signature = signature();
     let digest = signature.digest();
     let config = ServerConfig::new("jcc-2026", "scientific-ensemble", digest, [0, 1, 2, 3])
@@ -133,6 +138,14 @@ fn server_with_capacity(capacity: usize) -> CatalogServer {
                 })
             },
         )
+        .unwrap()
+        .with_attraction_region_config(AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.5,
+            diffusion_steps: 2,
+            maximum_distance: 0.35,
+            minimum_probes,
+        })
         .unwrap();
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
@@ -353,6 +366,46 @@ fn policy_relation_uses_fixed_probe_attraction_regions() {
         relation,
         CatalogRelation::SameBasin,
         "replicas with the same fixed-probe return dynamics must share an attraction region"
+    );
+}
+
+#[test]
+fn attraction_region_evidence_threshold_is_explicit() {
+    let server = server_with_region_evidence(2, 1);
+    let digest = signature().digest();
+    let mut first =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut second =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+    let first_state = candidate(0, 1, 1.2);
+    let second_state = candidate(1, 1, 2.0);
+    first.record_visit(1, first_state.clone()).unwrap();
+    second.record_visit(1, second_state.clone()).unwrap();
+    first
+        .record_transition(
+            2,
+            "probe",
+            TransitionDestination::Resolved(candidate(0, 2, 2.0)),
+            false,
+        )
+        .unwrap();
+    second
+        .record_transition(
+            2,
+            "probe",
+            TransitionDestination::Resolved(candidate(1, 2, 2.0)),
+            false,
+        )
+        .unwrap();
+
+    assert_eq!(
+        first
+            .policy_state(3, first_state.descriptor, first_state.energy)
+            .unwrap()
+            .relation,
+        CatalogRelation::SameBasin
     );
 }
 
