@@ -1,18 +1,53 @@
-#[test]
-fn version_constant_matches_manifest() {
-    let manifest = include_str!("../Cargo.toml");
-    let package_version = manifest
+fn toml_value<'a>(source: &'a str, section: &str, key: &str) -> &'a str {
+    source
         .lines()
-        .skip_while(|line| line.trim() != "[package]")
+        .skip_while(|line| line.trim() != section)
         .skip(1)
         .find_map(|line| {
             let trimmed = line.trim();
             trimmed
-                .strip_prefix("version")
+                .strip_prefix(key)
                 .and_then(|rest| rest.split_once('='))
                 .map(|(_, value)| value.trim().trim_matches('"'))
         })
-        .expect("Cargo.toml [package] version");
+        .unwrap_or_else(|| panic!("{section} {key}"))
+}
+
+fn cff_value<'a>(source: &'a str, key: &str) -> &'a str {
+    source
+        .lines()
+        .find_map(|line| {
+            line.trim()
+                .strip_prefix(key)
+                .and_then(|rest| rest.strip_prefix(':'))
+                .map(|value| value.trim().trim_matches('"'))
+        })
+        .unwrap_or_else(|| panic!("CITATION.cff {key}"))
+}
+
+#[test]
+fn all_public_version_metadata_matches_manifest() {
+    let package_version = toml_value(include_str!("../Cargo.toml"), "[package]", "version");
 
     assert_eq!(anneal_core::ANNEAL_VERSION, package_version);
+    assert_eq!(
+        toml_value(include_str!("../pyproject.toml"), "[project]", "version"),
+        package_version
+    );
+    assert_eq!(
+        toml_value(include_str!("../pixi.toml"), "[workspace]", "version"),
+        package_version
+    );
+    assert_eq!(
+        toml_value(
+            include_str!("../towncrier.toml"),
+            "[tool.towncrier]",
+            "version"
+        ),
+        package_version
+    );
+    assert_eq!(
+        cff_value(include_str!("../CITATION.cff"), "version"),
+        package_version
+    );
 }
