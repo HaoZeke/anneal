@@ -99,6 +99,10 @@ marginal variances are Gaussian and are solved directly.  This is the
 latent-GMRF component that an INLA construction would contain, but there is no
 non-Gaussian likelihood or hyperparameter integral requiring a Laplace
 approximation.  Calling it full INLA would overstate the implementation.
+The inverse precision is also a screened graph Green function: diagonal terms
+measure local uncertainty and off-diagonal terms propagate floor evidence
+along observed basin paths.  It is an exact solve on the bounded active graph,
+not a factorized mean-field closure or an imaginary-time propagator.
 
 The Bayesian layers retain separate conditioning information: discounted
 Thompson allocation chooses local move arms, a cost-asymmetric screen assigns
