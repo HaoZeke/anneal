@@ -14,7 +14,7 @@ mod run {
     use crate::catalog_rpc::{
         CatalogCandidate, CatalogMutation, CatalogRelation, CatalogSnapshot,
         DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-        ProtocolRejection,
+        ProtocolRejection, TransitionDestination,
     };
     use crate::methods::feynman_kac::population_family_position;
 
@@ -49,6 +49,8 @@ mod run {
         SharingDisabled,
         /// One complete local-slice and transition diagnostic.
         Slice,
+        /// One explicit action-conditioned perturb--quench observation.
+        Transition,
     }
 
     impl TraceKind {
@@ -67,6 +69,7 @@ mod run {
                 Self::RpcFallback => "rpc_fallback",
                 Self::SharingDisabled => "sharing_disabled",
                 Self::Slice => "slice",
+                Self::Transition => "transition",
             }
         }
     }
@@ -94,6 +97,19 @@ mod run {
         pub slice: Option<SliceTrace>,
         /// Exact active-catalog mutation attached to an offer event.
         pub catalog: Option<CatalogMutation>,
+        /// Action and outcome attached to a transition event.
+        pub transition: Option<TransitionTrace>,
+    }
+
+    /// Replayable action-conditioned transition diagnostic.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TransitionTrace {
+        /// Stable target-blind proposal action.
+        pub action: String,
+        /// Whether the perturb--quench produced a classified destination.
+        pub resolved: bool,
+        /// Whether the destination became the replica's live state.
+        pub adopted: bool,
     }
 
     /// Catalog, policy, and latent-field evidence for one policy query.
@@ -253,6 +269,19 @@ mod run {
         /// Coordinator rejected validation or left active size unchanged.
         Rejected,
         /// Communication failed and the local trajectory remains authoritative.
+        LocalFallback,
+        /// Sharing is disabled for the independent control arm.
+        SharingDisabled,
+    }
+
+    /// Result of registering current state or one transition observation.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum TransitionRecordOutcome {
+        /// The coordinator accepted the replay-safe record.
+        Recorded,
+        /// Scientific validation or transition ordering rejected the record.
+        Rejected,
+        /// Communication failed and local execution remains authoritative.
         LocalFallback,
         /// Sharing is disabled for the independent control arm.
         SharingDisabled,
@@ -565,6 +594,49 @@ mod run {
                     Ok(CatalogOfferOutcome::LocalFallback)
                 }
             }
+        }
+
+        /// Register the validated basin occupied by a replica without adding an edge.
+        pub fn record_current(
+            &mut self,
+            replica: u32,
+            candidate: CatalogCandidate,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.record_visit(rpc_sequence, candidate))
+            };
+            self.handle_transition_record(
+                replica,
+                "register_current".to_owned(),
+                true,
+                true,
+                result,
+            )
+        }
+
+        /// Record one action-conditioned perturb--quench result.
+        pub fn record_transition(
+            &mut self,
+            replica: u32,
+            action: impl Into<String>,
+            destination: TransitionDestination,
+            adopted: bool,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let action = action.into();
+            let resolved = matches!(destination, TransitionDestination::Resolved(_));
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_mut().map(|client| {
+                    client.record_transition(rpc_sequence, action.clone(), destination, adopted)
+                })
+            };
+            self.handle_transition_record(replica, action, resolved, adopted, result)
         }
 
         /// Poll the coordinator or retain independent local execution.
@@ -979,8 +1051,19 @@ mod run {
                             )
                         },
                     );
+                let (transition_action, transition_resolved, transition_adopted) =
+                    event.transition.as_ref().map_or_else(
+                        || ("null".to_owned(), "null".to_owned(), "null".to_owned()),
+                        |transition| {
+                            (
+                                format!("\"{}\"", json_escape(&transition.action)),
+                                transition.resolved.to_string(),
+                                transition.adopted.to_string(),
+                            )
+                        },
+                    );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -1021,6 +1104,9 @@ mod run {
                 catalog_mutation,
                 catalog_evicted,
                 catalog_incumbent,
+                transition_action,
+                transition_resolved,
+                transition_adopted,
             ));
             }
             output
@@ -1064,6 +1150,53 @@ mod run {
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                     Ok(PopulationSynchronizationOutcome::LocalFallback)
+                }
+            }
+        }
+
+        fn handle_transition_record(
+            &mut self,
+            replica: u32,
+            action: String,
+            resolved: bool,
+            adopted: bool,
+            result: Option<Result<crate::catalog_rpc::client::MutationReceipt, CatalogClientError>>,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(TransitionRecordOutcome::SharingDisabled)
+                }
+                Some(Ok(receipt)) => {
+                    self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                    self.push_event(
+                        replica,
+                        TraceKind::Transition,
+                        Some(receipt.snapshot.version),
+                        None,
+                    )?;
+                    self.events
+                        .last_mut()
+                        .expect("transition push appends one trace event")
+                        .transition = Some(TransitionTrace {
+                        action,
+                        resolved,
+                        adopted,
+                    });
+                    Ok(TransitionRecordOutcome::Recorded)
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(TransitionRecordOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(TransitionRecordOutcome::LocalFallback)
                 }
             }
         }
@@ -1213,6 +1346,7 @@ mod run {
                 policy: None,
                 slice: None,
                 catalog: None,
+                transition: None,
             });
             Ok(())
         }

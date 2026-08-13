@@ -24,7 +24,7 @@ use anneal_core::cooperative_search::{
     CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
     PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
     RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation, SynchronizationOutcome,
-    TraceKind,
+    TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -308,6 +308,49 @@ fn only_explicit_probe_transitions_update_transition_uncertainty() {
     let after_unresolved = client.policy_state(8, descriptor, current.energy).unwrap();
     assert!(after_unresolved.transition_uncertainty < after_probe.transition_uncertainty);
     assert_eq!(after_unresolved.local_basin, initialized.local_basin);
+}
+
+#[test]
+fn cooperative_run_traces_explicit_transition_records() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        run.record_current(0, candidate(0, 1, 1.2)).unwrap(),
+        TransitionRecordOutcome::Recorded
+    );
+    assert_eq!(
+        run.record_transition(
+            0,
+            "probe",
+            TransitionDestination::Resolved(candidate(0, 2, 1.2)),
+            false,
+        )
+        .unwrap(),
+        TransitionRecordOutcome::Recorded
+    );
+
+    let event = run.events().last().unwrap();
+    assert_eq!(event.kind, TraceKind::Transition);
+    let transition = event.transition.as_ref().unwrap();
+    assert_eq!(transition.action, "probe");
+    assert!(transition.resolved);
+    assert!(!transition.adopted);
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"transition_action\":\"probe\""));
+    assert!(trace.contains("\"transition_resolved\":true"));
+    assert!(trace.contains("\"transition_adopted\":false"));
 }
 
 #[test]
