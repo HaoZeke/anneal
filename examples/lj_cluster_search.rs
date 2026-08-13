@@ -2210,6 +2210,49 @@ fn lj_catalog_candidate(
 }
 
 #[cfg(feature = "bank-rpc")]
+#[allow(clippy::too_many_arguments)]
+fn lj_transition_candidates(
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+    replica: u32,
+    source_sequence: u64,
+    destination_sequence: u64,
+    seed: u64,
+    charged_work: usize,
+    transition: &AcceptedTransition,
+) -> Option<(
+    anneal_core::catalog_rpc::CatalogCandidate,
+    anneal_core::catalog_rpc::CatalogCandidate,
+)> {
+    if !transition.validated {
+        return None;
+    }
+    let source = lj_catalog_candidate(
+        descriptor_space,
+        species,
+        replica,
+        source_sequence,
+        seed,
+        charged_work,
+        transition.from_energy,
+        transition.from_state.view(),
+        transition.from_gradient.as_ref()?.view(),
+    )?;
+    let destination = lj_catalog_candidate(
+        descriptor_space,
+        species,
+        replica,
+        destination_sequence,
+        seed,
+        charged_work,
+        transition.to_energy,
+        transition.to_state.view(),
+        transition.to_gradient.as_ref()?.view(),
+    )?;
+    Some((source, destination))
+}
+
+#[cfg(feature = "bank-rpc")]
 fn validate_sampled_lj(
     candidate: &anneal_core::catalog_rpc::CatalogCandidate,
     descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
