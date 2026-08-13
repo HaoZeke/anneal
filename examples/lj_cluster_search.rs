@@ -2314,6 +2314,95 @@ fn lj_transition_candidates(
 }
 
 #[cfg(feature = "bank-rpc")]
+enum AdaptiveCatalogOperation {
+    RegisterCurrent(anneal_core::catalog_rpc::CatalogCandidate),
+    Adopt {
+        action: String,
+        destination: anneal_core::catalog_rpc::CatalogCandidate,
+    },
+}
+
+#[cfg(feature = "bank-rpc")]
+#[allow(clippy::too_many_arguments)]
+fn adaptive_catalog_operations(
+    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: &[u32],
+    replica: u32,
+    candidate_sequence: &mut u64,
+    seed: u64,
+    charged_work: usize,
+    transitions: &[AcceptedTransition],
+) -> Vec<AdaptiveCatalogOperation> {
+    let mut operations = Vec::new();
+    let mut registered_state: Option<Array1<f64>> = None;
+    for transition in transitions {
+        if !transition.validated
+            || transition.from_gradient.is_none()
+            || transition.to_gradient.is_none()
+        {
+            registered_state = None;
+            continue;
+        }
+        let continues_registered_path = registered_state
+            .as_ref()
+            .is_some_and(|state| state == &transition.from_state);
+        if !continues_registered_path {
+            let source_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
+            let Some(source) = lj_catalog_candidate(
+                descriptor_space,
+                species,
+                replica,
+                source_sequence,
+                seed,
+                charged_work,
+                transition.from_energy,
+                transition.from_state.view(),
+                transition
+                    .from_gradient
+                    .as_ref()
+                    .expect("validated transition source gradient checked")
+                    .view(),
+            ) else {
+                registered_state = None;
+                continue;
+            };
+            *candidate_sequence = source_sequence;
+            operations.push(AdaptiveCatalogOperation::RegisterCurrent(source));
+        }
+        let destination_sequence = candidate_sequence
+            .checked_add(1)
+            .expect("candidate sequence must fit u64");
+        let Some(destination) = lj_catalog_candidate(
+            descriptor_space,
+            species,
+            replica,
+            destination_sequence,
+            seed,
+            charged_work,
+            transition.to_energy,
+            transition.to_state.view(),
+            transition
+                .to_gradient
+                .as_ref()
+                .expect("validated transition destination gradient checked")
+                .view(),
+        ) else {
+            registered_state = None;
+            continue;
+        };
+        *candidate_sequence = destination_sequence;
+        operations.push(AdaptiveCatalogOperation::Adopt {
+            action: transition.action.clone(),
+            destination,
+        });
+        registered_state = Some(transition.to_state.clone());
+    }
+    operations
+}
+
+#[cfg(feature = "bank-rpc")]
 fn validate_sampled_lj(
     candidate: &anneal_core::catalog_rpc::CatalogCandidate,
     descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
