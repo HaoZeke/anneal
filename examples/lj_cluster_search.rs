@@ -1299,7 +1299,8 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
-        PopulationSynchronizationOutcome, RunManifest,
+        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
+        SliceQuench, SliceTrace, SliceValidation,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -1391,6 +1392,7 @@ fn run_capnp_catalog(
             }
             break;
         }
+        let slice_start = ledger.spent();
         let slice_budget = slice.min((ledger.remaining() - 2) / 2).max(1);
         let mut slice_ledger = Ledger::new(slice_budget);
         let output = run_with_bias(
@@ -1445,6 +1447,42 @@ fn run_capnp_catalog(
         screened_out += output.screened_out;
         returned += output.returned;
         slices += 1;
+
+        let mut slice_trace = SliceTrace {
+            slice: slices,
+            current_basin: None,
+            active_relation: None,
+            policy_role: PolicyRole::Unavailable,
+            policy_reason: "policy_unavailable",
+            proposal_family: ProposalFamily::Local,
+            sampled_basin: None,
+            descriptor_step_norm: None,
+            cartesian_step_norm: None,
+            validation: if boundaries
+                .iter()
+                .any(|boundary| boundary.status() == QuenchStatus::Validated)
+            {
+                SliceValidation::Accepted
+            } else if boundaries.is_empty() {
+                SliceValidation::NotAttempted
+            } else {
+                SliceValidation::Rejected
+            },
+            quench: if boundaries
+                .iter()
+                .any(|boundary| boundary.status() == QuenchStatus::Validated)
+            {
+                SliceQuench::Converged
+            } else if boundaries.is_empty() {
+                SliceQuench::NotAttempted
+            } else {
+                SliceQuench::Rejected
+            },
+            adoption: SliceAdoption::NotAttempted,
+            novelty: None,
+            energy: None,
+            charged_work: 0,
+        };
 
         let local_deepened = output.best < best;
         if local_deepened {
@@ -1504,6 +1542,13 @@ fn run_capnp_catalog(
         let Ok(descriptor) =
             descriptor_space.describe(policy_state.view(), Some(&signature.atomic_numbers))
         else {
+            slice_trace.policy_reason = "descriptor_rejected";
+            slice_trace.energy = best.is_finite().then_some(best);
+            slice_trace.charged_work =
+                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+            cooperative
+                .record_slice(replica, slice_trace)
+                .expect("descriptor failure must retain a complete slice diagnostic");
             continue;
         };
         cooperative
@@ -1512,9 +1557,15 @@ fn run_capnp_catalog(
         let policy_energy = if best.is_finite() {
             best
         } else {
+            slice_trace.policy_reason = "no_valid_energy";
+            slice_trace.charged_work =
+                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+            cooperative
+                .record_slice(replica, slice_trace)
+                .expect("invalid-energy slice must retain a complete diagnostic");
             continue;
         };
-        let PolicyEvidenceOutcome::Remote(input) = cooperative
+        let policy_outcome = cooperative
             .policy_input(
                 replica,
                 descriptor.values().to_vec(),
@@ -1522,22 +1573,75 @@ fn run_capnp_catalog(
                 stall,
                 local_deepened,
             )
-            .expect("coordinator policy evidence must preserve local invariants")
-        else {
-            continue;
+            .expect("coordinator policy evidence must preserve local invariants");
+        let input = match policy_outcome {
+            PolicyEvidenceOutcome::Remote(input) => input,
+            PolicyEvidenceOutcome::Rejected => {
+                slice_trace.policy_reason = "policy_rejected";
+                slice_trace.energy = Some(policy_energy);
+                slice_trace.charged_work =
+                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+                cooperative
+                    .record_slice(replica, slice_trace)
+                    .expect("rejected policy evidence must retain a complete diagnostic");
+                continue;
+            }
+            PolicyEvidenceOutcome::LocalFallback => {
+                slice_trace.policy_reason = "rpc_fallback";
+                slice_trace.energy = Some(policy_energy);
+                slice_trace.charged_work =
+                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+                cooperative
+                    .record_slice(replica, slice_trace)
+                    .expect("RPC fallback must retain a complete slice diagnostic");
+                continue;
+            }
+            PolicyEvidenceOutcome::SharingDisabled => {
+                slice_trace.policy_reason = "sharing_disabled";
+                slice_trace.energy = Some(policy_energy);
+                slice_trace.charged_work =
+                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+                cooperative
+                    .record_slice(replica, slice_trace)
+                    .expect("control-arm execution must retain a complete slice diagnostic");
+                continue;
+            }
         };
+        let policy_trace = cooperative
+            .events()
+            .last()
+            .and_then(|event| event.policy)
+            .expect("remote policy evidence must be attached to its snapshot event");
+        slice_trace.current_basin = policy_trace.local_basin;
+        slice_trace.active_relation = Some(policy_trace.relation);
+        slice_trace.novelty = Some(policy_trace.novelty);
+        slice_trace.energy = Some(policy_energy);
         let decision = cooperative
             .decide(replica, input)
             .expect("pure policy decision must name the configured replica");
+        slice_trace.policy_role = match decision.action {
+            PolicyAction::ContinueLocal => PolicyRole::Local,
+            PolicyAction::Exploit { .. } => PolicyRole::Exploit,
+            PolicyAction::Explore => PolicyRole::Explore,
+            PolicyAction::Leave => PolicyRole::Leave,
+        };
+        slice_trace.policy_reason = decision.reason.code();
         match decision.action {
             PolicyAction::ContinueLocal => {}
             PolicyAction::Exploit { win_only } => {
+                slice_trace.proposal_family = ProposalFamily::CatalogSample;
                 if let CatalogSampleOutcome::Candidate(candidate) = cooperative
                     .sample_candidate(replica, rng.random())
                     .expect("catalog sampling must preserve local execution")
                     && ledger.remaining() > 0
                     && ledger.charge()
                 {
+                    slice_trace.descriptor_step_norm =
+                        Some(vector_distance(descriptor.values(), &candidate.descriptor));
+                    slice_trace.cartesian_step_norm = Some(vector_distance(
+                        policy_state.as_slice().expect("LJ state is contiguous"),
+                        &candidate.coordinates,
+                    ));
                     cooperative
                         .record_work(replica, ChargeKind::FreshValidation, 1)
                         .expect("sample validation must enter the cooperative ledger");
@@ -1545,18 +1649,29 @@ fn run_capnp_catalog(
                         &candidate,
                         &descriptor_space,
                         &signature.atomic_numbers,
-                    ) && (!win_only || energy < best)
-                    {
-                        current = coordinates.clone();
-                        if energy < best {
-                            best = energy;
-                            best_state = Some(coordinates);
-                            stall = 0;
+                    ) {
+                        slice_trace.validation = SliceValidation::Accepted;
+                        if !win_only || energy < best {
+                            slice_trace.adoption = SliceAdoption::Adopted;
+                            current = coordinates.clone();
+                            if energy < best {
+                                best = energy;
+                                best_state = Some(coordinates);
+                                stall = 0;
+                            }
+                        } else {
+                            slice_trace.adoption = SliceAdoption::NotImproved;
                         }
+                    } else {
+                        slice_trace.validation = SliceValidation::Rejected;
+                        slice_trace.adoption = SliceAdoption::Rejected;
                     }
+                } else {
+                    slice_trace.adoption = SliceAdoption::Rejected;
                 }
             }
             PolicyAction::Explore | PolicyAction::Leave => {
+                slice_trace.proposal_family = ProposalFamily::DescriptorHole;
                 if let CatalogHoleOutcome::Proposal(hole) = cooperative
                     .descriptor_hole(
                         replica,
@@ -1566,6 +1681,7 @@ fn run_capnp_catalog(
                     )
                     .expect("descriptor-hole access must preserve local execution")
                 {
+                    slice_trace.descriptor_step_norm = Some(vector_norm(&hole.increment));
                     cooperative
                         .record_work(replica, ChargeKind::RemoteProposal, 0)
                         .expect("remote proposal work must enter the cooperative ledger");
@@ -1576,8 +1692,17 @@ fn run_capnp_catalog(
                         &hole.increment,
                         matches!(decision.action, PolicyAction::Leave),
                     ) {
+                        slice_trace.cartesian_step_norm = Some(vector_distance(
+                            policy_state.as_slice().expect("LJ state is contiguous"),
+                            proposed.as_slice().expect("LJ proposal is contiguous"),
+                        ));
+                        slice_trace.adoption = SliceAdoption::Adopted;
                         current = proposed;
+                    } else {
+                        slice_trace.adoption = SliceAdoption::Rejected;
                     }
+                } else {
+                    slice_trace.adoption = SliceAdoption::Rejected;
                 }
             }
         }
@@ -1701,6 +1826,12 @@ fn run_capnp_catalog(
                 ),
             }
         }
+        slice_trace.energy = best.is_finite().then_some(best);
+        slice_trace.charged_work =
+            u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+        cooperative
+            .record_slice(replica, slice_trace)
+            .expect("every local slice must retain one complete diagnostic");
         println!(
             "      catalog slice {slices} spent {} best {best:.6} stall {stall}",
             ledger.spent()
@@ -1736,6 +1867,24 @@ fn run_capnp_catalog(
         returned,
         ..Outcome::default()
     }
+}
+
+#[cfg(feature = "bank-rpc")]
+fn vector_norm(values: &[f64]) -> f64 {
+    values.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+#[cfg(feature = "bank-rpc")]
+fn vector_distance(left: &[f64], right: &[f64]) -> f64 {
+    assert_eq!(left.len(), right.len(), "diagnostic vectors must align");
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| {
+            let difference = left - right;
+            difference * difference
+        })
+        .sum::<f64>()
+        .sqrt()
 }
 
 #[cfg(feature = "bank-rpc")]
