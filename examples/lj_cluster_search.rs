@@ -1673,6 +1673,55 @@ fn run_capnp_catalog(
                 .record_work(replica, ChargeKind::LocalProposal, 0)
                 .expect("uncharged local work must enter the cooperative ledger");
         }
+        let adaptive_operations = adaptive_catalog_operations(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            replica,
+            &mut candidate_sequence,
+            seed,
+            ledger.spent(),
+            &output.accepted_transitions,
+        );
+        let mut adaptive_path_active = false;
+        for operation in adaptive_operations {
+            match operation {
+                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
+                    if !ledger.charge() {
+                        break;
+                    }
+                    cooperative
+                        .record_work(replica, ChargeKind::FreshValidation, 1)
+                        .expect("adaptive source validation must enter the ledger");
+                    adaptive_path_active = cooperative
+                        .record_current(replica, candidate)
+                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
+                        .unwrap_or(false);
+                }
+                AdaptiveCatalogOperation::Adopt {
+                    action,
+                    destination,
+                } => {
+                    if !adaptive_path_active {
+                        continue;
+                    }
+                    if !ledger.charge() {
+                        break;
+                    }
+                    cooperative
+                        .record_work(replica, ChargeKind::FreshValidation, 1)
+                        .expect("adaptive destination validation must enter the ledger");
+                    adaptive_path_active = cooperative
+                        .record_transition(
+                            replica,
+                            action,
+                            TransitionDestination::Resolved(destination),
+                            true,
+                        )
+                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
+                        .unwrap_or(false);
+                }
+            }
+        }
         let hop_offset = hops;
         accepted_transitions.extend(output.accepted_transitions.iter().cloned().map(
             |mut transition| {
