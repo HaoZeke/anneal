@@ -970,7 +970,6 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                let _ = transition_node(scientific, observation.basin_id);
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
@@ -1523,11 +1522,11 @@ fn attraction_region_relation(
     replica: u32,
     local_basin: Option<BasinId>,
 ) -> CatalogRelation {
-    let Some(local_node) = local_basin
-        .and_then(|basin| scientific.transition_nodes.get(&basin))
-        .copied()
-    else {
+    let Some(local_basin) = local_basin else {
         return CatalogRelation::Empty;
+    };
+    let Some(local_node) = scientific.transition_nodes.get(&local_basin).copied() else {
+        return CatalogRelation::Incumbent;
     };
     let Ok(regions) = scientific
         .transition_graph
