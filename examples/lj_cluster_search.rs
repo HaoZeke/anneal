@@ -1369,6 +1369,35 @@ fn cooperative_policy_point(current: ArrayView1<f64>, current_energy: f64) -> (A
     (current.to_owned(), current_energy)
 }
 
+#[cfg(feature = "bank-rpc")]
+fn fixed_probe_trial<R: rand::Rng + ?Sized>(
+    current: ArrayView1<f64>,
+    scale: f64,
+    rng: &mut R,
+) -> Option<Array1<f64>> {
+    if current.is_empty() || !current.len().is_multiple_of(3) || !scale.is_finite() || scale <= 0.0
+    {
+        return None;
+    }
+    let atoms = current.len() / 3;
+    let mut displacement = Array1::zeros(current.len());
+    for coordinate in &mut displacement {
+        let u1 = rng.random::<f64>().max(1e-12);
+        let u2 = rng.random::<f64>();
+        *coordinate = scale * (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+    }
+    for axis in 0..3 {
+        let mean = (0..atoms)
+            .map(|atom| displacement[3 * atom + axis])
+            .sum::<f64>()
+            / atoms as f64;
+        for atom in 0..atoms {
+            displacement[3 * atom + axis] -= mean;
+        }
+    }
+    Some(current.to_owned() + displacement)
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -1381,13 +1410,13 @@ fn run_capnp_catalog(
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::PolicyAction;
-    use anneal_core::catalog_rpc::CatalogIdentity;
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
+    use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
         PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
-        SliceQuench, SliceTrace, SliceValidation,
+        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -1439,6 +1468,16 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<u32>().ok())
         .unwrap_or(256)
         .max(1);
+    let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(8)
+        .max(1);
+    let probe_scale = std::env::var("CATALOG_PROBE_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.2 * run_cfg.length_scale);
     let minimum_population_interval = slice
         .checked_mul(2)
         .and_then(|value| value.checked_add(2))
@@ -1632,6 +1671,99 @@ fn run_capnp_catalog(
                 .record_work(replica, ChargeKind::FreshValidation, 1)
                 .expect("receiving validation must enter the cooperative ledger");
             let _ = cooperative.offer_candidate(replica, candidate);
+        }
+
+        if slices.is_multiple_of(probe_interval) && ledger.remaining() >= 4 && ledger.charge() {
+            let (source_energy, source_gradient) = lj(policy_state.view());
+            cooperative
+                .record_work(replica, ChargeKind::FreshValidation, 1)
+                .expect("probe source validation must enter the cooperative ledger");
+            candidate_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("probe source descriptor work must enter the cooperative ledger");
+            let source_candidate = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                ledger.spent(),
+                source_energy,
+                policy_state.view(),
+                source_gradient.view(),
+            );
+            if let Some(source_candidate) = source_candidate
+                && ledger.remaining() >= 3
+                && ledger.charge()
+            {
+                cooperative
+                    .record_work(replica, ChargeKind::FreshValidation, 1)
+                    .expect("probe source receiving validation must enter the ledger");
+                let registered = cooperative
+                    .record_current(replica, source_candidate)
+                    .expect("probe source registration must preserve local execution");
+                if registered == TransitionRecordOutcome::Recorded
+                    && let Some(trial) =
+                        fixed_probe_trial(policy_state.view(), probe_scale, &mut rng)
+                {
+                    let probe_start = ledger.spent();
+                    let (probe_energy, probe_state) =
+                        relax(ledger, trial.view(), run_cfg.relax_steps);
+                    let probe_gradient = grad(ledger, probe_state.view());
+                    let probe_charged = ledger.spent().saturating_sub(probe_start);
+                    candidate_sequence = candidate_sequence
+                        .checked_add(1)
+                        .expect("candidate sequence must fit u64");
+                    let destination = probe_gradient.as_ref().and_then(|gradient| {
+                        lj_catalog_candidate(
+                            &descriptor_space,
+                            &signature.atomic_numbers,
+                            replica,
+                            candidate_sequence,
+                            seed,
+                            ledger.spent(),
+                            probe_energy,
+                            probe_state.view(),
+                            gradient.view(),
+                        )
+                    });
+                    cooperative
+                        .record_work(
+                            replica,
+                            if destination.is_some() {
+                                ChargeKind::AcceptedQuench
+                            } else {
+                                ChargeKind::RejectedQuench
+                            },
+                            u64::try_from(probe_charged).expect("probe quench charge must fit u64"),
+                        )
+                        .expect("fixed-probe quench must enter the cooperative ledger");
+                    match destination {
+                        Some(candidate) if ledger.remaining() > 0 && ledger.charge() => {
+                            cooperative
+                                .record_work(replica, ChargeKind::FreshValidation, 1)
+                                .expect("probe receiving validation must enter the ledger");
+                            let _ = cooperative.record_transition(
+                                replica,
+                                "probe",
+                                TransitionDestination::Resolved(candidate),
+                                false,
+                            );
+                        }
+                        _ => {
+                            let _ = cooperative.record_transition(
+                                replica,
+                                "probe",
+                                TransitionDestination::Unresolved,
+                                false,
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         let Ok(descriptor) =
