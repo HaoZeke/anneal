@@ -709,16 +709,7 @@ where
     let mut returned = 0usize;
     let mut slices = 0usize;
     let mut null_starts = 0usize;
-    let mut improvements: Vec<(usize, usize, usize, f64)> = Vec::new();
-    let mut best = f64::INFINITY;
-    let mut best_state: Option<Array1<f64>> = Some(start.to_owned());
-    if structure_is_sane(start, sane_sep(cfg)) && ledger.charge() {
-        let (e0, _) = objective.value_and_gradient(start);
-        if e0.is_finite() {
-            best = e0;
-            improvements.push((0, ledger.spent(), 0, e0));
-        }
-    }
+    let (mut best, mut best_state, mut improvements) = empty_validated_record();
     let total = ledger.remaining();
     let mut schedule: Option<DiversityAnnealer> = None;
     let expected = 3 * cfg.n_points;
@@ -893,6 +884,14 @@ where
         ..Outcome::default()
     };
     (out, stats)
+}
+
+#[cfg(any(feature = "bank-rpc", test))]
+type ImprovementRecord = (usize, usize, usize, f64);
+
+#[cfg(any(feature = "bank-rpc", test))]
+fn empty_validated_record() -> (f64, Option<Array1<f64>>, Vec<ImprovementRecord>) {
+    (f64::INFINITY, None, Vec::new())
 }
 
 /// Work spent before a run first reached `target`, or how much it spent
