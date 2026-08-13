@@ -970,6 +970,7 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
+                let _ = transition_node(scientific, observation.basin_id);
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
