@@ -81,4 +81,4 @@ print("additive best_val", float(res["best_val"]))
 
 - Website tutorials: classical, Bayesian pilot+mixer, GLE, polish+device
 - Reproducibility (paper tables/figures): https://github.com/HaoZeke/anneal_repro
-- Zenodo archive: https://doi.org/10.5281/zenodo.20672621
+- Zenodo archive: https://doi.org/10.5281/zenodo.20672620
