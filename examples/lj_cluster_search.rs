@@ -1809,14 +1809,11 @@ fn run_capnp_catalog(
         &mut local_rng,
     );
     let mut candidate_sequence = 0u64;
-    let mut checkpoint_sequence = 0u64;
+    let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     let mut best_at_checkpoint = f64::INFINITY;
     let mut stall = 0u32;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
-        checkpoint_sequence = checkpoint_sequence
-            .checked_add(1)
-            .expect("checkpoint sequence must fit u64");
         let boundary_charged = snapshot
             .quench_boundaries()
             .iter()
@@ -1977,8 +1974,11 @@ fn run_capnp_catalog(
         let decision = cooperative
             .decide(replica, policy)
             .expect("policy decision must name the configured replica");
+        slice_sequence = slice_sequence
+            .checked_add(1)
+            .expect("slice sequence must fit u64");
         let mut trace = SliceTrace {
-            slice: checkpoint_sequence,
+            slice: slice_sequence,
             current_basin: cooperative
                 .events()
                 .last()
