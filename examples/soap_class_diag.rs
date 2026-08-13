@@ -114,7 +114,10 @@ fn main() {
     let (e13, x13) = relax(x13.view(), 400);
     let mean = mean_residual_rms(x13.view(), spec);
     let class = class_residual_rms(x13.view(), spec);
-    println!("LJ13 ico energy {e13:.6}  mean_rms {mean:.6}  class_rms {class:.6}  ih {}", ih_dominated(x13.view(), spec));
+    println!(
+        "LJ13 ico energy {e13:.6}  mean_rms {mean:.6}  class_rms {class:.6}  ih {}",
+        ih_dominated(x13.view(), spec)
+    );
 
     let n: usize = std::env::args()
         .nth(1)
