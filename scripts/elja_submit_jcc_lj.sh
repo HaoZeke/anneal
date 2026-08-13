@@ -56,7 +56,7 @@ for n in 75 98 102 104; do
       --array="0-${last}" \
       --partition="${ELJA_PARTITION:-s-normal}" \
       --account="${ELJA_ACCOUNT:-chem-ui}" \
-      --time="${ELJA_TIME:-24:00:00}" \
+      --time="${ELJA_TIME:-2-00:00:00}" \
       --cpus-per-task=5 \
       --mem="${ELJA_MEM:-16G}" \
       --output="$log" \
