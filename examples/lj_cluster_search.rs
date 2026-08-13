@@ -1947,6 +1947,16 @@ fn run_capnp_catalog(
         } else {
             stall = stall.saturating_add(1);
         }
+        if checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+        {
+            return CheckpointAction::ProbeProposal {
+                state,
+                action: "probe".to_owned(),
+            };
+        }
         let Some(current_gradient) = snapshot.current_gradient() else {
             return CheckpointAction::Continue;
         };
@@ -1976,16 +1986,6 @@ fn run_capnp_catalog(
             Some(TransitionRecordOutcome::Rejected | TransitionRecordOutcome::LocalFallback) | None
         ) {
             return CheckpointAction::Continue;
-        }
-        if checkpoint_sequence.is_multiple_of(probe_interval)
-            && snapshot.remaining() > run_cfg.relax_steps
-            && let Some(state) =
-                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
-        {
-            return CheckpointAction::ProbeProposal {
-                state,
-                action: "probe".to_owned(),
-            };
         }
         let policy = match cooperative
             .policy_input(

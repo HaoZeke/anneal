@@ -1086,7 +1086,14 @@ where
                 );
                 let from_energy = e;
                 let from_state = x.clone();
-                let from_gradient = current_validation_gradient.clone();
+                let mut from_gradient = current_validation_gradient.clone();
+                if !adopt && from_gradient.is_none() {
+                    from_gradient = grad.as_deref_mut().and_then(|g| {
+                        g(ledger, from_state.view()).filter(|values| {
+                            values.iter().fold(0.0_f64, |a, q| a.max(q.abs())) < cfg.record_gradient
+                        })
+                    });
+                }
                 let (proposal_energy, proposal_state) =
                     relax(ledger, state.view(), cfg.relax_steps);
                 let proposal_sane = quench_is_sane(cfg, proposal_energy, proposal_state.view());
@@ -1100,8 +1107,9 @@ where
                 } else {
                     None
                 };
-                let recordable =
-                    proposal_sane && (!gradient_required || validation_gradient.is_some());
+                let recordable = proposal_sane
+                    && (!gradient_required || from_gradient.is_some())
+                    && (!gradient_required || validation_gradient.is_some());
                 if recordable {
                     if adopt {
                         hops += 1;
