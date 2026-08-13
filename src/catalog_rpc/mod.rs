@@ -8,13 +8,14 @@ use capnp::serialize;
 use crate::Catalog_capnp::{
     CatalogRelation as WireCatalogRelation, QuenchStatus as WireQuenchStatus, RejectionKind,
     accepted_reply, candidate_record, catalog_reply, catalog_request, population_epoch_reply,
+    policy_state_reply,
 };
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 5;
+pub const PROTOCOL_VERSION: u16 = 6;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +200,7 @@ pub enum CatalogRelation {
 }
 
 /// Exact coordinator evidence used by the cooperative policy.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PolicyState {
     /// Exact number of fixed-census observations.
     pub total_visits: u64,
@@ -215,6 +216,14 @@ pub struct PolicyState {
     pub aggregate_charged: u64,
     /// Declared ensemble charged-work budget.
     pub aggregate_budget: u64,
+    /// Stable census-basin identifier, or `None` for an unassigned descriptor.
+    pub local_basin: Option<u64>,
+    /// Distance from the query descriptor to its assigned immutable medoid.
+    pub local_basin_distance: f64,
+    /// Distance to the nearest distinct census medoid.
+    pub novelty: f64,
+    /// Posterior uncertainty of the latent Gaussian basin-transition field.
+    pub transition_uncertainty: f64,
 }
 
 /// Replica-addressed fixed-population plan returned by the coordinator.
@@ -545,6 +554,16 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_relation(state.relation.into());
                     output.set_aggregate_charged(state.aggregate_charged);
                     output.set_aggregate_budget(state.aggregate_budget);
+                    {
+                        let mut basin = output.reborrow().init_local_basin();
+                        match state.local_basin {
+                            Some(identifier) => basin.set_assigned(identifier),
+                            None => basin.set_unassigned(()),
+                        }
+                    }
+                    output.set_local_basin_distance(state.local_basin_distance);
+                    output.set_novelty(state.novelty);
+                    output.set_transition_uncertainty(state.transition_uncertainty);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -623,6 +642,10 @@ pub(crate) fn decode_reply_reader(
                 }
                 accepted_reply::payload::PolicyState(state) => {
                     let state = state.map_err(wire_error)?;
+                    let local_basin = match state.get_local_basin().which().map_err(wire_error)? {
+                        policy_state_reply::local_basin::Unassigned(()) => None,
+                        policy_state_reply::local_basin::Assigned(identifier) => Some(identifier),
+                    };
                     AcceptedPayload::PolicyState(PolicyState {
                         total_visits: state.get_total_visits(),
                         singleton_basins: state.get_singleton_basins(),
@@ -631,6 +654,10 @@ pub(crate) fn decode_reply_reader(
                         relation: state.get_relation().map_err(wire_error)?.into(),
                         aggregate_charged: state.get_aggregate_charged(),
                         aggregate_budget: state.get_aggregate_budget(),
+                        local_basin,
+                        local_basin_distance: state.get_local_basin_distance(),
+                        novelty: state.get_novelty(),
+                        transition_uncertainty: state.get_transition_uncertainty(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

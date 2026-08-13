@@ -72,6 +72,13 @@ struct PolicyStateReply {
   relation @4 :CatalogRelation;
   aggregateCharged @5 :UInt64;
   aggregateBudget @6 :UInt64;
+  localBasin :union {
+    unassigned @7 :Void;
+    assigned @8 :UInt64;
+  }
+  localBasinDistance @9 :Float64;
+  novelty @10 :Float64;
+  transitionUncertainty @11 :Float64;
 }
 
 struct PopulationSubmitRequest {
