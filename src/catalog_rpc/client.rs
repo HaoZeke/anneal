@@ -12,7 +12,7 @@ use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
     CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
     PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
-    decode_reply_reader, encode_request,
+    TransitionDestination, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -268,6 +268,28 @@ impl CatalogClient {
             duplicate: reply.duplicate,
             snapshot: reply.snapshot,
             catalog,
+        })
+    }
+
+    /// Record one action-conditioned transition from the registered live basin.
+    pub fn record_transition(
+        &mut self,
+        event_sequence: u64,
+        action: impl Into<String>,
+        destination: TransitionDestination,
+    ) -> Result<MutationReceipt, CatalogClientError> {
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::RecordTransition {
+                action: action.into(),
+                destination,
+            },
+        )?;
+        Ok(MutationReceipt {
+            version: reply.snapshot.version,
+            duplicate: reply.duplicate,
+            snapshot: reply.snapshot,
+            catalog: None,
         })
     }
 
