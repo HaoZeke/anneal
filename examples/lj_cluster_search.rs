@@ -1340,6 +1340,11 @@ fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     }
 }
 
+#[cfg(feature = "bank-rpc")]
+fn cooperative_policy_point(current: ArrayView1<f64>, current_energy: f64) -> (Array1<f64>, f64) {
+    (current.to_owned(), current_energy)
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -1428,8 +1433,10 @@ fn run_capnp_catalog(
         run_cfg.bias_gamma,
     );
     let mut current = random_cluster(run_cfg.n_points, 0.7, run_cfg.min_separation, &mut rng);
+    let mut current_energy = f64::NAN;
     let mut best = f64::INFINITY;
     let mut best_state = None;
+    let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
     let mut basins = 0usize;
     let mut screened_out = 0usize;
@@ -1437,7 +1444,6 @@ fn run_capnp_catalog(
     let mut slices = 0u64;
     let mut candidate_sequence = 0u64;
     let mut population_epoch = 0u64;
-    let mut population_representative = None;
     let mut stall = 0u32;
 
     while ledger.remaining() > 0 {
@@ -1500,6 +1506,16 @@ fn run_capnp_catalog(
                 .record_work(replica, ChargeKind::LocalProposal, 0)
                 .expect("uncharged local work must enter the cooperative ledger");
         }
+        let hop_offset = hops;
+        accepted_transitions.extend(output.accepted_transitions.iter().cloned().map(
+            |mut transition| {
+                transition.hop = transition
+                    .hop
+                    .checked_add(hop_offset)
+                    .expect("aggregate hop index must fit usize");
+                transition
+            },
+        ));
         hops += output.hops;
         basins += output.basins;
         screened_out += output.screened_out;
@@ -1550,11 +1566,15 @@ fn run_capnp_catalog(
         } else {
             stall = stall.saturating_add(1);
         }
-        current = output
-            .final_state
-            .or_else(|| output.best_state.clone())
-            .unwrap_or(current);
-        let policy_state = best_state.as_ref().unwrap_or(&current).clone();
+        if let Some(state) = output.final_state.as_ref() {
+            current = state.clone();
+            current_energy = output.final_energy;
+        } else if let Some(state) = output.best_state.as_ref() {
+            current = state.clone();
+            current_energy = output.best;
+        }
+        let (policy_state, policy_energy) =
+            cooperative_policy_point(current.view(), current_energy);
 
         for boundary in boundaries
             .iter()
@@ -1580,13 +1600,6 @@ fn run_capnp_catalog(
                     .expect("validated quench must retain its fresh gradient"),
             )
             .expect("validated LJ quench must produce a catalog candidate");
-            if population_representative.as_ref().is_none_or(
-                |incumbent: &anneal_core::catalog_rpc::CatalogCandidate| {
-                    candidate.energy < incumbent.energy
-                },
-            ) {
-                population_representative = Some(candidate.clone());
-            }
             assert!(
                 ledger.charge(),
                 "slice reservation must cover every receiving validation"
@@ -1601,7 +1614,7 @@ fn run_capnp_catalog(
             descriptor_space.describe(policy_state.view(), Some(&signature.atomic_numbers))
         else {
             slice_trace.policy_reason = "descriptor_rejected";
-            slice_trace.energy = best.is_finite().then_some(best);
+            slice_trace.energy = current_energy.is_finite().then_some(current_energy);
             slice_trace.charged_work =
                 u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
             cooperative
@@ -1612,8 +1625,8 @@ fn run_capnp_catalog(
         cooperative
             .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
             .expect("policy descriptor work must enter the cooperative ledger");
-        let policy_energy = if best.is_finite() {
-            best
+        let policy_energy = if policy_energy.is_finite() {
+            policy_energy
         } else {
             slice_trace.policy_reason = "no_valid_energy";
             slice_trace.charged_work =
@@ -1713,6 +1726,7 @@ fn run_capnp_catalog(
                         if !win_only || energy < best {
                             slice_trace.adoption = SliceAdoption::Adopted;
                             current = coordinates.clone();
+                            current_energy = energy;
                             if energy < best {
                                 best = energy;
                                 best_state = Some(coordinates);
@@ -1757,6 +1771,7 @@ fn run_capnp_catalog(
                         ));
                         slice_trace.adoption = SliceAdoption::Adopted;
                         current = proposed;
+                        current_energy = f64::NAN;
                     } else {
                         slice_trace.adoption = SliceAdoption::Rejected;
                     }
@@ -1778,9 +1793,9 @@ fn run_capnp_catalog(
                 .expect("population charged-work threshold must fit u64"),
         )
         .expect("population charged-work threshold must fit usize");
+        let mut population_representative = None;
         if population_threshold <= last_population_threshold
             && ledger.spent() >= population_threshold
-            && population_representative.is_none()
             && ledger.remaining() >= 3
             && ledger.charge()
         {
@@ -1842,7 +1857,7 @@ fn run_capnp_catalog(
                         population_family_position(&plan.destinations, &plan.parents, replica)
                             .expect("validated population plan must address this replica");
                     let parent_coordinates = Array1::from_vec(parent.coordinates.clone());
-                    current = if family.family_size() > 1 {
+                    let (next_state, next_energy) = if family.family_size() > 1 {
                         let draw = population_rejuvenation_draw(
                             seed,
                             population_epoch,
@@ -1857,20 +1872,24 @@ fn run_capnp_catalog(
                                 cooperative
                                     .record_work(replica, ChargeKind::RemoteProposal, 0)
                                     .expect("rejuvenation proposal must enter the ledger");
-                                pullback_lj_hole(
+                                match pullback_lj_hole(
                                     &descriptor_space,
                                     &signature.atomic_numbers,
                                     parent_coordinates.view(),
                                     &hole.increment,
                                     true,
-                                )
-                                .unwrap_or(parent_coordinates)
+                                ) {
+                                    Some(proposed) => (proposed, f64::NAN),
+                                    None => (parent_coordinates, parent.energy),
+                                }
                             }
-                            _ => parent_coordinates,
+                            _ => (parent_coordinates, parent.energy),
                         }
                     } else {
-                        parent_coordinates
+                        (parent_coordinates, parent.energy)
                     };
+                    current = next_state;
+                    current_energy = next_energy;
                     population_epoch = population_epoch
                         .checked_add(1)
                         .expect("population epoch must fit u64");
@@ -1885,7 +1904,7 @@ fn run_capnp_catalog(
                 ),
             }
         }
-        slice_trace.energy = best.is_finite().then_some(best);
+        slice_trace.energy = current_energy.is_finite().then_some(current_energy);
         slice_trace.charged_work =
             u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
         cooperative
@@ -1919,6 +1938,8 @@ fn run_capnp_catalog(
         best,
         best_state,
         final_state: Some(current),
+        final_energy: current_energy,
+        accepted_transitions,
         hops,
         basins,
         charged: ledger.spent(),
