@@ -7,11 +7,7 @@ use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-fn toy_relax(
-    ledger: &mut Ledger,
-    state: ArrayView1<f64>,
-    steps: usize,
-) -> (f64, Array1<f64>) {
+fn toy_relax(ledger: &mut Ledger, state: ArrayView1<f64>, steps: usize) -> (f64, Array1<f64>) {
     let mut relaxed = state.to_owned();
     for _ in 0..steps {
         if !ledger.charge() {
@@ -36,12 +32,7 @@ fn fresh_bias(cfg: &Config) -> BasinBias<ClusterFingerprint> {
 fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
     let cfg = Config::recommended(6);
     let mut seeding_rng = StdRng::seed_from_u64(0x5eed);
-    let start = random_cluster(
-        cfg.n_points,
-        0.7,
-        cfg.min_separation,
-        &mut seeding_rng,
-    );
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut seeding_rng);
     let mut uninterrupted_rng = seeding_rng.clone();
     let mut checkpointed_rng = seeding_rng;
     let mut uninterrupted_ledger = Ledger::new(4_000);
@@ -78,7 +69,10 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
         &mut checkpoint,
     );
 
-    assert!(checkpoints.len() > 1, "checkpoint hook did not observe the run");
+    assert!(
+        checkpoints.len() > 1,
+        "checkpoint hook did not observe the run"
+    );
     assert!(
         checkpoints.windows(2).all(|pair| pair[0] < pair[1]),
         "checkpoint counters are not strictly monotone: {checkpoints:?}"
@@ -99,4 +93,57 @@ fn no_action_checkpoints_are_identical_to_an_uninterrupted_run() {
         checkpointed_rng.random::<u64>(),
         "checkpoint handling consumed the local random stream"
     );
+}
+
+#[test]
+fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
+    let cfg = Config::recommended(6);
+    let mut rng = StdRng::seed_from_u64(0xb0_0d_a7);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(4_000);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = toy_relax;
+    let proposed = Array1::from_elem(start.len(), 2.0);
+    let mut offered = false;
+    let mut observed_after_transport = false;
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if !offered {
+            offered = true;
+            return CheckpointAction::BoundaryProposal {
+                state: proposed.clone(),
+                action: "test-boundary".to_string(),
+            };
+        }
+        observed_after_transport = snapshot
+            .accepted_transitions()
+            .iter()
+            .any(|transition| transition.action == "test-boundary");
+        CheckpointAction::Continue
+    };
+
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        211,
+        &mut checkpoint,
+    );
+
+    assert!(offered, "checkpoint did not offer the boundary proposal");
+    assert!(
+        observed_after_transport,
+        "a later checkpoint did not observe the transported edge"
+    );
+    assert!(
+        outcome
+            .accepted_transitions
+            .iter()
+            .any(|transition| transition.action == "test-boundary"),
+        "the accepted boundary proposal is absent from the trajectory"
+    );
+    assert!(outcome.hops > 1, "the chain stopped at the transport");
 }
