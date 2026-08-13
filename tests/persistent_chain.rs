@@ -148,3 +148,50 @@ fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
     );
     assert!(outcome.hops > 1, "the chain stopped at the transport");
 }
+
+#[test]
+fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
+    let mut cfg = Config::recommended(6);
+    cfg.relax_steps = 200;
+    let mut rng = StdRng::seed_from_u64(0xfeed_600d);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(260);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = toy_relax;
+    let proposed = start.mapv(|value| value + 4.0);
+    let mut occupied_before_probe = None;
+    let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        if occupied_before_probe.is_none() {
+            occupied_before_probe = Some(snapshot.current_state().to_owned());
+            return CheckpointAction::ProbeProposal {
+                state: proposed.clone(),
+                action: "probe".to_string(),
+            };
+        }
+        CheckpointAction::Continue
+    };
+
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        40,
+        &mut checkpoint,
+    );
+
+    let probe = outcome
+        .accepted_transitions
+        .iter()
+        .find(|transition| transition.action == "probe")
+        .expect("probe transition is absent from the trajectory evidence");
+    assert!(!probe.adopted, "a diagnostic probe became a live-chain hop");
+    assert_eq!(
+        outcome.final_state.as_ref(),
+        occupied_before_probe.as_ref(),
+        "a non-adopting probe replaced the occupied chain state"
+    );
+}

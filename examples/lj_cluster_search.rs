@@ -151,6 +151,7 @@ mod option_tests {
             to_state: destination.clone(),
             to_gradient: Some(destination_gradient),
             validated: true,
+            adopted: true,
         };
 
         let (from, to) = lj_transition_candidates(
@@ -196,6 +197,7 @@ mod option_tests {
                 to_state: second.clone(),
                 to_gradient: Some(second_gradient.clone()),
                 validated: true,
+                adopted: true,
             },
             AcceptedTransition {
                 hop: 4,
@@ -207,6 +209,7 @@ mod option_tests {
                 to_state: third,
                 to_gradient: Some(third_gradient),
                 validated: true,
+                adopted: true,
             },
         ];
         let mut sequence = 20;
@@ -1784,6 +1787,16 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(500)
         .max(1);
+    let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(8)
+        .max(1);
+    let probe_scale = std::env::var("CATALOG_PROBE_SCALE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(0.2 * run_cfg.length_scale);
     let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -1795,7 +1808,8 @@ fn run_capnp_catalog(
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let mut coordination_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
+    let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
+    let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
         run_cfg.merge_radius,
@@ -1809,11 +1823,15 @@ fn run_capnp_catalog(
         &mut local_rng,
     );
     let mut candidate_sequence = 0u64;
+    let mut checkpoint_sequence = 0u64;
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     let mut best_at_checkpoint = f64::INFINITY;
     let mut stall = 0u32;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
+        checkpoint_sequence = checkpoint_sequence
+            .checked_add(1)
+            .expect("checkpoint sequence must fit u64");
         let boundary_charged = snapshot
             .quench_boundaries()
             .iter()
@@ -1874,6 +1892,7 @@ fn run_capnp_catalog(
                 AdaptiveCatalogOperation::Adopt {
                     action,
                     destination,
+                    adopted,
                 } if path_active => {
                     cooperative
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
@@ -1883,7 +1902,7 @@ fn run_capnp_catalog(
                             replica,
                             action,
                             TransitionDestination::Resolved(destination),
-                            true,
+                            adopted,
                         )
                         .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
                         .unwrap_or(false);
@@ -1951,10 +1970,22 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = current_candidate.descriptor.clone();
-        if cooperative.record_current(replica, current_candidate).ok()
-            != Some(TransitionRecordOutcome::Recorded)
-        {
+        let registered = cooperative.record_current(replica, current_candidate).ok();
+        if matches!(
+            registered,
+            Some(TransitionRecordOutcome::Rejected | TransitionRecordOutcome::LocalFallback) | None
+        ) {
             return CheckpointAction::Continue;
+        }
+        if checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+        {
+            return CheckpointAction::ProbeProposal {
+                state,
+                action: "probe".to_owned(),
+            };
         }
         let policy = match cooperative
             .policy_input(
@@ -2022,7 +2053,7 @@ fn run_capnp_catalog(
                 };
                 trace.proposal_family = ProposalFamily::BoundaryTransport;
                 if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                    .boundary_crossing(replica, descriptor, coordination_rng.random())
+                    .boundary_crossing(replica, descriptor, transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
                     trace.sampled_basin = Some(crossing.destination_basin);
@@ -2034,7 +2065,7 @@ fn run_capnp_catalog(
                         &crossing,
                         transport_noise,
                         transport_radius,
-                        &mut coordination_rng,
+                        &mut transport_rng,
                     ) {
                         trace.cartesian_step_norm = Some(vector_distance(
                             snapshot
@@ -2296,6 +2327,7 @@ fn run_capnp_catalog_sliced(
                 AdaptiveCatalogOperation::Adopt {
                     action,
                     destination,
+                    adopted,
                 } => {
                     if !adaptive_path_active {
                         continue;
@@ -2311,7 +2343,7 @@ fn run_capnp_catalog_sliced(
                             replica,
                             action,
                             TransitionDestination::Resolved(destination),
-                            true,
+                            adopted,
                         )
                         .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
                         .unwrap_or(false);
@@ -3038,6 +3070,7 @@ enum AdaptiveCatalogOperation {
     Adopt {
         action: String,
         destination: anneal_core::catalog_rpc::CatalogCandidate,
+        adopted: bool,
     },
 }
 
@@ -3115,8 +3148,13 @@ fn adaptive_catalog_operations(
         operations.push(AdaptiveCatalogOperation::Adopt {
             action: transition.action.clone(),
             destination,
+            adopted: transition.adopted,
         });
-        registered_state = Some(transition.to_state.clone());
+        registered_state = Some(if transition.adopted {
+            transition.to_state.clone()
+        } else {
+            transition.from_state.clone()
+        });
     }
     operations
 }
