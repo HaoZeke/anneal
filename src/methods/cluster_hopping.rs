@@ -105,6 +105,70 @@ pub struct AcceptedTransition {
     pub validated: bool,
 }
 
+/// Read-only scientific state exposed at a charged-work checkpoint.
+///
+/// A checkpoint observes the live chain in place. It does not end the run,
+/// rebuild an adaptive controller, or consume the chain's random stream.
+pub struct ChainCheckpoint<'a> {
+    current_state: ArrayView1<'a, f64>,
+    current_energy: f64,
+    current_gradient: Option<ArrayView1<'a, f64>>,
+    best_state: Option<ArrayView1<'a, f64>>,
+    best_energy: f64,
+    accepted_transitions: &'a [AcceptedTransition],
+    charged: usize,
+    hops: usize,
+}
+
+impl<'a> ChainCheckpoint<'a> {
+    /// Quenched state occupied by the live chain.
+    pub fn current_state(&self) -> ArrayView1<'a, f64> {
+        self.current_state
+    }
+
+    /// Quenched energy of the state occupied by the live chain.
+    pub fn current_energy(&self) -> f64 {
+        self.current_energy
+    }
+
+    /// Fresh validation gradient retained for the occupied state, when any.
+    pub fn current_gradient(&self) -> Option<ArrayView1<'a, f64>> {
+        self.current_gradient
+    }
+
+    /// Lowest state found under this ledger, when one is recordable.
+    pub fn best_state(&self) -> Option<ArrayView1<'a, f64>> {
+        self.best_state
+    }
+
+    /// Lowest recordable energy found under this ledger.
+    pub fn best_energy(&self) -> f64 {
+        self.best_energy
+    }
+
+    /// Accepted transitions completed since the preceding checkpoint.
+    pub fn accepted_transitions(&self) -> &'a [AcceptedTransition] {
+        self.accepted_transitions
+    }
+
+    /// Charged objective work completed by this checkpoint.
+    pub fn charged(&self) -> usize {
+        self.charged
+    }
+
+    /// Perturb--quench hops completed by this checkpoint.
+    pub fn hops(&self) -> usize {
+        self.hops
+    }
+}
+
+/// Action returned after observing a live-chain checkpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckpointAction {
+    /// Leave the live chain and every adaptive controller unchanged.
+    Continue,
+}
+
 impl QuenchBoundary {
     /// Scientific status assigned by the caller's fresh convergence check.
     pub fn status(&self) -> QuenchStatus {
@@ -551,7 +615,19 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
     settle: Option<Settle<'_>>,
     rng: &mut R,
 ) -> Outcome {
-    run_full(cfg, start, ledger, relax, grad, None, settle, rng)
+    let mut checkpoint = |_| CheckpointAction::Continue;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        settle,
+        None,
+        &mut checkpoint,
+        rng,
+    )
 }
 
 /// Runs from `start` with an optional charged gradient.
@@ -563,7 +639,19 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Outcome {
-    run_full(cfg, start, ledger, relax, grad, None, None, rng)
+    let mut checkpoint = |_| CheckpointAction::Continue;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+    )
 }
 
 /// As [`run_with_gradient`], with a bias supplied by the caller and left
@@ -593,10 +681,62 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         "a shared bias and a replica ladder are different things: \
          each rung owns its own bias"
     );
-    run_full(cfg, start, ledger, relax, grad, Some(bias), None, rng)
+    let mut checkpoint = |_| CheckpointAction::Continue;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        Some(bias),
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+    )
 }
 
-fn run_full<'g, R: Rng + ?Sized>(
+/// As [`run_with_bias`], exposing periodic observations without ending the
+/// live chain or rebuilding any adaptive state.
+pub fn run_with_bias_at_checkpoints<'g, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    bias: &mut BasinBias<ClusterFingerprint>,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Outcome
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    assert!(
+        cfg.replicas <= 1,
+        "a shared bias and a replica ladder are different things: \
+         each rung owns its own bias"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        Some(bias),
+        None,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+    )
+}
+
+fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
     ledger: &mut Ledger,
@@ -604,8 +744,14 @@ fn run_full<'g, R: Rng + ?Sized>(
     mut grad: Option<&mut GradFn<'g>>,
     external_bias: Option<&mut BasinBias<ClusterFingerprint>>,
     mut settle: Option<Settle<'_>>,
+    checkpoint_interval: Option<usize>,
+    checkpoint: &mut H,
     rng: &mut R,
-) -> Outcome {
+) -> Outcome
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
     let n = cfg.n_points;
     // The descriptor and the metric have to agree. A shape distance is
     // computed from coordinates, so keying on it means passing coordinates
@@ -864,8 +1010,34 @@ fn run_full<'g, R: Rng + ?Sized>(
     let mut accepted = 0usize;
     let mut accepted_transitions = Vec::new();
     let mut hops = 0usize;
+    let mut checkpoint_hops = 0usize;
+    let mut checkpoint_transition_start = 0usize;
+    let mut next_checkpoint = checkpoint_interval;
 
     loop {
+        if let (Some(interval), Some(threshold)) = (checkpoint_interval, next_checkpoint)
+            && hops > checkpoint_hops
+            && ledger.spent() >= threshold
+        {
+            let snapshot = ChainCheckpoint {
+                current_state: x.view(),
+                current_energy: e,
+                current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
+                best_state: ledger.best_state.as_ref().map(|state| state.view()),
+                best_energy: ledger.best,
+                accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+                charged: ledger.spent(),
+                hops,
+            };
+            let CheckpointAction::Continue = checkpoint(snapshot);
+            checkpoint_hops = hops;
+            checkpoint_transition_start = accepted_transitions.len();
+            next_checkpoint = ledger
+                .spent()
+                .checked_div(interval)
+                .and_then(|completed| completed.checked_add(1))
+                .and_then(|next| next.checked_mul(interval));
+        }
         if ledger.remaining() == 0 {
             break;
         }
@@ -2259,6 +2431,20 @@ fn run_full<'g, R: Rng + ?Sized>(
         }
     }
 
+    if checkpoint_interval.is_some() && hops > checkpoint_hops {
+        let snapshot = ChainCheckpoint {
+            current_state: x.view(),
+            current_energy: e,
+            current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
+            best_state: ledger.best_state.as_ref().map(|state| state.view()),
+            best_energy: ledger.best,
+            accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
+            charged: ledger.spent(),
+            hops,
+        };
+        let CheckpointAction::Continue = checkpoint(snapshot);
+    }
+
     let n_basins = bias.n_basins();
     let final_radius = bias.merge_radius();
     if let Some(slot) = carried {
@@ -3184,12 +3370,14 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!validated.is_empty());
         assert!(validated.iter().all(|transition| {
-            transition.from_gradient.as_ref().is_some_and(|gradient| {
-                gradient.len() == transition.from_state.len()
-            }) && transition
-                .to_gradient
+            transition
+                .from_gradient
                 .as_ref()
-                .is_some_and(|gradient| gradient.len() == transition.to_state.len())
+                .is_some_and(|gradient| gradient.len() == transition.from_state.len())
+                && transition
+                    .to_gradient
+                    .as_ref()
+                    .is_some_and(|gradient| gradient.len() == transition.to_state.len())
         }));
     }
 
