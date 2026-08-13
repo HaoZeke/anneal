@@ -99,22 +99,22 @@ unsafe extern "C" fn xtb_callback(
     let mut energy = 0.0;
     let mut var = 0.0;
     kernel.evaluations += 1;
-    if let Some(path) = env_path("RGPOT_XTB_TRACE") {
-        if let Ok(mut trace) = File::create(path) {
-            let positions = unsafe { std::slice::from_raw_parts(pos, 3 * n) };
-            let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
-            let _ = writeln!(trace, "{n}");
-            let _ = writeln!(trace, "rgpot xtb evaluation {}", kernel.evaluations);
-            for i in 0..n {
-                let _ = writeln!(
-                    trace,
-                    "{} {:.17e} {:.17e} {:.17e}",
-                    atomic_numbers[i],
-                    positions[3 * i],
-                    positions[3 * i + 1],
-                    positions[3 * i + 2]
-                );
-            }
+    if let Some(path) = env_path("RGPOT_XTB_TRACE")
+        && let Ok(mut trace) = File::create(path)
+    {
+        let positions = unsafe { std::slice::from_raw_parts(pos, 3 * n) };
+        let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
+        let _ = writeln!(trace, "{n}");
+        let _ = writeln!(trace, "rgpot xtb evaluation {}", kernel.evaluations);
+        for i in 0..n {
+            let _ = writeln!(
+                trace,
+                "{} {:.17e} {:.17e} {:.17e}",
+                atomic_numbers[i],
+                positions[3 * i],
+                positions[3 * i + 1],
+                positions[3 * i + 2]
+            );
         }
     }
     let rc = unsafe {

@@ -56,7 +56,7 @@ fn main() {
         0.263209643,
     ];
     let mut law = BudgetWindowTemperature::new(114, 0.5);
-    println!("{:>4} {:>16} {:>16}  {}", "step", "rust", "python", "match");
+    println!("{:>4} {:>16} {:>16}  match", "step", "rust", "python");
     for k in 0..10 {
         law.observe_rejection(rejections[k]);
         let t = law.temperature(gaps[k], remaining[k]);
@@ -100,7 +100,7 @@ fn main() {
             seen.push(h.height());
         }
     }
-    println!("\n{:>4} {:>16} {:>16}  {}", "n", "rust", "python", "match");
+    println!("\n{:>4} {:>16} {:>16}  match", "n", "rust", "python");
     for (k, e) in expected_h.iter().enumerate() {
         let ok = close(seen[k], *e, 1e-7);
         if !ok {
@@ -133,20 +133,17 @@ fn main() {
         let s = Array1::from(vec![*v as f64]);
         bias.deposit(s.view(), 1.0);
     }
-    println!(
-        "\n{:>6} {:>16} {:>16}  {}",
-        "basin", "rust", "python", "match"
-    );
-    for k in 0..5 {
+    println!("\n{:>6} {:>16} {:>16}  match", "basin", "rust", "python");
+    for (k, expected) in expected_final.iter().enumerate() {
         let s = Array1::from(vec![k as f64]);
         let got = bias.potential(s.view());
-        let ok = close(got, expected_final[k], 1e-7);
+        let ok = close(got, *expected, 1e-7);
         if !ok {
             failures += 1;
         }
         println!(
             "{k:>6} {got:>16.9} {:>16.9}  {}",
-            expected_final[k],
+            expected,
             if ok { "yes" } else { "NO" }
         );
     }

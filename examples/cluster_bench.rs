@@ -165,10 +165,10 @@ fn main() {
         cfg.keying = Keying::Canonical;
         cfg.merge_radius = 0.3;
     }
-    if let Ok(v) = std::env::var("MERGE_RADIUS") {
-        if let Ok(r) = v.parse::<f64>() {
-            cfg.merge_radius = r;
-        }
+    if let Ok(v) = std::env::var("MERGE_RADIUS")
+        && let Ok(r) = v.parse::<f64>()
+    {
+        cfg.merge_radius = r;
     }
     if !opts.is_empty() {
         println!("  mechanisms: {}", opts.join(", "));

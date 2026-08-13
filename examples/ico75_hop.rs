@@ -165,10 +165,10 @@ fn load_xyz(path: &str) -> Array1<f64> {
         if parts.len() < start + 3 {
             continue;
         }
-        if let Ok(_n) = parts[0].parse::<usize>() {
-            if parts.len() == 1 {
-                continue;
-            }
+        if let Ok(_n) = parts[0].parse::<usize>()
+            && parts.len() == 1
+        {
+            continue;
         }
         for k in 0..3 {
             if let Ok(v) = parts[start + k].parse::<f64>() {
@@ -259,11 +259,11 @@ fn main() {
             );
         }
     }
-    if let Some(ref pth) = path {
-        if !std::path::Path::new(pth).is_file() {
-            dump_xyz(pth, x0.view(), e0);
-            println!("wrote {pth}");
-        }
+    if let Some(ref pth) = path
+        && !std::path::Path::new(pth).is_file()
+    {
+        dump_xyz(pth, x0.view(), e0);
+        println!("wrote {pth}");
     }
     println!("trial 1");
     let mut rng1 = StdRng::seed_from_u64(1);
