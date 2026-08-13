@@ -2,7 +2,7 @@
 
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest, PROTOCOL_VERSION,
-    ProtocolError, decode_request, encode_request, validate_identity,
+    ProtocolError, TransitionDestination, decode_request, encode_request, validate_identity,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -62,6 +62,14 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             candidate: candidate(),
         },
         CatalogOperation::PopulationPlan { epoch: 7 },
+        CatalogOperation::RecordTransition {
+            action: "probe".into(),
+            destination: TransitionDestination::Resolved(candidate()),
+        },
+        CatalogOperation::RecordTransition {
+            action: "probe".into(),
+            destination: TransitionDestination::Unresolved,
+        },
     ];
     for operation in operations {
         let request = CatalogRequest {
