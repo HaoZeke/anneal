@@ -1,4 +1,6 @@
-use anneal_core::transition_graph::{TransitionGraph, TransitionOutcome};
+use anneal_core::transition_graph::{
+    AttractionRegionConfig, TransitionGraph, TransitionOutcome,
+};
 
 #[test]
 fn fixed_probe_matrix_does_not_pool_adaptive_actions() {
@@ -55,4 +57,65 @@ fn action_counts_remain_independent() {
     );
     assert_eq!(graph.observations("probe", 0), 1);
     assert_eq!(graph.observations("transport", 0), 2);
+}
+
+#[test]
+fn equal_probe_return_dynamics_form_one_attraction_region() {
+    let mut graph = TransitionGraph::new();
+    for source in [0, 1] {
+        for _ in 0..20 {
+            graph
+                .observe("probe", source, TransitionOutcome::Resolved(0))
+                .unwrap();
+            graph
+                .observe("probe", source, TransitionOutcome::Resolved(1))
+                .unwrap();
+        }
+    }
+    for _ in 0..40 {
+        graph
+            .observe("probe", 2, TransitionOutcome::Resolved(2))
+            .unwrap();
+    }
+
+    let regions = graph
+        .attraction_regions(&AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.1,
+            diffusion_steps: 1,
+            maximum_distance: 0.1,
+            minimum_probes: 8,
+        })
+        .unwrap();
+
+    assert_eq!(regions, vec![vec![0, 1], vec![2]]);
+}
+
+#[test]
+fn insufficient_probe_evidence_stays_singleton_unresolved() {
+    let mut graph = TransitionGraph::new();
+    for _ in 0..12 {
+        graph
+            .observe("probe", 0, TransitionOutcome::Resolved(0))
+            .unwrap();
+        graph
+            .observe("probe", 1, TransitionOutcome::Resolved(0))
+            .unwrap();
+    }
+    graph
+        .observe("adaptive", 2, TransitionOutcome::Resolved(0))
+        .unwrap();
+
+    let regions = graph
+        .attraction_regions(&AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.1,
+            diffusion_steps: 2,
+            maximum_distance: 0.1,
+            minimum_probes: 8,
+        })
+        .unwrap();
+
+    assert_eq!(regions, vec![vec![0, 1], vec![2]]);
+    assert_eq!(graph.observations("probe", 2), 0);
 }
