@@ -1,13 +1,16 @@
 //! Isolated scientific catalog coordinator for a reduced-unit LJ ensemble.
 //!
 //! Usage: `catalog_server <addr> <n> <capacity> <census-radius> <total-work>
-//! <campaign> <ensemble> [replicas] [state-directory]`, where replicas defaults
-//! to `0,1,2,3` and the state directory enables restart-safe request replay.
+//! <campaign> <ensemble> [replicas] [state-directory] [minimum-probes]
+//! [maximum-region-distance] [Dirichlet-concentration] [diffusion-steps]`,
+//! where replicas defaults to `0,1,2,3` and the state directory enables
+//! restart-safe request replay.
 
 use anneal_core::catalog::lj::{
     descriptor_space, fresh_evaluation, reference_coordinates, system_signature, validator_config,
 };
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
+use anneal_core::transition_graph::AttractionRegionConfig;
 use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,6 +29,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .split(',')
         .map(str::parse::<u32>)
         .collect::<Result<Vec<_>, _>>()?;
+    let minimum_probes = optional_parse(&args, 10, 8_u64)?;
+    let maximum_distance = optional_parse(&args, 11, 0.35_f64)?;
+    let concentration = optional_parse(&args, 12, 0.5_f64)?;
+    let diffusion_steps = optional_parse(&args, 13, 2_usize)?;
 
     let signature = system_signature(n_points)?;
     let digest = signature.digest();
@@ -47,7 +54,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             census_radius,
             total_work,
             move |coordinates| fresh_evaluation(n_points, coordinates),
-        )?;
+        )?
+        .with_attraction_region_config(AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration,
+            diffusion_steps,
+            maximum_distance,
+            minimum_probes,
+        })?;
     if let Some(directory) = args.get(9) {
         config = config.with_state_directory(directory)?;
     }
@@ -84,4 +98,20 @@ where
     T::Err: std::error::Error + 'static,
 {
     Ok(required(args, index, name)?.parse()?)
+}
+
+fn optional_parse<T>(
+    args: &[String],
+    index: usize,
+    default: T,
+) -> Result<T, Box<dyn std::error::Error>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error + 'static,
+{
+    args.get(index)
+        .map(|value| value.parse::<T>())
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+        .map_err(Into::into)
 }
