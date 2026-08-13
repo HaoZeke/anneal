@@ -81,9 +81,17 @@ jobs:
           cog check "$COG_FROM..$COG_TO"
 
       - name: Audit for large files
-        uses: HaoZeke/large-file-auditor@v0.1.0
-        with:
-          file-size-threshold: "1M"
+        shell: bash
+        run: |
+          oversized=$(
+            git rev-list --objects --all |
+              git cat-file --batch-check='%(objecttype) %(objectsize) %(objectname) %(rest)' |
+              awk '$1 == "blob" && $2 > 1048576'
+          )
+          if [[ -n "$oversized" ]]; then
+            printf 'Git history contains blobs larger than 1 MiB:\n%s\n' "$oversized" >&2
+            exit 1
+          fi
 
   test:
     name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})
