@@ -163,10 +163,18 @@ pub fn diversity_constrained_assignment(
         }
     }
     while selected.len() < slots {
+        let smallest_family = ordered
+            .iter()
+            .filter_map(|candidate| {
+                let size = family_sizes.get(&candidate.source).copied().unwrap_or(0);
+                (size < max_family_size).then_some(size)
+            })
+            .min()
+            .expect("capacity check guarantees an available source");
         let candidate = ordered
             .iter()
             .find(|candidate| {
-                family_sizes.get(&candidate.source).copied().unwrap_or(0) < max_family_size
+                family_sizes.get(&candidate.source).copied().unwrap_or(0) == smallest_family
             })
             .expect("capacity check guarantees an available source");
         selected.push(candidate.source);
