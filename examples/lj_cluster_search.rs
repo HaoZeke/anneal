@@ -29,7 +29,10 @@ use anneal_core::shape::IraMetric;
 fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     let height = opts.contains(&"height");
     let noheight = opts.contains(&"noheight");
-    assert!(!(height && noheight), "height and noheight are contradictory");
+    assert!(
+        !(height && noheight),
+        "height and noheight are contradictory"
+    );
     cfg.adaptive_height = (cfg.adaptive_height || height) && !noheight;
 
     let climb = opts.contains(&"climb");
@@ -101,6 +104,23 @@ mod option_tests {
 
         assert_eq!(state, current);
         assert_eq!(energy, -7.5);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn fixed_probe_is_seeded_target_blind_and_translation_free() {
+        let current = Array1::from(vec![0.0; 12]);
+        let mut first_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
+        let mut second_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
+        let first = fixed_probe_trial(current.view(), 0.2, &mut first_rng).unwrap();
+        let second = fixed_probe_trial(current.view(), 0.2, &mut second_rng).unwrap();
+
+        assert_eq!(first, second);
+        assert_ne!(first, current);
+        for axis in 0..3 {
+            let mean = (0..4).map(|atom| first[3 * atom + axis]).sum::<f64>() / 4.0;
+            assert!(mean.abs() < 1e-12);
+        }
     }
 }
 
@@ -729,8 +749,12 @@ fn main() {
         );
     }
     if let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") {
-        std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
-            .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+        std::fs::write(
+            &path,
+            cfg.resolved_json()
+                .expect("serialize resolved configuration"),
+        )
+        .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
     }
 
     // The bank arm. Runs the same chains under the same total budget, with
