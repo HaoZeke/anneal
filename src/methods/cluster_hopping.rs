@@ -3174,7 +3174,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!validated.is_empty());
         assert!(validated.iter().all(|transition| {
-            transition
+            transition.from_gradient.as_ref().is_some_and(|gradient| {
+                gradient.len() == transition.from_state.len()
+            }) && transition
                 .to_gradient
                 .as_ref()
                 .is_some_and(|gradient| gradient.len() == transition.to_state.len())
