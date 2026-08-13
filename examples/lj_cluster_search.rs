@@ -282,6 +282,18 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn population_assignment_never_clones_a_parent_minimum() {
+        let live = Array1::from(vec![3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 2.0, 4.0, 0.0]);
+        let parent = Array1::from(vec![8.0, 1.0, 0.0, 8.0, 2.0, 0.0, 7.0, 1.0, 0.0]);
+
+        let next = population_region_trial(live.view(), None, 0.05, 10.0, 71);
+
+        assert_eq!(next, live);
+        assert_ne!(next, parent);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn quenched_transport_destination_keeps_its_action_label() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
