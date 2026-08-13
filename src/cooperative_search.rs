@@ -210,8 +210,8 @@ mod run {
         pub adoption: SliceAdoption,
         /// Target-independent novelty supplied to the policy.
         pub novelty: Option<f64>,
-        /// Best local energy at the slice boundary.
-        pub energy: f64,
+        /// Best local energy at the slice boundary, absent when no valid state exists.
+        pub energy: Option<f64>,
         /// Exact charged work consumed by the slice.
         pub charged_work: u64,
     }
@@ -943,7 +943,7 @@ mod run {
                                 format!("\"{}\"", slice_quench_code(slice.quench)),
                                 format!("\"{}\"", slice_adoption_code(slice.adoption)),
                                 optional_f64(slice.novelty),
-                                slice.energy.to_string(),
+                                optional_f64(slice.energy),
                                 slice.charged_work.to_string(),
                             ]
                         },
@@ -1283,19 +1283,14 @@ mod run {
                 reason: "slice indices are one-based",
             });
         }
-        if !diagnostic.energy.is_finite() {
-            return Err(CooperativeRunError::InvalidSliceDiagnostic {
-                slice: diagnostic.slice,
-                reason: "slice energy must be finite",
-            });
-        }
-        if !finite_nonnegative(diagnostic.descriptor_step_norm)
+        if diagnostic.energy.is_some_and(|energy| !energy.is_finite())
+            || !finite_nonnegative(diagnostic.descriptor_step_norm)
             || !finite_nonnegative(diagnostic.cartesian_step_norm)
             || !finite_nonnegative(diagnostic.novelty)
         {
             return Err(CooperativeRunError::InvalidSliceDiagnostic {
                 slice: diagnostic.slice,
-                reason: "slice norms and novelty must be finite and nonnegative",
+                reason: "slice energy must be finite and norms and novelty must be nonnegative",
             });
         }
         Ok(())

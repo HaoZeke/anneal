@@ -285,7 +285,7 @@ fn every_slice_has_one_complete_transition_diagnostic() {
             quench: SliceQuench::Converged,
             adoption: SliceAdoption::Adopted,
             novelty: Some(0.75),
-            energy: -397.492,
+            energy: Some(-397.492),
             charged_work: 7,
         },
     )
