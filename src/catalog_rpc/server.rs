@@ -677,19 +677,11 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let relation = match scientific.catalog.incumbent() {
-                None => CatalogRelation::Empty,
-                Some(incumbent) if local_basin.is_some_and(|id| id == incumbent.census_id()) => {
-                    CatalogRelation::Incumbent
-                }
-                Some(_) if local_basin.is_some_and(|id| scientific.catalog.entry(id).is_some()) => {
-                    CatalogRelation::SameBasin
-                }
-                Some(incumbent) if incumbent.energy() < *energy => {
-                    CatalogRelation::UnrelatedLowerAnchor
-                }
-                Some(_) => CatalogRelation::UnrelatedNoAnchor,
-            };
+            let relation = attraction_region_relation(
+                scientific,
+                request.identity.replica,
+                local_basin,
+            );
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -1501,6 +1493,51 @@ fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
                 .unwrap_or(1.0)
         },
     )
+}
+
+fn attraction_region_relation(
+    scientific: &ScientificState,
+    replica: u32,
+    local_basin: Option<BasinId>,
+) -> CatalogRelation {
+    let Some(local_node) = local_basin
+        .and_then(|basin| scientific.transition_nodes.get(&basin))
+        .copied()
+    else {
+        return CatalogRelation::Empty;
+    };
+    let Ok(regions) = scientific
+        .transition_graph
+        .attraction_regions(&AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.5,
+            diffusion_steps: 2,
+            maximum_distance: 0.35,
+            minimum_probes: 8,
+        })
+    else {
+        return CatalogRelation::Empty;
+    };
+    let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
+    for (region, nodes) in regions.iter().enumerate() {
+        for node in nodes {
+            node_region[*node] = region;
+        }
+    }
+    let Some(local_region) = node_region.get(local_node).copied() else {
+        return CatalogRelation::Empty;
+    };
+    let shared = scientific
+        .last_basin_by_replica
+        .iter()
+        .filter(|(other, _)| **other != replica)
+        .filter_map(|(_, basin)| scientific.transition_nodes.get(basin))
+        .any(|node| node_region.get(*node).copied() == Some(local_region));
+    if shared {
+        CatalogRelation::SameBasin
+    } else {
+        CatalogRelation::Incumbent
+    }
 }
 
 fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descriptor: &[f64]) -> f64 {
