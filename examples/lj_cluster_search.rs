@@ -1596,6 +1596,44 @@ fn run_capnp_catalog(
         .expect("population charged-work threshold must fit usize");
         if population_threshold <= last_population_threshold
             && ledger.spent() >= population_threshold
+            && population_representative.is_none()
+            && ledger.remaining() >= 3
+            && ledger.charge()
+        {
+            let (incumbent_energy, incumbent_gradient) = lj(policy_state.view());
+            cooperative
+                .record_work(replica, ChargeKind::FreshValidation, 1)
+                .expect("incumbent validation must enter the cooperative ledger");
+            candidate_sequence = candidate_sequence
+                .checked_add(1)
+                .expect("candidate sequence must fit u64");
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("incumbent descriptor work must enter the cooperative ledger");
+            if let Some(candidate) = lj_catalog_candidate(
+                &descriptor_space,
+                &signature.atomic_numbers,
+                replica,
+                candidate_sequence,
+                seed,
+                ledger.spent(),
+                incumbent_energy,
+                policy_state.view(),
+                incumbent_gradient.view(),
+            ) {
+                assert!(
+                    ledger.charge(),
+                    "population threshold must reserve incumbent receiving validation"
+                );
+                cooperative
+                    .record_work(replica, ChargeKind::FreshValidation, 1)
+                    .expect("incumbent receiving validation must enter the cooperative ledger");
+                let _ = cooperative.offer_candidate(replica, candidate.clone());
+                population_representative = Some(candidate);
+            }
+        }
+        if population_threshold <= last_population_threshold
+            && ledger.spent() >= population_threshold
             && let Some(representative) = population_representative.clone()
         {
             assert!(
