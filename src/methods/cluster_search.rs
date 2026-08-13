@@ -16,9 +16,10 @@
 //! and neither the driver nor this function can tell them apart.
 
 use crate::methods::cluster_hopping::{
-    Config, Ledger, OVERLAP_SEPARATION, Outcome, min_pair_distance, optimize_with_gradient,
-    structure_is_sane,
+    Config, Ledger, OVERLAP_SEPARATION, Outcome, optimize_with_gradient,
 };
+#[cfg(any(feature = "bank-rpc", test))]
+use crate::methods::cluster_hopping::{min_pair_distance, structure_is_sane};
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
