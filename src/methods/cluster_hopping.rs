@@ -163,10 +163,17 @@ impl<'a> ChainCheckpoint<'a> {
 }
 
 /// Action returned after observing a live-chain checkpoint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CheckpointAction {
     /// Leave the live chain and every adaptive controller unchanged.
     Continue,
+    /// Quench and adopt a target-blind boundary perturbation.
+    BoundaryProposal {
+        /// Cartesian proposal produced from shared region-boundary evidence.
+        state: Array1<f64>,
+        /// General proposal-family label retained on the trajectory edge.
+        action: String,
+    },
 }
 
 fn continue_without_checkpoint(_: ChainCheckpoint<'_>) -> CheckpointAction {
@@ -1033,7 +1040,7 @@ where
                 charged: ledger.spent(),
                 hops,
             };
-            let CheckpointAction::Continue = checkpoint(snapshot);
+            let checkpoint_action = checkpoint(snapshot);
             checkpoint_hops = hops;
             checkpoint_transition_start = accepted_transitions.len();
             next_checkpoint = ledger
@@ -1041,6 +1048,66 @@ where
                 .checked_div(interval)
                 .and_then(|completed| completed.checked_add(1))
                 .and_then(|next| next.checked_mul(interval));
+            match checkpoint_action {
+                CheckpointAction::Continue => {}
+                CheckpointAction::BoundaryProposal { state, action } => {
+                    assert_eq!(
+                        state.len(),
+                        x.len(),
+                        "boundary proposal must match the live Cartesian state"
+                    );
+                    let from_energy = e;
+                    let from_state = x.clone();
+                    let from_gradient = current_validation_gradient.clone();
+                    let (proposal_energy, proposal_state) =
+                        relax(ledger, state.view(), cfg.relax_steps);
+                    let proposal_sane = quench_is_sane(cfg, proposal_energy, proposal_state.view());
+                    let gradient_required = grad.is_some();
+                    let validation_gradient = if proposal_sane {
+                        grad.as_deref_mut().and_then(|g| {
+                            g(ledger, proposal_state.view()).filter(|values| {
+                                values.iter().fold(0.0_f64, |a, q| a.max(q.abs()))
+                                    < cfg.record_gradient
+                            })
+                        })
+                    } else {
+                        None
+                    };
+                    let recordable =
+                        proposal_sane && (!gradient_required || validation_gradient.is_some());
+                    hops += 1;
+                    if recordable {
+                        let improved = proposal_energy < ledger.best - 1e-10;
+                        ledger.record(proposal_energy, proposal_state.view());
+                        let reached = identity.basin_of(proposal_state.view());
+                        let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
+                        feedback.observe(Some(from), reached);
+                        here = Some(reached);
+                        e = proposal_energy;
+                        x = proposal_state;
+                        current_validation_gradient = validation_gradient.clone();
+                        accepted += 1;
+                        accepted_transitions.push(AcceptedTransition {
+                            hop: hops,
+                            action,
+                            from_energy,
+                            to_energy: e,
+                            from_state,
+                            from_gradient,
+                            to_state: x.clone(),
+                            to_gradient: validation_gradient,
+                            validated: true,
+                        });
+                        bias.deposit(x.view(), cfg.temperature);
+                        if improved && improvements.len() < 512 {
+                            improvements.push((hops, ledger.spent(), bias.n_basins(), e));
+                        }
+                    } else {
+                        unconverged_records += 1;
+                        bias.deposit(x.view(), cfg.temperature);
+                    }
+                }
+            }
         }
         if ledger.remaining() == 0 {
             break;
@@ -2433,20 +2500,6 @@ where
                 }
             }
         }
-    }
-
-    if checkpoint_interval.is_some() && hops > checkpoint_hops {
-        let snapshot = ChainCheckpoint {
-            current_state: x.view(),
-            current_energy: e,
-            current_gradient: current_validation_gradient.as_ref().map(|g| g.view()),
-            best_state: ledger.best_state.as_ref().map(|state| state.view()),
-            best_energy: ledger.best,
-            accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-            charged: ledger.spent(),
-            hops,
-        };
-        let CheckpointAction::Continue = checkpoint(snapshot);
     }
 
     let n_basins = bias.n_basins();
