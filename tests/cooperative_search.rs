@@ -15,7 +15,9 @@ use anneal_core::catalog_policy::{
 use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
-use anneal_core::catalog_rpc::{CatalogCandidate, CatalogIdentity, ProtocolRejection};
+use anneal_core::catalog_rpc::{
+    CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection,
+};
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome, CooperativeRun,
@@ -98,6 +100,10 @@ fn candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandidate {
 }
 
 fn server() -> CatalogServer {
+    server_with_capacity(2)
+}
+
+fn server_with_capacity(capacity: usize) -> CatalogServer {
     let signature = signature();
     let digest = signature.digest();
     let config = ServerConfig::new("jcc-2026", "scientific-ensemble", digest, [0, 1, 2, 3])
@@ -114,7 +120,7 @@ fn server() -> CatalogServer {
                 energy_abs_tolerance: 1e-12,
                 energy_rel_tolerance: 1e-12,
             },
-            2,
+            capacity,
             0.05,
             400,
             |coordinates| {
@@ -167,6 +173,7 @@ fn catalog_outputs_are_actionable_and_seeded() {
     let sampled = client.sample_candidate(2, 91).unwrap().unwrap();
     assert_eq!(sampled.coordinates, admitted.coordinates);
     assert_eq!(sampled.descriptor, admitted.descriptor);
+    assert_eq!(sampled.census_basin, Some(0));
 
     let first = client
         .descriptor_hole(3, admitted.descriptor.clone(), 128, 73)
@@ -187,6 +194,54 @@ fn catalog_outputs_are_actionable_and_seeded() {
     assert_eq!(policy.local_basin_visits, 1);
     assert!(!policy.globally_saturated);
     assert_eq!(policy.relation, CatalogRelation::Incumbent);
+}
+
+#[test]
+fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
+    let server = server_with_capacity(1);
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        run.offer_candidate(0, candidate(0, 1, 1.2)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    let added = run.events().last().unwrap().catalog.as_ref().unwrap();
+    assert_eq!(added.basin_id, 0);
+    assert_eq!(added.kind, CatalogMutationKind::Added);
+    assert!(added.evicted.is_empty());
+    assert_eq!(added.incumbent_basin, Some(0));
+
+    assert_eq!(
+        run.offer_candidate(0, candidate(0, 2, 2.0)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    let replacement = run.events().last().unwrap().catalog.as_ref().unwrap();
+    assert_eq!(replacement.basin_id, 1);
+    assert_eq!(replacement.kind, CatalogMutationKind::ReplacedCapacity);
+    assert_eq!(replacement.evicted, vec![0]);
+    assert_eq!(replacement.incumbent_basin, Some(1));
+
+    let CatalogSampleOutcome::Candidate(sampled) = run.sample_candidate(0, 0).unwrap() else {
+        panic!("active catalog must return its sole representative")
+    };
+    assert_eq!(sampled.census_basin, Some(1));
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"catalog_basin\":1"));
+    assert!(trace.contains("\"catalog_mutation\":\"replaced_capacity\""));
+    assert!(trace.contains("\"catalog_evicted\":[0]"));
+    assert!(trace.contains("\"catalog_incumbent\":1"));
 }
 
 #[test]
