@@ -189,6 +189,31 @@ fn catalog_outputs_are_actionable_and_seeded() {
 }
 
 #[test]
+fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client = CatalogClient::connect(
+        server.addr(),
+        identity(0, digest),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let first = candidate(0, 1, 1.2);
+    let first_descriptor = first.descriptor.clone();
+
+    client.offer_candidate(1, first).unwrap();
+    client.offer_candidate(2, candidate(0, 2, 2.0)).unwrap();
+    let state = client.policy_state(3, first_descriptor, -1.2).unwrap();
+
+    assert_eq!(state.local_basin, Some(0));
+    assert_eq!(state.local_basin_distance, 0.0);
+    assert!(state.novelty.is_finite() && state.novelty > 0.0);
+    assert!(
+        state.transition_uncertainty.is_finite() && state.transition_uncertainty > 0.0
+    );
+}
+
+#[test]
 fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
     let server = server();
     let digest = signature().digest();
