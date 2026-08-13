@@ -158,17 +158,17 @@ impl Bank {
             .filter(|(_, d)| d.is_finite())
             .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        if let Some((i, d)) = nearest {
-            if d <= self.dcut {
-                self.members[i].hits += 1;
-                return if energy < self.members[i].energy {
-                    self.members[i].state = state.to_owned();
-                    self.members[i].energy = energy;
-                    Admission::Improved(i)
-                } else {
-                    Admission::Duplicate(i)
-                };
-            }
+        if let Some((i, d)) = nearest
+            && d <= self.dcut
+        {
+            self.members[i].hits += 1;
+            return if energy < self.members[i].energy {
+                self.members[i].state = state.to_owned();
+                self.members[i].energy = energy;
+                Admission::Improved(i)
+            } else {
+                Admission::Duplicate(i)
+            };
         }
 
         self.novel += 1;

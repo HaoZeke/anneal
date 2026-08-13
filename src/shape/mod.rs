@@ -722,7 +722,7 @@ mod tests {
 /// so a bias on it deposits on a constant; the deviation under a chosen
 /// operation separates structures that no group label distinguishes.
 pub fn symmetry_deviation(coords: ArrayView1<f64>, matrix: &[f64; 9]) -> Result<f64, ShapeError> {
-    if coords.len() % 3 != 0 {
+    if !coords.len().is_multiple_of(3) {
         return Err(ShapeError::NotThreeDimensional(coords.len()));
     }
     let n = coords.len() / 3;
@@ -760,7 +760,7 @@ pub fn symmetry_pair(
     coords: ArrayView1<f64>,
     matrix: &[f64; 9],
 ) -> Result<(f64, Vec<usize>), ShapeError> {
-    if coords.len() % 3 != 0 {
+    if !coords.len().is_multiple_of(3) {
         return Err(ShapeError::NotThreeDimensional(coords.len()));
     }
     let n = coords.len() / 3;

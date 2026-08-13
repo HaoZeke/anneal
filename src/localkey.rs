@@ -87,11 +87,12 @@ fn hash_graph(nodes: &[usize], adj: &[Vec<usize>]) -> u64 {
     let mut edges: Vec<(usize, usize)> = Vec::new();
     for &a in nodes {
         for &b in &adj[a] {
-            if b > a && set.contains(&b) {
-                if let (Some(ha), Some(hb)) = (ix[a], ix[b]) {
-                    g.add_edge(ha, hb, ());
-                    edges.push((a, b));
-                }
+            if b > a
+                && set.contains(&b)
+                && let (Some(ha), Some(hb)) = (ix[a], ix[b])
+            {
+                g.add_edge(ha, hb, ());
+                edges.push((a, b));
             }
         }
     }

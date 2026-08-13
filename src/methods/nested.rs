@@ -141,23 +141,22 @@ pub fn nested_search(
         // incumbent best is negligible, this population has converged and
         // further replacements only re-sample it. The budget buys a fresh
         // compression instead.
-        if replacements > 2 * cfg.live {
-            if let Some(p) = curve.mass_below(best, 1e-3) {
-                if p < 0.05 {
-                    repopulations += 1;
-                    curve = VolumeCurve::default();
-                    for slot in live.iter_mut() {
-                        let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
-                        let (e, x) = relax(ledger, x0.view(), cfg.relax_steps);
-                        *slot = (e, x);
-                        if e < best {
-                            best = e;
-                            best_x = slot.1.clone();
-                        }
-                        if ledger.remaining() == 0 {
-                            break 'outer;
-                        }
-                    }
+        if replacements > 2 * cfg.live
+            && let Some(p) = curve.mass_below(best, 1e-3)
+            && p < 0.05
+        {
+            repopulations += 1;
+            curve = VolumeCurve::default();
+            for slot in live.iter_mut() {
+                let x0 = random_cluster(n, 0.7, 0.5, &mut rng);
+                let (e, x) = relax(ledger, x0.view(), cfg.relax_steps);
+                *slot = (e, x);
+                if e < best {
+                    best = e;
+                    best_x = slot.1.clone();
+                }
+                if ledger.remaining() == 0 {
+                    break 'outer;
                 }
             }
         }

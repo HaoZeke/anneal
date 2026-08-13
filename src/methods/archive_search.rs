@@ -267,11 +267,11 @@ fn incumbent_floor(archive: &Archive) -> Option<usize> {
     let mut best = 0usize;
     let mut e = f64::INFINITY;
     for i in 0..n {
-        if let Some(f) = archive.floors.get(i) {
-            if f.e_min < e {
-                e = f.e_min;
-                best = i;
-            }
+        if let Some(f) = archive.floors.get(i)
+            && f.e_min < e
+        {
+            e = f.e_min;
+            best = i;
         }
     }
     Some(best)
@@ -361,18 +361,19 @@ fn residual_origin<R: Rng + ?Sized>(
         let keys = local_keys(key_coords(start, cfg).view(), LOCAL_CUTOFF);
         return (keys.first().copied(), start.to_owned());
     }
-    if let Some(i) = archive.residual.best_node() {
-        if i < archive.reps.len() && !archive.reps[i].is_empty() {
-            let x = archive.reps[i].view();
-            let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
-            if let Some(k) = archive.catalog.unsaturated_in(&keys) {
-                return (Some(k), residual_from_key(x, k, rng));
-            }
-            return (
-                None,
-                residual_from_key(x, keys.first().copied().unwrap_or(0), rng),
-            );
+    if let Some(i) = archive.residual.best_node()
+        && i < archive.reps.len()
+        && !archive.reps[i].is_empty()
+    {
+        let x = archive.reps[i].view();
+        let keys = local_keys(key_coords(x, cfg).view(), LOCAL_CUTOFF);
+        if let Some(k) = archive.catalog.unsaturated_in(&keys) {
+            return (Some(k), residual_from_key(x, k, rng));
         }
+        return (
+            None,
+            residual_from_key(x, keys.first().copied().unwrap_or(0), rng),
+        );
     }
     if let Some(k) = archive.catalog.due_key() {
         if let Some(x) = archive.key_reps.get(&k) {
@@ -559,10 +560,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     basins: hop1.basins,
                 }
             };
-            if acc.best.is_finite() {
-                if let Some(ref x) = acc.best_state {
-                    record_best(archive, cfg, acc.best, x.view());
-                }
+            if acc.best.is_finite()
+                && let Some(ref x) = acc.best_state
+            {
+                record_best(archive, cfg, acc.best, x.view());
             }
             return ArchiveOutcome {
                 best: acc.best,
@@ -601,10 +602,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             &slices,
             slab,
         );
-        if acc.best.is_finite() {
-            if let Some(ref x) = acc.best_state {
-                record_best(archive, cfg, acc.best, x.view());
-            }
+        if acc.best.is_finite()
+            && let Some(ref x) = acc.best_state
+        {
+            record_best(archive, cfg, acc.best, x.view());
         }
         return ArchiveOutcome {
             best: acc.best,
@@ -633,10 +634,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     let used1 = led1.spent();
     let _ = ledger.charge_many(used1);
     let at1 = hop_best_at(&hop1, used1);
-    if hop1.best.is_finite() {
-        if let Some(ref x) = hop1.best_state {
-            record_best(archive, cfg, hop1.best, x.view());
-        }
+    if hop1.best.is_finite()
+        && let Some(ref x) = hop1.best_state
+    {
+        record_best(archive, cfg, hop1.best, x.view());
     }
     if let Some(ref x) = hop1.final_state {
         let keys = local_keys(key_coords(x.view(), cfg).view(), LOCAL_CUTOFF);
@@ -690,10 +691,10 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             let _ = archive.catalog.record_search(k, landing);
         }
         let floors_before = archive.floors.len();
-        if hop.best.is_finite() {
-            if let Some(ref x) = hop.best_state {
-                record_best(archive, cfg, hop.best, x.view());
-            }
+        if hop.best.is_finite()
+            && let Some(ref x) = hop.best_state
+        {
+            record_best(archive, cfg, hop.best, x.view());
         }
         if archive.floors.len() == floors_before {
             same_floor += 1;

@@ -193,12 +193,12 @@ impl BasinCatalog {
             })
             .collect::<Vec<_>>();
 
-        if let Some(index) = same_index {
-            if validated.fresh.energy >= self.entries[index].energy() {
-                return AdmissionOutcome::Rejected {
-                    reason: AdmissionRejection::SameBasinNotLower,
-                };
-            }
+        if let Some(index) = same_index
+            && validated.fresh.energy >= self.entries[index].energy()
+        {
+            return AdmissionOutcome::Rejected {
+                reason: AdmissionRejection::SameBasinNotLower,
+            };
         }
         if !conflicts.is_empty() {
             if conflicts

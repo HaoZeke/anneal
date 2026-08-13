@@ -1192,7 +1192,7 @@ impl ClusterMove {
                 };
                 // A modest rotation, half a radian at most, so the shake stays
                 // a shake rather than a relocation.
-                let angle = (rng.random::<f64>() - 0.5);
+                let angle = rng.random::<f64>() - 0.5;
                 let (sa, ca) = angle.sin_cos();
                 let n = x.len() / 3;
                 for &a in atoms {

@@ -162,7 +162,7 @@ impl WarmLbfgs {
     {
         let f0 = *f;
         let mut evals = 0usize;
-        let mut probe = |a: f64, fg: &mut F, evals: &mut usize| {
+        let probe = |a: f64, fg: &mut F, evals: &mut usize| {
             let mut t = x.clone();
             t.scaled_add(a, d);
             let r = fg(t.view());

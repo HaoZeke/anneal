@@ -462,15 +462,14 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => Some(client.record_ledger_event(
+                state.client.as_mut().map(|client| {
+                    client.record_ledger_event(
                         rpc_sequence,
                         kind,
                         charged_calls,
                         cumulative_charged,
-                    )),
-                    None => None,
-                }
+                    )
+                })
             };
             match result {
                 None => self.push_event(replica, TraceKind::LocalWork, None, None)?,
@@ -509,10 +508,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => Some(client.offer_candidate(rpc_sequence, candidate)),
-                    None => None,
-                }
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.offer_candidate(rpc_sequence, candidate))
             };
             match result {
                 None => {
@@ -576,10 +575,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => Some(client.snapshot(rpc_sequence)),
-                    None => None,
-                }
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.snapshot(rpc_sequence))
             };
             match result {
                 None => {
@@ -615,12 +614,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => {
-                        Some(client.policy_state_with_snapshot(rpc_sequence, descriptor, energy))
-                    }
-                    None => None,
-                }
+                state.client.as_mut().map(|client| {
+                    client.policy_state_with_snapshot(rpc_sequence, descriptor, energy)
+                })
             };
             match result {
                 None => {
@@ -668,10 +664,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => Some(client.sample_candidate(rpc_sequence, draw)),
-                    None => None,
-                }
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.sample_candidate(rpc_sequence, draw))
             };
             match result {
                 None => {
@@ -707,12 +703,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => {
-                        Some(client.descriptor_hole(rpc_sequence, current, samples, draw))
-                    }
-                    None => None,
-                }
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.descriptor_hole(rpc_sequence, current, samples, draw))
             };
             match result {
                 None => {
@@ -746,12 +740,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => {
-                        Some(client.submit_population_with_snapshot(rpc_sequence, epoch, candidate))
-                    }
-                    None => None,
-                }
+                state.client.as_mut().map(|client| {
+                    client.submit_population_with_snapshot(rpc_sequence, epoch, candidate)
+                })
             };
             self.handle_population_result(replica, epoch, result)
         }
@@ -765,10 +756,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                match state.client.as_mut() {
-                    Some(client) => Some(client.population_plan_with_snapshot(rpc_sequence, epoch)),
-                    None => None,
-                }
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.population_plan_with_snapshot(rpc_sequence, epoch))
             };
             self.handle_population_result(replica, epoch, result)
         }

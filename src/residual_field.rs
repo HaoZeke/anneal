@@ -71,7 +71,7 @@ impl ResidualField {
         }
         self.resize(a.max(b) + 1);
         let (u, v) = if a < b { (a, b) } else { (b, a) };
-        if !self.edges.iter().any(|&e| e == (u, v)) {
+        if !self.edges.contains(&(u, v)) {
             self.edges.push((u, v));
             self.invalidate();
         }

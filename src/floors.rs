@@ -140,11 +140,12 @@ impl FloorBook {
     /// claims it.
     pub fn assign(&mut self, e: f64, prev: Option<usize>, rise: f64) -> usize {
         let de = self.delta_e();
-        if let Some(p) = prev {
-            if p < self.floors.len() && rise <= de.max(0.0) {
-                self.floors[p].observe(e);
-                return p;
-            }
+        if let Some(p) = prev
+            && p < self.floors.len()
+            && rise <= de.max(0.0)
+        {
+            self.floors[p].observe(e);
+            return p;
         }
         let mut best: Option<(usize, f64)> = None;
         for (i, f) in self.floors.iter().enumerate() {

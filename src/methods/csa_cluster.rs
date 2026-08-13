@@ -409,7 +409,7 @@ where
             passes = min_hits;
             if bank_cfg.deadlock_inject > 0
                 && bank_cfg.deadlock_iters > 0
-                && passes % bank_cfg.deadlock_iters == 0
+                && passes.is_multiple_of(bank_cfg.deadlock_iters)
             {
                 deadlocks += 1;
                 bank.grow(bank_cfg.deadlock_inject);

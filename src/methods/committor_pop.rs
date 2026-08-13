@@ -29,8 +29,8 @@ use crate::methods::cluster_hopping::{
     Config, GradFn, Ledger, Relax, random_cluster, run_with_gradient,
 };
 use ndarray::Array1;
+use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
 
 /// Outcome of a committor-population run.
 #[derive(Debug, Clone)]

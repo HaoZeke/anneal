@@ -1408,10 +1408,10 @@ fn candidate_axes(x: ArrayView1<f64>) -> Vec<[f64; 3]> {
     }
     far.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     for &(_, v) in far.iter().take(12.min(n)) {
-        if let Some(u) = norm3(v) {
-            if axis_unique(&axes, u) {
-                axes.push(u);
-            }
+        if let Some(u) = norm3(v)
+            && axis_unique(&axes, u)
+        {
+            axes.push(u);
         }
     }
     axes
@@ -1733,14 +1733,7 @@ pub fn step_away_cloud<R: Rng + ?Sized>(
     {
         let _ = spec;
         let _ = groups;
-        return crate::featomic_hop::step_away_featomic(
-            x,
-            rmsd,
-            spec.rcut_nn,
-            species,
-            mobile,
-            rng,
-        );
+        crate::featomic_hop::step_away_featomic(x, rmsd, spec.rcut_nn, species, mobile, rng)
     }
     #[cfg(not(feature = "featomic"))]
     {
@@ -2224,7 +2217,7 @@ fn ylm_real(u: [f64; 3], l_max: usize) -> Vec<f64> {
         p[m][m] = -(2.0 * m as f64 - 1.0) * rho * p[m - 1][m - 1];
     }
     for m in 0..l_max {
-        if m + 1 <= l_max {
+        if m < l_max {
             p[m + 1][m] = z * (2.0 * m as f64 + 1.0) * p[m][m];
         }
     }
