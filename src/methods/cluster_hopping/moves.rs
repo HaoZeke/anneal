@@ -1488,7 +1488,7 @@ mod move_scaling_tests {
     fn molecular_soap_modes_control_internal_deformation() {
         // An asymmetric grouped cloud with no covalent-neighbour exclusions
         // keeps this test about the proposal constraint, not a bond classifier.
-        let species = vec![0, 0, 0, 0];
+        let species = vec![1, 1, 1, 1];
         let groups = vec![vec![0, 1], vec![2, 3]];
         let x = Array1::from_vec(vec![
             0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28,
