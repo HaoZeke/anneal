@@ -129,6 +129,42 @@ singular attenuation.  =tests/descriptor_pullback.rs= checks analytic and
 finite-difference Jacobians, rank deficiency, frozen coordinates, rigid modes,
 trust clipping, and measured nonlinear contraction.
 
+* D21a: finite rigid retraction of molecular cloud hops
+
+The observed-cloud hop uses a related but distinct construction.  Its stacked
+SOAP plus ACE =nu=3= residual is pulled back through the analytic Jacobian and
+scaled to the Cartesian trust cap, giving an ambient trial
+
+\[
+  \widetilde x_i=x_i+\widetilde{\Delta x}_i.
+\]
+
+For every declared rigid group =g=, let =c_g= and =\widetilde c_g= be the
+centroids of the current and ambient coordinates.  The finite proposal uses
+the nearest proper rigid motion
+
+\[
+  R_g^\star=\mathop{\rm arg\,min}_{R\in SO(3)}
+  \sum_{i\in g}\left\|
+    R(x_i-c_g)-(\widetilde x_i-\widetilde c_g)
+  \right\|_2^2,
+  \qquad
+  x_i^+=\widetilde c_g+R_g^\star(x_i-c_g).
+\]
+
+Consequently =||x_i^+-x_j^+||_2=||x_i-x_j||_2= for every pair in
+the same group.  Translation and rotation selected by the ambient descriptor
+direction survive, while its bond stretches and bends do not.  Ungrouped atoms
+retain their ambient step and frozen atoms remain pinned because they are
+excluded from movable groups and from the pullback columns.
+
+The rotation is obtained from Horn's symmetric =4 x 4= quaternion eigenproblem,
+which remains well defined for planar groups such as water.  This is a metric
+retraction onto a product of finite rigid-body manifolds, not the first-order
+projector =P= in D21.  =src/soap.rs::step_away_cloud= applies the retraction to
+both descriptor backends after trust scaling; =tests/cloud_hop_compare.rs=
+exercises it through the unchanged eight-seed molecular comparison.
+
 * D22: active-catalog packing and incumbent invariants
 
 Let =C_t= be the finite active catalog and let =D_t= be its coordinator-owned
