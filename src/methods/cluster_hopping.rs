@@ -97,6 +97,8 @@ pub struct AcceptedTransition {
     pub from_state: Array1<f64>,
     /// Quenched destination coordinates.
     pub to_state: Array1<f64>,
+    /// Whether the destination met the run's fresh quench-validity contract.
+    pub validated: bool,
 }
 
 impl QuenchBoundary {
@@ -1874,6 +1876,7 @@ fn run_full<'g, R: Rng + ?Sized>(
                 to_energy: e_new,
                 from_state: x.clone(),
                 to_state: x_new.clone(),
+                validated: recordable,
             });
             e = e_new;
             x = x_new;
