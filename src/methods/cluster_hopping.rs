@@ -1287,6 +1287,9 @@ fn run_full<'g, R: Rng + ?Sized>(
             unconverged_records += 1;
             hops += 1;
             bias.deposit(x.view(), temperature);
+            if cfg.max_hops.is_some_and(|cap| hops >= cap) {
+                break;
+            }
             continue;
         }
         // Under MH a screened structure is not a minimum; under Metropolis it
