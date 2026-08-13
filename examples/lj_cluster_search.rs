@@ -718,6 +718,10 @@ fn main() {
             cfg.merge_radius
         );
     }
+    if let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") {
+        std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
+            .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+    }
 
     // The bank arm. Runs the same chains under the same total budget, with
     // where-to-start-next and what-to-keep decided by the diversity rule

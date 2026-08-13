@@ -5,7 +5,9 @@
 
 mod common;
 
-use anneal_core::methods::cluster_hopping::{Config, Ledger, covalent_radius};
+use anneal_core::methods::cluster_hopping::{
+    Config, Ledger, SoapProposalMode, covalent_radius,
+};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
@@ -18,6 +20,23 @@ use rand::SeedableRng;
 use rand::rngs::StdRng;
 use std::io::Write;
 use std::path::Path;
+
+fn soap_mode_from_env() -> SoapProposalMode {
+    match std::env::var("ANNEAL_SOAP_MODE").as_deref() {
+        Ok("flexible") | Err(_) => SoapProposalMode::Flexible,
+        Ok("rigid") => SoapProposalMode::Rigid,
+        Ok("off") => SoapProposalMode::Off,
+        Ok(value) => panic!("ANNEAL_SOAP_MODE must be flexible, rigid, or off; got {value}"),
+    }
+}
+
+fn write_resolved_config(cfg: &Config) {
+    let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") else {
+        return;
+    };
+    std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
+        .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+}
 
 fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
     let frame = readcon_core::iterators::read_first_frame(Path::new(path))
@@ -172,6 +191,8 @@ fn main() {
         }
         cfg.frozen = Some(frozen);
     }
+    cfg.soap_mode = soap_mode_from_env();
+    write_resolved_config(&cfg);
     let pot = RgpotObjective::cuh2(&atmnrs, box_);
     let inner = pot.wrapper();
     let mut active = vec![false; n];
