@@ -84,6 +84,33 @@ mod run {
         pub reason: Option<&'static str>,
         /// Genealogy evidence attached to a completed population epoch.
         pub population: Option<PopulationTrace>,
+        /// Exact coordinator evidence attached to a policy-state refresh.
+        pub policy: Option<PolicyTrace>,
+    }
+
+    /// Catalog, policy, and latent-field evidence for one policy query.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct PolicyTrace {
+        /// Stable census-basin identifier, or `None` for an unassigned descriptor.
+        pub local_basin: Option<u64>,
+        /// Relation between the query and the active catalog.
+        pub relation: CatalogRelation,
+        /// Exact number of fixed-census observations.
+        pub total_visits: u64,
+        /// Exact number of singleton basins in the fixed census.
+        pub singleton_basins: u64,
+        /// Exact visits assigned to the query basin.
+        pub local_basin_visits: u64,
+        /// Whether the fixed census meets its declared saturation rule.
+        pub globally_saturated: bool,
+        /// Distance from the query descriptor to its immutable census medoid.
+        pub local_basin_distance: f64,
+        /// Distance from the query to the nearest distinct census medoid.
+        pub novelty: f64,
+        /// Posterior uncertainty of the latent Gaussian transition field.
+        pub transition_uncertainty: f64,
+        /// Energy used to classify the query against the active catalog.
+        pub query_energy: f64,
     }
 
     /// Genealogy evidence for one destination at a completed epoch.
@@ -486,6 +513,10 @@ mod run {
                         Some(receipt.snapshot.version),
                         None,
                     )?;
+                    self.events
+                        .last_mut()
+                        .expect("snapshot-refresh push appends one trace event")
+                        .policy = Some(policy_trace(receipt.state, energy));
                     Ok(PolicyEvidenceOutcome::Remote(input))
                 }
                 Some(Err(CatalogClientError::Rejected(reason))) => {
@@ -682,8 +713,51 @@ mod run {
                             )
                         },
                     );
+                let (
+                    policy_local_basin,
+                    policy_relation,
+                    policy_total_visits,
+                    policy_singleton_basins,
+                    policy_local_basin_visits,
+                    policy_globally_saturated,
+                    policy_local_basin_distance,
+                    policy_novelty,
+                    policy_transition_uncertainty,
+                    policy_query_energy,
+                ) = event.policy.map_or_else(
+                    || {
+                        (
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                        )
+                    },
+                    |policy| {
+                        (
+                            policy
+                                .local_basin
+                                .map_or_else(|| "null".to_owned(), |value| value.to_string()),
+                            format!("\"{}\"", catalog_relation_code(policy.relation)),
+                            policy.total_visits.to_string(),
+                            policy.singleton_basins.to_string(),
+                            policy.local_basin_visits.to_string(),
+                            policy.globally_saturated.to_string(),
+                            policy.local_basin_distance.to_string(),
+                            policy.novelty.to_string(),
+                            policy.transition_uncertainty.to_string(),
+                            policy.query_energy.to_string(),
+                        )
+                    },
+                );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -695,6 +769,16 @@ mod run {
                 family_ordinal,
                 family_size,
                 ess,
+                policy_local_basin,
+                policy_relation,
+                policy_total_visits,
+                policy_singleton_basins,
+                policy_local_basin_visits,
+                policy_globally_saturated,
+                policy_local_basin_distance,
+                policy_novelty,
+                policy_transition_uncertainty,
+                policy_query_energy,
             ));
             }
             output
@@ -884,6 +968,7 @@ mod run {
                 kind,
                 reason,
                 population: None,
+                policy: None,
             });
             Ok(())
         }
@@ -907,6 +992,31 @@ mod run {
             ProtocolRejection::SequenceRegression => "sequence_regression",
             ProtocolRejection::SnapshotRegression => "snapshot_regression",
             ProtocolRejection::ValidationRejected => "validation_rejected",
+        }
+    }
+
+    fn catalog_relation_code(relation: CatalogRelation) -> &'static str {
+        match relation {
+            CatalogRelation::Empty => "empty",
+            CatalogRelation::Incumbent => "incumbent",
+            CatalogRelation::SameBasin => "same_basin",
+            CatalogRelation::UnrelatedNoAnchor => "unrelated_no_anchor",
+            CatalogRelation::UnrelatedLowerAnchor => "unrelated_lower_anchor",
+        }
+    }
+
+    fn policy_trace(state: PolicyState, query_energy: f64) -> PolicyTrace {
+        PolicyTrace {
+            local_basin: state.local_basin,
+            relation: state.relation,
+            total_visits: state.total_visits,
+            singleton_basins: state.singleton_basins,
+            local_basin_visits: state.local_basin_visits,
+            globally_saturated: state.globally_saturated,
+            local_basin_distance: state.local_basin_distance,
+            novelty: state.novelty,
+            transition_uncertainty: state.transition_uncertainty,
+            query_energy,
         }
     }
 
