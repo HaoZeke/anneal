@@ -17,3 +17,31 @@ See [[file:../explanation/algebra.org][algebra]].
 - maximum a posteriori (MAP) :: Maximum a posteriori (the point estimate returned by the Bayesian pilot).
 - Thompson sampling :: Draw from each arm's posterior and pick the max (used by the mixer on the per-chain Beta posteriors).
 - BAB (B-A-B) propagator :: The B-A-B splitting integrator used by the generalized =Langevin= equation (GLE) move.
+- charged work :: Objective and gradient evaluations recorded in a monotone
+per-replica ledger.  Aggregate ensemble work is the sum of unique replica
+charges, independent of how many processor elements execute them concurrently.
+- basin census :: Immutable descriptor medoids, memberships, and exact visit
+counts used for scarcity and unseen-mass estimates.  Active-catalogue eviction
+does not change the census.
+- descriptor catalogue :: A bounded communication set of validated low-energy,
+well-separated representatives.  A receiving replica freshly evaluates a
+representative before it can affect the chain or encounter record.
+- synchronous Feynman--Kac population :: A fixed-size interacting population
+formed when every replica submits one validated representative.  Rank-based
+weights, systematic parent assignment, a family cap, and sibling rejuvenation
+divide search effort without using target morphology or reference energy.
+- diffusion Monte Carlo (DMC) analogy :: The cooperative population reuses
+walker weighting, resampling, and genealogy as algorithmic bookkeeping.  It
+does not implement imaginary-time Green-function propagation, a trial
+wavefunction, fixed-node physics, or a quantum-energy estimator.
+- Gaussian Markov random field (GMRF) :: The latent Gaussian residual field on
+the observed basin-transition graph.  Posterior marginal variance supplies the
+cross-replica uncertainty rank.
+- integrated nested Laplace approximation (INLA) :: A broader latent-Gaussian
+inference construction.  The catalogue field needs only an exact Gaussian
+conditional solve, so it does not perform Laplace approximation or
+hyperparameter integration and is not a full INLA implementation.
+- nested sampling :: A separate driver with a descending ceiling and
+live-point volume weights.  It remains a matched-budget comparison because
+those weights cannot be merged with Feynman--Kac genealogy without changing
+the meaning of both methods.
