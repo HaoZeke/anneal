@@ -455,6 +455,42 @@ fn repair(x: &mut Array1<f64>, n: usize, min_sep: f64) {
     }
 }
 
+/// Shortest pair distance in a 3N Cartesian state.
+pub fn min_pair_distance(x: ArrayView1<f64>) -> f64 {
+    let n = x.len() / 3;
+    if n < 2 {
+        return f64::INFINITY;
+    }
+    let mut best = f64::INFINITY;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let dx = x[3 * i] - x[3 * j];
+            let dy = x[3 * i + 1] - x[3 * j + 1];
+            let dz = x[3 * i + 2] - x[3 * j + 2];
+            best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+        }
+    }
+    best
+}
+
+/// Whether a Cartesian state contains only finite, separated atoms.
+pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
+    x.iter().all(|value| value.is_finite()) && min_pair_distance(x) >= min_sep
+}
+
+/// Pair distance below which an external molecular potential is observing an
+/// overlap artifact rather than a physical bond.
+pub const OVERLAP_SEPARATION: f64 = 0.35;
+
+fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
+    let minimum = if cfg.species.is_some() {
+        OVERLAP_SEPARATION
+    } else {
+        0.0
+    };
+    energy.is_finite() && structure_is_sane(x, minimum)
+}
+
 /// Runs the driver until the ledger is spent.
 ///
 /// `start` is a starting configuration and `relax` performs a relaxation of the
@@ -1247,6 +1283,12 @@ fn run_full<'g, R: Rng + ?Sized>(
             }
             out
         };
+        if !quench_is_sane(cfg, e_new, x_new.view()) {
+            unconverged_records += 1;
+            hops += 1;
+            bias.deposit(x.view(), temperature);
+            continue;
+        }
         // Under MH a screened structure is not a minimum; under Metropolis it
         // is still a legal chain state (cheaper step, same deposit).
         let unquenched = cfg.minima_hopping && (screened_this || returning);
@@ -2873,6 +2915,7 @@ mod tests {
     #[test]
     fn overlapping_quench_is_not_recorded_or_reported_as_an_improvement() {
         let mut cfg = Config::for_cluster(2);
+        cfg.species = Some(vec![29, 1]);
         cfg.max_hops = Some(1);
         cfg.screen_steps = 1;
         cfg.relax_steps = 1;
