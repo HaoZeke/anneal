@@ -642,6 +642,17 @@ fn apply_request(
             let local_basin_visits = local_basin
                 .and_then(|id| scientific.census.entry(id))
                 .map_or(0, |entry| entry.visits());
+            let local_basin_distance = local_basin
+                .and_then(|id| scientific.census.entry(id))
+                .map_or(0.0, |entry| descriptor_distance(descriptor, entry.medoid()));
+            let novelty = local_basin.map_or_else(
+                || nearest_census_distance(&scientific.census, descriptor).unwrap_or(0.0),
+                |id| nearest_other_census_distance(&scientific.census, id, descriptor),
+            );
+            let transition_uncertainty = local_basin.map_or_else(
+                || scientific.transition_field.residual_score(),
+                |id| transition_uncertainty(scientific, id),
+            );
             let relation = match scientific.catalog.incumbent() {
                 None => CatalogRelation::Empty,
                 Some(incumbent) if local_basin.is_some_and(|id| id == incumbent.census_id()) => {
@@ -669,6 +680,10 @@ fn apply_request(
                     .ledger
                     .as_ref()
                     .map_or(0, CooperativeLedger::aggregate_budget),
+                local_basin: local_basin.map(BasinId::as_raw),
+                local_basin_distance,
+                novelty,
+                transition_uncertainty,
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -1124,21 +1139,30 @@ fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descripto
         .entries()
         .iter()
         .filter(|entry| entry.id() != local)
-        .map(|entry| {
-            descriptor
-                .iter()
-                .zip(entry.medoid())
-                .map(|(left, right)| {
-                    let delta = left - right;
-                    delta * delta
-                })
-                .sum::<f64>()
-                .sqrt()
-        })
+        .map(|entry| descriptor_distance(descriptor, entry.medoid()))
         .fold(None, |nearest, distance| {
             Some(nearest.map_or(distance, |current: f64| current.min(distance)))
         })
         .unwrap_or(0.0)
+}
+
+fn nearest_census_distance(census: &BasinCensus, descriptor: &[f64]) -> Option<f64> {
+    census
+        .entries()
+        .iter()
+        .map(|entry| descriptor_distance(descriptor, entry.medoid()))
+        .reduce(f64::min)
+}
+
+fn descriptor_distance(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(left, right)| {
+            let delta = left - right;
+            delta * delta
+        })
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn identity_rejection(
