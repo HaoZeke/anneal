@@ -1458,7 +1458,7 @@ mod move_scaling_tests {
     }
 
     #[test]
-    fn recommended_molecular_offers_soap_with_species() {
+    fn recommended_molecular_offers_flexible_soap_with_species() {
         let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
         assert_eq!(rec.soap_mode, SoapProposalMode::Flexible);
         assert!(
@@ -1472,11 +1472,11 @@ mod move_scaling_tests {
                 ClusterMove::Soap {
                     class: false,
                     species: Some(_),
-                    groups: Some(_),
+                    groups: None,
                     ..
                 }
             )),
-            "recommended_molecular missing species-aware SOAP: {:?}",
+            "recommended_molecular missing flexible species-aware SOAP: {:?}",
             rec.move_library
                 .kernels(&rec)
                 .iter()
