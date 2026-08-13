@@ -1579,9 +1579,10 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
-        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
-        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun,
+        PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
+        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -1643,6 +1644,16 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(0.2 * run_cfg.length_scale);
+    let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .unwrap_or(0.05 * run_cfg.length_scale);
+    let transport_radius = std::env::var("CATALOG_TRANSPORT_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
     let minimum_population_interval = slice
         .checked_mul(2)
         .and_then(|value| value.checked_add(2))
@@ -2114,26 +2125,21 @@ fn run_capnp_catalog(
                 }
             }
             PolicyAction::Explore | PolicyAction::Leave => {
-                slice_trace.proposal_family = ProposalFamily::DescriptorHole;
-                if let CatalogHoleOutcome::Proposal(hole) = cooperative
-                    .descriptor_hole(
-                        replica,
-                        descriptor.values().to_vec(),
-                        hole_samples,
-                        rng.random(),
-                    )
-                    .expect("descriptor-hole access must preserve local execution")
+                slice_trace.proposal_family = ProposalFamily::BoundaryTransport;
+                if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
+                    .boundary_crossing(replica, descriptor.values().to_vec(), rng.random())
+                    .expect("boundary-crossing access must preserve local execution")
                 {
-                    slice_trace.descriptor_step_norm = Some(vector_norm(&hole.increment));
+                    slice_trace.sampled_basin = Some(crossing.destination_basin);
                     cooperative
                         .record_work(replica, ChargeKind::RemoteProposal, 0)
                         .expect("remote proposal work must enter the cooperative ledger");
-                    if let Some(proposed) = pullback_lj_hole(
-                        &descriptor_space,
-                        &signature.atomic_numbers,
+                    if let Some(proposed) = boundary_crossing_trial(
                         policy_state.view(),
-                        &hole.increment,
-                        matches!(decision.action, PolicyAction::Leave),
+                        &crossing,
+                        transport_noise,
+                        transport_radius,
+                        &mut rng,
                     ) {
                         slice_trace.cartesian_step_norm = Some(vector_distance(
                             policy_state.as_slice().expect("LJ state is contiguous"),
