@@ -48,6 +48,10 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             samples: 4096,
             draw: 92,
         },
+        CatalogOperation::BoundaryCrossing {
+            current: vec![0.1, 0.2, 0.3],
+            draw: 93,
+        },
         CatalogOperation::PolicyState {
             descriptor: vec![0.1, 0.2, 0.3],
             energy: -396.282,
