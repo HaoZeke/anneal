@@ -15,7 +15,7 @@
 //! there arrives at the cluster driver by the same route as one written here
 //! and neither the driver nor this function can tell them apart.
 
-#[cfg(feature = "bank-rpc")]
+#[cfg(any(feature = "bank-rpc", test))]
 use crate::methods::cluster_hopping::OVERLAP_SEPARATION;
 #[cfg(test)]
 use crate::methods::cluster_hopping::min_pair_distance;
