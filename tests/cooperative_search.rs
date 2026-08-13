@@ -883,7 +883,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         local_stall_slices: 0,
         local_deepened: false,
     };
-    assert!(matches!(
+    assert_eq!(
         run.decide(
             0,
             input(ActiveCatalogRelation::Unrelated {
@@ -892,8 +892,8 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         )
         .unwrap()
         .action,
-        PolicyAction::Exploit { .. }
-    ));
+        PolicyAction::Explore
+    );
     assert_eq!(
         run.decide(
             1,
@@ -936,7 +936,6 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         TraceKind::Admission,
         TraceKind::Rejection,
         TraceKind::SnapshotRefresh,
-        TraceKind::PolicyExploit,
         TraceKind::PolicyExplore,
         TraceKind::PolicyLeave,
         TraceKind::PolicyLocal,
@@ -944,6 +943,12 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
     ] {
         assert!(run.events().iter().any(|event| event.kind == required));
     }
+    assert!(
+        run.events()
+            .iter()
+            .all(|event| event.kind != TraceKind::PolicyExploit),
+        "cooperative policy must not communicate minima through exploitation"
+    );
     let lines = run.json_lines(&RunManifest {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
