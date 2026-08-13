@@ -115,7 +115,7 @@ fn checkpoint_boundary_proposal_is_quenched_and_chain_continues() {
                 action: "test-boundary".to_string(),
             };
         }
-        observed_after_transport = snapshot
+        observed_after_transport |= snapshot
             .accepted_transitions()
             .iter()
             .any(|transition| transition.action == "test-boundary");
