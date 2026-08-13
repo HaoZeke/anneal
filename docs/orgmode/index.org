@@ -26,6 +26,12 @@ The public API keeps the driver choice explicit: classical schedules, GLE propos
 
 * Key Features
 
+- *Cooperative cluster population* :: Four independently charged replicas share
+validated basin evidence through a synchronous catalogue coordinator.  A
+target-free Feynman--Kac epoch uses energy, novelty, census scarcity, and GMRF
+uncertainty to resample a fixed population with capped families and distinct
+rejuvenation.  Private-catalogue ensembles preserve the causal control for the
+value of cross-replica communication.
 - *Classical presets (Boltzmann, Fast, Gsa)* :: Logarithmic, reciprocal, and Tsallis families.
 Identical call site via =run=; only the component objects differ.
 - *Bayesian pilot + mixer (bGSA auto)* :: QMC pilot draws for (T0, sigma, q_v), short chains, three-term posterior (prior + 0.234 target + improvement), per-chain Beta(4,1) on "produced new global best", Thompson sampling every step with 0.05 incumbent guard.
