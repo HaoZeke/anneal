@@ -214,6 +214,64 @@ fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
 }
 
 #[test]
+fn cooperative_trace_records_policy_diagnostic_evidence() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let first = candidate(0, 1, 1.2);
+    let first_descriptor = first.descriptor.clone();
+
+    assert_eq!(
+        run.offer_candidate(0, first).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    assert_eq!(
+        run.offer_candidate(0, candidate(0, 2, 2.0)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    assert!(matches!(
+        run.policy_input(0, first_descriptor, -1.2, 3, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::Remote(_)
+    ));
+
+    let event = run.events().last().unwrap();
+    assert_eq!(event.kind, TraceKind::SnapshotRefresh);
+    let evidence = event
+        .policy
+        .expect("policy refresh must retain the exact coordinator evidence");
+    assert_eq!(evidence.local_basin, Some(0));
+    assert_eq!(evidence.relation, CatalogRelation::Incumbent);
+    assert_eq!(evidence.total_visits, 2);
+    assert_eq!(evidence.singleton_basins, 2);
+    assert_eq!(evidence.local_basin_visits, 1);
+    assert!(!evidence.globally_saturated);
+    assert_eq!(evidence.local_basin_distance, 0.0);
+    assert!(evidence.novelty.is_finite() && evidence.novelty > 0.0);
+    assert!(
+        evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0
+    );
+    assert_eq!(evidence.query_energy, -1.2);
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"policy_local_basin\":0"));
+    assert!(trace.contains("\"policy_relation\":\"incumbent\""));
+    assert!(trace.contains("\"policy_total_visits\":2"));
+    assert!(trace.contains("\"policy_transition_uncertainty\":"));
+    assert!(trace.contains("\"policy_query_energy\":-1.2"));
+}
+
+#[test]
 fn coordinator_closes_population_epoch_only_after_all_replicas_submit() {
     let server = server();
     let digest = signature().digest();
