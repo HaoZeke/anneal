@@ -1610,10 +1610,9 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogSampleOutcome, CooperativeRun,
-        PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
-        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CatalogSampleOutcome, CooperativeRun, PolicyEvidenceOutcome,
+        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
+        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -1659,11 +1658,6 @@ fn run_capnp_catalog(
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(500)
-        .max(1);
-    let hole_samples = std::env::var("CATALOG_HOLE_SAMPLES")
-        .ok()
-        .and_then(|value| value.parse::<u32>().ok())
-        .unwrap_or(256)
         .max(1);
     let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
         .ok()
@@ -2272,19 +2266,19 @@ fn run_capnp_catalog(
                             family.ordinal(),
                         );
                         match cooperative
-                            .descriptor_hole(replica, parent.descriptor.clone(), hole_samples, draw)
+                            .boundary_crossing(replica, parent.descriptor.clone(), draw)
                             .expect("population rejuvenation must preserve local execution")
                         {
-                            CatalogHoleOutcome::Proposal(hole) => {
+                            CatalogBoundaryOutcome::Crossing(crossing) => {
                                 cooperative
                                     .record_work(replica, ChargeKind::RemoteProposal, 0)
                                     .expect("rejuvenation proposal must enter the ledger");
-                                match pullback_lj_hole(
-                                    &descriptor_space,
-                                    &signature.atomic_numbers,
+                                match population_boundary_trial(
                                     parent_coordinates.view(),
-                                    &hole.increment,
-                                    true,
+                                    &crossing,
+                                    transport_noise,
+                                    transport_radius,
+                                    draw,
                                 ) {
                                     Some(proposed) => (proposed, f64::NAN),
                                     None => (parent_coordinates, parent.energy),
@@ -2354,11 +2348,6 @@ fn run_capnp_catalog(
         returned,
         ..Outcome::default()
     }
-}
-
-#[cfg(feature = "bank-rpc")]
-fn vector_norm(values: &[f64]) -> f64 {
-    values.iter().map(|value| value * value).sum::<f64>().sqrt()
 }
 
 #[cfg(feature = "bank-rpc")]
@@ -2595,43 +2584,6 @@ fn validate_sampled_lj(
         return None;
     }
     Some((energy, coordinates))
-}
-
-#[cfg(feature = "bank-rpc")]
-fn pullback_lj_hole(
-    descriptor_space: &anneal_core::descriptor_space::DescriptorSpace,
-    species: &[u32],
-    coordinates: ArrayView1<f64>,
-    increment: &[f64],
-    leave: bool,
-) -> Option<Array1<f64>> {
-    use anneal_core::catalog_policy::proposal::pullback_increment;
-    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
-
-    let jacobian = descriptor_space
-        .jacobian_analytic(coordinates, Some(species))
-        .ok()?;
-    let desired = Array1::from_vec(increment.to_vec());
-    let constraints = PullbackConstraints {
-        frozen_coordinates: vec![false; coordinates.len()],
-        rigid_group_labels: Vec::new(),
-        remove_translation: true,
-    };
-    let result = pullback_increment(
-        jacobian.view(),
-        desired.view(),
-        Array1::ones(desired.len()).view(),
-        None,
-        &constraints,
-        PullbackConfig {
-            damping: 1e-3,
-            trust_radius: if leave { 0.60 } else { 0.35 },
-            length_scale: 1.0,
-        },
-    )
-    .ok()?;
-    let proposed = coordinates.to_owned() + result.step();
-    (minimum_pair_distance(proposed.as_slice()?) >= 0.5).then_some(proposed)
 }
 
 #[cfg(feature = "bank-rpc")]
