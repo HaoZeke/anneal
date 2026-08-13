@@ -470,6 +470,11 @@ fn handle_connection(
     config: &ServerConfig,
     state: Arc<Mutex<CoordinatorState>>,
 ) -> Result<(), String> {
+    // Cap'n Proto framing expects a blocking stream. Listener polling remains
+    // nonblocking, while every accepted connection waits for its next frame.
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| error.to_string())?;
     stream
         .set_nodelay(true)
         .map_err(|error| error.to_string())?;
