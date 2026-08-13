@@ -32,6 +32,11 @@ pub fn report_trace(out: &Outcome, spent: usize) {
 
 /// Whether this process is talking to a Cap'n bank.
 pub fn bank_label() -> &'static str {
+    match std::env::var("BANK_SHARING").as_deref() {
+        Ok("shared") => return "shared",
+        Ok("control") => return "control",
+        _ => {}
+    }
     match std::env::var("BANK_RPC") {
         Ok(s) if !s.is_empty() => "bank",
         _ => "nobank",

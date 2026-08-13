@@ -114,36 +114,59 @@ for replica in 0 1 2 3; do
   mkdir -p "$OUT/workers/replica-$replica"
 done
 
-server_pid=
-stop_server() {
-  if [[ -n $server_pid ]]; then
-    kill "$server_pid" 2>/dev/null || true
-    wait "$server_pid" 2>/dev/null || true
-  fi
+server_pids=()
+server_prefixes=()
+private_endpoints=()
+shared_endpoint=
+last_started_endpoint=
+stop_servers() {
+  local pid
+  for pid in "${server_pids[@]}"; do
+    kill "$pid" 2>/dev/null || true
+  done
+  for pid in "${server_pids[@]}"; do
+    wait "$pid" 2>/dev/null || true
+  done
+  server_pids=()
+  server_prefixes=()
 }
-trap stop_server EXIT
+trap stop_servers EXIT
 
-endpoint=
-if [[ $ARM == shared ]]; then
-  "$SERVER" 127.0.0.1:0 "$CAPACITY" >"$OUT/bank-server.out" 2>"$OUT/bank-server.err" &
-  server_pid=$!
+start_bank() {
+  local prefix=$1
+  local pid endpoint=
+  "$SERVER" 127.0.0.1:0 "$CAPACITY" >"${prefix}.out" 2>"${prefix}.err" &
+  pid=$!
+  server_pids+=("$pid")
+  server_prefixes+=("$prefix")
   for _ in $(seq 1 100); do
-    endpoint=$(grep -oE 'bank listening on [^ ]+' "$OUT/bank-server.err" 2>/dev/null \
+    endpoint=$(grep -oE 'bank listening on [^ ]+' "${prefix}.err" 2>/dev/null \
       | head -1 | awk '{print $4}' || true)
     if [[ -n $endpoint ]]; then
-      break
+      last_started_endpoint=$endpoint
+      return
     fi
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-      echo "bank server exited during startup" >&2
-      cat "$OUT/bank-server.err" >&2
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "bank server exited during startup: $prefix" >&2
+      cat "${prefix}.err" >&2
       exit 1
     fi
     sleep 0.1
   done
-  if [[ -z $endpoint ]]; then
-    echo "bank server did not publish its allocated address" >&2
-    exit 1
-  fi
+  echo "bank server did not publish its allocated address: $prefix" >&2
+  exit 1
+}
+
+if [[ $ARM == shared ]]; then
+  start_bank "$OUT/bank-shared"
+  shared_endpoint=$last_started_endpoint
+  bank_topology=shared
+else
+  for replica in 0 1 2 3; do
+    start_bank "$OUT/bank-private-$replica"
+    private_endpoints[$replica]=$last_started_endpoint
+  done
+  bank_topology=private_per_replica
 fi
 
 pids=()
@@ -156,6 +179,7 @@ for replica in 0 1 2 3; do
     export TARGET_TOL=1e-3
     export BANK_SLICE=$SLICE
     export BANK_SYNC=$SYNC_INTERVAL
+    export BANK_SHARING=$ARM
     if [[ $SYSTEM == h2o2 || $SYSTEM == h2o4 || $SYSTEM == h2o6 ]]; then
       export RGPOT_XTB_ENGINE=$ENGINE
       export RGPOT_XTB_TRACE=$worker/last-request.txt
@@ -163,9 +187,9 @@ for replica in 0 1 2 3; do
       export RGPOT_CUH2_LIBRARY=$ENGINE
     fi
     if [[ $ARM == shared ]]; then
-      export BANK_RPC=$endpoint
+      export BANK_RPC=$shared_endpoint
     else
-      unset BANK_RPC
+      export BANK_RPC=${private_endpoints[$replica]}
     fi
     cd "$worker"
     exec "${COMMAND_PREFIX[@]}" "$PER_REPLICA_BUDGET" 1
@@ -183,22 +207,24 @@ if ((status != 0)); then
   echo "at least one molecule/slab replica failed" >&2
   exit "$status"
 fi
-if [[ $ARM == shared ]]; then
-  if ! kill -0 "$server_pid" 2>/dev/null; then
-    wait "$server_pid" || true
-    echo "bank server exited before the ensemble terminal boundary" >&2
-    cat "$OUT/bank-server.err" >&2
+for index in "${!server_pids[@]}"; do
+  if ! kill -0 "${server_pids[$index]}" 2>/dev/null; then
+    wait "${server_pids[$index]}" || true
+    echo "bank server exited before the ensemble terminal boundary: ${server_prefixes[$index]}" >&2
+    cat "${server_prefixes[$index]}.err" >&2
     exit 1
   fi
-  "$PEEK" "$endpoint" >"$OUT/bank-snapshot.txt"
-  stop_server
-  server_pid=
-fi
-
-label=nobank
+done
 if [[ $ARM == shared ]]; then
-  label=bank
+  "$PEEK" "$shared_endpoint" >"$OUT/bank-snapshot.txt"
+else
+  for replica in 0 1 2 3; do
+    "$PEEK" "${private_endpoints[$replica]}" >"$OUT/bank-snapshot-replica-$replica.txt"
+  done
 fi
+stop_servers
+
+label=$ARM
 for replica in 0 1 2 3; do
   worker=$OUT/workers/replica-$replica
   output=$worker/stdout.log
@@ -231,6 +257,7 @@ grep -h "verify e=" "$OUT"/workers/replica-*/stdout.log >"$OUT/verifications.txt
   printf 'target_energy=%s\n' "$TARGET"
   printf 'bank_capacity=%s\n' "$CAPACITY"
   printf 'bank_slice=%s\n' "$SLICE"
+  printf 'bank_topology=%s\n' "$bank_topology"
   printf 'bank_sync=charged_slices\n'
   printf 'bank_sync_interval=%s\n' "$SYNC_INTERVAL"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
@@ -242,10 +269,8 @@ grep -h "verify e=" "$OUT"/workers/replica-*/stdout.log >"$OUT/verifications.txt
   if [[ $SYSTEM == cuh2 ]]; then
     sha256sum "$CON"
   fi
-  if [[ $ARM == shared ]]; then
-    sha256sum "$SERVER"
-    sha256sum "$PEEK"
-  fi
+  sha256sum "$SERVER"
+  sha256sum "$PEEK"
 } >"$OUT/run.manifest"
 
 touch "$OUT/TERMINAL_OK"
