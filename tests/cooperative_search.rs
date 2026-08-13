@@ -17,6 +17,7 @@ use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, Client
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection,
+    TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -263,6 +264,49 @@ fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
     assert_eq!(state.local_basin_distance, 0.0);
     assert!(state.novelty.is_finite() && state.novelty > 0.0);
     assert!(state.transition_uncertainty.is_finite() && state.transition_uncertainty > 0.0);
+}
+
+#[test]
+fn only_explicit_probe_transitions_update_transition_uncertainty() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let current = candidate(0, 1, 1.2);
+    let descriptor = current.descriptor.clone();
+
+    client.record_visit(1, current.clone()).unwrap();
+    let initialized = client
+        .policy_state(2, descriptor.clone(), current.energy)
+        .unwrap();
+    client.offer_candidate(3, candidate(0, 2, 2.0)).unwrap();
+    let after_offer = client
+        .policy_state(4, descriptor.clone(), current.energy)
+        .unwrap();
+    assert_eq!(
+        after_offer.transition_uncertainty,
+        initialized.transition_uncertainty
+    );
+
+    client
+        .record_transition(
+            5,
+            "probe",
+            TransitionDestination::Resolved(candidate(0, 3, 1.2)),
+        )
+        .unwrap();
+    let after_probe = client
+        .policy_state(6, descriptor.clone(), current.energy)
+        .unwrap();
+    assert!(after_probe.transition_uncertainty < after_offer.transition_uncertainty);
+
+    client
+        .record_transition(7, "probe", TransitionDestination::Unresolved)
+        .unwrap();
+    let after_unresolved = client.policy_state(8, descriptor, current.energy).unwrap();
+    assert!(after_unresolved.transition_uncertainty < after_probe.transition_uncertainty);
+    assert_eq!(after_unresolved.local_basin, initialized.local_basin);
 }
 
 #[test]
