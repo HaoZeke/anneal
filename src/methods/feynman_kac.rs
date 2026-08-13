@@ -2,10 +2,11 @@
 //!
 //! A search epoch supplies one validated representative per chain. The
 //! selection potential combines within-epoch energy rank, descriptor novelty,
-//! and census scarcity. Systematic resampling keeps the chain population
-//! fixed, while a family cap prevents a single observed funnel from occupying
-//! every slot. This is a population-management operator, not a Green-function
-//! approximation and not an electronic-structure convergence claim.
+//! census scarcity, and latent-Gaussian transition uncertainty. Systematic
+//! resampling keeps the chain population fixed, while a family cap prevents a
+//! single observed funnel from occupying every slot. This is a
+//! population-management operator, not a Green-function approximation and not
+//! an electronic-structure convergence claim.
 
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
