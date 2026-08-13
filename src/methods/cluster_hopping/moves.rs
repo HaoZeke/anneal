@@ -1563,11 +1563,16 @@ mod move_scaling_tests {
         let dr = internal(&y_rigid);
 
         assert!(
-            df.iter().zip(&d0).any(|(after, before)| (after - before).abs() > 1e-8),
+            df.iter()
+                .zip(&d0)
+                .any(|(after, before)| (after - before).abs() > 1e-8),
             "flexible SOAP did not deform any internal distance"
         );
         for (after, before) in dr.iter().zip(&d0) {
-            assert!((after - before).abs() < 1e-10, "rigid SOAP changed {before} to {after}");
+            assert!(
+                (after - before).abs() < 1e-10,
+                "rigid SOAP changed {before} to {after}"
+            );
         }
 
         let mut off = flexible;
