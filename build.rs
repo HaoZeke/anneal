@@ -17,7 +17,6 @@ fn main() {
             "vesin.cpp",
             "cpu_cell_list.cpp",
             "verlet.cpp",
-            "threadpool.cpp",
             "shared_libraries.cpp",
             "vesin_cuda_stub.cpp",
         ] {
