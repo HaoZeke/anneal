@@ -122,6 +122,8 @@ pub mod potentials;
 pub mod quench;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
+/// Joint population assignment across fixed-probe attraction regions.
+pub mod region_assignment;
 pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
