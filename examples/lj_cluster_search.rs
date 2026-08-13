@@ -297,10 +297,7 @@ mod option_tests {
     fn pending_population_epoch_polls_after_another_local_slice() {
         let mut progress = PopulationEpochProgress::default();
 
-        assert_eq!(
-            progress.action(true, true),
-            PopulationEpochAction::Submit
-        );
+        assert_eq!(progress.action(true, true), PopulationEpochAction::Submit);
         progress.observe_pending();
         assert_eq!(progress.action(true, true), PopulationEpochAction::Poll);
         assert_eq!(progress.epoch(), 0);
@@ -1675,6 +1672,58 @@ fn population_region_trial(
         .unwrap_or_else(|| current.to_owned())
 }
 
+#[cfg(feature = "bank-rpc")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PopulationEpochAction {
+    LocalWork,
+    Submit,
+    Poll,
+}
+
+#[cfg(feature = "bank-rpc")]
+#[derive(Debug, Default)]
+struct PopulationEpochProgress {
+    epoch: u64,
+    pending: bool,
+}
+
+#[cfg(feature = "bank-rpc")]
+impl PopulationEpochProgress {
+    fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    fn is_pending(&self) -> bool {
+        self.pending
+    }
+
+    fn action(
+        &self,
+        threshold_reached: bool,
+        representative_available: bool,
+    ) -> PopulationEpochAction {
+        if self.pending {
+            PopulationEpochAction::Poll
+        } else if threshold_reached && representative_available {
+            PopulationEpochAction::Submit
+        } else {
+            PopulationEpochAction::LocalWork
+        }
+    }
+
+    fn observe_pending(&mut self) {
+        self.pending = true;
+    }
+
+    fn observe_ready(&mut self) {
+        self.pending = false;
+        self.epoch = self
+            .epoch
+            .checked_add(1)
+            .expect("population epoch must fit u64");
+    }
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -1788,7 +1837,7 @@ fn run_capnp_catalog(
     let mut returned = 0usize;
     let mut slices = 0u64;
     let mut candidate_sequence = 0u64;
-    let mut population_epoch = 0u64;
+    let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
 
     while ledger.remaining() > 0 {
@@ -2311,7 +2360,8 @@ fn run_capnp_catalog(
         }
 
         let population_threshold = usize::try_from(
-            population_epoch
+            population_progress
+                .epoch()
                 .checked_add(1)
                 .and_then(|epoch| {
                     epoch.checked_mul(
@@ -2323,8 +2373,10 @@ fn run_capnp_catalog(
         )
         .expect("population charged-work threshold must fit usize");
         let mut population_representative = None;
-        if population_threshold <= last_population_threshold
-            && ledger.spent() >= population_threshold
+        let population_threshold_reached = population_threshold <= last_population_threshold
+            && ledger.spent() >= population_threshold;
+        if !population_progress.is_pending()
+            && population_threshold_reached
             && ledger.remaining() >= 3
             && ledger.charge()
         {
@@ -2360,34 +2412,48 @@ fn run_capnp_catalog(
                 population_representative = Some(candidate);
             }
         }
-        if population_threshold <= last_population_threshold
-            && ledger.spent() >= population_threshold
-            && let Some(representative) = population_representative.clone()
-        {
-            assert!(
-                ledger.charge(),
-                "slice reservation must cover population receiving validation"
-            );
-            cooperative
-                .record_work(replica, ChargeKind::FreshValidation, 1)
-                .expect("population validation must enter the cooperative ledger");
-            let mut population = cooperative
-                .submit_population(replica, population_epoch, representative)
-                .expect("population submission must preserve cooperative invariants");
-            while matches!(population, PopulationSynchronizationOutcome::Pending { .. }) {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-                population = cooperative
-                    .poll_population(replica, population_epoch)
-                    .expect("population polling must preserve cooperative invariants");
+        let population = match population_progress.action(
+            population_threshold_reached,
+            population_representative.is_some(),
+        ) {
+            PopulationEpochAction::Submit => {
+                assert!(
+                    ledger.charge(),
+                    "slice reservation must cover population receiving validation"
+                );
+                cooperative
+                    .record_work(replica, ChargeKind::FreshValidation, 1)
+                    .expect("population validation must enter the cooperative ledger");
+                Some(
+                    cooperative
+                        .submit_population(
+                            replica,
+                            population_progress.epoch(),
+                            population_representative
+                                .expect("submit action requires a validated representative"),
+                        )
+                        .expect("population submission must preserve cooperative invariants"),
+                )
             }
+            PopulationEpochAction::Poll => Some(
+                cooperative
+                    .poll_population(replica, population_progress.epoch())
+                    .expect("population polling must preserve cooperative invariants"),
+            ),
+            PopulationEpochAction::LocalWork => None,
+        };
+        if let Some(population) = population {
             match population {
+                PopulationSynchronizationOutcome::Pending { .. } => {
+                    population_progress.observe_pending();
+                }
                 PopulationSynchronizationOutcome::Ready { parent, plan } => {
                     let family =
                         population_family_position(&plan.destinations, &plan.parents, replica)
                             .expect("validated population plan must address this replica");
                     let draw = population_rejuvenation_draw(
                         seed,
-                        population_epoch,
+                        population_progress.epoch(),
                         replica,
                         family.ordinal(),
                     );
@@ -2417,18 +2483,13 @@ fn run_capnp_catalog(
                     };
                     current = next_state;
                     current_energy = next_energy;
-                    population_epoch = population_epoch
-                        .checked_add(1)
-                        .expect("population epoch must fit u64");
+                    population_progress.observe_ready();
                 }
                 PopulationSynchronizationOutcome::Rejected => {
                     panic!("coordinator rejected a catalog-validated population representative")
                 }
                 PopulationSynchronizationOutcome::LocalFallback
                 | PopulationSynchronizationOutcome::SharingDisabled => {}
-                PopulationSynchronizationOutcome::Pending { .. } => unreachable!(
-                    "population polling loop exits only after the barrier leaves pending state"
-                ),
             }
         }
         slice_trace.energy = current_energy.is_finite().then_some(current_energy);
