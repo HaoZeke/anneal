@@ -83,9 +83,10 @@ mod option_tests {
     #[test]
     fn explicit_negative_options_disable_default_true_mechanisms() {
         let mut cfg = Config::recommended(75);
-        apply_boolean_options(&mut cfg, &["rec", "noheight", "noclimb"]);
+        apply_boolean_options(&mut cfg, &["rec", "noheight", "noclimb", "nosym"]);
         assert!(!cfg.adaptive_height);
         assert!(!cfg.escape_on_stall);
+        assert!(!cfg.symmetrise_on_stall);
     }
 
     #[test]
