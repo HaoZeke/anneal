@@ -1020,6 +1020,54 @@ mod tests {
         assert!(!gradient_is_converged(gradient.view(), 1.0e-5));
     }
 
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn bank_samples_require_charged_local_energy_and_gradient_validation() {
+        let potential = PairPotential::lennard_jones(2);
+        let config = Config::for_cluster(2);
+        let radius = 2.0_f64.powf(1.0 / 6.0) / 2.0;
+        let minimum = Array1::from_vec(vec![-radius, 0.0, 0.0, radius, 0.0, 0.0]);
+        let mut ledger = Ledger::new(2);
+        let mut stats = RelaxStats::default();
+
+        let accepted = validate_bank_sample(
+            &potential,
+            &config,
+            &mut ledger,
+            &mut stats,
+            -1.0,
+            minimum.view(),
+        );
+
+        assert!((accepted.expect("validated minimum was rejected") + 1.0).abs() < 1e-12);
+        assert_eq!(ledger.spent(), 1);
+        assert_eq!(stats.check_charged, 1);
+
+        let rejected = validate_bank_sample(
+            &potential,
+            &config,
+            &mut ledger,
+            &mut stats,
+            -0.5,
+            minimum.view(),
+        );
+        assert!(rejected.is_none(), "a peer energy mismatch was adopted");
+        assert_eq!(ledger.spent(), 2);
+        assert_eq!(stats.check_charged, 2);
+
+        let unaffordable = validate_bank_sample(
+            &potential,
+            &config,
+            &mut ledger,
+            &mut stats,
+            -1.0,
+            minimum.view(),
+        );
+        assert!(unaffordable.is_none());
+        assert_eq!(ledger.spent(), 2);
+        assert_eq!(stats.check_charged, 2);
+    }
+
     #[test]
     fn bank_search_does_not_report_its_unquenched_start() {
         let (best, best_state, improvements) = empty_validated_record();
