@@ -47,7 +47,7 @@ mod config;
 mod moves;
 mod preset;
 
-pub use config::{Config, Keying};
+pub use config::{Config, Keying, SoapProposalMode};
 pub use moves::*;
 
 #[cfg(test)]

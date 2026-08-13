@@ -42,6 +42,17 @@ pub enum Keying {
     SoapPacking,
 }
 
+/// Constraint applied to SOAP proposals on grouped systems.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SoapProposalMode {
+    /// Apply the ambient Cartesian pullback. Internal geometry may change.
+    Flexible,
+    /// Retract each declared group onto its nearest rigid motion.
+    Rigid,
+    /// Do not include a SOAP proposal in the move library.
+    Off,
+}
+
 /// Driver settings.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -438,9 +449,9 @@ pub struct Config {
     /// SOAP hop uses the 555→421 / fcc-prototype oracle. Off (recommended)
     /// is the observed-cloud residual `2p − μ`.
     pub soap_class_residual: bool,
-    /// Offer the SOAP pullback arm. Recommended leaves this on. Off is the
-    /// control that asks whether the arm does any work.
-    pub soap_hop: bool,
+    /// Molecular constraint mode for the SOAP proposal. Recommended uses the
+    /// flexible Cartesian pullback; `Off` removes the arm for the control.
+    pub soap_mode: SoapProposalMode,
     /// Extra relaxation steps on a returning trial when `return_screen` is on.
     ///
     /// Zero (the recommended default) skips the full quench entirely, which is
@@ -619,7 +630,7 @@ impl Config {
         cfg.return_screen = true;
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
-        cfg.soap_hop = true;
+        cfg.soap_mode = SoapProposalMode::Flexible;
         // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
         // gap (~0.09-0.18). That empties a basin on the first revisit
         // and the next start is another ico draw. Adaptive height with
@@ -757,7 +768,7 @@ impl Config {
             ladder_top: 4.0,
             return_screen: false,
             soap_class_residual: false,
-            soap_hop: true,
+            soap_mode: SoapProposalMode::Flexible,
             return_polish: 0,
             return_polish_after: 0,
             path_on_stall: false,
@@ -823,7 +834,7 @@ impl Config {
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
         cfg.soap_class_residual = false;
-        cfg.soap_hop = true;
+        cfg.soap_mode = SoapProposalMode::Flexible;
         cfg.adaptive_height = true;
         cfg.height_revisits = 20.0;
         #[cfg(feature = "featomic")]

@@ -72,7 +72,7 @@ impl MoveLibrary {
                     n_points: cfg.n_points,
                     neighbour_cutoff: cfg.neighbour_cutoff,
                 });
-                if cfg.soap_hop {
+                if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, None, None));
                 }
                 kernels
@@ -139,7 +139,7 @@ impl MoveLibrary {
                 } else {
                     Some(mobile)
                 };
-                if cfg.soap_hop {
+                if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
                 kernels
@@ -375,7 +375,11 @@ fn soap_arm(
         class: cfg.soap_class_residual && packing,
         species: cfg.species.clone(),
         mobile,
-        groups,
+        groups: if cfg.soap_mode == SoapProposalMode::Rigid {
+            groups
+        } else {
+            None
+        },
     }
 }
 
