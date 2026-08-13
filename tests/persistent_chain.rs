@@ -1,7 +1,7 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::methods::cluster_hopping::{
     ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Ledger, random_cluster,
-    run_with_bias, run_with_bias_at_checkpoints,
+    run_with_bias, run_with_bias_at_checkpoints, run_with_gradient,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::rngs::StdRng;
@@ -193,5 +193,53 @@ fn checkpoint_probe_is_recorded_without_becoming_the_live_chain() {
         outcome.final_state.as_ref(),
         occupied_before_probe.as_ref(),
         "a non-adopting probe replaced the occupied chain state"
+    );
+}
+
+#[test]
+fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
+    let mut cfg = Config::for_cluster(2);
+    cfg.max_hops = Some(1);
+    cfg.screen_margin = -100.0;
+    cfg.return_screen = false;
+    let start = Array1::from(vec![-0.6, 0.0, 0.0, 0.6, 0.0, 0.0]);
+    let screened = &start + 0.25;
+    let mut ledger = Ledger::new(100);
+    let mut rng = StdRng::seed_from_u64(0x5c_4e_e7);
+    let mut relax_calls = 0usize;
+    let mut relax = |ledger: &mut Ledger, _state: ArrayView1<f64>, steps: usize| {
+        assert!(ledger.charge());
+        relax_calls += 1;
+        if relax_calls == 1 {
+            assert_eq!(steps, cfg.relax_steps);
+            (0.0, start.clone())
+        } else {
+            assert_eq!(steps, cfg.screen_steps);
+            (-10.0, screened.clone())
+        }
+    };
+    let mut gradient = |ledger: &mut Ledger, state: ArrayView1<f64>| {
+        assert!(ledger.charge());
+        if state == start.view() {
+            Some(Array1::zeros(state.len()))
+        } else {
+            Some(Array1::ones(state.len()))
+        }
+    };
+
+    let outcome = run_with_gradient(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        Some(&mut gradient),
+        &mut rng,
+    );
+
+    assert_eq!(outcome.final_state.as_ref(), Some(&start));
+    assert_eq!(outcome.final_energy, 0.0);
+    assert!(
+        outcome.accepted_transitions.is_empty(),
+        "an unvalidated partial relaxation entered the accepted trajectory"
     );
 }
