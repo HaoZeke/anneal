@@ -268,6 +268,15 @@ latent-GMRF component of an INLA-style construction.  Because both prior and
 likelihood are Gaussian, the conditional posterior is exact and no Laplace
 approximation or R-INLA runtime is required.
 
+Equivalently, =G_Q=Q^{-1}= is the screened Green function of the basin graph.
+Its diagonal =G_Q(b,b)= is the local posterior susceptibility used in =u_b=;
+an off-diagonal entry =G_Q(b,c)= propagates floor evidence between basins along
+all graph paths, with =tau_0= providing the screening mass.  This is the
+classical Green-function analogue useful to the search.  It acts on a bounded
+graph of validated basins rather than on the =3N= coordinate space and is
+solved exactly by the cached Cholesky factor, so no factorized mean-field
+closure is introduced.
+
 The Bayesian mechanisms have distinct conditioning information and therefore
 remain separate.  Discounted Thompson allocation in
 =methods/cluster_hopping= chooses local perturbation kernels.  The
