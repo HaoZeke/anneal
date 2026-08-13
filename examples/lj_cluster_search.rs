@@ -53,6 +53,35 @@ fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     (e, g)
 }
 
+#[cfg(test)]
+mod option_tests {
+    use super::*;
+
+    #[test]
+    fn unrelated_recommended_options_preserve_default_true_mechanisms() {
+        let mut cfg = Config::recommended(75);
+        apply_boolean_options(&mut cfg, &["rec", "catalog"]);
+        assert!(cfg.adaptive_height);
+        assert!(cfg.escape_on_stall);
+    }
+
+    #[test]
+    fn explicit_negative_options_disable_default_true_mechanisms() {
+        let mut cfg = Config::recommended(75);
+        apply_boolean_options(&mut cfg, &["rec", "noheight", "noclimb"]);
+        assert!(!cfg.adaptive_height);
+        assert!(!cfg.escape_on_stall);
+    }
+
+    #[test]
+    fn positive_options_add_mechanisms_to_plain_configuration() {
+        let mut cfg = Config::for_cluster(75);
+        apply_boolean_options(&mut cfg, &["height", "climb"]);
+        assert!(cfg.adaptive_height);
+        assert!(cfg.escape_on_stall);
+    }
+}
+
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
 fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
     if !led.charge() {
