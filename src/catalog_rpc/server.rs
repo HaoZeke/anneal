@@ -1501,6 +1501,7 @@ fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<u
         return None;
     }
     let node = scientific.transition_nodes.len();
+    scientific.transition_graph.register_node(node).ok()?;
     scientific.transition_nodes.insert(basin, node);
     Some(node)
 }
