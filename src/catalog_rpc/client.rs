@@ -9,10 +9,10 @@ use capnp::message::ReaderOptions;
 use capnp::serialize;
 
 use super::{
-    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
-    CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot, DescriptorHoleProposal,
-    PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
-    TransitionDestination, decode_reply_reader, encode_request,
+    AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
+    CatalogMutation, CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot,
+    DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError,
+    ProtocolRejection, TransitionDestination, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -256,7 +256,11 @@ impl CatalogClient {
         let catalog = match reply.payload {
             AcceptedPayload::CatalogMutation(mutation) => Some(mutation),
             AcceptedPayload::None => None,
-            _ => {
+            AcceptedPayload::BoundaryCrossing(_)
+            | AcceptedPayload::Candidate(_)
+            | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::PolicyState(_)
+            | AcceptedPayload::PopulationEpoch(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -332,6 +336,7 @@ impl CatalogClient {
             AcceptedPayload::Candidate(candidate) => Ok(Some(candidate)),
             AcceptedPayload::None => Ok(None),
             AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -363,10 +368,38 @@ impl CatalogClient {
             AcceptedPayload::DescriptorHole(hole) => Ok(hole),
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
+            | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
+    /// Sample one observed adopted crossing from the query attraction region.
+    pub fn boundary_crossing(
+        &mut self,
+        event_sequence: u64,
+        current: Vec<f64>,
+        draw: u64,
+    ) -> Result<Option<BoundaryCrossingRecord>, CatalogClientError> {
+        match self
+            .call(
+                event_sequence,
+                CatalogOperation::BoundaryCrossing { current, draw },
+            )?
+            .payload
+        {
+            AcceptedPayload::BoundaryCrossing(crossing) => Ok(Some(crossing)),
+            AcceptedPayload::None => Ok(None),
+            AcceptedPayload::Candidate(_)
+            | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::PolicyState(_)
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
+                "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
         }
@@ -403,6 +436,7 @@ impl CatalogClient {
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
@@ -506,6 +540,7 @@ fn population_epoch_payload(
         AcceptedPayload::None
         | AcceptedPayload::Candidate(_)
         | AcceptedPayload::DescriptorHole(_)
+        | AcceptedPayload::BoundaryCrossing(_)
         | AcceptedPayload::PolicyState(_)
         | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"

@@ -16,11 +16,11 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 
 use super::{
-    AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
-    CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply, CatalogRequest,
-    CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-    ProtocolError, ProtocolRejection, TransitionDestination, decode_request, decode_request_reader,
-    encode_reply, encode_request,
+    AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
+    CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
+    CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
+    PopulationPlan, ProtocolError, ProtocolRejection, TransitionDestination, decode_request,
+    decode_request_reader, encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -211,6 +211,8 @@ struct ScientificState {
     transition_graph: TransitionGraph,
     transition_nodes: BTreeMap<BasinId, usize>,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
+    last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
+    boundary_crossings: Vec<BoundaryCrossingRecord>,
     transition_capacity: usize,
     population: SynchronousPopulation,
     population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
@@ -256,6 +258,8 @@ impl CoordinatorState {
                     transition_graph: TransitionGraph::new(),
                     transition_nodes: BTreeMap::new(),
                     last_basin_by_replica: BTreeMap::new(),
+                    last_candidate_by_replica: BTreeMap::new(),
+                    boundary_crossings: Vec::new(),
                     transition_capacity: scientific.catalog_capacity,
                     population: SynchronousPopulation::new(
                         config.replicas.iter().copied(),
@@ -627,6 +631,18 @@ fn apply_request(
                 nearest_catalog_distance: hole.nearest_catalog_distance(),
             });
         }
+        CatalogOperation::BoundaryCrossing { current, draw } => {
+            let Some(scientific) = state.scientific.as_ref() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            if let Some(crossing) = sample_boundary_crossing(scientific, current, *draw) {
+                payload = AcceptedPayload::BoundaryCrossing(crossing);
+            }
+        }
         CatalogOperation::PolicyState { descriptor, energy } => {
             let Some(scientific) = state.scientific.as_ref() else {
                 return rejected(
@@ -891,6 +907,10 @@ fn apply_request(
                 scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
+                scientific.last_candidate_by_replica.insert(
+                    request.identity.replica,
+                    candidate_from_validated(&validated, Some(observation.basin_id)),
+                );
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
@@ -1016,6 +1036,10 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            let source_candidate = scientific
+                .last_candidate_by_replica
+                .get(&request.identity.replica)
+                .cloned();
             let outcome = match destination {
                 TransitionDestination::Unresolved => TransitionOutcome::Unresolved,
                 TransitionDestination::Resolved(candidate) => {
@@ -1049,6 +1073,29 @@ fn apply_request(
                         scientific
                             .last_basin_by_replica
                             .insert(request.identity.replica, observation.basin_id);
+                        let destination_candidate =
+                            candidate_from_validated(&validated, Some(observation.basin_id));
+                        scientific.last_candidate_by_replica.insert(
+                            request.identity.replica,
+                            destination_candidate.clone(),
+                        );
+                        if scientific.transition_capacity > 0
+                            && source_basin != observation.basin_id
+                            && let Some(source_candidate) = source_candidate.as_ref()
+                        {
+                            if scientific.boundary_crossings.len()
+                                == scientific.transition_capacity
+                            {
+                                scientific.boundary_crossings.remove(0);
+                            }
+                            scientific.boundary_crossings.push(BoundaryCrossingRecord {
+                                action: action.clone(),
+                                from: source_candidate.coordinates.clone(),
+                                to: destination_candidate.coordinates,
+                                source_basin: source_basin.as_raw(),
+                                destination_basin: observation.basin_id.as_raw(),
+                            });
+                        }
                     }
                     state.census_visits = observation.total_visits;
                     TransitionOutcome::Resolved(destination_node)
@@ -1350,6 +1397,57 @@ fn region_population_assignment(
         *weight /= total;
     }
     Some((parents, weights))
+}
+
+fn sample_boundary_crossing(
+    scientific: &ScientificState,
+    current: &[f64],
+    draw: u64,
+) -> Option<BoundaryCrossingRecord> {
+    let query_basin = scientific.census.basin_for(current).ok().flatten()?;
+    let query_node = *scientific.transition_nodes.get(&query_basin)?;
+    let regions = scientific
+        .transition_graph
+        .attraction_regions(&AttractionRegionConfig {
+            probe_action: "probe".into(),
+            concentration: 0.5,
+            diffusion_steps: 2,
+            maximum_distance: 0.35,
+            minimum_probes: 8,
+        })
+        .ok()?;
+    let mut node_region = vec![usize::MAX; scientific.transition_graph.node_count()];
+    for (region, nodes) in regions.iter().enumerate() {
+        for node in nodes {
+            node_region[*node] = region;
+        }
+    }
+    let query_region = *node_region.get(query_node)?;
+    if query_region == usize::MAX {
+        return None;
+    }
+    let eligible = scientific
+        .boundary_crossings
+        .iter()
+        .filter(|crossing| {
+            let source = BasinId::from_raw(crossing.source_basin);
+            let destination = BasinId::from_raw(crossing.destination_basin);
+            let Some(source_node) = scientific.transition_nodes.get(&source).copied() else {
+                return false;
+            };
+            let Some(destination_node) = scientific.transition_nodes.get(&destination).copied()
+            else {
+                return false;
+            };
+            node_region.get(source_node).copied() == Some(query_region)
+                && node_region.get(destination_node).copied() != Some(query_region)
+        })
+        .collect::<Vec<_>>();
+    if eligible.is_empty() {
+        return None;
+    }
+    let index = usize::try_from(draw % eligible.len() as u64).ok()?;
+    Some(eligible[index].clone())
 }
 
 fn population_diagnostics(
