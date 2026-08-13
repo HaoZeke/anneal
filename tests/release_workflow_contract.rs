@@ -35,3 +35,13 @@ fn ci_provisions_pinned_all_feature_dependencies() {
     assert!(workflow.contains("IRA_LIB_DIR"));
     assert!(workflow.contains("cmake --build"));
 }
+
+#[test]
+fn ci_lints_only_the_new_commit_range() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+
+    assert!(workflow.contains("tool: cocogitto"));
+    assert!(workflow.contains("COG_FROM"));
+    assert!(workflow.contains("cog check \"$COG_FROM..$COG_TO\""));
+    assert!(!workflow.contains("cocogitto/cocogitto-action"));
+}
