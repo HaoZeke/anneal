@@ -47,10 +47,13 @@ fn hard_lj_manifests_pin_every_scientific_input() {
 
     for required in [
         r#"source_commit=%s\n"#,
-        r#"sha256sum "$BIN""#,
-        r#"sha256sum "$0""#,
-        r#"sha256sum "$QUALIFIER""#,
-        r#"sha256sum "$CALIBRATION""#,
+        r#"requested_options=%s\n"#,
+        r#"resolved_config_sha256=%s\n"#,
+        r#"binary_sha256=%s\n"#,
+        r#"runner_sha256=%s\n"#,
+        r#"qualifier_sha256=%s\n"#,
+        r#"calibration_sha256=%s\n"#,
+        r#"ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json"#,
     ] {
         assert!(
             source.contains(required),
@@ -99,6 +102,13 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
         r#"BANK_SHARING=$ARM"#,
         r#"BANK_RPC=${private_endpoints[$replica]}"#,
         r#"source_commit=%s\n"#,
+        r#"soap_mode=%s\n"#,
+        r#"requested_options=%s\n"#,
+        r#"resolved_config_sha256=%s\n"#,
+        r#"binary_sha256=%s\n"#,
+        r#"engine_sha256=%s\n"#,
+        r#"ANNEAL_SOAP_MODE=$SOAP_MODE"#,
+        r#"ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json"#,
         r#"bank_sync=charged_slices\n"#,
         r#"touch "$OUT/TERMINAL_OK""#,
         r#"xargs -0 sha256sum >SHA256SUMS"#,
@@ -125,7 +135,27 @@ fn molecular_submission_pairs_every_system_and_arm() {
         );
     }
     assert!(source.contains("for arm in shared control"));
+    assert!(source.contains("for soap_mode in flexible off"));
     assert!(source.contains(r#"CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}"#));
+}
+
+#[test]
+fn physical_drivers_accept_and_record_every_soap_mode() {
+    for driver in ["molecular_cluster.rs", "slab_adsorption.rs"] {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(driver);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for required in [
+            "ANNEAL_SOAP_MODE",
+            "ANNEAL_RESOLVED_CONFIG",
+            "SoapProposalMode::Flexible",
+            "SoapProposalMode::Rigid",
+            "SoapProposalMode::Off",
+            "resolved_json()",
+        ] {
+            assert!(source.contains(required), "{driver} omits {required}");
+        }
+    }
 }
 
 #[test]
