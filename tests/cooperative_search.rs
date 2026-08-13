@@ -192,12 +192,9 @@ fn catalog_outputs_are_actionable_and_seeded() {
 fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
     let server = server();
     let digest = signature().digest();
-    let mut client = CatalogClient::connect(
-        server.addr(),
-        identity(0, digest),
-        ClientConfig::default(),
-    )
-    .unwrap();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
     let first = candidate(0, 1, 1.2);
     let first_descriptor = first.descriptor.clone();
 
@@ -208,9 +205,7 @@ fn policy_state_exposes_hard_lj_diagnostic_boundaries() {
     assert_eq!(state.local_basin, Some(0));
     assert_eq!(state.local_basin_distance, 0.0);
     assert!(state.novelty.is_finite() && state.novelty > 0.0);
-    assert!(
-        state.transition_uncertainty.is_finite() && state.transition_uncertainty > 0.0
-    );
+    assert!(state.transition_uncertainty.is_finite() && state.transition_uncertainty > 0.0);
 }
 
 #[test]
@@ -254,9 +249,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
     assert!(!evidence.globally_saturated);
     assert_eq!(evidence.local_basin_distance, 0.0);
     assert!(evidence.novelty.is_finite() && evidence.novelty > 0.0);
-    assert!(
-        evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0
-    );
+    assert!(evidence.transition_uncertainty.is_finite() && evidence.transition_uncertainty > 0.0);
     assert_eq!(evidence.query_energy, -1.2);
 
     let trace = run.json_lines(&RunManifest {
@@ -730,8 +723,10 @@ fn server_loss_preserves_independent_local_trajectory_and_ledger() {
         disconnected.ledger().event_count(),
         independent.ledger().event_count()
     );
-    assert!(disconnected
-        .events()
-        .iter()
-        .any(|event| event.kind == TraceKind::RpcFallback));
+    assert!(
+        disconnected
+            .events()
+            .iter()
+            .any(|event| event.kind == TraceKind::RpcFallback)
+    );
 }
