@@ -4,6 +4,8 @@
 //! owns the objective surface; this file only constructs the IS-A handle
 //! the search already knows how to take.
 
+#![allow(dead_code)]
+
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_objective_t};
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
@@ -156,16 +158,7 @@ unsafe extern "C" fn cuh2_callback(
     }
     let mut forces = vec![0.0; 3 * n];
     let mut energy = 0.0;
-    let rc = unsafe {
-        (kernel.force)(
-            n as i32,
-            pos,
-            z,
-            boxp,
-            forces.as_mut_ptr(),
-            &mut energy,
-        )
-    };
+    let rc = unsafe { (kernel.force)(n as i32, pos, z, boxp, forces.as_mut_ptr(), &mut energy) };
     if rc != 0 || !energy.is_finite() {
         return rgpot_status_t::RGPOT_INTERNAL_ERROR;
     }
@@ -228,10 +221,7 @@ impl RgpotObjective {
         let mut err = [0u8; 256];
         let pot = unsafe { create(&cfg, err.as_mut_ptr(), err.len()) };
         if pot.is_null() {
-            panic!(
-                "rgpot_xtb_create failed: {}",
-                String::from_utf8_lossy(&err)
-            );
+            panic!("rgpot_xtb_create failed: {}", String::from_utf8_lossy(&err));
         }
         let force =
             unsafe { std::mem::transmute::<Symbol<XtbForce>, Symbol<'static, XtbForce>>(force) };

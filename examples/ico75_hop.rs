@@ -176,7 +176,12 @@ fn load_xyz(path: &str) -> Array1<f64> {
             }
         }
     }
-    assert_eq!(vals.len(), 225, "{path} has {} coords, want 225", vals.len());
+    assert_eq!(
+        vals.len(),
+        225,
+        "{path} has {} coords, want 225",
+        vals.len()
+    );
     Array1::from(vals)
 }
 
@@ -204,13 +209,7 @@ fn main() {
     let p = fivefold_probe(x0.view(), RMSD);
     println!(
         "probe d5 {:.6} n_axes {} residual_rms {:.6} gated {} pentagon {} top5 {:.3} top12 {:.3}",
-        p.d5,
-        p.n_axes,
-        p.residual_rms,
-        p.gated,
-        p.used_pentagon,
-        p.top5_share,
-        p.top12_share
+        p.d5, p.n_axes, p.residual_rms, p.gated, p.used_pentagon, p.top5_share, p.top12_share
     );
     #[cfg(feature = "featomic")]
     {
@@ -381,7 +380,7 @@ fn main() {
             em - e0
         );
         // Always take the shipped hop quench. From melt, downhill is free.
-        let mut e = em;
+        let mut e: f64;
         let mut x = xm.clone();
         let mut best = em;
         let mut n_marks = 0usize;
@@ -413,9 +412,7 @@ fn main() {
             if c == "below_ico" || c == "marks" {
                 n_below += 1;
             }
-            println!(
-                "melt_walk {hop} e {e:.9} class {c} best {best:.9}"
-            );
+            println!("melt_walk {hop} e {e:.9} class {c} best {best:.9}");
         }
         println!(
             "melt_walk_summary marks {n_marks}/40 ico {n_ico}/40 below {n_below}/40 best {best:.9}"
@@ -459,9 +456,7 @@ fn main() {
             if c == "below_ico" || c == "marks" {
                 n_below += 1;
             }
-            println!(
-                "melt_mh {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
-            );
+            println!("melt_mh {hop} e {e:.9} acc {acc} class {c} best {best:.9}");
         }
         println!(
             "melt_mh_summary acc {acc_n}/40 marks {n_marks}/40 ico {n_ico}/40 below {n_below}/40 best {best:.9}"
@@ -501,9 +496,7 @@ fn main() {
                 n_below += 1;
             }
             if hop % 5 == 4 || c == "marks" || c == "below_ico" {
-                println!(
-                    "melt_bh {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
-                );
+                println!("melt_bh {hop} e {e:.9} acc {acc} class {c} best {best:.9}");
             }
         }
         println!(
@@ -542,9 +535,7 @@ fn main() {
                 landed_ico += 1;
             }
             if hop % 5 == 4 || c == "marks" || c == "below_ico" {
-                println!(
-                    "melt_rec {hop} e {e:.9} acc {acc} class {c} best {best:.9}"
-                );
+                println!("melt_rec {hop} e {e:.9} acc {acc} class {c} best {best:.9}");
             }
         }
         println!(

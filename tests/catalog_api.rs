@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use anneal_core::catalog::{BasinCatalog, Catalog, Event, EventCatalog};
 
 fn one_event() -> Event {

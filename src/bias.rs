@@ -175,7 +175,6 @@ mod tests {
         WellTemperedBias::new(projector, mu, [-5.0, -5.0], [5.0, 5.0], 0.5, 1.0, 5.0, 32)
     }
 
-    #[test]
     /// The prune is exact, so it has to agree with an exhaustive scan on every
     /// query. A metric that reports no key is the exhaustive scan, which makes
     /// this a comparison of the two paths through the same code on the same
@@ -226,6 +225,7 @@ mod tests {
         }
     }
 
+    #[test]
     fn potential_is_zero_before_deposit() {
         let b = identity_projector_2d();
         let s = array![0.0, 0.0];

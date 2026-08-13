@@ -124,7 +124,13 @@ struct Row {
     soap_draws: usize,
 }
 
-fn run_one(mut cfg: Config, start: ArrayView1<f64>, budget: usize, seed: u64, frozen: Option<&[bool]>) -> Row {
+fn run_one(
+    mut cfg: Config,
+    start: ArrayView1<f64>,
+    budget: usize,
+    seed: u64,
+    frozen: Option<&[bool]>,
+) -> Row {
     let n = start.len() / 3;
     let pot = PairPotential::lennard_jones(n);
     let mut ledger = Ledger::new(budget);
@@ -169,7 +175,6 @@ fn rec_off(species: Vec<u32>, groups: Vec<Vec<usize>>) -> Config {
 
 #[test]
 fn soap_on_vs_off_water4_eight_seeds() {
-    const M: usize = 4;
     const SEEDS: u64 = 8;
     const BUDGET: usize = 2_500;
     let mut on_better = 0usize;
@@ -181,12 +186,18 @@ fn soap_on_vs_off_water4_eight_seeds() {
     let mut hops_on = 0usize;
     let mut hops_off = 0usize;
     {
-        let ( _, z, g) = packed_waters(M, 0);
+        let (_, z, g) = packed_waters(M, 0);
         println!("mol soap_rmsd {}", soap_rmsd(&rec_on(z, g)));
     }
     for s in 0..SEEDS {
         let (start, z, g) = packed_waters(M, s);
-        let a = run_one(rec_on(z.clone(), g.clone()), start.view(), BUDGET, 100 + s, None);
+        let a = run_one(
+            rec_on(z.clone(), g.clone()),
+            start.view(),
+            BUDGET,
+            100 + s,
+            None,
+        );
         let b = run_one(rec_off(z, g), start.view(), BUDGET, 100 + s, None);
         sum_on += a.best;
         sum_off += b.best;
@@ -274,10 +285,8 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
 }
 
 fn ico_cluster(n: usize, seed: u64) -> Array1<f64> {
-    let sites = anneal_core::lattice::grow(
-        &anneal_core::structure::Template::Icosahedral.points(),
-        n,
-    );
+    let sites =
+        anneal_core::lattice::grow(&anneal_core::structure::Template::Icosahedral.points(), n);
     let nn = 2.0_f64.powf(1.0 / 6.0);
     let mut rng = StdRng::seed_from_u64(seed.wrapping_mul(0x51ED));
     let mut x = Array1::zeros(3 * n);
