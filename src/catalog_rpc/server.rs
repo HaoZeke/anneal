@@ -19,8 +19,8 @@ use super::{
     AcceptedPayload, AcceptedReply, CatalogCandidate, CatalogIdentity, CatalogMutation,
     CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply, CatalogRequest,
     CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-    ProtocolError, ProtocolRejection, decode_request, decode_request_reader, encode_reply,
-    encode_request,
+    ProtocolError, ProtocolRejection, TransitionDestination, decode_request, decode_request_reader,
+    encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -34,7 +34,7 @@ use crate::descriptor_space::DescriptorSpace;
 use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PopulationMember, SelectionCoefficients, SynchronousPopulation,
 };
-use crate::residual_field::ResidualField;
+use crate::transition_graph::{TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
 
@@ -207,7 +207,7 @@ struct ScientificState {
     validator: CandidateValidator,
     census: BasinCensus,
     catalog: BasinCatalog,
-    transition_field: ResidualField,
+    transition_graph: TransitionGraph,
     transition_nodes: BTreeMap<BasinId, usize>,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     transition_capacity: usize,
@@ -252,7 +252,7 @@ impl CoordinatorState {
                         scientific.total_charged_work,
                     )
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
-                    transition_field: ResidualField::new(),
+                    transition_graph: TransitionGraph::new(),
                     transition_nodes: BTreeMap::new(),
                     last_basin_by_replica: BTreeMap::new(),
                     transition_capacity: scientific.catalog_capacity,
@@ -658,10 +658,8 @@ fn apply_request(
                 || nearest_census_distance(&scientific.census, descriptor).unwrap_or(0.0),
                 |id| nearest_other_census_distance(&scientific.census, id, descriptor),
             );
-            let transition_uncertainty = local_basin.map_or_else(
-                || scientific.transition_field.residual_score(),
-                |id| transition_uncertainty(scientific, id),
-            );
+            let transition_uncertainty =
+                local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
             let relation = match scientific.catalog.incumbent() {
                 None => CatalogRelation::Empty,
                 Some(incumbent) if local_basin.is_some_and(|id| id == incumbent.census_id()) => {
@@ -883,12 +881,10 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                observe_transition(
-                    scientific,
-                    request.identity.replica,
-                    observation.basin_id,
-                    validated.fresh.energy,
-                );
+                scientific
+                    .last_basin_by_replica
+                    .insert(request.identity.replica, observation.basin_id);
+                let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
                 let Some(census_visits) = state.census_visits.checked_add(1) else {
@@ -930,12 +926,6 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                observe_transition(
-                    scientific,
-                    request.identity.replica,
-                    observation.basin_id,
-                    validated.fresh.energy,
-                );
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
@@ -981,6 +971,98 @@ fn apply_request(
             if let Some(mutation) = mutation {
                 payload = AcceptedPayload::CatalogMutation(mutation);
             }
+        }
+        CatalogOperation::RecordTransition {
+            action,
+            destination,
+        } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            if action.is_empty() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Some(source_basin) = scientific
+                .last_basin_by_replica
+                .get(&request.identity.replica)
+                .copied()
+            else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(source_node) = transition_node(scientific, source_basin) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let outcome = match destination {
+                TransitionDestination::Unresolved => TransitionOutcome::Unresolved,
+                TransitionDestination::Resolved(candidate) => {
+                    let Ok(validated) =
+                        validate_candidate(scientific, &request.identity, candidate)
+                    else {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    };
+                    let Ok(observation) =
+                        scientific.census.observe(&validated.candidate.descriptor)
+                    else {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    };
+                    let Some(destination_node) = transition_node(scientific, observation.basin_id)
+                    else {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    };
+                    scientific
+                        .last_basin_by_replica
+                        .insert(request.identity.replica, observation.basin_id);
+                    state.census_visits = observation.total_visits;
+                    TransitionOutcome::Resolved(destination_node)
+                }
+            };
+            if scientific
+                .transition_graph
+                .observe(action.clone(), source_node, outcome)
+                .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.snapshot_version = snapshot_version;
         }
         CatalogOperation::LedgerEvent {
             kind,
@@ -1160,21 +1242,6 @@ fn catalog_mutation(
     }
 }
 
-fn observe_transition(scientific: &mut ScientificState, replica: u32, basin: BasinId, energy: f64) {
-    let previous = scientific.last_basin_by_replica.insert(replica, basin);
-    let current_node = transition_node(scientific, basin);
-    if let Some(current_node) = current_node {
-        scientific.transition_field.observe(current_node, energy);
-        if let Some(previous_node) =
-            previous.and_then(|previous| scientific.transition_nodes.get(&previous).copied())
-        {
-            scientific
-                .transition_field
-                .edge(previous_node, current_node);
-        }
-    }
-}
-
 fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<usize> {
     if let Some(node) = scientific.transition_nodes.get(&basin) {
         return Some(*node);
@@ -1189,8 +1256,13 @@ fn transition_node(scientific: &mut ScientificState, basin: BasinId) -> Option<u
 
 fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
     scientific.transition_nodes.get(&basin).map_or_else(
-        || scientific.transition_field.residual_score(),
-        |node| scientific.transition_field.score(*node),
+        || 1.0,
+        |node| {
+            scientific
+                .transition_graph
+                .uncertainty("probe", *node, 0.5)
+                .unwrap_or(1.0)
+        },
     )
 }
 

@@ -9,14 +9,14 @@ use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
     QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, candidate_record,
     catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
-    population_epoch_reply,
+    population_epoch_reply, transition_record,
 };
 
 pub mod client;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 7;
+pub const PROTOCOL_VERSION: u16 = 8;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +60,15 @@ pub struct CatalogCandidate {
     pub seed: u64,
     /// Coordinator-assigned fixed-census basin for returned representatives.
     pub census_basin: Option<u64>,
+}
+
+/// Resolved or unresolved result of one action-labelled perturb--quench step.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransitionDestination {
+    /// The step did not yield a valid classified minimum.
+    Unresolved,
+    /// The step reached a candidate requiring receiving-side validation.
+    Resolved(CatalogCandidate),
 }
 
 /// Exact serialized outcome of one active-catalog admission attempt.
@@ -176,6 +185,13 @@ pub enum CatalogOperation {
     PopulationPlan {
         /// Charged-work synchronization epoch.
         epoch: u64,
+    },
+    /// Record one action-conditioned transition from the replica's live basin.
+    RecordTransition {
+        /// Stable target-blind proposal-action identifier.
+        action: String,
+        /// Resolved validated endpoint or explicit unresolved outcome.
+        destination: TransitionDestination,
     },
 }
 
@@ -484,6 +500,20 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::PopulationPlan { epoch } => {
             operation.init_population_plan().set_epoch(*epoch);
         }
+        CatalogOperation::RecordTransition {
+            action,
+            destination,
+        } => {
+            let mut transition = operation.init_record_transition();
+            transition.set_action(action.as_str());
+            let mut wire_destination = transition.init_destination();
+            match destination {
+                TransitionDestination::Unresolved => wire_destination.set_unresolved(()),
+                TransitionDestination::Resolved(candidate) => {
+                    fill_candidate(wire_destination.init_resolved(), candidate);
+                }
+            }
+        }
     }
     let mut bytes = Vec::new();
     serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
@@ -562,6 +592,19 @@ pub(crate) fn decode_request_reader(
             let plan = plan.map_err(wire_error)?;
             CatalogOperation::PopulationPlan {
                 epoch: plan.get_epoch(),
+            }
+        }
+        catalog_request::operation::RecordTransition(transition) => {
+            let transition = transition.map_err(wire_error)?;
+            let destination = match transition.get_destination().which().map_err(wire_error)? {
+                transition_record::destination::Unresolved(()) => TransitionDestination::Unresolved,
+                transition_record::destination::Resolved(candidate) => {
+                    TransitionDestination::Resolved(read_candidate(candidate.map_err(wire_error)?)?)
+                }
+            };
+            CatalogOperation::RecordTransition {
+                action: text_value(transition.get_action().map_err(wire_error)?)?,
+                destination,
             }
         }
     };
