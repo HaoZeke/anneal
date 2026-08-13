@@ -134,6 +134,8 @@ pub mod structure;
 pub mod swarm;
 pub mod symmetrise;
 pub mod terminate;
+/// Action-conditioned structural transition evidence.
+pub mod transition_graph;
 pub mod twin;
 /// Shared algebra-facing type definitions.
 pub mod types;
