@@ -480,3 +480,14 @@ fn handle(mut stream: TcpStream, inner: Arc<Mutex<Inner>>) -> Result<(), String>
         stream.flush().map_err(|e| e.to_string())?;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_ephemeral_bank_reports_its_allocated_port() {
+        let (_listener, address) = bind_bank_listener("127.0.0.1:0").unwrap();
+        assert_ne!(address.port(), 0);
+    }
+}
