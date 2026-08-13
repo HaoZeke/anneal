@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    calibrate_census_radius, CalibrationError, CalibrationPair, DescriptorSignature,
-    EmpiricalQuantileMethod, SignatureDigest, MINIMUM_CENSUS_CALIBRATION_PAIRS,
+    CalibrationError, CalibrationPair, DescriptorSignature, EmpiricalQuantileMethod,
+    MINIMUM_CENSUS_CALIBRATION_PAIRS, SignatureDigest, calibrate_census_radius,
 };
 use std::collections::BTreeMap;
 

@@ -3,9 +3,7 @@
 //! Cluster, multi-species molecule, and a slab-shaped frozen frame. The
 //! in-crate Lennard-Jones potential stands in for a QC engine.
 
-use anneal_core::methods::cluster_hopping::{
-    ClusterMove, Config, Ledger, run_with_gradient,
-};
+use anneal_core::methods::cluster_hopping::{ClusterMove, Config, Ledger, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};
@@ -14,8 +12,8 @@ use rand::rngs::StdRng;
 
 fn water_dimer() -> (Array1<f64>, Vec<u32>, Vec<Vec<usize>>) {
     let x = Array1::from_vec(vec![
-        0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 3.10, 0.15, 0.08, 3.98, 0.40, -0.05,
-        2.82, 1.05, 0.18,
+        0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 3.10, 0.15, 0.08, 3.98, 0.40, -0.05, 2.82,
+        1.05, 0.18,
     ]);
     let z = vec![8, 1, 1, 8, 1, 1];
     let groups = vec![vec![0, 1, 2], vec![3, 4, 5]];
@@ -96,11 +94,7 @@ fn hop_shape_from_shipped_constructors() {
         .into_iter()
         .find(|k| matches!(k, ClusterMove::Soap { .. }));
     match soap {
-        Some(ClusterMove::Soap {
-            class,
-            species,
-            ..
-        }) => {
+        Some(ClusterMove::Soap { class, species, .. }) => {
             assert!(!class);
             assert_eq!(species.as_deref(), Some(&[8, 1, 1][..]));
             println!("mol class={class} species={species:?}");
@@ -108,11 +102,7 @@ fn hop_shape_from_shipped_constructors() {
         _ => panic!("recommended_molecular has no SOAP arm"),
     }
 
-    let mut slab = Config::recommended_molecular(
-        vec![29, 29, 1, 1],
-        vec![vec![2, 3]],
-        1.0,
-    );
+    let mut slab = Config::recommended_molecular(vec![29, 29, 1, 1], vec![vec![2, 3]], 1.0);
     slab.active_region = Some((vec![2, 3], 0));
     slab.n_points = 4;
     let soap = slab

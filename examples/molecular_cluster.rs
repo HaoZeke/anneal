@@ -5,9 +5,7 @@
 
 mod common;
 
-use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, MoveLibrary, repack_rigid_groups,
-};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, MoveLibrary, repack_rigid_groups};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
@@ -35,10 +33,7 @@ fn main() {
     let atmnrs: Vec<i32> = (0..m).flat_map(|_| [8i32, 1, 1]).collect();
     let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
-    let pot = RgpotObjective::xtb(
-        &atmnrs,
-        [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
-    );
+    let pot = RgpotObjective::xtb(&atmnrs, [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0]);
     let obj = pot.wrapper();
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     cfg.move_library = MoveLibrary::Molecular {

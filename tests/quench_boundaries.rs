@@ -1,5 +1,5 @@
 use anneal_core::methods::cluster_hopping::{Ledger, QuenchStatus};
-use ndarray::{array, Array1};
+use ndarray::{Array1, array};
 
 #[test]
 fn quench_boundaries_partition_charged_relaxation_work() {

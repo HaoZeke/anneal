@@ -10,7 +10,12 @@ fn main() {
         .unwrap_or_else(|e| panic!("connect {addr}: {e}"));
     let s = c.snapshot().unwrap_or_else(|e| panic!("snapshot: {e}"));
     println!("bank {addr}");
-    println!("  members {}  dcut {:.6}  wells {}", s.size, s.dcut, s.wells.len());
+    println!(
+        "  members {}  dcut {:.6}  wells {}",
+        s.size,
+        s.dcut,
+        s.wells.len()
+    );
     if !s.energies.is_empty() {
         let mut e = s.energies.clone();
         e.sort_by(|a, b| a.partial_cmp(b).unwrap());

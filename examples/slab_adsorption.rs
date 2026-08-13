@@ -79,11 +79,7 @@ fn displace_adsorbate(
     let ang = rng.random::<f64>() * 2.0 * std::f64::consts::PI;
     let (sa, ca) = ang.sin_cos();
     for &i in free {
-        let rel = [
-            x[3 * i] - c[0],
-            x[3 * i + 1] - c[1],
-            x[3 * i + 2] - c[2],
-        ];
+        let rel = [x[3 * i] - c[0], x[3 * i + 1] - c[1], x[3 * i + 2] - c[2]];
         x[3 * i] = target[0] + ca * rel[0] - sa * rel[1];
         x[3 * i + 1] = target[1] + sa * rel[0] + ca * rel[1];
         x[3 * i + 2] = target[2] + rel[2];
