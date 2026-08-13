@@ -136,6 +136,7 @@ pids=()
 for replica in 0 1 2 3; do
   seed=$((SEED_BASE + replica))
   worker=$OUT/workers/replica-${replica}
+  mkdir -p "$worker"
   args=rec
   if [[ $ARM == control ]]; then
     args=rec,catalog
@@ -148,7 +149,7 @@ for replica in 0 1 2 3; do
     export CATALOG_HOLE_SAMPLES="$HOLE_SAMPLES"
     export CATALOG_POPULATION_INTERVAL="$POPULATION_INTERVAL"
     export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
-    export ANNEAL_RESOLVED_CONFIG=$worker.resolved-config.json
+    export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
     export SEED_OFFSET="$seed"
     if [[ $ARM == shared ]]; then
       export CATALOG_RPC="$endpoint"
@@ -171,11 +172,11 @@ if (( status != 0 )); then
   exit "$status"
 fi
 for replica in 0 1 2 3; do
-  test -s "$OUT/workers/replica-${replica}.resolved-config.json"
+  test -s "$OUT/workers/replica-${replica}/resolved-config.json"
 done
 for replica in 1 2 3; do
-  cmp -s "$OUT/workers/replica-0.resolved-config.json" \
-    "$OUT/workers/replica-${replica}.resolved-config.json"
+  cmp -s "$OUT/workers/replica-0/resolved-config.json" \
+    "$OUT/workers/replica-${replica}/resolved-config.json"
 done
 
 if [[ $ARM == shared ]] && ! kill -0 "$server_pid" 2>/dev/null; then
@@ -223,7 +224,7 @@ fi
   "$OUT/traces/replica-2.jsonl" \
   "$OUT/traces/replica-3.jsonl"
 
-cp "$OUT/workers/replica-0.resolved-config.json" "$OUT/resolved-config.json"
+cp "$OUT/workers/replica-0/resolved-config.json" "$OUT/resolved-config.json"
 resolved_config_sha256=$(sha256sum "$OUT/resolved-config.json" | awk '{print $1}')
 binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
 runner_sha256=$(sha256sum "$0" | awk '{print $1}')
