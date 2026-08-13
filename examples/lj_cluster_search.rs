@@ -1530,6 +1530,39 @@ fn fixed_probe_trial<R: rand::Rng + ?Sized>(
     Some(current.to_owned() + displacement)
 }
 
+#[cfg(feature = "bank-rpc")]
+fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
+    current: ArrayView1<f64>,
+    crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
+    noise_scale: f64,
+    trust_radius: f64,
+    rng: &mut R,
+) -> Option<Array1<f64>> {
+    let crossing = anneal_core::boundary_transport::ObservedCrossing::new(
+        Array1::from_vec(crossing.from.clone()),
+        Array1::from_vec(crossing.to.clone()),
+    )
+    .ok()?;
+    let mut noise = Array1::zeros(current.len());
+    for coordinate in &mut noise {
+        let u1 = rng.random::<f64>().max(1e-12);
+        let u2 = rng.random::<f64>();
+        *coordinate = (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos();
+    }
+    anneal_core::boundary_transport::boundary_transport(
+        current,
+        &crossing,
+        noise.view(),
+        &anneal_core::boundary_transport::BoundaryTransportConfig {
+            noise_scale,
+            trust_radius,
+            frozen_coordinates: Vec::new(),
+            rigid_groups: Vec::new(),
+        },
+    )
+    .ok()
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
