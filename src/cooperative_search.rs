@@ -161,6 +161,8 @@ mod run {
         CatalogSample,
         /// Farthest-hole descriptor proposal and Cartesian pullback.
         DescriptorHole,
+        /// Aligned displacement from an observed attraction-region crossing.
+        BoundaryTransport,
         /// Synchronous fixed-population reconfiguration.
         PopulationReconfiguration,
     }
@@ -1451,6 +1453,7 @@ mod run {
             ProposalFamily::Local => "local",
             ProposalFamily::CatalogSample => "catalog_sample",
             ProposalFamily::DescriptorHole => "descriptor_hole",
+            ProposalFamily::BoundaryTransport => "boundary_transport",
             ProposalFamily::PopulationReconfiguration => "population_reconfiguration",
         }
     }
