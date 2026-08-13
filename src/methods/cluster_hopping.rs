@@ -169,6 +169,10 @@ pub enum CheckpointAction {
     Continue,
 }
 
+fn continue_without_checkpoint(_: ChainCheckpoint<'_>) -> CheckpointAction {
+    CheckpointAction::Continue
+}
+
 impl QuenchBoundary {
     /// Scientific status assigned by the caller's fresh convergence check.
     pub fn status(&self) -> QuenchStatus {
@@ -615,7 +619,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
     settle: Option<Settle<'_>>,
     rng: &mut R,
 ) -> Outcome {
-    let mut checkpoint = |_| CheckpointAction::Continue;
+    let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
         start,
@@ -639,7 +643,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
     grad: Option<&mut GradFn<'g>>,
     rng: &mut R,
 ) -> Outcome {
-    let mut checkpoint = |_| CheckpointAction::Continue;
+    let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
         start,
@@ -681,7 +685,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         "a shared bias and a replica ladder are different things: \
          each rung owns its own bias"
     );
-    let mut checkpoint = |_| CheckpointAction::Continue;
+    let mut checkpoint = continue_without_checkpoint;
     run_full(
         cfg,
         start,
