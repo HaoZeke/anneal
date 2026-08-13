@@ -55,6 +55,11 @@ struct DescriptorHoleReply {
   nearestCatalogDistance @2 :Float64;
 }
 
+struct BoundaryCrossingRequest {
+  current @0 :List(Float64);
+  draw @1 :UInt64;
+}
+
 struct PolicyStateRequest {
   descriptor @0 :List(Float64);
   energy @1 :Float64;
@@ -162,6 +167,7 @@ struct CatalogRequest {
     populationSubmit @11 :PopulationSubmitRequest;
     populationPlan @12 :PopulationPlanRequest;
     recordTransition @13 :TransitionRecord;
+    boundaryCrossing @14 :BoundaryCrossingRequest;
   }
 }
 
