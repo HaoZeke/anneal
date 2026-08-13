@@ -294,6 +294,27 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn pending_population_epoch_polls_after_another_local_slice() {
+        let mut progress = PopulationEpochProgress::default();
+
+        assert_eq!(
+            progress.action(true, true),
+            PopulationEpochAction::Submit
+        );
+        progress.observe_pending();
+        assert_eq!(progress.action(true, true), PopulationEpochAction::Poll);
+        assert_eq!(progress.epoch(), 0);
+
+        progress.observe_ready();
+        assert_eq!(progress.epoch(), 1);
+        assert_eq!(
+            progress.action(false, false),
+            PopulationEpochAction::LocalWork
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn quenched_transport_destination_keeps_its_action_label() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
