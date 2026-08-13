@@ -34,6 +34,28 @@ fn hard_lj_arrays_accept_an_isolated_campaign_name() {
 }
 
 #[test]
+fn hard_lj_manifests_pin_every_scientific_input() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_lj_ensemble.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for required in [
+        r#"source_commit=%s\n"#,
+        r#"sha256sum "$BIN""#,
+        r#"sha256sum "$0""#,
+        r#"sha256sum "$QUALIFIER""#,
+        r#"sha256sum "$CALIBRATION""#,
+    ] {
+        assert!(
+            source.contains(required),
+            "hard-LJ manifest is missing provenance field {required}"
+        );
+    }
+}
+
+#[test]
 fn molecular_build_produces_every_paired_campaign_executable() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
