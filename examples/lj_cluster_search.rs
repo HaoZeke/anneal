@@ -254,6 +254,25 @@ mod option_tests {
             assert!((actual - expected).abs() < 1e-8);
         }
     }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn population_sibling_uses_seeded_boundary_transport() {
+        let crossing = anneal_core::catalog_rpc::BoundaryCrossingRecord {
+            action: "shell_rotate".into(),
+            from: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            to: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0],
+            source_basin: 3,
+            destination_basin: 7,
+        };
+        let parent = Array1::from(vec![3.0, 4.0, 0.0, 3.0, 5.0, 0.0, 2.0, 4.0, 0.0]);
+
+        let first = population_boundary_trial(parent.view(), &crossing, 0.05, 10.0, 71).unwrap();
+        let second = population_boundary_trial(parent.view(), &crossing, 0.05, 10.0, 71).unwrap();
+
+        assert_eq!(first, second);
+        assert_ne!(first, parent);
+    }
 }
 
 /// Value and gradient, charged to the ledger, or `None` when it is spent.
