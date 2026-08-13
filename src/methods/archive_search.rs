@@ -115,12 +115,8 @@ struct HopAcc {
     basins: usize,
 }
 
-fn paid_full_quenches(
-    cfg: &Config,
-    allocated: usize,
-    hop: &crate::methods::cluster_hopping::Outcome,
-) -> usize {
-    hop.hops + usize::from(allocated >= cfg.relax_steps.max(1))
+fn paid_full_quenches(cfg: &Config, allocated: usize, hops: usize) -> usize {
+    hops + usize::from(allocated >= cfg.relax_steps.max(1))
 }
 
 /// Push a near-miss onto its approximate point group and quench.
@@ -247,7 +243,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         let used = led.spent();
         let _ = ledger.charge_many(used);
         acc.screens += hop.screened_out;
-        acc.full += paid_full_quenches(cfg, take, &hop);
+        acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
         acc.artn += hop.symmetrised.0 + hop.stall_escapes;
         acc.basins = acc.basins.max(hop.basins);
@@ -401,7 +397,7 @@ fn fold_hop(
     at: usize,
 ) {
     acc.screens += hop.screened_out;
-    acc.full += paid_full_quenches(cfg, allocated, hop);
+    acc.full += paid_full_quenches(cfg, allocated, hop.hops);
     acc.returned += hop.returned;
     acc.artn += hop.symmetrised.0 + hop.stall_escapes;
     acc.basins = acc.basins.max(hop.basins);
@@ -467,95 +463,96 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 let _ = ledger.charge_many(used2);
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
-                let (best, best_state, best_at, basins, screens, full, returned, artn) = if rest3
-                    > 0
-                    && hop2.best < hop1.best - 0.015
-                    && hop2.best_state.is_some()
-                {
-                    let mut c3 = c2.clone();
-                    if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
-                        groups, ..
-                    } = &cfg.move_library
-                    {
-                        c3.move_library = crate::methods::cluster_hopping::MoveLibrary::Molecular {
-                            groups: groups.clone(),
-                            reactive: true,
+                let (best, best_state, best_at, basins, screens, full, returned, artn) =
+                    if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
+                        let mut c3 = c2.clone();
+                        if let crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                            groups,
+                            ..
+                        } = &cfg.move_library
+                        {
+                            c3.move_library =
+                                crate::methods::cluster_hopping::MoveLibrary::Molecular {
+                                    groups: groups.clone(),
+                                    reactive: true,
+                                };
+                        }
+                        let x3 = hop2.best_state.clone().unwrap();
+                        let mut led3 = Ledger::new(rest3);
+                        let hop3 = run_with_gradient(
+                            &c3,
+                            x3.view(),
+                            &mut led3,
+                            relax,
+                            grad.as_deref_mut(),
+                            rng,
+                        );
+                        let _ = ledger.charge_many(led3.spent());
+                        let at3 = used1
+                            .saturating_add(used2)
+                            .saturating_add(hop_best_at(&hop3, led3.spent()));
+                        let (b, s, a, n) = if hop3.best < hop2.best.min(hop1.best) - 1e-12 {
+                            (hop3.best, hop3.best_state, at3, hop3.basins)
+                        } else if hop2.best < hop1.best - 1e-12 {
+                            (hop2.best, hop2.best_state, at2, hop2.basins)
+                        } else {
+                            (hop1.best, hop1.best_state, at1, hop1.basins)
                         };
-                    }
-                    let x3 = hop2.best_state.clone().unwrap();
-                    let mut led3 = Ledger::new(rest3);
-                    let hop3 = run_with_gradient(
-                        &c3,
-                        x3.view(),
-                        &mut led3,
-                        relax,
-                        grad.as_deref_mut(),
-                        rng,
-                    );
-                    let _ = ledger.charge_many(led3.spent());
-                    let at3 = used1
-                        .saturating_add(used2)
-                        .saturating_add(hop_best_at(&hop3, led3.spent()));
-                    let (b, s, a, n) = if hop3.best < hop2.best.min(hop1.best) - 1e-12 {
-                        (hop3.best, hop3.best_state, at3, hop3.basins)
+                        (
+                            b,
+                            s,
+                            a,
+                            n,
+                            hop1.screened_out + hop2.screened_out + hop3.screened_out,
+                            paid_full_quenches(cfg, p1, hop1.hops)
+                                + paid_full_quenches(cfg, hunt, hop2.hops)
+                                + paid_full_quenches(cfg, rest3, hop3.hops),
+                            hop1.returned + hop2.returned + hop3.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop3.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop3.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts
+                                + hop3.restarts,
+                        )
                     } else if hop2.best < hop1.best - 1e-12 {
-                        (hop2.best, hop2.best_state, at2, hop2.basins)
+                        (
+                            hop2.best,
+                            hop2.best_state,
+                            at2,
+                            hop2.basins,
+                            hop1.screened_out + hop2.screened_out,
+                            paid_full_quenches(cfg, p1, hop1.hops)
+                                + paid_full_quenches(cfg, hunt, hop2.hops),
+                            hop1.returned + hop2.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts,
+                        )
                     } else {
-                        (hop1.best, hop1.best_state, at1, hop1.basins)
+                        (
+                            hop1.best,
+                            hop1.best_state,
+                            at1,
+                            hop1.basins,
+                            hop1.screened_out + hop2.screened_out,
+                            paid_full_quenches(cfg, p1, hop1.hops)
+                                + paid_full_quenches(cfg, hunt, hop2.hops),
+                            hop1.returned + hop2.returned,
+                            hop1.symmetrised.0
+                                + hop2.symmetrised.0
+                                + hop1.stall_escapes
+                                + hop2.stall_escapes
+                                + hop1.restarts
+                                + hop2.restarts,
+                        )
                     };
-                    (
-                        b,
-                        s,
-                        a,
-                        n,
-                        hop1.screened_out + hop2.screened_out + hop3.screened_out,
-                        paid_full_quenches(cfg, p1, &hop1)
-                            + paid_full_quenches(cfg, hunt, &hop2)
-                            + paid_full_quenches(cfg, rest3, &hop3),
-                        hop1.returned + hop2.returned + hop3.returned,
-                        hop1.symmetrised.0
-                            + hop2.symmetrised.0
-                            + hop3.symmetrised.0
-                            + hop1.stall_escapes
-                            + hop2.stall_escapes
-                            + hop3.stall_escapes
-                            + hop1.restarts
-                            + hop2.restarts
-                            + hop3.restarts,
-                    )
-                } else if hop2.best < hop1.best - 1e-12 {
-                    (
-                        hop2.best,
-                        hop2.best_state,
-                        at2,
-                        hop2.basins,
-                        hop1.screened_out + hop2.screened_out,
-                        paid_full_quenches(cfg, p1, &hop1) + paid_full_quenches(cfg, hunt, &hop2),
-                        hop1.returned + hop2.returned,
-                        hop1.symmetrised.0
-                            + hop2.symmetrised.0
-                            + hop1.stall_escapes
-                            + hop2.stall_escapes
-                            + hop1.restarts
-                            + hop2.restarts,
-                    )
-                } else {
-                    (
-                        hop1.best,
-                        hop1.best_state,
-                        at1,
-                        hop1.basins,
-                        hop1.screened_out + hop2.screened_out,
-                        paid_full_quenches(cfg, p1, &hop1) + paid_full_quenches(cfg, hunt, &hop2),
-                        hop1.returned + hop2.returned,
-                        hop1.symmetrised.0
-                            + hop2.symmetrised.0
-                            + hop1.stall_escapes
-                            + hop2.stall_escapes
-                            + hop1.restarts
-                            + hop2.restarts,
-                    )
-                };
                 HopAcc {
                     best,
                     best_state,
@@ -572,7 +569,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     best_state: hop1.best_state,
                     best_at: at1,
                     screens: hop1.screened_out,
-                    full: paid_full_quenches(cfg, p1, &hop1),
+                    full: paid_full_quenches(cfg, p1, hop1.hops),
                     returned: hop1.returned,
                     artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
                     basins: hop1.basins,
@@ -671,7 +668,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         best_state: hop1.best_state,
         best_at: at1,
         screens: hop1.screened_out,
-        full: paid_full_quenches(cfg, explore, &hop1),
+        full: paid_full_quenches(cfg, explore, hop1.hops),
         returned: hop1.returned,
         artn: hop1.symmetrised.0 + hop1.stall_escapes,
         basins: hop1.basins,
