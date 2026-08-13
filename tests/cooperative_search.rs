@@ -491,10 +491,10 @@ fn every_slice_has_one_complete_transition_diagnostic() {
             current_basin: Some(3),
             active_relation: Some(CatalogRelation::SameBasin),
             policy_role: PolicyRole::Explore,
-            policy_reason: "farthest_hole",
-            proposal_family: ProposalFamily::DescriptorHole,
-            sampled_basin: None,
-            descriptor_step_norm: Some(0.25),
+            policy_reason: "observed_boundary_crossing",
+            proposal_family: ProposalFamily::BoundaryTransport,
+            sampled_basin: Some(7),
+            descriptor_step_norm: None,
             cartesian_step_norm: Some(0.5),
             validation: SliceValidation::Accepted,
             quench: SliceQuench::Converged,
@@ -514,7 +514,7 @@ fn every_slice_has_one_complete_transition_diagnostic() {
     assert_eq!(slice.slice, 1);
     assert_eq!(slice.current_basin, Some(3));
     assert_eq!(slice.policy_role, PolicyRole::Explore);
-    assert_eq!(slice.proposal_family, ProposalFamily::DescriptorHole);
+    assert_eq!(slice.proposal_family, ProposalFamily::BoundaryTransport);
     assert_eq!(slice.validation, SliceValidation::Accepted);
     assert_eq!(slice.quench, SliceQuench::Converged);
     assert_eq!(slice.adoption, SliceAdoption::Adopted);
@@ -529,7 +529,7 @@ fn every_slice_has_one_complete_transition_diagnostic() {
     assert!(trace.contains("\"slice\":1"));
     assert!(trace.contains("\"slice_current_basin\":3"));
     assert!(trace.contains("\"slice_policy_role\":\"explore\""));
-    assert!(trace.contains("\"slice_proposal_family\":\"descriptor_hole\""));
+    assert!(trace.contains("\"slice_proposal_family\":\"boundary_transport\""));
     assert!(trace.contains("\"slice_validation\":\"accepted\""));
     assert!(trace.contains("\"slice_quench\":\"converged\""));
     assert!(trace.contains("\"slice_adoption\":\"adopted\""));
