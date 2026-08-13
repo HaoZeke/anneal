@@ -61,6 +61,8 @@ dependencies = [
  "rayon",
  "readcon-core",
  "rgpot-core",
+ "serde",
+ "serde_json",
  "sha2",
  "thiserror",
  "trybuild",

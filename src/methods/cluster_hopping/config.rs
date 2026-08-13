@@ -9,7 +9,8 @@ use super::*;
 /// the lever: at 75 points the merge radius on a distance spectrum is sharply
 /// sensitive, 13 seeds in 24 at 0.7 against 0 in 8 at 0.95, and a descriptor
 /// that separates distinct structures more cleanly is what would widen that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Keying {
     /// Sorted pairwise distances.
     #[default]
@@ -43,7 +44,8 @@ pub enum Keying {
 }
 
 /// Constraint applied to SOAP proposals on grouped systems.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SoapProposalMode {
     /// Apply the ambient Cartesian pullback. Internal geometry may change.
     Flexible,
@@ -54,7 +56,7 @@ pub enum SoapProposalMode {
 }
 
 /// Driver settings.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct Config {
     /// Points in a state; the state length must be `3 * n_points`.
     pub n_points: usize,
@@ -591,6 +593,29 @@ pub struct Config {
 }
 
 impl Config {
+    /// Canonical, versioned JSON for the fully resolved configuration.
+    pub fn resolved_json(&self) -> Result<String, serde_json::Error> {
+        #[derive(serde::Serialize)]
+        struct ResolvedConfig<'a> {
+            schema: &'static str,
+            #[serde(flatten)]
+            config: &'a Config,
+        }
+
+        serde_json::to_string(&ResolvedConfig {
+            schema: "anneal-cluster-config-v1",
+            config: self,
+        })
+    }
+
+    /// SHA-256 of [`Config::resolved_json`] as lowercase hexadecimal.
+    pub fn resolved_sha256(&self) -> Result<String, serde_json::Error> {
+        use sha2::{Digest, Sha256};
+
+        let digest = Sha256::digest(self.resolved_json()?.as_bytes());
+        Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+
     /// Settings for `n_points` at the campaign's measured defaults.
     /// The measured configuration: the stack every layer of which beat or
     /// matched its paired control across four cluster morphologies.
