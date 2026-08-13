@@ -18,8 +18,10 @@
 use crate::methods::cluster_hopping::{
     Config, Ledger, OVERLAP_SEPARATION, Outcome, optimize_with_gradient,
 };
+#[cfg(test)]
+use crate::methods::cluster_hopping::min_pair_distance;
 #[cfg(any(feature = "bank-rpc", test))]
-use crate::methods::cluster_hopping::{min_pair_distance, structure_is_sane};
+use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::warm_lbfgs::WarmLbfgs;
 use crate::quench::{QuenchPredictor, Verdict};
 use eindir_core::gradient::DifferentiableObjective;
