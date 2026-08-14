@@ -1710,7 +1710,36 @@ where
         };
         let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
         if recordable {
+            let improved_record = e_new < ledger.best - 1e-10;
             ledger.record(e_new, x_new.view());
+            // A new best is the one state worth sharing, and the census a
+            // shared run identifies basins in was calibrated from quenches
+            // at the share tolerance, which the ordinary record tolerance
+            // does not reach. Polishing only improvements bounds the cost
+            // to the number of improvement events, every evaluation charged
+            // to this ledger, and the polished state enters the boundary
+            // record the checkpoint offer loop already reads.
+            if cfg.polish_records > 0 && improved_record {
+                let charged_before_polish = ledger.spent();
+                let (polished_energy, polished_state) =
+                    relax(ledger, x_new.view(), cfg.polish_records);
+                let polished_gradient = grad.as_deref_mut().and_then(|g| {
+                    g(ledger, polished_state.view()).filter(|values| {
+                        // Euclidean, matching the offer gate and the census
+                        // calibration, not the max-abs bound records use.
+                        values.iter().map(|v| v * v).sum::<f64>().sqrt() < cfg.share_gradient
+                    })
+                });
+                if polished_gradient.is_some() {
+                    ledger.record(polished_energy, polished_state.view());
+                }
+                ledger.record_quench_boundary(
+                    charged_before_polish,
+                    polished_energy,
+                    polished_state,
+                    polished_gradient,
+                );
+            }
         } else {
             unconverged_records += 1;
         }

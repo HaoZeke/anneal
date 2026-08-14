@@ -1957,6 +1957,10 @@ fn run_capnp_catalog(
 
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
+    // A cooperative run must produce states at the share tolerance or the
+    // coordinator has nothing valid to hold; solo runs leave this off and
+    // keep the screened economy untouched.
+    run_cfg.polish_records = run_cfg.relax_steps;
     let checkpoint_interval = std::env::var("CATALOG_SLICE")
         .or_else(|_| std::env::var("BANK_SLICE"))
         .ok()
@@ -2110,6 +2114,7 @@ fn run_capnp_catalog(
             }
         }
 
+        let mut freshest_boundary = None;
         for boundary in snapshot
             .quench_boundaries()
             .iter()
@@ -2135,7 +2140,8 @@ fn run_capnp_catalog(
                 boundary.state(),
                 gradient,
             ) {
-                let _ = cooperative.offer_candidate(replica, candidate);
+                let _ = cooperative.offer_candidate(replica, candidate.clone());
+                freshest_boundary = Some(candidate);
             }
         }
 
@@ -2273,26 +2279,36 @@ fn run_capnp_catalog(
                 }
             }
         }
-        let Some(current_gradient) = snapshot.current_gradient() else {
-            return CheckpointAction::Continue;
-        };
+        // The chain stands mid-hop at almost every checkpoint, so a policy
+        // gated on the current state being a validated minimum asks almost
+        // never, which is how a whole run passed with two policy queries.
+        // The basin the chain occupies is its last validated quench, and
+        // this checkpoint's freshest polished boundary is exactly that, so
+        // the policy asks from there whenever the current state cannot
+        // qualify.
         candidate_sequence = candidate_sequence
             .checked_add(1)
             .expect("candidate sequence must fit u64");
         cooperative
             .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
             .expect("current descriptor work must enter the cooperative ledger");
-        let Some(current_candidate) = lj_catalog_candidate(
-            &descriptor_space,
-            &signature.atomic_numbers,
-            replica,
-            candidate_sequence,
-            seed,
-            snapshot.charged(),
-            snapshot.current_energy(),
-            snapshot.current_state(),
-            current_gradient,
-        ) else {
+        let current_candidate = snapshot
+            .current_gradient()
+            .and_then(|current_gradient| {
+                lj_catalog_candidate(
+                    &descriptor_space,
+                    &signature.atomic_numbers,
+                    replica,
+                    candidate_sequence,
+                    seed,
+                    snapshot.charged(),
+                    snapshot.current_energy(),
+                    snapshot.current_state(),
+                    current_gradient,
+                )
+            })
+            .or_else(|| freshest_boundary.take());
+        let Some(current_candidate) = current_candidate else {
             return CheckpointAction::Continue;
         };
         let descriptor = current_candidate.descriptor.clone();

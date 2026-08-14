@@ -1094,6 +1094,20 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
+                // An offer is validated exactly as a visit is, so it also
+                // refreshes the best candidate the population join reads;
+                // without this a replica whose only validated states arrive
+                // as offers has nothing on file at every barrier.
+                let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
+                let deeper = scientific
+                    .best_candidate_by_replica
+                    .get(&request.identity.replica)
+                    .is_none_or(|stored| canonical.energy < stored.energy);
+                if deeper {
+                    scientific
+                        .best_candidate_by_replica
+                        .insert(request.identity.replica, canonical);
+                }
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,

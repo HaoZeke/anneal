@@ -558,6 +558,18 @@ pub struct Config {
     /// comes back near 1e-6, and tight enough to bar a partial quench, which
     /// comes back near 1e-1 or worse.
     pub record_gradient: f64,
+    /// Extra relaxation steps spent polishing a new best to share tolerance.
+    ///
+    /// Screened hopping's economy is that almost no hop is fully relaxed, so
+    /// almost no state meets the tolerance a shared census identifies basins
+    /// at, and a cooperative run has nothing valid to offer. Polishing only
+    /// the states that improve the record bounds the cost to the number of
+    /// improvements, a few hundred evaluations each over tens of events,
+    /// about one percent of a campaign budget, all charged to the ledger.
+    /// Zero disables the polish and leaves the solo behaviour untouched.
+    pub polish_records: usize,
+    /// Gradient bound a polished record must reach to become shareable.
+    pub share_gradient: f64,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
     ///
@@ -816,6 +828,8 @@ impl Config {
             screen_steps: 25,
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
+            polish_records: 0,
+            share_gradient: LennardJonesPreset::SHARE_GRADIENT * energy_scale / length_scale,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             construct_width: 4,
