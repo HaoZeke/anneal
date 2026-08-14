@@ -131,7 +131,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut source_rejections = 0u64;
     let mut quench_rejections = 0u64;
     let mut identity_rejections = 0u64;
-    let maximum_attempts = u64::try_from(pair_count)?.saturating_mul(100);
+    // The rejection-sampled start generator refuses most draws at these
+    // densities: LJ75 accepts about seven pairs per thousand attempts, and
+    // the larger sizes accept fewer. A cap of a hundred attempts per pair
+    // therefore stopped the sweep short of the requested count rather than
+    // reaching it. The cap exists to bound a pathological run, not to ration
+    // ordinary rejection, so it scales with the same determinism: the seed
+    // stream is a function of the attempt index alone, and the loop still
+    // exits at the first attempt that completes the requested pairs.
+    let maximum_attempts = u64::try_from(pair_count)?.saturating_mul(2_000);
     while accepted < pair_count && attempt < maximum_attempts {
         let source_seed = base_seed
             .checked_add(3 * attempt)
