@@ -991,14 +991,17 @@ where
     // Evaluated screen state of the trial that entered the current basin,
     // kept as the exit point a stalled chain leaves through.
     let mut basin_entry: Option<Array1<f64>> = None;
-    // Learned stall response. Each enabled escape is one arm of the same
-    // Beta-Bernoulli Thompson allocation the move set uses, so a stall
-    // draws one response and the draw is rewarded when the escape lands
-    // deeper than the incumbent it left, instead of every enabled
-    // mechanism firing in file order. Every arm is domain-free: the trail
-    // is the objective's own descent history, the climb needs a gradient
-    // alone, the restart draws fresh coordinates. With one arm enabled the
-    // allocator always selects it, so single-flag behaviour is unchanged.
+    // Learned stall response. Each enabled escape is one arm under the
+    // same depth-rewarded Thompson allocation the move set uses: a stall
+    // draws one response and the draw is rewarded with the deepening the
+    // escape realized, a signed number every stall produces, under a
+    // Normal-Gamma posterior whose predictive needs no reward scale. A
+    // success bit was the first version and is exactly the sparse reward
+    // DepthAllocator documents as failing to switch a wrong arm off.
+    // Every arm is domain-free: the trail is the objective's own descent
+    // history, the climb needs a gradient alone, the restart draws fresh
+    // coordinates. With one arm enabled the allocator is never consulted,
+    // so single-flag behaviour is unchanged.
     let stall_arms: Vec<&'static str> = [
         cfg.trail_on_stall.then_some("trail"),
         cfg.escape_on_stall.then_some("climb"),
@@ -1007,7 +1010,7 @@ where
     .into_iter()
     .flatten()
     .collect();
-    let mut stall_allocator = FlooredThompson::new(stall_arms.len().max(1));
+    let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -2370,7 +2373,7 @@ where
             None
         };
         let stalled_from = e;
-        let mut stall_outcome: Option<bool> = None;
+        let mut stall_outcome: Option<f64> = None;
         if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
@@ -2388,7 +2391,7 @@ where
             e = ef;
             x = xf;
             here = None;
-            stall_outcome = Some(e < stalled_from);
+            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
             && let Some(x_entry) = basin_entry.take()
@@ -2426,7 +2429,7 @@ where
             e = ee;
             x = xe;
             here = None;
-            stall_outcome = Some(e < stalled_from);
+            stall_outcome = Some(stalled_from - e);
         }
         if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
@@ -2473,12 +2476,12 @@ where
                     if !cfg.minima_hopping {
                         here = None;
                     }
-                    stall_outcome = Some(e < stalled_from);
+                    stall_outcome = Some(stalled_from - e);
                 }
             }
         }
-        if let (Some(arm), Some(deeper)) = (stall_response, stall_outcome) {
-            stall_allocator.update(arm, deeper);
+        if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
+            stall_allocator.update(arm, gain);
         }
 
         if n_rep > 1 {
