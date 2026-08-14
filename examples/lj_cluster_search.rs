@@ -1987,18 +1987,6 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50_000)
         .max(minimum_population_interval);
-    let population_poll_limit = std::env::var("CATALOG_POPULATION_POLL_LIMIT")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(30_000)
-        .max(1);
-    let population_poll_delay = std::time::Duration::from_millis(
-        std::env::var("CATALOG_POPULATION_POLL_MILLIS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(2)
-            .max(1),
-    );
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
@@ -2153,6 +2141,133 @@ fn run_capnp_catalog(
         } else {
             stall = stall.saturating_add(1);
         }
+        // The population barrier is serviced before any local gate. A
+        // checkpoint often finds the chain mid-hop with nothing that passes
+        // candidate validation; that must not silence its participation and
+        // must never block the chain. Membership is joined by reference to
+        // the best candidate the coordinator has already validated for this
+        // replica; a replica with nothing on file abstains so the epoch
+        // completes without it; a pending barrier is answered by returning
+        // to local work until the next checkpoint rather than by polling in
+        // place, which is what left one replica asleep for its whole budget.
+        let mut population_assignment = None;
+        loop {
+            let outcome = match active_population_action(
+                &population_progress,
+                snapshot.charged(),
+                snapshot.remaining(),
+                population_interval,
+                true,
+            ) {
+                PopulationEpochAction::Submit => cooperative
+                    .join_population(replica, population_progress.epoch())
+                    .expect("population join must preserve cooperative invariants"),
+                PopulationEpochAction::Poll => cooperative
+                    .poll_population(replica, population_progress.epoch())
+                    .expect("population polling must preserve cooperative invariants"),
+                PopulationEpochAction::Abstain => cooperative
+                    .abstain_population(replica, population_progress.epoch())
+                    .expect("population abstention must preserve cooperative invariants"),
+                PopulationEpochAction::LocalWork => break,
+            };
+            match outcome {
+                PopulationSynchronizationOutcome::Pending { .. } => {
+                    population_progress.observe_pending();
+                    break;
+                }
+                PopulationSynchronizationOutcome::Ready { parent, plan } => {
+                    let completed_epoch = population_progress.epoch();
+                    population_progress.observe_ready();
+                    population_assignment = Some((completed_epoch, parent, plan));
+                }
+                PopulationSynchronizationOutcome::Unaddressed => {
+                    population_progress.observe_ready();
+                }
+                PopulationSynchronizationOutcome::Rejected => {
+                    match cooperative
+                        .abstain_population(replica, population_progress.epoch())
+                        .expect("population abstention must preserve cooperative invariants")
+                    {
+                        PopulationSynchronizationOutcome::Ready { .. }
+                        | PopulationSynchronizationOutcome::Unaddressed => {
+                            population_progress.observe_ready();
+                        }
+                        PopulationSynchronizationOutcome::Pending { .. } => {
+                            population_progress.observe_pending();
+                        }
+                        _ => {}
+                    }
+                    break;
+                }
+                PopulationSynchronizationOutcome::LocalFallback
+                | PopulationSynchronizationOutcome::SharingDisabled => break,
+            }
+        }
+        if let Some((completed_epoch, parent, plan)) = population_assignment
+            && snapshot.remaining() > 0
+        {
+            let family = population_family_position(&plan.destinations, &plan.parents, replica)
+                .expect("validated population plan must address this replica");
+            let draw =
+                population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
+            let crossing = match cooperative
+                .boundary_crossing(replica, parent.descriptor, draw)
+                .expect("population frontier access must preserve local execution")
+            {
+                CatalogBoundaryOutcome::Crossing(crossing) => {
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("population frontier proposal must enter the ledger");
+                    Some(crossing)
+                }
+                _ => None,
+            };
+            if let Some(crossing) = crossing {
+                let state = population_region_trial(
+                    snapshot.current_state(),
+                    Some(&crossing),
+                    transport_noise,
+                    transport_radius,
+                    draw,
+                );
+                if state != snapshot.current_state() {
+                    slice_sequence = slice_sequence
+                        .checked_add(1)
+                        .expect("slice sequence must fit u64");
+                    let reconfiguration = SliceTrace {
+                        slice: slice_sequence,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Explore,
+                        policy_reason: "population_assignment",
+                        proposal_family: ProposalFamily::PopulationReconfiguration,
+                        sampled_basin: Some(crossing.destination_basin),
+                        descriptor_step_norm: None,
+                        cartesian_step_norm: Some(vector_distance(
+                            snapshot
+                                .current_state()
+                                .as_slice()
+                                .expect("LJ state is contiguous"),
+                            state.as_slice().expect("LJ proposal is contiguous"),
+                        )),
+                        validation: SliceValidation::Accepted,
+                        quench: SliceQuench::Converged,
+                        adoption: SliceAdoption::Adopted,
+                        novelty: None,
+                        energy: Some(snapshot.current_energy()),
+                        charged_work: u64::try_from(checkpoint_charged)
+                            .expect("checkpoint charge must fit u64"),
+                    };
+                    cooperative
+                        .record_slice(replica, reconfiguration)
+                        .expect("population checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state,
+                        action: "population_boundary".to_owned(),
+                    };
+                }
+            }
+        }
         let Some(current_gradient) = snapshot.current_gradient() else {
             return CheckpointAction::Continue;
         };
@@ -2176,7 +2291,6 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = current_candidate.descriptor.clone();
-        let population_candidate = current_candidate.clone();
         let policy = match cooperative
             .registered_policy_input(replica, current_candidate, stall, local_deepened)
             .expect("coordinator policy evidence must preserve local invariants")
@@ -2215,120 +2329,11 @@ fn run_capnp_catalog(
             charged_work: u64::try_from(checkpoint_charged)
                 .expect("checkpoint charge must fit u64"),
         };
-        let mut population_assignment = None;
-        loop {
-            let population = match active_population_action(
-                &population_progress,
-                snapshot.charged(),
-                snapshot.remaining(),
-                population_interval,
-                true,
-            ) {
-                PopulationEpochAction::Submit => Some(
-                    cooperative
-                        .submit_population(
-                            replica,
-                            population_progress.epoch(),
-                            population_candidate.clone(),
-                        )
-                        .expect("population submission must preserve cooperative invariants"),
-                ),
-                PopulationEpochAction::Poll => Some(
-                    cooperative
-                        .poll_population(replica, population_progress.epoch())
-                        .expect("population polling must preserve cooperative invariants"),
-                ),
-                PopulationEpochAction::Abstain => Some(
-                    cooperative
-                        .abstain_population(replica, population_progress.epoch())
-                        .expect("population abstention must preserve cooperative invariants"),
-                ),
-                PopulationEpochAction::LocalWork => None,
-            };
-            let Some(population) = population else {
-                break;
-            };
-            if matches!(population, PopulationSynchronizationOutcome::Pending { .. }) {
-                population_progress.observe_pending();
-            }
-            let mut polls = 0usize;
-            let population = resolve_population_barrier(population, || {
-                if polls >= population_poll_limit {
-                    return PopulationSynchronizationOutcome::LocalFallback;
-                }
-                polls += 1;
-                std::thread::sleep(population_poll_delay);
-                cooperative
-                    .poll_population(replica, population_progress.epoch())
-                    .unwrap_or(PopulationSynchronizationOutcome::LocalFallback)
-            });
-            match population {
-                PopulationSynchronizationOutcome::Ready { parent, plan } => {
-                    let completed_epoch = population_progress.epoch();
-                    population_progress.observe_ready();
-                    population_assignment = Some((completed_epoch, parent, plan));
-                }
-                PopulationSynchronizationOutcome::Rejected
-                | PopulationSynchronizationOutcome::LocalFallback
-                | PopulationSynchronizationOutcome::SharingDisabled => break,
-                PopulationSynchronizationOutcome::Pending { .. } => {
-                    unreachable!("population resolver returns only a terminal outcome")
-                }
-            }
-        }
         if snapshot.remaining() == 0 {
             cooperative
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
-        }
-        if let Some((completed_epoch, parent, plan)) = population_assignment {
-            let family = population_family_position(&plan.destinations, &plan.parents, replica)
-                .expect("validated population plan must address this replica");
-            let draw =
-                population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
-            let crossing = match cooperative
-                .boundary_crossing(replica, parent.descriptor, draw)
-                .expect("population frontier access must preserve local execution")
-            {
-                CatalogBoundaryOutcome::Crossing(crossing) => {
-                    cooperative
-                        .record_work(replica, ChargeKind::RemoteProposal, 0)
-                        .expect("population frontier proposal must enter the ledger");
-                    Some(crossing)
-                }
-                _ => None,
-            };
-            if let Some(crossing) = crossing {
-                let state = population_region_trial(
-                    snapshot.current_state(),
-                    Some(&crossing),
-                    transport_noise,
-                    transport_radius,
-                    draw,
-                );
-                if state != snapshot.current_state() {
-                    trace.policy_role = PolicyRole::Explore;
-                    trace.policy_reason = "population_assignment";
-                    trace.proposal_family = ProposalFamily::PopulationReconfiguration;
-                    trace.sampled_basin = Some(crossing.destination_basin);
-                    trace.cartesian_step_norm = Some(vector_distance(
-                        snapshot
-                            .current_state()
-                            .as_slice()
-                            .expect("LJ state is contiguous"),
-                        state.as_slice().expect("LJ proposal is contiguous"),
-                    ));
-                    trace.adoption = SliceAdoption::Adopted;
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("population checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state,
-                        action: "population_boundary".to_owned(),
-                    };
-                }
-            }
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
@@ -2420,856 +2425,6 @@ fn run_capnp_catalog(
         eprint!("{trace}");
     }
     outcome
-}
-
-/// Legacy sliced catalog runner retained for replaying archived campaigns.
-#[cfg(feature = "bank-rpc")]
-#[allow(dead_code)]
-fn run_capnp_catalog_sliced(
-    cfg: &Config,
-    ledger: &mut Ledger,
-    relax: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>),
-    grad: &mut dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f64>>,
-    seed: u64,
-    endpoint: Option<&str>,
-) -> Outcome {
-    use anneal_core::catalog::lj::{descriptor_space, system_signature};
-    use anneal_core::catalog_policy::PolicyAction;
-    use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
-    use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
-    use anneal_core::cooperative_search::ledger::ChargeKind;
-    use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
-    };
-    use anneal_core::methods::feynman_kac::{
-        population_family_position, population_rejuvenation_draw,
-    };
-    use rand::Rng;
-
-    let campaign = required_catalog_env("CATALOG_CAMPAIGN");
-    let ensemble = required_catalog_env("CATALOG_ENSEMBLE");
-    let replica = required_catalog_env("CATALOG_REPLICA")
-        .parse::<u32>()
-        .expect("CATALOG_REPLICA must be an unsigned integer");
-    let signature = system_signature(cfg.n_points).expect("LJ catalog signature must be valid");
-    let descriptor_space = descriptor_space();
-    let mut cooperative = CooperativeRun::new(
-        [replica],
-        u64::try_from(ledger.budget()).expect("LJ budget must fit the cooperative ledger"),
-    )
-    .expect("single-replica local ledger must be valid");
-    if let Some(endpoint) = endpoint {
-        let address = endpoint
-            .parse()
-            .expect("CATALOG_RPC must be a host:port socket address");
-        let identity = CatalogIdentity {
-            campaign: campaign.clone(),
-            ensemble: ensemble.clone(),
-            replica,
-            signature_digest: signature.digest(),
-        };
-        match CatalogClient::connect(address, identity, ClientConfig::default()) {
-            Ok(client) => cooperative
-                .attach_client(replica, client)
-                .expect("configured replica must accept its catalog client"),
-            Err(error) => eprintln!(
-                "catalog {endpoint} unavailable ({error}); local execution remains active"
-            ),
-        }
-    }
-
-    let mut run_cfg = cfg.clone();
-    run_cfg.budget_window = true;
-    let slice = std::env::var("CATALOG_SLICE")
-        .or_else(|_| std::env::var("BANK_SLICE"))
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(500)
-        .max(1);
-    let probe_interval = std::env::var("CATALOG_PROBE_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(8)
-        .max(1);
-    let probe_scale = std::env::var("CATALOG_PROBE_SCALE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(0.2 * run_cfg.length_scale);
-    let transport_noise = std::env::var("CATALOG_TRANSPORT_NOISE")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .unwrap_or(0.05 * run_cfg.length_scale);
-    let transport_radius = std::env::var("CATALOG_TRANSPORT_RADIUS")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
-    let minimum_population_interval = slice
-        .checked_mul(2)
-        .and_then(|value| value.checked_add(2))
-        .expect("catalog slice must admit a charged-work population interval");
-    let population_interval = std::env::var("CATALOG_POPULATION_INTERVAL")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(50_000)
-        .max(minimum_population_interval);
-    let last_population_threshold = ledger.budget().saturating_sub(4);
-    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(seed);
-    let mut bias = BasinBias::new(
-        ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
-        run_cfg.merge_radius,
-        run_cfg.bias_height,
-        run_cfg.bias_gamma,
-    );
-    let mut current = random_cluster(run_cfg.n_points, 0.7, run_cfg.min_separation, &mut rng);
-    let mut current_energy = f64::NAN;
-    let mut best = f64::INFINITY;
-    let mut best_state = None;
-    let mut accepted_transitions = Vec::new();
-    let mut hops = 0usize;
-    let mut basins = 0usize;
-    let mut screened_out = 0usize;
-    let mut returned = 0usize;
-    let mut slices = 0u64;
-    let mut candidate_sequence = 0u64;
-    let mut population_progress = PopulationEpochProgress::default();
-    let mut stall = 0u32;
-
-    while ledger.remaining() > 0 {
-        if ledger.remaining() <= 4 {
-            while ledger.charge() {
-                let _ = lj(current.view());
-                cooperative
-                    .record_work(replica, ChargeKind::AuxiliaryEvaluation, 1)
-                    .expect("terminal potential calls must enter the cooperative ledger");
-            }
-            break;
-        }
-        let slice_start = ledger.spent();
-        let slice_budget = slice.min((ledger.remaining() - 2) / 2).max(1);
-        let mut slice_ledger = Ledger::new(slice_budget);
-        let output = run_with_bias(
-            &run_cfg,
-            current.view(),
-            &mut slice_ledger,
-            relax,
-            Some(grad),
-            &mut bias,
-            &mut rng,
-        );
-        let slice_charged = slice_ledger.spent();
-        ledger.charge_many(slice_charged);
-        if let Some(state) = slice_ledger.best_state.as_ref() {
-            ledger.record(slice_ledger.best, state.view());
-        }
-        let boundaries = slice_ledger.quench_boundaries().to_vec();
-        let boundary_charged = boundaries
-            .iter()
-            .map(|boundary| boundary.charged_calls())
-            .sum::<usize>();
-        for boundary in &boundaries {
-            cooperative
-                .record_work(
-                    replica,
-                    match boundary.status() {
-                        QuenchStatus::Validated => ChargeKind::AcceptedQuench,
-                        QuenchStatus::Rejected => ChargeKind::RejectedQuench,
-                    },
-                    u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
-                )
-                .expect("each quench must enter the cooperative ledger exactly once");
-        }
-        let auxiliary_charged = slice_charged
-            .checked_sub(boundary_charged)
-            .expect("quench boundaries cannot exceed slice work");
-        if auxiliary_charged > 0 {
-            cooperative
-                .record_work(
-                    replica,
-                    ChargeKind::AuxiliaryEvaluation,
-                    u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
-                )
-                .expect("proposal evaluations must enter the cooperative ledger");
-        } else if slice_charged == 0 {
-            cooperative
-                .record_work(replica, ChargeKind::LocalProposal, 0)
-                .expect("uncharged local work must enter the cooperative ledger");
-        }
-        let adaptive_operations = adaptive_catalog_operations(
-            &descriptor_space,
-            &signature.atomic_numbers,
-            replica,
-            &mut candidate_sequence,
-            seed,
-            ledger.spent(),
-            &output.accepted_transitions,
-        );
-        let mut adaptive_path_active = false;
-        for operation in adaptive_operations {
-            match operation {
-                AdaptiveCatalogOperation::RegisterCurrent(candidate) => {
-                    if !ledger.charge() {
-                        break;
-                    }
-                    cooperative
-                        .record_work(replica, ChargeKind::FreshValidation, 1)
-                        .expect("adaptive source validation must enter the ledger");
-                    adaptive_path_active = cooperative
-                        .record_current(replica, candidate)
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
-                }
-                AdaptiveCatalogOperation::Adopt {
-                    action,
-                    destination,
-                    adopted,
-                } => {
-                    if !adaptive_path_active {
-                        continue;
-                    }
-                    if !ledger.charge() {
-                        break;
-                    }
-                    cooperative
-                        .record_work(replica, ChargeKind::FreshValidation, 1)
-                        .expect("adaptive destination validation must enter the ledger");
-                    adaptive_path_active = cooperative
-                        .record_transition(
-                            replica,
-                            action,
-                            TransitionDestination::Resolved(destination),
-                            adopted,
-                        )
-                        .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
-                        .unwrap_or(false);
-                }
-            }
-        }
-        let hop_offset = hops;
-        accepted_transitions.extend(output.accepted_transitions.iter().cloned().map(
-            |mut transition| {
-                transition.hop = transition
-                    .hop
-                    .checked_add(hop_offset)
-                    .expect("aggregate hop index must fit usize");
-                transition
-            },
-        ));
-        hops += output.hops;
-        basins += output.basins;
-        screened_out += output.screened_out;
-        returned += output.returned;
-        slices += 1;
-
-        let mut slice_trace = SliceTrace {
-            slice: slices,
-            current_basin: None,
-            active_relation: None,
-            policy_role: PolicyRole::Unavailable,
-            policy_reason: "policy_unavailable",
-            proposal_family: ProposalFamily::Local,
-            sampled_basin: None,
-            descriptor_step_norm: None,
-            cartesian_step_norm: None,
-            validation: if boundaries
-                .iter()
-                .any(|boundary| boundary.status() == QuenchStatus::Validated)
-            {
-                SliceValidation::Accepted
-            } else if boundaries.is_empty() {
-                SliceValidation::NotAttempted
-            } else {
-                SliceValidation::Rejected
-            },
-            quench: if boundaries
-                .iter()
-                .any(|boundary| boundary.status() == QuenchStatus::Validated)
-            {
-                SliceQuench::Converged
-            } else if boundaries.is_empty() {
-                SliceQuench::NotAttempted
-            } else {
-                SliceQuench::Rejected
-            },
-            adoption: SliceAdoption::NotAttempted,
-            novelty: None,
-            energy: None,
-            charged_work: 0,
-        };
-
-        let local_deepened = output.best < best;
-        if local_deepened {
-            best = output.best;
-            best_state = output.best_state.clone();
-            stall = 0;
-        } else {
-            stall = stall.saturating_add(1);
-        }
-        if let Some(state) = output.final_state.as_ref() {
-            current = state.clone();
-            current_energy = output.final_energy;
-        } else if let Some(state) = output.best_state.as_ref() {
-            current = state.clone();
-            current_energy = output.best;
-        }
-        let (policy_state, policy_energy) =
-            cooperative_policy_point(current.view(), current_energy);
-
-        for boundary in boundaries
-            .iter()
-            .filter(|boundary| boundary.status() == QuenchStatus::Validated)
-        {
-            candidate_sequence = candidate_sequence
-                .checked_add(1)
-                .expect("candidate sequence must fit u64");
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("descriptor work must enter the cooperative ledger");
-            let candidate = lj_catalog_candidate(
-                &descriptor_space,
-                &signature.atomic_numbers,
-                replica,
-                candidate_sequence,
-                seed,
-                ledger.spent(),
-                boundary.energy(),
-                boundary.state(),
-                boundary
-                    .gradient()
-                    .expect("validated quench must retain its fresh gradient"),
-            )
-            .expect("validated LJ quench must produce a catalog candidate");
-            assert!(
-                ledger.charge(),
-                "slice reservation must cover every receiving validation"
-            );
-            cooperative
-                .record_work(replica, ChargeKind::FreshValidation, 1)
-                .expect("receiving validation must enter the cooperative ledger");
-            let _ = cooperative.offer_candidate(replica, candidate);
-        }
-
-        if slices.is_multiple_of(probe_interval) && ledger.remaining() >= 4 && ledger.charge() {
-            let (source_energy, source_gradient) = lj(policy_state.view());
-            cooperative
-                .record_work(replica, ChargeKind::FreshValidation, 1)
-                .expect("probe source validation must enter the cooperative ledger");
-            candidate_sequence = candidate_sequence
-                .checked_add(1)
-                .expect("candidate sequence must fit u64");
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("probe source descriptor work must enter the cooperative ledger");
-            let source_candidate = lj_catalog_candidate(
-                &descriptor_space,
-                &signature.atomic_numbers,
-                replica,
-                candidate_sequence,
-                seed,
-                ledger.spent(),
-                source_energy,
-                policy_state.view(),
-                source_gradient.view(),
-            );
-            if let Some(source_candidate) = source_candidate
-                && ledger.remaining() >= 3
-                && ledger.charge()
-            {
-                cooperative
-                    .record_work(replica, ChargeKind::FreshValidation, 1)
-                    .expect("probe source receiving validation must enter the ledger");
-                let registered = cooperative
-                    .record_current(replica, source_candidate)
-                    .expect("probe source registration must preserve local execution");
-                if registered == TransitionRecordOutcome::Recorded
-                    && let Some(trial) =
-                        fixed_probe_trial(policy_state.view(), probe_scale, &mut rng)
-                {
-                    let probe_start = ledger.spent();
-                    let (probe_energy, probe_state) =
-                        relax(ledger, trial.view(), run_cfg.relax_steps);
-                    let probe_gradient = grad(ledger, probe_state.view());
-                    let probe_charged = ledger.spent().saturating_sub(probe_start);
-                    candidate_sequence = candidate_sequence
-                        .checked_add(1)
-                        .expect("candidate sequence must fit u64");
-                    let destination = probe_gradient.as_ref().and_then(|gradient| {
-                        lj_catalog_candidate(
-                            &descriptor_space,
-                            &signature.atomic_numbers,
-                            replica,
-                            candidate_sequence,
-                            seed,
-                            ledger.spent(),
-                            probe_energy,
-                            probe_state.view(),
-                            gradient.view(),
-                        )
-                    });
-                    cooperative
-                        .record_work(
-                            replica,
-                            if destination.is_some() {
-                                ChargeKind::AcceptedQuench
-                            } else {
-                                ChargeKind::RejectedQuench
-                            },
-                            u64::try_from(probe_charged).expect("probe quench charge must fit u64"),
-                        )
-                        .expect("fixed-probe quench must enter the cooperative ledger");
-                    match destination {
-                        Some(candidate) if ledger.remaining() > 0 && ledger.charge() => {
-                            cooperative
-                                .record_work(replica, ChargeKind::FreshValidation, 1)
-                                .expect("probe receiving validation must enter the ledger");
-                            let _ = cooperative.record_transition(
-                                replica,
-                                "probe",
-                                TransitionDestination::Resolved(candidate),
-                                false,
-                            );
-                        }
-                        _ => {
-                            let _ = cooperative.record_transition(
-                                replica,
-                                "probe",
-                                TransitionDestination::Unresolved,
-                                false,
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        let policy_energy = if policy_energy.is_finite() {
-            policy_energy
-        } else {
-            slice_trace.policy_reason = "no_valid_energy";
-            slice_trace.charged_work =
-                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-            cooperative
-                .record_slice(replica, slice_trace)
-                .expect("invalid-energy slice must retain a complete diagnostic");
-            continue;
-        };
-        if ledger.remaining() < 2 || !ledger.charge() {
-            slice_trace.policy_reason = "current_registration_budget_exhausted";
-            slice_trace.energy = Some(policy_energy);
-            slice_trace.charged_work =
-                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-            cooperative
-                .record_slice(replica, slice_trace)
-                .expect("registration budget exhaustion must retain a complete diagnostic");
-            continue;
-        }
-        let (registered_energy, registered_gradient) = lj(policy_state.view());
-        cooperative
-            .record_work(replica, ChargeKind::FreshValidation, 1)
-            .expect("live-state validation must enter the cooperative ledger");
-        candidate_sequence = candidate_sequence
-            .checked_add(1)
-            .expect("candidate sequence must fit u64");
-        cooperative
-            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-            .expect("live-state descriptor work must enter the cooperative ledger");
-        let Some(live_candidate) = lj_catalog_candidate(
-            &descriptor_space,
-            &signature.atomic_numbers,
-            replica,
-            candidate_sequence,
-            seed,
-            ledger.spent(),
-            registered_energy,
-            policy_state.view(),
-            registered_gradient.view(),
-        ) else {
-            slice_trace.policy_reason = "current_registration_validation_rejected";
-            slice_trace.energy = registered_energy.is_finite().then_some(registered_energy);
-            slice_trace.charged_work =
-                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-            cooperative
-                .record_slice(replica, slice_trace)
-                .expect("invalid live state must retain a complete diagnostic");
-            continue;
-        };
-        assert!(
-            ledger.charge(),
-            "live-state registration must reserve receiving validation"
-        );
-        cooperative
-            .record_work(replica, ChargeKind::FreshValidation, 1)
-            .expect("live-state receiving validation must enter the cooperative ledger");
-        let policy_descriptor = live_candidate.descriptor.clone();
-        let policy_energy = live_candidate.energy;
-        let policy_outcome = cooperative
-            .registered_policy_input(replica, live_candidate, stall, local_deepened)
-            .expect("registered policy evidence must preserve local invariants");
-        let input = match policy_outcome {
-            PolicyEvidenceOutcome::Remote(input) => input,
-            PolicyEvidenceOutcome::Rejected => {
-                slice_trace.policy_reason = "policy_rejected";
-                slice_trace.energy = Some(policy_energy);
-                slice_trace.charged_work =
-                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-                cooperative
-                    .record_slice(replica, slice_trace)
-                    .expect("rejected policy evidence must retain a complete diagnostic");
-                continue;
-            }
-            PolicyEvidenceOutcome::LocalFallback => {
-                slice_trace.policy_reason = "rpc_fallback";
-                slice_trace.energy = Some(policy_energy);
-                slice_trace.charged_work =
-                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-                cooperative
-                    .record_slice(replica, slice_trace)
-                    .expect("RPC fallback must retain a complete slice diagnostic");
-                continue;
-            }
-            PolicyEvidenceOutcome::SharingDisabled => {
-                slice_trace.policy_reason = "sharing_disabled";
-                slice_trace.energy = Some(policy_energy);
-                slice_trace.charged_work =
-                    u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-                cooperative
-                    .record_slice(replica, slice_trace)
-                    .expect("control-arm execution must retain a complete slice diagnostic");
-                continue;
-            }
-        };
-        let policy_trace = cooperative
-            .events()
-            .last()
-            .and_then(|event| event.policy)
-            .expect("remote policy evidence must be attached to its snapshot event");
-        slice_trace.current_basin = policy_trace.local_basin;
-        slice_trace.active_relation = Some(policy_trace.relation);
-        slice_trace.novelty = Some(policy_trace.novelty);
-        slice_trace.energy = Some(policy_energy);
-        let decision = cooperative
-            .decide(replica, input)
-            .expect("pure policy decision must name the configured replica");
-        slice_trace.policy_role = match decision.action {
-            PolicyAction::ContinueLocal => PolicyRole::Local,
-            PolicyAction::Exploit { .. } => PolicyRole::Explore,
-            PolicyAction::Explore => PolicyRole::Explore,
-            PolicyAction::Leave => PolicyRole::Leave,
-        };
-        slice_trace.policy_reason = decision.reason.code();
-        match decision.action {
-            PolicyAction::ContinueLocal => {}
-            PolicyAction::Exploit { .. } | PolicyAction::Explore | PolicyAction::Leave => {
-                slice_trace.proposal_family = ProposalFamily::BoundaryTransport;
-                let source_registered = if ledger.remaining() >= 2 && ledger.charge() {
-                    let (source_energy, source_gradient) = lj(policy_state.view());
-                    cooperative
-                        .record_work(replica, ChargeKind::FreshValidation, 1)
-                        .expect("transport source validation must enter the ledger");
-                    candidate_sequence = candidate_sequence
-                        .checked_add(1)
-                        .expect("candidate sequence must fit u64");
-                    let source = lj_catalog_candidate(
-                        &descriptor_space,
-                        &signature.atomic_numbers,
-                        replica,
-                        candidate_sequence,
-                        seed,
-                        ledger.spent(),
-                        source_energy,
-                        policy_state.view(),
-                        source_gradient.view(),
-                    );
-                    if let Some(source) = source
-                        && ledger.charge()
-                    {
-                        cooperative
-                            .record_work(replica, ChargeKind::FreshValidation, 1)
-                            .expect("transport source receiving validation must enter the ledger");
-                        cooperative.record_current(replica, source).ok()
-                            == Some(TransitionRecordOutcome::Recorded)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-                if source_registered
-                    && let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                        .boundary_crossing(replica, policy_descriptor.clone(), rng.random())
-                        .expect("boundary-crossing access must preserve local execution")
-                {
-                    slice_trace.sampled_basin = Some(crossing.destination_basin);
-                    cooperative
-                        .record_work(replica, ChargeKind::RemoteProposal, 0)
-                        .expect("remote proposal work must enter the cooperative ledger");
-                    if let Some(proposed) = boundary_crossing_trial(
-                        policy_state.view(),
-                        &crossing,
-                        transport_noise,
-                        transport_radius,
-                        &mut rng,
-                    ) {
-                        slice_trace.cartesian_step_norm = Some(vector_distance(
-                            policy_state.as_slice().expect("LJ state is contiguous"),
-                            proposed.as_slice().expect("LJ proposal is contiguous"),
-                        ));
-                        let transport_start = ledger.spent();
-                        let (transport_energy, transport_state) =
-                            relax(ledger, proposed.view(), run_cfg.relax_steps);
-                        let transport_gradient = grad(ledger, transport_state.view());
-                        let transport_charged = ledger.spent().saturating_sub(transport_start);
-                        candidate_sequence = candidate_sequence
-                            .checked_add(1)
-                            .expect("candidate sequence must fit u64");
-                        let destination = transport_gradient.as_ref().and_then(|gradient| {
-                            boundary_transition_destination(
-                                &descriptor_space,
-                                &signature.atomic_numbers,
-                                replica,
-                                candidate_sequence,
-                                seed,
-                                ledger.spent(),
-                                transport_energy,
-                                transport_state.view(),
-                                gradient.view(),
-                            )
-                        });
-                        cooperative
-                            .record_work(
-                                replica,
-                                if destination.is_some() {
-                                    ChargeKind::AcceptedQuench
-                                } else {
-                                    ChargeKind::RejectedQuench
-                                },
-                                u64::try_from(transport_charged)
-                                    .expect("transport quench charge must fit u64"),
-                            )
-                            .expect("transport quench must enter the cooperative ledger");
-                        if let Some((action, destination)) = destination
-                            && ledger.charge()
-                        {
-                            cooperative
-                                .record_work(replica, ChargeKind::FreshValidation, 1)
-                                .expect("transport receiving validation must enter the ledger");
-                            let _ = cooperative.record_transition(
-                                replica,
-                                action,
-                                TransitionDestination::Resolved(destination),
-                                true,
-                            );
-                            slice_trace.validation = SliceValidation::Accepted;
-                            slice_trace.quench = SliceQuench::Converged;
-                            slice_trace.adoption = SliceAdoption::Adopted;
-                            current = transport_state.clone();
-                            current_energy = transport_energy;
-                            if transport_energy < best {
-                                best = transport_energy;
-                                best_state = Some(transport_state);
-                                stall = 0;
-                            }
-                        } else {
-                            slice_trace.validation = SliceValidation::Rejected;
-                            slice_trace.quench = SliceQuench::Rejected;
-                            slice_trace.adoption = SliceAdoption::Rejected;
-                        }
-                    } else {
-                        slice_trace.adoption = SliceAdoption::Rejected;
-                    }
-                } else {
-                    slice_trace.adoption = SliceAdoption::Rejected;
-                }
-            }
-        }
-
-        let population_threshold = usize::try_from(
-            population_progress
-                .epoch()
-                .checked_add(1)
-                .and_then(|epoch| {
-                    epoch.checked_mul(
-                        u64::try_from(population_interval)
-                            .expect("population interval must fit u64"),
-                    )
-                })
-                .expect("population charged-work threshold must fit u64"),
-        )
-        .expect("population charged-work threshold must fit usize");
-        let mut population_representative = None;
-        let population_threshold_reached = population_threshold <= last_population_threshold
-            && ledger.spent() >= population_threshold;
-        if !population_progress.is_pending()
-            && population_threshold_reached
-            && ledger.remaining() >= 3
-            && ledger.charge()
-        {
-            let (population_state, _) =
-                cooperative_population_point(current.view(), current_energy);
-            let (incumbent_energy, incumbent_gradient) = lj(population_state.view());
-            cooperative
-                .record_work(replica, ChargeKind::FreshValidation, 1)
-                .expect("incumbent validation must enter the cooperative ledger");
-            candidate_sequence = candidate_sequence
-                .checked_add(1)
-                .expect("candidate sequence must fit u64");
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("incumbent descriptor work must enter the cooperative ledger");
-            if let Some(candidate) = lj_catalog_candidate(
-                &descriptor_space,
-                &signature.atomic_numbers,
-                replica,
-                candidate_sequence,
-                seed,
-                ledger.spent(),
-                incumbent_energy,
-                population_state.view(),
-                incumbent_gradient.view(),
-            ) {
-                assert!(
-                    ledger.charge(),
-                    "population threshold must reserve incumbent receiving validation"
-                );
-                cooperative
-                    .record_work(replica, ChargeKind::FreshValidation, 1)
-                    .expect("incumbent receiving validation must enter the cooperative ledger");
-                let _ = cooperative.offer_candidate(replica, candidate.clone());
-                population_representative = Some(candidate);
-            }
-        }
-        let population = match population_progress.action(
-            population_threshold_reached,
-            population_representative.is_some(),
-        ) {
-            PopulationEpochAction::Submit => {
-                assert!(
-                    ledger.charge(),
-                    "slice reservation must cover population receiving validation"
-                );
-                cooperative
-                    .record_work(replica, ChargeKind::FreshValidation, 1)
-                    .expect("population validation must enter the cooperative ledger");
-                Some(
-                    cooperative
-                        .submit_population(
-                            replica,
-                            population_progress.epoch(),
-                            population_representative
-                                .expect("submit action requires a validated representative"),
-                        )
-                        .expect("population submission must preserve cooperative invariants"),
-                )
-            }
-            PopulationEpochAction::Poll => Some(
-                cooperative
-                    .poll_population(replica, population_progress.epoch())
-                    .expect("population polling must preserve cooperative invariants"),
-            ),
-            PopulationEpochAction::Abstain => Some(
-                cooperative
-                    .abstain_population(replica, population_progress.epoch())
-                    .expect("population abstention must preserve cooperative invariants"),
-            ),
-            PopulationEpochAction::LocalWork => None,
-        };
-        if let Some(population) = population {
-            match population {
-                PopulationSynchronizationOutcome::Pending { .. } => {
-                    population_progress.observe_pending();
-                }
-                PopulationSynchronizationOutcome::Ready { parent, plan } => {
-                    let family =
-                        population_family_position(&plan.destinations, &plan.parents, replica)
-                            .expect("validated population plan must address this replica");
-                    let draw = population_rejuvenation_draw(
-                        seed,
-                        population_progress.epoch(),
-                        replica,
-                        family.ordinal(),
-                    );
-                    let crossing = match cooperative
-                        .boundary_crossing(replica, parent.descriptor.clone(), draw)
-                        .expect("population frontier access must preserve local execution")
-                    {
-                        CatalogBoundaryOutcome::Crossing(crossing) => {
-                            cooperative
-                                .record_work(replica, ChargeKind::RemoteProposal, 0)
-                                .expect("population frontier proposal must enter the ledger");
-                            Some(crossing)
-                        }
-                        _ => None,
-                    };
-                    let next_state = population_region_trial(
-                        current.view(),
-                        crossing.as_ref(),
-                        transport_noise,
-                        transport_radius,
-                        draw,
-                    );
-                    let next_energy = if next_state == current {
-                        current_energy
-                    } else {
-                        f64::NAN
-                    };
-                    current = next_state;
-                    current_energy = next_energy;
-                    population_progress.observe_ready();
-                }
-                PopulationSynchronizationOutcome::Rejected => {
-                    panic!("coordinator rejected a catalog-validated population representative")
-                }
-                PopulationSynchronizationOutcome::LocalFallback
-                | PopulationSynchronizationOutcome::SharingDisabled => {}
-            }
-        }
-        slice_trace.energy = current_energy.is_finite().then_some(current_energy);
-        slice_trace.charged_work =
-            u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-        cooperative
-            .record_slice(replica, slice_trace)
-            .expect("every local slice must retain one complete diagnostic");
-        println!(
-            "      catalog slice {slices} spent {} best {best:.6} stall {stall}",
-            ledger.spent()
-        );
-        let _ = io::stdout().flush();
-    }
-
-    let trace = cooperative.json_lines(&RunManifest {
-        campaign,
-        ensemble,
-        sharing: endpoint.is_some(),
-    });
-    if let Ok(path) = std::env::var("CATALOG_TRACE") {
-        let mut output = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .expect("CATALOG_TRACE must be writable");
-        output
-            .write_all(trace.as_bytes())
-            .expect("catalog trace write must succeed");
-    } else {
-        eprint!("{trace}");
-    }
-    Outcome {
-        best,
-        best_state,
-        final_state: Some(current),
-        final_energy: current_energy,
-        accepted_transitions,
-        hops,
-        basins,
-        charged: ledger.spent(),
-        screened_out,
-        returned,
-        ..Outcome::default()
-    }
 }
 
 #[cfg(feature = "bank-rpc")]

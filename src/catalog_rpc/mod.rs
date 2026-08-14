@@ -198,6 +198,11 @@ pub enum CatalogOperation {
         /// Charged-work synchronization epoch.
         epoch: u64,
     },
+    /// Join one epoch by reference to the best validated candidate on file.
+    PopulationJoin {
+        /// Charged-work synchronization epoch.
+        epoch: u64,
+    },
     /// Record one action-conditioned transition from the replica's live basin.
     RecordTransition {
         /// Stable target-blind proposal-action identifier.
@@ -569,6 +574,9 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::PopulationAbstain { epoch } => {
             operation.init_population_abstain().set_epoch(*epoch);
         }
+        CatalogOperation::PopulationJoin { epoch } => {
+            operation.init_population_join().set_epoch(*epoch);
+        }
         CatalogOperation::RecordTransition {
             action,
             destination,
@@ -676,6 +684,12 @@ pub(crate) fn decode_request_reader(
             let abstain = abstain.map_err(wire_error)?;
             CatalogOperation::PopulationAbstain {
                 epoch: abstain.get_epoch(),
+            }
+        }
+        catalog_request::operation::PopulationJoin(join) => {
+            let join = join.map_err(wire_error)?;
+            CatalogOperation::PopulationJoin {
+                epoch: join.get_epoch(),
             }
         }
         catalog_request::operation::RecordTransition(transition) => {
