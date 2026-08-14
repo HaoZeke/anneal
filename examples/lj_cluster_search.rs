@@ -323,6 +323,37 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn active_checkpoint_schedules_population_from_charged_work() {
+        let mut progress = PopulationEpochProgress::default();
+
+        assert_eq!(
+            active_population_action(&progress, 999, 2_001, 1_000, true),
+            PopulationEpochAction::LocalWork
+        );
+        assert_eq!(
+            active_population_action(&progress, 1_000, 2_000, 1_000, true),
+            PopulationEpochAction::Submit
+        );
+
+        progress.observe_pending();
+        assert_eq!(
+            active_population_action(&progress, 1_500, 1_500, 1_000, false),
+            PopulationEpochAction::Poll
+        );
+
+        progress.observe_ready();
+        assert_eq!(
+            active_population_action(&progress, 1_999, 1_001, 1_000, true),
+            PopulationEpochAction::LocalWork
+        );
+        assert_eq!(
+            active_population_action(&progress, 2_000, 1_000, 1_000, true),
+            PopulationEpochAction::Submit
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn quenched_transport_destination_keeps_its_action_label() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
