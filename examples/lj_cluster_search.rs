@@ -1839,8 +1839,11 @@ fn active_population_action(
             .expect("population charged-work threshold must fit u64"),
     )
     .expect("population charged-work threshold must fit usize");
+    let budget = charged
+        .checked_add(remaining)
+        .expect("charged and remaining work must fit usize");
     progress.action(
-        charged >= threshold && remaining > 0,
+        charged >= threshold && threshold < budget,
         representative_available,
     )
 }
@@ -2184,32 +2187,34 @@ fn run_capnp_catalog(
             charged_work: u64::try_from(checkpoint_charged)
                 .expect("checkpoint charge must fit u64"),
         };
-        if snapshot.remaining() == 0 {
-            cooperative
-                .record_slice(replica, trace)
-                .expect("terminal checkpoint trace must remain complete");
-            return CheckpointAction::Continue;
-        }
-        let population = match active_population_action(
-            &population_progress,
-            snapshot.charged(),
-            snapshot.remaining(),
-            population_interval,
-            true,
-        ) {
-            PopulationEpochAction::Submit => Some(
-                cooperative
-                    .submit_population(replica, population_progress.epoch(), population_candidate)
-                    .expect("population submission must preserve cooperative invariants"),
-            ),
-            PopulationEpochAction::Poll => Some(
-                cooperative
-                    .poll_population(replica, population_progress.epoch())
-                    .expect("population polling must preserve cooperative invariants"),
-            ),
-            PopulationEpochAction::LocalWork => None,
-        };
-        if let Some(population) = population {
+        let mut population_assignment = None;
+        loop {
+            let population = match active_population_action(
+                &population_progress,
+                snapshot.charged(),
+                snapshot.remaining(),
+                population_interval,
+                true,
+            ) {
+                PopulationEpochAction::Submit => Some(
+                    cooperative
+                        .submit_population(
+                            replica,
+                            population_progress.epoch(),
+                            population_candidate.clone(),
+                        )
+                        .expect("population submission must preserve cooperative invariants"),
+                ),
+                PopulationEpochAction::Poll => Some(
+                    cooperative
+                        .poll_population(replica, population_progress.epoch())
+                        .expect("population polling must preserve cooperative invariants"),
+                ),
+                PopulationEpochAction::LocalWork => None,
+            };
+            let Some(population) = population else {
+                break;
+            };
             if matches!(population, PopulationSynchronizationOutcome::Pending { .. }) {
                 population_progress.observe_pending();
             }
@@ -2226,64 +2231,69 @@ fn run_capnp_catalog(
             });
             match population {
                 PopulationSynchronizationOutcome::Ready { parent, plan } => {
-                    let family =
-                        population_family_position(&plan.destinations, &plan.parents, replica)
-                            .expect("validated population plan must address this replica");
-                    let draw = population_rejuvenation_draw(
-                        seed,
-                        population_progress.epoch(),
-                        replica,
-                        family.ordinal(),
-                    );
-                    let crossing = match cooperative
-                        .boundary_crossing(replica, parent.descriptor, draw)
-                        .expect("population frontier access must preserve local execution")
-                    {
-                        CatalogBoundaryOutcome::Crossing(crossing) => {
-                            cooperative
-                                .record_work(replica, ChargeKind::RemoteProposal, 0)
-                                .expect("population frontier proposal must enter the ledger");
-                            Some(crossing)
-                        }
-                        _ => None,
-                    };
+                    let completed_epoch = population_progress.epoch();
                     population_progress.observe_ready();
-                    if let Some(crossing) = crossing {
-                        let state = population_region_trial(
-                            snapshot.current_state(),
-                            Some(&crossing),
-                            transport_noise,
-                            transport_radius,
-                            draw,
-                        );
-                        if state != snapshot.current_state() {
-                            trace.policy_role = PolicyRole::Explore;
-                            trace.policy_reason = "population_assignment";
-                            trace.proposal_family = ProposalFamily::PopulationReconfiguration;
-                            trace.sampled_basin = Some(crossing.destination_basin);
-                            trace.cartesian_step_norm = Some(vector_distance(
-                                snapshot
-                                    .current_state()
-                                    .as_slice()
-                                    .expect("LJ state is contiguous"),
-                                state.as_slice().expect("LJ proposal is contiguous"),
-                            ));
-                            trace.adoption = SliceAdoption::Adopted;
-                            cooperative
-                                .record_slice(replica, trace)
-                                .expect("population checkpoint trace must remain complete");
-                            return CheckpointAction::BoundaryProposal {
-                                state,
-                                action: "population_boundary".to_owned(),
-                            };
-                        }
-                    }
+                    population_assignment = Some((completed_epoch, parent, plan));
                 }
                 PopulationSynchronizationOutcome::Rejected
                 | PopulationSynchronizationOutcome::LocalFallback
-                | PopulationSynchronizationOutcome::SharingDisabled => {}
+                | PopulationSynchronizationOutcome::SharingDisabled => break,
                 PopulationSynchronizationOutcome::Pending { .. } => {
                     unreachable!("population resolver returns only a terminal outcome")
+                }
+            }
+        }
+        if snapshot.remaining() == 0 {
+            cooperative
+                .record_slice(replica, trace)
+                .expect("terminal checkpoint trace must remain complete");
+            return CheckpointAction::Continue;
+        }
+        if let Some((completed_epoch, parent, plan)) = population_assignment {
+            let family = population_family_position(&plan.destinations, &plan.parents, replica)
+                .expect("validated population plan must address this replica");
+            let draw =
+                population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
+            let crossing = match cooperative
+                .boundary_crossing(replica, parent.descriptor, draw)
+                .expect("population frontier access must preserve local execution")
+            {
+                CatalogBoundaryOutcome::Crossing(crossing) => {
+                    cooperative
+                        .record_work(replica, ChargeKind::RemoteProposal, 0)
+                        .expect("population frontier proposal must enter the ledger");
+                    Some(crossing)
+                }
+                _ => None,
+            };
+            if let Some(crossing) = crossing {
+                let state = population_region_trial(
+                    snapshot.current_state(),
+                    Some(&crossing),
+                    transport_noise,
+                    transport_radius,
+                    draw,
+                );
+                if state != snapshot.current_state() {
+                    trace.policy_role = PolicyRole::Explore;
+                    trace.policy_reason = "population_assignment";
+                    trace.proposal_family = ProposalFamily::PopulationReconfiguration;
+                    trace.sampled_basin = Some(crossing.destination_basin);
+                    trace.cartesian_step_norm = Some(vector_distance(
+                        snapshot
+                            .current_state()
+                            .as_slice()
+                            .expect("LJ state is contiguous"),
+                        state.as_slice().expect("LJ proposal is contiguous"),
+                    ));
+                    trace.adoption = SliceAdoption::Adopted;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("population checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state,
+                        action: "population_boundary".to_owned(),
+                    };
                 }
             }
         }
