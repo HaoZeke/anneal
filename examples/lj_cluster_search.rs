@@ -1691,11 +1691,13 @@ fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     }
 }
 
+#[cfg(test)]
 #[cfg(feature = "bank-rpc")]
 fn cooperative_policy_point(current: ArrayView1<f64>, current_energy: f64) -> (Array1<f64>, f64) {
     (current.to_owned(), current_energy)
 }
 
+#[cfg(test)]
 #[cfg(feature = "bank-rpc")]
 fn cooperative_population_point(
     current: ArrayView1<f64>,
@@ -1816,10 +1818,6 @@ impl PopulationEpochProgress {
         self.epoch
     }
 
-    fn is_pending(&self) -> bool {
-        self.pending
-    }
-
     fn action(
         &self,
         threshold_reached: bool,
@@ -1882,6 +1880,7 @@ fn active_population_action(
     )
 }
 
+#[cfg(test)]
 #[cfg(feature = "bank-rpc")]
 fn resolve_population_barrier<F>(
     mut outcome: anneal_core::cooperative_search::PopulationSynchronizationOutcome,
@@ -2489,6 +2488,7 @@ fn lj_catalog_candidate(
     })
 }
 
+#[cfg(test)]
 #[cfg(feature = "bank-rpc")]
 #[allow(clippy::too_many_arguments)]
 fn lj_transition_candidates(
@@ -2532,6 +2532,7 @@ fn lj_transition_candidates(
     Some((source, destination))
 }
 
+#[cfg(test)]
 #[cfg(feature = "bank-rpc")]
 #[allow(clippy::too_many_arguments)]
 fn boundary_transition_destination(

@@ -977,6 +977,7 @@ mod run {
             self.handle_population_result(replica, epoch, result)
         }
 
+        /// Ask once whether the epoch has closed, without waiting.
         pub fn poll_population(
             &mut self,
             replica: u32,

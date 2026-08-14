@@ -638,6 +638,11 @@ impl SynchronousPopulation {
         self.complete_open_epoch(epoch)
     }
 
+    /// Submit one replica's member to the open epoch.
+    ///
+    /// Completes the epoch when every replica that has not abstained has
+    /// submitted; a repeat of an identical submission is answered from the
+    /// completed record.
     pub fn submit(
         &mut self,
         epoch: u64,
