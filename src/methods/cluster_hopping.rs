@@ -991,6 +991,23 @@ where
     // Evaluated screen state of the trial that entered the current basin,
     // kept as the exit point a stalled chain leaves through.
     let mut basin_entry: Option<Array1<f64>> = None;
+    // Learned stall response. Each enabled escape is one arm of the same
+    // Beta-Bernoulli Thompson allocation the move set uses, so a stall
+    // draws one response and the draw is rewarded when the escape lands
+    // deeper than the incumbent it left, instead of every enabled
+    // mechanism firing in file order. Every arm is domain-free: the trail
+    // is the objective's own descent history, the climb needs a gradient
+    // alone, the restart draws fresh coordinates. With one arm enabled the
+    // allocator always selects it, so single-flag behaviour is unchanged.
+    let stall_arms: Vec<&'static str> = [
+        cfg.trail_on_stall.then_some("trail"),
+        cfg.escape_on_stall.then_some("climb"),
+        cfg.restart_on_stall.then_some("restart"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let mut stall_allocator = FlooredThompson::new(stall_arms.len().max(1));
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -2343,7 +2360,18 @@ where
         // (J. Chem. Phys. 111, 8417 (1999)): a random restart lands
         // back on Mackay. The manuscript stall step is tabu only.
         // A directed leave is `escape_on_stall` (Goedecker / Schönborn).
-        if cfg.restart_on_stall && stuck {
+        let stall_response = if stuck && !stall_arms.is_empty() {
+            Some(if stall_arms.len() > 1 {
+                stall_allocator.select(rng)
+            } else {
+                0
+            })
+        } else {
+            None
+        };
+        let stalled_from = e;
+        let mut stall_outcome: Option<bool> = None;
+        if stall_response.map(|arm| stall_arms[arm] == "restart") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
             let fresh = if let Some(groups) = cfg.move_library.declared_groups() {
@@ -2360,10 +2388,9 @@ where
             e = ef;
             x = xf;
             here = None;
+            stall_outcome = Some(e < stalled_from);
         }
-        let mut stall_handled = false;
-        if cfg.trail_on_stall
-            && stuck
+        if stall_response.map(|arm| stall_arms[arm] == "trail") == Some(true)
             && let Some(x_entry) = basin_entry.take()
         {
             quiet = 0;
@@ -2399,9 +2426,9 @@ where
             e = ee;
             x = xe;
             here = None;
-            stall_handled = true;
+            stall_outcome = Some(e < stalled_from);
         }
-        if cfg.escape_on_stall && stuck && !stall_handled {
+        if stall_response.map(|arm| stall_arms[arm] == "climb") == Some(true) {
             quiet = 0;
             longest_quiet = 0;
             if let Some(g) = grad.as_deref_mut() {
@@ -2446,8 +2473,12 @@ where
                     if !cfg.minima_hopping {
                         here = None;
                     }
+                    stall_outcome = Some(e < stalled_from);
                 }
             }
+        }
+        if let (Some(arm), Some(deeper)) = (stall_response, stall_outcome) {
+            stall_allocator.update(arm, deeper);
         }
 
         if n_rep > 1 {
