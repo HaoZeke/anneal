@@ -2192,10 +2192,7 @@ fn run_capnp_catalog(
             PopulationEpochAction::LocalWork => None,
         };
         if let Some(population) = population {
-            if matches!(
-                population,
-                PopulationSynchronizationOutcome::Pending { .. }
-            ) {
+            if matches!(population, PopulationSynchronizationOutcome::Pending { .. }) {
                 population_progress.observe_pending();
             }
             let mut polls = 0usize;
