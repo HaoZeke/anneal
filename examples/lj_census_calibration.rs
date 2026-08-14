@@ -12,7 +12,7 @@ use anneal_core::catalog::lj::{
     CALIBRATION_GRADIENT_TOLERANCE, accepts_repeated_quench, descriptor_space,
     discovered_minimum_id, perturb_reference, system_signature,
 };
-use anneal_core::methods::cluster_hopping::{Config, random_cluster_in_radius};
+use anneal_core::methods::cluster_hopping::{Config, random_cluster};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use anneal_core::shape::match_shapes;
@@ -25,6 +25,8 @@ struct QuenchEvidence {
     gradient_norm: f64,
     evaluations: usize,
 }
+
+const SOURCE_DENSITY: f64 = 0.7;
 
 fn hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(2 * bytes.len());
@@ -142,9 +144,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             .ok_or("right perturbation seed overflow")?;
         attempt += 1;
         let mut source_rng = rand::rngs::StdRng::seed_from_u64(source_seed);
-        let source_start = random_cluster_in_radius(
+        let source_start = random_cluster(
             n_points,
-            config.start_radius(),
+            SOURCE_DENSITY,
             config.min_separation,
             &mut source_rng,
         );
@@ -248,7 +250,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     pairs.flush()?;
     if accepted != pair_count {
         return Err(format!(
-            "accepted {accepted} of {pair_count} pairs in {attempt} deterministic attempts"
+            concat!(
+                "accepted {accepted} of {pair_count} pairs in {attempt} deterministic attempts; ",
+                "source_rejections={source_rejections} quench_rejections={quench_rejections} ",
+                "identity_rejections={identity_rejections}"
+            )
         )
         .into());
     }
@@ -260,7 +266,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             "{{\n  \"artifact_schema_version\": 1,\n  \"system\": \"lj{}\",",
             "\n  \"signature_digest\": \"{}\",\n  \"descriptor_schema\": {},",
             "\n  \"source_policy\": \"seeded-random-cluster-quench-v1\",",
-            "\n  \"source_radius\": {:.17e},\n  \"source_min_separation\": {:.17e},",
+            "\n  \"source_density\": {:.17e},\n  \"source_min_separation\": {:.17e},",
             "\n  \"pair_count\": {},",
             "\n  \"identity_contract\": {{\"energy_abs_tolerance\": 1e-7,",
             "\"gradient_norm_tolerance\": 1e-5,\"ira_distance_tolerance\": 1e-4}},",
@@ -272,7 +278,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         n_points,
         signature_digest,
         schema_json,
-        config.start_radius(),
+        SOURCE_DENSITY,
         config.min_separation,
         pair_count,
         attempt,
