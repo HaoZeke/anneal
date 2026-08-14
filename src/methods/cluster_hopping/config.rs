@@ -154,6 +154,15 @@ pub struct Config {
     /// improving costs a few per cent and supplies the one thing a biased
     /// random walk has no mechanism for: leaving a funnel on purpose.
     pub escape_on_stall: bool,
+    /// Leave a stalled basin back through the door the chain came in.
+    ///
+    /// The screen state of the accepted trial that entered the current basin
+    /// is an evaluated waypoint of the descent, partway down from the ridge.
+    /// Restarting from it with an outward push costs only the requench,
+    /// against 637 evaluations for a Lanczos climb, and starts from a point
+    /// the landscape has already priced. The climb remains the fallback when
+    /// no entry is on record.
+    pub trail_on_stall: bool,
     /// Smallest number of hops without improvement before a climb is
     /// triggered.
     ///
@@ -788,6 +797,7 @@ impl Config {
             escape_overshoot: 1.5,
             escape_max_climb: 24,
             escape_on_stall: false,
+            trail_on_stall: false,
             escape_stall_patience: 5_000,
             escape_stall_factor: 2.0,
             ladder_top: 4.0,
