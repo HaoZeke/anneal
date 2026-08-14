@@ -1,6 +1,6 @@
 use anneal_core::catalog::lj::{
-    accepts_calibration_minimum, descriptor_space, fresh_evaluation, parse_reference_coordinates,
-    perturb_reference, system_signature, validator_config,
+    accepts_repeated_quench, descriptor_space, discovered_minimum_id, fresh_evaluation,
+    parse_reference_coordinates, perturb_reference, system_signature, validator_config,
 };
 use ndarray::ArrayView1;
 
@@ -55,36 +55,45 @@ fn development_reference_parser_requires_one_finite_xyz_row_per_site() {
 
 #[test]
 fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
-    assert!(accepts_calibration_minimum(
+    assert!(accepts_repeated_quench(
         -397.492331,
         -397.492331 + 5e-8,
         8e-6,
         2e-5,
     ));
-    assert!(!accepts_calibration_minimum(
+    assert!(!accepts_repeated_quench(
         -397.492331,
         -397.492331 + 2e-6,
         8e-6,
         2e-5,
     ));
-    assert!(!accepts_calibration_minimum(
+    assert!(!accepts_repeated_quench(
         -397.492331,
         -397.492331,
         2e-5,
         2e-5,
     ));
-    assert!(!accepts_calibration_minimum(
+    assert!(!accepts_repeated_quench(
         -397.492331,
         -397.492331,
         8e-6,
         2e-4,
     ));
-    assert!(!accepts_calibration_minimum(
+    assert!(!accepts_repeated_quench(
         -397.492331,
         f64::NAN,
         8e-6,
         2e-5,
     ));
+}
+
+#[test]
+fn discovered_minimum_identity_uses_only_search_evidence() {
+    let identity = discovered_minimum_id(75, 7_500_123, -381.25);
+    assert_eq!(identity, "lj75-search-seed-7500123-energy-c077d40000000000");
+    assert!(!identity.contains("global"));
+    assert_ne!(identity, discovered_minimum_id(75, 7_500_124, -381.25));
+    assert_ne!(identity, discovered_minimum_id(75, 7_500_123, -381.5));
 }
 
 #[test]
