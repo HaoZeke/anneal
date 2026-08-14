@@ -1595,6 +1595,14 @@ fn cooperative_policy_point(current: ArrayView1<f64>, current_energy: f64) -> (A
 }
 
 #[cfg(feature = "bank-rpc")]
+fn cooperative_population_point(
+    current: ArrayView1<f64>,
+    current_energy: f64,
+) -> (Array1<f64>, f64) {
+    (current.to_owned(), current_energy)
+}
+
+#[cfg(feature = "bank-rpc")]
 fn fixed_probe_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     scale: f64,
@@ -2832,7 +2840,9 @@ fn run_capnp_catalog_sliced(
             && ledger.remaining() >= 3
             && ledger.charge()
         {
-            let (incumbent_energy, incumbent_gradient) = lj(policy_state.view());
+            let (population_state, _) =
+                cooperative_population_point(current.view(), current_energy);
+            let (incumbent_energy, incumbent_gradient) = lj(population_state.view());
             cooperative
                 .record_work(replica, ChargeKind::FreshValidation, 1)
                 .expect("incumbent validation must enter the cooperative ledger");
@@ -2850,7 +2860,7 @@ fn run_capnp_catalog_sliced(
                 seed,
                 ledger.spent(),
                 incumbent_energy,
-                policy_state.view(),
+                population_state.view(),
                 incumbent_gradient.view(),
             ) {
                 assert!(
