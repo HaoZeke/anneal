@@ -1774,6 +1774,31 @@ impl PopulationEpochProgress {
     }
 }
 
+#[cfg(feature = "bank-rpc")]
+fn active_population_action(
+    progress: &PopulationEpochProgress,
+    charged: usize,
+    remaining: usize,
+    interval: usize,
+    representative_available: bool,
+) -> PopulationEpochAction {
+    assert!(interval > 0, "population interval must be positive");
+    let threshold = usize::try_from(
+        progress
+            .epoch()
+            .checked_add(1)
+            .and_then(|epoch| {
+                epoch.checked_mul(u64::try_from(interval).expect("population interval fits u64"))
+            })
+            .expect("population charged-work threshold must fit u64"),
+    )
+    .expect("population charged-work threshold must fit usize");
+    progress.action(
+        charged >= threshold && remaining > 0,
+        representative_available,
+    )
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -1791,8 +1816,11 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole, ProposalFamily,
-        RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
+        PopulationSynchronizationOutcome, RunManifest, SliceAdoption, SliceQuench, SliceTrace,
+        SliceValidation, TransitionRecordOutcome,
+    };
+    use anneal_core::methods::feynman_kac::{
+        population_family_position, population_rejuvenation_draw,
     };
     use rand::{Rng, SeedableRng};
 
@@ -1856,6 +1884,15 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0)
         .unwrap_or(run_cfg.length_scale * (run_cfg.n_points as f64).sqrt());
+    let minimum_population_interval = checkpoint_interval
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(2))
+        .expect("catalog checkpoint must admit a charged-work population interval");
+    let population_interval = std::env::var("CATALOG_POPULATION_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(50_000)
+        .max(minimum_population_interval);
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
@@ -1876,6 +1913,7 @@ fn run_capnp_catalog(
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     let mut best_at_checkpoint = f64::INFINITY;
+    let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
@@ -2009,16 +2047,6 @@ fn run_capnp_catalog(
         } else {
             stall = stall.saturating_add(1);
         }
-        if checkpoint_sequence.is_multiple_of(probe_interval)
-            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
-            && let Some(state) =
-                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
-        {
-            return CheckpointAction::ProbeProposal {
-                state,
-                action: "probe".to_owned(),
-            };
-        }
         let Some(current_gradient) = snapshot.current_gradient() else {
             return CheckpointAction::Continue;
         };
@@ -2042,18 +2070,11 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = current_candidate.descriptor.clone();
-        let registered = cooperative.record_current(replica, current_candidate).ok();
-        if matches!(
-            registered,
-            Some(TransitionRecordOutcome::Rejected | TransitionRecordOutcome::LocalFallback) | None
-        ) {
-            return CheckpointAction::Continue;
-        }
+        let population_candidate = current_candidate.clone();
         let policy = match cooperative
-            .policy_input(
+            .registered_policy_input(
                 replica,
-                descriptor.clone(),
-                snapshot.current_energy(),
+                current_candidate,
                 stall,
                 local_deepened,
             )
@@ -2064,6 +2085,11 @@ fn run_capnp_catalog(
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
         };
+        let policy_trace = cooperative
+            .events()
+            .last()
+            .and_then(|event| event.policy)
+            .expect("registered policy evidence must remain attached to its snapshot");
         let decision = cooperative
             .decide(replica, policy)
             .expect("policy decision must name the configured replica");
@@ -2072,16 +2098,8 @@ fn run_capnp_catalog(
             .expect("slice sequence must fit u64");
         let mut trace = SliceTrace {
             slice: slice_sequence,
-            current_basin: cooperative
-                .events()
-                .last()
-                .and_then(|event| event.policy)
-                .and_then(|policy| policy.local_basin),
-            active_relation: cooperative
-                .events()
-                .last()
-                .and_then(|event| event.policy)
-                .map(|policy| policy.relation),
+            current_basin: policy_trace.local_basin,
+            active_relation: Some(policy_trace.relation),
             policy_role: PolicyRole::Local,
             policy_reason: decision.reason.code(),
             proposal_family: ProposalFamily::Local,
@@ -2091,11 +2109,7 @@ fn run_capnp_catalog(
             validation: SliceValidation::Accepted,
             quench: SliceQuench::Converged,
             adoption: SliceAdoption::NotAttempted,
-            novelty: cooperative
-                .events()
-                .last()
-                .and_then(|event| event.policy)
-                .map(|policy| policy.novelty),
+            novelty: Some(policy_trace.novelty),
             energy: Some(snapshot.current_energy()),
             charged_work: u64::try_from(checkpoint_charged)
                 .expect("checkpoint charge must fit u64"),
@@ -2105,6 +2119,106 @@ fn run_capnp_catalog(
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
+        }
+        let population = match active_population_action(
+            &population_progress,
+            snapshot.charged(),
+            snapshot.remaining(),
+            population_interval,
+            true,
+        ) {
+            PopulationEpochAction::Submit => Some(
+                cooperative
+                    .submit_population(
+                        replica,
+                        population_progress.epoch(),
+                        population_candidate,
+                    )
+                    .expect("population submission must preserve cooperative invariants"),
+            ),
+            PopulationEpochAction::Poll => Some(
+                cooperative
+                    .poll_population(replica, population_progress.epoch())
+                    .expect("population polling must preserve cooperative invariants"),
+            ),
+            PopulationEpochAction::LocalWork => None,
+        };
+        if let Some(population) = population {
+            match population {
+                PopulationSynchronizationOutcome::Pending { .. } => {
+                    population_progress.observe_pending();
+                }
+                PopulationSynchronizationOutcome::Ready { parent, plan } => {
+                    let family =
+                        population_family_position(&plan.destinations, &plan.parents, replica)
+                            .expect("validated population plan must address this replica");
+                    let draw = population_rejuvenation_draw(
+                        seed,
+                        population_progress.epoch(),
+                        replica,
+                        family.ordinal(),
+                    );
+                    let crossing = match cooperative
+                        .boundary_crossing(replica, parent.descriptor, draw)
+                        .expect("population frontier access must preserve local execution")
+                    {
+                        CatalogBoundaryOutcome::Crossing(crossing) => {
+                            cooperative
+                                .record_work(replica, ChargeKind::RemoteProposal, 0)
+                                .expect("population frontier proposal must enter the ledger");
+                            Some(crossing)
+                        }
+                        _ => None,
+                    };
+                    population_progress.observe_ready();
+                    if let Some(crossing) = crossing {
+                        let state = population_region_trial(
+                            snapshot.current_state(),
+                            Some(&crossing),
+                            transport_noise,
+                            transport_radius,
+                            draw,
+                        );
+                        if state != snapshot.current_state() {
+                            trace.policy_role = PolicyRole::Explore;
+                            trace.policy_reason = "population_assignment";
+                            trace.proposal_family = ProposalFamily::PopulationReconfiguration;
+                            trace.sampled_basin = Some(crossing.destination_basin);
+                            trace.cartesian_step_norm = Some(vector_distance(
+                                snapshot
+                                    .current_state()
+                                    .as_slice()
+                                    .expect("LJ state is contiguous"),
+                                state.as_slice().expect("LJ proposal is contiguous"),
+                            ));
+                            trace.adoption = SliceAdoption::Adopted;
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("population checkpoint trace must remain complete");
+                            return CheckpointAction::BoundaryProposal {
+                                state,
+                                action: "population_boundary".to_owned(),
+                            };
+                        }
+                    }
+                }
+                PopulationSynchronizationOutcome::Rejected
+                | PopulationSynchronizationOutcome::LocalFallback
+                | PopulationSynchronizationOutcome::SharingDisabled => {}
+            }
+        }
+        if checkpoint_sequence.is_multiple_of(probe_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let Some(state) =
+                fixed_probe_trial(snapshot.current_state(), probe_scale, &mut probe_rng)
+        {
+            cooperative
+                .record_slice(replica, trace)
+                .expect("probe checkpoint trace must remain complete");
+            return CheckpointAction::ProbeProposal {
+                state,
+                action: "probe".to_owned(),
+            };
         }
         match decision.action {
             PolicyAction::ContinueLocal => {}
