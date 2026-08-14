@@ -223,3 +223,59 @@ fn cloned_offspring_receive_stable_distinct_rejuvenation_draws() {
     assert!(population_family_position(&destinations, &parents[..3], 0).is_none());
     assert!(population_family_position(&destinations, &parents, 9).is_none());
 }
+
+#[test]
+fn an_abstaining_replica_releases_the_epoch_instead_of_holding_it_open() {
+    // Three replicas submit and one cannot. Requiring the absent one holds
+    // the barrier open until every budget drains, which is what stalled the
+    // 2026-08-14 campaign: one replica polled sixty thousand times while
+    // its peers finished and left.
+    let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 17).unwrap();
+    for replica in 0..3u32 {
+        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        assert!(matches!(
+            population.submit(0, member).unwrap(),
+            EpochSubmissionOutcome::Pending { .. }
+        ));
+    }
+
+    let outcome = population.abstain(0, 3).unwrap();
+
+    let EpochSubmissionOutcome::Ready(plan) = outcome else {
+        panic!("an abstention completing the barrier must yield a plan");
+    };
+    assert_eq!(plan.epoch(), 0);
+    // The abstaining replica is not a destination: it has nothing to be
+    // reconfigured into and is not part of this population.
+    assert_eq!(plan.destinations(), &[0, 1, 2]);
+    for parent in plan.parents() {
+        assert!(plan.destinations().contains(parent));
+    }
+}
+
+#[test]
+fn abstention_applies_to_one_epoch_and_not_to_the_next() {
+    let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 23).unwrap();
+    population
+        .submit(0, PopulationMember::new(0, -5.0, 0.4, 1.0).unwrap())
+        .unwrap();
+    assert!(matches!(
+        population.abstain(0, 1).unwrap(),
+        EpochSubmissionOutcome::Ready(_)
+    ));
+
+    // Replica 1 abstained because its own state offered nothing at that
+    // barrier, which says nothing about the next one.
+    let outcome = population
+        .submit(1, PopulationMember::new(0, -6.0, 0.4, 1.0).unwrap())
+        .unwrap();
+
+    assert_eq!(
+        outcome,
+        EpochSubmissionOutcome::Pending {
+            epoch: 1,
+            submitted: 1,
+            required: 2,
+        }
+    );
+}

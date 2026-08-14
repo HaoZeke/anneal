@@ -32,7 +32,8 @@ use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::DescriptorSpace;
 use crate::methods::feynman_kac::{
-    EpochSubmissionOutcome, PopulationMember, SelectionCoefficients, SynchronousPopulation,
+    EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
+    SynchronousPopulation,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
@@ -811,58 +812,7 @@ fn apply_request(
                     })
                 }
                 EpochSubmissionOutcome::Ready(plan) => {
-                    let source_candidates = scientific
-                        .population_candidates
-                        .get(epoch)
-                        .expect("complete epoch retains every source candidate");
-                    let (parents, weights, selection) = match region_population_assignment(
-                        scientific,
-                        plan.destinations(),
-                        source_candidates,
-                        config.replicas.len().div_ceil(2),
-                    ) {
-                        Some((parents, weights)) => {
-                            (parents, weights, PopulationSelection::RegionCovering)
-                        }
-                        None => (
-                            plan.parents().to_vec(),
-                            plan.weights().to_vec(),
-                            PopulationSelection::SystematicResampling,
-                        ),
-                    };
-                    let parent_candidates = parents
-                        .iter()
-                        .map(|parent| {
-                            source_candidates
-                                .get(parent)
-                                .expect("parent replica submitted a validated candidate")
-                                .clone()
-                        })
-                        .collect::<Vec<_>>();
-                    let diagnostics = population_diagnostics(&weights, &parents, &config.replicas);
-                    let wire_plan = PopulationPlan {
-                        epoch: plan.epoch(),
-                        destinations: plan.destinations().to_vec(),
-                        parents,
-                        weights,
-                        effective_sample_size: diagnostics.0,
-                        unique_parents: u32::try_from(diagnostics.1)
-                            .expect("unique parents are bounded by replica count"),
-                        max_family_size: u32::try_from(diagnostics.2)
-                            .expect("family size is bounded by replica count"),
-                        offspring_variance: diagnostics.3,
-                        parent_candidates,
-                        selection,
-                    };
-                    scientific
-                        .population_plans
-                        .insert(*epoch, wire_plan.clone());
-                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                        epoch: *epoch,
-                        submitted: required,
-                        required,
-                        plan: Some(wire_plan),
-                    })
+                    realize_population_plan(scientific, config, *epoch, &plan, required)
                 }
             };
             if inserted {
@@ -875,6 +825,41 @@ fn apply_request(
                 };
                 state.snapshot_version = snapshot_version;
             }
+        }
+        CatalogOperation::PopulationAbstain { epoch } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Ok(outcome) = scientific
+                .population
+                .abstain(*epoch, request.identity.replica)
+            else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let required = u32::try_from(config.replicas.len())
+                .expect("replica count is bounded by the protocol");
+            payload = match outcome {
+                EpochSubmissionOutcome::Pending { submitted, .. } => {
+                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                        epoch: *epoch,
+                        submitted: u32::try_from(submitted)
+                            .expect("submission count is bounded by replica count"),
+                        required,
+                        plan: None,
+                    })
+                }
+                EpochSubmissionOutcome::Ready(plan) => {
+                    realize_population_plan(scientific, config, *epoch, &plan, required)
+                }
+            };
         }
         CatalogOperation::PopulationPlan { epoch } => {
             let Some(scientific) = state.scientific.as_ref() else {
@@ -1523,6 +1508,68 @@ fn transition_uncertainty(scientific: &ScientificState, basin: BasinId) -> f64 {
                 .unwrap_or(1.0)
         },
     )
+}
+
+/// Build, store, and report the plan for one completed epoch.
+///
+/// Reached from a submission that completes the barrier and from an
+/// abstention that completes it, so the two cannot drift apart in how a
+/// plan is selected, counted, or retained for later polls.
+fn realize_population_plan(
+    scientific: &mut ScientificState,
+    config: &ServerConfig,
+    epoch: u64,
+    plan: &PopulationEpochPlan,
+    required: u32,
+) -> AcceptedPayload {
+    let source_candidates = scientific
+        .population_candidates
+        .get(&epoch)
+        .expect("complete epoch retains every source candidate");
+    let (parents, weights, selection) = match region_population_assignment(
+        scientific,
+        plan.destinations(),
+        source_candidates,
+        config.replicas.len().div_ceil(2),
+    ) {
+        Some((parents, weights)) => (parents, weights, PopulationSelection::RegionCovering),
+        None => (
+            plan.parents().to_vec(),
+            plan.weights().to_vec(),
+            PopulationSelection::SystematicResampling,
+        ),
+    };
+    let parent_candidates = parents
+        .iter()
+        .map(|parent| {
+            source_candidates
+                .get(parent)
+                .expect("parent replica submitted a validated candidate")
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    let diagnostics = population_diagnostics(&weights, &parents, &config.replicas);
+    let wire_plan = PopulationPlan {
+        epoch: plan.epoch(),
+        destinations: plan.destinations().to_vec(),
+        parents,
+        weights: weights.to_vec(),
+        effective_sample_size: diagnostics.0,
+        unique_parents: u32::try_from(diagnostics.1)
+            .expect("unique parents are bounded by replica count"),
+        max_family_size: u32::try_from(diagnostics.2)
+            .expect("family size is bounded by replica count"),
+        offspring_variance: diagnostics.3,
+        parent_candidates,
+        selection,
+    };
+    scientific.population_plans.insert(epoch, wire_plan.clone());
+    AcceptedPayload::PopulationEpoch(PopulationEpochState {
+        epoch,
+        submitted: required,
+        required,
+        plan: Some(wire_plan),
+    })
 }
 
 fn attraction_region_relation(

@@ -497,6 +497,7 @@ pub struct SynchronousPopulation {
     open_epoch: u64,
     submissions: BTreeMap<u32, PopulationMember>,
     completed: BTreeMap<u64, CompletedEpoch>,
+    abstained: BTreeSet<u32>,
 }
 
 impl SynchronousPopulation {
@@ -531,6 +532,7 @@ impl SynchronousPopulation {
             open_epoch: 0,
             submissions: BTreeMap::new(),
             completed: BTreeMap::new(),
+            abstained: BTreeSet::new(),
         })
     }
 
@@ -540,6 +542,74 @@ impl SynchronousPopulation {
     }
 
     /// Submit one immutable replica representative to an epoch barrier.
+    /// Replicas still expected to submit to the open epoch.
+    ///
+    /// A replica that cannot produce a validated representative at this
+    /// barrier will never submit to it, so counting it as required holds
+    /// the epoch open until every other replica has drained its budget.
+    /// Abstention applies to the open epoch alone: the replica rejoins the
+    /// next one, since the condition that stopped it is a property of where
+    /// its search currently stands rather than of the replica.
+    fn required(&self) -> usize {
+        self.replicas.len().saturating_sub(self.abstained.len())
+    }
+
+    /// Replicas whose submission forms the open epoch, in configured order.
+    fn participants(&self) -> Vec<u32> {
+        self.replicas
+            .iter()
+            .copied()
+            .filter(|replica| self.submissions.contains_key(replica))
+            .collect()
+    }
+
+    /// Whether every replica that can still submit has done so.
+    fn epoch_is_complete(&self) -> bool {
+        !self.submissions.is_empty() && self.submissions.len() >= self.required()
+    }
+
+    /// Record that a replica will not submit to the open epoch.
+    ///
+    /// A replica reaches this when the barrier arrives and its own state
+    /// yields no validated representative. Announcing it releases the
+    /// replicas already waiting, which otherwise poll until their budgets
+    /// drain, because the barrier requires everyone and a replica that
+    /// cannot submit never arrives.
+    pub fn abstain(
+        &mut self,
+        epoch: u64,
+        replica: u32,
+    ) -> Result<EpochSubmissionOutcome, ReconfigurationError> {
+        if !self.replicas.contains(&replica) {
+            return Err(ReconfigurationError::UnknownReplica { replica });
+        }
+        if epoch < self.open_epoch {
+            let Some(completed) = self.completed.get(&epoch) else {
+                return Err(ReconfigurationError::EpochMismatch {
+                    expected: self.open_epoch,
+                    received: epoch,
+                });
+            };
+            return Ok(EpochSubmissionOutcome::Ready(completed.plan.clone()));
+        }
+        if epoch > self.open_epoch {
+            return Err(ReconfigurationError::EpochMismatch {
+                expected: self.open_epoch,
+                received: epoch,
+            });
+        }
+        self.abstained.insert(replica);
+        self.submissions.remove(&replica);
+        if !self.epoch_is_complete() {
+            return Ok(EpochSubmissionOutcome::Pending {
+                epoch,
+                submitted: self.submissions.len(),
+                required: self.required(),
+            });
+        }
+        self.complete_open_epoch(epoch)
+    }
+
     pub fn submit(
         &mut self,
         epoch: u64,
@@ -587,22 +657,29 @@ impl SynchronousPopulation {
             };
         }
         self.submissions.insert(member.replica, member);
-        if self.submissions.len() < self.replicas.len() {
+        if !self.epoch_is_complete() {
             return Ok(EpochSubmissionOutcome::Pending {
                 epoch,
                 submitted: self.submissions.len(),
-                required: self.replicas.len(),
+                required: self.required(),
             });
         }
 
-        let members = self
-            .replicas
+        self.complete_open_epoch(epoch)
+    }
+
+    fn complete_open_epoch(
+        &mut self,
+        epoch: u64,
+    ) -> Result<EpochSubmissionOutcome, ReconfigurationError> {
+        let participants = self.participants();
+        let members = participants
             .iter()
             .map(|replica| {
                 *self
                     .submissions
                     .get(replica)
-                    .expect("complete epoch contains every configured replica")
+                    .expect("a participant has submitted by construction")
             })
             .collect::<Vec<_>>();
         let ranked = rank_population(&members)?;
@@ -618,16 +695,17 @@ impl SynchronousPopulation {
         )?;
         let epoch_plan = PopulationEpochPlan {
             epoch,
-            destinations: self.replicas.clone(),
+            destinations: participants.clone(),
             parents: plan
                 .parents()
                 .iter()
-                .map(|index| self.replicas[*index])
+                .map(|index| participants[*index])
                 .collect(),
             weights: plan.weights().to_vec(),
             diagnostics: plan.diagnostics(),
         };
         let submissions = std::mem::take(&mut self.submissions);
+        self.abstained.clear();
         self.completed.insert(
             epoch,
             CompletedEpoch {

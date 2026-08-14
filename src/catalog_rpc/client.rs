@@ -485,6 +485,23 @@ impl CatalogClient {
             .state)
     }
 
+    /// Decline to submit to one epoch and retain its coordinator snapshot.
+    ///
+    /// Called when the barrier arrives and the replica's own state yields no
+    /// validated representative, so that the replicas already waiting are
+    /// released instead of polling until their budgets drain.
+    pub fn population_abstain_with_snapshot(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+    ) -> Result<PopulationEpochReceipt, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::PopulationAbstain { epoch })?;
+        Ok(PopulationEpochReceipt {
+            state: population_epoch_payload(reply.payload, "population abstain")?,
+            snapshot: reply.snapshot,
+        })
+    }
+
     /// Poll a population plan and retain its coordinator snapshot.
     pub fn population_plan_with_snapshot(
         &mut self,
