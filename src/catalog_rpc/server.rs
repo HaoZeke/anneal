@@ -702,8 +702,12 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let relation =
-                attraction_region_relation(scientific, request.identity.replica, local_basin);
+            let relation = attraction_region_relation(
+                scientific,
+                request.identity.replica,
+                local_basin,
+                *energy,
+            );
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -1525,6 +1529,7 @@ fn attraction_region_relation(
     scientific: &ScientificState,
     replica: u32,
     local_basin: Option<BasinId>,
+    energy: f64,
 ) -> CatalogRelation {
     let Some(local_basin) = local_basin else {
         return CatalogRelation::Empty;
@@ -1554,9 +1559,33 @@ fn attraction_region_relation(
         .filter_map(|(_, basin)| scientific.transition_nodes.get(basin))
         .any(|node| node_region.get(*node).copied() == Some(local_region));
     if shared {
-        CatalogRelation::SameBasin
+        return CatalogRelation::SameBasin;
+    }
+    // Holding a region alone is not the same as holding the catalog's best
+    // entry. Reporting the incumbent for both told a replica that nothing
+    // better existed whenever no neighbour stood beside it, which is the
+    // state a spread-out ensemble is in almost always, and the policy
+    // answers the incumbent with local work that has no exit. The catalog
+    // separates the two: the incumbent is the entry that is actually
+    // deepest, and a replica alone above a deeper entry is unrelated to it
+    // and free to exploit it.
+    if scientific
+        .catalog
+        .incumbent()
+        .map(|entry| entry.census_id())
+        == Some(local_basin)
+    {
+        return CatalogRelation::Incumbent;
+    }
+    let lower_energy_anchor = scientific
+        .catalog
+        .entries()
+        .iter()
+        .any(|entry| entry.census_id() != local_basin && entry.energy() < energy);
+    if lower_energy_anchor {
+        CatalogRelation::UnrelatedLowerAnchor
     } else {
-        CatalogRelation::Incumbent
+        CatalogRelation::UnrelatedNoAnchor
     }
 }
 
