@@ -115,6 +115,16 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn cooperative_population_point_is_the_post_policy_live_endpoint() {
+        let transported = Array1::from(vec![4.0, 5.0, 6.0]);
+        let (state, energy) = cooperative_population_point(transported.view(), -9.25);
+
+        assert_eq!(state, transported);
+        assert_eq!(energy, -9.25);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn fixed_probe_is_seeded_target_blind_and_translation_free() {
         let current = Array1::from(vec![0.0; 12]);
         let mut first_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
