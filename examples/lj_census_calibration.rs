@@ -9,21 +9,21 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use anneal_core::catalog::lj::{
-    accepts_calibration_minimum, descriptor_space, parse_reference_coordinates, perturb_reference,
-    system_signature,
+    CALIBRATION_GRADIENT_TOLERANCE, accepts_repeated_quench, descriptor_space,
+    discovered_minimum_id, perturb_reference, system_signature,
 };
+use anneal_core::methods::cluster_hopping::{Config, random_cluster_in_radius};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use anneal_core::shape::match_shapes;
 use ndarray::{Array1, ArrayView1};
-use sha2::{Digest, Sha256};
+use rand::SeedableRng;
 
 struct QuenchEvidence {
     state: Array1<f64>,
     energy: f64,
     gradient_norm: f64,
     evaluations: usize,
-    ira_distance: f64,
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -58,7 +58,6 @@ fn descriptor_schema_json(
 fn quench(
     potential: &PairPotential,
     start: ArrayView1<f64>,
-    reference: ArrayView1<f64>,
 ) -> Result<QuenchEvidence, Box<dyn Error>> {
     let mut optimizer = WarmLbfgs::default();
     let (energy, state, evaluations) = optimizer.minimize(start, 2_000, |coordinates| {
@@ -70,7 +69,6 @@ fn quench(
         .map(|value| value * value)
         .sum::<f64>()
         .sqrt();
-    let ira_distance = match_shapes(reference, state.view(), 1.8)?.distance;
     if (energy - fresh_energy).abs() > 1e-10 {
         return Err("quench and fresh energies disagree".into());
     }
@@ -79,7 +77,6 @@ fn quench(
         energy: fresh_energy,
         gradient_norm,
         evaluations,
-        ira_distance,
     })
 }
 
@@ -92,27 +89,21 @@ fn required<T: std::str::FromStr>(args: &[String], index: usize, name: &str) -> 
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().collect::<Vec<_>>();
-    if args.len() != 10 {
+    if args.len() != 7 {
         return Err(format!(
-            "usage: {} N REFERENCE REFERENCE_URL ENERGY PAIRS BASE_SEED SIGMA PAIRS_JSONL SIGNATURE_JSON",
+            "usage: {} N PAIRS BASE_SEED SIGMA PAIRS_JSONL SIGNATURE_JSON",
             args.first().map_or("lj_census_calibration", String::as_str)
         )
         .into());
     }
     let n_points: usize = required(&args, 1, "N")?;
-    let reference_path = Path::new(&args[2]);
-    let reference_url = &args[3];
-    let published_reference_energy: f64 = required(&args, 4, "reference energy")?;
-    let pair_count: usize = required(&args, 5, "pair count")?;
-    let base_seed: u64 = required(&args, 6, "base seed")?;
-    let perturbation_sigma: f64 = required(&args, 7, "perturbation sigma")?;
+    let pair_count: usize = required(&args, 2, "pair count")?;
+    let base_seed: u64 = required(&args, 3, "base seed")?;
+    let perturbation_sigma: f64 = required(&args, 4, "perturbation sigma")?;
     if pair_count < 100 {
         return Err("pair count must be at least 100".into());
     }
 
-    let reference_text = fs::read_to_string(reference_path)?;
-    let reference = Array1::from(parse_reference_coordinates(&reference_text, n_points)?);
-    let reference_sha256 = hex(&Sha256::digest(reference_text.as_bytes()));
     let signature = system_signature(n_points)?;
     let signature_digest = hex(&signature.digest());
     let schema_json = descriptor_schema_json(
@@ -123,17 +114,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let descriptor = descriptor_space();
     let potential = PairPotential::lennard_jones(n_points);
-    let reference_quench = quench(&potential, reference.view(), reference.view())?;
-    if (reference_quench.energy - published_reference_energy).abs() > 5e-6 {
-        return Err(format!(
-            "published energy {published_reference_energy:.12} disagrees with the quenched reference {:.12}",
-            reference_quench.energy
-        )
-        .into());
-    }
-    let minimum_id = format!("ccd-lj{n_points}-global-minimum");
-    let pair_path = Path::new(&args[8]);
-    let manifest_path = Path::new(&args[9]);
+    let config = Config::recommended(n_points);
+    let pair_path = Path::new(&args[5]);
+    let manifest_path = Path::new(&args[6]);
     if let Some(parent) = pair_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -143,32 +126,59 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut pairs = BufWriter::new(fs::File::create(pair_path)?);
     let mut accepted = 0usize;
     let mut attempt = 0u64;
+    let mut source_rejections = 0u64;
     let mut quench_rejections = 0u64;
     let mut identity_rejections = 0u64;
     let maximum_attempts = u64::try_from(pair_count)?.saturating_mul(100);
     while accepted < pair_count && attempt < maximum_attempts {
-        let left_seed = base_seed
-            .checked_add(2 * attempt)
+        let source_seed = base_seed
+            .checked_add(3 * attempt)
+            .ok_or("source seed overflow")?;
+        let left_seed = source_seed
+            .checked_add(1)
             .ok_or("left perturbation seed overflow")?;
         let right_seed = left_seed
             .checked_add(1)
             .ok_or("right perturbation seed overflow")?;
         attempt += 1;
+        let mut source_rng = rand::rngs::StdRng::seed_from_u64(source_seed);
+        let source_start = random_cluster_in_radius(
+            n_points,
+            config.start_radius(),
+            config.min_separation,
+            &mut source_rng,
+        );
+        if source_start.len() != 3 * n_points {
+            source_rejections += 1;
+            continue;
+        }
+        let source = match quench(&potential, source_start.view()) {
+            Ok(source)
+                if source.energy.is_finite()
+                    && source.gradient_norm <= CALIBRATION_GRADIENT_TOLERANCE =>
+            {
+                source
+            }
+            _ => {
+                source_rejections += 1;
+                continue;
+            }
+        };
         let left_start = perturb_reference(
-            reference.as_slice().expect("reference is contiguous"),
+            source.state.as_slice().expect("source is contiguous"),
             n_points,
             left_seed,
             perturbation_sigma,
         )?;
         let right_start = perturb_reference(
-            reference.as_slice().expect("reference is contiguous"),
+            source.state.as_slice().expect("source is contiguous"),
             n_points,
             right_seed,
             perturbation_sigma,
         )?;
         let (left, right) = match (
-            quench(&potential, ArrayView1::from(&left_start), reference.view()),
-            quench(&potential, ArrayView1::from(&right_start), reference.view()),
+            quench(&potential, ArrayView1::from(&left_start)),
+            quench(&potential, ArrayView1::from(&right_start)),
         ) {
             (Ok(left), Ok(right)) => (left, right),
             _ => {
@@ -176,16 +186,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
         };
-        if !accepts_calibration_minimum(
-            reference_quench.energy,
+        let left_ira_distance = match_shapes(source.state.view(), left.state.view(), 1.8)?.distance;
+        let right_ira_distance =
+            match_shapes(source.state.view(), right.state.view(), 1.8)?.distance;
+        if !accepts_repeated_quench(
+            source.energy,
             left.energy,
             left.gradient_norm,
-            left.ira_distance,
-        ) || !accepts_calibration_minimum(
-            reference_quench.energy,
+            left_ira_distance,
+        ) || !accepts_repeated_quench(
+            source.energy,
             right.energy,
             right.gradient_norm,
-            right.ira_distance,
+            right_ira_distance,
         ) {
             identity_rejections += 1;
             continue;
@@ -196,6 +209,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             descriptor.describe(right.state.view(), Some(&signature.atomic_numbers))?;
         let distance = left_descriptor.distance(&right_descriptor)?;
         let pair_id = format!("lj{n_points}-pair-{accepted:04}");
+        let minimum_id = discovered_minimum_id(n_points, source_seed, source.energy);
         writeln!(
             pairs,
             concat!(
@@ -223,8 +237,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             right.energy,
             left.gradient_norm,
             right.gradient_norm,
-            left.ira_distance,
-            right.ira_distance,
+            left_ira_distance,
+            right_ira_distance,
             signature_digest,
             schema_json,
             distance,
@@ -245,30 +259,24 @@ fn main() -> Result<(), Box<dyn Error>> {
         concat!(
             "{{\n  \"artifact_schema_version\": 1,\n  \"system\": \"lj{}\",",
             "\n  \"signature_digest\": \"{}\",\n  \"descriptor_schema\": {},",
-            "\n  \"reference_source\": \"{}\",\n  \"reference_sha256\": \"{}\",",
-            "\n  \"published_reference_energy\": {:.17e},",
-            "\n  \"calibration_reference_energy\": {:.17e},",
-            "\n  \"calibration_reference_gradient_norm\": {:.17e},",
-            "\n  \"calibration_reference_ira_distance\": {:.17e},",
-            "\n  \"calibration_reference_evaluations\": {},\n  \"pair_count\": {},",
+            "\n  \"source_policy\": \"seeded-random-cluster-quench-v1\",",
+            "\n  \"source_radius\": {:.17e},\n  \"source_min_separation\": {:.17e},",
+            "\n  \"pair_count\": {},",
             "\n  \"identity_contract\": {{\"energy_abs_tolerance\": 1e-7,",
             "\"gradient_norm_tolerance\": 1e-5,\"ira_distance_tolerance\": 1e-4}},",
-            "\n  \"attempt_count\": {},\n  \"quench_rejections\": {},",
+            "\n  \"attempt_count\": {},\n  \"source_rejections\": {},",
+            "\n  \"quench_rejections\": {},",
             "\n  \"identity_rejections\": {},\n  \"base_seed\": {},",
             "\n  \"perturbation_sigma\": {:.17e}\n}}"
         ),
         n_points,
         signature_digest,
         schema_json,
-        reference_url,
-        reference_sha256,
-        published_reference_energy,
-        reference_quench.energy,
-        reference_quench.gradient_norm,
-        reference_quench.ira_distance,
-        reference_quench.evaluations,
+        config.start_radius(),
+        config.min_separation,
         pair_count,
         attempt,
+        source_rejections,
         quench_rejections,
         identity_rejections,
         base_seed,

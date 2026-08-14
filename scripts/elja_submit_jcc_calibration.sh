@@ -12,12 +12,6 @@ LOG_DIR=${JCC_CALIBRATION_LOG_DIR:-$REPRO_ROOT/results_jcc/calibration/logs}
 [[ -x $FINALIZER ]] || { echo "missing finalizer: $FINALIZER" >&2; exit 1; }
 mkdir -p "$LOG_DIR"
 
-declare -A ENERGY=(
-  [75]=-397.492331
-  [98]=-543.665361
-  [102]=-569.363652
-  [104]=-582.086642
-)
 declare -A BASE_SEED=(
   [75]=7500000
   [98]=9800000
@@ -37,7 +31,7 @@ for n in 75 98 102 104; do
     --mem="${JCC_CALIBRATION_MEM:-8G}" \
     --output="$LOG_DIR/lj${n}-%j.out" \
     --export="ALL,ANNEAL_REPRO_ROOT=${REPRO_ROOT}" \
-    "$CALIBRATOR" "$n" "${ENERGY[$n]}" "${BASE_SEED[$n]}" "${JCC_CALIBRATION_SIGMA:-0.01}")
+    "$CALIBRATOR" "$n" "${BASE_SEED[$n]}" "${JCC_CALIBRATION_SIGMA:-0.01}")
   job_ids+=("${job_id%%;*}")
   echo "submitted lj${n}: ${job_id}"
 done

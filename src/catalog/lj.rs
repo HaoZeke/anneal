@@ -109,25 +109,29 @@ pub fn perturb_reference(
         .collect())
 }
 
-/// Whether a development quench has independent evidence for the declared
-/// Lennard-Jones minimum used to calibrate a descriptor census radius.
-pub fn accepts_calibration_minimum(
-    reference_energy: f64,
+/// Whether a repeated development quench returns to its search-discovered
+/// source minimum closely enough to measure descriptor noise.
+pub fn accepts_repeated_quench(
+    source_energy: f64,
     candidate_energy: f64,
     gradient_norm: f64,
     ira_distance: f64,
 ) -> bool {
-    [
-        reference_energy,
-        candidate_energy,
-        gradient_norm,
-        ira_distance,
-    ]
+    [source_energy, candidate_energy, gradient_norm, ira_distance]
     .iter()
     .all(|value| value.is_finite())
-        && (candidate_energy - reference_energy).abs() <= CALIBRATION_ENERGY_TOLERANCE
+        && (candidate_energy - source_energy).abs() <= CALIBRATION_ENERGY_TOLERANCE
         && gradient_norm <= CALIBRATION_GRADIENT_TOLERANCE
         && ira_distance <= CALIBRATION_IRA_TOLERANCE
+}
+
+/// Stable calibration identity derived only from a search seed and its
+/// freshly evaluated quenched energy.
+pub fn discovered_minimum_id(n_points: usize, source_seed: u64, energy: f64) -> String {
+    format!(
+        "lj{n_points}-search-seed-{source_seed}-energy-{:016x}",
+        energy.to_bits()
+    )
 }
 
 /// Versioned multiscale SOAP/ACE space used by every LJ catalog size.
