@@ -1720,25 +1720,17 @@ where
             // to this ledger, and the polished state enters the boundary
             // record the checkpoint offer loop already reads.
             if cfg.polish_records > 0 && improved_record {
-                let charged_before_polish = ledger.spent();
+                // The relax closure owns boundary recording and share-grade
+                // validation; recording a second boundary here counted the
+                // polish twice and tripped the checkpoint accounting. The
+                // library's whole contribution is the extra descent, bounded
+                // by the number of improvement events and charged like any
+                // other relaxation.
                 let (polished_energy, polished_state) =
                     relax(ledger, x_new.view(), cfg.polish_records);
-                let polished_gradient = grad.as_deref_mut().and_then(|g| {
-                    g(ledger, polished_state.view()).filter(|values| {
-                        // Euclidean, matching the offer gate and the census
-                        // calibration, not the max-abs bound records use.
-                        values.iter().map(|v| v * v).sum::<f64>().sqrt() < cfg.share_gradient
-                    })
-                });
-                if polished_gradient.is_some() {
+                if polished_energy <= e_new {
                     ledger.record(polished_energy, polished_state.view());
                 }
-                ledger.record_quench_boundary(
-                    charged_before_polish,
-                    polished_energy,
-                    polished_state,
-                    polished_gradient,
-                );
             }
         } else {
             unconverged_records += 1;

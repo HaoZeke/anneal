@@ -23,10 +23,6 @@ impl LennardJonesPreset {
     pub(super) const ESCAPE_AMPLITUDE: f64 = 0.25;
     pub(super) const SCREEN_MARGIN: f64 = 2.0;
     pub(super) const RECORD_GRADIENT: f64 = 1.0e-3;
-    /// Tolerance a shared candidate must reach: the census radius was
-    /// calibrated from quenches accepted at this bound, so identity in the
-    /// shared census is only meaningful for states polished to it.
-    pub(super) const SHARE_GRADIENT: f64 = 1.0e-5;
     pub(super) const CONTAINER_RADIUS: f64 = 0.9;
     pub(super) const MIN_SEPARATION: f64 = 0.85;
 }

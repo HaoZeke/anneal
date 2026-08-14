@@ -568,8 +568,6 @@ pub struct Config {
     /// about one percent of a campaign budget, all charged to the ledger.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
-    /// Gradient bound a polished record must reach to become shareable.
-    pub share_gradient: f64,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
     ///
@@ -829,7 +827,6 @@ impl Config {
             adaptive_screen: false,
             record_gradient: LennardJonesPreset::RECORD_GRADIENT * energy_scale / length_scale,
             polish_records: 0,
-            share_gradient: LennardJonesPreset::SHARE_GRADIENT * energy_scale / length_scale,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             construct_width: 4,

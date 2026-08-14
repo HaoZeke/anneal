@@ -1960,7 +1960,11 @@ fn run_capnp_catalog(
     // A cooperative run must produce states at the share tolerance or the
     // coordinator has nothing valid to hold; solo runs leave this off and
     // keep the screened economy untouched.
-    run_cfg.polish_records = run_cfg.relax_steps;
+    // A capped first relaxation lands near 1e-4; the run-end verification
+    // note in this file measures 4000 further steps reaching 1.7e-6, so the
+    // polish budget is sized to cross the closure's 1e-5 validation rather
+    // than to stop where the first cap stopped.
+    run_cfg.polish_records = run_cfg.relax_steps.saturating_mul(10);
     let checkpoint_interval = std::env::var("CATALOG_SLICE")
         .or_else(|_| std::env::var("BANK_SLICE"))
         .ok()
