@@ -523,6 +523,41 @@ fn cooperative_run_traces_explicit_transition_records() {
 }
 
 #[test]
+fn cooperative_run_traces_local_execution_without_a_coordinator() {
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+
+    run.record_executed_transition(
+        0,
+        17,
+        "boundary_transport",
+        -170.713_101,
+        -172.877_736,
+        true,
+    )
+    .unwrap();
+
+    let event = run.events().last().unwrap();
+    assert_eq!(event.kind, TraceKind::TransitionExecution);
+    let transition = event.transition.as_ref().unwrap();
+    assert_eq!(transition.action, "boundary_transport");
+    assert_eq!(transition.hop, Some(17));
+    assert_eq!(transition.from_energy, Some(-170.713_101));
+    assert_eq!(transition.to_energy, Some(-172.877_736));
+    assert!(transition.resolved);
+    assert!(transition.adopted);
+
+    let trace = run.json_lines(&RunManifest {
+        campaign: "jcc-2026".into(),
+        ensemble: "scientific-ensemble".into(),
+        sharing: true,
+    });
+    assert!(trace.contains("\"kind\":\"transition_execution\""));
+    assert!(trace.contains("\"transition_hop\":17"));
+    assert!(trace.contains("\"transition_from_energy\":-170.713101"));
+    assert!(trace.contains("\"transition_to_energy\":-172.877736"));
+}
+
+#[test]
 fn cooperative_trace_records_policy_diagnostic_evidence() {
     let server = server();
     let digest = signature().digest();
