@@ -98,7 +98,8 @@ pub enum ShapeError {
     NonBijectivePermutation,
     /// Structures hold different numbers of points, so no permutation exists.
     SizeMismatch(usize, usize),
-    /// IRA reported a non-zero status.
+    /// IRA reported a non-zero status, or anneal refused the call because
+    /// the point set cannot define a basis (`DEGENERATE_BASIS`).
     Library(i32),
     /// A coordinate buffer whose length is not a multiple of three.
     NotThreeDimensional(usize),
@@ -279,6 +280,15 @@ pub fn match_shapes(
     let n2 = b.len() / 3;
     if n1 != n2 || n1 == 0 {
         return Err(ShapeError::SizeMismatch(n1, n2));
+    }
+    // IRA builds its frames from three points of the structure and indexes
+    // one past the atom count when no such triple exists, reading outside
+    // `coords1`. A coincident or collinear set is the case that reaches it:
+    // it defines no plane, so there is no third basis vector to find. The
+    // condition is a property of the input, so it is answered here rather
+    // than after the library has already walked off the array.
+    if !spans_a_plane(&a) || !spans_a_plane(&b) {
+        return Err(ShapeError::Library(DEGENERATE_BASIS));
     }
     // IRA expects contiguous row-major coordinates; a view may be strided.
     let ca: Vec<f64> = a.iter().copied().collect();
@@ -683,6 +693,64 @@ mod tests {
             f64::INFINITY
         );
     }
+}
+
+/// Reported by [`match_shapes`] when a point set defines no plane, so IRA
+/// has no basis to build and must not be called.
+pub const DEGENERATE_BASIS: i32 = -1;
+
+/// Whether a point set spans at least two dimensions.
+///
+/// Takes the widest displacement from the centroid as the first direction,
+/// then asks whether any point has a component off that line. Distances are
+/// judged against the structure's own extent, so the answer does not depend
+/// on the units the coordinates are written in.
+fn spans_a_plane(coords: &ArrayView1<f64>) -> bool {
+    let n = coords.len() / 3;
+    if n < 3 {
+        return false;
+    }
+    let mut centroid = [0.0_f64; 3];
+    for atom in 0..n {
+        for axis in 0..3 {
+            centroid[axis] += coords[3 * atom + axis];
+        }
+    }
+    for value in &mut centroid {
+        *value /= n as f64;
+    }
+    let offset = |atom: usize| {
+        [
+            coords[3 * atom] - centroid[0],
+            coords[3 * atom + 1] - centroid[1],
+            coords[3 * atom + 2] - centroid[2],
+        ]
+    };
+    let norm = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let mut first = [0.0_f64; 3];
+    let mut extent = 0.0_f64;
+    for atom in 0..n {
+        let candidate = offset(atom);
+        let length = norm(candidate);
+        if length > extent {
+            extent = length;
+            first = candidate;
+        }
+    }
+    if !extent.is_finite() || extent <= 0.0 {
+        return false;
+    }
+    let unit = [first[0] / extent, first[1] / extent, first[2] / extent];
+    let tolerance = 1e-9 * extent;
+    (0..n).any(|atom| {
+        let v = offset(atom);
+        let projection = v[0] * unit[0] + v[1] * unit[1] + v[2] * unit[2];
+        norm([
+            v[0] - projection * unit[0],
+            v[1] - projection * unit[1],
+            v[2] - projection * unit[2],
+        ]) > tolerance
+    })
 }
 
 /// Deviation of a structure from invariance under one operation.
