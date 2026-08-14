@@ -2238,6 +2238,11 @@ fn run_capnp_catalog(
                         .poll_population(replica, population_progress.epoch())
                         .expect("population polling must preserve cooperative invariants"),
                 ),
+                PopulationEpochAction::Abstain => Some(
+                    cooperative
+                        .abstain_population(replica, population_progress.epoch())
+                        .expect("population abstention must preserve cooperative invariants"),
+                ),
                 PopulationEpochAction::LocalWork => None,
             };
             let Some(population) = population else {
