@@ -502,6 +502,24 @@ impl CatalogClient {
         })
     }
 
+    /// Join an epoch by reference and retain its coordinator snapshot.
+    ///
+    /// The coordinator forms the member from the replica's best candidate it
+    /// has already validated, so no state crosses the wire at barrier time
+    /// and no re-validation is charged. Rejected when nothing is on file,
+    /// which the caller answers by abstaining.
+    pub fn population_join_with_snapshot(
+        &mut self,
+        event_sequence: u64,
+        epoch: u64,
+    ) -> Result<PopulationEpochReceipt, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::PopulationJoin { epoch })?;
+        Ok(PopulationEpochReceipt {
+            state: population_epoch_payload(reply.payload, "population join")?,
+            snapshot: reply.snapshot,
+        })
+    }
+
     /// Poll a population plan and retain its coordinator snapshot.
     pub fn population_plan_with_snapshot(
         &mut self,

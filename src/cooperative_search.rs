@@ -384,6 +384,10 @@ mod run {
             /// Immutable full-population plan and genealogy diagnostics.
             plan: PopulationPlan,
         },
+        /// The epoch closed without this replica: it abstained, so the plan
+        /// addresses only the replicas that joined, and there is nothing for
+        /// this one to adopt. Not an error; the replica rejoins next epoch.
+        Unaddressed,
         /// The coordinator rejected the representative or epoch request.
         Rejected,
         /// Communication failed and the local trajectory remains authoritative.
@@ -938,6 +942,24 @@ mod run {
         }
 
         /// Poll an existing population epoch without changing its evidence.
+        /// Join this epoch by reference to the best validated candidate the
+        /// coordinator already holds for this replica.
+        pub fn join_population(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.population_join_with_snapshot(rpc_sequence, epoch))
+            };
+            self.handle_population_result(replica, epoch, result)
+        }
+
         /// Decline this epoch so the replicas waiting on it are released.
         pub fn abstain_population(
             &mut self,
@@ -1383,6 +1405,18 @@ mod run {
                 });
             }
             let Some(plan) = state.plan else {
+                if state.required == 0 && state.submitted == 0 {
+                    // The epoch closed with every replica abstaining, so
+                    // there is no plan and nothing to adopt; the counter
+                    // still advances past it.
+                    self.push_event(
+                        replica,
+                        TraceKind::PopulationReady,
+                        Some(catalog_version),
+                        None,
+                    )?;
+                    return Ok(PopulationSynchronizationOutcome::Unaddressed);
+                }
                 if state.required == 0 || state.submitted >= state.required {
                     return Err(CooperativeRunError::InvalidPopulationPlan {
                         epoch,
@@ -1419,10 +1453,16 @@ mod run {
                 .enumerate()
                 .filter(|(_, destination)| **destination == replica);
             let Some((index, _)) = destinations.next() else {
-                return Err(CooperativeRunError::InvalidPopulationPlan {
-                    epoch,
-                    reason: "requesting replica has no destination",
-                });
+                // The plan excludes replicas that abstained from the epoch,
+                // so a completed plan without this replica means it declined
+                // rather than that the coordinator misaddressed anything.
+                self.push_event(
+                    replica,
+                    TraceKind::PopulationReady,
+                    Some(catalog_version),
+                    None,
+                )?;
+                return Ok(PopulationSynchronizationOutcome::Unaddressed);
             };
             if destinations.next().is_some() {
                 return Err(CooperativeRunError::InvalidPopulationPlan {

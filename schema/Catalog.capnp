@@ -134,6 +134,15 @@ struct PopulationAbstainRequest {
   epoch @0 :UInt64;
 }
 
+# Join an epoch by reference to the replica's best already-validated
+# candidate on file with the coordinator. The client does not re-ship or
+# re-validate state at barrier time: the coordinator has fresh-evaluated
+# every visit it accepted, so barrier membership is a lookup, not a
+# transfer.
+struct PopulationJoinRequest {
+  epoch @0 :UInt64;
+}
+
 struct TransitionRecord {
   action @0 :Text;
   adopted @3 :Bool;
@@ -196,6 +205,7 @@ struct CatalogRequest {
     recordTransition @13 :TransitionRecord;
     boundaryCrossing @14 :BoundaryCrossingRequest;
     populationAbstain @15 :PopulationAbstainRequest;
+    populationJoin @16 :PopulationJoinRequest;
   }
 }
 

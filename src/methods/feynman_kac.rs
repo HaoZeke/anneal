@@ -563,6 +563,11 @@ impl SynchronousPopulation {
             .collect()
     }
 
+    /// Replicas the open epoch still requires, after abstentions.
+    pub fn open_requirement(&self) -> usize {
+        self.required()
+    }
+
     /// Whether every replica that can still submit has done so.
     fn epoch_is_complete(&self) -> bool {
         !self.submissions.is_empty() && self.submissions.len() >= self.required()
@@ -584,13 +589,15 @@ impl SynchronousPopulation {
             return Err(ReconfigurationError::UnknownReplica { replica });
         }
         if epoch < self.open_epoch {
-            let Some(completed) = self.completed.get(&epoch) else {
-                return Err(ReconfigurationError::EpochMismatch {
-                    expected: self.open_epoch,
-                    received: epoch,
-                });
+            return match self.completed.get(&epoch) {
+                Some(completed) => Ok(EpochSubmissionOutcome::Ready(completed.plan.clone())),
+                // Closed with no plan: every replica abstained from it.
+                None => Ok(EpochSubmissionOutcome::Pending {
+                    epoch,
+                    submitted: 0,
+                    required: 0,
+                }),
             };
-            return Ok(EpochSubmissionOutcome::Ready(completed.plan.clone()));
         }
         if epoch > self.open_epoch {
             return Err(ReconfigurationError::EpochMismatch {
@@ -600,6 +607,27 @@ impl SynchronousPopulation {
         }
         self.abstained.insert(replica);
         self.submissions.remove(&replica);
+        if self.abstained.len() == self.replicas.len() {
+            // Every replica declined, so there is no population to select
+            // from, yet the epoch must still close: leaving it open wedges
+            // every replica's epoch counter on a barrier nobody can meet.
+            // A vacant close is reported as zero submitted of zero required,
+            // which no genuinely pending epoch can produce, since a pending
+            // epoch always has at least one replica still expected.
+            self.abstained.clear();
+            self.open_epoch =
+                self.open_epoch
+                    .checked_add(1)
+                    .ok_or(ReconfigurationError::InvalidParameter {
+                        field: "epoch_overflow",
+                        value: self.open_epoch as f64,
+                    })?;
+            return Ok(EpochSubmissionOutcome::Pending {
+                epoch,
+                submitted: 0,
+                required: 0,
+            });
+        }
         if !self.epoch_is_complete() {
             return Ok(EpochSubmissionOutcome::Pending {
                 epoch,

@@ -237,6 +237,7 @@ struct ScientificState {
     transition_nodes: BTreeMap<BasinId, usize>,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
+    best_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
     boundary_crossings: Vec<BoundaryCrossingRecord>,
     transition_capacity: usize,
     population: SynchronousPopulation,
@@ -285,6 +286,7 @@ impl CoordinatorState {
                     transition_nodes: BTreeMap::new(),
                     last_basin_by_replica: BTreeMap::new(),
                     last_candidate_by_replica: BTreeMap::new(),
+                    best_candidate_by_replica: BTreeMap::new(),
                     boundary_crossings: Vec::new(),
                     transition_capacity: scientific.catalog_capacity,
                     population: SynchronousPopulation::new(
@@ -799,20 +801,23 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let required = u32::try_from(config.replicas.len())
-                .expect("replica count is bounded by the protocol");
             payload = match outcome {
-                EpochSubmissionOutcome::Pending { submitted, .. } => {
-                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                        epoch: *epoch,
-                        submitted: u32::try_from(submitted)
-                            .expect("submission count is bounded by replica count"),
-                        required,
-                        plan: None,
-                    })
-                }
+                EpochSubmissionOutcome::Pending {
+                    submitted,
+                    required,
+                    ..
+                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: u32::try_from(submitted)
+                        .expect("submission count is bounded by replica count"),
+                    required: u32::try_from(required)
+                        .expect("requirement is bounded by replica count"),
+                    plan: None,
+                }),
                 EpochSubmissionOutcome::Ready(plan) => {
-                    realize_population_plan(scientific, config, *epoch, &plan, required)
+                    let participants = u32::try_from(plan.destinations().len())
+                        .expect("participants are bounded by replica count");
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
                 }
             };
             if inserted {
@@ -825,6 +830,103 @@ fn apply_request(
                 };
                 state.snapshot_version = snapshot_version;
             }
+        }
+        CatalogOperation::PopulationJoin { epoch } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            // Barrier membership is a lookup: the member is formed from the
+            // best candidate this coordinator has already fresh-validated for
+            // the replica, so nothing is re-shipped or re-validated at the
+            // barrier and a replica whose current point is mid-hop can still
+            // join with its best minimum. A retry reuses the entry already
+            // recorded for this epoch, so an improved best between retries
+            // cannot turn a repeat into a conflicting submission.
+            let recorded = scientific
+                .population_candidates
+                .get(epoch)
+                .and_then(|entries| entries.get(&request.identity.replica))
+                .cloned();
+            let Some(member_candidate) = recorded.or_else(|| {
+                scientific
+                    .best_candidate_by_replica
+                    .get(&request.identity.replica)
+                    .cloned()
+            }) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Ok(Some(basin_id)) = scientific.census.basin_for(&member_candidate.descriptor)
+            else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let basin_visits = scientific
+                .census
+                .entry(basin_id)
+                .expect("classified census basin exists")
+                .visits();
+            let novelty = nearest_other_census_distance(
+                &scientific.census,
+                basin_id,
+                &member_candidate.descriptor,
+            );
+            let residual_uncertainty = transition_uncertainty(scientific, basin_id);
+            let Ok(member) = PopulationMember::new_with_uncertainty(
+                request.identity.replica,
+                member_candidate.energy,
+                novelty,
+                basin_visits as f64,
+                residual_uncertainty,
+            ) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            scientific
+                .population_candidates
+                .entry(*epoch)
+                .or_default()
+                .entry(request.identity.replica)
+                .or_insert(member_candidate);
+            let Ok(outcome) = scientific.population.submit(*epoch, member) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            payload = match outcome {
+                EpochSubmissionOutcome::Pending {
+                    submitted,
+                    required,
+                    ..
+                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: u32::try_from(submitted)
+                        .expect("submission count is bounded by replica count"),
+                    required: u32::try_from(required)
+                        .expect("requirement is bounded by replica count"),
+                    plan: None,
+                }),
+                EpochSubmissionOutcome::Ready(plan) => {
+                    let participants = u32::try_from(plan.destinations().len())
+                        .expect("participants are bounded by replica count");
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
+                }
+            };
         }
         CatalogOperation::PopulationAbstain { epoch } => {
             let Some(scientific) = state.scientific.as_mut() else {
@@ -844,20 +946,23 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let required = u32::try_from(config.replicas.len())
-                .expect("replica count is bounded by the protocol");
             payload = match outcome {
-                EpochSubmissionOutcome::Pending { submitted, .. } => {
-                    AcceptedPayload::PopulationEpoch(PopulationEpochState {
-                        epoch: *epoch,
-                        submitted: u32::try_from(submitted)
-                            .expect("submission count is bounded by replica count"),
-                        required,
-                        plan: None,
-                    })
-                }
+                EpochSubmissionOutcome::Pending {
+                    submitted,
+                    required,
+                    ..
+                } => AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: u32::try_from(submitted)
+                        .expect("submission count is bounded by replica count"),
+                    required: u32::try_from(required)
+                        .expect("requirement is bounded by replica count"),
+                    plan: None,
+                }),
                 EpochSubmissionOutcome::Ready(plan) => {
-                    realize_population_plan(scientific, config, *epoch, &plan, required)
+                    let participants = u32::try_from(plan.destinations().len())
+                        .expect("participants are bounded by replica count");
+                    realize_population_plan(scientific, config, *epoch, &plan, participants)
                 }
             };
         }
@@ -869,13 +974,17 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let required = u32::try_from(config.replicas.len())
-                .expect("replica count is bounded by the protocol");
             if let Some(plan) = scientific.population_plans.get(epoch) {
+                // A completed epoch's population is its participants, which
+                // abstentions may have made smaller than the configured
+                // replica set; reporting the configured count here would fail
+                // every reader's consistency check against the plan vectors.
+                let participants = u32::try_from(plan.destinations.len())
+                    .expect("participants are bounded by replica count");
                 payload = AcceptedPayload::PopulationEpoch(PopulationEpochState {
                     epoch: *epoch,
-                    submitted: required,
-                    required,
+                    submitted: participants,
+                    required: participants,
                     plan: Some(plan.clone()),
                 });
             } else if *epoch == scientific.population.open_epoch() {
@@ -887,7 +996,18 @@ fn apply_request(
                     epoch: *epoch,
                     submitted: u32::try_from(submitted)
                         .expect("submission count is bounded by replica count"),
-                    required,
+                    required: u32::try_from(scientific.population.open_requirement())
+                        .expect("requirement is bounded by replica count"),
+                    plan: None,
+                });
+            } else if *epoch < scientific.population.open_epoch() {
+                // Closed with no stored plan: every replica abstained from
+                // it. Zero of zero is the vacant-close answer a poller needs
+                // to advance past the epoch instead of wedging on it.
+                payload = AcceptedPayload::PopulationEpoch(PopulationEpochState {
+                    epoch: *epoch,
+                    submitted: 0,
+                    required: 0,
                     plan: None,
                 });
             } else {
@@ -919,10 +1039,19 @@ fn apply_request(
                 scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
-                scientific.last_candidate_by_replica.insert(
-                    request.identity.replica,
-                    candidate_from_validated(&validated, Some(observation.basin_id)),
-                );
+                let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
+                let deeper = scientific
+                    .best_candidate_by_replica
+                    .get(&request.identity.replica)
+                    .is_none_or(|stored| canonical.energy < stored.energy);
+                if deeper {
+                    scientific
+                        .best_candidate_by_replica
+                        .insert(request.identity.replica, canonical.clone());
+                }
+                scientific
+                    .last_candidate_by_replica
+                    .insert(request.identity.replica, canonical);
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {

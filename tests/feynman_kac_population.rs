@@ -279,3 +279,55 @@ fn abstention_applies_to_one_epoch_and_not_to_the_next() {
         }
     );
 }
+
+#[test]
+fn an_epoch_every_replica_abstains_from_closes_vacantly() {
+    // Leaving it open would wedge every epoch counter on a barrier nobody
+    // can meet. Zero submitted of zero required is the vacant-close answer,
+    // which no genuinely pending epoch can produce.
+    let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 41).unwrap();
+    assert!(matches!(
+        population.abstain(0, 0).unwrap(),
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 1,
+            required: 1,
+        } | EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 0,
+            required: 1,
+        }
+    ));
+
+    let close = population.abstain(0, 1).unwrap();
+
+    assert_eq!(
+        close,
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 0,
+            required: 0,
+        }
+    );
+    // The next epoch is open and both replicas are expected again.
+    let outcome = population
+        .submit(1, PopulationMember::new(0, -3.0, 0.2, 1.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        outcome,
+        EpochSubmissionOutcome::Pending {
+            epoch: 1,
+            submitted: 1,
+            required: 2,
+        }
+    );
+    // A late look back at the vacant epoch answers vacantly, not with an error.
+    assert_eq!(
+        population.abstain(0, 0).unwrap(),
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 0,
+            required: 0,
+        }
+    );
+}
