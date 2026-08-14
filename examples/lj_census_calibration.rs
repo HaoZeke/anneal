@@ -251,10 +251,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     if accepted != pair_count {
         return Err(format!(
             concat!(
-                "accepted {accepted} of {pair_count} pairs in {attempt} deterministic attempts; ",
-                "source_rejections={source_rejections} quench_rejections={quench_rejections} ",
-                "identity_rejections={identity_rejections}"
-            )
+                "accepted {} of {} pairs in {} deterministic attempts; ",
+                "source_rejections={} quench_rejections={} identity_rejections={}"
+            ),
+            accepted,
+            pair_count,
+            attempt,
+            source_rejections,
+            quench_rejections,
+            identity_rejections,
         )
         .into());
     }
