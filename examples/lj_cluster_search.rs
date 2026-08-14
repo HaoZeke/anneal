@@ -1868,6 +1868,19 @@ fn run_capnp_catalog(
         }
         last_charged = snapshot.charged();
 
+        for transition in snapshot.accepted_transitions() {
+            cooperative
+                .record_executed_transition(
+                    replica,
+                    u64::try_from(transition.hop).expect("transition hop must fit u64"),
+                    transition.action.clone(),
+                    transition.from_energy,
+                    transition.to_energy,
+                    transition.adopted,
+                )
+                .expect("validated local transition execution must remain traceable");
+        }
+
         let operations = adaptive_catalog_operations(
             &descriptor_space,
             &signature.atomic_numbers,

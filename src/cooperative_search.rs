@@ -51,6 +51,8 @@ mod run {
         Slice,
         /// One explicit action-conditioned perturb--quench observation.
         Transition,
+        /// One validated perturb--quench execution before coordinator registration.
+        TransitionExecution,
     }
 
     impl TraceKind {
@@ -70,6 +72,7 @@ mod run {
                 Self::SharingDisabled => "sharing_disabled",
                 Self::Slice => "slice",
                 Self::Transition => "transition",
+                Self::TransitionExecution => "transition_execution",
             }
         }
     }
@@ -106,6 +109,12 @@ mod run {
     pub struct TransitionTrace {
         /// Stable target-blind proposal action.
         pub action: String,
+        /// Live-chain hop at which the execution completed, when locally observed.
+        pub hop: Option<u64>,
+        /// Source energy of a locally observed execution.
+        pub from_energy: Option<f64>,
+        /// Destination energy of a locally observed execution.
+        pub to_energy: Option<f64>,
         /// Whether the perturb--quench produced a classified destination.
         pub resolved: bool,
         /// Whether the destination became the replica's live state.
@@ -656,6 +665,31 @@ mod run {
             self.handle_transition_record(replica, action, resolved, adopted, result)
         }
 
+        /// Record one validated local perturb--quench independently of RPC registration.
+        pub fn record_executed_transition(
+            &mut self,
+            replica: u32,
+            hop: u64,
+            action: impl Into<String>,
+            from_energy: f64,
+            to_energy: f64,
+            adopted: bool,
+        ) -> Result<(), CooperativeRunError> {
+            self.push_event(replica, TraceKind::TransitionExecution, None, None)?;
+            self.events
+                .last_mut()
+                .expect("transition-execution push appends one trace event")
+                .transition = Some(TransitionTrace {
+                action: action.into(),
+                hop: Some(hop),
+                from_energy: Some(from_energy),
+                to_energy: Some(to_energy),
+                resolved: true,
+                adopted,
+            });
+            Ok(())
+        }
+
         /// Poll the coordinator or retain independent local execution.
         pub fn synchronize(
             &mut self,
@@ -1106,19 +1140,38 @@ mod run {
                             )
                         },
                     );
-                let (transition_action, transition_resolved, transition_adopted) =
+                let (
+                    transition_action,
+                    transition_hop,
+                    transition_from_energy,
+                    transition_to_energy,
+                    transition_resolved,
+                    transition_adopted,
+                ) =
                     event.transition.as_ref().map_or_else(
-                        || ("null".to_owned(), "null".to_owned(), "null".to_owned()),
+                        || {
+                            (
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                                "null".to_owned(),
+                            )
+                        },
                         |transition| {
                             (
                                 format!("\"{}\"", json_escape(&transition.action)),
+                                optional_u64(transition.hop),
+                                optional_f64(transition.from_energy),
+                                optional_f64(transition.to_energy),
                                 transition.resolved.to_string(),
                                 transition.adopted.to_string(),
                             )
                         },
                     );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -1160,6 +1213,9 @@ mod run {
                 catalog_evicted,
                 catalog_incumbent,
                 transition_action,
+                transition_hop,
+                transition_from_energy,
+                transition_to_energy,
                 transition_resolved,
                 transition_adopted,
             ));
@@ -1235,6 +1291,9 @@ mod run {
                         .expect("transition push appends one trace event")
                         .transition = Some(TransitionTrace {
                         action,
+                        hop: None,
+                        from_energy: None,
+                        to_energy: None,
                         resolved,
                         adopted,
                     });
