@@ -1549,6 +1549,7 @@ where
                 }
             }
         }
+        let best_before_iteration = ledger.best;
         if stage_one_reject {
             // The chain stays. A rejected proposal still deposits on where the
             // chain stands, exactly as a rejection through the ordinary
@@ -1710,28 +1711,7 @@ where
         };
         let recordable = !unquenched && (!gradient_required || validation_gradient.is_some());
         if recordable {
-            let improved_record = e_new < ledger.best - 1e-10;
             ledger.record(e_new, x_new.view());
-            // A new best is the one state worth sharing, and the census a
-            // shared run identifies basins in was calibrated from quenches
-            // at the share tolerance, which the ordinary record tolerance
-            // does not reach. Polishing only improvements bounds the cost
-            // to the number of improvement events, every evaluation charged
-            // to this ledger, and the polished state enters the boundary
-            // record the checkpoint offer loop already reads.
-            if cfg.polish_records > 0 && improved_record {
-                // The relax closure owns boundary recording and share-grade
-                // validation; recording a second boundary here counted the
-                // polish twice and tripped the checkpoint accounting. The
-                // library's whole contribution is the extra descent, bounded
-                // by the number of improvement events and charged like any
-                // other relaxation.
-                let (polished_energy, polished_state) =
-                    relax(ledger, x_new.view(), cfg.polish_records);
-                if polished_energy <= e_new {
-                    ledger.record(polished_energy, polished_state.view());
-                }
-            }
         } else {
             unconverged_records += 1;
         }
@@ -2503,6 +2483,26 @@ where
         }
         if let (Some(arm), Some(gain)) = (stall_response, stall_outcome) {
             stall_allocator.update(arm, gain);
+        }
+        // A new best is the one state worth sharing, and the census a shared
+        // run identifies basins in was calibrated at the share tolerance,
+        // which neither the ordinary record gate nor an escape's capped
+        // relaxation reaches. One choke point covers every route a best can
+        // arrive by, hop records and stall escapes alike: whenever this
+        // iteration deepened the ledger, its best state is polished through
+        // the relax closure, which owns boundary recording and share-grade
+        // validation, so the polished minimum enters the boundary record the
+        // checkpoint offer loop already reads. Bounded by the number of
+        // improvement events and charged like any other relaxation.
+        if cfg.polish_records > 0
+            && ledger.best < best_before_iteration - 1e-10
+            && let Some(best_state) = ledger.best_state.clone()
+        {
+            let (polished_energy, polished_state) =
+                relax(ledger, best_state.view(), cfg.polish_records);
+            if polished_energy <= ledger.best {
+                ledger.record(polished_energy, polished_state.view());
+            }
         }
 
         if n_rep > 1 {
