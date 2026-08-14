@@ -193,6 +193,11 @@ pub enum CatalogOperation {
         /// Charged-work synchronization epoch.
         epoch: u64,
     },
+    /// Decline to submit to one epoch, releasing the replicas waiting on it.
+    PopulationAbstain {
+        /// Charged-work synchronization epoch.
+        epoch: u64,
+    },
     /// Record one action-conditioned transition from the replica's live basin.
     RecordTransition {
         /// Stable target-blind proposal-action identifier.
@@ -561,6 +566,9 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::PopulationPlan { epoch } => {
             operation.init_population_plan().set_epoch(*epoch);
         }
+        CatalogOperation::PopulationAbstain { epoch } => {
+            operation.init_population_abstain().set_epoch(*epoch);
+        }
         CatalogOperation::RecordTransition {
             action,
             destination,
@@ -662,6 +670,12 @@ pub(crate) fn decode_request_reader(
             let plan = plan.map_err(wire_error)?;
             CatalogOperation::PopulationPlan {
                 epoch: plan.get_epoch(),
+            }
+        }
+        catalog_request::operation::PopulationAbstain(abstain) => {
+            let abstain = abstain.map_err(wire_error)?;
+            CatalogOperation::PopulationAbstain {
+                epoch: abstain.get_epoch(),
             }
         }
         catalog_request::operation::RecordTransition(transition) => {
@@ -784,13 +798,13 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                         wire.set_offspring_variance(plan.offspring_variance);
                         wire.set_selection(match plan.selection {
                             PopulationSelection::Unspecified => {
-                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::Unspecified
+                                crate::Catalog_capnp::PopulationSelection::Unspecified
                             }
                             PopulationSelection::SystematicResampling => {
-                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::SystematicResampling
+                                crate::Catalog_capnp::PopulationSelection::SystematicResampling
                             }
                             PopulationSelection::RegionCovering => {
-                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::RegionCovering
+                                crate::Catalog_capnp::PopulationSelection::RegionCovering
                             }
                         });
                         let mut candidates = wire
@@ -913,13 +927,13 @@ pub(crate) fn decode_reply_reader(
                                 offspring_variance: plan.get_offspring_variance(),
                                 parent_candidates,
                                 selection: match plan.get_selection().map_err(wire_error)? {
-                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::Unspecified => {
+                                    crate::Catalog_capnp::PopulationSelection::Unspecified => {
                                         PopulationSelection::Unspecified
                                     }
-                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::SystematicResampling => {
+                                    crate::Catalog_capnp::PopulationSelection::SystematicResampling => {
                                         PopulationSelection::SystematicResampling
                                     }
-                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::RegionCovering => {
+                                    crate::Catalog_capnp::PopulationSelection::RegionCovering => {
                                         PopulationSelection::RegionCovering
                                     }
                                 },

@@ -127,6 +127,13 @@ struct PopulationPlanRequest {
   epoch @0 :UInt64;
 }
 
+# Sent when a replica reaches a barrier with no validated representative.
+# Without it the epoch waits for a submission that is never coming and the
+# replicas already waiting poll until their budgets drain.
+struct PopulationAbstainRequest {
+  epoch @0 :UInt64;
+}
+
 struct TransitionRecord {
   action @0 :Text;
   adopted @3 :Bool;
@@ -188,6 +195,7 @@ struct CatalogRequest {
     populationPlan @12 :PopulationPlanRequest;
     recordTransition @13 :TransitionRecord;
     boundaryCrossing @14 :BoundaryCrossingRequest;
+    populationAbstain @15 :PopulationAbstainRequest;
   }
 }
 

@@ -938,6 +938,23 @@ mod run {
         }
 
         /// Poll an existing population epoch without changing its evidence.
+        /// Decline this epoch so the replicas waiting on it are released.
+        pub fn abstain_population(
+            &mut self,
+            replica: u32,
+            epoch: u64,
+        ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.population_abstain_with_snapshot(rpc_sequence, epoch))
+            };
+            self.handle_population_result(replica, epoch, result)
+        }
+
         pub fn poll_population(
             &mut self,
             replica: u32,

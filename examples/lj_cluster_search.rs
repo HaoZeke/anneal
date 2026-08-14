@@ -354,6 +354,25 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn a_barrier_without_a_representative_abstains_rather_than_working_locally() {
+        // The epoch requires every replica. A replica that reaches the
+        // barrier with nothing valid to submit and quietly does local work
+        // instead leaves the replicas that did submit polling until their
+        // budgets drain, which is the deadlock this reports.
+        let progress = PopulationEpochProgress::default();
+
+        assert_eq!(
+            active_population_action(&progress, 1_000, 2_000, 1_000, false),
+            PopulationEpochAction::Abstain
+        );
+        assert_eq!(
+            active_population_action(&progress, 1_000, 2_000, 1_000, true),
+            PopulationEpochAction::Submit
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn active_checkpoint_catches_up_missed_epochs_at_the_terminal_boundary() {
         let mut progress = PopulationEpochProgress::default();
         progress.observe_ready();
@@ -1771,6 +1790,8 @@ fn population_region_trial(
 #[cfg(feature = "bank-rpc")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PopulationEpochAction {
+    /// The barrier is here but this replica has nothing valid to submit.
+    Abstain,
     LocalWork,
     Submit,
     Poll,
@@ -1802,6 +1823,13 @@ impl PopulationEpochProgress {
             PopulationEpochAction::Poll
         } else if threshold_reached && representative_available {
             PopulationEpochAction::Submit
+        } else if threshold_reached {
+            // The barrier is here and this replica cannot produce a
+            // validated representative for it. Doing local work instead
+            // leaves every replica that has already submitted polling
+            // until its budget drains, because the epoch requires this
+            // one and it is not coming.
+            PopulationEpochAction::Abstain
         } else {
             PopulationEpochAction::LocalWork
         }
@@ -3136,6 +3164,11 @@ fn run_capnp_catalog_sliced(
                 cooperative
                     .poll_population(replica, population_progress.epoch())
                     .expect("population polling must preserve cooperative invariants"),
+            ),
+            PopulationEpochAction::Abstain => Some(
+                cooperative
+                    .abstain_population(replica, population_progress.epoch())
+                    .expect("population abstention must preserve cooperative invariants"),
             ),
             PopulationEpochAction::LocalWork => None,
         };
