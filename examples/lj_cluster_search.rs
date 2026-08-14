@@ -22,7 +22,9 @@ use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
-use std::io::{self, Write};
+#[cfg(feature = "graphkey")]
+use std::io;
+use std::io::Write;
 
 #[cfg(all(feature = "ira", not(feature = "featomic")))]
 use anneal_core::shape::IraMetric;
