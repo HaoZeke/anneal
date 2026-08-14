@@ -910,6 +910,10 @@ fn main() {
     apply_boolean_options(&mut cfg, &opts);
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
+    // Stall exits through the recorded basin entry, named so it is
+    // measurable against the Lanczos climb rather than replacing it.
+    cfg.trail_on_stall = opts.contains(&"trail")
+        || std::env::var("CLUSTER_TRAIL_EXIT").is_ok_and(|value| value == "1");
     // Do not clobber Config::recommended: that hop already turns the
     // return screen on. The flag only adds it to for_cluster.
     if opts.contains(&"rscreen") {

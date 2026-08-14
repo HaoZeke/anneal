@@ -443,6 +443,8 @@ pub struct Outcome {
     pub restarts: usize,
     /// Climbs triggered by a stall.
     pub stall_escapes: usize,
+    /// Stall exits taken through the recorded basin entry.
+    pub trail_escapes: usize,
     /// Energy gained by those that landed lower than where they left.
     pub stall_escape_gain: f64,
     /// Mean softest eigenvalue over those proposals.
@@ -985,6 +987,10 @@ where
     let mut longest_quiet = 0usize;
     let mut stall_escapes = 0usize;
     let mut stall_escape_gain = 0.0_f64;
+    let mut trail_escapes = 0usize;
+    // Evaluated screen state of the trial that entered the current basin,
+    // kept as the exit point a stalled chain leaves through.
+    let mut basin_entry: Option<Array1<f64>> = None;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -1532,6 +1538,11 @@ where
             continue;
         }
         let (e_screen, x_screen) = relax(ledger, trial.view(), cfg.screen_steps);
+        let entry_snapshot = if cfg.trail_on_stall {
+            Some(x_screen.clone())
+        } else {
+            None
+        };
         // Two reasons to stop before the full relaxation. The trial is going
         // nowhere useful by energy, or it is going back where the chain already
         // is, which the energy screen cannot see because a returning trial
@@ -2177,6 +2188,9 @@ where
                 validated: recordable,
                 adopted: true,
             });
+            if !returning && let Some(snapshot) = entry_snapshot {
+                basin_entry = Some(snapshot);
+            }
             e = e_new;
             x = x_new;
             current_validation_gradient = validation_gradient;
@@ -2347,7 +2361,47 @@ where
             x = xf;
             here = None;
         }
-        if cfg.escape_on_stall && stuck {
+        let mut stall_handled = false;
+        if cfg.trail_on_stall
+            && stuck
+            && let Some(x_entry) = basin_entry.take()
+        {
+            quiet = 0;
+            longest_quiet = 0;
+            // Outward is from the minimum toward the entry, continued past it
+            // with noise, so the restart leans toward the ridge the chain
+            // crossed on the way in rather than back down the funnel.
+            let mut exit = x_entry.clone();
+            let outward: Vec<f64> = x_entry
+                .iter()
+                .zip(x.iter())
+                .map(|(entry, minimum)| entry - minimum)
+                .collect();
+            let norm = outward.iter().map(|v| v * v).sum::<f64>().sqrt();
+            for (index, value) in exit.iter_mut().enumerate() {
+                let along = if norm > 0.0 {
+                    outward[index] / norm
+                } else {
+                    0.0
+                };
+                *value += cfg.escape_amplitude * (0.5 * along + rng.random::<f64>() - 0.5);
+            }
+            let (ee, xe) = relax(ledger, exit.view(), cfg.relax_steps);
+            ledger.record(ee, xe.view());
+            hops += 1;
+            stall_escapes += 1;
+            trail_escapes += 1;
+            if ee < e {
+                stall_escape_gain += e - ee;
+            }
+            // Taken whatever its energy, exactly as the climb below: the
+            // chain has shown it cannot improve from where it stands.
+            e = ee;
+            x = xe;
+            here = None;
+            stall_handled = true;
+        }
+        if cfg.escape_on_stall && stuck && !stall_handled {
             quiet = 0;
             longest_quiet = 0;
             if let Some(g) = grad.as_deref_mut() {
@@ -2605,6 +2659,7 @@ where
         merge_radius: final_radius,
         mean_step: radius.mean_step(),
         stall_escapes,
+        trail_escapes,
         stall_escape_gain,
         soft_lambda: if soft_escapes > 0 {
             soft_lambda / soft_escapes as f64
