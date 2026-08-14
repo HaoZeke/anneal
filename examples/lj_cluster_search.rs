@@ -354,6 +354,34 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn active_checkpoint_resolves_a_pending_population_barrier() {
+        use anneal_core::cooperative_search::PopulationSynchronizationOutcome;
+
+        let mut polls = 0;
+        let outcome = resolve_population_barrier(
+            PopulationSynchronizationOutcome::Pending {
+                submitted: 1,
+                required: 4,
+            },
+            || {
+                polls += 1;
+                if polls == 1 {
+                    PopulationSynchronizationOutcome::Pending {
+                        submitted: 3,
+                        required: 4,
+                    }
+                } else {
+                    PopulationSynchronizationOutcome::Rejected
+                }
+            },
+        );
+
+        assert_eq!(outcome, PopulationSynchronizationOutcome::Rejected);
+        assert_eq!(polls, 2);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn quenched_transport_destination_keeps_its_action_label() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
         let descriptor_space = anneal_core::catalog::lj::descriptor_space();
