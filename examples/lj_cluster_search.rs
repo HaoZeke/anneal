@@ -1815,9 +1815,9 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole, ProposalFamily,
-        PopulationSynchronizationOutcome, RunManifest, SliceAdoption, SliceQuench, SliceTrace,
-        SliceValidation, TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -2072,12 +2072,7 @@ fn run_capnp_catalog(
         let descriptor = current_candidate.descriptor.clone();
         let population_candidate = current_candidate.clone();
         let policy = match cooperative
-            .registered_policy_input(
-                replica,
-                current_candidate,
-                stall,
-                local_deepened,
-            )
+            .registered_policy_input(replica, current_candidate, stall, local_deepened)
             .expect("coordinator policy evidence must preserve local invariants")
         {
             PolicyEvidenceOutcome::Remote(input) => input,
@@ -2129,11 +2124,7 @@ fn run_capnp_catalog(
         ) {
             PopulationEpochAction::Submit => Some(
                 cooperative
-                    .submit_population(
-                        replica,
-                        population_progress.epoch(),
-                        population_candidate,
-                    )
+                    .submit_population(replica, population_progress.epoch(), population_candidate)
                     .expect("population submission must preserve cooperative invariants"),
             ),
             PopulationEpochAction::Poll => Some(
