@@ -778,6 +778,35 @@ mod run {
             }
         }
 
+        /// Register one validated live-chain state and query policy evidence
+        /// for that exact coordinator-assigned census observation.
+        pub fn registered_policy_input(
+            &mut self,
+            replica: u32,
+            candidate: CatalogCandidate,
+            local_stall_slices: u32,
+            local_deepened: bool,
+        ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
+            let descriptor = candidate.descriptor.clone();
+            let energy = candidate.energy;
+            match self.record_current(replica, candidate)? {
+                TransitionRecordOutcome::Recorded => self.policy_input(
+                    replica,
+                    descriptor,
+                    energy,
+                    local_stall_slices,
+                    local_deepened,
+                ),
+                TransitionRecordOutcome::Rejected => Ok(PolicyEvidenceOutcome::Rejected),
+                TransitionRecordOutcome::LocalFallback => {
+                    Ok(PolicyEvidenceOutcome::LocalFallback)
+                }
+                TransitionRecordOutcome::SharingDisabled => {
+                    Ok(PolicyEvidenceOutcome::SharingDisabled)
+                }
+            }
+        }
+
         /// Sample one validated active-catalog candidate.
         pub fn sample_candidate(
             &mut self,

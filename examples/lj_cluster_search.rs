@@ -2560,21 +2560,6 @@ fn run_capnp_catalog_sliced(
             }
         }
 
-        let Ok(descriptor) =
-            descriptor_space.describe(policy_state.view(), Some(&signature.atomic_numbers))
-        else {
-            slice_trace.policy_reason = "descriptor_rejected";
-            slice_trace.energy = current_energy.is_finite().then_some(current_energy);
-            slice_trace.charged_work =
-                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
-            cooperative
-                .record_slice(replica, slice_trace)
-                .expect("descriptor failure must retain a complete slice diagnostic");
-            continue;
-        };
-        cooperative
-            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-            .expect("policy descriptor work must enter the cooperative ledger");
         let policy_energy = if policy_energy.is_finite() {
             policy_energy
         } else {
@@ -2586,15 +2571,58 @@ fn run_capnp_catalog_sliced(
                 .expect("invalid-energy slice must retain a complete diagnostic");
             continue;
         };
+        if ledger.remaining() < 2 || !ledger.charge() {
+            slice_trace.policy_reason = "current_registration_budget_exhausted";
+            slice_trace.energy = Some(policy_energy);
+            slice_trace.charged_work =
+                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+            cooperative
+                .record_slice(replica, slice_trace)
+                .expect("registration budget exhaustion must retain a complete diagnostic");
+            continue;
+        }
+        let (registered_energy, registered_gradient) = lj(policy_state.view());
+        cooperative
+            .record_work(replica, ChargeKind::FreshValidation, 1)
+            .expect("live-state validation must enter the cooperative ledger");
+        candidate_sequence = candidate_sequence
+            .checked_add(1)
+            .expect("candidate sequence must fit u64");
+        cooperative
+            .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+            .expect("live-state descriptor work must enter the cooperative ledger");
+        let Some(live_candidate) = lj_catalog_candidate(
+            &descriptor_space,
+            &signature.atomic_numbers,
+            replica,
+            candidate_sequence,
+            seed,
+            ledger.spent(),
+            registered_energy,
+            policy_state.view(),
+            registered_gradient.view(),
+        ) else {
+            slice_trace.policy_reason = "current_registration_validation_rejected";
+            slice_trace.energy = registered_energy.is_finite().then_some(registered_energy);
+            slice_trace.charged_work =
+                u64::try_from(ledger.spent() - slice_start).expect("slice charge must fit u64");
+            cooperative
+                .record_slice(replica, slice_trace)
+                .expect("invalid live state must retain a complete diagnostic");
+            continue;
+        };
+        assert!(
+            ledger.charge(),
+            "live-state registration must reserve receiving validation"
+        );
+        cooperative
+            .record_work(replica, ChargeKind::FreshValidation, 1)
+            .expect("live-state receiving validation must enter the cooperative ledger");
+        let policy_descriptor = live_candidate.descriptor.clone();
+        let policy_energy = live_candidate.energy;
         let policy_outcome = cooperative
-            .policy_input(
-                replica,
-                descriptor.values().to_vec(),
-                policy_energy,
-                stall,
-                local_deepened,
-            )
-            .expect("coordinator policy evidence must preserve local invariants");
+            .registered_policy_input(replica, live_candidate, stall, local_deepened)
+            .expect("registered policy evidence must preserve local invariants");
         let input = match policy_outcome {
             PolicyEvidenceOutcome::Remote(input) => input,
             PolicyEvidenceOutcome::Rejected => {
@@ -2686,7 +2714,7 @@ fn run_capnp_catalog_sliced(
                 };
                 if source_registered
                     && let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                        .boundary_crossing(replica, descriptor.values().to_vec(), rng.random())
+                        .boundary_crossing(replica, policy_descriptor.clone(), rng.random())
                         .expect("boundary-crossing access must preserve local execution")
                 {
                     slice_trace.sampled_basin = Some(crossing.destination_basin);
