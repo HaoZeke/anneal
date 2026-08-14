@@ -327,6 +327,31 @@ pub struct PolicyState {
     pub transition_uncertainty: f64,
 }
 
+/// Which selection produced a barrier's parent map.
+///
+/// The two branches carry different weights, so a reader that cannot
+/// tell them apart cannot interpret the weights it is given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopulationSelection {
+    /// Written before the branch was recorded.
+    Unspecified,
+    /// Systematic resampling of the Feynman-Kac weights.
+    SystematicResampling,
+    /// Attraction-region coverage before any source is duplicated.
+    RegionCovering,
+}
+
+impl PopulationSelection {
+    /// Stable token used in the replica event stream.
+    pub fn as_trace_str(self) -> &'static str {
+        match self {
+            Self::Unspecified => "unspecified",
+            Self::SystematicResampling => "systematic_resampling",
+            Self::RegionCovering => "region_covering",
+        }
+    }
+}
+
 /// Replica-addressed fixed-population plan returned by the coordinator.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PopulationPlan {
@@ -348,6 +373,8 @@ pub struct PopulationPlan {
     pub offspring_variance: f64,
     /// Validated parent record paired with every destination.
     pub parent_candidates: Vec<CatalogCandidate>,
+    /// Branch that produced this parent map.
+    pub selection: PopulationSelection,
 }
 
 /// Barrier state for one synchronous population epoch.
@@ -755,6 +782,17 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                         wire.set_unique_parents(plan.unique_parents);
                         wire.set_max_family_size(plan.max_family_size);
                         wire.set_offspring_variance(plan.offspring_variance);
+                        wire.set_selection(match plan.selection {
+                            PopulationSelection::Unspecified => {
+                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::Unspecified
+                            }
+                            PopulationSelection::SystematicResampling => {
+                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::SystematicResampling
+                            }
+                            PopulationSelection::RegionCovering => {
+                                crate::catalog_rpc::Catalog_capnp::PopulationSelection::RegionCovering
+                            }
+                        });
                         let mut candidates = wire
                             .reborrow()
                             .init_parent_candidates(plan.parent_candidates.len() as u32);
@@ -874,6 +912,17 @@ pub(crate) fn decode_reply_reader(
                                 max_family_size: plan.get_max_family_size(),
                                 offspring_variance: plan.get_offspring_variance(),
                                 parent_candidates,
+                                selection: match plan.get_selection().map_err(wire_error)? {
+                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::Unspecified => {
+                                        PopulationSelection::Unspecified
+                                    }
+                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::SystematicResampling => {
+                                        PopulationSelection::SystematicResampling
+                                    }
+                                    crate::catalog_rpc::Catalog_capnp::PopulationSelection::RegionCovering => {
+                                        PopulationSelection::RegionCovering
+                                    }
+                                },
                             })
                         }
                     };

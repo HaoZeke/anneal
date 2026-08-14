@@ -136,6 +136,17 @@ struct TransitionRecord {
   }
 }
 
+# Which selection produced a barrier's parent map. The two branches carry
+# different weights, so a reader that cannot tell them apart cannot
+# interpret the weights it is given. Zero is unspecified rather than a
+# real branch, so a record written before this field existed cannot be
+# read as though it had taken one.
+enum PopulationSelection {
+  unspecified @0;
+  systematicResampling @1;
+  regionCovering @2;
+}
+
 struct PopulationPlan {
   epoch @0 :UInt64;
   destinations @1 :List(UInt32);
@@ -146,6 +157,7 @@ struct PopulationPlan {
   maxFamilySize @6 :UInt32;
   offspringVariance @7 :Float64;
   parentCandidates @8 :List(CandidateRecord);
+  selection @9 :PopulationSelection;
 }
 
 struct PopulationEpochReply {

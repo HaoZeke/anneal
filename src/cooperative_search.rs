@@ -13,8 +13,8 @@ mod run {
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, CatalogCandidate, CatalogMutation, CatalogRelation,
-        CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
-        PopulationPlan, ProtocolRejection, TransitionDestination,
+        CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
+        PopulationSelection, ProtocolRejection, TransitionDestination,
     };
     use crate::methods::feynman_kac::population_family_position;
 
@@ -259,6 +259,8 @@ mod run {
         pub family_size: u32,
         /// Kish effective sample size of source selection weights.
         pub effective_sample_size: f64,
+        /// Branch that produced this barrier's parent map.
+        pub selection: PopulationSelection,
     }
 
     /// Required manifest identity emitted before run events.
@@ -798,9 +800,7 @@ mod run {
                     local_deepened,
                 ),
                 TransitionRecordOutcome::Rejected => Ok(PolicyEvidenceOutcome::Rejected),
-                TransitionRecordOutcome::LocalFallback => {
-                    Ok(PolicyEvidenceOutcome::LocalFallback)
-                }
+                TransitionRecordOutcome::LocalFallback => Ok(PolicyEvidenceOutcome::LocalFallback),
                 TransitionRecordOutcome::SharingDisabled => {
                     Ok(PolicyEvidenceOutcome::SharingDisabled)
                 }
@@ -1036,27 +1036,35 @@ mod run {
                     || "null".to_owned(),
                     |value| format!("\"{}\"", json_escape(value)),
                 );
-                let (population_epoch, population_parent, family_ordinal, family_size, ess) =
-                    event.population.map_or_else(
-                        || {
-                            (
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                            )
-                        },
-                        |population| {
-                            (
-                                population.epoch.to_string(),
-                                population.parent.to_string(),
-                                population.family_ordinal.to_string(),
-                                population.family_size.to_string(),
-                                population.effective_sample_size.to_string(),
-                            )
-                        },
-                    );
+                let (
+                    population_epoch,
+                    population_parent,
+                    family_ordinal,
+                    family_size,
+                    ess,
+                    population_selection,
+                ) = event.population.map_or_else(
+                    || {
+                        (
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                        )
+                    },
+                    |population| {
+                        (
+                            population.epoch.to_string(),
+                            population.parent.to_string(),
+                            population.family_ordinal.to_string(),
+                            population.family_size.to_string(),
+                            population.effective_sample_size.to_string(),
+                            format!("\"{}\"", population.selection.as_trace_str()),
+                        )
+                    },
+                );
                 let (
                     policy_local_basin,
                     policy_relation,
@@ -1176,31 +1184,30 @@ mod run {
                     transition_to_energy,
                     transition_resolved,
                     transition_adopted,
-                ) =
-                    event.transition.as_ref().map_or_else(
-                        || {
-                            (
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                                "null".to_owned(),
-                            )
-                        },
-                        |transition| {
-                            (
-                                format!("\"{}\"", json_escape(&transition.action)),
-                                optional_u64(transition.hop),
-                                optional_f64(transition.from_energy),
-                                optional_f64(transition.to_energy),
-                                transition.resolved.to_string(),
-                                transition.adopted.to_string(),
-                            )
-                        },
-                    );
+                ) = event.transition.as_ref().map_or_else(
+                    || {
+                        (
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                            "null".to_owned(),
+                        )
+                    },
+                    |transition| {
+                        (
+                            format!("\"{}\"", json_escape(&transition.action)),
+                            optional_u64(transition.hop),
+                            optional_f64(transition.from_energy),
+                            optional_f64(transition.to_energy),
+                            transition.resolved.to_string(),
+                            transition.adopted.to_string(),
+                        )
+                    },
+                );
                 output.push_str(&format!(
-                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
+                "{{\"kind\":\"{}\",\"replica\":{},\"sequence\":{},\"aggregate_charged\":{},\"catalog_version\":{},\"reason\":{},\"population_epoch\":{},\"population_parent\":{},\"population_family_ordinal\":{},\"population_family_size\":{},\"population_effective_sample_size\":{},\"population_selection\":{},\"policy_local_basin\":{},\"policy_relation\":{},\"policy_total_visits\":{},\"policy_singleton_basins\":{},\"policy_local_basin_visits\":{},\"policy_globally_saturated\":{},\"policy_local_basin_distance\":{},\"policy_novelty\":{},\"policy_transition_uncertainty\":{},\"policy_query_energy\":{},\"slice\":{},\"slice_current_basin\":{},\"slice_active_relation\":{},\"slice_policy_role\":{},\"slice_policy_reason\":{},\"slice_proposal_family\":{},\"slice_sampled_basin\":{},\"slice_descriptor_step_norm\":{},\"slice_cartesian_step_norm\":{},\"slice_validation\":{},\"slice_quench\":{},\"slice_adoption\":{},\"slice_novelty\":{},\"slice_energy\":{},\"slice_charged_work\":{},\"catalog_basin\":{},\"catalog_mutation\":{},\"catalog_evicted\":{},\"catalog_incumbent\":{},\"transition_action\":{},\"transition_hop\":{},\"transition_from_energy\":{},\"transition_to_energy\":{},\"transition_resolved\":{},\"transition_adopted\":{}}}\n",
                 event.kind.code(),
                 event.replica,
                 event.sequence,
@@ -1212,6 +1219,7 @@ mod run {
                 family_ordinal,
                 family_size,
                 ess,
+                population_selection,
                 policy_local_basin,
                 policy_relation,
                 policy_total_visits,
@@ -1456,6 +1464,7 @@ mod run {
                 family_ordinal,
                 family_size,
                 effective_sample_size: plan.effective_sample_size,
+                selection: plan.selection,
             });
             Ok(PopulationSynchronizationOutcome::Ready { parent, plan })
         }
