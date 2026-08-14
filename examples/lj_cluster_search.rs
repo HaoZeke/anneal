@@ -1827,6 +1827,23 @@ fn active_population_action(
     )
 }
 
+#[cfg(feature = "bank-rpc")]
+fn resolve_population_barrier<F>(
+    mut outcome: anneal_core::cooperative_search::PopulationSynchronizationOutcome,
+    mut poll: F,
+) -> anneal_core::cooperative_search::PopulationSynchronizationOutcome
+where
+    F: FnMut() -> anneal_core::cooperative_search::PopulationSynchronizationOutcome,
+{
+    while matches!(
+        outcome,
+        anneal_core::cooperative_search::PopulationSynchronizationOutcome::Pending { .. }
+    ) {
+        outcome = poll();
+    }
+    outcome
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -1921,6 +1938,18 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50_000)
         .max(minimum_population_interval);
+    let population_poll_limit = std::env::var("CATALOG_POPULATION_POLL_LIMIT")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(30_000)
+        .max(1);
+    let population_poll_delay = std::time::Duration::from_millis(
+        std::env::var("CATALOG_POPULATION_POLL_MILLIS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(2)
+            .max(1),
+    );
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
@@ -2163,10 +2192,24 @@ fn run_capnp_catalog(
             PopulationEpochAction::LocalWork => None,
         };
         if let Some(population) = population {
-            match population {
-                PopulationSynchronizationOutcome::Pending { .. } => {
-                    population_progress.observe_pending();
+            if matches!(
+                population,
+                PopulationSynchronizationOutcome::Pending { .. }
+            ) {
+                population_progress.observe_pending();
+            }
+            let mut polls = 0usize;
+            let population = resolve_population_barrier(population, || {
+                if polls >= population_poll_limit {
+                    return PopulationSynchronizationOutcome::LocalFallback;
                 }
+                polls += 1;
+                std::thread::sleep(population_poll_delay);
+                cooperative
+                    .poll_population(replica, population_progress.epoch())
+                    .unwrap_or(PopulationSynchronizationOutcome::LocalFallback)
+            });
+            match population {
                 PopulationSynchronizationOutcome::Ready { parent, plan } => {
                     let family =
                         population_family_position(&plan.destinations, &plan.parents, replica)
@@ -2224,6 +2267,9 @@ fn run_capnp_catalog(
                 PopulationSynchronizationOutcome::Rejected
                 | PopulationSynchronizationOutcome::LocalFallback
                 | PopulationSynchronizationOutcome::SharingDisabled => {}
+                PopulationSynchronizationOutcome::Pending { .. } => {
+                    unreachable!("population resolver returns only a terminal outcome")
+                }
             }
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)
