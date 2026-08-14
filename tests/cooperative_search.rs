@@ -177,6 +177,35 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 }
 
 #[test]
+fn registered_policy_query_assigns_the_live_chain_to_a_census_basin() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0, 1, 2, 3], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let live = candidate(0, 1, 1.2);
+    assert!(matches!(
+        run.registered_policy_input(0, live, 0, false).unwrap(),
+        PolicyEvidenceOutcome::Remote(_)
+    ));
+    let policy = run
+        .events()
+        .iter()
+        .rev()
+        .find_map(|event| event.policy)
+        .expect("registered policy query did not emit policy evidence");
+    assert!(policy.local_basin.is_some());
+    assert_eq!(policy.total_visits, 1);
+    assert_eq!(policy.local_basin_visits, 1);
+    assert_eq!(policy.local_basin_distance, 0.0);
+}
+
+#[test]
 fn catalog_outputs_are_actionable_and_seeded() {
     let server = server();
     let digest = signature().digest();
