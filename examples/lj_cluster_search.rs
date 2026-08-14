@@ -354,6 +354,24 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn active_checkpoint_catches_up_missed_epochs_at_the_terminal_boundary() {
+        let mut progress = PopulationEpochProgress::default();
+        progress.observe_ready();
+
+        assert_eq!(
+            active_population_action(&progress, 3_000, 0, 1_000, true),
+            PopulationEpochAction::Submit
+        );
+
+        progress.observe_ready();
+        assert_eq!(
+            active_population_action(&progress, 3_000, 0, 1_000, true),
+            PopulationEpochAction::LocalWork
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn active_checkpoint_resolves_a_pending_population_barrier() {
         use anneal_core::cooperative_search::PopulationSynchronizationOutcome;
 
