@@ -105,7 +105,7 @@ mod run {
     }
 
     /// Replayable action-conditioned transition diagnostic.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq)]
     pub struct TransitionTrace {
         /// Stable target-blind proposal action.
         pub action: String,
