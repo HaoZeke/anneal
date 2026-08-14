@@ -11,7 +11,6 @@ REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 [[ -x $PYTHON ]] || { echo "missing calibration Python: $PYTHON" >&2; exit 1; }
 cd "$REPRO_ROOT"
-(cd development/jcc/reference && sha256sum --check --strict SHA256SUMS)
 "$PYTHON" workflow/jcc/calibrate_census.py \
   --config config/jcc/census_calibration.json
 

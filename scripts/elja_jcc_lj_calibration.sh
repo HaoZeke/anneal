@@ -8,9 +8,8 @@ if [[ -z ${SLURM_JOB_ID:-} ]]; then
 fi
 
 N=${1:?LJ point count}
-ENERGY=${2:?published CCD energy}
-BASE_SEED=${3:?base perturbation seed}
-SIGMA=${4:-0.01}
+BASE_SEED=${2:?base search seed}
+SIGMA=${3:-0.01}
 case "$N" in
   75|98|102|104) ;;
   *) echo "unsupported calibration size: $N" >&2; exit 2 ;;
@@ -19,8 +18,6 @@ esac
 ANNEAL_ROOT=${LJ_ROOT:-$HOME/anneal-build}
 REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 PAIR_COUNT=${JCC_CALIBRATION_PAIRS:-200}
-REFERENCE_DIR=$REPRO_ROOT/development/jcc/reference
-REFERENCE=$REFERENCE_DIR/lj${N}.points
 PAIR_DIR=$REPRO_ROOT/development/jcc/census_pairs
 SIGNATURE_DIR=$REPRO_ROOT/development/jcc/signatures
 PAIR_OUTPUT=$PAIR_DIR/lj${N}.jsonl
@@ -28,12 +25,10 @@ SIGNATURE_OUTPUT=$SIGNATURE_DIR/lj${N}.json
 PARTIAL_PAIR=$PAIR_DIR/.lj${N}.${SLURM_JOB_ID}.jsonl
 PARTIAL_SIGNATURE=$SIGNATURE_DIR/.lj${N}.${SLURM_JOB_ID}.json
 BINARY=$ANNEAL_ROOT/target/release/examples/lj_census_calibration
-REFERENCE_URL=https://www-wales.ch.cam.ac.uk/~jon/structures/LJ/points/${N}
 PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 
 [[ -x $BINARY ]] || { echo "missing calibration executable: $BINARY" >&2; exit 1; }
 [[ -x $PYTHON ]] || { echo "missing calibration Python: $PYTHON" >&2; exit 1; }
-[[ -f $REFERENCE ]] || { echo "missing reference: $REFERENCE" >&2; exit 1; }
 [[ ! -e $PAIR_OUTPUT ]] || { echo "immutable output exists: $PAIR_OUTPUT" >&2; exit 1; }
 [[ ! -e $SIGNATURE_OUTPUT ]] || { echo "immutable output exists: $SIGNATURE_OUTPUT" >&2; exit 1; }
 [[ ! -e $PARTIAL_PAIR && ! -e $PARTIAL_SIGNATURE ]] || {
@@ -42,14 +37,12 @@ PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 }
 
 mkdir -p "$PAIR_DIR" "$SIGNATURE_DIR"
-(cd "$REFERENCE_DIR" && sha256sum --check --strict SHA256SUMS)
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 
 "$BINARY" \
-  "$N" "$REFERENCE" "$REFERENCE_URL" "$ENERGY" \
-  "$PAIR_COUNT" "$BASE_SEED" "$SIGMA" \
+  "$N" "$PAIR_COUNT" "$BASE_SEED" "$SIGMA" \
   "$PARTIAL_PAIR" "$PARTIAL_SIGNATURE"
 
 "$PYTHON" -m json.tool "$PARTIAL_SIGNATURE" >/dev/null
