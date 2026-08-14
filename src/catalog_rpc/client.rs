@@ -259,6 +259,7 @@ impl CatalogClient {
             AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_) => {
                 return Err(ProtocolError::Malformed(
@@ -337,6 +338,7 @@ impl CatalogClient {
             AcceptedPayload::None => Ok(None),
             AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::BoundaryCrossing(_)
+            | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -369,6 +371,7 @@ impl CatalogClient {
             AcceptedPayload::None
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::BoundaryCrossing(_)
+            | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -396,6 +399,7 @@ impl CatalogClient {
             AcceptedPayload::None => Ok(None),
             AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
+            | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -437,6 +441,7 @@ impl CatalogClient {
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::BoundaryCrossing(_)
+            | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
@@ -495,7 +500,10 @@ impl CatalogClient {
         event_sequence: u64,
         epoch: u64,
     ) -> Result<PopulationEpochReceipt, CatalogClientError> {
-        let reply = self.call(event_sequence, CatalogOperation::PopulationAbstain { epoch })?;
+        let reply = self.call(
+            event_sequence,
+            CatalogOperation::PopulationAbstain { epoch },
+        )?;
         Ok(PopulationEpochReceipt {
             state: population_epoch_payload(reply.payload, "population abstain")?,
             snapshot: reply.snapshot,
@@ -531,6 +539,61 @@ impl CatalogClient {
             state: population_epoch_payload(reply.payload, "population plan")?,
             snapshot: reply.snapshot,
         })
+    }
+
+    /// Read-only aggregate status; any observer naming the right campaign
+    /// and ensemble may ask, with no replica identity and no signature.
+    pub fn observer_status(
+        &mut self,
+        event_sequence: u64,
+    ) -> Result<crate::catalog_rpc::CoordinatorStatus, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::ObserverStatus)?;
+        match reply.payload {
+            AcceptedPayload::CoordinatorStatus(status) => Ok(status),
+            _ => Err(CatalogClientError::Protocol(ProtocolError::Malformed(
+                "observer status reply carried the wrong payload".to_owned(),
+            ))),
+        }
+    }
+
+    /// The framed Cap'n Proto reply to a status query, byte-exact as the
+    /// coordinator sent it, validated as a status before it is handed on.
+    pub fn observer_status_frame(
+        &mut self,
+        event_sequence: u64,
+    ) -> Result<Vec<u8>, CatalogClientError> {
+        let request = CatalogRequest {
+            protocol_version: PROTOCOL_VERSION,
+            identity: self.identity.clone(),
+            event_sequence,
+            snapshot_version: self.snapshot_version,
+            operation: CatalogOperation::ObserverStatus,
+        };
+        self.stream.write_all(&encode_request(&request)?)?;
+        self.stream.flush()?;
+        let message = serialize::read_message(&mut self.stream, ReaderOptions::new())
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+        {
+            let root = message
+                .get_root::<catalog_reply::Reader>()
+                .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+            match decode_reply_reader(root)? {
+                CatalogReply::Accepted(reply)
+                    if matches!(reply.payload, AcceptedPayload::CoordinatorStatus(_)) => {}
+                CatalogReply::Accepted(_) => {
+                    return Err(CatalogClientError::Protocol(ProtocolError::Malformed(
+                        "observer status reply carried the wrong payload".to_owned(),
+                    )));
+                }
+                CatalogReply::Rejected { reason, .. } => {
+                    return Err(CatalogClientError::Rejected(reason));
+                }
+            }
+        }
+        let mut frame = Vec::new();
+        capnp::serialize::write_message_segments(&mut frame, &message.into_segments())
+            .map_err(|error| ProtocolError::Malformed(error.to_string()))?;
+        Ok(frame)
     }
 
     fn call(
@@ -576,6 +639,7 @@ fn population_epoch_payload(
         | AcceptedPayload::Candidate(_)
         | AcceptedPayload::DescriptorHole(_)
         | AcceptedPayload::BoundaryCrossing(_)
+        | AcceptedPayload::CoordinatorStatus(_)
         | AcceptedPayload::PolicyState(_)
         | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"

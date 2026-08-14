@@ -203,6 +203,9 @@ pub enum CatalogOperation {
         /// Charged-work synchronization epoch.
         epoch: u64,
     },
+    /// Read-only aggregate status, answerable by any observer that names
+    /// the right campaign and ensemble.
+    ObserverStatus,
     /// Record one action-conditioned transition from the replica's live basin.
     RecordTransition {
         /// Stable target-blind proposal-action identifier.
@@ -401,6 +404,40 @@ pub struct PopulationEpochState {
 }
 
 /// Optional scientific payload returned by an accepted operation.
+/// One replica's progress inside a coordinator status report.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReplicaProgress {
+    /// Replica identifier.
+    pub replica: u32,
+    /// Force evaluations the replica has recorded.
+    pub charged_work: u64,
+    /// Lowest validated energy the coordinator holds for the replica.
+    pub best_energy: f64,
+}
+
+/// Read-only aggregate state for an observer outside the ensemble.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoordinatorStatus {
+    /// Monotone coordinator snapshot version.
+    pub snapshot_version: u64,
+    /// Population epoch currently open.
+    pub open_epoch: u64,
+    /// Members submitted to the open epoch.
+    pub epoch_submitted: u32,
+    /// Members the open epoch still requires.
+    pub epoch_required: u32,
+    /// Exact census visit total.
+    pub census_visits: u64,
+    /// Active catalog entries.
+    pub active_entries: u32,
+    /// Sum of the replicas' recorded force evaluations.
+    pub aggregate_charged: u64,
+    /// Declared ensemble budget.
+    pub aggregate_budget: u64,
+    /// Per-replica progress, in replica order.
+    pub replicas: Vec<ReplicaProgress>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcceptedPayload {
     /// Snapshot or mutation response without an additional scientific record.
@@ -417,6 +454,8 @@ pub enum AcceptedPayload {
     PopulationEpoch(PopulationEpochState),
     /// Exact active-catalog admission result.
     CatalogMutation(CatalogMutation),
+    /// Read-only aggregate status for an observer.
+    CoordinatorStatus(CoordinatorStatus),
 }
 
 /// Accepted coordinator response.
@@ -577,6 +616,9 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::PopulationJoin { epoch } => {
             operation.init_population_join().set_epoch(*epoch);
         }
+        CatalogOperation::ObserverStatus => {
+            operation.set_observer_status(());
+        }
         CatalogOperation::RecordTransition {
             action,
             destination,
@@ -692,6 +734,7 @@ pub(crate) fn decode_request_reader(
                 epoch: join.get_epoch(),
             }
         }
+        catalog_request::operation::ObserverStatus(()) => CatalogOperation::ObserverStatus,
         catalog_request::operation::RecordTransition(transition) => {
             let transition = transition.map_err(wire_error)?;
             let destination = match transition.get_destination().which().map_err(wire_error)? {
@@ -763,6 +806,24 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     );
                     output.set_source_basin(crossing.source_basin);
                     output.set_destination_basin(crossing.destination_basin);
+                }
+                AcceptedPayload::CoordinatorStatus(status) => {
+                    let mut output = payload.init_coordinator_status();
+                    output.set_snapshot_version(status.snapshot_version);
+                    output.set_open_epoch(status.open_epoch);
+                    output.set_epoch_submitted(status.epoch_submitted);
+                    output.set_epoch_required(status.epoch_required);
+                    output.set_census_visits(status.census_visits);
+                    output.set_active_entries(status.active_entries);
+                    output.set_aggregate_charged(status.aggregate_charged);
+                    output.set_aggregate_budget(status.aggregate_budget);
+                    let mut replicas = output.init_replicas(status.replicas.len() as u32);
+                    for (index, progress) in status.replicas.iter().enumerate() {
+                        let mut row = replicas.reborrow().get(index as u32);
+                        row.set_replica(progress.replica);
+                        row.set_charged_work(progress.charged_work);
+                        row.set_best_energy(progress.best_energy);
+                    }
                 }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
@@ -894,6 +955,28 @@ pub(crate) fn decode_reply_reader(
                         to: list_f64(crossing.get_to().map_err(wire_error)?),
                         source_basin: crossing.get_source_basin(),
                         destination_basin: crossing.get_destination_basin(),
+                    })
+                }
+                accepted_reply::payload::CoordinatorStatus(status) => {
+                    let status = status.map_err(wire_error)?;
+                    let mut replicas = Vec::new();
+                    for row in status.get_replicas().map_err(wire_error)?.iter() {
+                        replicas.push(ReplicaProgress {
+                            replica: row.get_replica(),
+                            charged_work: row.get_charged_work(),
+                            best_energy: row.get_best_energy(),
+                        });
+                    }
+                    AcceptedPayload::CoordinatorStatus(CoordinatorStatus {
+                        snapshot_version: status.get_snapshot_version(),
+                        open_epoch: status.get_open_epoch(),
+                        epoch_submitted: status.get_epoch_submitted(),
+                        epoch_required: status.get_epoch_required(),
+                        census_visits: status.get_census_visits(),
+                        active_entries: status.get_active_entries(),
+                        aggregate_charged: status.get_aggregate_charged(),
+                        aggregate_budget: status.get_aggregate_budget(),
+                        replicas,
                     })
                 }
                 accepted_reply::payload::PolicyState(state) => {

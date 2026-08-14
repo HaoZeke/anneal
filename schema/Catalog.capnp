@@ -143,6 +143,29 @@ struct PopulationJoinRequest {
   epoch @0 :UInt64;
 }
 
+# Read-only coordinator status for an observer outside the ensemble. A
+# server that can only be interrogated by its own four replicas cannot be
+# watched, which is how a deadlocked campaign ran for hours looking
+# healthy. Aggregates only: no coordinates, no descriptors, and the reply
+# is never journaled, because observation is not history.
+struct ReplicaProgress {
+  replica @0 :UInt32;
+  chargedWork @1 :UInt64;
+  bestEnergy @2 :Float64;
+}
+
+struct CoordinatorStatus {
+  snapshotVersion @0 :UInt64;
+  openEpoch @1 :UInt64;
+  epochSubmitted @2 :UInt32;
+  epochRequired @3 :UInt32;
+  censusVisits @4 :UInt64;
+  activeEntries @5 :UInt32;
+  aggregateCharged @6 :UInt64;
+  aggregateBudget @7 :UInt64;
+  replicas @8 :List(ReplicaProgress);
+}
+
 struct TransitionRecord {
   action @0 :Text;
   adopted @3 :Bool;
@@ -206,6 +229,7 @@ struct CatalogRequest {
     boundaryCrossing @14 :BoundaryCrossingRequest;
     populationAbstain @15 :PopulationAbstainRequest;
     populationJoin @16 :PopulationJoinRequest;
+    observerStatus @17 :Void;
   }
 }
 
@@ -245,6 +269,7 @@ struct AcceptedReply {
     populationEpoch @9 :PopulationEpochReply;
     catalogMutation @10 :CatalogMutationReply;
     boundaryCrossing @11 :BoundaryCrossingReply;
+    coordinatorStatus @12 :CoordinatorStatus;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;

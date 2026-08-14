@@ -549,6 +549,27 @@ fn process_request(
         Ok(state) => state,
         Err(poisoned) => poisoned.into_inner(),
     };
+    if matches!(request.operation, CatalogOperation::ObserverStatus) {
+        // Observation is not history: the reply is assembled from the live
+        // state, never journaled, and never advances a replica's sequence.
+        // The observer must name the right campaign and ensemble, nothing
+        // more, so a coordinator can be watched without holding a replica
+        // identity or the system signature.
+        if request.identity.campaign != config.campaign
+            || request.identity.ensemble != config.ensemble
+        {
+            return Ok(rejected(
+                &state,
+                request.event_sequence,
+                ProtocolRejection::CampaignMismatch,
+            ));
+        }
+        return Ok(observer_status_reply(
+            config,
+            &state,
+            request.event_sequence,
+        ));
+    }
     let mut next = state.clone();
     let reply = apply_request(config, &mut next, request.clone());
     if matches!(
@@ -601,6 +622,10 @@ fn apply_request(
     }
     let mut payload = AcceptedPayload::None;
     match &request.operation {
+        // Answered in process_request from the live state; a status that
+        // reaches this dispatch has bypassed it, which apply_request treats
+        // as a plain snapshot rather than a scientific operation.
+        CatalogOperation::ObserverStatus => {}
         CatalogOperation::Snapshot => {}
         CatalogOperation::Sample { draw } => {
             if let Some(scientific) = state.scientific.as_ref()
@@ -1808,6 +1833,75 @@ fn descriptor_distance(left: &[f64], right: &[f64]) -> f64 {
         })
         .sum::<f64>()
         .sqrt()
+}
+
+/// Aggregate read-only status for an observer.
+fn observer_status_reply(
+    config: &ServerConfig,
+    state: &CoordinatorState,
+    event_sequence: u64,
+) -> CatalogReply {
+    let mut replicas = Vec::new();
+    for replica in &config.replicas {
+        let charged_work = state
+            .ledger
+            .as_ref()
+            .and_then(|ledger| ledger.replica_total(*replica))
+            .unwrap_or(0);
+        let best_energy = state
+            .scientific
+            .as_ref()
+            .and_then(|scientific| scientific.best_candidate_by_replica.get(replica))
+            .map_or(f64::INFINITY, |candidate| candidate.energy);
+        replicas.push(crate::catalog_rpc::ReplicaProgress {
+            replica: *replica,
+            charged_work,
+            best_energy,
+        });
+    }
+    let (open_epoch, epoch_submitted, epoch_required) =
+        state.scientific.as_ref().map_or((0, 0, 0), |scientific| {
+            let open = scientific.population.open_epoch();
+            let submitted = scientific
+                .population_candidates
+                .get(&open)
+                .map_or(0, BTreeMap::len);
+            (
+                open,
+                u32::try_from(submitted).unwrap_or(u32::MAX),
+                u32::try_from(scientific.population.open_requirement()).unwrap_or(u32::MAX),
+            )
+        });
+    let status = crate::catalog_rpc::CoordinatorStatus {
+        snapshot_version: state.snapshot_version,
+        open_epoch,
+        epoch_submitted,
+        epoch_required,
+        census_visits: state.census_visits,
+        active_entries: state.active_entries,
+        aggregate_charged: state
+            .ledger
+            .as_ref()
+            .map_or(0, CooperativeLedger::ensemble_total),
+        aggregate_budget: state
+            .ledger
+            .as_ref()
+            .map_or(0, CooperativeLedger::aggregate_budget),
+        replicas,
+    };
+    let snapshot = CatalogSnapshot {
+        version: state.snapshot_version,
+        census_visits: state.census_visits,
+        active_entries: state.active_entries,
+        aggregate_charged: status.aggregate_charged,
+        aggregate_budget: status.aggregate_budget,
+    };
+    CatalogReply::Accepted(AcceptedReply {
+        event_sequence,
+        duplicate: true,
+        snapshot,
+        payload: AcceptedPayload::CoordinatorStatus(status),
+    })
 }
 
 fn identity_rejection(
