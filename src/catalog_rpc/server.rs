@@ -19,8 +19,8 @@ use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
     CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
-    PopulationPlan, ProtocolError, ProtocolRejection, TransitionDestination, decode_request,
-    decode_request_reader, encode_reply, encode_request,
+    PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, TransitionDestination,
+    decode_request, decode_request_reader, encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -702,11 +702,8 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let relation = attraction_region_relation(
-                scientific,
-                request.identity.replica,
-                local_basin,
-            );
+            let relation =
+                attraction_region_relation(scientific, request.identity.replica, local_basin);
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -814,13 +811,21 @@ fn apply_request(
                         .population_candidates
                         .get(epoch)
                         .expect("complete epoch retains every source candidate");
-                    let (parents, weights) = region_population_assignment(
+                    let (parents, weights, selection) = match region_population_assignment(
                         scientific,
                         plan.destinations(),
                         source_candidates,
                         config.replicas.len().div_ceil(2),
-                    )
-                    .unwrap_or_else(|| (plan.parents().to_vec(), plan.weights().to_vec()));
+                    ) {
+                        Some((parents, weights)) => {
+                            (parents, weights, PopulationSelection::RegionCovering)
+                        }
+                        None => (
+                            plan.parents().to_vec(),
+                            plan.weights().to_vec(),
+                            PopulationSelection::SystematicResampling,
+                        ),
+                    };
                     let parent_candidates = parents
                         .iter()
                         .map(|parent| {
@@ -843,6 +848,7 @@ fn apply_request(
                             .expect("family size is bounded by replica count"),
                         offspring_variance: diagnostics.3,
                         parent_candidates,
+                        selection,
                     };
                     scientific
                         .population_plans
@@ -1092,16 +1098,14 @@ fn apply_request(
                             .insert(request.identity.replica, observation.basin_id);
                         let destination_candidate =
                             candidate_from_validated(&validated, Some(observation.basin_id));
-                        scientific.last_candidate_by_replica.insert(
-                            request.identity.replica,
-                            destination_candidate.clone(),
-                        );
+                        scientific
+                            .last_candidate_by_replica
+                            .insert(request.identity.replica, destination_candidate.clone());
                         if scientific.transition_capacity > 0
                             && source_basin != observation.basin_id
                             && let Some(source_candidate) = source_candidate.as_ref()
                         {
-                            if scientific.boundary_crossings.len()
-                                == scientific.transition_capacity
+                            if scientific.boundary_crossings.len() == scientific.transition_capacity
                             {
                                 scientific.boundary_crossings.remove(0);
                             }
