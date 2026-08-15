@@ -1762,6 +1762,60 @@ fn cooperative_population_point(
 }
 
 #[cfg(feature = "bank-rpc")]
+/// Per-center class histogram of a state against a mutable codebook of
+/// environment leaders, leader-clustered at a fixed radius. The
+/// codebook grows as new local motifs appear, so histograms from
+/// different times share class identities.
+fn class_histogram(
+    state: ArrayView1<f64>,
+    leaders: &mut Vec<Array1<f64>>,
+    radius: f64,
+) -> std::collections::BTreeMap<usize, usize> {
+    use anneal_core::soap::{SoapSpec, local_nu3_z};
+    let rows = local_nu3_z(state, SoapSpec::default(), None);
+    let mut histogram = std::collections::BTreeMap::new();
+    for row_index in 0..rows.nrows() {
+        let row = rows.row(row_index);
+        let mut assigned = None;
+        for (class, leader) in leaders.iter().enumerate() {
+            let distance = row
+                .iter()
+                .zip(leader.iter())
+                .map(|(p, q)| (p - q) * (p - q))
+                .sum::<f64>()
+                .sqrt();
+            if distance <= radius {
+                assigned = Some(class);
+                break;
+            }
+        }
+        let class = assigned.unwrap_or_else(|| {
+            leaders.push(row.to_owned());
+            leaders.len() - 1
+        });
+        *histogram.entry(class).or_insert(0usize) += 1;
+    }
+    histogram
+}
+
+/// Normalized L1 distance between two class histograms.
+fn histogram_l1(
+    a: &std::collections::BTreeMap<usize, usize>,
+    b: &std::collections::BTreeMap<usize, usize>,
+) -> f64 {
+    let total_a = a.values().sum::<usize>().max(1) as f64;
+    let total_b = b.values().sum::<usize>().max(1) as f64;
+    let classes: std::collections::BTreeSet<usize> = a.keys().chain(b.keys()).copied().collect();
+    classes
+        .iter()
+        .map(|class| {
+            let p = *a.get(class).unwrap_or(&0) as f64 / total_a;
+            let q = *b.get(class).unwrap_or(&0) as f64 / total_b;
+            (p - q).abs()
+        })
+        .sum()
+}
+
 fn fixed_probe_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     scale: f64,
@@ -2057,6 +2111,23 @@ fn run_capnp_catalog(
     // committor surrogate accumulate without touching the acceptance
     // rule. Gated until the paired smoke measures it.
     let bridge_enabled = std::env::var("CATALOG_BRIDGE").is_ok_and(|v| v == "1");
+    // Histogram screen: on stall, candidate escape perturbations are
+    // ranked by the novelty of their per-center class histogram against
+    // the chain's own visited histograms, and the most novel one is
+    // proposed. The measured basis: the sealed best is class-identical
+    // to the icosahedral reference while Marks separates by class
+    // counts alone, so distance in histogram space is exactly the
+    // direction a funnel exchange must move, named without naming any
+    // structure. Gated until the paired smoke measures it.
+    let histo_screen = std::env::var("CATALOG_HISTO_SCREEN").is_ok_and(|v| v == "1");
+    let histo_radius = std::env::var("CATALOG_HISTO_RADIUS")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(1.4);
+    let mut histo_leaders: Vec<Array1<f64>> = Vec::new();
+    let mut histo_history: std::collections::VecDeque<std::collections::BTreeMap<usize, usize>> =
+        std::collections::VecDeque::new();
     // External MD segments: a burst of thermostatted dynamics from the
     // live state, quenched through the ordinary proposal path, with the
     // engine's force calls settled into the same ledger every other
@@ -2159,6 +2230,7 @@ fn run_capnp_catalog(
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
     let mut bridge_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xb41d_6e55_0b41_d6e5);
     let mut md_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x3d5e_9a1c_44d0_77ff);
+    let mut histo_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x715a_0c1a_5571_5a0c);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
         run_cfg.merge_radius,
@@ -2602,6 +2674,61 @@ fn run_capnp_catalog(
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
+        }
+        if histo_screen {
+            cooperative
+                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                .expect("histogram descriptor work must enter the cooperative ledger");
+            let own = class_histogram(snapshot.current_state(), &mut histo_leaders, histo_radius);
+            let novel_here = histo_history
+                .iter()
+                .map(|past| histogram_l1(&own, past))
+                .fold(f64::INFINITY, f64::min);
+            histo_history.push_back(own);
+            if histo_history.len() > 256 {
+                histo_history.pop_front();
+            }
+            // Screen only when stalled and the current neighborhood is
+            // familiar: a chain already somewhere novel needs no push.
+            if stall >= 8
+                && novel_here < 0.05
+                && checkpoint_sequence.is_multiple_of(16)
+                && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            {
+                let mut best: Option<(f64, Array1<f64>)> = None;
+                for _ in 0..6 {
+                    let Some(candidate) = fixed_probe_trial(
+                        snapshot.current_state(),
+                        2.0 * probe_scale,
+                        &mut histo_rng,
+                    ) else {
+                        continue;
+                    };
+                    cooperative
+                        .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
+                        .expect("histogram screen work must enter the cooperative ledger");
+                    let histogram =
+                        class_histogram(candidate.view(), &mut histo_leaders, histo_radius);
+                    let novelty = histo_history
+                        .iter()
+                        .map(|past| histogram_l1(&histogram, past))
+                        .fold(f64::INFINITY, f64::min);
+                    if best.as_ref().is_none_or(|(kept, _)| novelty > *kept) {
+                        best = Some((novelty, candidate));
+                    }
+                }
+                if let Some((novelty, candidate)) = best
+                    && novelty > 0.0
+                {
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("histogram checkpoint trace must remain complete");
+                    return CheckpointAction::ProbeProposal {
+                        state: candidate,
+                        action: "histo".to_owned(),
+                    };
+                }
+            }
         }
         if let Some(engine) = md_engine.as_ref()
             && checkpoint_sequence.is_multiple_of(md_interval)
