@@ -355,6 +355,8 @@ pub struct PolicyState {
     pub explore_collapsed: bool,
     /// Incumbent attractor won the occupancy contest against competitors.
     pub certified_attractor: bool,
+    /// Successive halving discarded this walk at a rung.
+    pub pruned: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -993,6 +995,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_transition_uncertainty(state.transition_uncertainty);
                     output.set_explore_collapsed(state.explore_collapsed);
                     output.set_certified_attractor(state.certified_attractor);
+                    output.set_pruned(state.pruned);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1179,6 +1182,7 @@ pub(crate) fn decode_reply_reader(
                         transition_uncertainty: state.get_transition_uncertainty(),
                         explore_collapsed: state.get_explore_collapsed(),
                         certified_attractor: state.get_certified_attractor(),
+                        pruned: state.get_pruned(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

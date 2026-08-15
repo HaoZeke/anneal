@@ -98,6 +98,7 @@ struct PolicyStateReply {
   transitionUncertainty @11 :Float64;
   exploreCollapsed @12 :Bool;
   certifiedAttractor @13 :Bool;
+  pruned @14 :Bool;
 }
 
 enum CatalogMutationKind {

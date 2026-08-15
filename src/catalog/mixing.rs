@@ -156,6 +156,8 @@ pub struct MixingEvidence {
     /// Incumbent attractor is uniquely deepest, occupant-mixed, and
     /// strictly more occupied than every competitor.
     pub certified_attractor: bool,
+    /// Asynchronous successive halving discarded this walk at a rung.
+    pub pruned: bool,
 }
 
 /// Combine attractor strengths and the explore-role series.
@@ -176,6 +178,7 @@ pub fn invert_mixing(
                     .collect();
                 certified_global_minimum(putative, &competitors, true)
             }),
+        pruned: false,
     }
 }
 

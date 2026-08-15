@@ -4,6 +4,7 @@ pub mod basin;
 pub mod calibration;
 pub mod census;
 pub mod event;
+pub mod hyperband;
 pub mod lj;
 pub mod mixing;
 pub mod packing;
@@ -19,6 +20,9 @@ pub use calibration::{
 };
 pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};
+pub use hyperband::{
+    DEFAULT_MAX_RESOURCE, MIN_RESOURCE, REDUCTION_FACTOR, WalkRecord, current_rung, prune, rungs,
+};
 pub use mixing::{
     AttractorStrength, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
     explore_must_leave, invert_mixing, mixed, rhat_series, stronger,

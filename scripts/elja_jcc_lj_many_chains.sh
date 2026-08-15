@@ -15,6 +15,9 @@ CENSUS_RADIUS=${4:?calibrated census radius}
 REPLICAS=${CATALOG_REPLICAS:-300}
 WAVE=${CATALOG_WAVE:-24}
 MAX_HOPS=${CATALOG_MAX_HOPS:-}
+if [[ -n $MAX_HOPS ]]; then
+  export CATALOG_MAX_HOPS="$MAX_HOPS"
+fi
 
 ROOT=${LJ_ROOT:-$HOME/anneal-dev}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
