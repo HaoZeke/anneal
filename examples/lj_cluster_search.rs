@@ -2012,6 +2012,16 @@ fn run_capnp_catalog(
 
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
+    // Cooperative wells: the featomic archive the soap arm's hole step
+    // extrapolates away from, fed with every minimum the coordinator
+    // hands this replica. Boundary transport replays observed crossings
+    // and therefore interpolates inside the ensemble's experience; the
+    // hole step against the shared archive is the move that proposes
+    // beyond it. Gated by CATALOG_COOP_WELLS until measured.
+    let coop_wells_enabled = std::env::var("CATALOG_COOP_WELLS").is_ok_and(|v| v == "1");
+    let mut shared_wells: Vec<Array1<f64>> = Vec::new();
+    let coop_rcut = 3.5 * run_cfg.length_scale;
+    let coop_species = run_cfg.species.clone();
     // A cooperative run must produce states at the share tolerance or the
     // coordinator has nothing valid to hold; solo runs leave this off and
     // keep the screened economy untouched.
@@ -2280,6 +2290,32 @@ fn run_capnp_catalog(
                 .expect("validated population plan must address this replica");
             let draw =
                 population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
+            if coop_wells_enabled {
+                #[cfg(feature = "featomic")]
+                {
+                    let well = anneal_core::featomic_hop::soap_cloud_mean(
+                        ndarray::ArrayView1::from(parent.coordinates.as_slice()),
+                        coop_rcut,
+                        coop_species.as_deref(),
+                        None,
+                    );
+                    let known = shared_wells.iter().any(|w| {
+                        w.iter()
+                            .zip(well.iter())
+                            .map(|(a, b)| (a - b) * (a - b))
+                            .sum::<f64>()
+                            .sqrt()
+                            < anneal_core::featomic_hop::SOAP_PACK_MERGE
+                    });
+                    if !known {
+                        shared_wells.push(well);
+                        if shared_wells.len() > 30 {
+                            shared_wells.remove(0);
+                        }
+                        anneal_core::featomic_hop::set_packing_archive(shared_wells.clone());
+                    }
+                }
+            }
             let crossing = match cooperative
                 .boundary_crossing(replica, parent.descriptor, draw)
                 .expect("population frontier access must preserve local execution")
@@ -2433,6 +2469,34 @@ fn run_capnp_catalog(
                     .boundary_crossing(replica, descriptor, transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
+                    if coop_wells_enabled {
+                        #[cfg(feature = "featomic")]
+                        {
+                            let well = anneal_core::featomic_hop::soap_cloud_mean(
+                                ndarray::ArrayView1::from(crossing.to.as_slice()),
+                                coop_rcut,
+                                coop_species.as_deref(),
+                                None,
+                            );
+                            let known = shared_wells.iter().any(|w| {
+                                w.iter()
+                                    .zip(well.iter())
+                                    .map(|(a, b)| (a - b) * (a - b))
+                                    .sum::<f64>()
+                                    .sqrt()
+                                    < anneal_core::featomic_hop::SOAP_PACK_MERGE
+                            });
+                            if !known {
+                                shared_wells.push(well);
+                                if shared_wells.len() > 30 {
+                                    shared_wells.remove(0);
+                                }
+                                anneal_core::featomic_hop::set_packing_archive(
+                                    shared_wells.clone(),
+                                );
+                            }
+                        }
+                    }
                     trace.sampled_basin = Some(crossing.destination_basin);
                     cooperative
                         .record_work(replica, ChargeKind::RemoteProposal, 0)
