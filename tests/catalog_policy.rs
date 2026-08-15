@@ -241,7 +241,7 @@ fn a_certified_attractor_is_not_left_on_stall() {
 }
 
 #[test]
-fn a_certified_attractor_is_taken_from_an_unrelated_replica() {
+fn a_certificate_does_not_yank_an_unrelated_replica() {
     let (census, _) = census_with_repeated_visits(2);
     let mut state = input(
         ActiveCatalogRelation::Unrelated {
@@ -251,11 +251,10 @@ fn a_certified_attractor_is_taken_from_an_unrelated_replica() {
         AggregateProgress::new(20, 100).unwrap(),
     );
     state.mixing.certified_attractor = true;
-    state.mixing.explore_collapsed = true;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
-    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
+    assert_eq!(decision.action, PolicyAction::Explore);
+    assert_eq!(decision.reason, PolicyReason::UnrelatedCatalogExplore);
 }
 
 #[test]
