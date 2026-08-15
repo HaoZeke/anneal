@@ -303,11 +303,11 @@ pub mod catalog_identity {
         1 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         2 => <u32 as ::capnp::introspect::Introspect>::introspect(),
         3 => <::capnp::data::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -889,11 +889,11 @@ pub mod candidate_record {
         10 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         11 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         12 => <crate::Catalog_capnp::candidate_record::census_basin::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -1150,11 +1150,11 @@ pub mod candidate_record {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -1402,11 +1402,11 @@ pub mod candidate_record {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -1491,7 +1491,7 @@ pub static ENCODED_NODE: [::capnp::Word; 29] = [
   ::capnp::word(100, 0, 0, 0, 0, 0, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-  ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+  panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
 }
 }
 
@@ -1731,11 +1731,11 @@ pub mod ledger_event {
         0 => <u16 as ::capnp::introspect::Introspect>::introspect(),
         1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         2 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -2000,11 +2000,11 @@ pub mod descriptor_hole_request {
         0 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         1 => <u32 as ::capnp::introspect::Introspect>::introspect(),
         2 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -2288,11 +2288,11 @@ pub mod descriptor_hole_reply {
         0 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         1 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         2 => <f64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -2529,11 +2529,11 @@ pub mod boundary_crossing_request {
       match index {
         0 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -2885,11 +2885,11 @@ pub mod boundary_crossing_reply {
         2 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         3 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         4 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -3127,11 +3127,11 @@ pub mod policy_state_request {
       match index {
         0 => <::capnp::primitive_list::Owned<f64> as ::capnp::introspect::Introspect>::introspect(),
         1 => <f64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -3231,7 +3231,7 @@ pub static ENCODED_NODE: [::capnp::Word; 45] = [
   ::capnp::word(99, 104, 111, 114, 0, 0, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-  ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+  panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
 }
 }
 
@@ -3705,11 +3705,11 @@ pub mod policy_state_reply {
         8 => <f64 as ::capnp::introspect::Introspect>::introspect(),
         9 => <f64 as ::capnp::introspect::Introspect>::introspect(),
         10 => <f64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -3950,11 +3950,11 @@ pub mod policy_state_reply {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -4080,7 +4080,7 @@ pub static ENCODED_NODE: [::capnp::Word; 60] = [
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-  ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+  panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
 }
 }
 
@@ -4361,11 +4361,11 @@ pub mod catalog_mutation_reply {
         1 => <crate::Catalog_capnp::CatalogMutationKind as ::capnp::introspect::Introspect>::introspect(),
         2 => <::capnp::primitive_list::Owned<u64> as ::capnp::introspect::Introspect>::introspect(),
         3 => <crate::Catalog_capnp::catalog_mutation_reply::incumbent_basin::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -4605,11 +4605,11 @@ pub mod catalog_mutation_reply {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -4853,11 +4853,11 @@ pub mod population_submit_request {
       match index {
         0 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         1 => <crate::Catalog_capnp::candidate_record::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -5050,11 +5050,11 @@ pub mod population_plan_request {
     pub fn get_field_types(index: u16) -> ::capnp::introspect::Type {
       match index {
         0 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -5247,11 +5247,11 @@ pub mod population_abstain_request {
     pub fn get_field_types(index: u16) -> ::capnp::introspect::Type {
       match index {
         0 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -5444,11 +5444,11 @@ pub mod population_join_request {
     pub fn get_field_types(index: u16) -> ::capnp::introspect::Type {
       match index {
         0 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -5698,11 +5698,11 @@ pub mod replica_progress {
         0 => <u32 as ::capnp::introspect::Introspect>::introspect(),
         1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         2 => <f64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -5818,11 +5818,39 @@ pub mod coordinator_status {
     pub fn has_replicas(&self) -> bool {
       !self.reader.get_pointer_field(0).is_null()
     }
+    #[inline]
+    pub fn get_landscape_basins(self) -> u32 {
+      self.reader.get_data_field::<u32>(9)
+    }
+    #[inline]
+    pub fn get_algebraic_connectivity(self) -> f64 {
+      self.reader.get_data_field::<f64>(7)
+    }
+    #[inline]
+    pub fn get_seam_conductance(self) -> f64 {
+      self.reader.get_data_field::<f64>(8)
+    }
+    #[inline]
+    pub fn get_community_left(self) -> u32 {
+      self.reader.get_data_field::<u32>(18)
+    }
+    #[inline]
+    pub fn get_community_right(self) -> u32 {
+      self.reader.get_data_field::<u32>(19)
+    }
+    #[inline]
+    pub fn get_seam_left_basin(self) -> u64 {
+      self.reader.get_data_field::<u64>(10)
+    }
+    #[inline]
+    pub fn get_seam_right_basin(self) -> u64 {
+      self.reader.get_data_field::<u64>(11)
+    }
   }
 
   pub struct Builder<'a> { builder: ::capnp::private::layout::StructBuilder<'a> }
   impl <> ::capnp::traits::HasStructSize for Builder<'_,>  {
-    const STRUCT_SIZE: ::capnp::private::layout::StructSize = ::capnp::private::layout::StructSize { data: 7, pointers: 1 };
+    const STRUCT_SIZE: ::capnp::private::layout::StructSize = ::capnp::private::layout::StructSize { data: 12, pointers: 1 };
   }
   impl <> ::capnp::traits::HasTypeId for Builder<'_,>  {
     const TYPE_ID: u64 = _private::TYPE_ID;
@@ -5952,6 +5980,62 @@ pub mod coordinator_status {
     pub fn has_replicas(&self) -> bool {
       !self.builder.is_pointer_field_null(0)
     }
+    #[inline]
+    pub fn get_landscape_basins(self) -> u32 {
+      self.builder.get_data_field::<u32>(9)
+    }
+    #[inline]
+    pub fn set_landscape_basins(&mut self, value: u32)  {
+      self.builder.set_data_field::<u32>(9, value);
+    }
+    #[inline]
+    pub fn get_algebraic_connectivity(self) -> f64 {
+      self.builder.get_data_field::<f64>(7)
+    }
+    #[inline]
+    pub fn set_algebraic_connectivity(&mut self, value: f64)  {
+      self.builder.set_data_field::<f64>(7, value);
+    }
+    #[inline]
+    pub fn get_seam_conductance(self) -> f64 {
+      self.builder.get_data_field::<f64>(8)
+    }
+    #[inline]
+    pub fn set_seam_conductance(&mut self, value: f64)  {
+      self.builder.set_data_field::<f64>(8, value);
+    }
+    #[inline]
+    pub fn get_community_left(self) -> u32 {
+      self.builder.get_data_field::<u32>(18)
+    }
+    #[inline]
+    pub fn set_community_left(&mut self, value: u32)  {
+      self.builder.set_data_field::<u32>(18, value);
+    }
+    #[inline]
+    pub fn get_community_right(self) -> u32 {
+      self.builder.get_data_field::<u32>(19)
+    }
+    #[inline]
+    pub fn set_community_right(&mut self, value: u32)  {
+      self.builder.set_data_field::<u32>(19, value);
+    }
+    #[inline]
+    pub fn get_seam_left_basin(self) -> u64 {
+      self.builder.get_data_field::<u64>(10)
+    }
+    #[inline]
+    pub fn set_seam_left_basin(&mut self, value: u64)  {
+      self.builder.set_data_field::<u64>(10, value);
+    }
+    #[inline]
+    pub fn get_seam_right_basin(self) -> u64 {
+      self.builder.get_data_field::<u64>(11)
+    }
+    #[inline]
+    pub fn set_seam_right_basin(&mut self, value: u64)  {
+      self.builder.set_data_field::<u64>(11, value);
+    }
   }
 
   pub struct Pipeline { _typeless: ::capnp::any_pointer::Pipeline }
@@ -5963,18 +6047,18 @@ pub mod coordinator_status {
   impl Pipeline  {
   }
   mod _private {
-    pub static ENCODED_NODE: [::capnp::Word; 168] = [
+    pub static ENCODED_NODE: [::capnp::Word; 281] = [
       ::capnp::word(0, 0, 0, 0, 6, 0, 6, 0),
       ::capnp::word(58, 125, 7, 7, 43, 238, 116, 142),
-      ::capnp::word(14, 0, 0, 0, 1, 0, 7, 0),
+      ::capnp::word(14, 0, 0, 0, 1, 0, 12, 0),
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(41, 14, 0, 0, 78, 15, 0, 0),
+      ::capnp::word(41, 14, 0, 0, 192, 17, 0, 0),
       ::capnp::word(21, 0, 0, 0, 2, 1, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(29, 0, 0, 0, 255, 1, 0, 0),
+      ::capnp::word(29, 0, 0, 0, 135, 3, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(67, 97, 116, 97, 108, 111, 103, 46),
@@ -5982,70 +6066,119 @@ pub mod coordinator_status {
       ::capnp::word(111, 114, 100, 105, 110, 97, 116, 111),
       ::capnp::word(114, 83, 116, 97, 116, 117, 115, 0),
       ::capnp::word(0, 0, 0, 0, 1, 0, 1, 0),
-      ::capnp::word(36, 0, 0, 0, 3, 0, 4, 0),
+      ::capnp::word(64, 0, 0, 0, 3, 0, 4, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(237, 0, 0, 0, 130, 0, 0, 0),
+      ::capnp::word(177, 1, 0, 0, 130, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(236, 0, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(248, 0, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(176, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(188, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(1, 0, 0, 0, 1, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 1, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(245, 0, 0, 0, 82, 0, 0, 0),
+      ::capnp::word(185, 1, 0, 0, 82, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(244, 0, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(0, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(184, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(196, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(2, 0, 0, 0, 4, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 2, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(253, 0, 0, 0, 122, 0, 0, 0),
+      ::capnp::word(193, 1, 0, 0, 122, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(252, 0, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(8, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(192, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(204, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(3, 0, 0, 0, 5, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 3, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(5, 1, 0, 0, 114, 0, 0, 0),
+      ::capnp::word(201, 1, 0, 0, 114, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(4, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(16, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(200, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(212, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(4, 0, 0, 0, 3, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 4, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(13, 1, 0, 0, 106, 0, 0, 0),
+      ::capnp::word(209, 1, 0, 0, 106, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(12, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(24, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(208, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(220, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(5, 0, 0, 0, 8, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 5, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(21, 1, 0, 0, 114, 0, 0, 0),
+      ::capnp::word(217, 1, 0, 0, 114, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(20, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(32, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(216, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(228, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(6, 0, 0, 0, 5, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 6, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(29, 1, 0, 0, 138, 0, 0, 0),
+      ::capnp::word(225, 1, 0, 0, 138, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(32, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(44, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(228, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(240, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(7, 0, 0, 0, 6, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(41, 1, 0, 0, 130, 0, 0, 0),
+      ::capnp::word(237, 1, 0, 0, 130, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(40, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(52, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(236, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(248, 1, 0, 0, 2, 0, 1, 0),
       ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 1, 0, 8, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(49, 1, 0, 0, 74, 0, 0, 0),
+      ::capnp::word(245, 1, 0, 0, 74, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(48, 1, 0, 0, 3, 0, 1, 0),
-      ::capnp::word(76, 1, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(244, 1, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(16, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(9, 0, 0, 0, 9, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 9, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(13, 2, 0, 0, 130, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(12, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(24, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(10, 0, 0, 0, 7, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 10, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(21, 2, 0, 0, 178, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(24, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(36, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(11, 0, 0, 0, 8, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 11, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(33, 2, 0, 0, 130, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(32, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(44, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(12, 0, 0, 0, 18, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 12, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(41, 2, 0, 0, 114, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(40, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(52, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(13, 0, 0, 0, 19, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 13, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(49, 2, 0, 0, 122, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(48, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(60, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(14, 0, 0, 0, 10, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 14, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(57, 2, 0, 0, 114, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(56, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(68, 2, 0, 0, 2, 0, 1, 0),
+      ::capnp::word(15, 0, 0, 0, 11, 0, 0, 0),
+      ::capnp::word(0, 0, 1, 0, 15, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(65, 2, 0, 0, 122, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(64, 2, 0, 0, 3, 0, 1, 0),
+      ::capnp::word(76, 2, 0, 0, 2, 0, 1, 0),
       ::capnp::word(115, 110, 97, 112, 115, 104, 111, 116),
       ::capnp::word(86, 101, 114, 115, 105, 111, 110, 0),
       ::capnp::word(9, 0, 0, 0, 0, 0, 0, 0),
@@ -6132,6 +6265,70 @@ pub mod coordinator_status {
       ::capnp::word(14, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(108, 97, 110, 100, 115, 99, 97, 112),
+      ::capnp::word(101, 66, 97, 115, 105, 110, 115, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(97, 108, 103, 101, 98, 114, 97, 105),
+      ::capnp::word(99, 67, 111, 110, 110, 101, 99, 116),
+      ::capnp::word(105, 118, 105, 116, 121, 0, 0, 0),
+      ::capnp::word(11, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(11, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(115, 101, 97, 109, 67, 111, 110, 100),
+      ::capnp::word(117, 99, 116, 97, 110, 99, 101, 0),
+      ::capnp::word(11, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(11, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(99, 111, 109, 109, 117, 110, 105, 116),
+      ::capnp::word(121, 76, 101, 102, 116, 0, 0, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(99, 111, 109, 109, 117, 110, 105, 116),
+      ::capnp::word(121, 82, 105, 103, 104, 116, 0, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(8, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(115, 101, 97, 109, 76, 101, 102, 116),
+      ::capnp::word(66, 97, 115, 105, 110, 0, 0, 0),
+      ::capnp::word(9, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(9, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(115, 101, 97, 109, 82, 105, 103, 104),
+      ::capnp::word(116, 66, 97, 115, 105, 110, 0, 0),
+      ::capnp::word(9, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(9, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
+      ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
     ];
     pub fn get_field_types(index: u16) -> ::capnp::introspect::Type {
       match index {
@@ -6144,11 +6341,18 @@ pub mod coordinator_status {
         6 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         7 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         8 => <::capnp::struct_list::Owned<crate::Catalog_capnp::replica_progress::Owned> as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        9 => <u32 as ::capnp::introspect::Introspect>::introspect(),
+        10 => <f64 as ::capnp::introspect::Introspect>::introspect(),
+        11 => <f64 as ::capnp::introspect::Introspect>::introspect(),
+        12 => <u32 as ::capnp::introspect::Introspect>::introspect(),
+        13 => <u32 as ::capnp::introspect::Introspect>::introspect(),
+        14 => <u64 as ::capnp::introspect::Introspect>::introspect(),
+        15 => <u64 as ::capnp::introspect::Introspect>::introspect(),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -6156,9 +6360,9 @@ pub mod coordinator_status {
       members_by_discriminant: MEMBERS_BY_DISCRIMINANT,
       members_by_name: MEMBERS_BY_NAME,
     };
-    pub static NONUNION_MEMBERS : &[u16] = &[0,1,2,3,4,5,6,7,8];
+    pub static NONUNION_MEMBERS : &[u16] = &[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
     pub static MEMBERS_BY_DISCRIMINANT : &[u16] = &[];
-    pub static MEMBERS_BY_NAME : &[u16] = &[5,7,6,4,3,2,1,8,0];
+    pub static MEMBERS_BY_NAME : &[u16] = &[5,7,6,10,4,12,13,3,2,9,1,8,11,14,15,0];
     pub const TYPE_ID: u64 = 0x8e74_ee2b_0707_7d3a;
   }
 }
@@ -6349,7 +6553,7 @@ pub mod transition_record {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(2, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(80, 15, 0, 0, 232, 15, 0, 0),
+      ::capnp::word(194, 17, 0, 0, 90, 18, 0, 0),
       ::capnp::word(21, 0, 0, 0, 250, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -6407,11 +6611,11 @@ pub mod transition_record {
         0 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         1 => <crate::Catalog_capnp::transition_record::destination::Owned as ::capnp::introspect::Introspect>::introspect(),
         2 => <bool as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -6667,11 +6871,11 @@ pub mod transition_record {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <crate::Catalog_capnp::candidate_record::Owned as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -6733,7 +6937,7 @@ pub static ENCODED_NODE: [::capnp::Word; 36] = [
   ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-  ::capnp::word(41, 17, 0, 0, 135, 17, 0, 0),
+  ::capnp::word(155, 19, 0, 0, 249, 19, 0, 0),
   ::capnp::word(21, 0, 0, 0, 18, 1, 0, 0),
   ::capnp::word(37, 0, 0, 0, 7, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -6765,7 +6969,7 @@ pub static ENCODED_NODE: [::capnp::Word; 36] = [
   ::capnp::word(118, 101, 114, 105, 110, 103, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-  ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+  panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
 }
 }
 
@@ -7070,7 +7274,7 @@ pub mod population_plan {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(4, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(137, 17, 0, 0, 223, 18, 0, 0),
+      ::capnp::word(251, 19, 0, 0, 81, 21, 0, 0),
       ::capnp::word(21, 0, 0, 0, 234, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -7272,11 +7476,11 @@ pub mod population_plan {
         7 => <f64 as ::capnp::introspect::Introspect>::introspect(),
         8 => <::capnp::struct_list::Owned<crate::Catalog_capnp::candidate_record::Owned> as ::capnp::introspect::Introspect>::introspect(),
         9 => <crate::Catalog_capnp::PopulationSelection as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -7477,7 +7681,7 @@ pub mod population_epoch_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(225, 18, 0, 0, 141, 19, 0, 0),
+      ::capnp::word(83, 21, 0, 0, 255, 21, 0, 0),
       ::capnp::word(21, 0, 0, 0, 26, 1, 0, 0),
       ::capnp::word(37, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -7553,11 +7757,11 @@ pub mod population_epoch_reply {
         1 => <u32 as ::capnp::introspect::Introspect>::introspect(),
         2 => <u32 as ::capnp::introspect::Introspect>::introspect(),
         3 => <crate::Catalog_capnp::population_epoch_reply::result::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -7811,11 +8015,11 @@ pub mod population_epoch_reply {
         match index {
           0 => <() as ::capnp::introspect::Introspect>::introspect(),
           1 => <crate::Catalog_capnp::population_plan::Owned as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -8051,7 +8255,7 @@ pub mod catalog_request {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(2, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(143, 19, 0, 0, 112, 22, 0, 0),
+      ::capnp::word(1, 22, 0, 0, 226, 24, 0, 0),
       ::capnp::word(21, 0, 0, 0, 234, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -8145,11 +8349,11 @@ pub mod catalog_request {
         2 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         3 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         4 => <crate::Catalog_capnp::catalog_request::operation::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -8940,11 +9144,11 @@ pub mod catalog_request {
           11 => <crate::Catalog_capnp::population_abstain_request::Owned as ::capnp::introspect::Introspect>::introspect(),
           12 => <crate::Catalog_capnp::population_join_request::Owned as ::capnp::introspect::Introspect>::introspect(),
           13 => <() as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -9032,7 +9236,7 @@ pub static ENCODED_NODE: [::capnp::Word; 76] = [
   ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-  ::capnp::word(114, 22, 0, 0, 109, 23, 0, 0),
+  ::capnp::word(228, 24, 0, 0, 223, 25, 0, 0),
   ::capnp::word(21, 0, 0, 0, 226, 0, 0, 0),
   ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
   ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -9104,7 +9308,7 @@ pub static ENCODED_NODE: [::capnp::Word; 76] = [
   ::capnp::word(101, 100, 0, 0, 0, 0, 0, 0),
 ];
 pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-  ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+  panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
 }
 }
 
@@ -9295,7 +9499,7 @@ pub mod catalog_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(111, 23, 0, 0, 53, 24, 0, 0),
+      ::capnp::word(225, 25, 0, 0, 167, 26, 0, 0),
       ::capnp::word(21, 0, 0, 0, 218, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -9371,11 +9575,11 @@ pub mod catalog_reply {
         1 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         2 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         3 => <crate::Catalog_capnp::catalog_reply::result::Owned as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -9631,11 +9835,11 @@ pub mod catalog_reply {
         match index {
           0 => <crate::Catalog_capnp::accepted_reply::Owned as ::capnp::introspect::Introspect>::introspect(),
           1 => <crate::Catalog_capnp::RejectionKind as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,
@@ -9867,7 +10071,7 @@ pub mod accepted_reply {
       ::capnp::word(39, 31, 179, 234, 180, 91, 158, 141),
       ::capnp::word(1, 0, 7, 0, 0, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
-      ::capnp::word(55, 24, 0, 0, 52, 26, 0, 0),
+      ::capnp::word(169, 26, 0, 0, 166, 28, 0, 0),
       ::capnp::word(21, 0, 0, 0, 226, 0, 0, 0),
       ::capnp::word(33, 0, 0, 0, 7, 0, 0, 0),
       ::capnp::word(0, 0, 0, 0, 0, 0, 0, 0),
@@ -9978,11 +10182,11 @@ pub mod accepted_reply {
         3 => <crate::Catalog_capnp::accepted_reply::payload::Owned as ::capnp::introspect::Introspect>::introspect(),
         4 => <u64 as ::capnp::introspect::Introspect>::introspect(),
         5 => <u64 as ::capnp::introspect::Introspect>::introspect(),
-        _ => ::capnp::introspect::panic_invalid_field_index(index),
+        _ => panic!("invalid field index {}", index),
       }
     }
     pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-      ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+      panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
     }
     pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
       encoded_node: &ENCODED_NODE,
@@ -10520,11 +10724,11 @@ pub mod accepted_reply {
           5 => <crate::Catalog_capnp::catalog_mutation_reply::Owned as ::capnp::introspect::Introspect>::introspect(),
           6 => <crate::Catalog_capnp::boundary_crossing_reply::Owned as ::capnp::introspect::Introspect>::introspect(),
           7 => <crate::Catalog_capnp::coordinator_status::Owned as ::capnp::introspect::Introspect>::introspect(),
-          _ => ::capnp::introspect::panic_invalid_field_index(index),
+          _ => panic!("invalid field index {}", index),
         }
       }
       pub fn get_annotation_types(child_index: Option<u16>, index: u32) -> ::capnp::introspect::Type {
-        ::capnp::introspect::panic_invalid_annotation_indices(child_index, index)
+        panic!("invalid annotation indices ({:?}, {}) ", child_index, index)
       }
       pub static RAW_SCHEMA: ::capnp::introspect::RawStructSchema = ::capnp::introspect::RawStructSchema {
         encoded_node: &ENCODED_NODE,

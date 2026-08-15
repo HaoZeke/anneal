@@ -415,6 +415,24 @@ pub struct ReplicaProgress {
     pub best_energy: f64,
 }
 
+/// The seam between the two most weakly coupled communities of the
+/// explored landscape, as the referee reports it to an observer.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LandscapeSeam {
+    /// Second Laplacian eigenvalue of the basin transition graph.
+    pub algebraic_connectivity: f64,
+    /// Cut weight over the smaller community's volume.
+    pub conductance: f64,
+    /// Basin count on the left side.
+    pub community_left: u32,
+    /// Basin count on the right side.
+    pub community_right: u32,
+    /// Best-anchored basin of the left community.
+    pub left_basin: u64,
+    /// Best-anchored basin of the right community.
+    pub right_basin: u64,
+}
+
 /// Read-only aggregate state for an observer outside the ensemble.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoordinatorStatus {
@@ -436,6 +454,10 @@ pub struct CoordinatorStatus {
     pub aggregate_budget: u64,
     /// Per-replica progress, in replica order.
     pub replicas: Vec<ReplicaProgress>,
+    /// Basins the transition stream has linked into the referee's graph.
+    pub landscape_basins: u32,
+    /// The referee's seam, when at least two basins have been linked.
+    pub seam: Option<LandscapeSeam>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -817,6 +839,15 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_active_entries(status.active_entries);
                     output.set_aggregate_charged(status.aggregate_charged);
                     output.set_aggregate_budget(status.aggregate_budget);
+                    output.set_landscape_basins(status.landscape_basins);
+                    if let Some(seam) = &status.seam {
+                        output.set_algebraic_connectivity(seam.algebraic_connectivity);
+                        output.set_seam_conductance(seam.conductance);
+                        output.set_community_left(seam.community_left);
+                        output.set_community_right(seam.community_right);
+                        output.set_seam_left_basin(seam.left_basin);
+                        output.set_seam_right_basin(seam.right_basin);
+                    }
                     let mut replicas = output.init_replicas(status.replicas.len() as u32);
                     for (index, progress) in status.replicas.iter().enumerate() {
                         let mut row = replicas.reborrow().get(index as u32);
@@ -967,6 +998,16 @@ pub(crate) fn decode_reply_reader(
                             best_energy: row.get_best_energy(),
                         });
                     }
+                    let seam = (status.get_community_left() > 0
+                        && status.get_community_right() > 0)
+                        .then(|| LandscapeSeam {
+                            algebraic_connectivity: status.get_algebraic_connectivity(),
+                            conductance: status.get_seam_conductance(),
+                            community_left: status.get_community_left(),
+                            community_right: status.get_community_right(),
+                            left_basin: status.get_seam_left_basin(),
+                            right_basin: status.get_seam_right_basin(),
+                        });
                     AcceptedPayload::CoordinatorStatus(CoordinatorStatus {
                         snapshot_version: status.get_snapshot_version(),
                         open_epoch: status.get_open_epoch(),
@@ -977,6 +1018,8 @@ pub(crate) fn decode_reply_reader(
                         aggregate_charged: status.get_aggregate_charged(),
                         aggregate_budget: status.get_aggregate_budget(),
                         replicas,
+                        landscape_basins: status.get_landscape_basins(),
+                        seam,
                     })
                 }
                 accepted_reply::payload::PolicyState(state) => {
