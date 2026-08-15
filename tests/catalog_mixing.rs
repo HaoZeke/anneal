@@ -151,7 +151,7 @@ fn a_lone_ico_collapse_is_explore_failure_not_a_certificate() {
 }
 
 #[test]
-fn a_shared_lone_packing_forces_leave_even_when_energies_have_not_mixed() {
+fn a_lone_packing_with_unmixed_energies_is_not_explore_collapse() {
     let energies = [
         constant(-173.252378, 8),
         constant(-171.38, 8),
@@ -166,7 +166,19 @@ fn a_shared_lone_packing_forces_leave_even_when_energies_have_not_mixed() {
     ];
     assert!(!explore_collapsed(&energies));
     assert!(mixed(rhat_series(&families)));
-    assert!(explore_must_leave(&energies, &families, 1, 4));
+    assert!(!explore_must_leave(&energies, &families, 1, 4));
+}
+
+#[test]
+fn mixed_labels_on_one_of_two_known_packings_force_leave() {
+    let energies = [
+        constant(-171.38, 8),
+        constant(-170.45, 8),
+        constant(-166.64, 8),
+    ];
+    let families = [constant(0.0, 8), constant(0.0, 8), constant(0.0, 8)];
+    assert!(!explore_collapsed(&energies));
+    assert!(explore_must_leave(&energies, &families, 2, 3));
 }
 
 #[test]
