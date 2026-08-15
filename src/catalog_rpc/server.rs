@@ -37,6 +37,7 @@ use crate::methods::feynman_kac::{
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::methods::landscape_graph::LandscapeGraph;
+use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
@@ -237,6 +238,8 @@ struct ScientificState {
     attraction_regions: AttractionRegionConfig,
     transition_nodes: BTreeMap<BasinId, usize>,
     landscape: LandscapeGraph,
+    bridges: BTreeMap<u64, BridgeServerState>,
+    next_bridge: u64,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
     best_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
@@ -287,6 +290,8 @@ impl CoordinatorState {
                     attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
                     landscape: LandscapeGraph::new(),
+                    bridges: BTreeMap::new(),
+                    next_bridge: 0,
                     last_basin_by_replica: BTreeMap::new(),
                     last_candidate_by_replica: BTreeMap::new(),
                     best_candidate_by_replica: BTreeMap::new(),
@@ -630,6 +635,91 @@ fn apply_request(
         // as a plain snapshot rather than a scientific operation.
         CatalogOperation::ObserverStatus => {}
         CatalogOperation::Snapshot => {}
+        CatalogOperation::BridgeAssignment { draw } => {
+            if let Some(scientific) = state.scientific.as_mut()
+                && let Some((&bridge_id, bridge)) = scientific.bridges.iter_mut().next_back()
+            {
+                let replica = request.identity.replica;
+                let region = match bridge.assignments.get(&replica) {
+                    Some(&region) => region,
+                    None => {
+                        // Fewest-launched interior region; endpoints
+                        // belong to the minima, not to walkers.
+                        let interior = 1..bridge.string.regions() - 1;
+                        let region = interior
+                            .min_by_key(|&r| bridge.ledger.launches(r))
+                            .unwrap_or(1);
+                        bridge.assignments.insert(replica, region);
+                        region
+                    }
+                };
+                if bridge.ledger.launch(region).is_err() {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
+                let entry = bridge.entries.draw(region, *draw).map(|state| state.to_vec());
+                let images = bridge
+                    .string
+                    .images()
+                    .iter()
+                    .flat_map(|image| image.iter().copied())
+                    .collect();
+                payload =
+                    AcceptedPayload::BridgeAssignment(crate::catalog_rpc::BridgeAssignmentRecord {
+                        bridge: bridge_id,
+                        from_basin: bridge.from_basin,
+                        to_basin: bridge.to_basin,
+                        images,
+                        image_count: u32::try_from(bridge.string.regions())
+                            .expect("bridge images are bounded by a constant"),
+                        region: u32::try_from(region)
+                            .expect("bridge region is bounded by image count"),
+                        tube_radius: bridge.tube_radius,
+                        entry,
+                    });
+            }
+        }
+        CatalogOperation::BridgeCrossing { crossing } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(bridge) = scientific.bridges.get_mut(&crossing.bridge) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let from = crossing.from_region as usize;
+            let to = crossing.to_region as usize;
+            if bridge.ledger.crossing(from, to).is_err()
+                || bridge
+                    .entries
+                    .push(to, ndarray::Array1::from(crossing.state.clone()))
+                    .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.snapshot_version = snapshot_version;
+        }
         CatalogOperation::Sample { draw } => {
             if let Some(scientific) = state.scientific.as_ref()
                 && !scientific.catalog.is_empty()
@@ -1493,6 +1583,83 @@ fn catalog_mutation(
     }
 }
 
+/// One commissioned bridge: the string, the region weights, the stored
+/// entry states, and which replica holds which region.
+#[derive(Clone)]
+struct BridgeServerState {
+    string: BridgeString,
+    ledger: WeightLedger,
+    entries: EntryLists,
+    from_basin: u64,
+    to_basin: u64,
+    tube_radius: f64,
+    assignments: BTreeMap<u32, usize>,
+}
+
+/// Interior images of a commissioned bridge string.
+const BRIDGE_IMAGES: usize = 12;
+/// Weight fraction transferred per attempted exit.
+const BRIDGE_TRANSFER: f64 = 0.1;
+/// Stored entry states per region.
+const BRIDGE_ENTRY_CAPACITY: usize = 8;
+/// Bridge tube radius, in census radii.
+const BRIDGE_TUBE_RADII: f64 = 4.0;
+
+/// Commission a bridge across the referee's seam when none is active.
+///
+/// The seam names the two most weakly coupled communities; the bridge
+/// connects their best-anchored catalog entries through descriptor
+/// space, so the crossing evidence the confined segments produce is
+/// exactly the flux the landscape graph is missing. One bridge at a
+/// time: the machinery prices one seam, and a second seam only becomes
+/// visible after the first is crossed.
+fn commission_bridge(scientific: &mut ScientificState, census_radius: f64) {
+    if !scientific.bridges.is_empty() {
+        return;
+    }
+    let Ok(split) = scientific.landscape.spectral_split() else {
+        return;
+    };
+    if split.conductance >= 0.1 {
+        return;
+    }
+    let descriptor_of = |basin: u64| {
+        scientific
+            .catalog
+            .entries()
+            .iter()
+            .find(|entry| entry.census_id().as_raw() == basin)
+            .map(|entry| Array1::from(entry.descriptor().to_vec()))
+    };
+    let (Some(from), Some(to)) = (
+        descriptor_of(split.representatives.0),
+        descriptor_of(split.representatives.1),
+    ) else {
+        return;
+    };
+    let Ok(string) = BridgeString::chord(&from, &to, BRIDGE_IMAGES) else {
+        return;
+    };
+    let regions = string.regions();
+    let Ok(ledger) = WeightLedger::new(regions, BRIDGE_TRANSFER) else {
+        return;
+    };
+    let bridge = scientific.next_bridge;
+    scientific.next_bridge += 1;
+    scientific.bridges.insert(
+        bridge,
+        BridgeServerState {
+            string,
+            ledger,
+            entries: EntryLists::new(regions, BRIDGE_ENTRY_CAPACITY),
+            from_basin: split.representatives.0,
+            to_basin: split.representatives.1,
+            tube_radius: BRIDGE_TUBE_RADII * census_radius,
+            assignments: BTreeMap::new(),
+        },
+    );
+}
+
 /// Keep every weakly coupled community of the landscape represented in
 /// the parent map.
 ///
@@ -1778,6 +1945,13 @@ fn realize_population_plan(
     plan: &PopulationEpochPlan,
     required: u32,
 ) -> AcceptedPayload {
+    if let Some(census_radius) = config
+        .scientific
+        .as_ref()
+        .map(|scientific| scientific.census_radius)
+    {
+        commission_bridge(scientific, census_radius);
+    }
     let source_candidates = scientific
         .population_candidates
         .get(&epoch)

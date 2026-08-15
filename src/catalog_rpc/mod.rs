@@ -7,9 +7,9 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
-    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, candidate_record,
-    catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
-    population_epoch_reply, transition_record,
+    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, bridge_assignment,
+    candidate_record, catalog_mutation_reply, catalog_reply, catalog_request,
+    policy_state_reply, population_epoch_reply, transition_record,
 };
 
 pub mod client;
@@ -206,6 +206,17 @@ pub enum CatalogOperation {
     /// Read-only aggregate status, answerable by any observer that names
     /// the right campaign and ensemble.
     ObserverStatus,
+    /// Poll for a bridge segment assignment; the argument selects an
+    /// entry state from the assigned region's stored entries.
+    BridgeAssignment {
+        /// Caller-supplied draw for entry selection.
+        draw: u64,
+    },
+    /// Report one attempted exit from a bridge region.
+    BridgeCrossing {
+        /// Crossing record: bridge, regions, descriptor, state, energy.
+        crossing: BridgeCrossingRecord,
+    },
     /// Record one action-conditioned transition from the replica's live basin.
     RecordTransition {
         /// Stable target-blind proposal-action identifier.
@@ -415,6 +426,49 @@ pub struct ReplicaProgress {
     pub best_energy: f64,
 }
 
+/// One attempted exit from a bridge region, as the confined replica
+/// reports it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeCrossingRecord {
+    /// Bridge identifier.
+    pub bridge: u64,
+    /// Region the replica was confined to.
+    pub from_region: u32,
+    /// Region the attempted exit entered.
+    pub to_region: u32,
+    /// Descriptor at the crossing point.
+    pub descriptor: Vec<f64>,
+    /// Full state at the crossing point.
+    pub state: Vec<f64>,
+    /// Energy at the crossing point.
+    pub energy: f64,
+}
+
+/// A bridge segment assignment: the string, the region to confine to,
+/// and an entry state when one is stored.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BridgeAssignmentRecord {
+    /// Bridge identifier.
+    pub bridge: u64,
+    /// Catalog basin at the A endpoint.
+    pub from_basin: u64,
+    /// Catalog basin at the B endpoint.
+    pub to_basin: u64,
+    /// String images, row-major: `image_count` rows of the descriptor
+    /// dimension.
+    pub images: Vec<f64>,
+    /// Number of images.
+    pub image_count: u32,
+    /// Region index this replica confines to.
+    pub region: u32,
+    /// Distance from the endpoint chord beyond which a state has left
+    /// the bridge tube.
+    pub tube_radius: f64,
+    /// Stored entry state for the region, when any crossing has
+    /// deposited one.
+    pub entry: Option<Vec<f64>>,
+}
+
 /// The seam between the two most weakly coupled communities of the
 /// explored landscape, as the referee reports it to an observer.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -478,6 +532,8 @@ pub enum AcceptedPayload {
     CatalogMutation(CatalogMutation),
     /// Read-only aggregate status for an observer.
     CoordinatorStatus(CoordinatorStatus),
+    /// A bridge segment assignment for the requesting replica.
+    BridgeAssignment(BridgeAssignmentRecord),
 }
 
 /// Accepted coordinator response.
@@ -641,6 +697,24 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::ObserverStatus => {
             operation.set_observer_status(());
         }
+        CatalogOperation::BridgeAssignment { draw } => {
+            operation.set_bridge_assignment(*draw);
+        }
+        CatalogOperation::BridgeCrossing { crossing } => {
+            let mut wire = operation.init_bridge_crossing();
+            wire.set_bridge(crossing.bridge);
+            wire.set_from_region(crossing.from_region);
+            wire.set_to_region(crossing.to_region);
+            fill_f64(
+                wire.reborrow().init_descriptor(crossing.descriptor.len() as u32),
+                &crossing.descriptor,
+            );
+            fill_f64(
+                wire.reborrow().init_state(crossing.state.len() as u32),
+                &crossing.state,
+            );
+            wire.set_energy(crossing.energy);
+        }
         CatalogOperation::RecordTransition {
             action,
             destination,
@@ -757,6 +831,22 @@ pub(crate) fn decode_request_reader(
             }
         }
         catalog_request::operation::ObserverStatus(()) => CatalogOperation::ObserverStatus,
+        catalog_request::operation::BridgeAssignment(draw) => {
+            CatalogOperation::BridgeAssignment { draw }
+        }
+        catalog_request::operation::BridgeCrossing(crossing) => {
+            let crossing = crossing.map_err(wire_error)?;
+            CatalogOperation::BridgeCrossing {
+                crossing: BridgeCrossingRecord {
+                    bridge: crossing.get_bridge(),
+                    from_region: crossing.get_from_region(),
+                    to_region: crossing.get_to_region(),
+                    descriptor: list_f64(crossing.get_descriptor().map_err(wire_error)?),
+                    state: list_f64(crossing.get_state().map_err(wire_error)?),
+                    energy: crossing.get_energy(),
+                },
+            }
+        }
         catalog_request::operation::RecordTransition(transition) => {
             let transition = transition.map_err(wire_error)?;
             let destination = match transition.get_destination().which().map_err(wire_error)? {
@@ -854,6 +944,26 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                         row.set_replica(progress.replica);
                         row.set_charged_work(progress.charged_work);
                         row.set_best_energy(progress.best_energy);
+                    }
+                }
+                AcceptedPayload::BridgeAssignment(assignment) => {
+                    let mut output = payload.init_bridge_assignment();
+                    output.set_bridge(assignment.bridge);
+                    output.set_from_basin(assignment.from_basin);
+                    output.set_to_basin(assignment.to_basin);
+                    fill_f64(
+                        output.reborrow().init_images(assignment.images.len() as u32),
+                        &assignment.images,
+                    );
+                    output.set_image_count(assignment.image_count);
+                    output.set_region(assignment.region);
+                    output.set_tube_radius(assignment.tube_radius);
+                    let mut entry = output.init_entry();
+                    match &assignment.entry {
+                        Some(state) => {
+                            fill_f64(entry.init_state(state.len() as u32), state);
+                        }
+                        None => entry.set_none(()),
                     }
                 }
                 AcceptedPayload::PolicyState(state) => {
@@ -1020,6 +1130,25 @@ pub(crate) fn decode_reply_reader(
                         replicas,
                         landscape_basins: status.get_landscape_basins(),
                         seam,
+                    })
+                }
+                accepted_reply::payload::BridgeAssignment(assignment) => {
+                    let assignment = assignment.map_err(wire_error)?;
+                    let entry = match assignment.get_entry().which().map_err(wire_error)? {
+                        bridge_assignment::entry::None(()) => None,
+                        bridge_assignment::entry::State(state) => {
+                            Some(list_f64(state.map_err(wire_error)?))
+                        }
+                    };
+                    AcceptedPayload::BridgeAssignment(BridgeAssignmentRecord {
+                        bridge: assignment.get_bridge(),
+                        from_basin: assignment.get_from_basin(),
+                        to_basin: assignment.get_to_basin(),
+                        images: list_f64(assignment.get_images().map_err(wire_error)?),
+                        image_count: assignment.get_image_count(),
+                        region: assignment.get_region(),
+                        tube_radius: assignment.get_tube_radius(),
+                        entry,
                     })
                 }
                 accepted_reply::payload::PolicyState(state) => {
