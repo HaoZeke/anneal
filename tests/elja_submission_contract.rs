@@ -201,3 +201,21 @@ fn slab_driver_reports_quench_accounting() {
         );
     }
 }
+
+#[test]
+fn cooperative_share_optimization_is_one_quench_not_ten() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+
+    assert!(
+        source.contains("run_cfg.polish_records = run_cfg.relax_steps;"),
+        "cooperative share-tolerance optimization must be one quench, not ten"
+    );
+    assert!(
+        !source.contains("polish_records = run_cfg.relax_steps.saturating_mul(10)"),
+        "ten full quenches per record spend a short replica on one improvement"
+    );
+}

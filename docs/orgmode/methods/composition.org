@@ -26,9 +26,9 @@ coordinator leaves local execution active rather than failing the run
 
 Runtime configuration derives from =Config::recommended(n)= with
 =budget_window= forced on (=run_cfg.budget_window = true=,
-examples/lj_cluster_search.rs:1999-2000) and =polish_records= sized to
-cross the shared-catalog convergence tolerance
-(examples/lj_cluster_search.rs:2020-2024). Two cooperative-only
+examples/lj_cluster_search.rs:1999-2000) and =polish_records= equal to
+one full quench (=relax_steps=), the documented few hundred extra
+steps per record or visit. Two cooperative-only
 extensions are environment-gated: =CATALOG_COOP_WELLS= (feed remote
 minima into the featomic packing archive) and =CATALOG_SHARED_BIAS=
 (deposit remote minima into this chain's own well-tempered bias)
