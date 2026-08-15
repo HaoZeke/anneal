@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    AttractorStrength, certified_global_minimum, explore_collapsed, invert_mixing, mixed,
-    rhat_series, stronger, MIXED_RHAT,
+    AttractorStrength, certified_global_minimum, explore_collapsed, explore_must_leave,
+    invert_mixing, mixed, rhat_series, stronger, MIXED_RHAT,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
@@ -132,4 +132,30 @@ fn a_lone_ico_collapse_is_explore_failure_not_a_certificate() {
     assert!(!verdict.certified_attractor);
     assert!(verdict.explore_collapsed);
     assert!(explore_collapsed(&series));
+}
+
+#[test]
+fn a_shared_lone_packing_forces_leave_even_when_energies_have_not_mixed() {
+    let energies = [
+        constant(-173.252378, 8),
+        constant(-171.38, 8),
+        constant(-170.45, 8),
+        constant(-166.64, 8),
+    ];
+    let families = [
+        constant(0.0, 8),
+        constant(0.0, 8),
+        constant(0.0, 8),
+        constant(0.0, 8),
+    ];
+    assert!(!explore_collapsed(&energies));
+    assert!(mixed(rhat_series(&families)));
+    assert!(explore_must_leave(&energies, &families, 1, 4));
+}
+
+#[test]
+fn distinct_packing_labels_are_not_a_mixed_explore_set() {
+    let families = [constant(0.0, 8), constant(1.0, 8)];
+    assert!(!mixed(rhat_series(&families)));
+    assert!(!explore_must_leave(&families, &families, 2, 2));
 }
