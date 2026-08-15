@@ -1249,6 +1249,13 @@ pub fn step_away_mean<R: Rng + ?Sized>(
 /// does not keep the arm live.
 const FIVEFOLD_AXIS: f64 = 1.40;
 
+/// Yield threshold of the measured LJ packing hop.
+///
+/// The 58/72 LJ38 campaign fires the SOFI C5 residual on the best
+/// axis while that length is at most this gate, and yields only when
+/// the structure is already off the fivefold funnel.
+const FIVEFOLD_GATE: f64 = 1.15;
+
 /// How many distinct fivefold axes count as the icosahedral funnel.
 ///
 /// Ih has six. Marks D5h has one. Cuboctahedral packing has none.
@@ -1651,6 +1658,24 @@ pub fn fivefold_probe(x: ArrayView1<f64>, rmsd: f64) -> FivefoldProbe {
         top12_share: share(12),
         y,
     }
+}
+
+/// Measured LJ packing hop: SOFI C5 residual on the best axis.
+///
+/// Yields only when the best-axis fivefold length already exceeds
+/// [`FIVEFOLD_GATE`]. This is the hop that produced the LJ38 58/72
+/// campaign. The multi-axis gated hop is [`step_away_fivefold`].
+pub fn step_away_fivefold_measured(x: ArrayView1<f64>, rmsd: f64) -> Array1<f64> {
+    let (d5, axis, mut dr) = fivefold_residual(x);
+    if d5 > FIVEFOLD_GATE {
+        return x.to_owned();
+    }
+    let n = (x.len() / 3).max(1) as f64;
+    let cur = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
+    if cur < 1e-8 {
+        dr = pentagon_break(x, axis);
+    }
+    scale_to_cap(x, dr, rmsd)
 }
 
 /// Leave the fivefold funnel: amplify the SOFI C5 residual on the

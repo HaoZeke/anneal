@@ -1268,10 +1268,11 @@ impl ClusterMove {
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else if packing {
-                    // Measured LJ hop: SOFI C5 residual on a monoatomic
-                    // packing. The observed-cloud leftover is the molecular
-                    // and slab arm; on LJ it is a closed-shell breath.
-                    crate::soap::step_away_fivefold(x, *rmsd, rng)
+                    // Measured LJ hop: SOFI C5 residual on the best
+                    // axis, gated only by fivefold length. The multi-axis
+                    // hop yields on disordered LJ38 and never leaves.
+                    let _ = rng;
+                    crate::soap::step_away_fivefold_measured(x, *rmsd)
                 } else {
                     crate::soap::step_away_cloud(
                         x,
@@ -1470,9 +1471,8 @@ mod move_scaling_tests {
             -0.8, -0.9, 0.1, 1.3, -0.6, 0.8, -1.0, 0.4,
         ]);
         let mut move_rng = StdRng::seed_from_u64(11);
-        let mut five_rng = StdRng::seed_from_u64(11);
         let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
-        let five = crate::soap::step_away_fivefold(x.view(), rmsd, &mut five_rng);
+        let five = crate::soap::step_away_fivefold_measured(x.view(), rmsd);
         for index in 0..x.len() {
             assert!(
                 (proposed[index] - five[index]).abs() < 1e-12,
