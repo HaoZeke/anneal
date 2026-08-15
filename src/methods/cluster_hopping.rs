@@ -195,6 +195,20 @@ pub enum CheckpointAction {
         /// Probe action label retained separately from adaptive moves.
         action: String,
     },
+    /// Deposit bias at remote minima so the chain's own acceptance feels
+    /// what the ensemble has already visited.
+    ///
+    /// Collective knowledge that only arrives as an occasional steering
+    /// decision leaves the walk between checkpoints blind to it; a deposit
+    /// reshapes the biased landscape every subsequent move and every
+    /// Metropolis test walks on, which is continuous repulsion from
+    /// visited territory rather than an occasional redirect. The states
+    /// are deposited exactly as the chain's own visits are, so the
+    /// well-tempered accounting and the merge radius apply unchanged.
+    DepositRemote {
+        /// Cartesian minima received from the ensemble.
+        states: Vec<Array1<f64>>,
+    },
 }
 
 fn continue_without_checkpoint(_: ChainCheckpoint<'_>) -> CheckpointAction {
@@ -1102,6 +1116,14 @@ where
                 .and_then(|next| next.checked_mul(interval));
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
+                CheckpointAction::DepositRemote { states } => {
+                    for remote in &states {
+                        if remote.len() == x.len() {
+                            bias.deposit(bias.cv(remote.view()).view(), cfg.temperature);
+                        }
+                    }
+                    None
+                }
                 CheckpointAction::BoundaryProposal { state, action } => Some((state, action, true)),
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
             };
