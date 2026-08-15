@@ -1,7 +1,9 @@
+use anneal_core::catalog::REDUCTION_FACTOR;
 use anneal_core::methods::feynman_kac::{
-    BasinEvidence, EpochSubmissionOutcome, PopulationMember, SelectionCoefficients,
-    SynchronousPopulation, ascending_fractional_ranks, population_family_position,
-    population_rejuvenation_draw, rank_population, reconfiguration_plan,
+    BasinEvidence, EpochSubmissionOutcome, PackingOccupant, PopulationMember, ReconfigurationError,
+    SelectionCoefficients, SynchronousPopulation, ascending_fractional_ranks,
+    assign_parents_by_packing, population_family_position, population_rejuvenation_draw,
+    rank_population, reconfiguration_plan,
 };
 
 fn coefficients() -> SelectionCoefficients {
@@ -330,4 +332,158 @@ fn an_epoch_every_replica_abstains_from_closes_vacantly() {
             required: 0,
         }
     );
+}
+
+#[test]
+fn live_replicas_close_an_epoch_without_the_unstarted_roster() {
+    let mut population = SynchronousPopulation::new(0u32..8, coefficients(), 2, 11).unwrap();
+    for replica in 0..3u32 {
+        population.mark_live(replica).unwrap();
+    }
+
+    let mut last = None;
+    for replica in 0..3u32 {
+        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        last = Some(population.submit(0, member).unwrap());
+        if replica < 2 {
+            assert_eq!(
+                last,
+                Some(EpochSubmissionOutcome::Pending {
+                    epoch: 0,
+                    submitted: replica as usize + 1,
+                    required: 3,
+                })
+            );
+        }
+    }
+
+    let EpochSubmissionOutcome::Ready(plan) = last.expect("three live replicas must submit") else {
+        panic!("three live replicas must close the epoch without waiting for 3..7")
+    };
+    assert_eq!(plan.epoch(), 0);
+    assert_eq!(plan.destinations(), &[0, 1, 2]);
+}
+
+#[test]
+fn an_unmarked_population_still_waits_for_every_configured_replica() {
+    let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 13).unwrap();
+    let outcome = population
+        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        outcome,
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 1,
+            required: 4,
+        }
+    );
+}
+
+#[test]
+fn retiring_a_live_replica_closes_without_that_replica() {
+    let mut population = SynchronousPopulation::new(0u32..8, coefficients(), 2, 19).unwrap();
+    for replica in 0..4u32 {
+        population.mark_live(replica).unwrap();
+    }
+    population.retire(2).unwrap();
+    population.retire(2).unwrap();
+
+    let mut last = None;
+    for replica in [0u32, 1, 3] {
+        let member = PopulationMember::new(replica, -10.0 + f64::from(replica), 0.3, 2.0).unwrap();
+        last = Some(population.submit(0, member).unwrap());
+    }
+
+    let EpochSubmissionOutcome::Ready(plan) = last.expect("remaining live replicas must submit")
+    else {
+        panic!("remaining live replicas must close without the retired one")
+    };
+    assert_eq!(plan.epoch(), 0);
+    assert_eq!(plan.destinations(), &[0, 1, 3]);
+    assert!(!plan.destinations().contains(&2));
+}
+
+#[test]
+fn live_roster_updates_reject_unknown_replicas() {
+    let mut population = SynchronousPopulation::new([0, 1], coefficients(), 1, 29).unwrap();
+    assert_eq!(
+        population.mark_live(7).unwrap_err(),
+        ReconfigurationError::UnknownReplica { replica: 7 }
+    );
+    assert_eq!(
+        population.retire(7).unwrap_err(),
+        ReconfigurationError::UnknownReplica { replica: 7 }
+    );
+}
+
+fn occupant(replica: u32, family: Option<usize>, energy: f64) -> PackingOccupant {
+    PackingOccupant {
+        replica,
+        family,
+        energy,
+    }
+}
+
+#[test]
+fn unique_packing_families_keep_themselves_as_parent() {
+    let occupants = [
+        occupant(0, Some(0), -173.25),
+        occupant(1, Some(1), -173.92),
+        occupant(2, None, -170.0),
+    ];
+    let parents = assign_parents_by_packing(&occupants, 3);
+    assert_eq!(parents, vec![0, 1, 2]);
+}
+
+#[test]
+fn ico_cannot_occupy_half_the_ensemble() {
+    let mut occupants = vec![occupant(0, Some(1), -173.92)];
+    for replica in 1..151u32 {
+        occupants.push(occupant(
+            replica,
+            Some(0),
+            -173.25 + f64::from(replica) * 1e-4,
+        ));
+    }
+
+    let cap = usize::try_from(REDUCTION_FACTOR).unwrap_or(3);
+    let parents = assign_parents_by_packing(&occupants, cap);
+
+    assert_eq!(parents.len(), occupants.len());
+    assert_eq!(parents[0], 0);
+
+    let ico_donor = 1u32;
+    let ico_offspring = parents.iter().filter(|parent| **parent == ico_donor).count();
+    assert_eq!(ico_offspring, cap);
+
+    for (destination, parent) in occupants.iter().zip(parents.iter()) {
+        let parent_family = occupants
+            .iter()
+            .find(|occupant| occupant.replica == *parent)
+            .and_then(|occupant| occupant.family);
+        assert_eq!(parent_family, destination.family);
+    }
+
+    let ico_clones = occupants
+        .iter()
+        .zip(parents.iter())
+        .filter(|(destination, parent)| {
+            destination.family == Some(0) && destination.replica != **parent
+        })
+        .count();
+    assert_eq!(ico_clones, cap - 1);
+}
+
+#[test]
+fn deepest_ico_is_the_only_packing_donor() {
+    let occupants = [
+        occupant(4, Some(0), -173.24),
+        occupant(7, Some(0), -173.928427),
+        occupant(9, Some(0), -173.20),
+        occupant(2, Some(0), -173.10),
+        occupant(1, Some(1), -172.0),
+    ];
+    let parents = assign_parents_by_packing(&occupants, 3);
+    assert_eq!(parents, vec![4, 7, 7, 7, 1]);
 }
