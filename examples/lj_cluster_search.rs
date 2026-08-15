@@ -2736,63 +2736,74 @@ fn run_capnp_catalog(
                     }
                 }
             }
-            if parent.producer_replica != replica
-                && parent.coordinates.len() == snapshot.current_state().len()
-            {
-                let mut state = Array1::from(parent.coordinates.clone());
-                let atoms = state.len() / 3;
-                if atoms > 0 {
-                    let mut jitter = rand::rngs::StdRng::seed_from_u64(draw);
-                    for coordinate in state.iter_mut() {
-                        *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
-                    }
-                    for axis in 0..3 {
-                        let mean = (0..atoms).map(|atom| state[3 * atom + axis]).sum::<f64>()
-                            / atoms as f64;
-                        for atom in 0..atoms {
-                            state[3 * atom + axis] -= mean;
+            // Better isomer of the occupied packing only. A deeper
+            // different funnel is found independently.
+            let foreign_parent = parent.producer_replica != replica;
+            let live_state = snapshot.current_state();
+            if foreign_parent && parent.coordinates.len() == live_state.len() {
+                let live = live_state
+                    .as_slice()
+                    .expect("LJ state is contiguous");
+                let better_isomer = same_packing_coordinates(live, &parent.coordinates)
+                    && parent.energy < snapshot.current_energy() - 1e-10;
+                if better_isomer {
+                    let mut state = Array1::from(parent.coordinates.clone());
+                    let atoms = state.len() / 3;
+                    if atoms > 0 {
+                        let mut jitter = rand::rngs::StdRng::seed_from_u64(draw);
+                        for coordinate in state.iter_mut() {
+                            *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
+                        }
+                        for axis in 0..3 {
+                            let mean = (0..atoms)
+                                .map(|atom| state[3 * atom + axis])
+                                .sum::<f64>()
+                                / atoms as f64;
+                            for atom in 0..atoms {
+                                state[3 * atom + axis] -= mean;
+                            }
                         }
                     }
-                }
-                if state
-                    .iter()
-                    .zip(snapshot.current_state().iter())
-                    .any(|(a, b)| (a - b).abs() > 1e-12)
-                {
-                    slice_sequence = slice_sequence
-                        .checked_add(1)
-                        .expect("slice sequence must fit u64");
-                    let reconfiguration = SliceTrace {
-                        slice: slice_sequence,
-                        current_basin: None,
-                        active_relation: None,
-                        policy_role: PolicyRole::Exploit,
-                        policy_reason: "population_assignment",
-                        proposal_family: ProposalFamily::PopulationReconfiguration,
-                        sampled_basin: parent.census_basin,
-                        descriptor_step_norm: None,
-                        cartesian_step_norm: Some(vector_distance(
-                            snapshot
-                                .current_state()
-                                .as_slice()
-                                .expect("LJ state is contiguous"),
-                            state.as_slice().expect("LJ proposal is contiguous"),
-                        )),
-                        validation: SliceValidation::Accepted,
-                        quench: SliceQuench::Converged,
-                        adoption: SliceAdoption::Adopted,
-                        novelty: None,
-                        energy: Some(parent.energy),
-                        charged_work: u64::try_from(checkpoint_charged)
-                            .expect("checkpoint charge must fit u64"),
-                    };
-                    cooperative
-                        .record_slice(replica, reconfiguration)
-                        .expect("population checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state,
-                        action: "population_parent".to_owned(),
-                    };
+                    if state
+                        .iter()
+                        .zip(snapshot.current_state().iter())
+                        .any(|(a, b)| (a - b).abs() > 1e-12)
+                    {
+                        slice_sequence = slice_sequence
+                            .checked_add(1)
+                            .expect("slice sequence must fit u64");
+                        let reconfiguration = SliceTrace {
+                            slice: slice_sequence,
+                            current_basin: None,
+                            active_relation: None,
+                            policy_role: PolicyRole::Exploit,
+                            policy_reason: "population_assignment",
+                            proposal_family: ProposalFamily::PopulationReconfiguration,
+                            sampled_basin: parent.census_basin,
+                            descriptor_step_norm: None,
+                            cartesian_step_norm: Some(vector_distance(
+                                snapshot
+                                    .current_state()
+                                    .as_slice()
+                                    .expect("LJ state is contiguous"),
+                                state.as_slice().expect("LJ proposal is contiguous"),
+                            )),
+                            validation: SliceValidation::Accepted,
+                            quench: SliceQuench::Converged,
+                            adoption: SliceAdoption::Adopted,
+                            novelty: None,
+                            energy: Some(parent.energy),
+                            charged_work: u64::try_from(checkpoint_charged)
+                                .expect("checkpoint charge must fit u64"),
+                        };
+                        cooperative
+                            .record_slice(replica, reconfiguration)
+                            .expect("population checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state,
+                            action: "population_parent".to_owned(),
+                        };
+                    }
                 }
             }
             let crossing = match cooperative
@@ -2851,6 +2862,49 @@ fn run_capnp_catalog(
                         action: "population_boundary".to_owned(),
                     };
                 }
+            }
+            if foreign_parent {
+                let n = snapshot.current_state().len() / 3;
+                let left = anneal_core::methods::cluster_hopping::random_cluster(
+                    n,
+                    0.7,
+                    0.5,
+                    &mut transport_rng,
+                );
+                slice_sequence = slice_sequence
+                    .checked_add(1)
+                    .expect("slice sequence must fit u64");
+                let reconfiguration = SliceTrace {
+                    slice: slice_sequence,
+                    current_basin: None,
+                    active_relation: None,
+                    policy_role: PolicyRole::Explore,
+                    policy_reason: "population_reseed",
+                    proposal_family: ProposalFamily::HyperbandReseed,
+                    sampled_basin: parent.census_basin,
+                    descriptor_step_norm: None,
+                    cartesian_step_norm: Some(vector_distance(
+                        snapshot
+                            .current_state()
+                            .as_slice()
+                            .expect("LJ state is contiguous"),
+                        left.as_slice().expect("LJ proposal is contiguous"),
+                    )),
+                    validation: SliceValidation::Accepted,
+                    quench: SliceQuench::Converged,
+                    adoption: SliceAdoption::Adopted,
+                    novelty: None,
+                    energy: Some(snapshot.current_energy()),
+                    charged_work: u64::try_from(checkpoint_charged)
+                        .expect("checkpoint charge must fit u64"),
+                };
+                cooperative
+                    .record_slice(replica, reconfiguration)
+                    .expect("population checkpoint trace must remain complete");
+                return CheckpointAction::BoundaryProposal {
+                    state: left,
+                    action: "population_reseed".to_owned(),
+                };
             }
         }
         // Conversation is not identity. A position report every checkpoint
@@ -3349,6 +3403,15 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    let open_epoch = population_progress.epoch();
+    let _ = cooperative
+        .abstain_population(replica, open_epoch)
+        .expect("finished replica must leave the open population epoch");
+    if open_epoch != 0 {
+        let _ = cooperative
+            .abstain_population(replica, 0)
+            .expect("finished replica must leave epoch 0 if it is still open");
+    }
     #[cfg(feature = "nng-transport")]
     {
         brain_stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -3374,6 +3437,24 @@ fn run_capnp_catalog(
         eprint!("{trace}");
     }
     outcome
+}
+
+/// Whether two Cartesian states belong to one packing family.
+///
+/// Histograms share one [`anneal_core::catalog::PackingBook`] so class
+/// labels line up; independent [`anneal_core::catalog::packing_vector`]
+/// calls mint separate codebooks.
+#[cfg(feature = "bank-rpc")]
+fn same_packing_coordinates(live: &[f64], parent: &[f64]) -> bool {
+    use anneal_core::catalog::{PackingBook, same_packing};
+    let mut book = PackingBook::default();
+    if book.observe(live).is_none() || book.observe(parent).is_none() {
+        return false;
+    }
+    match (book.histogram(live), book.histogram(parent)) {
+        (Some(live_hist), Some(parent_hist)) => same_packing(&live_hist, &parent_hist),
+        _ => false,
+    }
 }
 
 #[cfg(feature = "bank-rpc")]
