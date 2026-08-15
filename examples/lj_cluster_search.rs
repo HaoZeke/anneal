@@ -1791,6 +1791,30 @@ fn fixed_probe_trial<R: rand::Rng + ?Sized>(
 }
 
 #[cfg(feature = "bank-rpc")]
+/// The bridge region owning a descriptor: the nearest string image, or
+/// `None` when the descriptor sits farther than the tube radius from
+/// every image.
+fn bridge_region_of(images: &[f64], dim: usize, descriptor: &[f64], tube: f64) -> Option<usize> {
+    if dim == 0 || images.len() % dim != 0 || images.is_empty() {
+        return None;
+    }
+    let mut best = 0usize;
+    let mut best_distance = f64::INFINITY;
+    for (index, image) in images.chunks_exact(dim).enumerate() {
+        let distance = image
+            .iter()
+            .zip(descriptor)
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+        if distance < best_distance {
+            best_distance = distance;
+            best = index;
+        }
+    }
+    (best_distance <= tube).then_some(best)
+}
+
 fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
@@ -1968,10 +1992,11 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
+    use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CatalogBridgeOutcome, CooperativeRun, PolicyEvidenceOutcome,
+        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
+        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -2024,6 +2049,15 @@ fn run_capnp_catalog(
     // feels what the ensemble has visited continuously rather than only
     // at steering decisions. Gated until the paired smoke measures it.
     let shared_bias_enabled = std::env::var("CATALOG_SHARED_BIAS").is_ok_and(|v| v == "1");
+    // Bridge segments: when the coordinator has commissioned a bridge
+    // across the referee's seam, this replica takes a region assignment,
+    // jumps to a stored entry state when one exists, and reports every
+    // region change as a crossing. Confinement is soft: crossings are
+    // recorded rather than moves rejected, so the weights and the
+    // committor surrogate accumulate without touching the acceptance
+    // rule. Gated until the paired smoke measures it.
+    let bridge_enabled = std::env::var("CATALOG_BRIDGE").is_ok_and(|v| v == "1");
+    let mut active_bridge: Option<BridgeAssignmentRecord> = None;
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
@@ -2071,9 +2105,15 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50_000)
         .max(minimum_population_interval);
+    let bridge_interval = std::env::var("CATALOG_BRIDGE_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(64)
+        .max(1);
     let mut local_rng = rand::rngs::StdRng::seed_from_u64(seed);
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
+    let mut bridge_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xb41d_6e55_0b41_d6e5);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
         run_cfg.merge_radius,
@@ -2403,6 +2443,37 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = position.values().to_vec();
+        if bridge_enabled && let Some(assignment) = &active_bridge {
+            match bridge_region_of(
+                &assignment.images,
+                descriptor.len(),
+                &descriptor,
+                assignment.tube_radius,
+            ) {
+                Some(region) if region != assignment.region as usize => {
+                    cooperative
+                        .bridge_crossing(
+                            replica,
+                            BridgeCrossingRecord {
+                                bridge: assignment.bridge,
+                                from_region: assignment.region,
+                                to_region: u32::try_from(region)
+                                    .expect("bridge region is bounded by image count"),
+                                descriptor: descriptor.clone(),
+                                state: snapshot.current_state().to_vec(),
+                                energy: snapshot.current_energy(),
+                            },
+                        )
+                        .expect("bridge crossing report must preserve local execution");
+                    active_bridge = None;
+                }
+                Some(_) => {}
+                None => {
+                    // Off the bridge tube entirely: the segment is over.
+                    active_bridge = None;
+                }
+            }
+        }
         let policy = match cooperative
             .policy_input(
                 replica,
@@ -2452,6 +2523,29 @@ fn run_capnp_catalog(
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
+        }
+        if bridge_enabled
+            && active_bridge.is_none()
+            && checkpoint_sequence.is_multiple_of(bridge_interval)
+            && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
+            && let CatalogBridgeOutcome::Assignment(assignment) = cooperative
+                .bridge_assignment(replica, bridge_rng.random())
+                .expect("bridge assignment poll must preserve local execution")
+        {
+            let entry = assignment
+                .entry
+                .clone()
+                .filter(|state| state.len() == snapshot.current_state().len());
+            active_bridge = Some(assignment);
+            if let Some(state) = entry {
+                cooperative
+                    .record_slice(replica, trace)
+                    .expect("bridge checkpoint trace must remain complete");
+                return CheckpointAction::ProbeProposal {
+                    state: Array1::from(state),
+                    action: "bridge".to_owned(),
+                };
+            }
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)

@@ -12,7 +12,8 @@ mod run {
     };
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
     use crate::catalog_rpc::{
-        BoundaryCrossingRecord, CatalogCandidate, CatalogMutation, CatalogRelation,
+        BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
+        CatalogMutation, CatalogRelation,
         CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
         PopulationSelection, ProtocolRejection, TransitionDestination,
     };
@@ -358,6 +359,21 @@ mod run {
         /// A validated adopted inter-basin crossing was returned.
         Crossing(BoundaryCrossingRecord),
         /// No crossing leaves the query's inferred attraction region.
+        Empty,
+        /// The coordinator rejected the request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
+    /// Result of one bridge assignment poll.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CatalogBridgeOutcome {
+        /// A commissioned bridge segment for this replica.
+        Assignment(BridgeAssignmentRecord),
+        /// No bridge is commissioned.
         Empty,
         /// The coordinator rejected the request.
         Rejected,
@@ -920,6 +936,72 @@ mod run {
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                     Ok(CatalogBoundaryOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Poll for a bridge segment assignment.
+        pub fn bridge_assignment(
+            &mut self,
+            replica: u32,
+            draw: u64,
+        ) -> Result<CatalogBridgeOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.bridge_assignment(rpc_sequence, draw))
+            };
+            match result {
+                None => Ok(CatalogBridgeOutcome::SharingDisabled),
+                Some(Ok(Some(assignment))) => Ok(CatalogBridgeOutcome::Assignment(assignment)),
+                Some(Ok(None)) => Ok(CatalogBridgeOutcome::Empty),
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(CatalogBridgeOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(CatalogBridgeOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Report one attempted exit from a bridge region.
+        pub fn bridge_crossing(
+            &mut self,
+            replica: u32,
+            crossing: BridgeCrossingRecord,
+        ) -> Result<(), CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state
+                    .client
+                    .as_mut()
+                    .map(|client| client.bridge_crossing(rpc_sequence, crossing))
+            };
+            match result {
+                None | Some(Ok(())) => Ok(()),
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(())
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(())
                 }
             }
         }
