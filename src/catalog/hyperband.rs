@@ -1,17 +1,20 @@
-//! Asynchronous successive halving on cooperative walks.
+//! Shared packing-first ranking for Hyperband rungs and Feynman--Kac epochs.
 //!
 //! Li, Jamieson, DeSalvo, Rostamizadeh, Talwalkar, *Hyperband*, JMLR 18
 //! (2018). Optuna and Ray Tune (Riedel / CoE RAISE) run the same
 //! schedule: resource multiplies by \(\eta\) at each rung, and only the
 //! top \(1/\eta\) of a cohort continue.
 //!
-//! The ranking here is packing-first. The sole occupant of a family is
-//! a new basin and is never pruned. Extra occupants of a crowded
-//! packing compete on energy. A walk with no packing yet is a possible
-//! new family and is kept. Pruned hops reseed a new start so the
-//! ensemble builds more basins instead of walking the same well.
+//! Hyperband and Feynman--Kac are not two allocators. Both call
+//! [`verdict`] and [`keep_ids`]. Hyperband applies the ranking at rungs
+//! 64/192/576 hops. Feynman--Kac applies the same ranking at a closed
+//! epoch. Ranking is packing-first, then energy. A sole family occupant
+//! is never reseeded. An unknown packing is a possible new family and
+//! is kept. Extra occupants of a crowded family compete on energy;
+//! beyond \(\lfloor n/\eta\rfloor\) extras they reseed a new random
+//! start, not a hole and not a parent clone.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Reduction factor \(\eta\). Same default as Optuna `HyperbandPruner`.
 pub const REDUCTION_FACTOR: u32 = 3;
@@ -59,27 +62,36 @@ pub fn current_rung(resource: u64, max_resource: u64) -> Option<u64> {
         .find(|&rung| resource >= rung)
 }
 
-/// Whether `id` is discarded at its current rung.
+/// Keep-or-reseed decision for one walk in a Hyperband or Feynman--Kac cohort.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnsembleVerdict {
+    /// Continue the current start.
+    Keep,
+    /// Draw a new random start. Not a hole and not a parent clone.
+    Reseed,
+}
+
+/// Ranking of one walk among a cohort.
 ///
 /// Unique-family occupants and unassigned packings stay. Extra
 /// occupants of a crowded family keep the best \(\lfloor n/\eta\rfloor\)
 /// by energy.
-pub fn prune(walks: &[WalkRecord], id: u32, max_resource: u64) -> bool {
+pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerdict {
     let Some(self_walk) = walks.iter().find(|walk| walk.id == id) else {
-        return false;
+        return EnsembleVerdict::Keep;
     };
     let Some(rung) = current_rung(self_walk.resource, max_resource) else {
-        return false;
+        return EnsembleVerdict::Keep;
     };
     if self_walk.family.is_none() {
-        return false;
+        return EnsembleVerdict::Keep;
     }
     let cohort: Vec<&WalkRecord> = walks
         .iter()
         .filter(|walk| walk.resource >= rung)
         .collect();
     if cohort.len() < 2 {
-        return false;
+        return EnsembleVerdict::Keep;
     }
     let mut best_of_family: BTreeMap<usize, (u32, f64)> = BTreeMap::new();
     for walk in &cohort {
@@ -101,7 +113,7 @@ pub fn prune(walks: &[WalkRecord], id: u32, max_resource: u64) -> bool {
             .get(&family)
             .is_some_and(|(best_id, _)| *best_id == id)
     }) {
-        return false;
+        return EnsembleVerdict::Keep;
     }
     let mut extras: Vec<&WalkRecord> = cohort
         .iter()
@@ -121,7 +133,25 @@ pub fn prune(walks: &[WalkRecord], id: u32, max_resource: u64) -> bool {
             .then_with(|| left.id.cmp(&right.id))
     });
     let keep = extras.len() / usize::try_from(REDUCTION_FACTOR).unwrap_or(3);
-    extras.iter().skip(keep).any(|walk| walk.id == id)
+    if extras.iter().skip(keep).any(|walk| walk.id == id) {
+        EnsembleVerdict::Reseed
+    } else {
+        EnsembleVerdict::Keep
+    }
+}
+
+/// Whether `id` is discarded at its current rung.
+pub fn prune(walks: &[WalkRecord], id: u32, max_resource: u64) -> bool {
+    verdict(walks, id, max_resource) == EnsembleVerdict::Reseed
+}
+
+/// Identities that [`verdict`] keeps, for a Feynman--Kac parent filter.
+pub fn keep_ids(walks: &[WalkRecord], max_resource: u64) -> BTreeSet<u32> {
+    walks
+        .iter()
+        .filter(|walk| verdict(walks, walk.id, max_resource) == EnsembleVerdict::Keep)
+        .map(|walk| walk.id)
+        .collect()
 }
 
 #[cfg(test)]
@@ -196,5 +226,20 @@ mod tests {
         ];
         assert!(!prune(&walks, 0, 1000));
         assert!(!prune(&walks, 1, 1000));
+    }
+
+    #[test]
+    fn keep_ids_retains_oh_and_best_ico_not_the_worst_ico() {
+        let mut walks = vec![
+            walk(0, 64, -173.928427, Some(1)),
+            walk(1, 64, -173.252378, Some(0)),
+        ];
+        for index in 2..13 {
+            walks.push(walk(index, 64, -173.25 + f64::from(index) * 1e-4, Some(0)));
+        }
+        let kept = keep_ids(&walks, 1000);
+        assert!(kept.contains(&0));
+        assert!(kept.contains(&1));
+        assert!(!kept.contains(&12));
     }
 }

@@ -21,7 +21,8 @@ pub use calibration::{
 pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use hyperband::{
-    DEFAULT_MAX_RESOURCE, MIN_RESOURCE, REDUCTION_FACTOR, WalkRecord, current_rung, prune, rungs,
+    DEFAULT_MAX_RESOURCE, EnsembleVerdict, MIN_RESOURCE, REDUCTION_FACTOR, WalkRecord,
+    current_rung, keep_ids, prune, rungs, verdict,
 };
 pub use mixing::{
     AttractorStrength, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
