@@ -26,8 +26,7 @@ use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCensus, BasinId, CandidateRecord,
     CandidateValidator, FreshEvaluation, PackingBook, QuenchStatus, SystemSignature,
-    ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm, packing_fingerprint,
-    same_packing,
+    ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -899,7 +898,9 @@ fn apply_request(
                 );
             };
             observe_packing(scientific, &validated.candidate.coordinates);
-            let packing = packing_fingerprint(&validated.candidate.coordinates);
+            let packing = scientific
+                .packing
+                .histogram(&validated.candidate.coordinates);
             let basin_visits = packing
                 .as_ref()
                 .and_then(|fp| scientific.packing.family_of(fp))
@@ -1030,7 +1031,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let packing = packing_fingerprint(&member_candidate.coordinates);
+            let packing = scientific
+                .packing
+                .histogram(&member_candidate.coordinates);
             let basin_visits = packing
                 .as_ref()
                 .and_then(|fp| scientific.packing.family_of(fp))
@@ -2064,16 +2067,14 @@ fn realize_population_plan(
 }
 
 fn observe_packing(scientific: &mut ScientificState, coordinates: &[f64]) {
-    if let Some(fingerprint) = packing_fingerprint(coordinates) {
-        let _ = scientific.packing.observe(&fingerprint);
-    }
+    let _ = scientific.packing.observe(coordinates);
 }
 
 fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64>> {
     scientific
         .last_candidate_by_replica
         .get(&replica)
-        .and_then(|candidate| packing_fingerprint(&candidate.coordinates))
+        .and_then(|candidate| scientific.packing.histogram(&candidate.coordinates))
 }
 
 fn packing_or_region_relation(
@@ -2100,9 +2101,9 @@ fn packing_relation(
     let mut compared = false;
     let mut same_as_incumbent = false;
     let mut same_as_any = false;
-    let mut lower_anchor = false;
+    let mut lower_known = false;
     for entry in scientific.catalog.entries() {
-        let Some(entry_fp) = packing_fingerprint(entry.coordinates()) else {
+        let Some(entry_fp) = scientific.packing.histogram(entry.coordinates()) else {
             continue;
         };
         compared = true;
@@ -2116,13 +2117,17 @@ fn packing_relation(
             same_as_incumbent = true;
         }
         if entry.energy() < energy - 1e-10 {
-            lower_anchor = true;
+            lower_known = true;
         }
     }
     if !compared {
         return None;
     }
-    if lower_anchor {
+    // Take a better isomer or a better known funnel only while the live
+    // structure still sits in a catalog family. A novel histogram is a
+    // Leave that has already left; snapping it back to the ico floor is
+    // the Wales-Doye trap.
+    if lower_known && same_as_any {
         return Some(CatalogRelation::UnrelatedLowerAnchor);
     }
     if same_as_incumbent {
