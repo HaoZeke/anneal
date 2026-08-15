@@ -121,6 +121,9 @@ pub mod raft;
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
 pub mod model_hessian;
+/// nng transport for consensus traffic between server brains.
+#[cfg(all(feature = "nng-transport", feature = "bank-rpc"))]
+pub mod decree_bus;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
