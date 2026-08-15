@@ -26,9 +26,12 @@ pub mod csa_cluster;
 /// Archive-ratcheted exploration of the minima network.
 #[cfg(feature = "graphkey")]
 pub mod ffs;
+/// Spectral referee over the explored landscape's transition graph.
+pub mod landscape_graph;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
+/// Umbrella bridges between two catalog minima in descriptor space.
 pub mod neus_bridge;
 /// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
