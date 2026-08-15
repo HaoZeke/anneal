@@ -25,8 +25,9 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCensus, BasinId, CandidateRecord,
-    CandidateValidator, FreshEvaluation, QuenchStatus, SystemSignature, ValidatedCandidate,
-    ValidatorConfig, euclidean_gradient_norm,
+    CandidateValidator, FreshEvaluation, PackingBook, QuenchStatus, SystemSignature,
+    ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm, packing_fingerprint,
+    same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -248,6 +249,7 @@ struct ScientificState {
     population: SynchronousPopulation,
     population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
     population_plans: BTreeMap<u64, PopulationPlan>,
+    packing: PackingBook,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -310,6 +312,7 @@ impl CoordinatorState {
                     .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     population_candidates: BTreeMap::new(),
                     population_plans: BTreeMap::new(),
+                    packing: PackingBook::default(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -820,19 +823,33 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let local_basin_visits = local_basin
-                .and_then(|id| scientific.census.entry(id))
-                .map_or(0, |entry| entry.visits());
+            let packing = replica_packing(scientific, request.identity.replica);
+            let local_basin_visits = packing
+                .as_ref()
+                .and_then(|fp| scientific.packing.family_of(fp))
+                .map_or_else(
+                    || {
+                        local_basin
+                            .and_then(|id| scientific.census.entry(id))
+                            .map_or(0, |entry| entry.visits())
+                    },
+                    |family| scientific.packing.visits(family),
+                );
             let local_basin_distance = local_basin
                 .and_then(|id| scientific.census.entry(id))
                 .map_or(0.0, |entry| descriptor_distance(descriptor, entry.medoid()));
-            let novelty = local_basin.map_or_else(
-                || nearest_census_distance(&scientific.census, descriptor).unwrap_or(0.0),
-                |id| nearest_other_census_distance(&scientific.census, id, descriptor),
+            let novelty = packing.as_ref().map_or_else(
+                || {
+                    local_basin.map_or_else(
+                        || nearest_census_distance(&scientific.census, descriptor).unwrap_or(0.0),
+                        |id| nearest_other_census_distance(&scientific.census, id, descriptor),
+                    )
+                },
+                |fp| scientific.packing.novelty(fp),
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let relation = attraction_region_relation(
+            let relation = packing_or_region_relation(
                 scientific,
                 request.identity.replica,
                 local_basin,
@@ -881,15 +898,30 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let basin_visits = scientific
-                .census
-                .entry(basin_id)
-                .expect("classified census basin exists")
-                .visits();
-            let novelty = nearest_other_census_distance(
-                &scientific.census,
-                basin_id,
-                &validated.candidate.descriptor,
+            observe_packing(scientific, &validated.candidate.coordinates);
+            let packing = packing_fingerprint(&validated.candidate.coordinates);
+            let basin_visits = packing
+                .as_ref()
+                .and_then(|fp| scientific.packing.family_of(fp))
+                .map_or_else(
+                    || {
+                        scientific
+                            .census
+                            .entry(basin_id)
+                            .expect("classified census basin exists")
+                            .visits()
+                    },
+                    |family| scientific.packing.visits(family),
+                );
+            let novelty = packing.as_ref().map_or_else(
+                || {
+                    nearest_other_census_distance(
+                        &scientific.census,
+                        basin_id,
+                        &validated.candidate.descriptor,
+                    )
+                },
+                |fp| scientific.packing.novelty(fp),
             );
             let canonical = candidate_from_validated(&validated, Some(basin_id));
             let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
@@ -998,15 +1030,29 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let basin_visits = scientific
-                .census
-                .entry(basin_id)
-                .expect("classified census basin exists")
-                .visits();
-            let novelty = nearest_other_census_distance(
-                &scientific.census,
-                basin_id,
-                &member_candidate.descriptor,
+            let packing = packing_fingerprint(&member_candidate.coordinates);
+            let basin_visits = packing
+                .as_ref()
+                .and_then(|fp| scientific.packing.family_of(fp))
+                .map_or_else(
+                    || {
+                        scientific
+                            .census
+                            .entry(basin_id)
+                            .expect("classified census basin exists")
+                            .visits()
+                    },
+                    |family| scientific.packing.visits(family),
+                );
+            let novelty = packing.as_ref().map_or_else(
+                || {
+                    nearest_other_census_distance(
+                        &scientific.census,
+                        basin_id,
+                        &member_candidate.descriptor,
+                    )
+                },
+                |fp| scientific.packing.novelty(fp),
             );
             let residual_uncertainty = transition_uncertainty(scientific, basin_id);
             let Ok(member) = PopulationMember::new_with_uncertainty(
@@ -1192,6 +1238,7 @@ fn apply_request(
                 scientific
                     .last_candidate_by_replica
                     .insert(request.identity.replica, canonical);
+                observe_packing(scientific, &validated.candidate.coordinates);
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
@@ -1246,8 +1293,12 @@ fn apply_request(
                 if deeper {
                     scientific
                         .best_candidate_by_replica
-                        .insert(request.identity.replica, canonical);
+                        .insert(request.identity.replica, canonical.clone());
                 }
+                scientific
+                    .last_candidate_by_replica
+                    .insert(request.identity.replica, canonical);
+                observe_packing(scientific, &validated.candidate.coordinates);
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
@@ -2010,6 +2061,81 @@ fn realize_population_plan(
         required,
         plan: Some(wire_plan),
     })
+}
+
+fn observe_packing(scientific: &mut ScientificState, coordinates: &[f64]) {
+    if let Some(fingerprint) = packing_fingerprint(coordinates) {
+        let _ = scientific.packing.observe(&fingerprint);
+    }
+}
+
+fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64>> {
+    scientific
+        .last_candidate_by_replica
+        .get(&replica)
+        .and_then(|candidate| packing_fingerprint(&candidate.coordinates))
+}
+
+fn packing_or_region_relation(
+    scientific: &ScientificState,
+    replica: u32,
+    local_basin: Option<BasinId>,
+    energy: f64,
+) -> CatalogRelation {
+    if let Some(relation) = packing_relation(scientific, replica, energy) {
+        return relation;
+    }
+    attraction_region_relation(scientific, replica, local_basin, energy)
+}
+
+fn packing_relation(
+    scientific: &ScientificState,
+    replica: u32,
+    energy: f64,
+) -> Option<CatalogRelation> {
+    if scientific.catalog.entries().is_empty() {
+        return None;
+    }
+    let local = replica_packing(scientific, replica)?;
+    let mut compared = false;
+    let mut same_as_incumbent = false;
+    let mut same_as_any = false;
+    let mut lower_anchor = false;
+    for entry in scientific.catalog.entries() {
+        let Some(entry_fp) = packing_fingerprint(entry.coordinates()) else {
+            continue;
+        };
+        compared = true;
+        let same = same_packing(&local, &entry_fp);
+        if same {
+            same_as_any = true;
+        }
+        if scientific.catalog.incumbent().map(|inc| inc.census_id()) == Some(entry.census_id())
+            && same
+        {
+            same_as_incumbent = true;
+        }
+        if entry.energy() < energy - 1e-10 {
+            lower_anchor = true;
+        }
+    }
+    if !compared {
+        return None;
+    }
+    if lower_anchor {
+        return Some(CatalogRelation::UnrelatedLowerAnchor);
+    }
+    if same_as_incumbent {
+        let incumbent_energy = scientific.catalog.incumbent().map(|entry| entry.energy());
+        if incumbent_energy.is_some_and(|best| (energy - best).abs() <= 1e-8) {
+            return Some(CatalogRelation::Incumbent);
+        }
+        return Some(CatalogRelation::SameBasin);
+    }
+    if same_as_any {
+        return Some(CatalogRelation::SameBasin);
+    }
+    Some(CatalogRelation::UnrelatedNoAnchor)
 }
 
 fn attraction_region_relation(

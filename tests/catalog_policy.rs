@@ -29,20 +29,41 @@ fn input(
 }
 
 #[test]
-fn incumbent_replica_continues_despite_saturation_and_stall() {
+fn incumbent_replica_polishes_until_the_known_well_stalls() {
     let (census, basin_id) = census_with_repeated_visits(21);
-    let mut state = input(
+    let polishing = input(
         ActiveCatalogRelation::Incumbent,
         CensusEvidence::from_census(&census, Some(basin_id)),
         AggregateProgress::new(90, 100).unwrap(),
     );
-    state.local_stall_slices = 100;
+    let mut stalled = polishing;
+    stalled.local_stall_slices = 8;
+
+    let polish = CatalogPolicy::decide(polishing);
+    assert_eq!(polish.action, PolicyAction::ContinueLocal);
+    assert_eq!(polish.reason, PolicyReason::IncumbentLocalSearch);
+    assert_eq!(polish.reason.code(), "incumbent_local_search");
+
+    let leave = CatalogPolicy::decide(stalled);
+    assert_eq!(leave.action, PolicyAction::Leave);
+    assert_eq!(leave.reason, PolicyReason::LocalStall);
+}
+
+#[test]
+fn a_better_catalog_min_is_taken_before_same_packing_leave() {
+    let (census, basin_id) = census_with_repeated_visits(8);
+    let mut state = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: true,
+        },
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.local_stall_slices = 8;
 
     let decision = CatalogPolicy::decide(state);
-
-    assert_eq!(decision.action, PolicyAction::ContinueLocal);
-    assert_eq!(decision.reason, PolicyReason::IncumbentLocalSearch);
-    assert_eq!(decision.reason.code(), "incumbent_local_search");
+    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
+    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
 }
 
 #[test]
@@ -225,8 +246,13 @@ fn decision_table_covers_every_discrete_input_state() {
                             assert!(!decision.reason.code().is_empty());
                             if relation == ActiveCatalogRelation::Incumbent
                                 && validation == ValidationState::Validated
+                                && !local_deepened
                             {
-                                assert_eq!(decision.action, PolicyAction::ContinueLocal);
+                                if local_stall_slices >= 8 {
+                                    assert_eq!(decision.action, PolicyAction::Leave);
+                                } else {
+                                    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+                                }
                             }
                         }
                     }
