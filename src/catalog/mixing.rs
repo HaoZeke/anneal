@@ -55,8 +55,14 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
             .map(|mean| (mean - theta_bar).powi(2))
             .sum::<f64>();
     let w: f64 = vars.iter().sum::<f64>() / m;
-    if w <= 0.0 {
-        return if b > 0.0 { f64::INFINITY } else { 0.0 };
+    // Repeated identical f64 values can leave a residual W after
+    // (n * x) / n, so treat a vanished within-chain variance as zero.
+    if w <= 1e-18 {
+        return if b > 1e-18 {
+            f64::INFINITY
+        } else {
+            0.0
+        };
     }
     let var_hat = ((n as f64 - 1.0) / n as f64) * w + b / n as f64;
     (var_hat / w).sqrt()
