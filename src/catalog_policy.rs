@@ -264,9 +264,9 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// Inverted Gelman--Rubin: a certified incumbent stays occupied.
-    /// A certificate does not yank an unrelated replica. Explore-role
-    /// mixing forces Leave.
+    /// A lower catalog energy is taken even if explore chains have
+    /// mixed. Mixing forces Leave only when there is no better
+    /// funnel to adopt. A certified incumbent stays occupied.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -289,9 +289,6 @@ impl CatalogPolicy {
                     PolicyReason::CertifiedAttractor,
                 )
             }
-            _ if input.mixing.explore_collapsed => {
-                decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
-            }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: true,
             } => {
@@ -304,6 +301,9 @@ impl CatalogPolicy {
                         PolicyReason::RemoteAnchorOpen
                     },
                 )
+            }
+            _ if input.mixing.explore_collapsed => {
+                decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
             }
             ActiveCatalogRelation::Incumbent if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)

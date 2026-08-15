@@ -191,6 +191,23 @@ fn validation_failure_and_local_descent_preserve_local_search() {
 }
 
 #[test]
+fn a_lower_catalog_energy_is_taken_even_when_explore_has_mixed() {
+    let (census, _) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: true,
+        },
+        CensusEvidence::from_census(&census, None),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.mixing.explore_collapsed = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
+    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
+}
+
+#[test]
 fn explore_collapse_forces_leave_instead_of_explore() {
     let (census, _) = census_with_repeated_visits(2);
     let mut state = input(

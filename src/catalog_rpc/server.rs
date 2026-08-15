@@ -2299,10 +2299,10 @@ fn packing_relation(
     if !compared {
         return None;
     }
-    // Take a better isomer in the same family only while the ensemble
-    // has not mixed onto an uncertified floor. A certificate does not
-    // yank a novel packing onto the current deepest well.
-    if lower_known && same_as_any && !ensemble_mixed(scientific) {
+    // A replica already in a known packing takes a lower catalog
+    // energy, including a deeper funnel. A novel histogram is not
+    // yanked back onto the current floor.
+    if lower_known && same_as_any {
         return Some(CatalogRelation::UnrelatedLowerAnchor);
     }
     if same_as_incumbent {
