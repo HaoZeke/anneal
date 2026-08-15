@@ -36,6 +36,7 @@ use crate::methods::feynman_kac::{
     SynchronousPopulation,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
+use crate::methods::landscape_graph::LandscapeGraph;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
@@ -235,6 +236,7 @@ struct ScientificState {
     transition_graph: TransitionGraph,
     attraction_regions: AttractionRegionConfig,
     transition_nodes: BTreeMap<BasinId, usize>,
+    landscape: LandscapeGraph,
     last_basin_by_replica: BTreeMap<u32, BasinId>,
     last_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
     best_candidate_by_replica: BTreeMap<u32, CatalogCandidate>,
@@ -284,6 +286,7 @@ impl CoordinatorState {
                     transition_graph: TransitionGraph::new(),
                     attraction_regions: scientific.attraction_regions.clone(),
                     transition_nodes: BTreeMap::new(),
+                    landscape: LandscapeGraph::new(),
                     last_basin_by_replica: BTreeMap::new(),
                     last_candidate_by_replica: BTreeMap::new(),
                     best_candidate_by_replica: BTreeMap::new(),
@@ -1061,9 +1064,22 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 };
-                scientific
+                let previous = scientific
                     .last_basin_by_replica
                     .insert(request.identity.replica, observation.basin_id);
+                // The census-visit stream is the referee's evidence: one
+                // replica occupying basin A and then basin B is one
+                // observed transition across their seam.
+                scientific.landscape.observe_basin(observation.basin_id.as_raw());
+                if let Some(previous) = previous
+                    && previous != observation.basin_id
+                {
+                    scientific.landscape.observe_crossing(
+                        previous.as_raw(),
+                        observation.basin_id.as_raw(),
+                        1.0,
+                    );
+                }
                 let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
                 let deeper = scientific
                     .best_candidate_by_replica
@@ -1477,6 +1493,78 @@ fn catalog_mutation(
     }
 }
 
+/// Keep every weakly coupled community of the landscape represented in
+/// the parent map.
+///
+/// Resampling concentrates offspring on the deepest submissions, and on
+/// a landscape whose explored graph splits into two communities that
+/// rarely exchange, that concentration abandons whichever community is
+/// currently shallower, after which nothing ever samples it again. When
+/// the referee sees such a split and the chosen parents all sit on one
+/// side while a submission exists on the other, the plan gives one slot
+/// of the most crowded family to the deepest candidate of the abandoned
+/// side. A well-mixed landscape passes through untouched.
+fn referee_community_coverage(
+    scientific: &ScientificState,
+    mut parents: Vec<u32>,
+    source_candidates: &BTreeMap<u32, CatalogCandidate>,
+) -> Vec<u32> {
+    let Ok(split) = scientific.landscape.spectral_split() else {
+        return parents;
+    };
+    if split.conductance >= 0.1 {
+        return parents;
+    }
+    let side = |replica: &u32| -> Option<bool> {
+        let basin = source_candidates.get(replica)?.census_basin?;
+        if split.left.contains(&basin) {
+            Some(true)
+        } else if split.right.contains(&basin) {
+            Some(false)
+        } else {
+            None
+        }
+    };
+    let mut has_left = false;
+    let mut has_right = false;
+    for parent in &parents {
+        match side(parent) {
+            Some(true) => has_left = true,
+            Some(false) => has_right = true,
+            None => {}
+        }
+    }
+    if has_left == has_right {
+        return parents;
+    }
+    let Some(replacement) = source_candidates
+        .keys()
+        .filter(|replica| side(replica) == Some(!has_left))
+        .min_by(|a, b| {
+            source_candidates[a]
+                .energy
+                .total_cmp(&source_candidates[b].energy)
+        })
+        .copied()
+    else {
+        return parents;
+    };
+    let mut counts = BTreeMap::<u32, usize>::new();
+    for parent in &parents {
+        *counts.entry(*parent).or_default() += 1;
+    }
+    let Some((&crowded, &family)) = counts.iter().max_by_key(|(_, count)| **count) else {
+        return parents;
+    };
+    if family < 2 {
+        return parents;
+    }
+    if let Some(slot) = parents.iter().rposition(|parent| *parent == crowded) {
+        parents[slot] = replacement;
+    }
+    parents
+}
+
 fn region_population_assignment(
     scientific: &ScientificState,
     destinations: &[u32],
@@ -1707,6 +1795,7 @@ fn realize_population_plan(
             PopulationSelection::SystematicResampling,
         ),
     };
+    let parents = referee_community_coverage(scientific, parents, source_candidates);
     let parent_candidates = parents
         .iter()
         .map(|parent| {
@@ -1872,6 +1961,21 @@ fn observer_status_reply(
                 u32::try_from(scientific.population.open_requirement()).unwrap_or(u32::MAX),
             )
         });
+    let landscape_basins = state.scientific.as_ref().map_or(0, |scientific| {
+        u32::try_from(scientific.landscape.len()).unwrap_or(u32::MAX)
+    });
+    let seam = state
+        .scientific
+        .as_ref()
+        .and_then(|scientific| scientific.landscape.spectral_split().ok())
+        .map(|split| crate::catalog_rpc::LandscapeSeam {
+            algebraic_connectivity: split.algebraic_connectivity,
+            conductance: split.conductance,
+            community_left: u32::try_from(split.left.len()).unwrap_or(u32::MAX),
+            community_right: u32::try_from(split.right.len()).unwrap_or(u32::MAX),
+            left_basin: split.representatives.0,
+            right_basin: split.representatives.1,
+        });
     let status = crate::catalog_rpc::CoordinatorStatus {
         snapshot_version: state.snapshot_version,
         open_epoch,
@@ -1888,6 +1992,8 @@ fn observer_status_reply(
             .as_ref()
             .map_or(0, CooperativeLedger::aggregate_budget),
         replicas,
+        landscape_basins,
+        seam,
     };
     let snapshot = CatalogSnapshot {
         version: state.snapshot_version,

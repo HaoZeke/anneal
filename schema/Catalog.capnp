@@ -164,6 +164,19 @@ struct CoordinatorStatus {
   aggregateCharged @6 :UInt64;
   aggregateBudget @7 :UInt64;
   replicas @8 :List(ReplicaProgress);
+  # The referee's view of the explored landscape: how many basins the
+  # transition stream has linked, how metastable the explored graph is,
+  # and the seam between its two most weakly coupled communities. The
+  # seam fields carry data only when communityLeft and communityRight
+  # are both nonzero; a status written before these fields existed reads
+  # as zeros, which is the honest no-referee answer.
+  landscapeBasins @9 :UInt32;
+  algebraicConnectivity @10 :Float64;
+  seamConductance @11 :Float64;
+  communityLeft @12 :UInt32;
+  communityRight @13 :UInt32;
+  seamLeftBasin @14 :UInt64;
+  seamRightBasin @15 :UInt64;
 }
 
 struct TransitionRecord {
