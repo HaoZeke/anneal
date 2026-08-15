@@ -1436,22 +1436,37 @@ mod move_scaling_tests {
             "recommended SOAP arm is not the observed-cloud residual"
         );
         assert!(
-            rec.adaptive_height,
-            "recommended must fill a packing over many revisits"
+            !rec.adaptive_height,
+            "recommended keeps the measured pair-spectrum basins"
+        );
+        assert_eq!(rec.keying, Keying::Distances);
+        assert!(
+            (rec.merge_radius - 0.7).abs() < 1e-12,
+            "recommended merge is the pair-spectrum 0.7, got {}",
+            rec.merge_radius
+        );
+    }
+
+    #[test]
+    fn packing_superbasin_fills_mean_soap_wells() {
+        let pack = Config::packing_superbasin(13);
+        assert!(
+            pack.adaptive_height,
+            "packing superbasin must fill a packing over many revisits"
         );
         assert!(
-            (rec.height_revisits - 20.0).abs() < 1e-12,
-            "recommended N_f analogue is 20 revisits, got {}",
-            rec.height_revisits
+            (pack.height_revisits - 20.0).abs() < 1e-12,
+            "packing N_f analogue is 20 revisits, got {}",
+            pack.height_revisits
         );
         #[cfg(feature = "featomic")]
         {
-            assert_eq!(rec.keying, Keying::SoapPacking);
+            assert_eq!(pack.keying, Keying::SoapPacking);
             assert!(
-                (rec.merge_radius - crate::featomic_hop::SOAP_PACK_MERGE).abs() < 1e-12,
+                (pack.merge_radius - crate::featomic_hop::SOAP_PACK_MERGE).abs() < 1e-12,
                 "SOAP packing merge is {}, got {}",
                 crate::featomic_hop::SOAP_PACK_MERGE,
-                rec.merge_radius
+                pack.merge_radius
             );
         }
     }

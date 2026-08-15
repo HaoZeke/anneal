@@ -658,6 +658,10 @@ impl Config {
     /// Thompson allocates SOAP with surface, single, burst and sym. The
     /// return screen and stall symmetrisation are on; Ih-dominated stalls
     /// withhold symmetrise rather than invent a missing packing.
+    ///
+    /// Basin identity stays the measured pair-spectrum merge at 0.7.
+    /// [`Config::packing_superbasin`] is the unmeasured SOAP-packing
+    /// keying and adaptive-height stack.
     pub fn recommended(n_points: usize) -> Self {
         let mut cfg = Self::for_cluster(n_points);
         cfg.move_library = MoveLibrary::LeanBurst;
@@ -675,6 +679,16 @@ impl Config {
         cfg.symmetrise_on_stall = true;
         cfg.soap_class_residual = false;
         cfg.soap_mode = SoapProposalMode::Flexible;
+        cfg
+    }
+
+    /// Unmeasured SOAP-packing superbasin on top of [`Config::recommended`].
+    ///
+    /// Unit high-`l` mean SOAP merge 0.10 plus adaptive height with
+    /// twenty revisits. Hit rates are not the recommended LJ38/LJ75
+    /// campaign numbers.
+    pub fn packing_superbasin(n_points: usize) -> Self {
+        let mut cfg = Self::recommended(n_points);
         // One deposit of 0.25 exceeds the measured LJ75 intra-funnel
         // gap (~0.09-0.18). That empties a basin on the first revisit
         // and the next start is another ico draw. Adaptive height with
