@@ -96,6 +96,8 @@ struct PolicyStateReply {
   localBasinDistance @9 :Float64;
   novelty @10 :Float64;
   transitionUncertainty @11 :Float64;
+  exploreCollapsed @12 :Bool;
+  certifiedAttractor @13 :Bool;
 }
 
 enum CatalogMutationKind {

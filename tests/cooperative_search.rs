@@ -5,8 +5,8 @@ use std::net::TcpListener;
 use std::thread;
 
 use anneal_core::catalog::{
-    BasinCensus, DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature,
-    ValidatorConfig,
+    BasinCensus, DescriptorSignature, EngineSignature, FreshEvaluation, MixingEvidence,
+    SystemSignature, ValidatorConfig,
 };
 use anneal_core::catalog_policy::{
     ActiveCatalogRelation, AggregateProgress, CatalogPolicyInput, CensusEvidence, PolicyAction,
@@ -1044,6 +1044,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         progress,
         local_stall_slices: 0,
         local_deepened: false,
+        mixing: MixingEvidence::default(),
     };
     assert_eq!(
         run.decide(

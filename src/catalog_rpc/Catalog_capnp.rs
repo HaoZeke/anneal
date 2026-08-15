@@ -3340,6 +3340,14 @@ pub mod policy_state_reply {
     pub fn get_transition_uncertainty(self) -> f64 {
       self.reader.get_data_field::<f64>(9)
     }
+    #[inline]
+    pub fn get_explore_collapsed(self) -> bool {
+      self.reader.get_bool_field(193)
+    }
+    #[inline]
+    pub fn get_certified_attractor(self) -> bool {
+      self.reader.get_bool_field(194)
+    }
   }
 
   pub struct Builder<'a> { builder: ::capnp::private::layout::StructBuilder<'a> }
@@ -3483,6 +3491,22 @@ pub mod policy_state_reply {
     #[inline]
     pub fn set_transition_uncertainty(&mut self, value: f64)  {
       self.builder.set_data_field::<f64>(9, value);
+    }
+    #[inline]
+    pub fn get_explore_collapsed(self) -> bool {
+      self.builder.get_bool_field(193)
+    }
+    #[inline]
+    pub fn set_explore_collapsed(&mut self, value: bool)  {
+      self.builder.set_bool_field(193, value);
+    }
+    #[inline]
+    pub fn get_certified_attractor(self) -> bool {
+      self.builder.get_bool_field(194)
+    }
+    #[inline]
+    pub fn set_certified_attractor(&mut self, value: bool)  {
+      self.builder.set_bool_field(194, value);
     }
   }
 

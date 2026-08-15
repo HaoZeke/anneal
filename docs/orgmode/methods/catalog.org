@@ -862,18 +862,22 @@ search.
 What it is: a pure, stateless function from evidence to one cooperative
 action -- no energy-height comparison, no mutable global state read
 inside the decision itself. Given validation state, the replica's
-relation to the active catalog, census evidence, aggregate progress, and
-local stall/deepening evidence, it returns exactly one of
-=ContinueLocal=, =Exploit{win_only}=, =Explore=, or =Leave=, each
-tagged with a stable trace reason.
+relation to the active catalog, census evidence, aggregate progress,
+local stall/deepening evidence, and inverted Gelman--Rubin mixing
+evidence, it returns exactly one of =ContinueLocal=,
+=Exploit{win_only}=, =Explore=, or =Leave=, each tagged with a stable
+trace reason. Explore-role mixing forces =Leave=. A certified attractor
+(uniquely deepest, occupant-mixed, strictly more occupied than every
+competitor) stays occupied and is taken from elsewhere.
 
 Key types and functions: =ActiveCatalogRelation= (src/catalog_policy.rs:14,
 =Empty=/=Incumbent=/=SameBasin=/=Unrelated{lower_energy_anchor}=);
 =ValidationState= (catalog_policy.rs:30); =CensusEvidence=
 (catalog_policy.rs:39); =AggregateProgress= (catalog_policy.rs:104,
 =win_only= true once half the aggregate budget is spent);
-=CatalogPolicyInput= (catalog_policy.rs:157); =PolicyAction=
-(catalog_policy.rs:174); =PolicyReason= (catalog_policy.rs:190, eleven
+=MixingEvidence= (src/catalog/mixing.rs); =CatalogPolicyInput=
+(catalog_policy.rs:157); =PolicyAction=
+(catalog_policy.rs:174); =PolicyReason= (catalog_policy.rs:190, thirteen
 named reasons, each with a stable =code()=); =CatalogPolicy::decide=
 (catalog_policy.rs:249).
 
