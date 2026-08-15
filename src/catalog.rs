@@ -6,6 +6,7 @@ pub mod census;
 pub mod event;
 pub mod hyperband;
 pub mod lj;
+pub mod molecular;
 pub mod mixing;
 pub mod packing;
 pub mod signature;
