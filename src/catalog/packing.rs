@@ -150,5 +150,5 @@ fn unit_in_place(values: &mut [f64]) -> bool {
 
 /// In-crate leftover mean used by tests that do not go through a catalog.
 pub fn packing_vector(coordinates: &[f64]) -> Array1<f64> {
-    packing_fingerprint(coordinates).map_or_else(Array1::zeros, Array1::from)
+    packing_fingerprint(coordinates).map_or_else(|| Array1::zeros(0), Array1::from)
 }
