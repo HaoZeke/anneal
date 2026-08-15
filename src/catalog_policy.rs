@@ -264,9 +264,10 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// A lower catalog energy is taken even if explore chains have
-    /// mixed. Mixing forces Leave only when there is no better
-    /// funnel to adopt. A certified incumbent stays occupied.
+    /// Explore-role mixing forces Leave. A better isomer of the
+    /// occupied packing may be taken when the ensemble is not
+    /// collapsed. A certified incumbent stays. A deeper different
+    /// funnel is not copied onto every chain.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -289,6 +290,9 @@ impl CatalogPolicy {
                     PolicyReason::CertifiedAttractor,
                 )
             }
+            _ if input.mixing.explore_collapsed => {
+                decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
+            }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: true,
             } => {
@@ -301,9 +305,6 @@ impl CatalogPolicy {
                         PolicyReason::RemoteAnchorOpen
                     },
                 )
-            }
-            _ if input.mixing.explore_collapsed => {
-                decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
             }
             ActiveCatalogRelation::Incumbent if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)
