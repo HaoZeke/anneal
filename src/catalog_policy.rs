@@ -118,6 +118,11 @@ impl AggregateProgress {
         Ok(Self { charged, budget })
     }
 
+    /// Exact aggregate charged work.
+    pub fn charged(self) -> u64 {
+        self.charged
+    }
+
     /// Whether at least half of aggregate charged work has been consumed.
     pub fn win_only(self) -> bool {
         self.charged.saturating_mul(2) >= self.budget
