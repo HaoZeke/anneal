@@ -2019,6 +2019,12 @@ fn run_capnp_catalog(
     // hole step against the shared archive is the move that proposes
     // beyond it. Gated by CATALOG_COOP_WELLS until measured.
     let coop_wells_enabled = std::env::var("CATALOG_COOP_WELLS").is_ok_and(|v| v == "1");
+    // Shared bias: remote minima are handed back to the run loop for
+    // deposit into this chain's own well-tempered bias, so acceptance
+    // feels what the ensemble has visited continuously rather than only
+    // at steering decisions. Gated until the paired smoke measures it.
+    let shared_bias_enabled = std::env::var("CATALOG_SHARED_BIAS").is_ok_and(|v| v == "1");
+    let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
     let coop_rcut = 3.5 * run_cfg.length_scale;
     let coop_species = run_cfg.species.clone();
@@ -2290,6 +2296,9 @@ fn run_capnp_catalog(
                 .expect("validated population plan must address this replica");
             let draw =
                 population_rejuvenation_draw(seed, completed_epoch, replica, family.ordinal());
+            if shared_bias_enabled {
+                pending_deposits.push(Array1::from(parent.coordinates.clone()));
+            }
             if coop_wells_enabled {
                 #[cfg(feature = "featomic")]
                 {
@@ -2469,6 +2478,9 @@ fn run_capnp_catalog(
                     .boundary_crossing(replica, descriptor, transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
+                    if shared_bias_enabled {
+                        pending_deposits.push(Array1::from(crossing.to.clone()));
+                    }
                     if coop_wells_enabled {
                         #[cfg(feature = "featomic")]
                         {
@@ -2531,6 +2543,11 @@ fn run_capnp_catalog(
         cooperative
             .record_slice(replica, trace)
             .expect("checkpoint trace must remain complete");
+        if shared_bias_enabled && !pending_deposits.is_empty() {
+            return CheckpointAction::DepositRemote {
+                states: std::mem::take(&mut pending_deposits),
+            };
+        }
         CheckpointAction::Continue
     };
     let outcome = run_with_bias_at_checkpoints(
