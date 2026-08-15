@@ -259,6 +259,22 @@ fn hyperband_prune_reseeds_instead_of_adopting_a_lower_funnel() {
 }
 
 #[test]
+fn a_crowded_packing_reseeds_even_when_the_walk_deepened() {
+    let (census, _) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, None),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.local_deepened = true;
+    state.mixing.pruned = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::HyperbandPruned);
+}
+
+#[test]
 fn a_certified_attractor_is_not_pruned() {
     let (census, basin_id) = census_with_repeated_visits(21);
     let mut state = input(

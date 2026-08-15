@@ -420,6 +420,53 @@ mod option_tests {
     }
 
     #[cfg(feature = "bank-rpc")]
+    fn open_epoch_retries(
+        outcome: &anneal_core::cooperative_search::PopulationSynchronizationOutcome,
+    ) -> bool {
+        matches!(
+            outcome,
+            anneal_core::cooperative_search::PopulationSynchronizationOutcome::Pending { .. }
+                | anneal_core::cooperative_search::PopulationSynchronizationOutcome::Rejected
+        )
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn rejected_join_stays_pending_and_retries_at_the_next_checkpoint() {
+        use anneal_core::cooperative_search::PopulationSynchronizationOutcome;
+
+        // Mid-run join rejection is not an exit. The replica stays on
+        // the open epoch and polls (retries join) after more local work,
+        // the same as a pending barrier. Abstaining would retire it.
+        let mut progress = PopulationEpochProgress::default();
+        assert!(open_epoch_retries(&PopulationSynchronizationOutcome::Rejected));
+        assert!(open_epoch_retries(
+            &PopulationSynchronizationOutcome::Pending {
+                submitted: 1,
+                required: 4,
+            }
+        ));
+        assert!(!open_epoch_retries(
+            &PopulationSynchronizationOutcome::Unaddressed
+        ));
+        progress.observe_pending();
+
+        assert_eq!(progress.epoch(), 0);
+        assert_eq!(
+            progress.action(true, true),
+            PopulationEpochAction::Poll
+        );
+        assert_eq!(
+            active_population_action(&progress, 1_000, 2_000, 1_000, true),
+            PopulationEpochAction::Poll
+        );
+        assert_ne!(
+            active_population_action(&progress, 1_000, 2_000, 1_000, true),
+            PopulationEpochAction::Abstain
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
     #[test]
     fn quenched_transport_destination_keeps_its_action_label() {
         let signature = anneal_core::catalog::lj::system_signature(2).unwrap();
@@ -2644,9 +2691,10 @@ fn run_capnp_catalog(
         // must never block the chain. Membership is joined by reference to
         // the best candidate the coordinator has already validated for this
         // replica; a replica with nothing on file abstains so the epoch
-        // completes without it; a pending barrier is answered by returning
-        // to local work until the next checkpoint rather than by polling in
-        // place, which is what left one replica asleep for its whole budget.
+        // completes without it; a pending or rejected join is answered by
+        // returning to local work until the next checkpoint rather than by
+        // polling in place or retiring, which is what left one replica
+        // asleep for its whole budget.
         let mut population_assignment = None;
         loop {
             let outcome = match active_population_action(
@@ -2668,7 +2716,8 @@ fn run_capnp_catalog(
                 PopulationEpochAction::LocalWork => break,
             };
             match outcome {
-                PopulationSynchronizationOutcome::Pending { .. } => {
+                PopulationSynchronizationOutcome::Pending { .. }
+                | PopulationSynchronizationOutcome::Rejected => {
                     population_progress.observe_pending();
                     break;
                 }
@@ -2679,22 +2728,6 @@ fn run_capnp_catalog(
                 }
                 PopulationSynchronizationOutcome::Unaddressed => {
                     population_progress.observe_ready();
-                }
-                PopulationSynchronizationOutcome::Rejected => {
-                    match cooperative
-                        .abstain_population(replica, population_progress.epoch())
-                        .expect("population abstention must preserve cooperative invariants")
-                    {
-                        PopulationSynchronizationOutcome::Ready { .. }
-                        | PopulationSynchronizationOutcome::Unaddressed => {
-                            population_progress.observe_ready();
-                        }
-                        PopulationSynchronizationOutcome::Pending { .. } => {
-                            population_progress.observe_pending();
-                        }
-                        _ => {}
-                    }
-                    break;
                 }
                 PopulationSynchronizationOutcome::LocalFallback
                 | PopulationSynchronizationOutcome::SharingDisabled => break,

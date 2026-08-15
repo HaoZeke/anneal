@@ -283,9 +283,6 @@ impl CatalogPolicy {
             ActiveCatalogRelation::Empty => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::EmptyCatalog)
             }
-            _ if input.local_deepened => {
-                decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
-            }
             _ if input.mixing.certified_attractor
                 && matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
             {
@@ -296,6 +293,9 @@ impl CatalogPolicy {
             }
             _ if input.mixing.pruned => {
                 decision(PolicyAction::Leave, PolicyReason::HyperbandPruned)
+            }
+            _ if input.local_deepened => {
+                decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
             }
             _ if input.mixing.explore_collapsed => {
                 decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
