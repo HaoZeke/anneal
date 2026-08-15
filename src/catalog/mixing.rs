@@ -135,17 +135,20 @@ pub fn explore_collapsed(explore_series: &[Vec<f64>]) -> bool {
     mixed(rhat_series(explore_series))
 }
 
-/// Explore-role failure: mixed energy, mixed packing-family labels, or
-/// two or more chains occupying a lone uncertified packing.
+/// Explore-role failure: mixed energy, or mixed packing-family labels
+/// after at least two families exist.
+///
+/// A catalog that has only one packing so far is the start of coverage,
+/// not a collapse. Extra occupants of that packing are Hyperband's job.
 pub fn explore_must_leave(
     energy_explore: &[Vec<f64>],
     family_series: &[Vec<f64>],
     n_families: usize,
     n_assigned: usize,
 ) -> bool {
+    let _ = n_assigned;
     explore_collapsed(energy_explore)
-        || mixed(rhat_series(family_series))
-        || (n_families <= 1 && n_assigned >= 2)
+        || (n_families >= 2 && mixed(rhat_series(family_series)))
 }
 
 /// Inverted Gelman--Rubin evidence consumed by the catalog policy.
