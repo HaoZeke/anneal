@@ -1267,6 +1267,11 @@ impl ClusterMove {
                 let packing = species.is_none() && mobile.is_none();
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
+                } else if packing {
+                    // Measured LJ hop: SOFI C5 residual on a monoatomic
+                    // packing. The observed-cloud leftover is the molecular
+                    // and slab arm; on LJ it is a closed-shell breath.
+                    crate::soap::step_away_fivefold(x, *rmsd, rng)
                 } else {
                     crate::soap::step_away_cloud(
                         x,
@@ -1445,6 +1450,35 @@ mod move_scaling_tests {
             "recommended merge is the pair-spectrum 0.7, got {}",
             rec.merge_radius
         );
+    }
+
+    #[test]
+    fn recommended_packing_soap_is_the_fivefold_residual() {
+        let rec = Config::recommended(13);
+        let soap = rec
+            .move_library
+            .kernels(&rec)
+            .into_iter()
+            .find(|k| matches!(k, ClusterMove::Soap { class: false, .. }))
+            .expect("recommended LeanBurst has a packing SOAP arm");
+        let ClusterMove::Soap { rmsd, .. } = soap else {
+            panic!("recommended SOAP arm is not Soap");
+        };
+        let x = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.15, 0.08, 0.02, 0.18, 1.22, 0.11, 0.95, 0.85, 1.28, -0.2, 0.9, -0.1,
+            0.4, -1.1, 0.3, -1.0, -0.2, 0.7, 0.6, 0.3, -1.2, -0.7, 0.5, 1.1, 1.2, -0.4, 0.2, -0.3,
+            -0.8, -0.9, 0.1, 1.3, -0.6, 0.8, -1.0, 0.4,
+        ]);
+        let mut move_rng = StdRng::seed_from_u64(11);
+        let mut five_rng = StdRng::seed_from_u64(11);
+        let proposed = soap.propose(x.view(), 0.8, &mut move_rng);
+        let five = crate::soap::step_away_fivefold(x.view(), rmsd, &mut five_rng);
+        for index in 0..x.len() {
+            assert!(
+                (proposed[index] - five[index]).abs() < 1e-12,
+                "packing SOAP left the measured fivefold residual at {index}"
+            );
+        }
     }
 
     #[test]
