@@ -18,6 +18,9 @@ default = []
 # Shape matching through the IRA Fortran library. Needs libira on the link
 # path; set IRA_LIB_DIR when building.
 ira = []
+# In-process MD segments through the LAMMPS C library. Needs liblammps on
+# the link path via LAMMPS_LIB_DIR.
+lammps = []
 # Exact basin identity by canonical contact-graph labelling through nauty.
 graphkey = ["dep:petgraph", "dep:nauty-pet"]
 # featomic SOAP power spectrum leftover. Off by default because the

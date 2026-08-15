@@ -104,6 +104,8 @@ pub mod laws;
 /// Local two-shell topology keys (k-ART).
 #[cfg(feature = "graphkey")]
 pub mod localkey;
+/// Short MD segments through external engines (LAMMPS, GROMACS).
+pub mod md_engine;
 /// Annealing-method extensions built on the typed algebra:
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.

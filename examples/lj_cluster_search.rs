@@ -2057,6 +2057,45 @@ fn run_capnp_catalog(
     // committor surrogate accumulate without touching the acceptance
     // rule. Gated until the paired smoke measures it.
     let bridge_enabled = std::env::var("CATALOG_BRIDGE").is_ok_and(|v| v == "1");
+    // External MD segments: a burst of thermostatted dynamics from the
+    // live state, quenched through the ordinary proposal path, with the
+    // engine's force calls settled into the same ledger every other
+    // evaluation draws from. Diversity from physics rather than from
+    // the proposal family's geometry. Gated until measured.
+    let md_engine = std::env::var("CATALOG_MD_ENGINE").ok().and_then(|name| {
+        // LAMMPS runs in process through liblammps and needs no binary;
+        // GROMACS has no embeddable C API and needs its gmx path.
+        let binary = std::env::var("CATALOG_MD_BIN").unwrap_or_else(|_| {
+            assert_ne!(
+                name, "gromacs",
+                "CATALOG_MD_ENGINE=gromacs requires CATALOG_MD_BIN naming gmx"
+            );
+            String::new()
+        });
+        let workdir = std::env::temp_dir().join(format!(
+            "anneal-md-{}-{}-{}",
+            campaign, ensemble, replica
+        ));
+        let engine = anneal_core::md_engine::engine_by_name(
+            &name,
+            std::path::Path::new(&binary),
+            &workdir,
+        );
+        if engine.is_none() {
+            panic!("CATALOG_MD_ENGINE must be lammps or gromacs, got {name}");
+        }
+        engine
+    });
+    let md_steps = std::env::var("CATALOG_MD_STEPS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(500)
+        .max(1);
+    let md_temperature = std::env::var("CATALOG_MD_TEMP")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .unwrap_or(1.2);
     let mut active_bridge: Option<BridgeAssignmentRecord> = None;
     let mut pending_deposits: Vec<Array1<f64>> = Vec::new();
     let mut shared_wells: Vec<Array1<f64>> = Vec::new();
@@ -2105,6 +2144,11 @@ fn run_capnp_catalog(
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(50_000)
         .max(minimum_population_interval);
+    let md_interval = std::env::var("CATALOG_MD_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(32)
+        .max(1);
     let bridge_interval = std::env::var("CATALOG_BRIDGE_INTERVAL")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -2114,6 +2158,7 @@ fn run_capnp_catalog(
     let mut probe_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x90be_4a11_7a2e_0001);
     let mut transport_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xc04f_5a7a_109e_57a1);
     let mut bridge_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0xb41d_6e55_0b41_d6e5);
+    let mut md_rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x3d5e_9a1c_44d0_77ff);
     let mut bias = BasinBias::new(
         ClusterFingerprint::of_config(&run_cfg, &Array1::zeros(0)),
         run_cfg.merge_radius,
@@ -2557,6 +2602,39 @@ fn run_capnp_catalog(
                 .record_slice(replica, trace)
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
+        }
+        if let Some(engine) = md_engine.as_ref()
+            && checkpoint_sequence.is_multiple_of(md_interval)
+            && snapshot.remaining() > md_steps.saturating_add(run_cfg.relax_steps).saturating_add(2)
+        {
+            match engine.propagate(
+                snapshot.current_state(),
+                md_steps,
+                md_temperature,
+                md_rng.random(),
+            ) {
+                Ok(state) if state.len() == snapshot.current_state().len() => {
+                    cooperative
+                        .record_work(
+                            replica,
+                            ChargeKind::AuxiliaryEvaluation,
+                            u64::try_from(md_steps).expect("md steps fit u64"),
+                        )
+                        .expect("md segment work must enter the cooperative ledger");
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("md checkpoint trace must remain complete");
+                    return CheckpointAction::ExternalProposal {
+                        state,
+                        action: format!("md_{}", engine.name()),
+                        external_calls: md_steps,
+                    };
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("md segment failed, local search continues: {error}");
+                }
+            }
         }
         if bridge_enabled
             && active_bridge.is_none()

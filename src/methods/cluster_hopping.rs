@@ -195,6 +195,21 @@ pub enum CheckpointAction {
         /// Probe action label retained separately from adaptive moves.
         action: String,
     },
+    /// Quench an externally produced perturbation whose construction
+    /// burned potential evaluations outside the chain's oracle.
+    ///
+    /// An external engine (a molecular-dynamics burst, a foreign
+    /// sampler) does real force work the ledger never saw; the calls
+    /// settle here before the proposal is quenched, so an engine-driven
+    /// move can never be cheaper than the work it did.
+    ExternalProposal {
+        /// Cartesian proposal produced by the external engine.
+        state: Array1<f64>,
+        /// Engine action label retained on the trajectory edge.
+        action: String,
+        /// Potential calls the external engine consumed.
+        external_calls: usize,
+    },
     /// Deposit bias at remote minima so the chain's own acceptance feels
     /// what the ensemble has already visited.
     ///
@@ -1126,6 +1141,19 @@ where
                 }
                 CheckpointAction::BoundaryProposal { state, action } => Some((state, action, true)),
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
+                CheckpointAction::ExternalProposal {
+                    state,
+                    action,
+                    external_calls,
+                } => {
+                    if ledger.charge_many(external_calls) {
+                        Some((state, action, false))
+                    } else {
+                        // The engine's own work drained the budget; the
+                        // proposal is unaffordable and the debt stands.
+                        None
+                    }
+                }
             };
             if let Some((state, action, adopt)) = proposal {
                 assert_eq!(
