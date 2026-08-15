@@ -241,6 +241,40 @@ fn a_mixed_uncertified_incumbent_leaves() {
 }
 
 #[test]
+fn hyperband_prune_reseeds_instead_of_adopting_a_lower_funnel() {
+    let (census, _) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: true,
+        },
+        CensusEvidence::from_census(&census, None),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.mixing.pruned = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::HyperbandPruned);
+    assert_eq!(decision.reason.code(), "hyperband_pruned");
+}
+
+#[test]
+fn a_certified_attractor_is_not_pruned() {
+    let (census, basin_id) = census_with_repeated_visits(21);
+    let mut state = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(90, 100).unwrap(),
+    );
+    state.mixing.pruned = true;
+    state.mixing.certified_attractor = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::CertifiedAttractor);
+}
+
+#[test]
 fn a_certified_attractor_is_not_left_on_stall() {
     let (census, basin_id) = census_with_repeated_visits(21);
     let mut state = input(

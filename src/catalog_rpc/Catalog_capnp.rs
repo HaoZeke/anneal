@@ -3348,6 +3348,10 @@ pub mod policy_state_reply {
     pub fn get_certified_attractor(self) -> bool {
       self.reader.get_bool_field(194)
     }
+    #[inline]
+    pub fn get_pruned(self) -> bool {
+      self.reader.get_bool_field(195)
+    }
   }
 
   pub struct Builder<'a> { builder: ::capnp::private::layout::StructBuilder<'a> }
@@ -3507,6 +3511,14 @@ pub mod policy_state_reply {
     #[inline]
     pub fn set_certified_attractor(&mut self, value: bool)  {
       self.builder.set_bool_field(194, value);
+    }
+    #[inline]
+    pub fn get_pruned(self) -> bool {
+      self.builder.get_bool_field(195)
+    }
+    #[inline]
+    pub fn set_pruned(&mut self, value: bool)  {
+      self.builder.set_bool_field(195, value);
     }
   }
 

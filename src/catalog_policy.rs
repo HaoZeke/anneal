@@ -221,6 +221,8 @@ pub enum PolicyReason {
     ExploreCollapsed,
     /// The incumbent attractor won the occupancy contest and stays occupied.
     CertifiedAttractor,
+    /// Successive halving discarded a crowded-family walk at a rung.
+    HyperbandPruned,
 }
 
 impl PolicyReason {
@@ -240,6 +242,7 @@ impl PolicyReason {
             Self::SameBasinExplore => "same_basin_explore",
             Self::ExploreCollapsed => "explore_collapsed",
             Self::CertifiedAttractor => "certified_attractor",
+            Self::HyperbandPruned => "hyperband_pruned",
         }
     }
 }
@@ -264,10 +267,11 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// Explore-role mixing forces Leave. A better isomer of the
-    /// occupied packing may be taken when the ensemble is not
-    /// collapsed. A certified incumbent stays. A deeper different
-    /// funnel is not copied onto every chain.
+    /// Explore-role mixing forces Leave. Extra occupants of a crowded
+    /// packing are pruned at Hyperband rungs and reseed. A better
+    /// isomer of the occupied packing may be taken when the ensemble
+    /// is not collapsed. A certified incumbent stays. A deeper
+    /// different funnel is not copied onto every chain.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -289,6 +293,9 @@ impl CatalogPolicy {
                     PolicyAction::ContinueLocal,
                     PolicyReason::CertifiedAttractor,
                 )
+            }
+            _ if input.mixing.pruned => {
+                decision(PolicyAction::Leave, PolicyReason::HyperbandPruned)
             }
             _ if input.mixing.explore_collapsed => {
                 decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)

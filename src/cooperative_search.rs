@@ -176,6 +176,8 @@ mod run {
         BoundaryTransport,
         /// Synchronous fixed-population reconfiguration.
         PopulationReconfiguration,
+        /// New random start after successive-halving prune.
+        HyperbandReseed,
     }
 
     /// Receiving validation result for a slice transition.
@@ -1693,6 +1695,7 @@ mod run {
             ProposalFamily::DescriptorHole => "descriptor_hole",
             ProposalFamily::BoundaryTransport => "boundary_transport",
             ProposalFamily::PopulationReconfiguration => "population_reconfiguration",
+            ProposalFamily::HyperbandReseed => "hyperband_reseed",
         }
     }
 
@@ -1804,6 +1807,7 @@ mod run {
             mixing: MixingEvidence {
                 explore_collapsed: state.explore_collapsed,
                 certified_attractor: state.certified_attractor,
+                pruned: state.pruned,
             },
         })
     }

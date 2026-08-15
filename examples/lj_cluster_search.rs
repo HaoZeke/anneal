@@ -2105,7 +2105,7 @@ fn run_capnp_catalog(
     endpoint: Option<&str>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
-    use anneal_core::catalog_policy::PolicyAction;
+    use anneal_core::catalog_policy::{PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
@@ -3165,6 +3165,24 @@ fn run_capnp_catalog(
             }
             PolicyAction::Leave => {
                 trace.policy_role = PolicyRole::Leave;
+                if decision.reason == PolicyReason::HyperbandPruned {
+                    let n = snapshot.current_state().len() / 3;
+                    let left = anneal_core::methods::cluster_hopping::random_cluster(
+                        n,
+                        0.7,
+                        0.5,
+                        &mut transport_rng,
+                    );
+                    trace.proposal_family = ProposalFamily::HyperbandReseed;
+                    trace.adoption = SliceAdoption::Adopted;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state: left,
+                        action: "hyperband_reseed".to_owned(),
+                    };
+                }
                 trace.proposal_family = ProposalFamily::DescriptorHole;
                 if coop_wells_enabled {
                     remember_packing_well(

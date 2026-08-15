@@ -26,8 +26,8 @@ use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
-    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
-    explore_must_leave, invert_mixing, rhat_series, same_packing,
+    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
+    euclidean_gradient_norm, explore_must_leave, invert_mixing, prune, rhat_series, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -252,6 +252,7 @@ struct ScientificState {
     packing: PackingBook,
     energy_history: BTreeMap<u32, VecDeque<f64>>,
     family_history: BTreeMap<u32, VecDeque<f64>>,
+    trial_hops: BTreeMap<u32, u64>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -317,6 +318,7 @@ impl CoordinatorState {
                     packing: PackingBook::default(),
                     energy_history: BTreeMap::new(),
                     family_history: BTreeMap::new(),
+                    trial_hops: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -806,7 +808,15 @@ fn apply_request(
             }
         }
         CatalogOperation::PolicyState { descriptor, energy } => {
-            let Some(scientific) = state.scientific.as_ref() else {
+            let ensemble_total = state
+                .ledger
+                .as_ref()
+                .map_or(0, CooperativeLedger::ensemble_total);
+            let ensemble_budget = state
+                .ledger
+                .as_ref()
+                .map_or(0, CooperativeLedger::aggregate_budget);
+            let Some(scientific) = state.scientific.as_mut() else {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -853,7 +863,8 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
-            let mixing = mixing_from_state(scientific);
+            let mut mixing = mixing_from_state(scientific);
+            mixing.pruned = hyperband_prune(scientific, request.identity.replica);
             let relation = packing_or_region_relation(
                 scientific,
                 request.identity.replica,
@@ -861,26 +872,24 @@ fn apply_request(
                 *energy,
                 mixing,
             );
+            if mixing.pruned {
+                reset_trial(scientific, request.identity.replica);
+            }
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
                 local_basin_visits,
                 globally_saturated: scientific.census.is_saturated(),
                 relation,
-                aggregate_charged: state
-                    .ledger
-                    .as_ref()
-                    .map_or(0, CooperativeLedger::ensemble_total),
-                aggregate_budget: state
-                    .ledger
-                    .as_ref()
-                    .map_or(0, CooperativeLedger::aggregate_budget),
+                aggregate_charged: ensemble_total,
+                aggregate_budget: ensemble_budget,
                 local_basin: local_basin.map(BasinId::as_raw),
                 local_basin_distance,
                 novelty,
                 transition_uncertainty,
                 explore_collapsed: mixing.explore_collapsed,
                 certified_attractor: mixing.certified_attractor,
+                pruned: mixing.pruned,
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -2116,11 +2125,49 @@ fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
     if !energy.is_finite() {
         return;
     }
+    *scientific.trial_hops.entry(replica).or_insert(0) += 1;
     let history = scientific.energy_history.entry(replica).or_default();
     history.push_back(energy);
     while history.len() > 64 {
         history.pop_front();
     }
+}
+
+fn hyperband_max_resource() -> u64 {
+    std::env::var("CATALOG_MAX_HOPS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|&hops| hops >= crate::catalog::MIN_RESOURCE)
+        .unwrap_or(crate::catalog::DEFAULT_MAX_RESOURCE)
+}
+
+fn hyperband_prune(scientific: &ScientificState, replica: u32) -> bool {
+    let max_resource = hyperband_max_resource();
+    let walks: Vec<WalkRecord> = scientific
+        .last_candidate_by_replica
+        .iter()
+        .map(|(id, candidate)| {
+            let family = scientific
+                .family_history
+                .get(id)
+                .and_then(|history| history.back().copied())
+                .map(|index| index as usize);
+            WalkRecord {
+                id: *id,
+                resource: scientific.trial_hops.get(id).copied().unwrap_or(0),
+                energy: candidate.energy,
+                family,
+            }
+        })
+        .collect();
+    prune(&walks, replica, max_resource)
+}
+
+fn reset_trial(scientific: &mut ScientificState, replica: u32) {
+    scientific.energy_history.remove(&replica);
+    scientific.family_history.remove(&replica);
+    scientific.trial_hops.remove(&replica);
+    scientific.last_candidate_by_replica.remove(&replica);
 }
 
 fn replica_series(scientific: &ScientificState, replica: u32) -> Vec<f64> {
