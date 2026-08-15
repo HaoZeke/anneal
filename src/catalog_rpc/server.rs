@@ -2261,7 +2261,7 @@ fn packing_relation(
     scientific: &ScientificState,
     replica: u32,
     energy: f64,
-    mixing: MixingEvidence,
+    _mixing: MixingEvidence,
 ) -> Option<CatalogRelation> {
     if scientific.catalog.entries().is_empty() {
         return None;
