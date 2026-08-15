@@ -1,6 +1,6 @@
 //! Serialized coordinator for one campaign ensemble and system signature.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -24,9 +24,10 @@ use super::{
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCensus, BasinId, CandidateRecord,
-    CandidateValidator, FreshEvaluation, PackingBook, QuenchStatus, SystemSignature,
-    ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm, same_packing,
+    AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
+    CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
+    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
+    invert_mixing, mixed, rhat_series, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -249,6 +250,7 @@ struct ScientificState {
     population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
     population_plans: BTreeMap<u64, PopulationPlan>,
     packing: PackingBook,
+    energy_history: BTreeMap<u32, VecDeque<f64>>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -312,6 +314,7 @@ impl CoordinatorState {
                     population_candidates: BTreeMap::new(),
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
+                    energy_history: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -848,11 +851,13 @@ fn apply_request(
             );
             let transition_uncertainty =
                 local_basin.map_or_else(|| 1.0, |id| transition_uncertainty(scientific, id));
+            let mixing = mixing_from_state(scientific);
             let relation = packing_or_region_relation(
                 scientific,
                 request.identity.replica,
                 local_basin,
                 *energy,
+                mixing,
             );
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
@@ -872,6 +877,8 @@ fn apply_request(
                 local_basin_distance,
                 novelty,
                 transition_uncertainty,
+                explore_collapsed: mixing.explore_collapsed,
+                certified_attractor: mixing.certified_attractor,
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -898,6 +905,11 @@ fn apply_request(
                 );
             };
             observe_packing(scientific, &validated.candidate.coordinates);
+            record_energy(
+                scientific,
+                request.identity.replica,
+                validated.fresh.energy,
+            );
             let packing = scientific
                 .packing
                 .histogram(&validated.candidate.coordinates);
@@ -1242,6 +1254,11 @@ fn apply_request(
                     .last_candidate_by_replica
                     .insert(request.identity.replica, canonical);
                 observe_packing(scientific, &validated.candidate.coordinates);
+                record_energy(
+                    scientific,
+                    request.identity.replica,
+                    validated.fresh.energy,
+                );
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
@@ -1302,6 +1319,11 @@ fn apply_request(
                     .last_candidate_by_replica
                     .insert(request.identity.replica, canonical);
                 observe_packing(scientific, &validated.candidate.coordinates);
+                record_energy(
+                    scientific,
+                    request.identity.replica,
+                    validated.fresh.energy,
+                );
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
@@ -2070,6 +2092,116 @@ fn observe_packing(scientific: &mut ScientificState, coordinates: &[f64]) {
     let _ = scientific.packing.observe(coordinates);
 }
 
+fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
+    if !energy.is_finite() {
+        return;
+    }
+    let history = scientific.energy_history.entry(replica).or_default();
+    history.push_back(energy);
+    while history.len() > 64 {
+        history.pop_front();
+    }
+}
+
+fn ensemble_mixed(scientific: &ScientificState) -> bool {
+    let chains: Vec<Vec<f64>> = scientific
+        .energy_history
+        .values()
+        .map(|history| history.iter().copied().collect())
+        .collect();
+    mixed(rhat_series(&chains))
+}
+
+fn replica_series(scientific: &ScientificState, replica: u32) -> Vec<f64> {
+    scientific
+        .energy_history
+        .get(&replica)
+        .map(|history| history.iter().copied().collect())
+        .unwrap_or_default()
+}
+
+fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
+    struct Family {
+        energy: f64,
+        occupancy: usize,
+        series: Vec<Vec<f64>>,
+    }
+    let mut families: BTreeMap<usize, Family> = BTreeMap::new();
+    let mut assigned = BTreeSet::new();
+    for (replica, candidate) in &scientific.last_candidate_by_replica {
+        assigned.insert(*replica);
+        let series = replica_series(scientific, *replica);
+        let family = scientific
+            .packing
+            .histogram(&candidate.coordinates)
+            .and_then(|histogram| scientific.packing.family_of(&histogram));
+        let Some(index) = family else {
+            continue;
+        };
+        let entry = families.entry(index).or_insert(Family {
+            energy: candidate.energy,
+            occupancy: 0,
+            series: Vec::new(),
+        });
+        entry.occupancy += 1;
+        entry.energy = entry.energy.min(candidate.energy);
+        if series.len() >= 2 {
+            entry.series.push(series);
+        }
+    }
+    let attractors: Vec<AttractorStrength> = families
+        .values()
+        .map(|family| AttractorStrength {
+            energy: family.energy,
+            occupancy: family.occupancy,
+            occupant_rhat: rhat_series(&family.series),
+        })
+        .collect();
+    let deepest = attractors
+        .iter()
+        .enumerate()
+        .filter(|(_, attractor)| attractor.energy.is_finite())
+        .min_by(|(_, left), (_, right)| {
+            left.energy
+                .partial_cmp(&right.energy)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(index, attractor)| (index, attractor.energy));
+    let deepest_unique = deepest.is_some_and(|(index, energy)| {
+        attractors
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .all(|(_, attractor)| attractor.energy > energy + 1e-10)
+    });
+    let deepest_energy = deepest.map(|(_, energy)| energy);
+    let mut explore = Vec::new();
+    if families.len() <= 1 || !deepest_unique {
+        for history in scientific.energy_history.values() {
+            let series: Vec<f64> = history.iter().copied().collect();
+            if series.len() >= 2 {
+                explore.push(series);
+            }
+        }
+    } else if let Some(floor) = deepest_energy {
+        for family in families.values() {
+            if family.energy > floor + 1e-10 {
+                explore.extend(family.series.iter().cloned());
+            }
+        }
+        for (replica, history) in &scientific.energy_history {
+            if assigned.contains(replica) {
+                continue;
+            }
+            let series: Vec<f64> = history.iter().copied().collect();
+            if series.len() >= 2 {
+                explore.push(series);
+            }
+        }
+    }
+    invert_mixing(&attractors, &explore)
+}
+
 fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64>> {
     scientific
         .last_candidate_by_replica
@@ -2082,8 +2214,9 @@ fn packing_or_region_relation(
     replica: u32,
     local_basin: Option<BasinId>,
     energy: f64,
+    mixing: MixingEvidence,
 ) -> CatalogRelation {
-    if let Some(relation) = packing_relation(scientific, replica, energy) {
+    if let Some(relation) = packing_relation(scientific, replica, energy, mixing) {
         return relation;
     }
     attraction_region_relation(scientific, replica, local_basin, energy)
@@ -2093,6 +2226,7 @@ fn packing_relation(
     scientific: &ScientificState,
     replica: u32,
     energy: f64,
+    mixing: MixingEvidence,
 ) -> Option<CatalogRelation> {
     if scientific.catalog.entries().is_empty() {
         return None;
@@ -2123,11 +2257,13 @@ fn packing_relation(
     if !compared {
         return None;
     }
-    // Take a better isomer or a better known funnel only while the live
-    // structure still sits in a catalog family. A novel histogram is a
-    // Leave that has already left; snapping it back to the ico floor is
-    // the Wales-Doye trap.
-    if lower_known && same_as_any {
+    // Take the certified global minimum from anywhere. Take a better
+    // isomer in the same family only while the ensemble has not mixed
+    // onto an uncertified floor.
+    if lower_known && mixing.certified_attractor {
+        return Some(CatalogRelation::UnrelatedLowerAnchor);
+    }
+    if lower_known && same_as_any && !ensemble_mixed(scientific) {
         return Some(CatalogRelation::UnrelatedLowerAnchor);
     }
     if same_as_incumbent {

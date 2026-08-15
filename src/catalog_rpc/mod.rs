@@ -351,6 +351,10 @@ pub struct PolicyState {
     pub novelty: f64,
     /// Posterior uncertainty of the latent Gaussian basin-transition field.
     pub transition_uncertainty: f64,
+    /// Explore-role chains have mixed onto one attractor.
+    pub explore_collapsed: bool,
+    /// Incumbent attractor won the occupancy contest against competitors.
+    pub certified_attractor: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -987,6 +991,8 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_local_basin_distance(state.local_basin_distance);
                     output.set_novelty(state.novelty);
                     output.set_transition_uncertainty(state.transition_uncertainty);
+                    output.set_explore_collapsed(state.explore_collapsed);
+                    output.set_certified_attractor(state.certified_attractor);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1171,6 +1177,8 @@ pub(crate) fn decode_reply_reader(
                         local_basin_distance: state.get_local_basin_distance(),
                         novelty: state.get_novelty(),
                         transition_uncertainty: state.get_transition_uncertainty(),
+                        explore_collapsed: state.get_explore_collapsed(),
+                        certified_attractor: state.get_certified_attractor(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

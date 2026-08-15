@@ -2,7 +2,7 @@
 
 pub mod proposal;
 
-use crate::catalog::{BasinCensus, BasinId};
+use crate::catalog::{BasinCensus, BasinId, MixingEvidence};
 
 /// Exact local visit count that classifies one occupied basin as exhausted.
 pub const LOCAL_CENSUS_LEAVE: u64 = 8;
@@ -172,6 +172,8 @@ pub struct CatalogPolicyInput {
     pub local_stall_slices: u32,
     /// Whether the replica deepened its own basin in this slice.
     pub local_deepened: bool,
+    /// Inverted Gelman--Rubin evidence for the live ensemble.
+    pub mixing: MixingEvidence,
 }
 
 /// Selectable action for one cooperative search slice.
@@ -215,6 +217,10 @@ pub enum PolicyReason {
     UnrelatedCatalogExplore,
     /// A related but unexhausted basin requests exploration.
     SameBasinExplore,
+    /// Explore-role chains have mixed; they must leave rather than keep exploring.
+    ExploreCollapsed,
+    /// The incumbent attractor won the occupancy contest and stays occupied.
+    CertifiedAttractor,
 }
 
 impl PolicyReason {
@@ -232,6 +238,8 @@ impl PolicyReason {
             Self::GlobalCensusSaturatedExplore => "global_census_saturated_explore",
             Self::UnrelatedCatalogExplore => "unrelated_catalog_explore",
             Self::SameBasinExplore => "same_basin_explore",
+            Self::ExploreCollapsed => "explore_collapsed",
+            Self::CertifiedAttractor => "certified_attractor",
         }
     }
 }
@@ -255,6 +263,9 @@ impl CatalogPolicy {
     /// A lower catalog energy is taken before a same-packing leave. The
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not polish one funnel for the rest of the budget.
+    ///
+    /// Inverted Gelman--Rubin: a certified attractor stays occupied and
+    /// is taken from elsewhere; explore-role mixing forces Leave.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -268,6 +279,28 @@ impl CatalogPolicy {
             }
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
+            }
+            _ if input.mixing.certified_attractor
+                && matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
+            {
+                decision(
+                    PolicyAction::ContinueLocal,
+                    PolicyReason::CertifiedAttractor,
+                )
+            }
+            _ if input.mixing.certified_attractor => {
+                let win_only = input.progress.win_only();
+                decision(
+                    PolicyAction::Exploit { win_only },
+                    if win_only {
+                        PolicyReason::RemoteAnchorClosed
+                    } else {
+                        PolicyReason::RemoteAnchorOpen
+                    },
+                )
+            }
+            _ if input.mixing.explore_collapsed => {
+                decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: true,

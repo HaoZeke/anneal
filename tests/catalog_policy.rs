@@ -1,4 +1,5 @@
 use anneal_core::catalog::BasinCensus;
+use anneal_core::catalog::MixingEvidence;
 use anneal_core::catalog_policy::{
     ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput, CensusEvidence,
     PolicyAction, PolicyReason, ValidationState,
@@ -25,6 +26,7 @@ fn input(
         progress,
         local_stall_slices: 0,
         local_deepened: false,
+        mixing: MixingEvidence::default(),
     }
 }
 
@@ -189,6 +191,74 @@ fn validation_failure_and_local_descent_preserve_local_search() {
 }
 
 #[test]
+fn explore_collapse_forces_leave_instead_of_explore() {
+    let (census, _) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: false,
+        },
+        CensusEvidence::from_census(&census, None),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.mixing.explore_collapsed = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::ExploreCollapsed);
+    assert_eq!(decision.reason.code(), "explore_collapsed");
+}
+
+#[test]
+fn a_mixed_uncertified_incumbent_leaves() {
+    let (census, basin_id) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.mixing.explore_collapsed = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::ExploreCollapsed);
+}
+
+#[test]
+fn a_certified_attractor_is_not_left_on_stall() {
+    let (census, basin_id) = census_with_repeated_visits(21);
+    let mut state = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(90, 100).unwrap(),
+    );
+    state.local_stall_slices = 8;
+    state.mixing.certified_attractor = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::CertifiedAttractor);
+    assert_eq!(decision.reason.code(), "certified_attractor");
+}
+
+#[test]
+fn a_certified_attractor_is_taken_from_an_unrelated_replica() {
+    let (census, _) = census_with_repeated_visits(2);
+    let mut state = input(
+        ActiveCatalogRelation::Unrelated {
+            lower_energy_anchor: false,
+        },
+        CensusEvidence::from_census(&census, None),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.mixing.certified_attractor = true;
+    state.mixing.explore_collapsed = true;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
+    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
+}
+
+#[test]
 fn zero_aggregate_budget_is_rejected() {
     assert!(AggregateProgress::new(0, 0).is_err());
 }
@@ -242,6 +312,7 @@ fn decision_table_covers_every_discrete_input_state() {
                                 progress,
                                 local_stall_slices,
                                 local_deepened,
+                                mixing: MixingEvidence::default(),
                             });
                             assert!(!decision.reason.code().is_empty());
                             if relation == ActiveCatalogRelation::Incumbent

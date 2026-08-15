@@ -6,6 +6,7 @@ pub mod ledger;
 mod run {
     use std::collections::BTreeMap;
 
+    use crate::catalog::MixingEvidence;
     use crate::catalog_policy::{
         ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput,
         CensusEvidence, PolicyAction, PolicyDecision, PolicyInputError, ValidationState,
@@ -1800,6 +1801,10 @@ mod run {
             progress: AggregateProgress::new(state.aggregate_charged, state.aggregate_budget)?,
             local_stall_slices,
             local_deepened,
+            mixing: MixingEvidence {
+                explore_collapsed: state.explore_collapsed,
+                certified_attractor: state.certified_attractor,
+            },
         })
     }
 
