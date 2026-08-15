@@ -2841,9 +2841,9 @@ fn run_capnp_catalog(
             }
             // Screen only when stalled and the current neighborhood is
             // familiar: a chain already somewhere novel needs no push.
-            if stall >= 8
+            if stall >= 4
                 && novel_here < 0.05
-                && checkpoint_sequence.is_multiple_of(16)
+                && checkpoint_sequence.is_multiple_of(8)
                 && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
             {
                 let mut best: Option<(f64, Array1<f64>)> = None;
