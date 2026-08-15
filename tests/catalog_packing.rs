@@ -21,6 +21,28 @@ fn load_xyz(text: &str) -> Array1<f64> {
 }
 
 #[test]
+fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    let ico_family = book
+        .observe(ico.as_slice().unwrap())
+        .expect("LJ38 ico has a class histogram");
+    let ico_hist = book.histogram(ico.as_slice().unwrap()).unwrap();
+    let oh_hist = book.histogram(oh.as_slice().unwrap()).unwrap();
+    let gap = packing_distance(&ico_hist, &oh_hist);
+    eprintln!("LJ38 ico–Oh DECAF L1 {gap}");
+    assert!(
+        gap > PACKING_MERGE,
+        "LJ38 ico–Oh DECAF L1 {gap} must sit outside the packing well {PACKING_MERGE}"
+    );
+    let oh_family = book
+        .observe(oh.as_slice().unwrap())
+        .expect("Oh opens a second family");
+    assert_ne!(oh_family, ico_family);
+}
+
+#[test]
 fn dimer_coordinates_have_no_packing_fingerprint() {
     assert!(packing_fingerprint(&[0.0, 0.0, 0.0, 1.2, 0.0, 0.0]).is_none());
 }
