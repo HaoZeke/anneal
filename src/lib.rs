@@ -31,6 +31,14 @@ pub mod bank_rpc;
 pub mod Bank_capnp {
     include!("bank_rpc/Bank_capnp.rs");
 }
+/// Generated Cap'n Proto schema for [`raft`] consensus traffic.
+#[cfg(feature = "bank-rpc")]
+#[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
+#[rustfmt::skip]
+#[allow(non_snake_case)]
+pub mod Raft_capnp {
+    include!("Raft_capnp.rs");
+}
 /// Generated Cap'n Proto schema for [`catalog_rpc`].
 #[cfg(feature = "bank-rpc")]
 #[allow(missing_docs, dead_code, clippy::all, non_camel_case_types)]
