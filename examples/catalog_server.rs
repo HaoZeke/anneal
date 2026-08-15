@@ -1,10 +1,16 @@
-//! Isolated scientific catalog coordinator for a reduced-unit LJ ensemble.
+//! Isolated scientific catalog coordinator.
 //!
 //! Usage: `catalog_server <addr> <n> <capacity> <census-radius> <total-work>
 //! <campaign> <ensemble> [replicas] [state-directory] [minimum-probes]
 //! [maximum-region-distance] [Dirichlet-concentration] [diffusion-steps]`,
 //! where replicas defaults to `0,1,2,3` and the state directory enables
 //! restart-safe request replay.
+//!
+//! `CATALOG_SYSTEM` selects the preset. Unset or `lj` is reduced-unit LJ
+//! (`n` is the site count). `CATALOG_SYSTEM=gfn2-water` selects the
+//! GFN2-xTB leftover SOAP identity (`n` is the molecule count) and the
+//! refusing GFN2 evaluator. Leftover SOAP is not a `DescriptorSpace`, so
+//! that mode does not start a coordinator.
 
 use anneal_core::catalog::lj::{
     descriptor_space, fresh_evaluation, reference_coordinates, system_signature, validator_config,
@@ -14,6 +20,23 @@ use anneal_core::transition_graph::AttractionRegionConfig;
 use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    match catalog_system()?.as_str() {
+        "lj" => run_lj_coordinator(),
+        "gfn2-water" => refuse_gfn2_water_coordinator(),
+        other => Err(format!("CATALOG_SYSTEM must be lj or gfn2-water, not {other}").into()),
+    }
+}
+
+fn catalog_system() -> Result<String, Box<dyn std::error::Error>> {
+    match std::env::var("CATALOG_SYSTEM") {
+        Err(std::env::VarError::NotPresent) => Ok("lj".into()),
+        Ok(value) if value.is_empty() => Ok("lj".into()),
+        Ok(value) => Ok(value),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn run_lj_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     let args = std::env::args().collect::<Vec<_>>();
     let addr = required(&args, 1, "addr")?;
     let n_points = parse::<usize>(&args, 2, "n")?;
@@ -80,6 +103,66 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         std::thread::park();
     }
+}
+
+/// GFN2-xTB leftover SOAP and the refusing evaluator. This is not a
+/// coordinator: leftover cannot be a `DescriptorSpace`, and a visit
+/// cannot be fresh-evaluated without a loaded rgpot engine.
+fn refuse_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
+    use anneal_core::catalog::molecular::{
+        fresh_evaluation as water_fresh_evaluation, leftover_descriptor_dim, leftover_values,
+        reference_coordinates, system_signature, validator_config, water_species,
+    };
+
+    let args = std::env::args().collect::<Vec<_>>();
+    let n_molecules = parse::<usize>(&args, 2, "n")?;
+    let species = water_species(n_molecules)?;
+    let reference = reference_coordinates(n_molecules)?;
+    let leftover = leftover_values(&reference, &species)?;
+    let leftover_dim = leftover_descriptor_dim(&species)?;
+    if leftover.len() != leftover_dim {
+        return Err("water leftover length disagrees with leftover_descriptor_dim".into());
+    }
+    let _validator = validator_config(&reference, leftover_dim)?;
+
+    // Identity constructor for this system. The digest argument is the
+    // SHA-256 of the loaded libxtb_engine.so and is not invented here.
+    let _identity = system_signature;
+    if water_fresh_evaluation(n_molecules, &reference).is_ok() {
+        return Err(
+            "GFN2-xTB catalog evaluation invented an energy without a loaded rgpot engine".into(),
+        );
+    }
+
+    // Type error if leftover is passed to with_scientific_state:
+    //
+    //   error[E0308]: mismatched types
+    //     leftover
+    //     ^^^^^^^^ expected `DescriptorSpace`, found `Vec<f64>`
+    //     expected struct `anneal_core::descriptor_space::DescriptorSpace`
+    //        found struct `Vec<f64>`
+    //
+    // leftover_values as the descriptor argument:
+    //
+    //   leftover_values
+    //   ^^^^^^^^^^^^^^^ expected `DescriptorSpace`, found fn item
+    //   expected struct `DescriptorSpace`
+    //      found fn item `fn(&[f64], &[u32]) -> Result<Vec<f64>, MolecularCatalogPresetError>`
+    //
+    // DescriptorBlockKind is SoapMean | SoapVariance | AceNu3Mean. There
+    // is no leftover aggregation, so describe() cannot be leftover SOAP.
+    // A SoapMean space named jcc-water-soap-leftover would be a different
+    // descriptor than stacked p_i - mu_z.
+    //
+    // Census radius is a CLI input and is unused here; this arm does not
+    // invent one.
+    Err(format!(
+        "CATALOG_SYSTEM=gfn2-water cannot start a coordinator: leftover SOAP is Vec<f64> \
+         (len {leftover_dim}), not DescriptorSpace (E0308: expected DescriptorSpace, found \
+         Vec<f64>). DescriptorBlockKind is SoapMean | SoapVariance | AceNu3Mean. GFN2 visits \
+         cannot be validated: fresh_evaluation refuses without a loaded rgpot engine handle."
+    )
+    .into())
 }
 
 fn required<'a>(
