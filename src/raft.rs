@@ -635,3 +635,271 @@ mod tests {
         assert_eq!(node.take_committed().len(), 1);
     }
 }
+
+/// Wire encoding of consensus traffic and decree payloads.
+#[cfg(feature = "bank-rpc")]
+pub mod wire {
+    use super::{Decree, NodeId, RaftMessage};
+    use crate::Raft_capnp::{decree, exploration_decree, raft_envelope, replica_assignment};
+    use capnp::message::{Builder, ReaderOptions};
+    use capnp::serialize;
+    use std::io::Cursor;
+
+    /// One replica's marching orders inside an exploration decree.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ReplicaAssignment {
+        /// Replica identifier.
+        pub replica: u32,
+        /// Seam side to work: `false` left, `true` right.
+        pub right_side: bool,
+        /// Class indices of the histogram target.
+        pub histogram_classes: Vec<u32>,
+        /// Normalized masses of the histogram target.
+        pub histogram_masses: Vec<f64>,
+        /// Anchor basin for boundary transport on the assigned side.
+        pub anchor_basin: u64,
+        /// Whether the replica runs confined bridge segments.
+        pub bridge_duty: bool,
+        /// Decree sequence for tracing.
+        pub decree_index: u64,
+    }
+
+    /// The decree payload: seam evidence and per-replica assignments.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ExplorationDecree {
+        /// Second Laplacian eigenvalue behind the decree.
+        pub algebraic_connectivity: f64,
+        /// Conductance of the seam behind the decree.
+        pub seam_conductance: f64,
+        /// Left representative basin.
+        pub left_basin: u64,
+        /// Right representative basin.
+        pub right_basin: u64,
+        /// Assignments in replica order.
+        pub assignments: Vec<ReplicaAssignment>,
+    }
+
+    /// Encode a decree payload.
+    pub fn encode_decree(decree: &ExplorationDecree) -> Vec<u8> {
+        let mut message = Builder::new_default();
+        let mut root = message.init_root::<exploration_decree::Builder>();
+        root.set_algebraic_connectivity(decree.algebraic_connectivity);
+        root.set_seam_conductance(decree.seam_conductance);
+        root.set_left_basin(decree.left_basin);
+        root.set_right_basin(decree.right_basin);
+        let mut assignments = root.init_assignments(decree.assignments.len() as u32);
+        for (index, assignment) in decree.assignments.iter().enumerate() {
+            let mut row = assignments.reborrow().get(index as u32);
+            row.set_replica(assignment.replica);
+            row.set_side(u8::from(assignment.right_side));
+            row.set_anchor_basin(assignment.anchor_basin);
+            row.set_bridge_duty(assignment.bridge_duty);
+            row.set_decree_index(assignment.decree_index);
+            {
+                let mut classes = row
+                    .reborrow()
+                    .init_histogram_classes(assignment.histogram_classes.len() as u32);
+                for (i, class) in assignment.histogram_classes.iter().enumerate() {
+                    classes.set(i as u32, *class);
+                }
+            }
+            let mut masses = row
+                .reborrow()
+                .init_histogram_masses(assignment.histogram_masses.len() as u32);
+            for (i, mass) in assignment.histogram_masses.iter().enumerate() {
+                masses.set(i as u32, *mass);
+            }
+        }
+        let mut bytes = Vec::new();
+        serialize::write_message(&mut bytes, &message).expect("in-memory write cannot fail");
+        bytes
+    }
+
+    /// Decode a decree payload.
+    pub fn decode_decree(bytes: &[u8]) -> Result<ExplorationDecree, capnp::Error> {
+        let reader = serialize::read_message(&mut Cursor::new(bytes), ReaderOptions::new())?;
+        let root = reader.get_root::<exploration_decree::Reader>()?;
+        let mut assignments = Vec::new();
+        for row in root.get_assignments()?.iter() {
+            assignments.push(ReplicaAssignment {
+                replica: row.get_replica(),
+                right_side: row.get_side() != 0,
+                histogram_classes: row.get_histogram_classes()?.iter().collect(),
+                histogram_masses: row.get_histogram_masses()?.iter().collect(),
+                anchor_basin: row.get_anchor_basin(),
+                bridge_duty: row.get_bridge_duty(),
+                decree_index: row.get_decree_index(),
+            });
+        }
+        Ok(ExplorationDecree {
+            algebraic_connectivity: root.get_algebraic_connectivity(),
+            seam_conductance: root.get_seam_conductance(),
+            left_basin: root.get_left_basin(),
+            right_basin: root.get_right_basin(),
+            assignments,
+        })
+    }
+
+    /// Encode one consensus message between two brains.
+    pub fn encode_envelope(from: NodeId, to: NodeId, message: &RaftMessage) -> Vec<u8> {
+        let mut builder = Builder::new_default();
+        let mut root = builder.init_root::<raft_envelope::Builder>();
+        root.set_from(from);
+        root.set_to(to);
+        let wire = root.init_message();
+        match message {
+            RaftMessage::RequestVote {
+                term,
+                last_log_index,
+                last_log_term,
+            } => {
+                let mut vote = wire.init_request_vote();
+                vote.set_term(*term);
+                vote.set_last_log_index(*last_log_index);
+                vote.set_last_log_term(*last_log_term);
+            }
+            RaftMessage::VoteReply { term, granted } => {
+                let mut reply = wire.init_vote_reply();
+                reply.set_term(*term);
+                reply.set_granted(*granted);
+            }
+            RaftMessage::AppendEntries {
+                term,
+                prev_log_index,
+                prev_log_term,
+                entries,
+                leader_commit,
+            } => {
+                let mut append = wire.init_append_entries();
+                append.set_term(*term);
+                append.set_prev_log_index(*prev_log_index);
+                append.set_prev_log_term(*prev_log_term);
+                append.set_leader_commit(*leader_commit);
+                let mut wire_entries = append.init_entries(entries.len() as u32);
+                for (index, entry) in entries.iter().enumerate() {
+                    let mut row = wire_entries.reborrow().get(index as u32);
+                    row.set_term(entry.term);
+                    row.set_payload(&entry.payload);
+                }
+            }
+            RaftMessage::AppendReply {
+                term,
+                success,
+                match_index,
+            } => {
+                let mut reply = wire.init_append_reply();
+                reply.set_term(*term);
+                reply.set_success(*success);
+                reply.set_match_index(*match_index);
+            }
+        }
+        let mut bytes = Vec::new();
+        serialize::write_message(&mut bytes, &builder).expect("in-memory write cannot fail");
+        bytes
+    }
+
+    /// Decode one consensus message.
+    pub fn decode_envelope(bytes: &[u8]) -> Result<(NodeId, NodeId, RaftMessage), capnp::Error> {
+        let reader = serialize::read_message(&mut Cursor::new(bytes), ReaderOptions::new())?;
+        let root = reader.get_root::<raft_envelope::Reader>()?;
+        let message = match root.get_message().which()? {
+            raft_envelope::message::RequestVote(vote) => RaftMessage::RequestVote {
+                term: vote.get_term(),
+                last_log_index: vote.get_last_log_index(),
+                last_log_term: vote.get_last_log_term(),
+            },
+            raft_envelope::message::VoteReply(reply) => RaftMessage::VoteReply {
+                term: reply.get_term(),
+                granted: reply.get_granted(),
+            },
+            raft_envelope::message::AppendEntries(append) => {
+                let mut entries = Vec::new();
+                for row in append.get_entries()?.iter() {
+                    entries.push(Decree {
+                        term: row.get_term(),
+                        payload: row.get_payload()?.to_vec(),
+                    });
+                }
+                RaftMessage::AppendEntries {
+                    term: append.get_term(),
+                    prev_log_index: append.get_prev_log_index(),
+                    prev_log_term: append.get_prev_log_term(),
+                    entries,
+                    leader_commit: append.get_leader_commit(),
+                }
+            }
+            raft_envelope::message::AppendReply(reply) => RaftMessage::AppendReply {
+                term: reply.get_term(),
+                success: reply.get_success(),
+                match_index: reply.get_match_index(),
+            },
+        };
+        Ok((root.get_from(), root.get_to(), message))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn every_envelope_round_trips() {
+            let messages = vec![
+                RaftMessage::RequestVote {
+                    term: 3,
+                    last_log_index: 7,
+                    last_log_term: 2,
+                },
+                RaftMessage::VoteReply {
+                    term: 3,
+                    granted: true,
+                },
+                RaftMessage::AppendEntries {
+                    term: 4,
+                    prev_log_index: 6,
+                    prev_log_term: 2,
+                    entries: vec![
+                        Decree {
+                            term: 4,
+                            payload: b"a".to_vec(),
+                        },
+                        Decree {
+                            term: 4,
+                            payload: Vec::new(),
+                        },
+                    ],
+                    leader_commit: 5,
+                },
+                RaftMessage::AppendReply {
+                    term: 4,
+                    success: false,
+                    match_index: 6,
+                },
+            ];
+            for message in messages {
+                let bytes = encode_envelope(2, 0, &message);
+                assert_eq!(decode_envelope(&bytes).unwrap(), (2, 0, message));
+            }
+        }
+
+        #[test]
+        fn a_decree_round_trips_with_histogram_targets() {
+            let decree = ExplorationDecree {
+                algebraic_connectivity: 0.013,
+                seam_conductance: 0.004,
+                left_basin: 11,
+                right_basin: 29,
+                assignments: vec![ReplicaAssignment {
+                    replica: 2,
+                    right_side: true,
+                    histogram_classes: vec![0, 2],
+                    histogram_masses: vec![0.13, 0.27],
+                    anchor_basin: 29,
+                    bridge_duty: true,
+                    decree_index: 5,
+                }],
+            };
+            let bytes = encode_decree(&decree);
+            assert_eq!(decode_decree(&bytes).unwrap(), decree);
+        }
+    }
+}
