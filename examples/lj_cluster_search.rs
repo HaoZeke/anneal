@@ -2089,6 +2089,143 @@ fn run_capnp_catalog(
         }
     }
 
+    // Server brains: each replica process runs a raft node over the
+    // decree bus; the elected leader reads the coordinator's seam
+    // through the observer protocol on its own cadence, far slower
+    // than minimization, and proposes exploration decrees the group
+    // replicates. Chains apply the newest committed decree at their
+    // next checkpoint and never wait for one. Enabled by the brain
+    // environment; absent variables spawn nothing.
+    #[cfg(feature = "nng-transport")]
+    let decree_slot: std::sync::Arc<
+        std::sync::Mutex<Option<anneal_core::raft::wire::ExplorationDecree>>,
+    > = std::sync::Arc::new(std::sync::Mutex::new(None));
+    #[cfg(feature = "nng-transport")]
+    let brain_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(feature = "nng-transport")]
+    let brain_handle = if let (Ok(listen), Ok(peers_raw)) = (
+        std::env::var("CATALOG_BRAIN_LISTEN"),
+        std::env::var("CATALOG_BRAIN_PEERS"),
+    ) {
+        use anneal_core::raft::wire::{
+            ExplorationDecree, ReplicaAssignment as DecreeAssignment, decode_decree,
+            decode_envelope, encode_decree, encode_envelope,
+        };
+        use anneal_core::raft::{RaftNode, Role};
+        let mut peer_ids = Vec::new();
+        let mut peer_urls = Vec::new();
+        for part in peers_raw.split(',').filter(|p| !p.is_empty()) {
+            let (peer_id, url) = part
+                .split_once('=')
+                .expect("CATALOG_BRAIN_PEERS holds id=url pairs");
+            peer_ids.push(
+                peer_id
+                    .parse::<u32>()
+                    .expect("brain peer id must be an unsigned integer"),
+            );
+            peer_urls.push(url.to_owned());
+        }
+        let slot = std::sync::Arc::clone(&decree_slot);
+        let stop = std::sync::Arc::clone(&brain_stop);
+        let brain_endpoint = endpoint.map(str::to_owned);
+        let brain_campaign = campaign.clone();
+        let brain_ensemble = ensemble.clone();
+        let replica_count = peer_ids.len() + 1;
+        Some(std::thread::spawn(move || {
+            let bus = anneal_core::decree_bus::DecreeBus::new(replica, &listen, &peer_urls)
+                .expect("brain bus must bind its own address");
+            let mut node = RaftNode::new(replica, peer_ids, 200, 37);
+            let mut observer = None;
+            let mut now = 0u64;
+            let mut last_lead_work = 0u64;
+            let mut decree_sequence = 0u64;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                now += 1;
+                for (to, message) in node.tick(now) {
+                    let _ = bus.send(&encode_envelope(replica, to, &message));
+                }
+                for frame in bus.poll() {
+                    if let Ok((from, _, message)) = decode_envelope(&frame) {
+                        for (to, out) in node.receive(from, message, now) {
+                            let _ = bus.send(&encode_envelope(replica, to, &out));
+                        }
+                    }
+                }
+                for decree in node.take_committed() {
+                    if let Ok(decoded) = decode_decree(&decree.payload)
+                        && let Ok(mut held) = slot.lock()
+                    {
+                        *held = Some(decoded);
+                    }
+                }
+                // Leader duty every ~2 s of brain time: read the seam,
+                // decree the split.
+                if node.role() == Role::Leader
+                    && now.saturating_sub(last_lead_work) >= 200
+                    && let Some(endpoint) = brain_endpoint.as_deref()
+                {
+                    last_lead_work = now;
+                    if observer.is_none() {
+                        let identity = anneal_core::catalog_rpc::CatalogIdentity {
+                            campaign: brain_campaign.clone(),
+                            ensemble: brain_ensemble.clone(),
+                            replica: u32::MAX,
+                            signature_digest: [0; 32],
+                        };
+                        observer = endpoint.parse().ok().and_then(|address| {
+                            anneal_core::catalog_rpc::client::CatalogClient::connect(
+                                address,
+                                identity,
+                                anneal_core::catalog_rpc::client::ClientConfig::default(),
+                            )
+                            .ok()
+                            .map(|client| (client, 1u64))
+                        });
+                    }
+                    if let Some((client, sequence)) = observer.as_mut() {
+                        match client.observer_status(*sequence) {
+                            Ok(status) => {
+                                *sequence += 1;
+                                if let Some(seam) = status.seam {
+                                    decree_sequence += 1;
+                                    let assignments = (0..replica_count as u32)
+                                        .map(|member| DecreeAssignment {
+                                            replica: member,
+                                            right_side: member % 2 == 1,
+                                            histogram_classes: Vec::new(),
+                                            histogram_masses: Vec::new(),
+                                            anchor_basin: if member % 2 == 1 {
+                                                seam.right_basin
+                                            } else {
+                                                seam.left_basin
+                                            },
+                                            bridge_duty: member % 2 == 1,
+                                            decree_index: decree_sequence,
+                                        })
+                                        .collect();
+                                    let decree = ExplorationDecree {
+                                        algebraic_connectivity: seam.algebraic_connectivity,
+                                        seam_conductance: seam.conductance,
+                                        left_basin: seam.left_basin,
+                                        right_basin: seam.right_basin,
+                                        assignments,
+                                    };
+                                    let _ = node.propose(encode_decree(&decree));
+                                }
+                            }
+                            Err(_) => {
+                                observer = None;
+                            }
+                        }
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
     // Cooperative wells: the featomic archive the soap arm's hole step
@@ -2675,6 +2812,20 @@ fn run_capnp_catalog(
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
         }
+        #[cfg(feature = "nng-transport")]
+        let decree_assignment = decree_slot
+            .try_lock()
+            .ok()
+            .and_then(|held| held.clone())
+            .and_then(|decree| {
+                decree
+                    .assignments
+                    .into_iter()
+                    .find(|assignment| assignment.replica == replica)
+            });
+        #[cfg(not(feature = "nng-transport"))]
+        let decree_assignment: Option<()> = None;
+        let _ = &decree_assignment;
         if histo_screen {
             cooperative
                 .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
@@ -2894,6 +3045,13 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    #[cfg(feature = "nng-transport")]
+    {
+        brain_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = brain_handle {
+            let _ = handle.join();
+        }
+    }
     let trace = cooperative.json_lines(&RunManifest {
         campaign,
         ensemble,
