@@ -1883,23 +1883,26 @@ where
                 .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
                 .unwrap_or(0.0);
         let delta = (e_new + v_new) - (e + v_old);
-        let accept = if !recordable {
-            if cfg.minima_hopping {
-                let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-                feedback.observe(Some(from), from);
-            }
-            false
-        } else if cfg.minima_hopping {
+        // Unquenched trials are not answers. They still face Metropolis,
+        // which is how the measured LJ38 run discovers basins from a
+        // 25-step screen. Gating accept on recordable froze that path
+        // at fifteen basins.
+        let accept = if cfg.minima_hopping {
             let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
-            // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
-            // while still feeling the per-basin deposits.
-            let reached = identity.basin_of(x_new.view());
-            feedback.observe(Some(from), reached);
-            let ok = feedback.accept(delta);
-            if ok {
-                here = Some(reached);
+            if unquenched {
+                feedback.observe(Some(from), from);
+                false
+            } else {
+                // Threshold on the *biased* rise. Adapts like Goedecker's E_diff
+                // while still feeling the per-basin deposits.
+                let reached = identity.basin_of(x_new.view());
+                feedback.observe(Some(from), reached);
+                let ok = feedback.accept(delta);
+                if ok {
+                    here = Some(reached);
+                }
+                ok
             }
-            ok
         } else if let (Some(sur), Some((pred_y, _raw_y))) = (surrogate.as_mut(), pending_surrogate)
         {
             // Second stage. The surrogate difference is subtracted back out, so
