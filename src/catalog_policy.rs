@@ -251,6 +251,10 @@ pub struct CatalogPolicy;
 
 impl CatalogPolicy {
     /// Decide one action without consulting energy-height or mutable global state.
+    ///
+    /// A lower catalog energy is taken before a same-packing leave. The
+    /// incumbent of a known well leaves once it stalls, so the ensemble
+    /// does not polish one funnel for the rest of the budget.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -262,23 +266,8 @@ impl CatalogPolicy {
             ActiveCatalogRelation::Empty => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::EmptyCatalog)
             }
-            ActiveCatalogRelation::Incumbent => decision(
-                PolicyAction::ContinueLocal,
-                PolicyReason::IncumbentLocalSearch,
-            ),
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
-            }
-            ActiveCatalogRelation::SameBasin
-                if input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE =>
-            {
-                decision(PolicyAction::Leave, PolicyReason::LocalCensusExhausted)
-            }
-            ActiveCatalogRelation::SameBasin if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
-                decision(PolicyAction::Leave, PolicyReason::LocalStall)
-            }
-            ActiveCatalogRelation::SameBasin => {
-                decision(PolicyAction::Explore, PolicyReason::SameBasinExplore)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: true,
@@ -292,6 +281,24 @@ impl CatalogPolicy {
                         PolicyReason::RemoteAnchorOpen
                     },
                 )
+            }
+            ActiveCatalogRelation::Incumbent if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
+                decision(PolicyAction::Leave, PolicyReason::LocalStall)
+            }
+            ActiveCatalogRelation::Incumbent => decision(
+                PolicyAction::ContinueLocal,
+                PolicyReason::IncumbentLocalSearch,
+            ),
+            ActiveCatalogRelation::SameBasin
+                if input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE =>
+            {
+                decision(PolicyAction::Leave, PolicyReason::LocalCensusExhausted)
+            }
+            ActiveCatalogRelation::SameBasin if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
+                decision(PolicyAction::Leave, PolicyReason::LocalStall)
+            }
+            ActiveCatalogRelation::SameBasin => {
+                decision(PolicyAction::Explore, PolicyReason::SameBasinExplore)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: false,

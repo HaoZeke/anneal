@@ -1729,6 +1729,69 @@ fn leave_known_packing<R: rand::Rng + ?Sized>(
 }
 
 #[cfg(feature = "bank-rpc")]
+fn remember_packing_well(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    wells: &mut Vec<Array1<f64>>,
+) {
+    #[cfg(feature = "featomic")]
+    {
+        let well = anneal_core::featomic_hop::soap_cloud_mean(x, rcut, species, None);
+        let known = wells.iter().any(|stored| {
+            stored.len() == well.len()
+                && stored
+                    .iter()
+                    .zip(well.iter())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    < anneal_core::featomic_hop::SOAP_PACK_MERGE
+        });
+        if !known && !well.is_empty() {
+            wells.push(well);
+            if wells.len() > 30 {
+                wells.remove(0);
+            }
+            anneal_core::featomic_hop::set_packing_archive(wells.clone());
+        }
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (x, rcut, species, wells);
+    }
+}
+
+fn leave_packing_state<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    wells: &[Array1<f64>],
+    rcut: f64,
+    species: Option<&[u32]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        if !wells.is_empty() {
+            return anneal_core::featomic_hop::step_into_hole(
+                x,
+                wells,
+                anneal_core::featomic_hop::SOAP_PACK_MERGE,
+                rcut,
+                species,
+                None,
+                rng,
+            );
+        }
+        let _ = (rcut, species);
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (wells, rcut, species, rng);
+    }
+    anneal_core::soap::step_away_fivefold_measured(x, rmsd)
+}
+
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -2229,13 +2292,12 @@ fn run_capnp_catalog(
 
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
-    // Cooperative wells: the featomic archive the soap arm's hole step
-    // extrapolates away from, fed with every minimum the coordinator
-    // hands this replica. Boundary transport replays observed crossings
-    // and therefore interpolates inside the ensemble's experience; the
-    // hole step against the shared archive is the move that proposes
-    // beyond it. Gated by CATALOG_COOP_WELLS until measured.
-    let coop_wells_enabled = std::env::var("CATALOG_COOP_WELLS").is_ok_and(|v| v == "1");
+    // Cooperative wells: the SOAP archive the hole step walks away
+    // from, fed with every minimum the coordinator hands this replica.
+    // Off only when CATALOG_COOP_WELLS=0.
+    let coop_wells_enabled = std::env::var("CATALOG_COOP_WELLS")
+        .ok()
+        .is_none_or(|value| value != "0");
     // Shared bias: remote minima are handed back to the run loop for
     // deposit into this chain's own well-tempered bias, so acceptance
     // feels what the ensemble has visited continuously rather than only
@@ -2667,6 +2729,65 @@ fn run_capnp_catalog(
                     }
                 }
             }
+            if parent.producer_replica != replica
+                && parent.coordinates.len() == snapshot.current_state().len()
+            {
+                let mut state = Array1::from(parent.coordinates.clone());
+                let atoms = state.len() / 3;
+                if atoms > 0 {
+                    let mut jitter = rand::rngs::StdRng::seed_from_u64(draw);
+                    for coordinate in state.iter_mut() {
+                        *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
+                    }
+                    for axis in 0..3 {
+                        let mean = (0..atoms).map(|atom| state[3 * atom + axis]).sum::<f64>()
+                            / atoms as f64;
+                        for atom in 0..atoms {
+                            state[3 * atom + axis] -= mean;
+                        }
+                    }
+                }
+                if state
+                    .iter()
+                    .zip(snapshot.current_state().iter())
+                    .any(|(a, b)| (a - b).abs() > 1e-12)
+                {
+                    slice_sequence = slice_sequence
+                        .checked_add(1)
+                        .expect("slice sequence must fit u64");
+                    let reconfiguration = SliceTrace {
+                        slice: slice_sequence,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Exploit,
+                        policy_reason: "population_assignment",
+                        proposal_family: ProposalFamily::PopulationReconfiguration,
+                        sampled_basin: parent.census_basin,
+                        descriptor_step_norm: None,
+                        cartesian_step_norm: Some(vector_distance(
+                            snapshot
+                                .current_state()
+                                .as_slice()
+                                .expect("LJ state is contiguous"),
+                            state.as_slice().expect("LJ proposal is contiguous"),
+                        )),
+                        validation: SliceValidation::Accepted,
+                        quench: SliceQuench::Converged,
+                        adoption: SliceAdoption::Adopted,
+                        novelty: None,
+                        energy: Some(parent.energy),
+                        charged_work: u64::try_from(checkpoint_charged)
+                            .expect("checkpoint charge must fit u64"),
+                    };
+                    cooperative
+                        .record_slice(replica, reconfiguration)
+                        .expect("population checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state,
+                        action: "population_parent".to_owned(),
+                    };
+                }
+            }
             let crossing = match cooperative
                 .boundary_crossing(replica, parent.descriptor, draw)
                 .expect("population frontier access must preserve local execution")
@@ -3038,33 +3159,41 @@ fn run_capnp_catalog(
             PolicyAction::Leave => {
                 trace.policy_role = PolicyRole::Leave;
                 trace.proposal_family = ProposalFamily::DescriptorHole;
-                let hole = cooperative
-                    .descriptor_hole(
-                        replica,
-                        descriptor.clone(),
-                        128,
-                        transport_rng.random(),
-                    )
-                    .expect("descriptor-hole access must preserve local execution");
-                if matches!(hole, CatalogHoleOutcome::Proposal(_)) {
-                    let left = anneal_core::soap::step_away_fivefold_measured(
+                if coop_wells_enabled {
+                    remember_packing_well(
                         snapshot.current_state(),
-                        0.35,
+                        coop_rcut,
+                        coop_species.as_deref(),
+                        &mut shared_wells,
                     );
-                    if left
-                        .iter()
-                        .zip(snapshot.current_state().iter())
-                        .any(|(a, b)| (a - b).abs() > 1e-12)
-                    {
-                        trace.adoption = SliceAdoption::Adopted;
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state: left,
-                            action: "catalog_leave".to_owned(),
-                        };
-                    }
+                }
+                let _ = cooperative.descriptor_hole(
+                    replica,
+                    descriptor.clone(),
+                    128,
+                    transport_rng.random(),
+                );
+                let left = leave_packing_state(
+                    snapshot.current_state(),
+                    0.35,
+                    &shared_wells,
+                    coop_rcut,
+                    coop_species.as_deref(),
+                    &mut transport_rng,
+                );
+                if left
+                    .iter()
+                    .zip(snapshot.current_state().iter())
+                    .any(|(a, b)| (a - b).abs() > 1e-12)
+                {
+                    trace.adoption = SliceAdoption::Adopted;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state: left,
+                        action: "catalog_leave".to_owned(),
+                    };
                 }
                 trace.adoption = SliceAdoption::Rejected;
             }
@@ -3131,6 +3260,43 @@ fn run_capnp_catalog(
                         return CheckpointAction::BoundaryProposal {
                             state,
                             action: "boundary_transport".to_owned(),
+                        };
+                    }
+                } else if let CatalogHoleOutcome::Proposal(_) = cooperative
+                    .descriptor_hole(
+                        replica,
+                        descriptor.clone(),
+                        128,
+                        transport_rng.random(),
+                    )
+                    .expect("descriptor-hole access must preserve local execution")
+                {
+                    let left = anneal_core::soap::step_away_cloud(
+                        snapshot.current_state(),
+                        anneal_core::soap::SoapSpec {
+                            n_max: 3,
+                            l_max: 6,
+                            rcut_nn: coop_rcut,
+                        },
+                        0.35,
+                        coop_species.as_deref(),
+                        None,
+                        None,
+                        &mut transport_rng,
+                    );
+                    if left
+                        .iter()
+                        .zip(snapshot.current_state().iter())
+                        .any(|(a, b)| (a - b).abs() > 1e-12)
+                    {
+                        trace.proposal_family = ProposalFamily::DescriptorHole;
+                        trace.adoption = SliceAdoption::Adopted;
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state: left,
+                            action: "catalog_explore".to_owned(),
                         };
                     }
                 }
