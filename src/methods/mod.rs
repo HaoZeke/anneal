@@ -29,6 +29,7 @@ pub mod ffs;
 pub mod minima_hopping;
 /// Nested search: population under a descending energy ceiling.
 pub mod nested;
+pub mod neus_bridge;
 /// Cut-and-splice mixing of two quenched clusters.
 pub mod splice;
 #[cfg(feature = "graphkey")]
