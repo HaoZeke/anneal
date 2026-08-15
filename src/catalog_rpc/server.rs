@@ -27,7 +27,7 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
-    explore_must_leave, invert_mixing, mixed, rhat_series, same_packing,
+    explore_must_leave, invert_mixing, rhat_series, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
