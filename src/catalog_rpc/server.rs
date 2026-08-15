@@ -2292,12 +2292,9 @@ fn packing_relation(
     if !compared {
         return None;
     }
-    // Take the certified global minimum from anywhere. Take a better
-    // isomer in the same family only while the ensemble has not mixed
-    // onto an uncertified floor.
-    if lower_known && mixing.certified_attractor {
-        return Some(CatalogRelation::UnrelatedLowerAnchor);
-    }
+    // Take a better isomer in the same family only while the ensemble
+    // has not mixed onto an uncertified floor. A certificate does not
+    // yank a novel packing onto the current deepest well.
     if lower_known && same_as_any && !ensemble_mixed(scientific) {
         return Some(CatalogRelation::UnrelatedLowerAnchor);
     }

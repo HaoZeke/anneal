@@ -112,9 +112,11 @@ pub fn stronger(left: &AttractorStrength, right: &AttractorStrength) -> bool {
 }
 
 /// A putative global minimum is certified only when occupant chains
-/// have mixed onto it, it is uniquely deepest, and it is strictly more
-/// attractive than every competing basin. Mixing onto a lone floor is
-/// not a certificate.
+/// have mixed onto it, it is uniquely deepest, at least one competing
+/// basin has also mixed (it is an attractor, not a flyby), and the
+/// putative is strictly more occupied than every competitor. Mixing
+/// onto a lone floor, or beating a single unmixed walk, is not a
+/// certificate.
 pub fn certified_global_minimum(
     putative: &AttractorStrength,
     competitors: &[AttractorStrength],
@@ -122,7 +124,7 @@ pub fn certified_global_minimum(
 ) -> bool {
     uniquely_deepest
         && putative.mixed()
-        && !competitors.is_empty()
+        && competitors.iter().any(AttractorStrength::mixed)
         && competitors
             .iter()
             .all(|other| stronger(putative, other))

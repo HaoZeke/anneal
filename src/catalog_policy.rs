@@ -264,8 +264,9 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// Inverted Gelman--Rubin: a certified attractor stays occupied and
-    /// is taken from elsewhere; explore-role mixing forces Leave.
+    /// Inverted Gelman--Rubin: a certified incumbent stays occupied.
+    /// A certificate does not yank an unrelated replica. Explore-role
+    /// mixing forces Leave.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -286,17 +287,6 @@ impl CatalogPolicy {
                 decision(
                     PolicyAction::ContinueLocal,
                     PolicyReason::CertifiedAttractor,
-                )
-            }
-            _ if input.mixing.certified_attractor => {
-                let win_only = input.progress.win_only();
-                decision(
-                    PolicyAction::Exploit { win_only },
-                    if win_only {
-                        PolicyReason::RemoteAnchorClosed
-                    } else {
-                        PolicyReason::RemoteAnchorOpen
-                    },
                 )
             }
             _ if input.mixing.explore_collapsed => {

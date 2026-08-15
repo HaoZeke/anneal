@@ -67,11 +67,27 @@ fn a_deeper_majority_that_has_mixed_is_certified() {
     let oh = oh_majority();
     let ico = AttractorStrength {
         energy: -173.252378,
-        occupancy: 1,
-        occupant_rhat: f64::INFINITY,
+        occupancy: 2,
+        occupant_rhat: 0.0,
     };
     assert!(stronger(&oh, &ico));
     assert!(certified_global_minimum(&oh, &[ico], true));
+}
+
+#[test]
+fn a_mixed_deepest_well_is_not_certified_against_a_flyby() {
+    let deep = AttractorStrength {
+        energy: -170.294257,
+        occupancy: 4,
+        occupant_rhat: 0.0,
+    };
+    let flyby = AttractorStrength {
+        energy: -168.1,
+        occupancy: 1,
+        occupant_rhat: f64::INFINITY,
+    };
+    assert!(stronger(&deep, &flyby));
+    assert!(!certified_global_minimum(&deep, &[flyby], true));
 }
 
 #[test]
@@ -111,8 +127,8 @@ fn energy_tie_is_not_uniquely_deepest() {
 fn inverted_mixing_certifies_only_a_winning_deeper_attractor() {
     let ico = AttractorStrength {
         energy: -173.252378,
-        occupancy: 1,
-        occupant_rhat: f64::INFINITY,
+        occupancy: 2,
+        occupant_rhat: 0.0,
     };
     let series = [constant(-173.252378, 8), constant(-170.0, 8)];
     let verdict = invert_mixing(&[oh_majority(), ico], &series);
