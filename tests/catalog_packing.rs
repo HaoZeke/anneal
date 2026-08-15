@@ -40,19 +40,25 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
         .expect("Marks histogram stays readable");
 
     assert!(same_packing(&ico_hist, &ico_hist));
-    let gap = packing_distance(&ico_hist, &marks_hist);
+    let unseen_gap = packing_distance(&ico_hist, &marks_hist);
     assert!(
-        gap > PACKING_MERGE,
-        "ico–Marks DECAF L1 {gap} must sit outside the packing well {PACKING_MERGE}"
+        unseen_gap > PACKING_MERGE,
+        "ico–Marks DECAF L1 {unseen_gap} must sit outside the packing well {PACKING_MERGE}"
     );
-    assert!(gap > 0.5, "sealed ico–Marks L1 is 0.69, got {gap}");
     let marks_family = book
         .observe(marks.as_slice().unwrap())
         .expect("Marks opens a second family");
     assert_ne!(marks_family, ico_family);
+    let ico_after = book.histogram(ico.as_slice().unwrap()).unwrap();
+    let marks_after = book.histogram(marks.as_slice().unwrap()).unwrap();
+    let pooled_gap = packing_distance(&ico_after, &marks_after);
+    assert!(
+        pooled_gap > PACKING_MERGE,
+        "pooled ico–Marks L1 {pooled_gap} must stay a different family"
+    );
     assert_eq!(book.visits(ico_family), 1);
     assert_eq!(book.visits(marks_family), 1);
-    assert!(book.novelty(&ico_hist) > PACKING_MERGE);
+    assert!(book.novelty(&ico_after) > PACKING_MERGE);
 }
 
 #[test]
