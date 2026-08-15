@@ -2044,13 +2044,14 @@ fn run_capnp_catalog(
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::PolicyAction;
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
-    use anneal_core::catalog_rpc::{CatalogIdentity, TransitionDestination};
+    use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::cooperative_search::{
-        CatalogBoundaryOutcome, CatalogBridgeOutcome, CooperativeRun, PolicyEvidenceOutcome,
-        PolicyRole, PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption,
-        SliceQuench, SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
+        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
+        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -3003,11 +3004,72 @@ fn run_capnp_catalog(
         }
         match decision.action {
             PolicyAction::ContinueLocal => {}
-            PolicyAction::Exploit { .. } | PolicyAction::Explore | PolicyAction::Leave => {
-                trace.policy_role = match decision.action {
-                    PolicyAction::Leave => PolicyRole::Leave,
-                    _ => PolicyRole::Explore,
-                };
+            PolicyAction::Exploit { win_only } => {
+                trace.policy_role = PolicyRole::Exploit;
+                trace.proposal_family = ProposalFamily::CatalogSample;
+                if let CatalogSampleOutcome::Candidate(candidate) = cooperative
+                    .sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
+                    .expect("incumbent sample must preserve local execution")
+                {
+                    let improves = candidate.energy < snapshot.current_energy() - 1e-10;
+                    if candidate.coordinates.len() == snapshot.current_state().len()
+                        && (!win_only || improves)
+                    {
+                        trace.sampled_basin = candidate.census_basin;
+                        trace.energy = Some(candidate.energy);
+                        trace.adoption = SliceAdoption::Adopted;
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state: Array1::from(candidate.coordinates),
+                            action: "catalog_incumbent".to_owned(),
+                        };
+                    }
+                    trace.adoption = if win_only && !improves {
+                        SliceAdoption::NotImproved
+                    } else {
+                        SliceAdoption::Rejected
+                    };
+                } else {
+                    trace.adoption = SliceAdoption::Rejected;
+                }
+            }
+            PolicyAction::Leave => {
+                trace.policy_role = PolicyRole::Leave;
+                trace.proposal_family = ProposalFamily::DescriptorHole;
+                let hole = cooperative
+                    .descriptor_hole(
+                        replica,
+                        descriptor.clone(),
+                        128,
+                        transport_rng.random(),
+                    )
+                    .expect("descriptor-hole access must preserve local execution");
+                if matches!(hole, CatalogHoleOutcome::Proposal(_)) {
+                    let left = anneal_core::soap::step_away_fivefold_measured(
+                        snapshot.current_state(),
+                        0.35,
+                    );
+                    if left
+                        .iter()
+                        .zip(snapshot.current_state().iter())
+                        .any(|(a, b)| (a - b).abs() > 1e-12)
+                    {
+                        trace.adoption = SliceAdoption::Adopted;
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state: left,
+                            action: "catalog_leave".to_owned(),
+                        };
+                    }
+                }
+                trace.adoption = SliceAdoption::Rejected;
+            }
+            PolicyAction::Explore => {
+                trace.policy_role = PolicyRole::Explore;
                 trace.proposal_family = ProposalFamily::BoundaryTransport;
                 if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
                     .boundary_crossing(replica, descriptor, transport_rng.random())

@@ -282,10 +282,17 @@ impl CatalogPolicy {
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: true,
-            } => decision(
-                PolicyAction::Explore,
-                PolicyReason::UnrelatedCatalogExplore,
-            ),
+            } => {
+                let win_only = input.progress.win_only();
+                decision(
+                    PolicyAction::Exploit { win_only },
+                    if win_only {
+                        PolicyReason::RemoteAnchorClosed
+                    } else {
+                        PolicyReason::RemoteAnchorOpen
+                    },
+                )
+            }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: false,
             } => decision(
