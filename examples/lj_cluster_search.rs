@@ -2839,10 +2839,14 @@ fn run_capnp_catalog(
             if histo_history.len() > 256 {
                 histo_history.pop_front();
             }
-            // Screen only when stalled and the current neighborhood is
-            // familiar: a chain already somewhere novel needs no push.
+            // Screen when stalled. Familiarity was a third gate here
+            // and measured out: thermal fluctuation alone moves a
+            // 75-atom histogram by a few flips per checkpoint, so the
+            // familiar-neighborhood test almost never passed and the
+            // mechanism fired once or twice per forty thousand
+            // evaluations. The stall counter is the gate.
+            let _ = novel_here;
             if stall >= 4
-                && novel_here < 0.05
                 && checkpoint_sequence.is_multiple_of(8)
                 && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
             {
