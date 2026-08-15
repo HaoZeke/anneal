@@ -2120,12 +2120,46 @@ fn run_capnp_catalog(
         run_cfg.bias_height,
         run_cfg.bias_gamma,
     );
-    let start = random_cluster(
-        run_cfg.n_points,
-        0.7,
-        run_cfg.min_separation,
-        &mut local_rng,
-    );
+    // A seeded start places one replica in a chosen basin, which is how
+    // a bridge scenario is constructed on demand: one replica in a
+    // second funnel splits the referee's landscape graph and the
+    // commissioning condition becomes reachable inside a smoke. The
+    // file holds an xyz body: a count line, a comment line, then one
+    // element and three coordinates per line.
+    let seeded_start = std::env::var("CATALOG_START_FILE").ok().filter(|_| {
+        std::env::var("CATALOG_START_REPLICA")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0)
+            == replica
+    });
+    let start = match seeded_start {
+        Some(path) => {
+            let text = std::fs::read_to_string(&path)
+                .expect("CATALOG_START_FILE must name a readable file");
+            let values: Vec<f64> = text
+                .lines()
+                .skip(2)
+                .flat_map(|line| {
+                    line.split_whitespace()
+                        .skip(1)
+                        .filter_map(|token| token.parse::<f64>().ok())
+                })
+                .collect();
+            assert_eq!(
+                values.len(),
+                3 * run_cfg.n_points,
+                "CATALOG_START_FILE must hold three coordinates per atom"
+            );
+            Array1::from(values)
+        }
+        None => random_cluster(
+            run_cfg.n_points,
+            0.7,
+            run_cfg.min_separation,
+            &mut local_rng,
+        ),
+    };
     let mut candidate_sequence = 0u64;
     let mut checkpoint_sequence = 0u64;
     let mut slice_sequence = 0u64;
