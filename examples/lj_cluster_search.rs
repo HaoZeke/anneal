@@ -2338,41 +2338,34 @@ fn run_capnp_catalog(
                 }
             }
         }
-        // The chain stands mid-hop at almost every checkpoint, so a policy
-        // gated on the current state being a validated minimum asks almost
-        // never, which is how a whole run passed with two policy queries.
-        // The basin the chain occupies is its last validated quench, and
-        // this checkpoint's freshest polished boundary is exactly that, so
-        // the policy asks from there whenever the current state cannot
-        // qualify.
+        // Conversation is not identity. A position report every checkpoint
+        // is how the chains talk: the descriptor of wherever the chain
+        // stands, mid-hop or not, asked against the census the validated
+        // registrations have built, with no purity gate, because reporting
+        // a position claims nothing about minimality. The identity tier,
+        // the census and catalog entries themselves, stays fed exclusively
+        // by share-grade validated states through the offer loop above.
+        let _ = freshest_boundary;
         candidate_sequence = candidate_sequence
             .checked_add(1)
             .expect("candidate sequence must fit u64");
         cooperative
             .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
             .expect("current descriptor work must enter the cooperative ledger");
-        let current_candidate = snapshot
-            .current_gradient()
-            .and_then(|current_gradient| {
-                lj_catalog_candidate(
-                    &descriptor_space,
-                    &signature.atomic_numbers,
-                    replica,
-                    candidate_sequence,
-                    seed,
-                    snapshot.charged(),
-                    snapshot.current_energy(),
-                    snapshot.current_state(),
-                    current_gradient,
-                )
-            })
-            .or_else(|| freshest_boundary.take());
-        let Some(current_candidate) = current_candidate else {
+        let Ok(position) =
+            descriptor_space.describe(snapshot.current_state(), Some(&signature.atomic_numbers))
+        else {
             return CheckpointAction::Continue;
         };
-        let descriptor = current_candidate.descriptor.clone();
+        let descriptor = position.values().to_vec();
         let policy = match cooperative
-            .registered_policy_input(replica, current_candidate, stall, local_deepened)
+            .policy_input(
+                replica,
+                descriptor.clone(),
+                snapshot.current_energy(),
+                stall,
+                local_deepened,
+            )
             .expect("coordinator policy evidence must preserve local invariants")
         {
             PolicyEvidenceOutcome::Remote(input) => input,
