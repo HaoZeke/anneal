@@ -17,6 +17,8 @@ pub mod server;
 
 /// Wire protocol version accepted by this release.
 pub const PROTOCOL_VERSION: u16 = 9;
+/// `Sample` draw that returns the active-catalog incumbent.
+pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]

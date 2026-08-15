@@ -1054,7 +1054,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         )
         .unwrap()
         .action,
-        PolicyAction::Explore
+        PolicyAction::Exploit { win_only: false }
     );
     assert_eq!(
         run.decide(
@@ -1098,6 +1098,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         TraceKind::Admission,
         TraceKind::Rejection,
         TraceKind::SnapshotRefresh,
+        TraceKind::PolicyExploit,
         TraceKind::PolicyExplore,
         TraceKind::PolicyLeave,
         TraceKind::PolicyLocal,
@@ -1105,12 +1106,6 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
     ] {
         assert!(run.events().iter().any(|event| event.kind == required));
     }
-    assert!(
-        run.events()
-            .iter()
-            .all(|event| event.kind != TraceKind::PolicyExploit),
-        "cooperative policy must not communicate minima through exploitation"
-    );
     let lines = run.json_lines(&RunManifest {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),

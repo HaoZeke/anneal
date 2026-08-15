@@ -724,9 +724,18 @@ fn apply_request(
             if let Some(scientific) = state.scientific.as_ref()
                 && !scientific.catalog.is_empty()
             {
-                let index = usize::try_from(*draw % scientific.catalog.len() as u64)
-                    .expect("sample index is bounded by catalog length");
-                let entry = &scientific.catalog.entries()[index];
+                // u64::MAX is the incumbent draw: exploit a deeper
+                // catalog representative rather than a random slot.
+                let entry = if *draw == crate::catalog_rpc::INCUMBENT_SAMPLE_DRAW {
+                    scientific
+                        .catalog
+                        .incumbent()
+                        .expect("nonempty catalog has an incumbent")
+                } else {
+                    let index = usize::try_from(*draw % scientific.catalog.len() as u64)
+                        .expect("sample index is bounded by catalog length");
+                    &scientific.catalog.entries()[index]
+                };
                 payload = AcceptedPayload::Candidate(candidate_from_validated(
                     entry.validated(),
                     Some(entry.census_id()),
@@ -2012,8 +2021,27 @@ fn attraction_region_relation(
     let Some(local_basin) = local_basin else {
         return CatalogRelation::Empty;
     };
+    let energy_relation = || {
+        if scientific
+            .catalog
+            .incumbent()
+            .map(|entry| entry.census_id())
+            == Some(local_basin)
+        {
+            CatalogRelation::Incumbent
+        } else if scientific
+            .catalog
+            .entries()
+            .iter()
+            .any(|entry| entry.census_id() != local_basin && entry.energy() < energy)
+        {
+            CatalogRelation::UnrelatedLowerAnchor
+        } else {
+            CatalogRelation::UnrelatedNoAnchor
+        }
+    };
     let Some(local_node) = scientific.transition_nodes.get(&local_basin).copied() else {
-        return CatalogRelation::Incumbent;
+        return energy_relation();
     };
     let Ok(regions) = scientific
         .transition_graph
@@ -2039,32 +2067,7 @@ fn attraction_region_relation(
     if shared {
         return CatalogRelation::SameBasin;
     }
-    // Holding a region alone is not the same as holding the catalog's best
-    // entry. Reporting the incumbent for both told a replica that nothing
-    // better existed whenever no neighbour stood beside it, which is the
-    // state a spread-out ensemble is in almost always, and the policy
-    // answers the incumbent with local work that has no exit. The catalog
-    // separates the two: the incumbent is the entry that is actually
-    // deepest, and a replica alone above a deeper entry is unrelated to it
-    // and free to exploit it.
-    if scientific
-        .catalog
-        .incumbent()
-        .map(|entry| entry.census_id())
-        == Some(local_basin)
-    {
-        return CatalogRelation::Incumbent;
-    }
-    let lower_energy_anchor = scientific
-        .catalog
-        .entries()
-        .iter()
-        .any(|entry| entry.census_id() != local_basin && entry.energy() < energy);
-    if lower_energy_anchor {
-        CatalogRelation::UnrelatedLowerAnchor
-    } else {
-        CatalogRelation::UnrelatedNoAnchor
-    }
+    energy_relation()
 }
 
 fn nearest_other_census_distance(census: &BasinCensus, local: BasinId, descriptor: &[f64]) -> f64 {
