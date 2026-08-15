@@ -203,6 +203,23 @@ fn slab_driver_reports_quench_accounting() {
 }
 
 #[test]
+fn cooperative_driver_honours_a_hop_cap() {
+    let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("lj_cluster_search.rs");
+    let source = fs::read_to_string(&driver)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", driver.display()));
+    assert!(
+        source.contains("CATALOG_MAX_HOPS"),
+        "cooperative driver must honour a hop cap so many-chain explore is hops, not a short ledger"
+    );
+    assert!(
+        source.contains("run_cfg.max_hops = Some(hops)"),
+        "CATALOG_MAX_HOPS must set Config::max_hops"
+    );
+}
+
+#[test]
 fn cooperative_share_optimization_is_one_quench_not_ten() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
