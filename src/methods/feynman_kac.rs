@@ -1023,61 +1023,64 @@ pub struct PackingOccupant {
     pub energy: f64,
 }
 
-/// Assign parents so resampling stays inside one packing family.
+/// Assign parents from the shared Keep/Reseed occupancy rule.
 ///
-/// Each distinct family keeps its lowest-energy occupant as a parent of
-/// itself. Extra members of the same family may copy that occupant up to
-/// `max_offspring` slots and otherwise stay local. A destination never
-/// receives a parent from a different packing. Unassigned packings stay
-/// on themselves.
+/// [`crate::catalog::keep_ids`] decides who may stay on a packing.
+/// The family champion is its own parent. Kept extras adopt the
+/// champion (better isomer). Everyone else is an extra beyond the
+/// cap: they stay self-parented so the client reseeds instead of
+/// cloning the well. A destination never receives a parent from a
+/// different packing.
 pub fn assign_parents_by_packing(
     occupants: &[PackingOccupant],
     max_offspring: usize,
 ) -> Vec<u32> {
-    let mut parents: Vec<u32> = occupants.iter().map(|occupant| occupant.replica).collect();
+    let _ = max_offspring;
     if occupants.is_empty() {
-        return parents;
+        return Vec::new();
     }
-    let cap = max_offspring.max(1);
-
-    let mut groups = BTreeMap::<usize, Vec<usize>>::new();
-    for (index, occupant) in occupants.iter().enumerate() {
+    let walks: Vec<crate::catalog::WalkRecord> = occupants
+        .iter()
+        .map(|occupant| crate::catalog::WalkRecord {
+            id: occupant.replica,
+            resource: crate::catalog::DEFAULT_MAX_RESOURCE,
+            energy: occupant.energy,
+            family: occupant.family,
+        })
+        .collect();
+    let keep = crate::catalog::keep_ids(&walks, crate::catalog::DEFAULT_MAX_RESOURCE);
+    let mut champion = BTreeMap::<usize, u32>::new();
+    for occupant in occupants {
         let Some(family) = occupant.family else {
             continue;
         };
-        groups.entry(family).or_default().push(index);
-    }
-
-    for indices in groups.values() {
-        if indices.len() < 2 {
-            continue;
-        }
-        let donor_index = indices
-            .iter()
-            .copied()
-            .min_by(|&left, &right| {
-                occupants[left]
-                    .energy
-                    .total_cmp(&occupants[right].energy)
-                    .then_with(|| occupants[left].replica.cmp(&occupants[right].replica))
-            })
-            .expect("family group is nonempty");
-        let donor = occupants[donor_index].replica;
-        let mut extras: Vec<usize> = indices
-            .iter()
-            .copied()
-            .filter(|&index| index != donor_index)
-            .collect();
-        extras.sort_by(|&left, &right| {
-            occupants[right]
-                .energy
-                .total_cmp(&occupants[left].energy)
-                .then_with(|| occupants[right].replica.cmp(&occupants[left].replica))
-        });
-        let clones = cap.saturating_sub(1);
-        for &index in extras.iter().take(clones) {
-            parents[index] = donor;
+        match champion.get(&family) {
+            None => {
+                champion.insert(family, occupant.replica);
+            }
+            Some(&current) => {
+                let current_energy = occupants
+                    .iter()
+                    .find(|other| other.replica == current)
+                    .map(|other| other.energy)
+                    .unwrap_or(f64::INFINITY);
+                if occupant.energy < current_energy - 1e-12 {
+                    champion.insert(family, occupant.replica);
+                }
+            }
         }
     }
-    parents
+    occupants
+        .iter()
+        .map(|occupant| {
+            if !keep.contains(&occupant.replica) {
+                return occupant.replica;
+            }
+            occupant
+                .family
+                .and_then(|family| champion.get(&family).copied())
+                .filter(|donor| keep.contains(donor))
+                .unwrap_or(occupant.replica)
+        })
+        .collect()
 }
