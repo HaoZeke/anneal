@@ -31,20 +31,20 @@ fn input(
 }
 
 #[test]
-fn incumbent_replica_polishes_until_the_known_well_stalls() {
+fn incumbent_replica_stays_in_the_well_until_it_stalls() {
     let (census, basin_id) = census_with_repeated_visits(21);
-    let polishing = input(
+    let relaxing = input(
         ActiveCatalogRelation::Incumbent,
         CensusEvidence::from_census(&census, Some(basin_id)),
         AggregateProgress::new(90, 100).unwrap(),
     );
-    let mut stalled = polishing;
+    let mut stalled = relaxing;
     stalled.local_stall_slices = 8;
 
-    let polish = CatalogPolicy::decide(polishing);
-    assert_eq!(polish.action, PolicyAction::ContinueLocal);
-    assert_eq!(polish.reason, PolicyReason::IncumbentLocalSearch);
-    assert_eq!(polish.reason.code(), "incumbent_local_search");
+    let local = CatalogPolicy::decide(relaxing);
+    assert_eq!(local.action, PolicyAction::ContinueLocal);
+    assert_eq!(local.reason, PolicyReason::IncumbentLocalSearch);
+    assert_eq!(local.reason.code(), "incumbent_local_search");
 
     let leave = CatalogPolicy::decide(stalled);
     assert_eq!(leave.action, PolicyAction::Leave);

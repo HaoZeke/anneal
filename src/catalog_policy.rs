@@ -262,7 +262,7 @@ impl CatalogPolicy {
     ///
     /// A lower catalog energy is taken before a same-packing leave. The
     /// incumbent of a known well leaves once it stalls, so the ensemble
-    /// does not polish one funnel for the rest of the budget.
+    /// does not keep relaxing one funnel for the rest of the budget.
     ///
     /// Inverted Gelman--Rubin: a certified attractor stays occupied and
     /// is taken from elsewhere; explore-role mixing forces Leave.
