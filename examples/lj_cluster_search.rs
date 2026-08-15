@@ -2878,7 +2878,12 @@ fn run_capnp_catalog(
                     cooperative
                         .record_slice(replica, trace)
                         .expect("histogram checkpoint trace must remain complete");
-                    return CheckpointAction::ProbeProposal {
+                    // Adoption, not a diagnostic probe: a screen that
+                    // cannot move the live chain contributes records
+                    // and no exploration, which the paired smokes
+                    // measured as bit-identical endpoints at every
+                    // gate setting.
+                    return CheckpointAction::BoundaryProposal {
                         state: candidate,
                         action: "histo".to_owned(),
                     };
