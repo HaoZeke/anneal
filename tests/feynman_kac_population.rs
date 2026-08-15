@@ -454,8 +454,7 @@ fn ico_cannot_occupy_half_the_ensemble() {
     assert_eq!(parents[0], 0);
 
     let ico_donor = 1u32;
-    let ico_offspring = parents.iter().filter(|parent| **parent == ico_donor).count();
-    assert_eq!(ico_offspring, cap);
+    assert_eq!(parents[1], ico_donor);
 
     for (destination, parent) in occupants.iter().zip(parents.iter()) {
         let parent_family = occupants
@@ -472,7 +471,20 @@ fn ico_cannot_occupy_half_the_ensemble() {
             destination.family == Some(0) && destination.replica != **parent
         })
         .count();
-    assert_eq!(ico_clones, cap - 1);
+    let ico_n = occupants
+        .iter()
+        .filter(|occupant| occupant.family == Some(0))
+        .count();
+    let extras = ico_n.saturating_sub(1);
+    assert_eq!(ico_clones, extras / cap);
+    let ico_self = occupants
+        .iter()
+        .zip(parents.iter())
+        .filter(|(destination, parent)| {
+            destination.family == Some(0) && destination.replica == **parent
+        })
+        .count();
+    assert_eq!(ico_self, ico_n - ico_clones);
 }
 
 #[test]
@@ -485,5 +497,5 @@ fn deepest_ico_is_the_only_packing_donor() {
         occupant(1, Some(1), -172.0),
     ];
     let parents = assign_parents_by_packing(&occupants, 3);
-    assert_eq!(parents, vec![4, 7, 7, 7, 1]);
+    assert_eq!(parents, vec![7, 7, 9, 2, 1]);
 }

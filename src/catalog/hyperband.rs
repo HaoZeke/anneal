@@ -86,6 +86,10 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
     if self_walk.family.is_none() {
         return EnsembleVerdict::Keep;
     }
+    occupancy_of_family(walks, id, rung)
+}
+
+fn occupancy_of_family(walks: &[WalkRecord], id: u32, rung: u64) -> EnsembleVerdict {
     let cohort: Vec<&WalkRecord> = walks
         .iter()
         .filter(|walk| walk.resource >= rung)
@@ -108,7 +112,8 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
             _ => {}
         }
     }
-    if self_walk.family.is_some_and(|family| {
+    let self_family = walks.iter().find(|walk| walk.id == id).and_then(|walk| walk.family);
+    if self_family.is_some_and(|family| {
         best_of_family
             .get(&family)
             .is_some_and(|(best_id, _)| *best_id == id)
