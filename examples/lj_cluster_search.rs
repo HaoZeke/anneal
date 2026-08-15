@@ -1213,14 +1213,69 @@ fn main() {
             };
             let mut boundary_energy = f;
             let mut validated_gradient = None;
+            let mut xr = xr;
             if led.charge() {
-                let (fresh_energy, g) = lj(xr.view());
+                let (fresh_energy, mut g) = lj(xr.view());
                 boundary_energy = fresh_energy;
-                if euclidean_gradient_norm(g.as_slice().expect("LJ gradient is contiguous")) < 1e-5
-                {
+                let mut gnorm =
+                    euclidean_gradient_norm(g.as_slice().expect("LJ gradient is contiguous"));
+                // The share tolerance is a Euclidean bound over every
+                // component, which sits severalfold above the max-abs a
+                // converged relaxation reports on larger systems, so a fixed
+                // step count that satisfies one size stalls just short on
+                // another. A relaxation that lands near the bound therefore
+                // continues in bounded chunks until it crosses it or proves
+                // it will not, exactly as the census calibration converged
+                // its own quenches. Only near-minima enter this loop, so the
+                // cost lands on the rare states worth validating.
+                let mut chunks = 0;
+                while gnorm >= 1e-5 && gnorm < 1e-3 && chunks < 10 && led.remaining() > 0 {
+                    // A stalled line search poisons the curvature memory; a
+                    // restarted optimizer descends where a warm one stands
+                    // still, which is the difference between the plateau a
+                    // whisker above the bound and crossing it.
+                    opt.forget();
+                    let (fc, xc, _) = opt.minimize(xr.view(), 500, |v| charged(led, v));
+                    boundary_energy = fc;
+                    xr = xc;
+                    if !led.charge() {
+                        break;
+                    }
+                    let (fe, ge) = lj(xr.view());
+                    boundary_energy = fe;
+                    gnorm =
+                        euclidean_gradient_norm(ge.as_slice().expect("LJ gradient is contiguous"));
+                    g = ge;
+                    chunks += 1;
+                    // The last few percent yield to plain steepest descent
+                    // with a fixed small step when the quasi-Newton stalls:
+                    // near a minimum the gradient direction is exact enough
+                    // and each step is one charged evaluation.
+                    let mut descents = 0;
+                    while gnorm >= 1e-5 && gnorm < 3e-5 && descents < 200 && led.charge() {
+                        // Fixed step alpha = 0.01 sits well under the
+                        // stability bound 2 over the stiffest LJ curvature,
+                        // so every mode contracts and the few percent above
+                        // the bound take tens of one-evaluation steps.
+                        for (value, gradient) in xr.iter_mut().zip(g.iter()) {
+                            *value -= 0.01 * gradient;
+                        }
+                        let (fe, ge) = lj(xr.view());
+                        boundary_energy = fe;
+                        gnorm = euclidean_gradient_norm(
+                            ge.as_slice().expect("LJ gradient is contiguous"),
+                        );
+                        g = ge;
+                        descents += 1;
+                    }
+                }
+                if gnorm < 1e-5 {
                     converged += 1;
                     validated_gradient = Some(g);
                 } else {
+                    if std::env::var("ANNEAL_POLISH_TRACE").is_ok() && chunks > 0 {
+                        eprintln!("POLISH_PLATEAU gnorm {gnorm:.3e} after {chunks} chunks");
+                    }
                     capped += 1;
                 }
             } else {

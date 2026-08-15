@@ -1011,6 +1011,7 @@ where
     .flatten()
     .collect();
     let mut stall_allocator = crate::allocate::DepthAllocator::new(stall_arms.len().max(1));
+    let mut last_polish_spent = 0usize;
     let mut soft_lambda = 0.0_f64;
     // The escape scale starts at the move library's own amplitude, so a run
     // without feedback and one with it begin identically.
@@ -1550,6 +1551,7 @@ where
             }
         }
         let best_before_iteration = ledger.best;
+        let mut moved_basin = false;
         if stage_one_reject {
             // The chain stays. A rejected proposal still deposits on where the
             // chain stands, exactly as a rejection through the ordinary
@@ -2212,6 +2214,7 @@ where
             if !returning && let Some(snapshot) = entry_snapshot {
                 basin_entry = Some(snapshot);
             }
+            moved_basin = !returning;
             e = e_new;
             x = x_new;
             current_validation_gradient = validation_gradient;
@@ -2494,12 +2497,36 @@ where
         // validation, so the polished minimum enters the boundary record the
         // checkpoint offer loop already reads. Bounded by the number of
         // improvement events and charged like any other relaxation.
+        // Two triggers, one mechanism. A deepened record is worth sharing on
+        // its own; a move into a fresh basin is worth registering because a
+        // census that only knows record-breakers cannot tell a chain it is
+        // walking into a basin someone has already searched, and telling it
+        // exactly that is what the shared catalog is for. The cooldown
+        // bounds the visit trigger so polishing can never take more than
+        // about a fifth of the budget on a chain that hops basins every
+        // slice.
+        let improved_record = ledger.best < best_before_iteration - 1e-10;
+        let visit_due = moved_basin
+            && ledger.spent().saturating_sub(last_polish_spent)
+                >= cfg.polish_records.saturating_mul(4);
         if cfg.polish_records > 0
-            && ledger.best < best_before_iteration - 1e-10
-            && let Some(best_state) = ledger.best_state.clone()
+            && (improved_record || visit_due)
+            && let Some(best_state) = if improved_record {
+                ledger.best_state.clone()
+            } else {
+                Some(x.clone())
+            }
         {
+            last_polish_spent = ledger.spent();
             let (polished_energy, polished_state) =
                 relax(ledger, best_state.view(), cfg.polish_records);
+            if std::env::var("ANNEAL_POLISH_TRACE").is_ok() {
+                eprintln!(
+                    "POLISH hop {hops} from {best} to {polished_energy} spent {spent}",
+                    best = best_before_iteration,
+                    spent = ledger.spent(),
+                );
+            }
             if polished_energy <= ledger.best {
                 ledger.record(polished_energy, polished_state.view());
             }
