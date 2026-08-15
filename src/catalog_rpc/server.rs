@@ -2253,6 +2253,7 @@ fn reset_trial(scientific: &mut ScientificState, replica: u32) {
     scientific.family_history.remove(&replica);
     scientific.trial_hops.remove(&replica);
     scientific.last_candidate_by_replica.remove(&replica);
+    scientific.best_candidate_by_replica.remove(&replica);
 }
 
 fn replica_series(scientific: &ScientificState, replica: u32) -> Vec<f64> {

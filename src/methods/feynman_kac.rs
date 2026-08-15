@@ -509,8 +509,7 @@ impl SynchronousPopulation {
     /// Construct a collector for one isolated ensemble.
     ///
     /// The live roster starts empty, so the barrier waits on every configured
-    /// replica until [`Self::mark_live`] declares the walkers that are
-    /// actually running.
+    /// replica until a submit sees a nonempty live set or a replica retires.
     pub fn new(
         replicas: impl IntoIterator<Item = u32>,
         coefficients: SelectionCoefficients,
@@ -579,7 +578,6 @@ impl SynchronousPopulation {
             return Err(ReconfigurationError::UnknownReplica { replica });
         }
         self.live.insert(replica);
-        self.live_roster = true;
         Ok(())
     }
 
@@ -598,9 +596,11 @@ impl SynchronousPopulation {
             return Err(ReconfigurationError::UnknownReplica { replica });
         }
         self.live.remove(&replica);
+        self.live_roster = true;
         self.abstained.insert(replica);
         self.submissions.remove(&replica);
-        self.close_if_ready(self.open_epoch)?;
+        let epoch = self.open_epoch;
+        self.close_if_ready(epoch)?;
         Ok(())
     }
 
@@ -748,6 +748,9 @@ impl SynchronousPopulation {
                     replica: member.replica,
                 })
             };
+        }
+        if !self.live.is_empty() {
+            self.live_roster = true;
         }
         self.submissions.insert(member.replica, member);
         self.close_if_ready(epoch)
