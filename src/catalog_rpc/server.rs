@@ -2123,15 +2123,6 @@ fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
     }
 }
 
-fn ensemble_mixed(scientific: &ScientificState) -> bool {
-    let chains: Vec<Vec<f64>> = scientific
-        .energy_history
-        .values()
-        .map(|history| history.iter().copied().collect())
-        .collect();
-    mixed(rhat_series(&chains))
-}
-
 fn replica_series(scientific: &ScientificState, replica: u32) -> Vec<f64> {
     scientific
         .energy_history
@@ -2277,7 +2268,7 @@ fn packing_relation(
     let mut compared = false;
     let mut same_as_incumbent = false;
     let mut same_as_any = false;
-    let mut lower_known = false;
+    let mut same_as_lower_isomer = false;
     for entry in scientific.catalog.entries() {
         let Some(entry_fp) = scientific.packing.histogram(entry.coordinates()) else {
             continue;
@@ -2286,23 +2277,23 @@ fn packing_relation(
         let same = same_packing(&local, &entry_fp);
         if same {
             same_as_any = true;
+            if entry.energy() < energy - 1e-10 {
+                same_as_lower_isomer = true;
+            }
         }
         if scientific.catalog.incumbent().map(|inc| inc.census_id()) == Some(entry.census_id())
             && same
         {
             same_as_incumbent = true;
         }
-        if entry.energy() < energy - 1e-10 {
-            lower_known = true;
-        }
     }
     if !compared {
         return None;
     }
-    // A replica already in a known packing takes a lower catalog
-    // energy, including a deeper funnel. A novel histogram is not
-    // yanked back onto the current floor.
-    if lower_known && same_as_any {
+    // Better isomer of the occupied packing only. A deeper different
+    // funnel is not copied: that mixes explore chains onto one
+    // attractor and destroys the occupancy certificate.
+    if same_as_lower_isomer {
         return Some(CatalogRelation::UnrelatedLowerAnchor);
     }
     if same_as_incumbent {

@@ -191,7 +191,7 @@ fn validation_failure_and_local_descent_preserve_local_search() {
 }
 
 #[test]
-fn a_lower_catalog_energy_is_taken_even_when_explore_has_mixed() {
+fn explore_collapse_leaves_instead_of_adopting_a_lower_funnel() {
     let (census, _) = census_with_repeated_visits(2);
     let mut state = input(
         ActiveCatalogRelation::Unrelated {
@@ -203,8 +203,8 @@ fn a_lower_catalog_energy_is_taken_even_when_explore_has_mixed() {
     state.mixing.explore_collapsed = true;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
-    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::ExploreCollapsed);
 }
 
 #[test]
