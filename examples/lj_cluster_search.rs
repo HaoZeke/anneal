@@ -2731,7 +2731,29 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = position.values().to_vec();
-        if bridge_enabled && let Some(assignment) = &active_bridge {
+        #[cfg(feature = "nng-transport")]
+        let decree_assignment = decree_slot
+            .try_lock()
+            .ok()
+            .and_then(|held| held.clone())
+            .and_then(|decree| {
+                decree
+                    .assignments
+                    .into_iter()
+                    .find(|assignment| assignment.replica == replica)
+            });
+        // The decree steers without touching any chain-local law: a
+        // replica under decree screens escapes more aggressively (the
+        // leader has seen a seam this chain cannot see locally), and
+        // bridge duty turns bridge polling on for exactly the replicas
+        // the leader named.
+        #[cfg(feature = "nng-transport")]
+        let (decree_stall_floor, decree_bridge_duty) = decree_assignment
+            .as_ref()
+            .map_or((4u32, false), |assignment| (2u32, assignment.bridge_duty));
+        #[cfg(not(feature = "nng-transport"))]
+        let (decree_stall_floor, decree_bridge_duty) = (4u32, false);
+        if (bridge_enabled || decree_bridge_duty) && let Some(assignment) = &active_bridge {
             match bridge_region_of(
                 &assignment.images,
                 descriptor.len(),
@@ -2812,20 +2834,6 @@ fn run_capnp_catalog(
                 .expect("terminal checkpoint trace must remain complete");
             return CheckpointAction::Continue;
         }
-        #[cfg(feature = "nng-transport")]
-        let decree_assignment = decree_slot
-            .try_lock()
-            .ok()
-            .and_then(|held| held.clone())
-            .and_then(|decree| {
-                decree
-                    .assignments
-                    .into_iter()
-                    .find(|assignment| assignment.replica == replica)
-            });
-        #[cfg(not(feature = "nng-transport"))]
-        let decree_assignment: Option<()> = None;
-        let _ = &decree_assignment;
         if histo_screen {
             cooperative
                 .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
@@ -2846,7 +2854,7 @@ fn run_capnp_catalog(
             // mechanism fired once or twice per forty thousand
             // evaluations. The stall counter is the gate.
             let _ = novel_here;
-            if stall >= 4
+            if stall >= decree_stall_floor
                 && checkpoint_sequence.is_multiple_of(8)
                 && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
             {
@@ -2923,7 +2931,7 @@ fn run_capnp_catalog(
                 }
             }
         }
-        if bridge_enabled
+        if (bridge_enabled || decree_bridge_duty)
             && active_bridge.is_none()
             && checkpoint_sequence.is_multiple_of(bridge_interval)
             && snapshot.remaining() > run_cfg.relax_steps.saturating_add(2)
