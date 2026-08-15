@@ -260,6 +260,8 @@ impl CatalogClient {
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_) => {
                 return Err(ProtocolError::Malformed(
@@ -339,6 +341,8 @@ impl CatalogClient {
             AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -372,6 +376,8 @@ impl CatalogClient {
             | AcceptedPayload::Candidate(_)
             | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -400,6 +406,8 @@ impl CatalogClient {
             AcceptedPayload::Candidate(_)
             | AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
@@ -442,6 +450,8 @@ impl CatalogClient {
             | AcceptedPayload::DescriptorHole(_)
             | AcceptedPayload::BoundaryCrossing(_)
             | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
+            | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
@@ -556,6 +566,33 @@ impl CatalogClient {
         }
     }
 
+    /// Poll for a bridge segment assignment. `None` when no bridge is
+    /// commissioned; the draw selects among the region's stored entries.
+    pub fn bridge_assignment(
+        &mut self,
+        event_sequence: u64,
+        draw: u64,
+    ) -> Result<Option<crate::catalog_rpc::BridgeAssignmentRecord>, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::BridgeAssignment { draw })?;
+        match reply.payload {
+            AcceptedPayload::BridgeAssignment(assignment) => Ok(Some(assignment)),
+            AcceptedPayload::None => Ok(None),
+            _ => Err(CatalogClientError::Protocol(ProtocolError::Malformed(
+                "bridge assignment reply carried the wrong payload".to_owned(),
+            ))),
+        }
+    }
+
+    /// Report one attempted exit from a bridge region.
+    pub fn bridge_crossing(
+        &mut self,
+        event_sequence: u64,
+        crossing: crate::catalog_rpc::BridgeCrossingRecord,
+    ) -> Result<(), CatalogClientError> {
+        self.call(event_sequence, CatalogOperation::BridgeCrossing { crossing })?;
+        Ok(())
+    }
+
     /// The framed Cap'n Proto reply to a status query, byte-exact as the
     /// coordinator sent it, validated as a status before it is handed on.
     pub fn observer_status_frame(
@@ -640,6 +677,7 @@ fn population_epoch_payload(
         | AcceptedPayload::DescriptorHole(_)
         | AcceptedPayload::BoundaryCrossing(_)
         | AcceptedPayload::CoordinatorStatus(_)
+        | AcceptedPayload::BridgeAssignment(_)
         | AcceptedPayload::PolicyState(_)
         | AcceptedPayload::CatalogMutation(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"

@@ -247,6 +247,11 @@ impl WeightLedger {
         Ok(())
     }
 
+    /// Segments launched in a region so far.
+    pub fn launches(&self, region: usize) -> u64 {
+        self.launched.get(region).copied().unwrap_or(0)
+    }
+
     /// Record an attempted exit and transfer weight toward its target.
     ///
     /// The update is Dickson and Dinner's: weight moves with attempted

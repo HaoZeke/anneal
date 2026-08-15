@@ -2,7 +2,8 @@
 
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest, PROTOCOL_VERSION,
-    ProtocolError, TransitionDestination, decode_request, encode_request, validate_identity,
+    BridgeCrossingRecord, ProtocolError, TransitionDestination, decode_request, encode_request,
+    validate_identity,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -75,6 +76,20 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             action: "probe".into(),
             destination: TransitionDestination::Unresolved,
             adopted: false,
+        },
+        CatalogOperation::PopulationAbstain { epoch: 7 },
+        CatalogOperation::PopulationJoin { epoch: 7 },
+        CatalogOperation::ObserverStatus,
+        CatalogOperation::BridgeAssignment { draw: 94 },
+        CatalogOperation::BridgeCrossing {
+            crossing: BridgeCrossingRecord {
+                bridge: 2,
+                from_region: 5,
+                to_region: 6,
+                descriptor: vec![0.4, 0.5, 0.6],
+                state: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                energy: -391.5,
+            },
         },
     ];
     for operation in operations {

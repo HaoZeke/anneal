@@ -143,6 +143,38 @@ struct PopulationJoinRequest {
   epoch @0 :UInt64;
 }
 
+# A commissioned bridge between two catalog minima. The string images
+# tile the channel between the two descriptors with Voronoi regions;
+# a replica holding an assignment confines its sampling to one region,
+# restarts from stored entry states, and reports attempted exits as
+# crossings. Images are row-major: imageCount rows of the descriptor
+# dimension.
+struct BridgeAssignment {
+  bridge @0 :UInt64;
+  fromBasin @1 :UInt64;
+  toBasin @2 :UInt64;
+  images @3 :List(Float64);
+  imageCount @4 :UInt32;
+  region @5 :UInt32;
+  tubeRadius @6 :Float64;
+  entry :union {
+    none @7 :Void;
+    state @8 :List(Float64);
+  }
+}
+
+# An attempted exit from a bridge region, reported by the confined
+# replica. The coordinator transfers region weight with the attempted
+# flux and stores the crossing state as an entry for the target region.
+struct BridgeCrossingRequest {
+  bridge @0 :UInt64;
+  fromRegion @1 :UInt32;
+  toRegion @2 :UInt32;
+  descriptor @3 :List(Float64);
+  state @4 :List(Float64);
+  energy @5 :Float64;
+}
+
 # Read-only coordinator status for an observer outside the ensemble. A
 # server that can only be interrogated by its own four replicas cannot be
 # watched, which is how a deadlocked campaign ran for hours looking
@@ -243,6 +275,8 @@ struct CatalogRequest {
     populationAbstain @15 :PopulationAbstainRequest;
     populationJoin @16 :PopulationJoinRequest;
     observerStatus @17 :Void;
+    bridgeAssignment @18 :UInt64;
+    bridgeCrossing @19 :BridgeCrossingRequest;
   }
 }
 
@@ -283,6 +317,7 @@ struct AcceptedReply {
     catalogMutation @10 :CatalogMutationReply;
     boundaryCrossing @11 :BoundaryCrossingReply;
     coordinatorStatus @12 :CoordinatorStatus;
+    bridgeAssignment @13 :BridgeAssignment;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
