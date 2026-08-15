@@ -109,13 +109,13 @@ fn energy_tie_is_not_uniquely_deepest() {
 
 #[test]
 fn inverted_mixing_certifies_only_a_winning_deeper_attractor() {
-    let series = [
-        constant(-173.928427, 8),
-        constant(-173.928427, 8),
-        constant(-173.928427, 8),
-        constant(-173.252378, 8),
-    ];
-    let verdict = invert_mixing(&[oh_majority(), ico_floor()], &series[3..]);
+    let ico = AttractorStrength {
+        energy: -173.252378,
+        occupancy: 1,
+        occupant_rhat: f64::INFINITY,
+    };
+    let series = [constant(-173.252378, 8), constant(-170.0, 8)];
+    let verdict = invert_mixing(&[oh_majority(), ico], &series);
     assert!(verdict.certified_attractor);
     assert!(!verdict.explore_collapsed);
 }
