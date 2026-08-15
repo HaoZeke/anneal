@@ -133,6 +133,19 @@ pub fn explore_collapsed(explore_series: &[Vec<f64>]) -> bool {
     mixed(rhat_series(explore_series))
 }
 
+/// Explore-role failure: mixed energy, mixed packing-family labels, or
+/// two or more chains occupying a lone uncertified packing.
+pub fn explore_must_leave(
+    energy_explore: &[Vec<f64>],
+    family_series: &[Vec<f64>],
+    n_families: usize,
+    n_assigned: usize,
+) -> bool {
+    explore_collapsed(energy_explore)
+        || mixed(rhat_series(family_series))
+        || (n_families <= 1 && n_assigned >= 2)
+}
+
 /// Inverted Gelman--Rubin evidence consumed by the catalog policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MixingEvidence {

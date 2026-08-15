@@ -27,7 +27,7 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, euclidean_gradient_norm,
-    invert_mixing, mixed, rhat_series, same_packing,
+    explore_must_leave, invert_mixing, mixed, rhat_series, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -251,6 +251,7 @@ struct ScientificState {
     population_plans: BTreeMap<u64, PopulationPlan>,
     packing: PackingBook,
     energy_history: BTreeMap<u32, VecDeque<f64>>,
+    family_history: BTreeMap<u32, VecDeque<f64>>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -315,6 +316,7 @@ impl CoordinatorState {
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
                     energy_history: BTreeMap::new(),
+                    family_history: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -904,7 +906,11 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            observe_packing(scientific, &validated.candidate.coordinates);
+            observe_packing(
+                scientific,
+                request.identity.replica,
+                &validated.candidate.coordinates,
+            );
             record_energy(
                 scientific,
                 request.identity.replica,
@@ -1253,7 +1259,11 @@ fn apply_request(
                 scientific
                     .last_candidate_by_replica
                     .insert(request.identity.replica, canonical);
-                observe_packing(scientific, &validated.candidate.coordinates);
+                observe_packing(
+                    scientific,
+                    request.identity.replica,
+                    &validated.candidate.coordinates,
+                );
                 record_energy(
                     scientific,
                     request.identity.replica,
@@ -1318,7 +1328,11 @@ fn apply_request(
                 scientific
                     .last_candidate_by_replica
                     .insert(request.identity.replica, canonical);
-                observe_packing(scientific, &validated.candidate.coordinates);
+                observe_packing(
+                    scientific,
+                    request.identity.replica,
+                    &validated.candidate.coordinates,
+                );
                 record_energy(
                     scientific,
                     request.identity.replica,
@@ -2088,8 +2102,14 @@ fn realize_population_plan(
     })
 }
 
-fn observe_packing(scientific: &mut ScientificState, coordinates: &[f64]) {
-    let _ = scientific.packing.observe(coordinates);
+fn observe_packing(scientific: &mut ScientificState, replica: u32, coordinates: &[f64]) {
+    if let Some(index) = scientific.packing.observe(coordinates) {
+        let history = scientific.family_history.entry(replica).or_default();
+        history.push_back(index as f64);
+        while history.len() > 64 {
+            history.pop_front();
+        }
+    }
 }
 
 fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
@@ -2199,7 +2219,22 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
             }
         }
     }
-    invert_mixing(&attractors, &explore)
+    let family_series: Vec<Vec<f64>> = scientific
+        .family_history
+        .values()
+        .map(|history| history.iter().copied().collect())
+        .filter(|series: &Vec<f64>| series.len() >= 2)
+        .collect();
+    let mut evidence = invert_mixing(&attractors, &explore);
+    if explore_must_leave(
+        &explore,
+        &family_series,
+        families.len(),
+        assigned.len(),
+    ) {
+        evidence.explore_collapsed = true;
+    }
+    evidence
 }
 
 fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64>> {
