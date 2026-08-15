@@ -6,6 +6,7 @@
 //! Marks has L1 0.69; versus the sealed ico floor the L1 is 0. No named
 //! morphology enters the comparison.
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 use ndarray::{Array1, ArrayView1};
@@ -30,12 +31,17 @@ const PACKING_SPEC: SoapSpec = SoapSpec {
 /// A closed-shell class histogram needs a real neighbour cloud.
 const MINIMUM_PACKING_ATOMS: usize = 13;
 
+/// Recompute DECAF only when some atom moved more than this.
+/// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.
+pub const PACKING_MOVE_EPS: f64 = 0.05;
+
 /// Leader-clustered environment codebook and packing-family visits.
 #[derive(Clone, Debug, Default)]
 pub struct PackingBook {
     env_leaders: Vec<Vec<f64>>,
     families: Vec<Vec<f64>>,
     visits: Vec<u64>,
+    histogram_cache: RefCell<Vec<(Vec<f64>, Vec<f64>)>>,
 }
 
 impl PackingBook {
@@ -43,6 +49,7 @@ impl PackingBook {
     /// toward a packing family.
     pub fn observe(&mut self, coordinates: &[f64]) -> Option<usize> {
         let histogram = self.assign_growing(coordinates)?;
+        self.remember(coordinates, &histogram);
         if let Some(index) = self.family_of(&histogram) {
             self.visits[index] = self.visits[index].saturating_add(1);
             return Some(index);
@@ -55,9 +62,43 @@ impl PackingBook {
     /// Normalized class histogram against the current codebook.
     ///
     /// Unseen environments share one extra bin so a query cannot mutate
-    /// the book. Visit/offer is what grows the codebook.
+    /// the book. Visit/offer is what grows the codebook. A structure
+    /// whose atoms have not moved by [`PACKING_MOVE_EPS`] reuses the
+    /// last histogram; DECAF cannot change family on that displacement.
     pub fn histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        self.assign_histogram(coordinates)
+        if let Some(histogram) = self.cached(coordinates) {
+            return Some(histogram);
+        }
+        let histogram = self.assign_histogram(coordinates)?;
+        self.remember(coordinates, &histogram);
+        Some(histogram)
+    }
+
+    fn cached(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
+        self.histogram_cache.borrow().iter().find_map(|(stored, histogram)| {
+            if !atom_moved(stored, coordinates, PACKING_MOVE_EPS) {
+                Some(histogram.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn remember(&self, coordinates: &[f64], histogram: &[f64]) {
+        let mut cache = self.histogram_cache.borrow_mut();
+        if let Some(slot) = cache
+            .iter_mut()
+            .find(|(stored, _)| !atom_moved(stored, coordinates, PACKING_MOVE_EPS))
+        {
+            slot.0 = coordinates.to_vec();
+            slot.1 = histogram.to_vec();
+            return;
+        }
+        cache.push((coordinates.to_vec(), histogram.to_vec()));
+        const CACHE_CAP: usize = 64;
+        if cache.len() > CACHE_CAP {
+            cache.remove(0);
+        }
     }
 
     /// Family index without mutating visit counts.
@@ -139,6 +180,20 @@ impl PackingBook {
         }
         Some(dense_normalized(&counts, self.env_leaders.len()))
     }
+}
+
+fn atom_moved(left: &[f64], right: &[f64], eps: f64) -> bool {
+    if left.len() != right.len() {
+        return true;
+    }
+    let n = left.len() / 3;
+    let limit = eps * eps;
+    (0..n).any(|atom| {
+        let d0 = left[3 * atom] - right[3 * atom];
+        let d1 = left[3 * atom + 1] - right[3 * atom + 1];
+        let d2 = left[3 * atom + 2] - right[3 * atom + 2];
+        d0 * d0 + d1 * d1 + d2 * d2 > limit
+    })
 }
 
 /// L1 distance between two normalized histograms, zero-padded to a common length.

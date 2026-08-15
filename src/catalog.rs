@@ -24,7 +24,8 @@ pub use mixing::{
     explore_must_leave, invert_mixing, mixed, rhat_series, stronger,
 };
 pub use packing::{
-    PACKING_MERGE, PackingBook, packing_distance, packing_fingerprint, packing_vector, same_packing,
+    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, packing_distance, packing_fingerprint,
+    packing_vector, same_packing,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{

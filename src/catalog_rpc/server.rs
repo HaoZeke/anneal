@@ -2152,9 +2152,16 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
         assigned.insert(*replica);
         let series = replica_series(scientific, *replica);
         let family = scientific
-            .packing
-            .histogram(&candidate.coordinates)
-            .and_then(|histogram| scientific.packing.family_of(&histogram));
+            .family_history
+            .get(replica)
+            .and_then(|history| history.back().copied())
+            .map(|index| index as usize)
+            .or_else(|| {
+                scientific
+                    .packing
+                    .histogram(&candidate.coordinates)
+                    .and_then(|histogram| scientific.packing.family_of(&histogram))
+            });
         let Some(index) = family else {
             continue;
         };

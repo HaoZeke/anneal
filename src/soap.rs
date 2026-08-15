@@ -148,8 +148,9 @@ pub fn local_spectra_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32
     if !(rcut > 0.0) {
         return out;
     }
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     for i in 0..n_at {
-        let (p, _) = atom_expand(x, i, n_at, rcut, spec, species);
+        let (p, _) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         for t in 0..dim {
             out[[i, t]] = p[t];
         }
@@ -180,14 +181,19 @@ pub fn local_nu3_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) 
     let n_chan = channels.len();
     let ace1 = spec.nu3_dim();
     let rcut = spec.rcut_nn;
+    let table = if n_at >= 2 && rcut > 0.0 {
+        Some(crate::neighbors::NeighborTable::build(x, n_at, rcut))
+    } else {
+        None
+    };
     for i in 0..n_at {
         for t in 0..d0 {
             out[[i, t]] = soap[[i, t]];
         }
-        if n_at < 2 || !(rcut > 0.0) {
+        let Some(table) = table.as_ref() else {
             continue;
-        }
-        let (_, c) = atom_expand(x, i, n_at, rcut, spec, species);
+        };
+        let (_, c) = atom_expand(x, i, n_at, rcut, spec, species, table);
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
             let sl = &c[c0..c0 + spec.n_max * n_lm];
@@ -237,12 +243,20 @@ fn gather_neigh(
     rcut: f64,
     species: Option<&[u32]>,
 ) -> Vec<Neigh> {
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
+    gather_neigh_from_table(x, i, rcut, species, &table)
+}
+
+fn gather_neigh_from_table(
+    x: ArrayView1<f64>,
+    i: usize,
+    rcut: f64,
+    species: Option<&[u32]>,
+    table: &crate::neighbors::NeighborTable,
+) -> Vec<Neigh> {
     let mut neigh = Vec::new();
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-    for j in 0..n_at {
-        if j == i {
-            continue;
-        }
+    for &j in table.neighbors(i) {
         let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
         let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if r >= rcut || r < 1e-12 {
@@ -568,10 +582,11 @@ pub fn jacobian_ace(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>)
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let c_atom = n_chan * spec.n_max * n_lm;
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let mut c = vec![vec![0.0; c_atom]; n_at];
     let mut dbdc = Vec::with_capacity(n_at * n_chan);
     for i in 0..n_at {
-        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species);
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         c[i] = ci;
         for ch in 0..n_chan {
             let c0 = ch * spec.n_max * n_lm;
@@ -680,9 +695,10 @@ pub fn jacobian_z(x: ArrayView1<f64>, spec: SoapSpec, species: Option<&[u32]>) -
     }
     let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
     let c_atom = n_chan * spec.n_max * n_lm;
+    let table = crate::neighbors::NeighborTable::build(x, n_at, rcut);
     let mut c = vec![vec![0.0; c_atom]; n_at];
     for i in 0..n_at {
-        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species);
+        let (_, ci) = atom_expand(x, i, n_at, rcut, spec, species, &table);
         c[i] = ci;
     }
     for i in 0..n_at {
@@ -2042,10 +2058,11 @@ pub fn jacobian_fd(x: ArrayView1<f64>, spec: SoapSpec, eps: f64) -> Array2<f64> 
 fn atom_expand(
     x: ArrayView1<f64>,
     i: usize,
-    n_at: usize,
+    _n_at: usize,
     rcut: f64,
     spec: SoapSpec,
     species: Option<&[u32]>,
+    table: &crate::neighbors::NeighborTable,
 ) -> (Array1<f64>, Vec<f64>) {
     let n_max = spec.n_max;
     let l_max = spec.l_max;
@@ -2055,10 +2072,7 @@ fn atom_expand(
     let c_atom = n_chan * n_max * n_lm;
     let mut c = vec![0.0; c_atom];
     let xi = [x[3 * i], x[3 * i + 1], x[3 * i + 2]];
-    for j in 0..n_at {
-        if j == i {
-            continue;
-        }
+    for &j in table.neighbors(i) {
         let d = [x[3 * j] - xi[0], x[3 * j + 1] - xi[1], x[3 * j + 2] - xi[2]];
         let r = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
         if r >= rcut || r < 1e-12 {

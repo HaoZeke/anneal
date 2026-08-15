@@ -22,8 +22,20 @@ pub struct NeighborTable {
 }
 
 impl NeighborTable {
-    /// Builds the table from scratch in O(n^2).
+    /// Builds the table. Prefers vesin cell lists when that backend is
+    /// compiled in; otherwise the exact all-pairs construction.
     pub fn build(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Self {
+        #[cfg(feature = "vesin-nl")]
+        {
+            if let Some(table) = Self::build_vesin(x, n, cutoff) {
+                return table;
+            }
+        }
+        Self::build_naive(x, n, cutoff)
+    }
+
+    /// Exact all-pairs construction.
+    pub fn build_naive(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Self {
         let cutoff2 = cutoff * cutoff;
         let mut lists = vec![Vec::new(); n];
         for i in 0..n {
@@ -308,7 +320,7 @@ mod vesin_ffi {
             for _ in 0..5 {
                 let n = 60;
                 let x = Array1::from_shape_fn(3 * n, |_| rng.random::<f64>() * 5.0);
-                let naive = NeighborTable::build(x.view(), n, 1.4);
+                let naive = NeighborTable::build_naive(x.view(), n, 1.4);
                 let fast = NeighborTable::build_vesin(x.view(), n, 1.4).expect("vesin refused");
                 for i in 0..n {
                     assert_eq!(naive.neighbors(i), fast.neighbors(i), "atom {i}");
