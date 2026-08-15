@@ -141,6 +141,24 @@ print(refined["best_val"])
 
 Full docs, tutorials (classical, Bayesian pilot+mixer, GLE, polish+device), algebra, how-tos, and reference at https://anneal.rgoswami.me .
 
+## Method catalog
+
+Every algorithmic mechanism in the crate, with file:line references,
+constants, and how the pieces feed each other:
+[`docs/orgmode/methods/catalog.org`](docs/orgmode/methods/catalog.org).
+A narrative walk of one cooperative run end to end, naming each
+mechanism as it fires, plus a dataflow diagram:
+[`docs/orgmode/methods/composition.org`](docs/orgmode/methods/composition.org).
+
+| Group | Covers |
+|---|---|
+| Local search | Quenching, screening, biased hopping, move kernels, stall escapes |
+| Learned allocation | Thompson/depth/contextual allocators, budget-window temperature, regime selection |
+| Descriptors and identity | SOAP/ACE spaces, featomic, IRA/SOFI shape matching, census calibration |
+| Cooperative layer | Catalog/census, policy, boundary transport, descriptor holes, Feynman-Kac population epochs, spectral referee, umbrella bridges, the Cap'n Proto protocol |
+| Population methods | CSA bank, archive search, splice, portfolio, replica exchange, warm L-BFGS |
+| Statistics and accounting | Cooperative and local ledgers, Good-Turing census accounting, paired-seed evaluation methodology |
+
 ## Development
 
 ```bash
