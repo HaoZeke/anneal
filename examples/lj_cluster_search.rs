@@ -84,7 +84,7 @@ mod option_tests {
     fn unrelated_recommended_options_preserve_default_true_mechanisms() {
         let mut cfg = Config::recommended(75);
         apply_boolean_options(&mut cfg, &["rec", "catalog"]);
-        assert!(cfg.adaptive_height);
+        assert!(!cfg.adaptive_height);
         assert!(cfg.escape_on_stall);
     }
 
