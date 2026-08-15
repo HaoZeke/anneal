@@ -106,6 +106,8 @@ pub mod laws;
 pub mod localkey;
 /// Short MD segments through external engines (LAMMPS, GROMACS).
 pub mod md_engine;
+/// Leader consensus over exploration decrees between server brains.
+pub mod raft;
 /// Annealing-method extensions built on the typed algebra:
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
