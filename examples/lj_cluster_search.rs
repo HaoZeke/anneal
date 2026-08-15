@@ -3201,7 +3201,7 @@ fn run_capnp_catalog(
                 trace.policy_role = PolicyRole::Explore;
                 trace.proposal_family = ProposalFamily::BoundaryTransport;
                 if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                    .boundary_crossing(replica, descriptor, transport_rng.random())
+                    .boundary_crossing(replica, descriptor.clone(), transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
                     if shared_bias_enabled {
