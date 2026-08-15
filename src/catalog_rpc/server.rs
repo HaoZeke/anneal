@@ -26,15 +26,16 @@ use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
-    QuenchStatus, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
-    euclidean_gradient_norm, explore_must_leave, invert_mixing, prune, rhat_series, same_packing,
+    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, prune, rhat_series,
+    same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
 use crate::descriptor_space::DescriptorSpace;
 use crate::methods::feynman_kac::{
-    EpochSubmissionOutcome, PopulationEpochPlan, PopulationMember, SelectionCoefficients,
-    SynchronousPopulation,
+    EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
+    SelectionCoefficients, SynchronousPopulation, assign_parents_by_packing,
 };
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::methods::landscape_graph::LandscapeGraph;
@@ -875,6 +876,17 @@ fn apply_request(
             if mixing.pruned {
                 reset_trial(scientific, request.identity.replica);
             }
+            if scientific
+                .population
+                .mark_live(request.identity.replica)
+                .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -1104,6 +1116,17 @@ fn apply_request(
                 .or_default()
                 .entry(request.identity.replica)
                 .or_insert(member_candidate);
+            if scientific
+                .population
+                .mark_live(request.identity.replica)
+                .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
             let Ok(outcome) = scientific.population.submit(*epoch, member) else {
                 return rejected(
                     state,
@@ -1139,6 +1162,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            let open_epoch = scientific.population.open_epoch();
             let Ok(outcome) = scientific
                 .population
                 .abstain(*epoch, request.identity.replica)
@@ -1149,6 +1173,18 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            if *epoch == open_epoch
+                && scientific
+                    .population
+                    .retire(request.identity.replica)
+                    .is_err()
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
             payload = match outcome {
                 EpochSubmissionOutcome::Pending {
                     submitted,
@@ -1278,6 +1314,17 @@ fn apply_request(
                     request.identity.replica,
                     validated.fresh.energy,
                 );
+                if scientific
+                    .population
+                    .mark_live(request.identity.replica)
+                    .is_err()
+                {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
                 let _ = transition_node(scientific, observation.basin_id);
                 observation.total_visits
             } else {
@@ -1347,6 +1394,17 @@ fn apply_request(
                     request.identity.replica,
                     validated.fresh.energy,
                 );
+                if scientific
+                    .population
+                    .mark_live(request.identity.replica)
+                    .is_err()
+                {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
                 let outcome = scientific.catalog.admit(
                     observation.basin_id,
                     observation.basin_visits,
@@ -2064,11 +2122,12 @@ fn realize_population_plan(
         .population_candidates
         .get(&epoch)
         .expect("complete epoch retains every source candidate");
-    let (parents, weights, selection) = match region_population_assignment(
+    let family_cap = usize::try_from(REDUCTION_FACTOR).unwrap_or(3);
+    let (fallback_parents, weights, selection) = match region_population_assignment(
         scientific,
         plan.destinations(),
         source_candidates,
-        config.replicas.len().div_ceil(2),
+        family_cap,
     ) {
         Some((parents, weights)) => (parents, weights, PopulationSelection::RegionCovering),
         None => (
@@ -2077,7 +2136,33 @@ fn realize_population_plan(
             PopulationSelection::SystematicResampling,
         ),
     };
-    let parents = referee_community_coverage(scientific, parents, source_candidates);
+    let fallback_parents =
+        referee_community_coverage(scientific, fallback_parents, source_candidates);
+    let occupants = plan
+        .destinations()
+        .iter()
+        .map(|replica| {
+            let candidate = source_candidates.get(replica);
+            PackingOccupant {
+                replica: *replica,
+                family: replica_family_index(scientific, *replica, candidate),
+                energy: candidate
+                    .map(|candidate| candidate.energy)
+                    .or_else(|| {
+                        scientific
+                            .last_candidate_by_replica
+                            .get(replica)
+                            .map(|candidate| candidate.energy)
+                    })
+                    .unwrap_or(f64::INFINITY),
+            }
+        })
+        .collect::<Vec<_>>();
+    let parents = if occupants.iter().any(|occupant| occupant.family.is_some()) {
+        assign_parents_by_packing(&occupants, family_cap)
+    } else {
+        fallback_parents
+    };
     let parent_candidates = parents
         .iter()
         .map(|parent| {
@@ -2287,6 +2372,32 @@ fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64
         .last_candidate_by_replica
         .get(&replica)
         .and_then(|candidate| scientific.packing.histogram(&candidate.coordinates))
+}
+
+fn replica_family_index(
+    scientific: &ScientificState,
+    replica: u32,
+    candidate: Option<&CatalogCandidate>,
+) -> Option<usize> {
+    scientific
+        .family_history
+        .get(&replica)
+        .and_then(|history| history.back().copied())
+        .map(|index| index as usize)
+        .or_else(|| {
+            let coordinates = candidate
+                .map(|candidate| candidate.coordinates.as_slice())
+                .or_else(|| {
+                    scientific
+                        .last_candidate_by_replica
+                        .get(&replica)
+                        .map(|candidate| candidate.coordinates.as_slice())
+                })?;
+            scientific
+                .packing
+                .histogram(coordinates)
+                .and_then(|histogram| scientific.packing.family_of(&histogram))
+        })
 }
 
 fn packing_or_region_relation(

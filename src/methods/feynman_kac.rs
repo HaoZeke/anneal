@@ -468,13 +468,14 @@ impl PopulationEpochPlan {
 /// Result of submitting one replica's evidence to a synchronous epoch.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EpochSubmissionOutcome {
-    /// The epoch remains open until every configured replica has submitted.
+    /// The epoch remains open until every replica the barrier still requires
+    /// has submitted.
     Pending {
         /// Open synchronization epoch.
         epoch: u64,
         /// Unique replica submissions received.
         submitted: usize,
-        /// Complete population size required.
+        /// Replicas the barrier still waits on.
         required: usize,
     },
     /// All replicas submitted and the immutable parent plan is available.
@@ -498,10 +499,18 @@ pub struct SynchronousPopulation {
     submissions: BTreeMap<u32, PopulationMember>,
     completed: BTreeMap<u64, CompletedEpoch>,
     abstained: BTreeSet<u32>,
+    live: BTreeSet<u32>,
+    /// When set, [`Self::required`] counts [`Self::live`] even if retirement
+    /// has emptied that set, instead of falling back to the configured roster.
+    live_roster: bool,
 }
 
 impl SynchronousPopulation {
     /// Construct a collector for one isolated ensemble.
+    ///
+    /// The live roster starts empty, so the barrier waits on every configured
+    /// replica until [`Self::mark_live`] declares the walkers that are
+    /// actually running.
     pub fn new(
         replicas: impl IntoIterator<Item = u32>,
         coefficients: SelectionCoefficients,
@@ -533,6 +542,8 @@ impl SynchronousPopulation {
             submissions: BTreeMap::new(),
             completed: BTreeMap::new(),
             abstained: BTreeSet::new(),
+            live: BTreeSet::new(),
+            live_roster: false,
         })
     }
 
@@ -541,17 +552,56 @@ impl SynchronousPopulation {
         self.open_epoch
     }
 
-    /// Submit one immutable replica representative to an epoch barrier.
-    /// Replicas still expected to submit to the open epoch.
+    /// Replicas the open epoch still waits on.
     ///
-    /// A replica that cannot produce a validated representative at this
-    /// barrier will never submit to it, so counting it as required holds
-    /// the epoch open until every other replica has drained its budget.
-    /// Abstention applies to the open epoch alone: the replica rejoins the
-    /// next one, since the condition that stopped it is a property of where
-    /// its search currently stands rather than of the replica.
+    /// Without a declared live roster the count is the configured population
+    /// minus abstentions. A declared live roster counts live replicas that
+    /// have not abstained, including zero when every live replica has
+    /// retired.
     fn required(&self) -> usize {
-        self.replicas.len().saturating_sub(self.abstained.len())
+        if self.live_roster {
+            self.live
+                .iter()
+                .filter(|replica| !self.abstained.contains(replica))
+                .count()
+        } else {
+            self.replicas.len().saturating_sub(self.abstained.len())
+        }
+    }
+
+    /// Declare that `replica` is an active walker the barrier waits on.
+    ///
+    /// Unknown identities, including replicas outside the configured roster,
+    /// return [`ReconfigurationError::UnknownReplica`]. A replica already in
+    /// the live set is accepted again.
+    pub fn mark_live(&mut self, replica: u32) -> Result<(), ReconfigurationError> {
+        if !self.replicas.contains(&replica) {
+            return Err(ReconfigurationError::UnknownReplica { replica });
+        }
+        self.live.insert(replica);
+        self.live_roster = true;
+        Ok(())
+    }
+
+    /// Remove `replica` from the live roster so the barrier no longer waits
+    /// for it.
+    ///
+    /// Retirement is an abstention from the open epoch: the replica is not a
+    /// required destination and any submission it already made is dropped. A
+    /// replica that is already retired is accepted again. Unknown identities
+    /// return [`ReconfigurationError::UnknownReplica`].
+    ///
+    /// If every live replica has retired and nobody remains to submit, the
+    /// open epoch closes vacantly so the barrier does not stay open.
+    pub fn retire(&mut self, replica: u32) -> Result<(), ReconfigurationError> {
+        if !self.replicas.contains(&replica) {
+            return Err(ReconfigurationError::UnknownReplica { replica });
+        }
+        self.live.remove(&replica);
+        self.abstained.insert(replica);
+        self.submissions.remove(&replica);
+        self.close_if_ready(self.open_epoch)?;
+        Ok(())
     }
 
     /// Replicas whose submission forms the open epoch, in configured order.
@@ -563,7 +613,8 @@ impl SynchronousPopulation {
             .collect()
     }
 
-    /// Replicas the open epoch still requires, after abstentions.
+    /// Replicas the open epoch still requires, after abstentions and
+    /// retirement from the live roster.
     pub fn open_requirement(&self) -> usize {
         self.required()
     }
@@ -571,6 +622,43 @@ impl SynchronousPopulation {
     /// Whether every replica that can still submit has done so.
     fn epoch_is_complete(&self) -> bool {
         !self.submissions.is_empty() && self.submissions.len() >= self.required()
+    }
+
+    /// Close the open epoch when the barrier is met or nobody remains.
+    fn close_if_ready(
+        &mut self,
+        epoch: u64,
+    ) -> Result<EpochSubmissionOutcome, ReconfigurationError> {
+        if self.submissions.is_empty() && self.required() == 0 {
+            // Every replica the barrier still counted declined, so there is
+            // no population to select from, yet the epoch must still close:
+            // leaving it open wedges every replica's epoch counter on a
+            // barrier nobody can meet. A vacant close is reported as zero
+            // submitted of zero required, which no genuinely pending epoch
+            // can produce, since a pending epoch always has at least one
+            // replica still expected.
+            self.abstained.clear();
+            self.open_epoch =
+                self.open_epoch
+                    .checked_add(1)
+                    .ok_or(ReconfigurationError::InvalidParameter {
+                        field: "epoch_overflow",
+                        value: self.open_epoch as f64,
+                    })?;
+            return Ok(EpochSubmissionOutcome::Pending {
+                epoch,
+                submitted: 0,
+                required: 0,
+            });
+        }
+        if !self.epoch_is_complete() {
+            return Ok(EpochSubmissionOutcome::Pending {
+                epoch,
+                submitted: self.submissions.len(),
+                required: self.required(),
+            });
+        }
+        self.complete_open_epoch(epoch)
     }
 
     /// Record that a replica will not submit to the open epoch.
@@ -607,40 +695,12 @@ impl SynchronousPopulation {
         }
         self.abstained.insert(replica);
         self.submissions.remove(&replica);
-        if self.abstained.len() == self.replicas.len() {
-            // Every replica declined, so there is no population to select
-            // from, yet the epoch must still close: leaving it open wedges
-            // every replica's epoch counter on a barrier nobody can meet.
-            // A vacant close is reported as zero submitted of zero required,
-            // which no genuinely pending epoch can produce, since a pending
-            // epoch always has at least one replica still expected.
-            self.abstained.clear();
-            self.open_epoch =
-                self.open_epoch
-                    .checked_add(1)
-                    .ok_or(ReconfigurationError::InvalidParameter {
-                        field: "epoch_overflow",
-                        value: self.open_epoch as f64,
-                    })?;
-            return Ok(EpochSubmissionOutcome::Pending {
-                epoch,
-                submitted: 0,
-                required: 0,
-            });
-        }
-        if !self.epoch_is_complete() {
-            return Ok(EpochSubmissionOutcome::Pending {
-                epoch,
-                submitted: self.submissions.len(),
-                required: self.required(),
-            });
-        }
-        self.complete_open_epoch(epoch)
+        self.close_if_ready(epoch)
     }
 
     /// Submit one replica's member to the open epoch.
     ///
-    /// Completes the epoch when every replica that has not abstained has
+    /// Completes the epoch when every replica the barrier still requires has
     /// submitted; a repeat of an identical submission is answered from the
     /// completed record.
     pub fn submit(
@@ -680,7 +740,7 @@ impl SynchronousPopulation {
                 Ok(EpochSubmissionOutcome::Pending {
                     epoch,
                     submitted: self.submissions.len(),
-                    required: self.replicas.len(),
+                    required: self.required(),
                 })
             } else {
                 Err(ReconfigurationError::ConflictingSubmission {
@@ -690,15 +750,7 @@ impl SynchronousPopulation {
             };
         }
         self.submissions.insert(member.replica, member);
-        if !self.epoch_is_complete() {
-            return Ok(EpochSubmissionOutcome::Pending {
-                epoch,
-                submitted: self.submissions.len(),
-                required: self.required(),
-            });
-        }
-
-        self.complete_open_epoch(epoch)
+        self.close_if_ready(epoch)
     }
 
     fn complete_open_epoch(
@@ -955,4 +1007,74 @@ fn genealogy_diagnostics(weights: &[f64], parents: &[usize]) -> GenealogyDiagnos
         max_family_size,
         offspring_variance,
     }
+}
+
+/// Destination replica with packing-family identity and energy.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PackingOccupant {
+    /// Replica identity.
+    pub replica: u32,
+    /// Packing-family index, or none before DECAF assigns one.
+    pub family: Option<usize>,
+    /// Occupant energy; lower is deeper.
+    pub energy: f64,
+}
+
+/// Assign parents so resampling stays inside one packing family.
+///
+/// Each distinct family keeps its lowest-energy occupant as a parent of
+/// itself. Extra members of the same family may copy that occupant up to
+/// `max_offspring` slots and otherwise stay local. A destination never
+/// receives a parent from a different packing. Unassigned packings stay
+/// on themselves.
+pub fn assign_parents_by_packing(
+    occupants: &[PackingOccupant],
+    max_offspring: usize,
+) -> Vec<u32> {
+    let mut parents: Vec<u32> = occupants.iter().map(|occupant| occupant.replica).collect();
+    if occupants.is_empty() {
+        return parents;
+    }
+    let cap = max_offspring.max(1);
+
+    let mut groups = BTreeMap::<usize, Vec<usize>>::new();
+    for (index, occupant) in occupants.iter().enumerate() {
+        let Some(family) = occupant.family else {
+            continue;
+        };
+        groups.entry(family).or_default().push(index);
+    }
+
+    for indices in groups.values() {
+        if indices.len() < 2 {
+            continue;
+        }
+        let donor_index = indices
+            .iter()
+            .copied()
+            .min_by(|&left, &right| {
+                occupants[left]
+                    .energy
+                    .total_cmp(&occupants[right].energy)
+                    .then_with(|| occupants[left].replica.cmp(&occupants[right].replica))
+            })
+            .expect("family group is nonempty");
+        let donor = occupants[donor_index].replica;
+        let mut extras: Vec<usize> = indices
+            .iter()
+            .copied()
+            .filter(|&index| index != donor_index)
+            .collect();
+        extras.sort_by(|&left, &right| {
+            occupants[right]
+                .energy
+                .total_cmp(&occupants[left].energy)
+                .then_with(|| occupants[right].replica.cmp(&occupants[left].replica))
+        });
+        let clones = cap.saturating_sub(1);
+        for &index in extras.iter().take(clones) {
+            parents[index] = donor;
+        }
+    }
+    parents
 }
