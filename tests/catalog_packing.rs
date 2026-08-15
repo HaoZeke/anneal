@@ -1,5 +1,6 @@
 use anneal_core::catalog::{
-    PACKING_MERGE, PackingBook, packing_distance, packing_fingerprint, same_packing,
+    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, packing_distance, packing_fingerprint,
+    same_packing,
 };
 use ndarray::Array1;
 
@@ -70,4 +71,16 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
     assert_eq!(book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()), 0.0);
+}
+
+#[test]
+fn a_sub_threshold_displacement_reuses_the_decaf_histogram() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    let first = book.histogram(ico.as_slice().unwrap()).unwrap();
+    let mut nudged = ico.clone();
+    nudged[0] += 0.1 * PACKING_MOVE_EPS;
+    let reused = book.histogram(nudged.as_slice().unwrap()).unwrap();
+    assert_eq!(first, reused);
 }
