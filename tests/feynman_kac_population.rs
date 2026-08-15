@@ -365,6 +365,23 @@ fn live_replicas_close_an_epoch_without_the_unstarted_roster() {
 }
 
 #[test]
+fn a_single_live_replica_cannot_close_the_configured_roster() {
+    let mut population = SynchronousPopulation::new(0u32..8, coefficients(), 2, 29).unwrap();
+    population.mark_live(0).unwrap();
+    let outcome = population
+        .submit(0, PopulationMember::new(0, -10.0, 0.3, 2.0).unwrap())
+        .unwrap();
+    assert_eq!(
+        outcome,
+        EpochSubmissionOutcome::Pending {
+            epoch: 0,
+            submitted: 1,
+            required: 8,
+        }
+    );
+}
+
+#[test]
 fn an_unmarked_population_still_waits_for_every_configured_replica() {
     let mut population = SynchronousPopulation::new([0, 1, 2, 3], coefficients(), 2, 13).unwrap();
     let outcome = population

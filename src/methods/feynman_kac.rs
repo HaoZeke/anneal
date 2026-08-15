@@ -749,7 +749,7 @@ impl SynchronousPopulation {
                 })
             };
         }
-        if !self.live.is_empty() {
+        if self.live.len() >= 2 {
             self.live_roster = true;
         }
         self.submissions.insert(member.replica, member);

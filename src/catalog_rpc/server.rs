@@ -2476,14 +2476,11 @@ fn attraction_region_relation(
             == Some(local_basin)
         {
             CatalogRelation::Incumbent
-        } else if scientific
-            .catalog
-            .entries()
-            .iter()
-            .any(|entry| entry.census_id() != local_basin && entry.energy() < energy)
-        {
-            CatalogRelation::UnrelatedLowerAnchor
         } else {
+            // A lower energy in another census basin is a different
+            // funnel. Exploit is a better isomer of the occupied
+            // packing only; packing_relation is what may set
+            // UnrelatedLowerAnchor.
             CatalogRelation::UnrelatedNoAnchor
         }
     };
