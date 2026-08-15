@@ -85,7 +85,7 @@ mod option_tests {
         let mut cfg = Config::recommended(75);
         apply_boolean_options(&mut cfg, &["rec", "catalog"]);
         assert!(!cfg.adaptive_height);
-        assert!(cfg.escape_on_stall);
+        assert!(!cfg.escape_on_stall);
     }
 
     #[test]

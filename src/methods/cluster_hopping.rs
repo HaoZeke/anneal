@@ -3157,7 +3157,7 @@ mod tests {
         let der = Config::derived(13);
         assert!(matches!(der.move_library, MoveLibrary::LeanBurst));
         assert!(der.allocate_moves && der.depth_reward && der.tabu_on_stall);
-        assert!(der.escape_on_stall);
+        assert!(!der.escape_on_stall);
         assert!(!der.restart_on_stall);
         assert!(der.budget_window);
         assert!(der.bayes_screen);
