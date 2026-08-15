@@ -2292,6 +2292,14 @@ fn run_capnp_catalog(
 
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
+    if let Ok(hops) = std::env::var("CATALOG_MAX_HOPS") {
+        let hops: usize = hops
+            .parse()
+            .expect("CATALOG_MAX_HOPS must be a positive hop count");
+        assert!(hops >= 1, "CATALOG_MAX_HOPS must be a positive hop count");
+        run_cfg.max_hops = Some(hops);
+        println!("  hop cap {hops}");
+    }
     // Cooperative wells: the SOAP archive the hole step walks away
     // from, fed with every minimum the coordinator hands this replica.
     // Off only when CATALOG_COOP_WELLS=0.
