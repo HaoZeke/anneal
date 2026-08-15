@@ -1173,18 +1173,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            if *epoch == open_epoch
-                && scientific
-                    .population
-                    .retire(request.identity.replica)
-                    .is_err()
-            {
-                return rejected(
-                    state,
-                    request.event_sequence,
-                    ProtocolRejection::ValidationRejected,
-                );
-            }
+            let _ = scientific
+                .population
+                .retire(request.identity.replica);
             payload = match outcome {
                 EpochSubmissionOutcome::Pending {
                     submitted,
