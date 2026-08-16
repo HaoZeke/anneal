@@ -49,6 +49,16 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
     cfg.symmetrise_on_stall = (cfg.symmetrise_on_stall || sym) && !nosym;
 }
 
+/// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
+/// on the occupied well. Not the paper-budget recommended hop.
+fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
+    let sb = Config::packing_superbasin(n);
+    cfg.adaptive_height = sb.adaptive_height;
+    cfg.height_revisits = sb.height_revisits;
+    cfg.keying = sb.keying;
+    cfg.merge_radius = sb.merge_radius;
+}
+
 /// Lennard-Jones value and gradient in reduced units, no cutoff.
 fn lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {
     let n = x.len() / 3;
@@ -103,6 +113,17 @@ mod option_tests {
         apply_boolean_options(&mut cfg, &["height", "climb"]);
         assert!(cfg.adaptive_height);
         assert!(cfg.escape_on_stall);
+    }
+
+    #[test]
+    fn occupancy_catalog_builds_soap_packing_superbasins() {
+        let mut cfg = Config::recommended(75);
+        apply_boolean_options(&mut cfg, &["rec", "catalog"]);
+        apply_occupancy_superbasin(&mut cfg, 75);
+        assert!(cfg.adaptive_height);
+        assert_eq!(cfg.height_revisits, 20.0);
+        #[cfg(feature = "featomic")]
+        assert_eq!(cfg.keying, Keying::SoapPacking);
     }
 
     #[cfg(feature = "bank-rpc")]
@@ -955,6 +976,12 @@ fn main() {
     cfg.budget_window = opts.contains(&"bfwt");
     cfg.allocate_moves = cfg.allocate_moves || opts.contains(&"thompson");
     apply_boolean_options(&mut cfg, &opts);
+    if std::env::var("CATALOG_RPC")
+        .ok()
+        .is_some_and(|value| !value.is_empty())
+    {
+        apply_occupancy_superbasin(&mut cfg, n);
+    }
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is
