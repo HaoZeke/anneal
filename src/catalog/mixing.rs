@@ -45,7 +45,11 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
         .iter()
         .zip(&means)
         .map(|(chain, mean)| {
-            chain.iter().map(|value| (value - mean).powi(2)).sum::<f64>() / (n as f64 - 1.0)
+            chain
+                .iter()
+                .map(|value| (value - mean).powi(2))
+                .sum::<f64>()
+                / (n as f64 - 1.0)
         })
         .collect();
     let theta_bar: f64 = means.iter().sum::<f64>() / m;
@@ -58,11 +62,7 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
     // Repeated identical f64 values can leave a residual W after
     // (n * x) / n, so treat a vanished within-chain variance as zero.
     if w <= 1e-18 {
-        return if b > 1e-18 {
-            f64::INFINITY
-        } else {
-            0.0
-        };
+        return if b > 1e-18 { f64::INFINITY } else { 0.0 };
     }
     let var_hat = ((n as f64 - 1.0) / n as f64) * w + b / n as f64;
     (var_hat / w).sqrt()
@@ -125,9 +125,7 @@ pub fn certified_global_minimum(
     uniquely_deepest
         && putative.mixed()
         && competitors.iter().any(AttractorStrength::mixed)
-        && competitors
-            .iter()
-            .all(|other| stronger(putative, other))
+        && competitors.iter().all(|other| stronger(putative, other))
 }
 
 /// Explore-role chains have collapsed onto one attractor.
@@ -148,8 +146,7 @@ pub fn explore_must_leave(
     n_assigned: usize,
 ) -> bool {
     let _ = n_families;
-    explore_collapsed(energy_explore)
-        || (n_assigned >= 2 && mixed(rhat_series(family_series)))
+    explore_collapsed(energy_explore) || (n_assigned >= 2 && mixed(rhat_series(family_series)))
 }
 
 /// Inverted Gelman--Rubin evidence consumed by the catalog policy.
@@ -171,17 +168,16 @@ pub fn invert_mixing(
 ) -> MixingEvidence {
     MixingEvidence {
         explore_collapsed: explore_collapsed(explore_series),
-        certified_attractor: unique_deepest(attractors)
-            .is_some_and(|index| {
-                let putative = &attractors[index];
-                let competitors: Vec<AttractorStrength> = attractors
-                    .iter()
-                    .enumerate()
-                    .filter(|(other, _)| *other != index)
-                    .map(|(_, attractor)| attractor.clone())
-                    .collect();
-                certified_global_minimum(putative, &competitors, true)
-            }),
+        certified_attractor: unique_deepest(attractors).is_some_and(|index| {
+            let putative = &attractors[index];
+            let competitors: Vec<AttractorStrength> = attractors
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, attractor)| attractor.clone())
+                .collect();
+            certified_global_minimum(putative, &competitors, true)
+        }),
         pruned: false,
     }
 }
@@ -208,5 +204,9 @@ fn unique_deepest(attractors: &[AttractorStrength]) -> Option<usize> {
             _ => {}
         }
     }
-    if unique { best.map(|(index, _)| index) } else { None }
+    if unique {
+        best.map(|(index, _)| index)
+    } else {
+        None
+    }
 }

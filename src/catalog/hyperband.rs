@@ -89,10 +89,7 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
 }
 
 fn occupancy_of_family(walks: &[WalkRecord], id: u32, rung: u64) -> EnsembleVerdict {
-    let cohort: Vec<&WalkRecord> = walks
-        .iter()
-        .filter(|walk| walk.resource >= rung)
-        .collect();
+    let cohort: Vec<&WalkRecord> = walks.iter().filter(|walk| walk.resource >= rung).collect();
     if cohort.len() < 2 {
         return EnsembleVerdict::Keep;
     }
@@ -111,7 +108,10 @@ fn occupancy_of_family(walks: &[WalkRecord], id: u32, rung: u64) -> EnsembleVerd
             _ => {}
         }
     }
-    let self_family = walks.iter().find(|walk| walk.id == id).and_then(|walk| walk.family);
+    let self_family = walks
+        .iter()
+        .find(|walk| walk.id == id)
+        .and_then(|walk| walk.family);
     if self_family.is_some_and(|family| {
         best_of_family
             .get(&family)
@@ -182,10 +182,7 @@ mod tests {
 
     #[test]
     fn a_sole_occupant_of_a_family_is_never_pruned() {
-        let walks = [
-            walk(0, 64, -173.25, Some(0)),
-            walk(1, 64, -173.92, Some(1)),
-        ];
+        let walks = [walk(0, 64, -173.25, Some(0)), walk(1, 64, -173.92, Some(1))];
         assert!(!prune(&walks, 0, 1000));
         assert!(!prune(&walks, 1, 1000));
     }
@@ -224,10 +221,7 @@ mod tests {
 
     #[test]
     fn unassigned_walks_are_not_ranked() {
-        let walks = [
-            walk(0, 10, -170.0, None),
-            walk(1, 10, -169.0, None),
-        ];
+        let walks = [walk(0, 10, -170.0, None), walk(1, 10, -169.0, None)];
         assert!(!prune(&walks, 0, 1000));
         assert!(!prune(&walks, 1, 1000));
     }
@@ -243,7 +237,10 @@ mod tests {
             walk(3, 10, -393.0, Some(0)),
         ];
         assert!(!prune(&walks, 0, 1000), "packing champion stays");
-        assert!(prune(&walks, 3, 1000), "surplus extra leaves the occupied packing");
+        assert!(
+            prune(&walks, 3, 1000),
+            "surplus extra leaves the occupied packing"
+        );
     }
 
     #[test]
@@ -270,12 +267,7 @@ mod tests {
     fn a_kept_ico_extra_may_still_isomer_adopt() {
         let mut walks = vec![walk(0, 64, -396.282249, Some(0))];
         for index in 1..10 {
-            walks.push(walk(
-                index,
-                64,
-                -396.28 + f64::from(index) * 1e-3,
-                Some(0),
-            ));
+            walks.push(walk(index, 64, -396.28 + f64::from(index) * 1e-3, Some(0)));
         }
         assert!(!prune(&walks, 0, 1000), "ico champion stays");
         assert!(

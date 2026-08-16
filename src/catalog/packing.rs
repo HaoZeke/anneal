@@ -75,13 +75,16 @@ impl PackingBook {
     }
 
     fn cached(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        self.histogram_cache.borrow().iter().find_map(|(stored, histogram)| {
-            if !atom_moved(stored, coordinates, PACKING_MOVE_EPS) {
-                Some(histogram.clone())
-            } else {
-                None
-            }
-        })
+        self.histogram_cache
+            .borrow()
+            .iter()
+            .find_map(|(stored, histogram)| {
+                if !atom_moved(stored, coordinates, PACKING_MOVE_EPS) {
+                    Some(histogram.clone())
+                } else {
+                    None
+                }
+            })
     }
 
     fn remember(&self, coordinates: &[f64], histogram: &[f64]) {
