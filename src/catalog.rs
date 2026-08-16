@@ -8,6 +8,7 @@ pub mod hyperband;
 pub mod lj;
 pub mod molecular;
 pub mod mixing;
+pub mod occupancy;
 pub mod packing;
 pub mod signature;
 pub mod validator;
@@ -29,6 +30,7 @@ pub use mixing::{
     AttractorStrength, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
     explore_must_leave, invert_mixing, mixed, rhat_series, stronger,
 };
+pub use occupancy::is_occupancy_leave_action;
 pub use packing::{
     PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, packing_distance, packing_fingerprint,
     packing_vector, same_packing,

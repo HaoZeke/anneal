@@ -1178,7 +1178,7 @@ where
                 #[cfg(feature = "featomic")]
                 let quenched = {
                     let (proposal_energy, proposal_state) = quenched;
-                    if adopt && (action == "hyperband_reseed" || action == "catalog_leave") {
+                    if adopt && crate::catalog::is_occupancy_leave_action(&action) {
                         let wells = crate::featomic_hop::packing_archive();
                         let rcut = 3.5 * cfg.length_scale;
                         if !wells.is_empty()
@@ -2955,7 +2955,7 @@ fn leave_boundary_start<R: Rng + ?Sized>(
 ) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
-        if action != "hyperband_reseed" && action != "catalog_leave" {
+        if !crate::catalog::is_occupancy_leave_action(action) {
             return proposed;
         }
         let wells = crate::featomic_hop::packing_archive();

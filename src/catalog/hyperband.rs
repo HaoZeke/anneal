@@ -1,28 +1,19 @@
-//! Shared packing-first ranking for Hyperband rungs and Feynman--Kac epochs.
+//! Occupancy ranking for extras of a DECAF packing family.
 //!
-//! Li, Jamieson, DeSalvo, Rostamizadeh, Talwalkar, *Hyperband*, JMLR 18
-//! (2018). Optuna and Ray Tune (Riedel / CoE RAISE) run the same
-//! schedule: resource multiplies by \(\eta\) at each rung, and only the
-//! top \(1/\eta\) of a cohort continue.
-//!
-//! Hyperband and Feynman--Kac are not two allocators. Both call
-//! [`verdict`] and [`keep_ids`]. Ranking applies as soon as DECAF
-//! assigns a family. Waiting for a rung lets extras adopt a deeper
-//! isomer of a crowded packing instead of reseeding. Feynman--Kac
-//! applies the same ranking at a closed epoch. A sole family occupant
-//! is never reseeded. An unknown packing is a possible new family and
-//! is kept. Extra occupants of a crowded family compete on energy;
-//! beyond \(\lfloor n/\eta\rfloor\) extras they reseed a new random
-//! start, not a hole and not a parent clone.
+//! Not Li--Jamieson Hyperband. There is no resource schedule
+//! \(r, \eta r, \ldots\). Champion of a family (lowest energy) stays.
+//! Keep \(\lfloor n_{\mathrm{extra}} / \eta \rfloor\) extras,
+//! \(\eta = 3\). Surplus Leave into a leftover-SOAP hole
+//! ([`crate::catalog::is_occupancy_leave_action`]). Rank as soon as
+//! DECAF assigns a family. Feynman--Kac epochs call the same
+//! [`verdict`]. A sole occupant and an unassigned packing stay.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Reduction factor \(\eta\). Same default as Optuna `HyperbandPruner`.
 pub const REDUCTION_FACTOR: u32 = 3;
-/// First rung, in hops. Shorter walks have no packing identity yet.
-/// Extras of a crowded family reseed here so they leave toward an
-/// unexplored leftover-SOAP hole; they do not wait for a serial
-/// recommended first-hit hop.
+/// First recorded hop rung, kept for the resource helper. Ranking of
+/// an assigned DECAF family does not wait for this value.
 pub const MIN_RESOURCE: u64 = 64;
 /// Hop cap used when the coordinator has no explicit rung ceiling.
 ///
