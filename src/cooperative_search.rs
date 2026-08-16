@@ -569,7 +569,7 @@ mod run {
                         None,
                         Some(rejection_code(reason)),
                     )?;
-                    return Err(CooperativeRunError::CoordinatorLedgerRejected(reason));
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                 }
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::LocalWork, None, None)?;
