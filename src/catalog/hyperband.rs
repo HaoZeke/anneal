@@ -91,9 +91,9 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
     if self_walk.family.is_none() {
         return EnsembleVerdict::Keep;
     }
-    let Some(rung) = current_rung(self_walk.resource, max_resource) else {
-        return EnsembleVerdict::Keep;
-    };
+    // DECAF already named the packing. Rank extras of that well
+    // immediately so they leave toward an unexplored SOAP hole.
+    let rung = current_rung(self_walk.resource, max_resource).unwrap_or(0);
     occupancy_of_family(walks, id, rung)
 }
 
@@ -242,15 +242,17 @@ mod tests {
     }
 
     #[test]
-    fn extras_below_the_first_rung_are_not_pruned() {
+    fn extras_of_an_identified_packing_leave_before_the_hop_rung() {
+        // DECAF assigned the family. Extras leave that well immediately;
+        // they do not wait for hop 64 or a serial first-hit hop.
         let walks = [
             walk(0, 10, -396.282249, Some(0)),
             walk(1, 10, -395.0, Some(0)),
             walk(2, 10, -394.0, Some(0)),
             walk(3, 10, -393.0, Some(0)),
         ];
-        assert!(!prune(&walks, 0, 1000));
-        assert!(!prune(&walks, 3, 1000));
+        assert!(!prune(&walks, 0, 1000), "packing champion stays");
+        assert!(prune(&walks, 3, 1000), "surplus extra leaves the occupied packing");
     }
 
     #[test]
