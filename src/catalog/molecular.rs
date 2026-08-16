@@ -32,6 +32,9 @@ use sha2::{Digest, Sha256};
 use super::{
     DescriptorSignature, EngineSignature, FreshEvaluation, SystemSignature, ValidatorConfig,
 };
+use crate::descriptor_space::{
+    DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
+};
 use crate::methods::cluster_hopping::covalent_radius;
 use crate::soap::{SoapSpec, local_spectra_z};
 
@@ -204,6 +207,23 @@ pub fn leftover_values(
         }
     }
     Ok(leftover)
+}
+
+/// Leftover SOAP as a catalog `DescriptorSpace`.
+pub fn leftover_space(
+    species: &[u32],
+) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
+    let spec = leftover_spec(species)?;
+    let block = DescriptorBlockSpec::new(
+        DescriptorBlockKind::SoapLeftover,
+        spec.n_max,
+        spec.l_max,
+        spec.rcut_nn,
+    )
+    .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
+    let schema = DescriptorSchema::new(DESCRIPTOR_SCHEMA, DESCRIPTOR_VERSION, vec![block])
+        .map_err(|_| MolecularCatalogPresetError::DescriptorDimension)?;
+    Ok(DescriptorSpace::new(schema))
 }
 
 /// SHA-256 of the declared GFN2 handle. This is not the engine binary.

@@ -54,6 +54,21 @@ fn hexamer_signature_records_gfn2_kind_and_leftover_dim() {
 }
 
 #[test]
+fn leftover_space_describe_has_the_leftover_dimension() {
+    use anneal_core::catalog::molecular::leftover_space;
+    let species = water_species(2).unwrap();
+    let coordinates = reference_coordinates(2).unwrap();
+    let space = leftover_space(&species).unwrap();
+    let described = space
+        .describe(
+            ndarray::ArrayView1::from(coordinates.as_slice()),
+            Some(&species),
+        )
+        .unwrap();
+    assert_eq!(described.values().len(), leftover_descriptor_dim(&species).unwrap());
+}
+
+#[test]
 fn leftover_vector_length_matches_declared_dimension() {
     let species = water_species(2).unwrap();
     let coordinates = reference_coordinates(2).unwrap();
