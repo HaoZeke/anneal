@@ -224,6 +224,14 @@ pub enum CheckpointAction {
         /// Cartesian minima received from the ensemble.
         states: Vec<Array1<f64>>,
     },
+    /// Occupancy certificate: stop this replica.
+    ///
+    /// Inverted Gelman--Rubin mixing or Good--Turing catalog
+    /// saturation. A published energy is not this action.
+    Retire {
+        /// `mixing` or `saturated`.
+        reason: String,
+    },
 }
 
 fn continue_without_checkpoint(_: ChainCheckpoint<'_>) -> CheckpointAction {
@@ -1129,8 +1137,12 @@ where
                 .checked_div(interval)
                 .and_then(|completed| completed.checked_add(1))
                 .and_then(|next| next.checked_mul(interval));
+            if let CheckpointAction::Retire { .. } = checkpoint_action {
+                break;
+            }
             let proposal = match checkpoint_action {
                 CheckpointAction::Continue => None,
+                CheckpointAction::Retire { .. } => unreachable!("retire breaks before this match"),
                 CheckpointAction::DepositRemote { states } => {
                     for remote in &states {
                         if remote.len() == x.len() {
@@ -1140,7 +1152,8 @@ where
                     None
                 }
                 CheckpointAction::BoundaryProposal { state, action } => {
-                    let state = leave_boundary_start(state, &action, x.view(), cfg, ledger, relax, rng);
+                    let state =
+                        leave_boundary_start(state, &action, x.view(), cfg, ledger, relax, rng);
                     Some((state, action, true))
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),

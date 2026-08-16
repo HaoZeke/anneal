@@ -13,6 +13,8 @@
 
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
+#[cfg(feature = "bank-rpc")]
+use anneal_core::catalog::{occupancy_complete, occupancy_retire, published_energy_score};
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
     Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
@@ -22,9 +24,7 @@ use anneal_core::methods::csa_cluster::{self, BankConfig};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
-#[cfg(feature = "graphkey")]
-use std::io;
-use std::io::Write;
+use std::io::{self, Write};
 
 #[cfg(all(feature = "ira", not(feature = "featomic")))]
 use anneal_core::shape::IraMetric;
@@ -460,7 +460,9 @@ mod option_tests {
         // the open epoch and polls (retries join) after more local work,
         // the same as a pending barrier. Abstaining would retire it.
         let mut progress = PopulationEpochProgress::default();
-        assert!(open_epoch_retries(&PopulationSynchronizationOutcome::Rejected));
+        assert!(open_epoch_retries(
+            &PopulationSynchronizationOutcome::Rejected
+        ));
         assert!(open_epoch_retries(
             &PopulationSynchronizationOutcome::Pending {
                 submitted: 1,
@@ -473,10 +475,7 @@ mod option_tests {
         progress.observe_pending();
 
         assert_eq!(progress.epoch(), 0);
-        assert_eq!(
-            progress.action(true, true),
-            PopulationEpochAction::Poll
-        );
+        assert_eq!(progress.action(true, true), PopulationEpochAction::Poll);
         assert_eq!(
             active_population_action(&progress, 1_000, 2_000, 1_000, true),
             PopulationEpochAction::Poll
@@ -596,7 +595,8 @@ fn lj_partial_grad(x: ndarray::ArrayView1<f64>, moved: &[usize]) -> Array1<f64> 
     g
 }
 
-/// Published global minima, for reporting only; nothing steers by these.
+/// Published global minima. A score for known hurdles; occupancy
+/// does not stop on these numbers.
 fn reference(n: usize) -> Option<f64> {
     Some(match n {
         13 => -44.326801,
@@ -2200,9 +2200,9 @@ fn run_capnp_catalog(
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
     use anneal_core::catalog_policy::{PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
+    use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, TransitionDestination};
     use anneal_core::cooperative_search::ledger::ChargeKind;
-    use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
         CooperativeRun, CooperativeRunError, PolicyEvidenceOutcome, PolicyRole,
@@ -2457,15 +2457,10 @@ fn run_capnp_catalog(
             );
             String::new()
         });
-        let workdir = std::env::temp_dir().join(format!(
-            "anneal-md-{}-{}-{}",
-            campaign, ensemble, replica
-        ));
-        let engine = anneal_core::md_engine::engine_by_name(
-            &name,
-            std::path::Path::new(&binary),
-            &workdir,
-        );
+        let workdir =
+            std::env::temp_dir().join(format!("anneal-md-{}-{}-{}", campaign, ensemble, replica));
+        let engine =
+            anneal_core::md_engine::engine_by_name(&name, std::path::Path::new(&binary), &workdir);
         if engine.is_none() {
             panic!("CATALOG_MD_ENGINE must be lammps or gromacs, got {name}");
         }
@@ -2595,7 +2590,9 @@ fn run_capnp_catalog(
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     let mut best_at_checkpoint = f64::INFINITY;
-    let mut announced_reference = false;
+    let mut announced_score = false;
+    let mut announced_personal = None;
+    let mut announced_done = false;
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
@@ -2729,21 +2726,30 @@ fn run_capnp_catalog(
         if local_deepened {
             best_at_checkpoint = snapshot.best_energy();
             stall = 0;
+            let jump =
+                announced_personal.is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
+            if jump {
+                println!(
+                    "  personal best {:.6}  hops {}",
+                    snapshot.best_energy(),
+                    snapshot.hops()
+                );
+                let _ = std::io::stdout().flush();
+                announced_personal = Some(snapshot.best_energy());
+            }
         } else {
             stall = stall.saturating_add(1);
         }
-        if !announced_reference {
-            if let Some(target) = reference(cfg.n_points) {
-                if snapshot.best_energy() < target + 1e-4 {
-                    println!(
-                        "  live best {:.6}  hops {}",
-                        snapshot.best_energy(),
-                        snapshot.hops()
-                    );
-                    let _ = std::io::stdout().flush();
-                    announced_reference = true;
-                }
-            }
+        if !announced_score
+            && published_energy_score(snapshot.best_energy(), reference(cfg.n_points))
+        {
+            println!(
+                "  score {:.6}  hops {}",
+                snapshot.best_energy(),
+                snapshot.hops()
+            );
+            let _ = std::io::stdout().flush();
+            announced_score = true;
         }
         // The population barrier is serviced before any local gate. A
         // checkpoint often finds the chain mid-hop with nothing that passes
@@ -2764,12 +2770,12 @@ fn run_capnp_catalog(
                 population_interval,
                 true,
             ) {
-                PopulationEpochAction::Submit => {
-                    population_call(cooperative.join_population(replica, population_progress.epoch()))
-                }
-                PopulationEpochAction::Poll => {
-                    population_call(cooperative.poll_population(replica, population_progress.epoch()))
-                }
+                PopulationEpochAction::Submit => population_call(
+                    cooperative.join_population(replica, population_progress.epoch()),
+                ),
+                PopulationEpochAction::Poll => population_call(
+                    cooperative.poll_population(replica, population_progress.epoch()),
+                ),
                 PopulationEpochAction::Abstain => population_call(
                     cooperative.abstain_population(replica, population_progress.epoch()),
                 ),
@@ -2833,9 +2839,7 @@ fn run_capnp_catalog(
             // isomer of the same packing; leftover extras reseed.
             // A deeper different funnel is never copied.
             let live_state = snapshot.current_state();
-            let live = live_state
-                .as_slice()
-                .expect("LJ state is contiguous");
+            let live = live_state.as_slice().expect("LJ state is contiguous");
             let extra_of_occupied_packing = plan.parent_candidates.iter().any(|candidate| {
                 candidate.producer_replica != replica
                     && candidate.energy < snapshot.current_energy() - 1e-10
@@ -2907,9 +2911,7 @@ fn run_capnp_catalog(
             }
             let foreign_parent = parent.producer_replica != replica;
             if foreign_parent && parent.coordinates.len() == live_state.len() {
-                let live = live_state
-                    .as_slice()
-                    .expect("LJ state is contiguous");
+                let live = live_state.as_slice().expect("LJ state is contiguous");
                 let better_isomer = same_packing_coordinates(live, &parent.coordinates)
                     && parent.energy < snapshot.current_energy() - 1e-10;
                 if better_isomer {
@@ -2921,9 +2923,7 @@ fn run_capnp_catalog(
                             *coordinate += transport_noise * (jitter.random::<f64>() - 0.5);
                         }
                         for axis in 0..3 {
-                            let mean = (0..atoms)
-                                .map(|atom| state[3 * atom + axis])
-                                .sum::<f64>()
+                            let mean = (0..atoms).map(|atom| state[3 * atom + axis]).sum::<f64>()
                                 / atoms as f64;
                             for atom in 0..atoms {
                                 state[3 * atom + axis] -= mean;
@@ -3115,7 +3115,9 @@ fn run_capnp_catalog(
             .map_or((4u32, false), |assignment| (2u32, assignment.bridge_duty));
         #[cfg(not(feature = "nng-transport"))]
         let (decree_stall_floor, decree_bridge_duty) = (4u32, false);
-        if (bridge_enabled || decree_bridge_duty) && let Some(assignment) = &active_bridge {
+        if (bridge_enabled || decree_bridge_duty)
+            && let Some(assignment) = &active_bridge
+        {
             match bridge_region_of(
                 &assignment.images,
                 descriptor.len(),
@@ -3161,6 +3163,31 @@ fn run_capnp_catalog(
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
         };
+        // Mixing already requires a competitor. Without a packing
+        // count on the wire, leftover-SOAP saturation alone is one
+        // family and is not completeness.
+        let n_occupied_families = usize::from(policy.mixing.certified_attractor) * 2;
+        if let Some(certificate) = occupancy_complete(
+            policy.mixing.certified_attractor,
+            policy.census.globally_saturated(),
+            n_occupied_families,
+        ) {
+            if !announced_done {
+                println!(
+                    "  done {}  hops {}  best {:.6}",
+                    certificate.as_str(),
+                    snapshot.hops(),
+                    snapshot.best_energy()
+                );
+                let _ = std::io::stdout().flush();
+                announced_done = true;
+            }
+            if occupancy_retire(certificate) {
+                return CheckpointAction::Retire {
+                    reason: certificate.as_str().to_owned(),
+                };
+            }
+        }
         let policy_trace = cooperative
             .events()
             .last()
@@ -3280,7 +3307,10 @@ fn run_capnp_catalog(
         }
         if let Some(engine) = md_engine.as_ref()
             && checkpoint_sequence.is_multiple_of(md_interval)
-            && snapshot.remaining() > md_steps.saturating_add(run_cfg.relax_steps).saturating_add(2)
+            && snapshot.remaining()
+                > md_steps
+                    .saturating_add(run_cfg.relax_steps)
+                    .saturating_add(2)
         {
             match engine.propagate(
                 snapshot.current_state(),
@@ -3535,12 +3565,7 @@ fn run_capnp_catalog(
                         };
                     }
                 } else if let CatalogHoleOutcome::Proposal(_) = cooperative
-                    .descriptor_hole(
-                        replica,
-                        descriptor.clone(),
-                        128,
-                        transport_rng.random(),
-                    )
+                    .descriptor_hole(replica, descriptor.clone(), 128, transport_rng.random())
                     .expect("descriptor-hole access must preserve local execution")
                 {
                     let left = anneal_core::soap::step_away_cloud(
