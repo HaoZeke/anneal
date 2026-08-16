@@ -1174,8 +1174,40 @@ where
                         })
                     });
                 }
-                let (proposal_energy, proposal_state) =
-                    relax(ledger, state.view(), cfg.relax_steps);
+                let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                #[cfg(feature = "featomic")]
+                let quenched = {
+                    let (proposal_energy, proposal_state) = quenched;
+                    if adopt && (action == "hyperband_reseed" || action == "catalog_leave") {
+                        let wells = crate::featomic_hop::packing_archive();
+                        let rcut = 3.5 * cfg.length_scale;
+                        if !wells.is_empty()
+                            && crate::featomic_hop::in_stored_well(
+                                proposal_state.view(),
+                                &wells,
+                                rcut,
+                                cfg.species.as_deref(),
+                                None,
+                            )
+                        {
+                            let retried = crate::featomic_hop::leave_occupied_packing(
+                                from_state.view(),
+                                &wells,
+                                rcut,
+                                cfg.species.as_deref(),
+                                None,
+                                |y| relax(ledger, y, cfg.relax_steps).1,
+                                rng,
+                            );
+                            relax(ledger, retried.view(), cfg.relax_steps)
+                        } else {
+                            (proposal_energy, proposal_state)
+                        }
+                    } else {
+                        (proposal_energy, proposal_state)
+                    }
+                };
+                let (proposal_energy, proposal_state) = quenched;
                 let proposal_sane = quench_is_sane(cfg, proposal_energy, proposal_state.view());
                 let gradient_required = grad.is_some();
                 let validation_gradient = if proposal_sane {
