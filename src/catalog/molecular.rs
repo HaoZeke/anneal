@@ -7,9 +7,8 @@
 //! spec (`n_max = 3`, `l_max = 6`, cutoff `3.5 * length_scale`).
 //! The featomic hop (`l >= 5`) is a high-`l` slice of that same
 //! calculator; that runtime length is not a compile-time identity.
-//! `DescriptorSpace` has no leftover aggregation block, so this
-//! module reports leftover dimension and values rather than a
-//! catalog `describe()` space.
+//! Leftover SOAP is [`leftover_space`]: one `SoapLeftover` block of
+//! stacked `p_i - mu_z(i)`. That is the catalog `describe()` space.
 //!
 //! A complete visit still needs a loaded rgpot engine. Required engine
 //! fields:
@@ -230,6 +229,13 @@ pub fn leftover_space(
 pub fn engine_config_digest() -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(ENGINE_CONFIG);
+    hasher.finalize().into()
+}
+
+/// SHA-256 of a loaded `libxtb_engine.so`. Callers pass the file bytes.
+pub fn engine_binary_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
     hasher.finalize().into()
 }
 

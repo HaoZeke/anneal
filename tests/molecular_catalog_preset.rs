@@ -1,8 +1,8 @@
 use anneal_core::catalog::molecular::{
     DESCRIPTOR_SCHEMA, ENGINE_BINARY_INPUT, ENGINE_KIND, WATER_HEXAMER_MOLECULES,
-    engine_config_digest, fresh_evaluation, leftover_descriptor_dim, leftover_spec,
-    leftover_values, length_scale, reference_coordinates, system_signature, validator_config,
-    water_groups, water_species,
+    engine_binary_digest, engine_config_digest, fresh_evaluation, leftover_descriptor_dim,
+    leftover_space, leftover_spec, leftover_values, length_scale, reference_coordinates,
+    system_signature, validator_config, water_groups, water_species,
 };
 use anneal_core::methods::cluster_hopping::Config;
 use anneal_core::soap::SoapSpec;
@@ -55,7 +55,6 @@ fn hexamer_signature_records_gfn2_kind_and_leftover_dim() {
 
 #[test]
 fn leftover_space_describe_has_the_leftover_dimension() {
-    use anneal_core::catalog::molecular::leftover_space;
     let species = water_species(2).unwrap();
     let coordinates = reference_coordinates(2).unwrap();
     let space = leftover_space(&species).unwrap();
@@ -114,4 +113,47 @@ fn fresh_evaluation_does_not_invent_an_energy() {
     assert!(system_signature(0, engine_digest(0x11)).is_err());
     assert!(fresh_evaluation(3, &[0.0; 9]).is_err());
     assert!(validator_config(&[0.0; 8], 8).is_err());
+}
+
+#[test]
+fn leftover_space_is_the_catalog_descriptor() {
+    let species = water_species(WATER_HEXAMER_MOLECULES).unwrap();
+    let space = leftover_space(&species).unwrap();
+    let signature = system_signature(WATER_HEXAMER_MOLECULES, engine_digest(0x11)).unwrap();
+    assert_eq!(space.schema().name(), DESCRIPTOR_SCHEMA);
+    assert_eq!(space.schema().name(), signature.descriptor.schema);
+    assert_eq!(space.schema().version(), signature.descriptor.version);
+    assert_eq!(
+        engine_binary_digest(&[0x11; 8]),
+        engine_binary_digest(&[0x11; 8])
+    );
+    assert_ne!(
+        engine_binary_digest(&[0x11; 8]),
+        engine_binary_digest(&[0x22; 8])
+    );
+}
+
+#[cfg(feature = "bank-rpc")]
+#[test]
+fn leftover_space_builds_a_gfn2_water_scientific_config() {
+    use anneal_core::catalog_rpc::server::ServerConfig;
+
+    let species = water_species(2).unwrap();
+    let reference = reference_coordinates(2).unwrap();
+    let leftover_dim = leftover_descriptor_dim(&species).unwrap();
+    let signature = system_signature(2, engine_digest(0x11)).unwrap();
+    let digest = signature.digest();
+    let config = ServerConfig::new("gfn2-water", "hexamer-test", digest, [0, 1, 2, 3])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            leftover_space(&species).unwrap(),
+            validator_config(&reference, leftover_dim).unwrap(),
+            8,
+            0.05,
+            400,
+            |coordinates| fresh_evaluation(2, coordinates),
+        );
+    assert!(config.is_ok());
+    assert!(fresh_evaluation(2, &reference).is_err());
 }
