@@ -217,6 +217,8 @@ pub enum PolicyReason {
     UnrelatedCatalogExplore,
     /// A related but unexhausted basin requests exploration.
     SameBasinExplore,
+    /// Another walk already occupies this DECAF packing. Leave it.
+    OccupiedPackingLeave,
     /// Explore-role chains have mixed; they must leave rather than keep exploring.
     ExploreCollapsed,
     /// The incumbent attractor won the occupancy contest and stays occupied.
@@ -240,6 +242,7 @@ impl PolicyReason {
             Self::GlobalCensusSaturatedExplore => "global_census_saturated_explore",
             Self::UnrelatedCatalogExplore => "unrelated_catalog_explore",
             Self::SameBasinExplore => "same_basin_explore",
+            Self::OccupiedPackingLeave => "occupied_packing_leave",
             Self::ExploreCollapsed => "explore_collapsed",
             Self::CertifiedAttractor => "certified_attractor",
             Self::HyperbandPruned => "hyperband_pruned",
@@ -329,7 +332,7 @@ impl CatalogPolicy {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)
             }
             ActiveCatalogRelation::SameBasin => {
-                decision(PolicyAction::Explore, PolicyReason::SameBasinExplore)
+                decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: false,
