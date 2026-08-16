@@ -86,6 +86,20 @@ fn global_saturation_never_forces_an_unrelated_replica_to_leave() {
 }
 
 #[test]
+fn same_decaf_packing_leaves_instead_of_exploring_isomers() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let state = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
+}
+
+#[test]
 fn exact_local_census_visits_trigger_leave_without_a_height_proxy() {
     let (census, basin_id) = census_with_repeated_visits(8);
     let state = input(
