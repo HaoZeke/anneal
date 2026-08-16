@@ -209,9 +209,7 @@ pub fn leftover_values(
 }
 
 /// Leftover SOAP as a catalog `DescriptorSpace`.
-pub fn leftover_space(
-    species: &[u32],
-) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
+pub fn leftover_space(species: &[u32]) -> Result<DescriptorSpace, MolecularCatalogPresetError> {
     let spec = leftover_spec(species)?;
     let block = DescriptorBlockSpec::new(
         DescriptorBlockKind::SoapLeftover,
@@ -329,9 +327,7 @@ pub fn validator_config(
 }
 
 /// Nonoverlapping development reference from the isolated-water template.
-pub fn reference_coordinates(
-    n_molecules: usize,
-) -> Result<Vec<f64>, MolecularCatalogPresetError> {
+pub fn reference_coordinates(n_molecules: usize) -> Result<Vec<f64>, MolecularCatalogPresetError> {
     if n_molecules == 0 {
         return Err(MolecularCatalogPresetError::InvalidMoleculeCount);
     }

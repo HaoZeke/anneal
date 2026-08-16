@@ -118,8 +118,8 @@ pub fn accepts_repeated_quench(
     ira_distance: f64,
 ) -> bool {
     [source_energy, candidate_energy, gradient_norm, ira_distance]
-    .iter()
-    .all(|value| value.is_finite())
+        .iter()
+        .all(|value| value.is_finite())
         && (candidate_energy - source_energy).abs() <= CALIBRATION_ENERGY_TOLERANCE
         && gradient_norm <= CALIBRATION_GRADIENT_TOLERANCE
         && ira_distance <= CALIBRATION_IRA_TOLERANCE
