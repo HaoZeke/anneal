@@ -1139,7 +1139,10 @@ where
                     }
                     None
                 }
-                CheckpointAction::BoundaryProposal { state, action } => Some((state, action, true)),
+                CheckpointAction::BoundaryProposal { state, action } => {
+                    let state = leave_boundary_start(state, &action, x.view(), cfg, ledger, relax, rng);
+                    Some((state, action, true))
+                }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
                 CheckpointAction::ExternalProposal {
                     state,
@@ -2907,6 +2910,41 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         }
     }
     y
+}
+
+fn leave_boundary_start<R: Rng + ?Sized>(
+    proposed: Array1<f64>,
+    action: &str,
+    live: ArrayView1<f64>,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    rng: &mut R,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        if action != "hyperband_reseed" && action != "catalog_leave" {
+            return proposed;
+        }
+        let wells = crate::featomic_hop::packing_archive();
+        if wells.is_empty() {
+            return proposed;
+        }
+        crate::featomic_hop::leave_occupied_packing(
+            live,
+            &wells,
+            3.5 * cfg.length_scale,
+            cfg.species.as_deref(),
+            None,
+            |y| relax(ledger, y, cfg.relax_steps).1,
+            rng,
+        )
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (action, live, cfg, ledger, relax, rng);
+        proposed
+    }
 }
 
 fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
