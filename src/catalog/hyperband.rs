@@ -19,8 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// Reduction factor \(\eta\). Same default as Optuna `HyperbandPruner`.
 pub const REDUCTION_FACTOR: u32 = 3;
-/// First rung, in hops. Shorter walks have no packing identity yet.
-pub const MIN_RESOURCE: u64 = 64;
+/// First rung, in hops. Serial recommended Marks first hits sit at
+/// hops 33847--58779. A first rung at 64 reseeds extras of the
+/// crowded icosahedral family hundreds of times before any of those
+/// walks can leave that shelf.
+pub const MIN_RESOURCE: u64 = 33847;
 /// Hop cap used when the coordinator has no explicit rung ceiling.
 ///
 /// Serial recommended Marks first hits sit at hops 33847--58779. A
@@ -180,47 +183,57 @@ mod tests {
     #[test]
     fn rungs_are_min_times_eta_up_to_the_hop_cap() {
         assert_eq!(rungs(1000, 64, 3), vec![64, 192, 576]);
-        assert_eq!(current_rung(63, 1000), None);
-        assert_eq!(current_rung(64, 1000), Some(64));
-        assert_eq!(current_rung(200, 1000), Some(192));
-        assert_eq!(current_rung(1000, 1000), Some(576));
+        assert_eq!(current_rung(20_000, DEFAULT_MAX_RESOURCE), None);
+        assert_eq!(
+            current_rung(MIN_RESOURCE, DEFAULT_MAX_RESOURCE),
+            Some(MIN_RESOURCE)
+        );
+        assert_eq!(
+            rungs(DEFAULT_MAX_RESOURCE, MIN_RESOURCE, REDUCTION_FACTOR),
+            vec![MIN_RESOURCE]
+        );
     }
 
     #[test]
     fn a_sole_occupant_of_a_family_is_never_pruned() {
         let walks = [
-            walk(0, 64, -173.25, Some(0)),
-            walk(1, 64, -173.92, Some(1)),
+            walk(0, MIN_RESOURCE, -173.25, Some(0)),
+            walk(1, MIN_RESOURCE, -173.92, Some(1)),
         ];
-        assert!(!prune(&walks, 0, 1000));
-        assert!(!prune(&walks, 1, 1000));
+        assert!(!prune(&walks, 0, DEFAULT_MAX_RESOURCE));
+        assert!(!prune(&walks, 1, DEFAULT_MAX_RESOURCE));
     }
 
     #[test]
     fn an_unassigned_packing_is_never_pruned() {
         let walks = [
-            walk(0, 64, -170.0, None),
-            walk(1, 64, -173.25, Some(0)),
-            walk(2, 64, -173.24, Some(0)),
+            walk(0, MIN_RESOURCE, -170.0, None),
+            walk(1, MIN_RESOURCE, -173.25, Some(0)),
+            walk(2, MIN_RESOURCE, -173.24, Some(0)),
         ];
-        assert!(!prune(&walks, 0, 1000));
+        assert!(!prune(&walks, 0, DEFAULT_MAX_RESOURCE));
     }
 
     #[test]
     fn extra_ico_occupants_are_pruned_and_the_best_ico_and_oh_stay() {
         let mut walks = vec![
-            walk(0, 64, -173.928427, Some(1)),
-            walk(1, 64, -173.252378, Some(0)),
+            walk(0, MIN_RESOURCE, -173.928427, Some(1)),
+            walk(1, MIN_RESOURCE, -173.252378, Some(0)),
         ];
         for index in 2..12 {
-            walks.push(walk(index, 64, -173.25 + f64::from(index) * 1e-4, Some(0)));
+            walks.push(walk(
+                index,
+                MIN_RESOURCE,
+                -173.25 + f64::from(index) * 1e-4,
+                Some(0),
+            ));
         }
-        assert!(!prune(&walks, 0, 1000));
-        assert!(!prune(&walks, 1, 1000));
+        assert!(!prune(&walks, 0, DEFAULT_MAX_RESOURCE));
+        assert!(!prune(&walks, 1, DEFAULT_MAX_RESOURCE));
         let pruned: Vec<u32> = walks
             .iter()
             .map(|walk| walk.id)
-            .filter(|&id| prune(&walks, id, 1000))
+            .filter(|&id| prune(&walks, id, DEFAULT_MAX_RESOURCE))
             .collect();
         assert!(!pruned.is_empty());
         assert!(!pruned.contains(&0));
@@ -251,34 +264,67 @@ mod tests {
     }
 
     #[test]
+    fn extras_of_one_family_are_kept_until_the_serial_marks_window() {
+        // Serial recommended Marks first hits hops 33847, 35058, 42633,
+        // 58779. A first rung at 64 reseeds extras hundreds of times
+        // before any of those walks can leave the icosahedral shelf.
+        let mut walks = Vec::new();
+        for index in 0..24 {
+            walks.push(walk(
+                index,
+                20_000,
+                -396.282249 + f64::from(index) * 1e-3,
+                Some(0),
+            ));
+        }
+        for id in 0..24 {
+            assert!(
+                !prune(&walks, id, DEFAULT_MAX_RESOURCE),
+                "replica {id} must keep walking at hop 20000"
+            );
+        }
+    }
+
+    #[test]
     fn a_kept_ico_extra_may_still_isomer_adopt() {
-        let mut walks = vec![walk(0, 64, -396.282249, Some(0))];
+        let mut walks = vec![walk(0, MIN_RESOURCE, -396.282249, Some(0))];
         for index in 1..10 {
             walks.push(walk(
                 index,
-                64,
+                MIN_RESOURCE,
                 -396.28 + f64::from(index) * 1e-3,
                 Some(0),
             ));
         }
-        assert!(!prune(&walks, 0, 1000), "ico champion stays");
         assert!(
-            !prune(&walks, 1, 1000),
+            !prune(&walks, 0, DEFAULT_MAX_RESOURCE),
+            "ico champion stays"
+        );
+        assert!(
+            !prune(&walks, 1, DEFAULT_MAX_RESOURCE),
             "best extra stays and may adopt a deeper ico isomer"
         );
-        assert!(prune(&walks, 9, 1000), "surplus extra reseeds");
+        assert!(
+            prune(&walks, 9, DEFAULT_MAX_RESOURCE),
+            "surplus extra reseeds"
+        );
     }
 
     #[test]
     fn keep_ids_retains_oh_and_best_ico_not_the_worst_ico() {
         let mut walks = vec![
-            walk(0, 64, -173.928427, Some(1)),
-            walk(1, 64, -173.252378, Some(0)),
+            walk(0, MIN_RESOURCE, -173.928427, Some(1)),
+            walk(1, MIN_RESOURCE, -173.252378, Some(0)),
         ];
         for index in 2..13 {
-            walks.push(walk(index, 64, -173.25 + f64::from(index) * 1e-4, Some(0)));
+            walks.push(walk(
+                index,
+                MIN_RESOURCE,
+                -173.25 + f64::from(index) * 1e-4,
+                Some(0),
+            ));
         }
-        let kept = keep_ids(&walks, 1000);
+        let kept = keep_ids(&walks, DEFAULT_MAX_RESOURCE);
         assert!(kept.contains(&0));
         assert!(kept.contains(&1));
         assert!(!kept.contains(&12));
