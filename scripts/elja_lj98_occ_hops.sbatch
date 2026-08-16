@@ -26,10 +26,10 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 export SEED_OFFSET_BASE=800000
-mkdir -p "$HOME/ljwork/jcc/lj98-occ-hole"
+mkdir -p "$HOME/ljwork/jcc/lj98-occ-leave"
 cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj98.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 0 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 1 "$RADIUS"
