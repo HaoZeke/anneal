@@ -2828,12 +2828,36 @@ fn run_capnp_catalog(
             });
             if parent.producer_replica == replica && extra_of_occupied_packing {
                 let n = live_state.len() / 3;
-                let left = anneal_core::methods::cluster_hopping::random_cluster(
-                    n,
-                    0.7,
-                    0.5,
-                    &mut transport_rng,
-                );
+                let left = {
+                    #[cfg(feature = "featomic")]
+                    {
+                        anneal_core::featomic_hop::surplus_reseed(
+                            live_state,
+                            &shared_wells,
+                            coop_rcut,
+                            coop_species.as_deref(),
+                            None,
+                            &mut transport_rng,
+                        )
+                        .unwrap_or_else(|| {
+                            anneal_core::methods::cluster_hopping::random_cluster(
+                                n,
+                                0.7,
+                                0.5,
+                                &mut transport_rng,
+                            )
+                        })
+                    }
+                    #[cfg(not(feature = "featomic"))]
+                    {
+                        anneal_core::methods::cluster_hopping::random_cluster(
+                            n,
+                            0.7,
+                            0.5,
+                            &mut transport_rng,
+                        )
+                    }
+                };
                 slice_sequence = slice_sequence
                     .checked_add(1)
                     .expect("slice sequence must fit u64");
