@@ -245,6 +245,25 @@ mod tests {
     }
 
     #[test]
+    fn a_kept_ico_extra_may_still_isomer_adopt() {
+        let mut walks = vec![walk(0, 10, -396.282249, Some(0))];
+        for index in 1..10 {
+            walks.push(walk(
+                index,
+                10,
+                -396.28 + f64::from(index) * 1e-3,
+                Some(0),
+            ));
+        }
+        assert!(!prune(&walks, 0, 1000), "ico champion stays");
+        assert!(
+            !prune(&walks, 1, 1000),
+            "best extra stays and may adopt a deeper ico isomer"
+        );
+        assert!(prune(&walks, 9, 1000), "surplus extra reseeds");
+    }
+
+    #[test]
     fn keep_ids_retains_oh_and_best_ico_not_the_worst_ico() {
         let mut walks = vec![
             walk(0, 64, -173.928427, Some(1)),
