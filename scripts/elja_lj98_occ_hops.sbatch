@@ -5,16 +5,17 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-occ-hole/slurm.%j.out
-# Occupancy catalog hop cap 60000. 8ded9aa random_cluster-reseeded
-# extras onto ico. Binary: anneal-hole fb409c5 (SOAP packing hole).
+#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-occ-leave/slurm.%j.out
+# Occupancy catalog hop cap 60000. A single SOAP hole start quenches
+# back onto ico. 4b540b3 retries the hole after that quench.
+# Binary: anneal-leave 4b540b3.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
-export LJ_ROOT=$HOME/anneal-hole
-export LJ_BIN=$HOME/anneal-hole/target/release/examples/lj_cluster_search
-export CATALOG_SERVER_BIN=$HOME/anneal-hole/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=lj98-occ-hole
-export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-hole/SOURCE_COMMIT
+export LJ_ROOT=$HOME/anneal-leave
+export LJ_BIN=$HOME/anneal-leave/target/release/examples/lj_cluster_search
+export CATALOG_SERVER_BIN=$HOME/anneal-leave/target/release/examples/catalog_server
+export CATALOG_CAMPAIGN=lj98-occ-leave
+export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-leave/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64

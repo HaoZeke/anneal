@@ -5,19 +5,19 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-hole/slurm.%j.out
+#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-leave/slurm.%j.out
 # Occupancy catalog with a hop cap that can reach Marks.
 # Serial rec Marks first hits are hops 33847-58779 (sci_rec_n75).
-# 4527057 pruned extras before the first Hyperband rung.
-# 8ded9aa waited for a rung then random_cluster-reseeded extras onto ico.
-# Binary: anneal-hole fb409c5 (surplus extras step into a SOAP packing hole).
+# A single SOAP hole start quenches back onto ico. 4b540b3 retries
+# the hole after that quench (leave_occupied_packing).
+# Binary: anneal-leave 4b540b3.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
-export LJ_ROOT=$HOME/anneal-hole
-export LJ_BIN=$HOME/anneal-hole/target/release/examples/lj_cluster_search
-export CATALOG_SERVER_BIN=$HOME/anneal-hole/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=lj75-occ-hole
-export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-hole/SOURCE_COMMIT
+export LJ_ROOT=$HOME/anneal-leave
+export LJ_BIN=$HOME/anneal-leave/target/release/examples/lj_cluster_search
+export CATALOG_SERVER_BIN=$HOME/anneal-leave/target/release/examples/catalog_server
+export CATALOG_CAMPAIGN=lj75-occ-leave
+export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-leave/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
@@ -28,7 +28,7 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 export SEED_OFFSET_BASE=800000
-mkdir -p "$HOME/ljwork/jcc/lj75-occ-hole"
+mkdir -p "$HOME/ljwork/jcc/lj75-occ-leave"
 cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
