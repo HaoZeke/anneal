@@ -27,8 +27,8 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, prune, rhat_series,
-    same_packing,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, occupant_rhat, prune,
+    rhat_series, same_packing,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -37,9 +37,9 @@ use crate::methods::feynman_kac::{
     EpochSubmissionOutcome, PackingOccupant, PopulationEpochPlan, PopulationMember,
     SelectionCoefficients, SynchronousPopulation, assign_parents_by_packing,
 };
-use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
+use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
@@ -672,7 +672,10 @@ fn apply_request(
                         ProtocolRejection::ValidationRejected,
                     );
                 }
-                let entry = bridge.entries.draw(region, *draw).map(|state| state.to_vec());
+                let entry = bridge
+                    .entries
+                    .draw(region, *draw)
+                    .map(|state| state.to_vec());
                 let images = bridge
                     .string
                     .images()
@@ -934,11 +937,7 @@ fn apply_request(
                 request.identity.replica,
                 &validated.candidate.coordinates,
             );
-            record_energy(
-                scientific,
-                request.identity.replica,
-                validated.fresh.energy,
-            );
+            record_energy(scientific, request.identity.replica, validated.fresh.energy);
             let packing = scientific
                 .packing
                 .histogram(&validated.candidate.coordinates);
@@ -1072,9 +1071,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let packing = scientific
-                .packing
-                .histogram(&member_candidate.coordinates);
+            let packing = scientific.packing.histogram(&member_candidate.coordinates);
             let basin_visits = packing
                 .as_ref()
                 .and_then(|fp| scientific.packing.family_of(fp))
@@ -1175,9 +1172,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let _ = scientific
-                .population
-                .retire(request.identity.replica);
+            let _ = scientific.population.retire(request.identity.replica);
             payload = match outcome {
                 EpochSubmissionOutcome::Pending {
                     submitted,
@@ -1274,7 +1269,9 @@ fn apply_request(
                 // The census-visit stream is the referee's evidence: one
                 // replica occupying basin A and then basin B is one
                 // observed transition across their seam.
-                scientific.landscape.observe_basin(observation.basin_id.as_raw());
+                scientific
+                    .landscape
+                    .observe_basin(observation.basin_id.as_raw());
                 if let Some(previous) = previous
                     && previous != observation.basin_id
                 {
@@ -1300,11 +1297,7 @@ fn apply_request(
                     request.identity.replica,
                     &validated.candidate.coordinates,
                 );
-                record_energy(
-                    scientific,
-                    request.identity.replica,
-                    validated.fresh.energy,
-                );
+                record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
                     .population
                     .mark_live(request.identity.replica)
@@ -1378,11 +1371,7 @@ fn apply_request(
                     request.identity.replica,
                     &validated.candidate.coordinates,
                 );
-                record_energy(
-                    scientific,
-                    request.identity.replica,
-                    validated.fresh.energy,
-                );
+                record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
                     .population
                     .mark_live(request.identity.replica)
@@ -2251,11 +2240,7 @@ fn reset_trial(scientific: &mut ScientificState, replica: u32) {
     scientific.pending_reseed.insert(replica);
 }
 
-fn remember_candidate(
-    scientific: &mut ScientificState,
-    replica: u32,
-    candidate: CatalogCandidate,
-) {
+fn remember_candidate(scientific: &mut ScientificState, replica: u32, candidate: CatalogCandidate) {
     scientific.pending_reseed.remove(&replica);
     scientific
         .last_candidate_by_replica
@@ -2311,7 +2296,7 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
         .map(|family| AttractorStrength {
             energy: family.energy,
             occupancy: family.occupancy,
-            occupant_rhat: rhat_series(&family.series),
+            occupant_rhat: occupant_rhat(&family.series),
         })
         .collect();
     let deepest = attractors
@@ -2363,12 +2348,7 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
         .filter(|series: &Vec<f64>| series.len() >= 2)
         .collect();
     let mut evidence = invert_mixing(&attractors, &explore);
-    if explore_must_leave(
-        &explore,
-        &family_series,
-        families.len(),
-        assigned.len(),
-    ) {
+    if explore_must_leave(&explore, &family_series, families.len(), assigned.len()) {
         evidence.explore_collapsed = true;
     }
     evidence

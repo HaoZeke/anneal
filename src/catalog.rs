@@ -27,8 +27,9 @@ pub use hyperband::{
     current_rung, keep_ids, prune, rungs, verdict,
 };
 pub use mixing::{
-    AttractorStrength, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
-    explore_must_leave, invert_mixing, mixed, rhat_series, stronger,
+    AttractorStrength, CERTIFY_MIN_SAMPLES, MIXED_RHAT, MixingEvidence, certified_global_minimum,
+    explore_collapsed, explore_must_leave, invert_mixing, mixed, occupant_rhat, rhat_series,
+    stronger,
 };
 pub use occupancy::{
     OccupancyCertificate, is_occupancy_leave_action, occupancy_complete, occupancy_retire,

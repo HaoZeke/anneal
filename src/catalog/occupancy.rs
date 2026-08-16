@@ -40,6 +40,9 @@
 //!
 //! Occupancy retires on a mixing certificate or on Good--Turing
 //! saturation of a catalog that already holds two occupied families.
+//! Occupant \(\hat R\) uses [`crate::catalog::CERTIFY_MIN_SAMPLES`]
+//! traces; two-point quenches on two random-start families are not a
+//! certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
 //! stop. Leftover-SOAP saturation on one family is collapse, not
 //! completeness: revisiting an icosahedral well drives the unseen

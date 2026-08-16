@@ -73,10 +73,27 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
 /// that is certification only if the attractor wins the occupancy
 /// contest against at least one competitor.
 pub const MIXED_RHAT: f64 = 1.2;
+/// Occupant traces shorter than this are not a Gelman--Rubin
+/// certificate. Two quench reports on two random-start families
+/// give \(\hat R = 0\) and are not a global minimum.
+pub const CERTIFY_MIN_SAMPLES: usize = 16;
 
 /// Whether \(\hat R\) says the chains have mixed.
 pub fn mixed(rhat: f64) -> bool {
     rhat.is_finite() && rhat < MIXED_RHAT
+}
+
+/// Occupant \(\hat R\) for certification. Series shorter than
+/// [`CERTIFY_MIN_SAMPLES`] are dropped, so two-point quenches cannot
+/// certify. Explore-role collapse still uses [`rhat_series`] on the
+/// raw traces.
+pub fn occupant_rhat(series: &[Vec<f64>]) -> f64 {
+    let usable: Vec<Vec<f64>> = series
+        .iter()
+        .filter(|chain| chain.len() >= CERTIFY_MIN_SAMPLES)
+        .cloned()
+        .collect();
+    rhat_series(&usable)
 }
 
 /// Occupancy and occupant mixing of one packing family or census basin.

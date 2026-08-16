@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    AttractorStrength, certified_global_minimum, explore_collapsed, explore_must_leave,
-    invert_mixing, mixed, rhat_series, stronger, MIXED_RHAT,
+    AttractorStrength, MIXED_RHAT, certified_global_minimum, explore_collapsed, explore_must_leave,
+    invert_mixing, mixed, occupant_rhat, rhat_series, stronger,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
@@ -121,6 +121,25 @@ fn energy_tie_is_not_uniquely_deepest() {
     let verdict = invert_mixing(&[left, right], &[constant(-173.25, 8), constant(-170.0, 8)]);
     assert!(!verdict.certified_attractor);
     assert!(!verdict.explore_collapsed);
+}
+
+#[test]
+fn two_point_traces_are_not_a_mixing_certificate() {
+    let short = [constant(-170.0, 2), constant(-170.0, 2)];
+    assert_eq!(rhat_series(&short), 0.0);
+    assert!(occupant_rhat(&short).is_infinite());
+    let left = AttractorStrength {
+        energy: -170.0,
+        occupancy: 12,
+        occupant_rhat: occupant_rhat(&short),
+    };
+    let right = AttractorStrength {
+        energy: -168.0,
+        occupancy: 12,
+        occupant_rhat: occupant_rhat(&[constant(-168.0, 2), constant(-168.0, 2)]),
+    };
+    let verdict = invert_mixing(&[left, right], &[]);
+    assert!(!verdict.certified_attractor);
 }
 
 #[test]
