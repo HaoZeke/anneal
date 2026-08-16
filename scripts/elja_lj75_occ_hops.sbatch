@@ -5,19 +5,18 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-leave/slurm.%j.out
-# Occupancy catalog with a hop cap that can reach Marks.
-# Serial rec Marks first hits are hops 33847-58779 (sci_rec_n75).
-# A single SOAP hole start quenches back onto ico. 4b540b3 retries
-# the hole after that quench (leave_occupied_packing).
-# Binary: anneal-leave 4b540b3.
+#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-marks/slurm.%j.out
+# Occupancy catalog hop cap 60000. Serial rec Marks first hits are
+# hops 33847-58779 (sci_rec_n75). Hyperband first rung is that
+# window (3027db2); extras of one family keep walking until then.
+# Binary: anneal-marksrung 3027db2.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
-export LJ_ROOT=$HOME/anneal-leave
-export LJ_BIN=$HOME/anneal-leave/target/release/examples/lj_cluster_search
-export CATALOG_SERVER_BIN=$HOME/anneal-leave/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=lj75-occ-leave
-export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-leave/SOURCE_COMMIT
+export LJ_ROOT=$HOME/anneal-marksrung
+export LJ_BIN=$HOME/anneal-marksrung/target/release/examples/lj_cluster_search
+export CATALOG_SERVER_BIN=$HOME/anneal-marksrung/target/release/examples/catalog_server
+export CATALOG_CAMPAIGN=lj75-occ-marks
+export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-marksrung/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
@@ -28,10 +27,10 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 export SEED_OFFSET_BASE=800000
-mkdir -p "$HOME/ljwork/jcc/lj75-occ-leave"
+mkdir -p "$HOME/ljwork/jcc/lj75-occ-marks"
 cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj75.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 1 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 0 "$RADIUS"
