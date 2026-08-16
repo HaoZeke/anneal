@@ -1683,6 +1683,7 @@ fn main() {
                 .unwrap_or_else(|| "NO STATE".into()),
             if hit { "  SOLVED" } else { "" }
         );
+        let _ = io::stdout().flush();
     }
     // Both counts, since a force budget and a hop budget are different
     // contests and the literature reports hops.
@@ -2594,6 +2595,7 @@ fn run_capnp_catalog(
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
     let mut best_at_checkpoint = f64::INFINITY;
+    let mut announced_reference = false;
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
@@ -2729,6 +2731,19 @@ fn run_capnp_catalog(
             stall = 0;
         } else {
             stall = stall.saturating_add(1);
+        }
+        if !announced_reference {
+            if let Some(target) = reference(cfg.n_points) {
+                if snapshot.best_energy() < target + 1e-4 {
+                    println!(
+                        "  live best {:.6}  hops {}",
+                        snapshot.best_energy(),
+                        snapshot.hops()
+                    );
+                    let _ = std::io::stdout().flush();
+                    announced_reference = true;
+                }
+            }
         }
         // The population barrier is serviced before any local gate. A
         // checkpoint often finds the chain mid-hop with nothing that passes
