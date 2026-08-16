@@ -151,7 +151,10 @@ fn a_lone_ico_collapse_is_explore_failure_not_a_certificate() {
 }
 
 #[test]
-fn a_lone_packing_with_unmixed_energies_is_not_explore_collapse() {
+fn mixed_decaf_labels_on_one_occupied_packing_force_leave() {
+    // SOAP/DECAF already say these four walks sit on one packing.
+    // Unmixed ico isomer energies are not a new family. Inverted GR
+    // must leave that well; waiting for a second packing never opens it.
     let energies = [
         constant(-173.252378, 8),
         constant(-171.38, 8),
@@ -166,7 +169,7 @@ fn a_lone_packing_with_unmixed_energies_is_not_explore_collapse() {
     ];
     assert!(!explore_collapsed(&energies));
     assert!(mixed(rhat_series(&families)));
-    assert!(!explore_must_leave(&energies, &families, 1, 4));
+    assert!(explore_must_leave(&energies, &families, 1, 4));
 }
 
 #[test]
