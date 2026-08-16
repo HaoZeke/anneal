@@ -254,6 +254,7 @@ struct ScientificState {
     energy_history: BTreeMap<u32, VecDeque<f64>>,
     family_history: BTreeMap<u32, VecDeque<f64>>,
     trial_hops: BTreeMap<u32, u64>,
+    pending_reseed: BTreeSet<u32>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -320,6 +321,7 @@ impl CoordinatorState {
                     energy_history: BTreeMap::new(),
                     family_history: BTreeMap::new(),
                     trial_hops: BTreeMap::new(),
+                    pending_reseed: BTreeSet::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -1292,9 +1294,7 @@ fn apply_request(
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
                 }
-                scientific
-                    .last_candidate_by_replica
-                    .insert(request.identity.replica, canonical);
+                remember_candidate(scientific, request.identity.replica, canonical);
                 observe_packing(
                     scientific,
                     request.identity.replica,
@@ -1372,9 +1372,7 @@ fn apply_request(
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
                 }
-                scientific
-                    .last_candidate_by_replica
-                    .insert(request.identity.replica, canonical);
+                remember_candidate(scientific, request.identity.replica, canonical);
                 observe_packing(
                     scientific,
                     request.identity.replica,
@@ -1518,9 +1516,11 @@ fn apply_request(
                             .insert(request.identity.replica, observation.basin_id);
                         let destination_candidate =
                             candidate_from_validated(&validated, Some(observation.basin_id));
-                        scientific
-                            .last_candidate_by_replica
-                            .insert(request.identity.replica, destination_candidate.clone());
+                        remember_candidate(
+                            scientific,
+                            request.identity.replica,
+                            destination_candidate.clone(),
+                        );
                         if scientific.transition_capacity > 0
                             && source_basin != observation.basin_id
                             && let Some(source_candidate) = source_candidate.as_ref()
@@ -2218,6 +2218,9 @@ fn hyperband_max_resource() -> u64 {
 }
 
 fn hyperband_prune(scientific: &ScientificState, replica: u32) -> bool {
+    if scientific.pending_reseed.contains(&replica) {
+        return true;
+    }
     let max_resource = hyperband_max_resource();
     let walks: Vec<WalkRecord> = scientific
         .last_candidate_by_replica
@@ -2245,6 +2248,18 @@ fn reset_trial(scientific: &mut ScientificState, replica: u32) {
     scientific.trial_hops.remove(&replica);
     scientific.last_candidate_by_replica.remove(&replica);
     scientific.best_candidate_by_replica.remove(&replica);
+    scientific.pending_reseed.insert(replica);
+}
+
+fn remember_candidate(
+    scientific: &mut ScientificState,
+    replica: u32,
+    candidate: CatalogCandidate,
+) {
+    scientific.pending_reseed.remove(&replica);
+    scientific
+        .last_candidate_by_replica
+        .insert(replica, candidate);
 }
 
 fn replica_series(scientific: &ScientificState, replica: u32) -> Vec<f64> {

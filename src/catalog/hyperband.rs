@@ -80,13 +80,11 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
     let Some(self_walk) = walks.iter().find(|walk| walk.id == id) else {
         return EnsembleVerdict::Keep;
     };
-    let Some(rung) = current_rung(self_walk.resource, max_resource) else {
-        return EnsembleVerdict::Keep;
-    };
     if self_walk.family.is_none() {
         return EnsembleVerdict::Keep;
     }
-    occupancy_of_family(walks, id, rung)
+    let _ = max_resource;
+    occupancy_of_family(walks, id, 0)
 }
 
 fn occupancy_of_family(walks: &[WalkRecord], id: u32, rung: u64) -> EnsembleVerdict {
@@ -224,13 +222,25 @@ mod tests {
     }
 
     #[test]
-    fn walks_below_the_first_rung_are_not_ranked() {
+    fn unassigned_walks_are_not_ranked() {
         let walks = [
-            walk(0, 10, -170.0, Some(0)),
-            walk(1, 10, -169.0, Some(0)),
+            walk(0, 10, -170.0, None),
+            walk(1, 10, -169.0, None),
         ];
         assert!(!prune(&walks, 0, 1000));
         assert!(!prune(&walks, 1, 1000));
+    }
+
+    #[test]
+    fn a_crowded_ico_extra_is_pruned_before_the_first_rung() {
+        let walks = [
+            walk(0, 10, -396.282249, Some(0)),
+            walk(1, 10, -395.0, Some(0)),
+            walk(2, 10, -394.0, Some(0)),
+            walk(3, 10, -393.0, Some(0)),
+        ];
+        assert!(!prune(&walks, 0, 1000));
+        assert!(prune(&walks, 3, 1000));
     }
 
     #[test]
