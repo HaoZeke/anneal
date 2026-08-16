@@ -6,9 +6,10 @@
 //! top \(1/\eta\) of a cohort continue.
 //!
 //! Hyperband and Feynman--Kac are not two allocators. Both call
-//! [`verdict`] and [`keep_ids`]. Hyperband applies the ranking at rungs
-//! 64/192/576 hops. Feynman--Kac applies the same ranking at a closed
-//! epoch. Ranking is packing-first, then energy. A sole family occupant
+//! [`verdict`] and [`keep_ids`]. Ranking applies as soon as DECAF
+//! assigns a family. Waiting for a rung lets extras adopt a deeper
+//! isomer of a crowded packing instead of reseeding. Feynman--Kac
+//! applies the same ranking at a closed epoch. A sole family occupant
 //! is never reseeded. An unknown packing is a possible new family and
 //! is kept. Extra occupants of a crowded family compete on energy;
 //! beyond \(\lfloor n/\eta\rfloor\) extras they reseed a new random
