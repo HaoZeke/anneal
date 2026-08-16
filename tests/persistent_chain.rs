@@ -243,3 +243,47 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
         "an unvalidated partial relaxation entered the accepted trajectory"
     );
 }
+
+#[test]
+fn occupancy_retire_stops_the_chain() {
+    let cfg = Config::recommended(6);
+    let mut rng = StdRng::seed_from_u64(0xd0_0e);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut ledger = Ledger::new(4_000);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = toy_relax;
+    let mut checkpoints = 0usize;
+    let mut checkpoint = |_: ChainCheckpoint<'_>| {
+        checkpoints += 1;
+        if checkpoints == 1 {
+            CheckpointAction::Retire {
+                reason: "mixing".to_owned(),
+            }
+        } else {
+            CheckpointAction::Continue
+        }
+    };
+
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        &mut ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        211,
+        &mut checkpoint,
+    );
+
+    assert_eq!(checkpoints, 1, "retire kept invoking the checkpoint hook");
+    assert!(
+        ledger.remaining() > 0,
+        "retire drained the budget instead of stopping"
+    );
+    assert!(
+        outcome.hops < 50,
+        "retire left the chain walking the full budget: hops {}",
+        outcome.hops
+    );
+}

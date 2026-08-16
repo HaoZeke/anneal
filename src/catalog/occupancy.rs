@@ -35,6 +35,15 @@
 //! nearest-well distance. Walk the packing mean toward that hole.
 //! Quench; if the quench sits in a stored well, retry. Feynman--Kac
 //! extras use this start. They do not draw a random cluster.
+//!
+//! ## Stop
+//!
+//! Occupancy retires on a mixing certificate or on Good--Turing
+//! saturation of a catalog that already holds two occupied families.
+//! A published energy (Cambridge or otherwise) is a score, not a
+//! stop. Leftover-SOAP saturation on one family is collapse, not
+//! completeness: revisiting an icosahedral well drives the unseen
+//! mass down without opening a second funnel.
 
 /// Actions that must land off the occupied leftover-SOAP well.
 pub fn is_occupancy_leave_action(action: &str) -> bool {
@@ -44,9 +53,62 @@ pub fn is_occupancy_leave_action(action: &str) -> bool {
     )
 }
 
+/// Why occupancy may retire a replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccupancyCertificate {
+    /// Occupant chains mixed onto a uniquely deepest attractor that
+    /// is strictly more occupied than every mixed competitor.
+    MixingCertified,
+    /// Good--Turing unseen mass of the observed census is small, and
+    /// at least two occupied packing families are on file.
+    CatalogSaturated,
+}
+
+impl OccupancyCertificate {
+    /// Stable token for worker logs (`mixing` or `saturated`).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MixingCertified => "mixing",
+            Self::CatalogSaturated => "saturated",
+        }
+    }
+}
+
+/// Published energy match. A score for known hurdles, never a stop.
+pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
+    published.is_some_and(|target| best < target + 1e-4)
+}
+
+/// Generic occupancy completeness. `n_occupied_families` is the DECAF
+/// packing count, not leftover-SOAP basin count.
+pub fn occupancy_complete(
+    mixing_certified: bool,
+    catalog_saturated: bool,
+    n_occupied_families: usize,
+) -> Option<OccupancyCertificate> {
+    if mixing_certified {
+        Some(OccupancyCertificate::MixingCertified)
+    } else if catalog_saturated && n_occupied_families >= 2 {
+        Some(OccupancyCertificate::CatalogSaturated)
+    } else {
+        None
+    }
+}
+
+/// Either certificate retires the replica. A published energy does not.
+pub fn occupancy_retire(certificate: OccupancyCertificate) -> bool {
+    matches!(
+        certificate,
+        OccupancyCertificate::MixingCertified | OccupancyCertificate::CatalogSaturated
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_occupancy_leave_action;
+    use super::{
+        OccupancyCertificate, is_occupancy_leave_action, occupancy_complete, occupancy_retire,
+        published_energy_score,
+    };
 
     #[test]
     fn feynman_kac_extras_use_the_same_leave_as_occupancy() {
@@ -55,5 +117,51 @@ mod tests {
         assert!(is_occupancy_leave_action("catalog_leave"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
+    }
+
+    #[test]
+    fn a_published_energy_is_a_score_not_a_certificate() {
+        assert!(published_energy_score(-173.928427, Some(-173.928427)));
+        assert!(published_energy_score(-397.492331, Some(-397.492331)));
+        assert!(!published_energy_score(-396.282249, Some(-397.492331)));
+        assert!(!published_energy_score(-173.928427, None));
+        assert_eq!(occupancy_complete(false, false, 0), None);
+    }
+
+    #[test]
+    fn inverted_gr_mixing_certifies_the_search() {
+        assert_eq!(
+            occupancy_complete(true, false, 1),
+            Some(OccupancyCertificate::MixingCertified)
+        );
+    }
+
+    #[test]
+    fn leftover_soap_saturation_on_one_family_is_not_done() {
+        assert_eq!(occupancy_complete(false, true, 1), None);
+        assert_eq!(occupancy_complete(false, true, 0), None);
+    }
+
+    #[test]
+    fn good_turing_with_a_competing_family_is_done() {
+        assert_eq!(
+            occupancy_complete(false, true, 2),
+            Some(OccupancyCertificate::CatalogSaturated)
+        );
+    }
+
+    #[test]
+    fn mixing_outranks_catalog_saturation() {
+        assert_eq!(
+            occupancy_complete(true, true, 2),
+            Some(OccupancyCertificate::MixingCertified)
+        );
+    }
+
+    #[test]
+    fn occupancy_retires_on_either_certificate_never_on_a_score() {
+        assert!(occupancy_retire(OccupancyCertificate::MixingCertified));
+        assert!(occupancy_retire(OccupancyCertificate::CatalogSaturated));
+        assert_eq!(occupancy_complete(false, false, 8), None);
     }
 }

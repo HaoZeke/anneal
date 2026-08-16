@@ -6,8 +6,8 @@ pub mod census;
 pub mod event;
 pub mod hyperband;
 pub mod lj;
-pub mod molecular;
 pub mod mixing;
+pub mod molecular;
 pub mod occupancy;
 pub mod packing;
 pub mod signature;
@@ -30,7 +30,10 @@ pub use mixing::{
     AttractorStrength, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
     explore_must_leave, invert_mixing, mixed, rhat_series, stronger,
 };
-pub use occupancy::is_occupancy_leave_action;
+pub use occupancy::{
+    OccupancyCertificate, is_occupancy_leave_action, occupancy_complete, occupancy_retire,
+    published_energy_score,
+};
 pub use packing::{
     PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, packing_distance, packing_fingerprint,
     packing_vector, same_packing,
