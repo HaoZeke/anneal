@@ -16,6 +16,8 @@ pub enum DescriptorBlockKind {
     SoapVariance,
     /// Mean ACE nu=3 contraction of local spherical expansions.
     AceNu3Mean,
+    /// Stacked species-conditioned leftover \(p_i-\mu_{z(i)}\).
+    SoapLeftover,
 }
 
 /// Resolution and aggregation contract for one normalized block.
@@ -336,7 +338,9 @@ impl DescriptorSpace {
         let mut metadata = Vec::with_capacity(self.schema.blocks.len());
         for (block_index, block) in self.schema.blocks.iter().copied().enumerate() {
             let local = match block.kind {
-                DescriptorBlockKind::SoapMean | DescriptorBlockKind::SoapVariance => {
+                DescriptorBlockKind::SoapMean
+                | DescriptorBlockKind::SoapVariance
+                | DescriptorBlockKind::SoapLeftover => {
                     local_spectra_z(coordinates, block.soap, species)
                 }
                 DescriptorBlockKind::AceNu3Mean => local_nu3_z(coordinates, block.soap, species),
@@ -347,6 +351,7 @@ impl DescriptorSpace {
                 DescriptorBlockKind::AceNu3Mean => {
                     column_mean(&local, block.soap.feat_dim(species))
                 }
+                DescriptorBlockKind::SoapLeftover => leftover_stack(&local, species),
             };
             if let Some(index) = aggregated.iter().position(|value| !value.is_finite()) {
                 return Err(DescriptorError::NonFiniteDescriptor {
@@ -448,6 +453,9 @@ impl DescriptorSpace {
                         local.ncols() - soap_dimension,
                     )
                 }
+                DescriptorBlockKind::SoapLeftover => {
+                    return self.jacobian_fd(coordinates, species, 1e-6);
+                }
             };
             debug_assert_eq!(raw_jacobian.ncols(), coordinate_dimension);
             debug_assert_eq!(raw_jacobian.nrows(), raw.len());
@@ -523,6 +531,66 @@ fn write_normalized_jacobian(
                 - raw[row] * radial_derivative / (norm_squared * norm);
         }
     }
+}
+
+fn leftover_stack(local: &Array2<f64>, species: Option<&[u32]>) -> Vec<f64> {
+    let rows = local.nrows();
+    let cols = local.ncols();
+    let mut leftover = vec![0.0; rows * cols];
+    if rows == 0 || cols == 0 {
+        return leftover;
+    }
+    match species {
+        None => {
+            let mean = column_mean(local, 0);
+            for row in 0..rows {
+                for column in 0..cols {
+                    leftover[row * cols + column] = local[[row, column]] - mean[column];
+                }
+            }
+        }
+        Some(labels) => {
+            let mut channels = Vec::new();
+            for &atomic_number in labels.iter().take(rows) {
+                if !channels.contains(&atomic_number) {
+                    channels.push(atomic_number);
+                }
+            }
+            let mut mean = vec![vec![0.0; cols]; channels.len()];
+            let mut count = vec![0.0; channels.len()];
+            for row in 0..rows {
+                let Some(channel) = labels
+                    .get(row)
+                    .and_then(|atomic_number| channels.iter().position(|value| value == atomic_number))
+                else {
+                    continue;
+                };
+                count[channel] += 1.0;
+                for column in 0..cols {
+                    mean[channel][column] += local[[row, column]];
+                }
+            }
+            for (channel, occupancy) in count.iter().copied().enumerate() {
+                if occupancy > 0.0 {
+                    for column in 0..cols {
+                        mean[channel][column] /= occupancy;
+                    }
+                }
+            }
+            for row in 0..rows {
+                let Some(channel) = labels
+                    .get(row)
+                    .and_then(|atomic_number| channels.iter().position(|value| value == atomic_number))
+                else {
+                    continue;
+                };
+                for column in 0..cols {
+                    leftover[row * cols + column] = local[[row, column]] - mean[channel][column];
+                }
+            }
+        }
+    }
+    leftover
 }
 
 fn column_mean(local: &Array2<f64>, start: usize) -> Vec<f64> {
