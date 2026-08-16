@@ -22,7 +22,11 @@ pub const REDUCTION_FACTOR: u32 = 3;
 /// First rung, in hops. Shorter walks have no packing identity yet.
 pub const MIN_RESOURCE: u64 = 64;
 /// Hop cap used when the coordinator has no explicit rung ceiling.
-pub const DEFAULT_MAX_RESOURCE: u64 = 1000;
+///
+/// Serial recommended Marks first hits sit at hops 33847--58779. A
+/// 1000-hop ceiling reseeds extras before any of those walks can
+/// leave the icosahedral shelf.
+pub const DEFAULT_MAX_RESOURCE: u64 = 60000;
 
 /// One live walk at the moment a rung is scored.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -84,8 +88,10 @@ pub fn verdict(walks: &[WalkRecord], id: u32, max_resource: u64) -> EnsembleVerd
     if self_walk.family.is_none() {
         return EnsembleVerdict::Keep;
     }
-    let _ = max_resource;
-    occupancy_of_family(walks, id, 0)
+    let Some(rung) = current_rung(self_walk.resource, max_resource) else {
+        return EnsembleVerdict::Keep;
+    };
+    occupancy_of_family(walks, id, rung)
 }
 
 fn occupancy_of_family(walks: &[WalkRecord], id: u32, rung: u64) -> EnsembleVerdict {
@@ -233,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn a_crowded_ico_extra_is_pruned_before_the_first_rung() {
+    fn extras_below_the_first_rung_are_not_pruned() {
         let walks = [
             walk(0, 10, -396.282249, Some(0)),
             walk(1, 10, -395.0, Some(0)),
@@ -241,16 +247,16 @@ mod tests {
             walk(3, 10, -393.0, Some(0)),
         ];
         assert!(!prune(&walks, 0, 1000));
-        assert!(prune(&walks, 3, 1000));
+        assert!(!prune(&walks, 3, 1000));
     }
 
     #[test]
     fn a_kept_ico_extra_may_still_isomer_adopt() {
-        let mut walks = vec![walk(0, 10, -396.282249, Some(0))];
+        let mut walks = vec![walk(0, 64, -396.282249, Some(0))];
         for index in 1..10 {
             walks.push(walk(
                 index,
-                10,
+                64,
                 -396.28 + f64::from(index) * 1e-3,
                 Some(0),
             ));
