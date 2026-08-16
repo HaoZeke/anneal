@@ -775,6 +775,32 @@ pub fn step_into_hole<R: Rng + ?Sized>(
     cur
 }
 
+/// Surplus Hyperband start: step the current packing mean into a SOAP
+/// hole of the occupied cloud. Empty wells yield `None` so the caller
+/// may draw a random cluster. Not a parent clone and not a named
+/// morphology.
+pub fn surplus_reseed<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    wells: &[Array1<f64>],
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Option<Array1<f64>> {
+    if wells.is_empty() {
+        return None;
+    }
+    Some(step_into_hole(
+        x,
+        wells,
+        SOAP_PACK_MERGE,
+        rcut,
+        species,
+        mobile,
+        rng,
+    ))
+}
+
 /// Kick mean SOAP in the null space of the occupied packing *and*
 /// of the shared-bank archive (known packings).
 fn packing_kick<R: Rng + ?Sized>(
@@ -1203,6 +1229,34 @@ mod tests {
             d > SOAP_DCUT_FALLBACK,
             "packing hop left mean SOAP unchanged, d={d}"
         );
+    }
+
+    #[test]
+    fn surplus_reseed_uses_a_soap_hole_when_the_packing_is_occupied() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
+        let mut rng = StdRng::seed_from_u64(11);
+        let y = surplus_reseed(
+            ico75.view(),
+            std::slice::from_ref(&mu),
+            3.5,
+            None,
+            None,
+            &mut rng,
+        )
+        .expect("occupied packing must yield a hole start");
+        let d = soap_bank_distance(ico75.view(), y.view(), 3.5, None, None);
+        assert!(
+            d > SOAP_PACK_MERGE * 0.5,
+            "surplus reseed stayed in the ico packing, d={d}"
+        );
+    }
+
+    #[test]
+    fn surplus_reseed_is_none_when_no_occupied_packing_is_known() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut rng = StdRng::seed_from_u64(3);
+        assert!(surplus_reseed(ico75.view(), &[], 3.5, None, None, &mut rng).is_none());
     }
 
     #[test]
