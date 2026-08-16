@@ -54,6 +54,11 @@ pub fn set_packing_archive(wells: Vec<Array1<f64>>) {
     PACK_ARCHIVE.with(|a| *a.borrow_mut() = wells);
 }
 
+/// Occupied packing means last stored by [`set_packing_archive`].
+pub fn packing_archive() -> Vec<Array1<f64>> {
+    PACK_ARCHIVE.with(|a| a.borrow().clone())
+}
+
 /// Leftover RMS below which the hop yields.
 const DEFECT: f64 = 1e-4;
 const LAMBDA: f64 = 1e-3;
@@ -801,6 +806,47 @@ pub fn surplus_reseed<R: Rng + ?Sized>(
     ))
 }
 
+/// Leave an occupied packing: hole, quench, and a second hole if the
+/// quench is a projector back onto a stored well. The hop loop quenches
+/// a single hole start onto the same packing; this is the retry that
+/// serial `leave_known_packing` already runs.
+pub fn leave_occupied_packing<R, Q>(
+    x: ArrayView1<f64>,
+    wells: &[Array1<f64>],
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    quench: Q,
+    rng: &mut R,
+) -> Array1<f64>
+where
+    R: Rng + ?Sized,
+    Q: FnOnce(ArrayView1<f64>) -> Array1<f64>,
+{
+    if wells.is_empty() {
+        return x.to_owned();
+    }
+    let y = step_into_hole(x, wells, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+    let q = quench(y.view());
+    let mu = unit(&soap_cloud_mean(q.view(), rcut, species, mobile));
+    let known = !mu.is_empty()
+        && wells.iter().any(|w| {
+            w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE
+        });
+    if !known {
+        return q;
+    }
+    step_into_hole(
+        q.view(),
+        wells,
+        SOAP_PACK_MERGE * 1.5,
+        rcut,
+        species,
+        mobile,
+        rng,
+    )
+}
+
 /// Kick mean SOAP in the null space of the occupied packing *and*
 /// of the shared-bank archive (known packings).
 fn packing_kick<R: Rng + ?Sized>(
@@ -1257,6 +1303,43 @@ mod tests {
         let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let mut rng = StdRng::seed_from_u64(3);
         assert!(surplus_reseed(ico75.view(), &[], 3.5, None, None, &mut rng).is_none());
+    }
+
+    #[test]
+    fn leave_occupied_packing_retries_when_the_quench_returns_to_the_well() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
+        let mut rng = StdRng::seed_from_u64(11);
+        let wells = [mu];
+        let hole = surplus_reseed(ico75.view(), &wells, 3.5, None, None, &mut rng)
+            .expect("occupied packing must yield a hole start");
+        let snapped = ico75.clone();
+        let d_snap = soap_l2_pack(
+            unit(&soap_cloud_mean(snapped.view(), 3.5, None, None)).view(),
+            wells[0].view(),
+        );
+        assert!(
+            d_snap <= SOAP_PACK_MERGE,
+            "ico projector must sit in the occupied well, d={d_snap}"
+        );
+        let left = leave_occupied_packing(
+            ico75.view(),
+            &wells,
+            3.5,
+            None,
+            None,
+            |_y| snapped.clone(),
+            &mut rng,
+        );
+        let d_left = soap_l2_pack(
+            unit(&soap_cloud_mean(left.view(), 3.5, None, None)).view(),
+            wells[0].view(),
+        );
+        assert!(
+            d_left > SOAP_PACK_MERGE,
+            "leave must retry the hole after a quench that snaps back, d={d_left}"
+        );
+        let _ = hole;
     }
 
     #[test]
