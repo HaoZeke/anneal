@@ -5,16 +5,16 @@
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-occ-marks/slurm.%j.out
-# Occupancy catalog hop cap 60000. Hyperband first rung is the
-# serial Marks first-hit window (3027db2). Binary: anneal-marksrung.
+#SBATCH --output=/users/home/rog32/ljwork/jcc/lj98-occ-sb/slurm.%j.out
+# Occupancy catalog: inverted GR leave, leftover-SOAP / DECAF packing
+# identity, leave requench, SOAP superbasin N_f. Binary: anneal-accel.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
-export LJ_ROOT=$HOME/anneal-marksrung
-export LJ_BIN=$HOME/anneal-marksrung/target/release/examples/lj_cluster_search
-export CATALOG_SERVER_BIN=$HOME/anneal-marksrung/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=lj98-occ-marks
-export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-marksrung/SOURCE_COMMIT
+export LJ_ROOT=$HOME/anneal-accel
+export LJ_BIN=$HOME/anneal-accel/target/release/examples/lj_cluster_search
+export CATALOG_SERVER_BIN=$HOME/anneal-accel/target/release/examples/catalog_server
+export CATALOG_CAMPAIGN=lj98-occ-sb
+export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-accel/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
@@ -25,7 +25,7 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 export SEED_OFFSET_BASE=800000
-mkdir -p "$HOME/ljwork/jcc/lj98-occ-marks"
+mkdir -p "$HOME/ljwork/jcc/lj98-occ-sb"
 cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
