@@ -2096,6 +2096,24 @@ impl PopulationEpochProgress {
 }
 
 #[cfg(feature = "bank-rpc")]
+fn population_call(
+    result: Result<
+        anneal_core::cooperative_search::PopulationSynchronizationOutcome,
+        anneal_core::cooperative_search::CooperativeRunError,
+    >,
+) -> anneal_core::cooperative_search::PopulationSynchronizationOutcome {
+    match result {
+        Ok(outcome) => outcome,
+        Err(anneal_core::cooperative_search::CooperativeRunError::InvalidPopulationPlan {
+            ..
+        }) => anneal_core::cooperative_search::PopulationSynchronizationOutcome::Unaddressed,
+        Err(error) => {
+            panic!("population call must preserve cooperative invariants: {error}")
+        }
+    }
+}
+
+#[cfg(feature = "bank-rpc")]
 fn active_population_action(
     progress: &PopulationEpochProgress,
     charged: usize,
@@ -2159,9 +2177,9 @@ fn run_capnp_catalog(
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
-        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
-        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-        TransitionRecordOutcome,
+        CooperativeRun, CooperativeRunError, PolicyEvidenceOutcome, PolicyRole,
+        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+        SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -2704,15 +2722,15 @@ fn run_capnp_catalog(
                 population_interval,
                 true,
             ) {
-                PopulationEpochAction::Submit => cooperative
-                    .join_population(replica, population_progress.epoch())
-                    .expect("population join must preserve cooperative invariants"),
-                PopulationEpochAction::Poll => cooperative
-                    .poll_population(replica, population_progress.epoch())
-                    .expect("population polling must preserve cooperative invariants"),
-                PopulationEpochAction::Abstain => cooperative
-                    .abstain_population(replica, population_progress.epoch())
-                    .expect("population abstention must preserve cooperative invariants"),
+                PopulationEpochAction::Submit => {
+                    population_call(cooperative.join_population(replica, population_progress.epoch()))
+                }
+                PopulationEpochAction::Poll => {
+                    population_call(cooperative.poll_population(replica, population_progress.epoch()))
+                }
+                PopulationEpochAction::Abstain => population_call(
+                    cooperative.abstain_population(replica, population_progress.epoch()),
+                ),
                 PopulationEpochAction::LocalWork => break,
             };
             match outcome {

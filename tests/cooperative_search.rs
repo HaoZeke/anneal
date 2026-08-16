@@ -849,6 +849,17 @@ fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
     assert_eq!(parent.producer_replica, 0);
     assert_eq!(plan.unique_parents, 4);
     assert_eq!(plan.max_family_size, 1);
+
+    let ahead = run.join_population(0, 5).unwrap();
+    assert!(
+        matches!(
+            ahead,
+            PopulationSynchronizationOutcome::Pending { .. }
+                | PopulationSynchronizationOutcome::Unaddressed
+                | PopulationSynchronizationOutcome::Rejected
+        ),
+        "a join on a non-open epoch must not kill the walk: {ahead:?}"
+    );
     assert!(
         run.events()
             .iter()
