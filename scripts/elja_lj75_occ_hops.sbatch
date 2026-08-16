@@ -7,15 +7,14 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-sb/slurm.%j.out
 # Occupancy catalog: inverted GR leave, leftover-SOAP / DECAF packing
-# identity, leave requench off the occupied well, SOAP superbasin N_f.
-# Binary: anneal-accel be83726.
+# identity, mixing / Good-Turing stop. Binary: anneal-stop 080ac51.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
-export LJ_ROOT=$HOME/anneal-accel
-export LJ_BIN=$HOME/anneal-accel/target/release/examples/lj_cluster_search
-export CATALOG_SERVER_BIN=$HOME/anneal-accel/target/release/examples/catalog_server
+export LJ_ROOT=$HOME/anneal-stop
+export LJ_BIN=$HOME/anneal-stop/target/release/examples/lj_cluster_search
+export CATALOG_SERVER_BIN=$HOME/anneal-stop/target/release/examples/catalog_server
 export CATALOG_CAMPAIGN=lj75-occ-sb
-export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-accel/SOURCE_COMMIT
+export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-stop/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
@@ -32,4 +31,4 @@ test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj75.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 3 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 4 "$RADIUS"
