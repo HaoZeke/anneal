@@ -1504,10 +1504,16 @@ mod run {
                     return Ok(PopulationSynchronizationOutcome::Unaddressed);
                 }
                 if state.required == 0 || state.submitted >= state.required {
-                    return Err(CooperativeRunError::InvalidPopulationPlan {
-                        epoch,
-                        reason: "pending barrier has invalid submission counts",
-                    });
+                    // Vacant close or a retire that advanced the epoch
+                    // without a plan. The replica skips it and stays
+                    // on its walk instead of dying.
+                    self.push_event(
+                        replica,
+                        TraceKind::PopulationReady,
+                        Some(catalog_version),
+                        None,
+                    )?;
+                    return Ok(PopulationSynchronizationOutcome::Unaddressed);
                 }
                 self.push_event(
                     replica,
