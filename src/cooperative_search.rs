@@ -1485,9 +1485,28 @@ mod run {
             catalog_version: u64,
         ) -> Result<PopulationSynchronizationOutcome, CooperativeRunError> {
             if state.epoch != epoch {
-                return Err(CooperativeRunError::InvalidPopulationPlan {
-                    epoch,
-                    reason: "barrier epoch does not match the request",
+                // The coordinator already left this epoch (vacant close or
+                // retire) or has not reached it. Killing the walk here is
+                // how LJ75 died at epoch 2. Skip a stale request; wait on
+                // a request that is still in the future.
+                if state.epoch > epoch {
+                    self.push_event(
+                        replica,
+                        TraceKind::PopulationReady,
+                        Some(catalog_version),
+                        None,
+                    )?;
+                    return Ok(PopulationSynchronizationOutcome::Unaddressed);
+                }
+                self.push_event(
+                    replica,
+                    TraceKind::PopulationPending,
+                    Some(catalog_version),
+                    None,
+                )?;
+                return Ok(PopulationSynchronizationOutcome::Pending {
+                    submitted: state.submitted,
+                    required: state.required,
                 });
             }
             let Some(plan) = state.plan else {
