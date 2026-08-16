@@ -3504,13 +3504,9 @@ fn run_capnp_catalog(
         &mut checkpoint,
     );
     let open_epoch = population_progress.epoch();
-    let _ = cooperative
-        .abstain_population(replica, open_epoch)
-        .expect("finished replica must leave the open population epoch");
+    let _ = population_call(cooperative.abstain_population(replica, open_epoch));
     if open_epoch != 0 {
-        let _ = cooperative
-            .abstain_population(replica, 0)
-            .expect("finished replica must leave epoch 0 if it is still open");
+        let _ = population_call(cooperative.abstain_population(replica, 0));
     }
     #[cfg(feature = "nng-transport")]
     {
