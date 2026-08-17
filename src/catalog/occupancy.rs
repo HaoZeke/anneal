@@ -102,6 +102,195 @@ pub fn occupancy_complete(
     }
 }
 
+/// Champion of the occupied packing has no TIS interface.
+pub const CHAMPION_RANK: u32 = u32::MAX;
+
+/// One leftover-SOAP interface seat owned by the catalog RPC.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct InterfaceSeat {
+    /// Replica that holds this seat.
+    pub replica: u32,
+    /// Interface rank. [`CHAMPION_RANK`] is the A-ensemble isomer walk.
+    pub rank: u32,
+    /// Threshold \(\lambda_i\) this extra must reach.
+    pub threshold: f64,
+    /// Highest leftover-SOAP \(\lambda\) this replica has posted.
+    pub lambda: f64,
+}
+
+impl InterfaceSeat {
+    /// Occupied-packing champion: no interface, isomer walk only.
+    pub fn champion(replica: u32) -> Self {
+        Self {
+            replica,
+            rank: CHAMPION_RANK,
+            threshold: 0.0,
+            lambda: 0.0,
+        }
+    }
+
+    /// Extra on interface `rank` with threshold \(\lambda_i\).
+    pub fn extra(replica: u32, rank: u32, threshold: f64) -> Self {
+        Self {
+            replica,
+            rank,
+            threshold,
+            lambda: 0.0,
+        }
+    }
+}
+
+/// Leftover-SOAP order parameter: distance from the occupied-well centroid.
+pub fn leftover_lambda(current: &[f64], centroid: &[f64]) -> f64 {
+    if current.is_empty() || current.len() != centroid.len() {
+        return 0.0;
+    }
+    current
+        .iter()
+        .zip(centroid)
+        .map(|(value, mean)| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        .sqrt()
+}
+
+/// TIS ladder: \(n\) interfaces equally spaced out to `horizon`.
+pub fn interface_ladder(n_extras: usize, horizon: f64) -> Vec<f64> {
+    if n_extras == 0 || !horizon.is_finite() || horizon <= 0.0 {
+        return Vec::new();
+    }
+    (1..=n_extras)
+        .map(|index| horizon * index as f64 / n_extras as f64)
+        .collect()
+}
+
+/// Whether this sample belongs in interface ensemble \(i\).
+pub fn in_interface_ensemble(max_lambda: f64, threshold: f64) -> bool {
+    max_lambda.is_finite() && threshold.is_finite() && max_lambda >= threshold
+}
+
+/// RETIS swap: each sample already satisfies the other's interface.
+pub fn retis_should_swap(lambda_a: f64, thresh_a: f64, lambda_b: f64, thresh_b: f64) -> bool {
+    thresh_a != thresh_b
+        && in_interface_ensemble(lambda_a, thresh_b)
+        && in_interface_ensemble(lambda_b, thresh_a)
+}
+
+/// Leave accepts a DECAF family change or an interface crossing.
+pub fn leave_shot_accepted(family_changed: bool, trial_lambda: f64, threshold: f64) -> bool {
+    family_changed || in_interface_ensemble(trial_lambda, threshold)
+}
+
+/// One frame on the occupancy Leave path.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeaveFrame {
+    /// Cartesian coordinates at this frame.
+    pub coordinates: Vec<f64>,
+    /// Leftover-SOAP descriptor at this frame.
+    pub leftover: Vec<f64>,
+    /// Leftover-SOAP \(\lambda\) from the occupied centroid.
+    pub lambda: f64,
+}
+
+/// Path the extra shoots from. OPS keeps the furthest frame; a failed
+/// quench does not throw away the climb toward the interface.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LeavePath {
+    frames: Vec<LeaveFrame>,
+}
+
+impl LeavePath {
+    /// Append one checkpoint. The path is a short climbing window.
+    pub fn push(&mut self, coordinates: Vec<f64>, leftover: Vec<f64>, lambda: f64) {
+        if !lambda.is_finite() {
+            return;
+        }
+        self.frames.push(LeaveFrame {
+            coordinates,
+            leftover,
+            lambda,
+        });
+        while self.frames.len() > 32 {
+            self.frames.remove(0);
+        }
+    }
+
+    /// Highest leftover-SOAP \(\lambda\) on the path.
+    pub fn max_lambda(&self) -> f64 {
+        self.frames
+            .iter()
+            .map(|frame| frame.lambda)
+            .fold(0.0, f64::max)
+    }
+
+    /// Interior frame with the highest \(\lambda\), else the last frame.
+    pub fn shoot_index(&self) -> Option<usize> {
+        match self.frames.len() {
+            0 => None,
+            1 | 2 => Some(self.frames.len() - 1),
+            n => self.frames[1..n - 1]
+                .iter()
+                .enumerate()
+                .max_by(|left, right| left.1.lambda.total_cmp(&right.1.lambda))
+                .map(|(index, _)| index + 1),
+        }
+    }
+
+    /// Coordinates to shoot from.
+    pub fn shoot_coordinates(&self) -> Option<&[f64]> {
+        self.shoot_index()
+            .map(|index| self.frames[index].coordinates.as_slice())
+    }
+
+    /// Leftover-SOAP descriptor at the shoot frame.
+    pub fn shoot_leftover(&self) -> Option<&[f64]> {
+        self.shoot_index()
+            .map(|index| self.frames[index].leftover.as_slice())
+    }
+}
+
+/// Assign extras increasing leftover-SOAP interfaces. Champion is omitted.
+pub fn assign_interfaces(extras: &[(u32, f64)], horizon: f64) -> Vec<InterfaceSeat> {
+    let ladder = interface_ladder(extras.len(), horizon);
+    extras
+        .iter()
+        .enumerate()
+        .map(|(index, (replica, lambda))| InterfaceSeat {
+            replica: *replica,
+            rank: index as u32,
+            threshold: ladder.get(index).copied().unwrap_or(horizon),
+            lambda: *lambda,
+        })
+        .collect()
+}
+
+/// Swap adjacent interface seats when both extras have crossed.
+pub fn retis_exchange_adjacent(seats: &mut [InterfaceSeat]) -> bool {
+    let mut swapped = false;
+    let mut index = 0;
+    while index + 1 < seats.len() {
+        let left = seats[index];
+        let right = seats[index + 1];
+        if left.rank == CHAMPION_RANK || right.rank == CHAMPION_RANK {
+            index += 1;
+            continue;
+        }
+        if retis_should_swap(left.lambda, left.threshold, right.lambda, right.threshold) {
+            seats[index].replica = right.replica;
+            seats[index].lambda = right.lambda;
+            seats[index + 1].replica = left.replica;
+            seats[index + 1].lambda = left.lambda;
+            swapped = true;
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    swapped
+}
+
 /// Ensemble stop. Mixing names a putative; extras still Leave.
 /// Retire only when two occupied DECAF families are on file and
 /// leftover-SOAP Good--Turing is saturated. A fabricated family
@@ -121,8 +310,10 @@ pub fn occupancy_retire(
 #[cfg(test)]
 mod tests {
     use super::{
-        OccupancyCertificate, is_occupancy_leave_action, occupancy_complete, occupancy_retire,
-        published_energy_score,
+        CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, assign_interfaces,
+        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+        leftover_lambda, occupancy_complete, occupancy_retire, published_energy_score,
+        retis_exchange_adjacent, retis_should_swap,
     };
 
     #[test]
@@ -201,5 +392,78 @@ mod tests {
             1
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
+    }
+
+    #[test]
+    fn leftover_lambda_is_the_distance_from_the_occupied_centroid() {
+        let centroid = [0.0, 0.0, 0.0];
+        let on_well = [0.0, 0.0, 0.0];
+        let off_well = [3.0, 4.0, 0.0];
+        assert_eq!(leftover_lambda(&on_well, &centroid), 0.0);
+        assert_eq!(leftover_lambda(&off_well, &centroid), 5.0);
+        assert_eq!(leftover_lambda(&[1.0], &centroid), 0.0);
+    }
+
+    #[test]
+    fn interface_ladder_stages_extras_away_from_the_occupied_well() {
+        assert!(interface_ladder(0, 1.0).is_empty());
+        assert_eq!(interface_ladder(2, 2.0), vec![1.0, 2.0]);
+        assert_eq!(interface_ladder(4, 1.0), vec![0.25, 0.5, 0.75, 1.0]);
+    }
+
+    #[test]
+    fn a_shot_is_in_the_interface_ensemble_once_it_reaches_the_threshold() {
+        assert!(!in_interface_ensemble(0.4, 0.5));
+        assert!(in_interface_ensemble(0.5, 0.5));
+        assert!(in_interface_ensemble(0.9, 0.5));
+    }
+
+    #[test]
+    fn retis_swaps_adjacent_ranks_only_when_each_sample_satisfies_the_other() {
+        assert!(retis_should_swap(1.0, 0.25, 0.6, 0.5));
+        assert!(!retis_should_swap(0.4, 0.25, 0.6, 0.5));
+        assert!(!retis_should_swap(1.0, 0.5, 1.0, 0.5));
+        assert!(!retis_should_swap(1.0, 0.25, 0.2, 0.5));
+    }
+
+    #[test]
+    fn leave_accepts_a_family_change_or_an_interface_crossing() {
+        assert!(leave_shot_accepted(true, 0.1, 0.5));
+        assert!(leave_shot_accepted(false, 0.5, 0.5));
+        assert!(!leave_shot_accepted(false, 0.4, 0.5));
+    }
+
+    #[test]
+    fn a_leave_path_shoots_from_the_highest_interior_lambda() {
+        let mut path = LeavePath::default();
+        path.push(vec![0.0], vec![0.0], 0.1);
+        path.push(vec![1.0], vec![1.0], 0.8);
+        path.push(vec![2.0], vec![2.0], 0.3);
+        assert_eq!(path.max_lambda(), 0.8);
+        assert_eq!(path.shoot_index(), Some(1));
+        assert_eq!(path.shoot_coordinates(), Some([1.0].as_slice()));
+    }
+
+    #[test]
+    fn extras_receive_increasing_interface_ranks_and_the_champion_does_not() {
+        let extras = [(1, 0.1), (2, 0.4), (3, 0.9)];
+        let assigned = assign_interfaces(&extras, 1.0);
+        assert_eq!(assigned.len(), 3);
+        assert_eq!(assigned[0].replica, 1);
+        assert_eq!(assigned[0].rank, 0);
+        assert!((assigned[0].threshold - 1.0 / 3.0).abs() < 1e-12);
+        assert_eq!(assigned[2].replica, 3);
+        assert!((assigned[2].threshold - 1.0).abs() < 1e-12);
+        assert_eq!(InterfaceSeat::champion(0).rank, CHAMPION_RANK);
+    }
+
+    #[test]
+    fn retis_exchanges_adjacent_seats_when_both_have_crossed() {
+        let extras = [(1, 1.0), (2, 0.8)];
+        let mut seats = assign_interfaces(&extras, 1.0);
+        assert!(retis_exchange_adjacent(&mut seats));
+        assert_eq!(seats[0].replica, 2);
+        assert_eq!(seats[1].replica, 1);
+        assert!(!retis_exchange_adjacent(&mut seats));
     }
 }
