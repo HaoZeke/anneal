@@ -3542,9 +3542,11 @@ fn run_capnp_catalog(
                         &mut shared_wells,
                     );
                 }
+                let live = snapshot.current_state();
+                let live_slice = live.as_slice().unwrap_or(&[]);
                 let shoot_coords = leave_path
                     .shoot_coordinates()
-                    .unwrap_or(snapshot.current_state());
+                    .unwrap_or(live_slice);
                 let shoot_leftover = leave_path
                     .shoot_leftover()
                     .unwrap_or(descriptor.as_slice());
