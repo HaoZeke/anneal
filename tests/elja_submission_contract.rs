@@ -238,8 +238,8 @@ fn occupancy_many_chains_starts_one_brain_per_replica() {
         );
     }
     assert!(
-        source.contains("id=tcp://"),
-        "brain peers must be id=tcp://host:port pairs the worker already parses"
+        source.contains(r#"${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))"#),
+        "brain peers must be replica=tcp://host:port pairs the worker already parses"
     );
 }
 
