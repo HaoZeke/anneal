@@ -71,6 +71,8 @@ struct BoundaryCrossingReply {
 struct PolicyStateRequest {
   descriptor @0 :List(Float64);
   energy @1 :Float64;
+  # Highest leftover-SOAP lambda on this replica's Leave path.
+  leftoverLambda @2 :Float64;
 }
 
 enum CatalogRelation {
@@ -99,6 +101,10 @@ struct PolicyStateReply {
   exploreCollapsed @12 :Bool;
   certifiedAttractor @13 :Bool;
   pruned @14 :Bool;
+  leftoverLambda @15 :Float64;
+  interfaceRank @16 :UInt32;
+  interfaceThreshold @17 :Float64;
+  interfaceCount @18 :UInt32;
 }
 
 enum CatalogMutationKind {

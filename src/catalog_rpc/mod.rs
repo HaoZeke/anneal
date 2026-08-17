@@ -17,7 +17,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 9;
+pub const PROTOCOL_VERSION: u16 = 10;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -174,6 +174,8 @@ pub enum CatalogOperation {
         descriptor: Vec<f64>,
         /// Candidate energy used to compare an unrelated incumbent anchor.
         energy: f64,
+        /// Highest leftover-SOAP \(\lambda\) on this replica's Leave path.
+        leftover_lambda: f64,
     },
     /// Submit one replay-safe charged-work event.
     LedgerEvent {
@@ -358,6 +360,14 @@ pub struct PolicyState {
     pub certified_attractor: bool,
     /// Successive halving discarded this walk at a rung.
     pub pruned: bool,
+    /// Leftover-SOAP \(\lambda\) the coordinator assigned this replica.
+    pub leftover_lambda: f64,
+    /// TIS interface rank. `u32::MAX` is the occupied-packing champion.
+    pub interface_rank: u32,
+    /// Threshold \(\lambda_i\) this extra must reach.
+    pub interface_threshold: f64,
+    /// Number of leftover-SOAP interfaces in the current ladder.
+    pub interface_count: u32,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -671,13 +681,18 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             );
             crossing.set_draw(*draw);
         }
-        CatalogOperation::PolicyState { descriptor, energy } => {
+        CatalogOperation::PolicyState {
+            descriptor,
+            energy,
+            leftover_lambda,
+        } => {
             let mut state = operation.init_policy_state();
             fill_f64(
                 state.reborrow().init_descriptor(descriptor.len() as u32),
                 descriptor,
             );
             state.set_energy(*energy);
+            state.set_leftover_lambda(*leftover_lambda);
         }
         CatalogOperation::LedgerEvent {
             kind,
@@ -804,6 +819,7 @@ pub(crate) fn decode_request_reader(
             CatalogOperation::PolicyState {
                 descriptor: list_f64(state.get_descriptor().map_err(wire_error)?),
                 energy: state.get_energy(),
+                leftover_lambda: state.get_leftover_lambda(),
             }
         }
         catalog_request::operation::LedgerEvent(ledger) => {
@@ -997,6 +1013,10 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_explore_collapsed(state.explore_collapsed);
                     output.set_certified_attractor(state.certified_attractor);
                     output.set_pruned(state.pruned);
+                    output.set_leftover_lambda(state.leftover_lambda);
+                    output.set_interface_rank(state.interface_rank);
+                    output.set_interface_threshold(state.interface_threshold);
+                    output.set_interface_count(state.interface_count);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1184,6 +1204,10 @@ pub(crate) fn decode_reply_reader(
                         explore_collapsed: state.get_explore_collapsed(),
                         certified_attractor: state.get_certified_attractor(),
                         pruned: state.get_pruned(),
+                        leftover_lambda: state.get_leftover_lambda(),
+                        interface_rank: state.get_interface_rank(),
+                        interface_threshold: state.get_interface_threshold(),
+                        interface_count: state.get_interface_count(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

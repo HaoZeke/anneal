@@ -828,12 +828,37 @@ mod run {
             local_stall_slices: u32,
             local_deepened: bool,
         ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
+            self.policy_input_with_lambda(
+                replica,
+                descriptor,
+                energy,
+                0.0,
+                local_stall_slices,
+                local_deepened,
+            )
+        }
+
+        /// Policy evidence with the replica's leftover-SOAP \(\lambda\).
+        pub fn policy_input_with_lambda(
+            &mut self,
+            replica: u32,
+            descriptor: Vec<f64>,
+            energy: f64,
+            leftover_lambda: f64,
+            local_stall_slices: u32,
+            local_deepened: bool,
+        ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
                 state.client.as_ref().map(|mailbox| {
                     mailbox.exec(move |client| {
-                        client.policy_state_with_snapshot(rpc_sequence, descriptor, energy)
+                        client.policy_state_with_lambda(
+                            rpc_sequence,
+                            descriptor,
+                            energy,
+                            leftover_lambda,
+                        )
                     })
                 })
             };
@@ -883,6 +908,26 @@ mod run {
             replica: u32,
             descriptor: Vec<f64>,
             energy: f64,
+            local_stall_slices: u32,
+            local_deepened: bool,
+        ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
+            self.try_policy_input_with_lambda(
+                replica,
+                descriptor,
+                energy,
+                0.0,
+                local_stall_slices,
+                local_deepened,
+            )
+        }
+
+        /// Mailbox policy with the replica's leftover-SOAP \(\lambda\).
+        pub fn try_policy_input_with_lambda(
+            &mut self,
+            replica: u32,
+            descriptor: Vec<f64>,
+            energy: f64,
+            leftover_lambda: f64,
             local_stall_slices: u32,
             local_deepened: bool,
         ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
@@ -947,8 +992,12 @@ mod run {
                 let slot = Arc::clone(&state.policy_slot);
                 if let Some(mailbox) = state.client.as_ref() {
                     mailbox.post(move |client| {
-                        let answer =
-                            client.policy_state_with_snapshot(rpc_sequence, descriptor, energy);
+                        let answer = client.policy_state_with_lambda(
+                            rpc_sequence,
+                            descriptor,
+                            energy,
+                            leftover_lambda,
+                        );
                         *slot.lock().expect("policy slot") = Some(answer);
                     });
                     state.policy_pending = true;
@@ -2200,6 +2249,9 @@ mod run {
                 certified_attractor: state.certified_attractor,
                 pruned: state.pruned,
             },
+            leftover_lambda: state.leftover_lambda,
+            interface_rank: state.interface_rank,
+            interface_threshold: state.interface_threshold,
         })
     }
 

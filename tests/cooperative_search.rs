@@ -1155,6 +1155,9 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         local_stall_slices: 0,
         local_deepened: false,
         mixing: MixingEvidence::default(),
+        leftover_lambda: 0.0,
+        interface_rank: u32::MAX,
+        interface_threshold: 0.0,
     };
     assert_eq!(
         run.decide(

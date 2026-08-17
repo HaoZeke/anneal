@@ -174,6 +174,12 @@ pub struct CatalogPolicyInput {
     pub local_deepened: bool,
     /// Inverted Gelman--Rubin evidence for the live ensemble.
     pub mixing: MixingEvidence,
+    /// Leftover-SOAP \(\lambda\) posted through the catalog RPC.
+    pub leftover_lambda: f64,
+    /// TIS interface rank. `u32::MAX` is the occupied-packing champion.
+    pub interface_rank: u32,
+    /// Threshold \(\lambda_i\) this extra must reach on Leave.
+    pub interface_threshold: f64,
 }
 
 /// Selectable action for one cooperative search slice.
