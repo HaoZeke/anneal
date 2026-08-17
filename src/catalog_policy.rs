@@ -321,9 +321,6 @@ impl CatalogPolicy {
                     PolicyReason::IncumbentLocalSearch,
                 )
             }
-            _ if input.interface_rank != u32::MAX => {
-                decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
-            }
             _ if input.mixing.explore_collapsed
                 && !matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
             {

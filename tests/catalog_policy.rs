@@ -48,8 +48,8 @@ fn extras_on_a_published_prize_keep() {
     let decision = CatalogPolicy::decide(extra);
     assert_eq!(decision.action, PolicyAction::ContinueLocal);
     extra.on_published_prize = false;
-    let leave = CatalogPolicy::decide(extra);
-    assert_eq!(leave.action, PolicyAction::Leave);
+    let walk = CatalogPolicy::decide(extra);
+    assert_eq!(walk.action, PolicyAction::ContinueLocal);
 }
 
 #[test]

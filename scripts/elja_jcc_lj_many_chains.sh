@@ -39,9 +39,11 @@ REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
 BRAIN_PORT_BASE=${CATALOG_BRAIN_PORT_BASE:-$((27000 + ${SLURM_JOB_ID:-0} % 2000))}
 brain_peers() {
   local me=$1
+  local lo=$2
+  local hi=$3
   local parts=()
   local r
-  for r in $(seq 0 $((REPLICAS - 1))); do
+  for r in $(seq "$lo" $((hi - 1))); do
     if (( r != me )); then
       parts+=("${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))")
     fi
@@ -128,6 +130,7 @@ status=0
 replica=0
 while (( replica < REPLICAS )); do
   pids=()
+  wave_start=$replica
   wave_end=$((replica + WAVE))
   if (( wave_end > REPLICAS )); then
     wave_end=$REPLICAS
@@ -152,7 +155,7 @@ while (( replica < REPLICAS )); do
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
       export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica")"
+      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
