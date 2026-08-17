@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, packing_distance, packing_fingerprint,
-    same_packing,
+    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family, packing_distance,
+    packing_fingerprint, same_packing,
 };
 use ndarray::Array1;
 
@@ -48,6 +48,16 @@ fn dimer_coordinates_have_no_packing_fingerprint() {
 }
 
 #[test]
+fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+    assert!(different_decaf_family(ico, marks));
+    assert!(!different_decaf_family(ico, ico));
+}
+
+#[test]
 fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
     let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
     let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
@@ -92,7 +102,10 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     let second = book.observe(ico.as_slice().unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
-    assert_eq!(book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()), 0.0);
+    assert_eq!(
+        book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()),
+        0.0
+    );
 }
 
 #[test]
