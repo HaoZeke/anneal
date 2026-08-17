@@ -14,7 +14,9 @@
 use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
-use anneal_core::catalog::{occupancy_complete, occupancy_retire, published_energy_score};
+use anneal_core::catalog::{
+    LeavePath, occupancy_complete, occupancy_retire, published_energy_score,
+};
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
     Ledger, MoveLibrary, Outcome, QuenchStatus, random_cluster, run_with_bias,
@@ -2651,6 +2653,8 @@ fn run_capnp_catalog(
     let mut announced_done = false;
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
+    #[cfg(feature = "bank-rpc")]
+    let mut leave_path = LeavePath::default();
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
@@ -3205,10 +3209,11 @@ fn run_capnp_catalog(
             }
         }
         let policy = match cooperative
-            .try_policy_input(
+            .try_policy_input_with_lambda(
                 replica,
                 descriptor.clone(),
                 snapshot.current_energy(),
+                leave_path.max_lambda(),
                 stall,
                 local_deepened,
             )
@@ -3219,6 +3224,11 @@ fn run_capnp_catalog(
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
         };
+        leave_path.push(
+            snapshot.current_state().to_vec(),
+            descriptor.clone(),
+            policy.leftover_lambda,
+        );
         // DECAF family count is not on the wire. Do not invent 2
         // from certified_attractor: leftover-SOAP saturation on ico
         // is one family. Mixing then prints a putative; extras Leave.
@@ -3536,16 +3546,22 @@ fn run_capnp_catalog(
                         &mut shared_wells,
                     );
                 }
+                let shoot_coords = leave_path
+                    .shoot_coordinates()
+                    .unwrap_or(snapshot.current_state());
+                let shoot_leftover = leave_path
+                    .shoot_leftover()
+                    .unwrap_or(descriptor.as_slice());
                 let hole = cooperative
                     .try_descriptor_hole(
                         replica,
-                        descriptor.clone(),
+                        shoot_leftover.to_vec(),
                         128,
                         transport_rng.random(),
                     )
                     .expect("catalog hole access must preserve local execution");
                 let local = leave_packing_state(
-                    snapshot.current_state(),
+                    ArrayView1::from(shoot_coords),
                     0.35,
                     &shared_wells,
                     coop_rcut,
@@ -3554,7 +3570,7 @@ fn run_capnp_catalog(
                 );
                 let left = match hole {
                     CatalogHoleOutcome::Proposal(proposal) => step_toward_catalog_hole(
-                        snapshot.current_state(),
+                        ArrayView1::from(shoot_coords),
                         &proposal.target,
                         &descriptor_space,
                         coop_species.as_deref(),
