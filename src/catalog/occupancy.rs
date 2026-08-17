@@ -60,6 +60,30 @@ pub fn is_occupancy_leave_action(action: &str) -> bool {
     )
 }
 
+/// How an occupancy Leave updates the live chain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccupancyLeaveAdopt {
+    /// Take the quenched trial as the live minimum.
+    Quench,
+    /// The quench sat in the occupied family. Keep the unquenched hole step.
+    HoleStep,
+}
+
+/// Occupancy Leave that quenches back onto the occupied packing must
+/// still move the chain to the hole step. A discarded same-family
+/// quench is a no-op Leave. Reseeds take the new start even when
+/// DECAF still names the old family.
+pub fn occupancy_leave_adopt(action: &str, family_changed: bool) -> Option<OccupancyLeaveAdopt> {
+    if !is_occupancy_leave_action(action) {
+        return None;
+    }
+    if action == "catalog_leave" && !family_changed {
+        Some(OccupancyLeaveAdopt::HoleStep)
+    } else {
+        Some(OccupancyLeaveAdopt::Quench)
+    }
+}
+
 /// Why occupancy may retire a replica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyCertificate {
@@ -345,8 +369,9 @@ pub fn occupancy_retire(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, assign_interfaces,
-        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+        CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
+        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
+        leave_shot_accepted, occupancy_leave_adopt,
         leftover_lambda, occupancy_complete, occupancy_retire, promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap,
     };
@@ -358,6 +383,28 @@ mod tests {
         assert!(is_occupancy_leave_action("catalog_leave"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
+    }
+
+    #[test]
+    fn catalog_leave_keeps_the_hole_step_when_the_quench_stays_home() {
+        assert_eq!(
+            occupancy_leave_adopt("catalog_leave", false),
+            Some(OccupancyLeaveAdopt::HoleStep)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("catalog_leave", true),
+            Some(OccupancyLeaveAdopt::Quench)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("hyperband_reseed", false),
+            Some(OccupancyLeaveAdopt::Quench)
+        );
+        assert_eq!(
+            occupancy_leave_adopt("population_reseed", false),
+            Some(OccupancyLeaveAdopt::Quench)
+        );
+        assert_eq!(occupancy_leave_adopt("catalog_incumbent", false), None);
+        assert_eq!(occupancy_leave_adopt("histo", true), None);
     }
 
     #[test]
