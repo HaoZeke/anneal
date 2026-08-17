@@ -31,6 +31,7 @@ jobs:
       - name: Validate release metadata
         shell: bash
         run: |
+          set -euo pipefail
           cargo_version=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
           python_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
           citation_version=$(awk '$1 == "version:" { gsub(/"/, "", $2); print $2; exit }' CITATION.cff)
