@@ -467,6 +467,9 @@ mod run {
         last_policy: Option<PolicyState>,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
         policy_pending: bool,
+        last_hole: Option<DescriptorHoleProposal>,
+        hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
+        hole_pending: bool,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -500,6 +503,9 @@ mod run {
                             last_policy: None,
                             policy_slot: Arc::new(Mutex::new(None)),
                             policy_pending: false,
+                            last_hole: None,
+                            hole_slot: Arc::new(Mutex::new(None)),
+                            hole_pending: false,
                         },
                     )
                 })
@@ -521,6 +527,9 @@ mod run {
             state.client = Some(CatalogMailbox::spawn(client));
             state.policy_pending = false;
             *state.policy_slot.lock().expect("policy slot") = None;
+            state.hole_pending = false;
+            *state.hole_slot.lock().expect("hole slot") = None;
+            state.last_hole = None;
             Ok(())
         }
 
@@ -1014,6 +1023,74 @@ mod run {
                     Ok(CatalogHoleOutcome::LocalFallback)
                 }
             }
+        }
+
+        /// Post a shared-cloud hole and return the last one.
+        /// The hop thread never waits. Leave applies this hole, not a
+        /// private well list, so extras bias off known superbasins.
+        pub fn try_descriptor_hole(
+            &mut self,
+            replica: u32,
+            current: Vec<f64>,
+            samples: u32,
+            draw: u64,
+        ) -> Result<CatalogHoleOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                return Ok(CatalogHoleOutcome::SharingDisabled);
+            }
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.hole_pending {
+                    state.hole_slot.lock().expect("hole slot").take()
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = finished {
+                self.replica_mut(replica)?.hole_pending = false;
+                match result {
+                    Ok(proposal) => {
+                        self.replica_mut(replica)?.last_hole = Some(proposal.clone());
+                        return Ok(CatalogHoleOutcome::Proposal(proposal));
+                    }
+                    Err(CatalogClientError::Rejected(reason)) => {
+                        self.push_event(
+                            replica,
+                            TraceKind::Rejection,
+                            None,
+                            Some(rejection_code(reason)),
+                        )?;
+                        return Ok(CatalogHoleOutcome::Rejected);
+                    }
+                    Err(_) => {
+                        self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                        return Ok(CatalogHoleOutcome::LocalFallback);
+                    }
+                }
+            }
+            let should_post = !self.replica_mut(replica)?.hole_pending;
+            if should_post {
+                let rpc_sequence = self.next_rpc_sequence(replica)?;
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.hole_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    mailbox.post(move |client| {
+                        let answer =
+                            client.descriptor_hole(rpc_sequence, current, samples, draw);
+                        *slot.lock().expect("hole slot") = Some(answer);
+                    });
+                    state.hole_pending = true;
+                }
+            }
+            if let Some(proposal) = self
+                .replicas
+                .get(&replica)
+                .and_then(|state| state.last_hole.clone())
+            {
+                return Ok(CatalogHoleOutcome::Proposal(proposal));
+            }
+            Ok(CatalogHoleOutcome::LocalFallback)
         }
 
         /// Request one observed crossing leaving the current attraction region.
