@@ -27,8 +27,10 @@ tag with the leading =v= stripped:
 - =pyproject.toml= =[project].version=
 - =CITATION.cff= =version:=
 
-If any one disagrees, the workflow stops before wheels and nothing
-is published. Bump all three in the same =chore(release):= commit.
+If any one disagrees, the workflow must stop before wheels and
+nothing is published. The validate step uses =set -euo pipefail= so a
+failed =test= fails the job. Bump all three in the same
+=chore(release):= commit.
 
 * Steps
 
@@ -69,6 +71,8 @@ PyPI and crates.io stopped at =0.7.2= (=v0.7.2=, 2026-08-01).
 - =0.9.0= had matching =0.9.0= metadata and assembled notes
   (=df28dd2=) and no tag at all.
 
-The corrective tags are =v0.8.0= on =0.8.0= (name only; that tree
-cannot publish) and =v0.9.0= on =df28dd2= (the first post-0.7.2 tree
-that can publish).
+The corrective tags are =v0.8.0= on =0.8.0= and =v0.9.0= on
+=df28dd2=. The =0.8.0= tree's workflow file does not =set -e= in
+validate, so that historical tag can still build wheels even though
+=CITATION.cff= is =0.7.2=. New tags use the =set -euo pipefail=
+validator.
