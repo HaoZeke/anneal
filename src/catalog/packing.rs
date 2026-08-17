@@ -21,6 +21,11 @@ pub const ENVIRONMENT_RADIUS: f64 = 1.4;
 /// sealed ico-floor L1 of 0 and the ico–Marks L1 of 0.69.
 pub const PACKING_MERGE: f64 = 0.20;
 
+/// Visits before a DECAF family counts as occupied. Same grain as
+/// [`crate::catalog_policy::LOCAL_CENSUS_LEAVE`]. One quench of a
+/// random start is not an occupied funnel.
+pub const OCCUPIED_FAMILY_VISITS: u64 = 8;
+
 /// DECAF used [`SoapSpec::default`], not the leftover hop spec.
 const PACKING_SPEC: SoapSpec = SoapSpec {
     n_max: 3,
@@ -124,10 +129,43 @@ impl PackingBook {
         self.visits.get(family).copied().unwrap_or(0)
     }
 
-    /// Occupied DECAF families on file. Visit count, not leftover-SOAP
-    /// basin count. Empty until `observe` records a histogram.
+    /// Occupied DECAF families on file. A family is occupied only after
+    /// [`OCCUPIED_FAMILY_VISITS`] observes. One quench of each packing
+    /// is not two occupied funnels.
     pub fn occupied_family_count(&self) -> usize {
-        self.visits.iter().filter(|&&visits| visits > 0).count()
+        self.visits
+            .iter()
+            .filter(|&&visits| visits >= OCCUPIED_FAMILY_VISITS)
+            .count()
+    }
+
+    /// Distinct rematched packings among live structures that are
+    /// already occupied on the book.
+    pub fn occupied_among<I, C>(&self, structures: I) -> usize
+    where
+        I: IntoIterator<Item = C>,
+        C: AsRef<[f64]>,
+    {
+        let mut representatives: Vec<Vec<f64>> = Vec::new();
+        for coordinates in structures {
+            let Some(histogram) = self.histogram(coordinates.as_ref()) else {
+                continue;
+            };
+            let occupied = self
+                .family_of(&histogram)
+                .is_some_and(|index| self.visits(index) >= OCCUPIED_FAMILY_VISITS);
+            if !occupied {
+                continue;
+            }
+            if representatives
+                .iter()
+                .any(|kept| same_packing(kept, &histogram))
+            {
+                continue;
+            }
+            representatives.push(histogram);
+        }
+        representatives.len()
     }
 
     /// L1 to the nearest family that is not this histogram's family.
