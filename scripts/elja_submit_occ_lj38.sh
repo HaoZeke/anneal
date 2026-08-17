@@ -4,7 +4,7 @@
 set -euo pipefail
 
 ROOT=${LJ_ROOT:-$HOME/anneal-stop}
-WANT=41ad564ef5a69fef99445d03c3064464705025e1
+WANT=aa0cde11bb9ae67907a86c019efde0d3228209af
 BIN=$ROOT/target/release/examples/lj_cluster_search
 SERVER=$ROOT/target/release/examples/catalog_server
 SRC_FILE=$ROOT/SOURCE_COMMIT
