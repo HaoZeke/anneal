@@ -2717,7 +2717,7 @@ fn run_capnp_catalog(
                 boundary.state(),
                 gradient,
             ) {
-                let _ = cooperative.offer_candidate(replica, candidate.clone());
+                let _ = cooperative.post_offer_candidate(replica, candidate.clone());
                 freshest_boundary = Some(candidate);
             }
         }
@@ -3149,7 +3149,7 @@ fn run_capnp_catalog(
             }
         }
         let policy = match cooperative
-            .policy_input(
+            .try_policy_input(
                 replica,
                 descriptor.clone(),
                 snapshot.current_energy(),
