@@ -3163,17 +3163,17 @@ fn run_capnp_catalog(
             | PolicyEvidenceOutcome::LocalFallback
             | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
         };
-        // Mixing already requires a competitor. Without a packing
-        // count on the wire, leftover-SOAP saturation alone is one
-        // family and is not completeness.
-        let n_occupied_families = usize::from(policy.mixing.certified_attractor) * 2;
+        // DECAF family count is not on the wire. Do not invent 2
+        // from certified_attractor: leftover-SOAP saturation on ico
+        // is one family. Mixing then prints a putative; extras Leave.
+        let n_occupied_families = 0;
         if let Some(certificate) = occupancy_complete(
             policy.mixing.certified_attractor,
             policy.census.globally_saturated(),
             n_occupied_families,
         ) {
             let saturated = policy.census.globally_saturated();
-            if occupancy_retire(certificate, saturated) {
+            if occupancy_retire(certificate, saturated, n_occupied_families) {
                 if !announced_done {
                     println!(
                         "  done {}  hops {}  best {:.6}",

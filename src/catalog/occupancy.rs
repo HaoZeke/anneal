@@ -103,13 +103,19 @@ pub fn occupancy_complete(
 }
 
 /// Ensemble stop. Mixing names a putative; extras still Leave.
-/// Saturation of two occupied families, alone or with mixing, retires.
-/// A published energy is not an argument.
-pub fn occupancy_retire(certificate: OccupancyCertificate, catalog_saturated: bool) -> bool {
-    match certificate {
-        OccupancyCertificate::CatalogSaturated => true,
-        OccupancyCertificate::MixingCertified => catalog_saturated,
-    }
+/// Retire only when two occupied DECAF families are on file and
+/// leftover-SOAP Good--Turing is saturated. A fabricated family
+/// count of `2 * certified` is not that count.
+pub fn occupancy_retire(
+    certificate: OccupancyCertificate,
+    catalog_saturated: bool,
+    n_occupied_families: usize,
+) -> bool {
+    n_occupied_families >= 2
+        && match certificate {
+            OccupancyCertificate::CatalogSaturated => true,
+            OccupancyCertificate::MixingCertified => catalog_saturated,
+        }
 }
 
 #[cfg(test)]
@@ -171,15 +177,28 @@ mod tests {
     fn mixing_alone_does_not_retire_extras_before_good_turing() {
         assert!(!occupancy_retire(
             OccupancyCertificate::MixingCertified,
-            false
+            false,
+            2
+        ));
+        assert!(!occupancy_retire(
+            OccupancyCertificate::MixingCertified,
+            true,
+            1
         ));
         assert!(occupancy_retire(
             OccupancyCertificate::MixingCertified,
-            true
+            true,
+            2
         ));
         assert!(occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
-            true
+            true,
+            2
+        ));
+        assert!(!occupancy_retire(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            1
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
     }
