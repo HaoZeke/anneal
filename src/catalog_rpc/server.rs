@@ -27,8 +27,9 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, occupant_rhat, prune,
-    rhat_series, same_packing,
+    WalkRecord, assign_interfaces, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_lambda, occupant_rhat, prune, retis_exchange_adjacent, rhat_series, same_packing,
+    CHAMPION_RANK, InterfaceSeat,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -255,6 +256,8 @@ struct ScientificState {
     family_history: BTreeMap<u32, VecDeque<f64>>,
     trial_hops: BTreeMap<u32, u64>,
     pending_reseed: BTreeSet<u32>,
+    leftover_lambda_by_replica: BTreeMap<u32, f64>,
+    interface_seat_by_replica: BTreeMap<u32, crate::catalog::InterfaceSeat>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -334,6 +337,8 @@ impl CoordinatorState {
                     family_history: BTreeMap::new(),
                     trial_hops: BTreeMap::new(),
                     pending_reseed: BTreeSet::new(),
+                    leftover_lambda_by_replica: BTreeMap::new(),
+                    interface_seat_by_replica: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -841,7 +846,11 @@ fn apply_request(
                 payload = AcceptedPayload::BoundaryCrossing(crossing);
             }
         }
-        CatalogOperation::PolicyState { descriptor, energy } => {
+        CatalogOperation::PolicyState {
+            descriptor,
+            energy,
+            leftover_lambda,
+        } => {
             let ensemble_total = state
                 .ledger
                 .as_ref()
@@ -920,6 +929,13 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
+            let seat = assign_leftover_interfaces(
+                scientific,
+                request.identity.replica,
+                descriptor,
+                *leftover_lambda,
+                relation,
+            );
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -935,6 +951,14 @@ fn apply_request(
                 explore_collapsed: mixing.explore_collapsed,
                 certified_attractor: mixing.certified_attractor,
                 pruned: mixing.pruned,
+                leftover_lambda: seat.lambda,
+                interface_rank: seat.rank,
+                interface_threshold: seat.threshold,
+                interface_count: scientific
+                    .interface_seat_by_replica
+                    .values()
+                    .filter(|seat| seat.rank != CHAMPION_RANK)
+                    .count() as u32,
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -2400,6 +2424,88 @@ fn replica_family_index(
                 .packing
                 .histogram(coordinates)
                 .and_then(|histogram| scientific.packing.family_of(&histogram))
+        })
+}
+
+fn assign_leftover_interfaces(
+    scientific: &mut ScientificState,
+    replica: u32,
+    descriptor: &[f64],
+    posted_lambda: f64,
+    relation: CatalogRelation,
+) -> InterfaceSeat {
+    let centroid = scientific
+        .catalog
+        .incumbent()
+        .map(|entry| entry.descriptor().to_vec());
+    let computed = centroid
+        .as_ref()
+        .map(|mean| leftover_lambda(descriptor, mean))
+        .unwrap_or(0.0);
+    let lambda = if posted_lambda.is_finite() && posted_lambda > 0.0 {
+        posted_lambda.max(computed)
+    } else {
+        computed
+    };
+    scientific
+        .leftover_lambda_by_replica
+        .insert(replica, lambda);
+    if matches!(relation, CatalogRelation::Incumbent) || centroid.is_none() {
+        let seat = InterfaceSeat {
+            replica,
+            rank: CHAMPION_RANK,
+            threshold: 0.0,
+            lambda,
+        };
+        scientific.interface_seat_by_replica.insert(replica, seat);
+        return seat;
+    }
+    let champion = scientific
+        .catalog
+        .incumbent()
+        .map(crate::catalog::ActiveBasinEntry::producer_replica);
+    let mut extras: Vec<(u32, f64)> = scientific
+        .leftover_lambda_by_replica
+        .iter()
+        .filter(|(id, _)| Some(**id) != champion)
+        .map(|(id, value)| (*id, *value))
+        .collect();
+    extras.sort_by_key(|(id, _)| *id);
+    let horizon = extras
+        .iter()
+        .map(|(_, value)| *value)
+        .fold(0.0, f64::max)
+        .max(1e-6);
+    let mut seats = assign_interfaces(&extras, horizon);
+    let _ = retis_exchange_adjacent(&mut seats);
+    scientific.interface_seat_by_replica.clear();
+    if let Some(id) = champion {
+        scientific.interface_seat_by_replica.insert(
+            id,
+            InterfaceSeat {
+                replica: id,
+                rank: CHAMPION_RANK,
+                threshold: 0.0,
+                lambda: scientific
+                    .leftover_lambda_by_replica
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(0.0),
+            },
+        );
+    }
+    for seat in seats {
+        scientific.interface_seat_by_replica.insert(seat.replica, seat);
+    }
+    scientific
+        .interface_seat_by_replica
+        .get(&replica)
+        .copied()
+        .unwrap_or(InterfaceSeat {
+            replica,
+            rank: 0,
+            threshold: horizon,
+            lambda,
         })
 }
 

@@ -1070,7 +1070,7 @@ candidate offers, descriptor-hole and boundary-crossing requests,
 policy-state reads, population submit/poll/abstain/join, and a
 read-only observer status op that requires no replica identity.
 
-Key types and functions: =PROTOCOL_VERSION = 9= (src/catalog_rpc/mod.rs:19);
+Key types and functions: =PROTOCOL_VERSION = 10= (src/catalog_rpc/mod.rs:19);
 =CatalogIdentity= (mod.rs:23); =CatalogCandidate= (mod.rs:36);
 =TransitionDestination= (mod.rs:67); =CatalogMutationKind=/
 =CatalogMutation= (mod.rs:76/121); =CatalogOperation=/=CatalogRequest=

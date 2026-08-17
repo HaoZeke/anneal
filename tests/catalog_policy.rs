@@ -27,6 +27,9 @@ fn input(
         local_stall_slices: 0,
         local_deepened: false,
         mixing: MixingEvidence::default(),
+        leftover_lambda: 0.0,
+        interface_rank: u32::MAX,
+        interface_threshold: 0.0,
     }
 }
 
@@ -393,6 +396,9 @@ fn decision_table_covers_every_discrete_input_state() {
                                 local_stall_slices,
                                 local_deepened,
                                 mixing: MixingEvidence::default(),
+                                leftover_lambda: 0.0,
+                                interface_rank: u32::MAX,
+                                interface_threshold: 0.0,
                             });
                             assert!(!decision.reason.code().is_empty());
                             if relation == ActiveCatalogRelation::Incumbent

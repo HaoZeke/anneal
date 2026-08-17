@@ -56,6 +56,7 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
         CatalogOperation::PolicyState {
             descriptor: vec![0.1, 0.2, 0.3],
             energy: -396.282,
+            leftover_lambda: 0.4,
         },
         CatalogOperation::LedgerEvent {
             kind: 5,

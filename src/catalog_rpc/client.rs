@@ -436,9 +436,24 @@ impl CatalogClient {
         descriptor: Vec<f64>,
         energy: f64,
     ) -> Result<PolicyStateReceipt, CatalogClientError> {
+        self.policy_state_with_lambda(event_sequence, descriptor, energy, 0.0)
+    }
+
+    /// Policy evidence with the replica's leftover-SOAP \(\lambda\).
+    pub fn policy_state_with_lambda(
+        &mut self,
+        event_sequence: u64,
+        descriptor: Vec<f64>,
+        energy: f64,
+        leftover_lambda: f64,
+    ) -> Result<PolicyStateReceipt, CatalogClientError> {
         let reply = self.call(
             event_sequence,
-            CatalogOperation::PolicyState { descriptor, energy },
+            CatalogOperation::PolicyState {
+                descriptor,
+                energy,
+                leftover_lambda,
+            },
         )?;
         match reply.payload {
             AcceptedPayload::PolicyState(state) => Ok(PolicyStateReceipt {
