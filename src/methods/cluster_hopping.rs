@@ -1194,15 +1194,13 @@ where
                     if adopt && crate::catalog::is_occupancy_leave_action(&action) {
                         let wells = crate::featomic_hop::packing_archive();
                         let rcut = 3.5 * cfg.length_scale;
-                        if !wells.is_empty()
-                            && crate::featomic_hop::in_stored_well(
-                                proposal_state.view(),
-                                &wells,
-                                rcut,
-                                cfg.species.as_deref(),
-                                None,
-                            )
-                        {
+                        let same_family = from_state
+                            .as_slice()
+                            .zip(proposal_state.as_slice())
+                            .is_none_or(|(origin, trial)| {
+                                !crate::catalog::different_decaf_family(origin, trial)
+                            });
+                        if !wells.is_empty() && same_family {
                             let retried = crate::featomic_hop::leave_occupied_packing(
                                 from_state.view(),
                                 &wells,

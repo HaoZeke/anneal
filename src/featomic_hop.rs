@@ -816,15 +816,14 @@ pub fn in_stored_well(
 ) -> bool {
     let mu = unit(&soap_cloud_mean(x, rcut, species, mobile));
     !mu.is_empty()
-        && wells.iter().any(|w| {
-            w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE
-        })
+        && wells
+            .iter()
+            .any(|w| w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE)
 }
 
-/// Leave an occupied packing: hole, quench, and further holes if the
-/// quench is a projector back onto a stored well. Talking extras must
-/// land off that well so a new family walk can start before a serial
-/// recommended first-hit hop.
+/// Leave an occupied packing: hole, quench, keep the quench only when
+/// DECAF says it is a different family. Leftover-SOAP off-well is not
+/// a family change. Talking extras start a new packing walk.
 pub fn leave_occupied_packing<R, Q>(
     x: ArrayView1<f64>,
     wells: &[Array1<f64>],
@@ -846,7 +845,9 @@ where
         let scale = SOAP_PACK_MERGE * (1.0 + 0.5 * f64::from(attempt));
         let y = step_into_hole(cur.view(), wells, scale, rcut, species, mobile, rng);
         let q = quench(y.view());
-        if !in_stored_well(q.view(), wells, rcut, species, mobile) {
+        let origin = x.as_slice().unwrap_or(&[]);
+        let trial = q.as_slice().unwrap_or(&[]);
+        if crate::catalog::different_decaf_family(origin, trial) {
             return q;
         }
         cur = q;
@@ -1321,6 +1322,29 @@ mod tests {
     }
 
     #[test]
+    fn leave_accepts_a_quench_that_opens_a_new_decaf_family() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
+        let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
+        let mut rng = StdRng::seed_from_u64(11);
+        let wells = [mu];
+        let left = leave_occupied_packing(
+            ico75.view(),
+            &wells,
+            3.5,
+            None,
+            None,
+            |_y| marks.clone(),
+            &mut rng,
+        );
+        assert_eq!(left, marks);
+        assert!(crate::catalog::different_decaf_family(
+            ico75.as_slice().unwrap(),
+            left.as_slice().unwrap()
+        ));
+    }
+
+    #[test]
     fn leave_occupied_packing_retries_when_the_quench_returns_to_the_well() {
         let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
@@ -1372,11 +1396,7 @@ mod tests {
             None,
             |y| {
                 n += 1;
-                if n < 3 {
-                    ico75.clone()
-                } else {
-                    y.to_owned()
-                }
+                if n < 3 { ico75.clone() } else { y.to_owned() }
             },
             &mut rng,
         );
