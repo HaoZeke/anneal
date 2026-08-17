@@ -240,7 +240,7 @@ fn explore_collapse_forces_leave_instead_of_explore() {
 }
 
 #[test]
-fn a_mixed_uncertified_incumbent_leaves() {
+fn a_mixed_uncertified_incumbent_keeps_the_isomer_walk() {
     let (census, basin_id) = census_with_repeated_visits(2);
     let mut state = input(
         ActiveCatalogRelation::Incumbent,
@@ -250,8 +250,8 @@ fn a_mixed_uncertified_incumbent_leaves() {
     state.mixing.explore_collapsed = true;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::ExploreCollapsed);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IncumbentLocalSearch);
 }
 
 #[test]
