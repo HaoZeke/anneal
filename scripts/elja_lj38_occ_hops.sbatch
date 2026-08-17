@@ -7,8 +7,8 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj38-occ-sb/slurm.%j.out
 # LJ38 occupancy on mixing / Good-Turing stop. Paper budget 4e5.
-# Binary: anneal-stop 41ad564. Ensemble 0003: Leave only on a new
-# DECAF family; mixing is putative; n_occupied_families is not invented.
+# Binary: anneal-stop aa0cde1. Ensemble 0003: mailbox hop (never wait);
+# Leave only on a new DECAF family; mixing is putative.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 export LJ_ROOT=$HOME/anneal-stop
