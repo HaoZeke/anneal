@@ -32,7 +32,7 @@ cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
-for symbol in different_decaf_family step_toward_catalog_hole CATALOG_BRAIN_LISTEN leftover_lambda leave_shot_accepted occupied_family_count; do
+for symbol in different_decaf_family step_toward_catalog_hole CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats"; do
   if ! grep -a -F -q "$symbol" "$LJ_BIN"; then
     echo "refusing: $LJ_BIN missing $symbol" >&2
     exit 2

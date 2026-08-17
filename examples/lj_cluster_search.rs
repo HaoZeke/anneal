@@ -2446,6 +2446,7 @@ fn run_capnp_catalog(
         assert!(hops >= 1, "CATALOG_MAX_HOPS must be a positive hop count");
         run_cfg.max_hops = Some(hops);
         println!("  hop cap {hops}");
+        println!("  leftover-SOAP TIS seats");
     }
     // Cooperative wells: the SOAP archive the hole step walks away
     // from, fed with every minimum the coordinator hands this replica.
