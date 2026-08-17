@@ -20,7 +20,10 @@ pub use calibration::{
     CalibrationError, CalibrationPair, CensusCalibration, EmpiricalQuantileMethod,
     MINIMUM_CENSUS_CALIBRATION_PAIRS, calibrate_census_radius,
 };
-pub use census::{BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation};
+pub use census::{
+    BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation, PRODUCTION_MAX_UNSEEN_MASS,
+    PRODUCTION_MINIMUM_VISITS,
+};
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use hyperband::{
     DEFAULT_MAX_RESOURCE, EnsembleVerdict, MIN_RESOURCE, REDUCTION_FACTOR, WalkRecord,
@@ -38,7 +41,7 @@ pub use occupancy::{
     published_energy_score, retis_exchange_adjacent, retis_should_swap,
 };
 pub use packing::{
-    OCCUPIED_FAMILY_VISITS, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
+    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
     packing_distance,
     packing_fingerprint, packing_vector, same_packing,
 };

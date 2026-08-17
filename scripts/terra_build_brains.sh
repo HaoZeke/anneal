@@ -25,9 +25,8 @@ cargo test --release --lib leftover_lambda
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
 cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
-cargo test --release --features bank-rpc --test catalog_packing singleton_packings
-cargo test --release --features bank-rpc --test catalog_packing occupied_funnel
-cargo test --release --features bank-rpc --test catalog_packing live_ico_isomers
+cargo test --release --features bank-rpc --test catalog_packing leftover_soap_gt_plus
+cargo test --release --features bank-rpc --test catalog_packing packing_good_turing
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server

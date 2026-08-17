@@ -1,7 +1,11 @@
 //! Append-only descriptor-basin census with exact visit accounting.
 
-const PRODUCTION_MINIMUM_VISITS: u64 = 20;
-const PRODUCTION_MAX_UNSEEN_MASS: f64 = 0.20;
+/// Production Good--Turing visit floor. Leftover-SOAP and DECAF
+/// packing certificates use this same count.
+pub const PRODUCTION_MINIMUM_VISITS: u64 = 20;
+/// Production Good--Turing unseen-mass ceiling. Leftover-SOAP and
+/// DECAF packing certificates use this same fraction.
+pub const PRODUCTION_MAX_UNSEEN_MASS: f64 = 0.20;
 
 /// Stable identifier for one immutable census medoid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
