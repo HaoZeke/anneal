@@ -13,6 +13,7 @@ use crate::Catalog_capnp::{
 };
 
 pub mod client;
+pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.

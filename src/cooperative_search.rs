@@ -5,13 +5,15 @@ pub mod ledger;
 #[cfg(feature = "bank-rpc")]
 mod run {
     use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
 
     use crate::catalog::MixingEvidence;
     use crate::catalog_policy::{
         ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput,
         CensusEvidence, PolicyAction, PolicyDecision, PolicyInputError, ValidationState,
     };
-    use crate::catalog_rpc::client::{CatalogClient, CatalogClientError};
+    use crate::catalog_rpc::client::{CatalogClient, CatalogClientError, PolicyStateReceipt};
+    use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
         CatalogMutation, CatalogRelation,
@@ -459,9 +461,12 @@ mod run {
         ledger_sequence: u64,
         rpc_sequence: u64,
         cumulative_charged: u64,
-        client: Option<CatalogClient>,
+        client: Option<CatalogMailbox>,
         snapshot: Option<CatalogSnapshot>,
         last_slice: u64,
+        last_policy: Option<PolicyState>,
+        policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
+        policy_pending: bool,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -492,6 +497,9 @@ mod run {
                             client: None,
                             snapshot: None,
                             last_slice: 0,
+                            last_policy: None,
+                            policy_slot: Arc::new(Mutex::new(None)),
+                            policy_pending: false,
                         },
                     )
                 })
@@ -509,7 +517,10 @@ mod run {
             replica: u32,
             client: CatalogClient,
         ) -> Result<(), CooperativeRunError> {
-            self.replica_mut(replica)?.client = Some(client);
+            let state = self.replica_mut(replica)?;
+            state.client = Some(CatalogMailbox::spawn(client));
+            state.policy_pending = false;
+            *state.policy_slot.lock().expect("policy slot") = None;
             Ok(())
         }
 
@@ -542,38 +553,26 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state.client.as_mut().map(|client| {
-                    client.record_ledger_event(
-                        rpc_sequence,
-                        kind,
-                        charged_calls,
-                        cumulative_charged,
-                    )
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.post(move |client| {
+                        let _ = client.record_ledger_event(
+                            rpc_sequence,
+                            kind,
+                            charged_calls,
+                            cumulative_charged,
+                        );
+                    });
                 })
             };
             match result {
                 None => self.push_event(replica, TraceKind::LocalWork, None, None)?,
-                Some(Ok(receipt)) => {
-                    self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
-                    self.push_event(
-                        replica,
-                        TraceKind::LocalWork,
-                        Some(receipt.snapshot.version),
-                        None,
-                    )?;
-                }
-                Some(Err(CatalogClientError::Rejected(reason))) => {
-                    self.push_event(
-                        replica,
-                        TraceKind::Rejection,
-                        None,
-                        Some(rejection_code(reason)),
-                    )?;
-                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
-                }
-                Some(Err(_)) => {
-                    self.push_event(replica, TraceKind::LocalWork, None, None)?;
-                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                Some(()) => {
+                    let version = self
+                        .replicas
+                        .get(&replica)
+                        .and_then(|state| state.snapshot)
+                        .map(|snapshot| snapshot.version);
+                    self.push_event(replica, TraceKind::LocalWork, version, None)?;
                 }
             }
             Ok(())
@@ -590,8 +589,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.offer_candidate(rpc_sequence, candidate))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.offer_candidate(rpc_sequence, candidate)))
             };
             match result {
                 None => {
@@ -658,8 +657,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.record_visit(rpc_sequence, candidate))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate)))
             };
             self.handle_transition_record(
                 replica,
@@ -683,8 +682,10 @@ mod run {
             let resolved = matches!(destination, TransitionDestination::Resolved(_));
             let result = {
                 let state = self.replica_mut(replica)?;
-                state.client.as_mut().map(|client| {
-                    client.record_transition(rpc_sequence, action.clone(), destination, adopted)
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.record_transition(rpc_sequence, action.clone(), destination, adopted)
+                    })
                 })
             };
             self.handle_transition_record(replica, action, resolved, adopted, result)
@@ -725,8 +726,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.snapshot(rpc_sequence))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.snapshot(rpc_sequence)))
             };
             match result {
                 None => {
@@ -762,8 +763,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state.client.as_mut().map(|client| {
-                    client.policy_state_with_snapshot(rpc_sequence, descriptor, energy)
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.policy_state_with_snapshot(rpc_sequence, descriptor, energy)
+                    })
                 })
             };
             match result {
@@ -801,6 +804,114 @@ mod run {
                     Ok(PolicyEvidenceOutcome::LocalFallback)
                 }
             }
+        }
+
+        /// Post policy to the mailbox and apply the last answer.
+        /// The hop thread never waits on the socket. A late policy
+        /// from the coordinator, a leader, or another chain redirects
+        /// the next slice; until then this replica is the single chain.
+        pub fn try_policy_input(
+            &mut self,
+            replica: u32,
+            descriptor: Vec<f64>,
+            energy: f64,
+            local_stall_slices: u32,
+            local_deepened: bool,
+        ) -> Result<PolicyEvidenceOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                return Ok(PolicyEvidenceOutcome::SharingDisabled);
+            }
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.policy_pending {
+                    state
+                        .policy_slot
+                        .lock()
+                        .expect("policy slot")
+                        .take()
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = finished {
+                self.replica_mut(replica)?.policy_pending = false;
+                match result {
+                    Ok(receipt) => {
+                        self.replica_mut(replica)?.last_policy = Some(receipt.state);
+                        let input = policy_input_from_state(
+                            receipt.state,
+                            local_stall_slices,
+                            local_deepened,
+                        )?;
+                        self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                        self.push_event(
+                            replica,
+                            TraceKind::SnapshotRefresh,
+                            Some(receipt.snapshot.version),
+                            None,
+                        )?;
+                        self.events
+                            .last_mut()
+                            .expect("snapshot-refresh push appends one trace event")
+                            .policy = Some(policy_trace(receipt.state, energy));
+                        return Ok(PolicyEvidenceOutcome::Remote(input));
+                    }
+                    Err(CatalogClientError::Rejected(reason)) => {
+                        self.push_event(
+                            replica,
+                            TraceKind::Rejection,
+                            None,
+                            Some(rejection_code(reason)),
+                        )?;
+                        return Ok(PolicyEvidenceOutcome::Rejected);
+                    }
+                    Err(_) => {
+                        self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                        return Ok(PolicyEvidenceOutcome::LocalFallback);
+                    }
+                }
+            }
+            let should_post = !self.replica_mut(replica)?.policy_pending;
+            if should_post {
+                let rpc_sequence = self.next_rpc_sequence(replica)?;
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.policy_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    mailbox.post(move |client| {
+                        let answer =
+                            client.policy_state_with_snapshot(rpc_sequence, descriptor, energy);
+                        *slot.lock().expect("policy slot") = Some(answer);
+                    });
+                    state.policy_pending = true;
+                }
+            }
+            if let Some(policy) = self.replicas.get(&replica).and_then(|state| state.last_policy)
+            {
+                let input = policy_input_from_state(policy, local_stall_slices, local_deepened)?;
+                return Ok(PolicyEvidenceOutcome::Remote(input));
+            }
+            self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+            Ok(PolicyEvidenceOutcome::LocalFallback)
+        }
+
+        /// Queue an offer. The hop continues without the admission result.
+        pub fn post_offer_candidate(
+            &mut self,
+            replica: u32,
+            candidate: CatalogCandidate,
+        ) -> Result<CatalogOfferOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                return Ok(CatalogOfferOutcome::SharingDisabled);
+            }
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.post(move |client| {
+                    let _ = client.offer_candidate(rpc_sequence, candidate);
+                });
+            }
+            Ok(CatalogOfferOutcome::LocalFallback)
         }
 
         /// Register one validated live-chain state and query policy evidence
@@ -841,8 +952,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.sample_candidate(rpc_sequence, draw))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.sample_candidate(rpc_sequence, draw)))
             };
             match result {
                 None => {
@@ -880,8 +991,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.descriptor_hole(rpc_sequence, current, samples, draw))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.descriptor_hole(rpc_sequence, current, samples, draw)))
             };
             match result {
                 None => {
@@ -917,8 +1028,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.boundary_crossing(rpc_sequence, current, draw))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.boundary_crossing(rpc_sequence, current, draw)))
             };
             match result {
                 None => {
@@ -954,8 +1065,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.bridge_assignment(rpc_sequence, draw))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.bridge_assignment(rpc_sequence, draw)))
             };
             match result {
                 None => Ok(CatalogBridgeOutcome::SharingDisabled),
@@ -988,8 +1099,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.bridge_crossing(rpc_sequence, crossing))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.bridge_crossing(rpc_sequence, crossing)))
             };
             match result {
                 None | Some(Ok(())) => Ok(()),
@@ -1019,8 +1130,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state.client.as_mut().map(|client| {
-                    client.submit_population_with_snapshot(rpc_sequence, epoch, candidate)
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.submit_population_with_snapshot(rpc_sequence, epoch, candidate)
+                    })
                 })
             };
             self.handle_population_result(replica, epoch, result)
@@ -1039,8 +1152,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.population_join_with_snapshot(rpc_sequence, epoch))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.population_join_with_snapshot(rpc_sequence, epoch)))
             };
             self.handle_population_result(replica, epoch, result)
         }
@@ -1056,8 +1169,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.population_abstain_with_snapshot(rpc_sequence, epoch))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.population_abstain_with_snapshot(rpc_sequence, epoch)))
             };
             self.handle_population_result(replica, epoch, result)
         }
@@ -1073,8 +1186,8 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 state
                     .client
-                    .as_mut()
-                    .map(|client| client.population_plan_with_snapshot(rpc_sequence, epoch))
+                    .as_ref()
+                    .map(|mailbox| mailbox.exec(move |client| client.population_plan_with_snapshot(rpc_sequence, epoch)))
             };
             self.handle_population_result(replica, epoch, result)
         }
