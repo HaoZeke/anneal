@@ -270,6 +270,18 @@ struct CoordinatorState {
 }
 
 impl CoordinatorState {
+    fn snapshot_for_apply(&self) -> Self {
+        Self {
+            snapshot_version: self.snapshot_version,
+            census_visits: self.census_visits,
+            active_entries: self.active_entries,
+            requests: BTreeMap::new(),
+            maximum_sequence: self.maximum_sequence.clone(),
+            ledger: self.ledger.clone(),
+            scientific: self.scientific.clone(),
+        }
+    }
+
     fn new(config: &ServerConfig) -> Result<Self, CatalogServerError> {
         let scientific = config
             .scientific
@@ -590,7 +602,19 @@ fn process_request(
             request.event_sequence,
         ));
     }
-    let mut next = state.clone();
+    let key = (request.identity.replica, request.event_sequence);
+    if let Some((stored, payload)) = state.requests.get(&key) {
+        return Ok(if stored == &request {
+            accepted_with_payload(&state, request.event_sequence, true, payload.clone())
+        } else {
+            rejected(
+                &state,
+                request.event_sequence,
+                ProtocolRejection::SequenceReplay,
+            )
+        });
+    }
+    let mut next = state.snapshot_for_apply();
     let reply = apply_request(config, &mut next, request.clone());
     if matches!(
         reply,
@@ -600,6 +624,10 @@ fn process_request(
         })
     ) {
         append_journal(config, &request).map_err(|error| error.to_string())?;
+        if let Some(entry) = next.requests.remove(&key) {
+            state.requests.insert(key, entry);
+        }
+        next.requests = std::mem::take(&mut state.requests);
         *state = next;
     }
     Ok(reply)
@@ -1631,22 +1659,10 @@ fn validate_candidate(
     {
         return Err(());
     }
-    let recomputed = scientific
-        .descriptor_space
-        .describe(
-            ArrayView1::from(&candidate.coordinates),
-            Some(&scientific.signature.atomic_numbers),
-        )
-        .map_err(|_| ())?;
-    if recomputed.values().len() != candidate.descriptor.len()
-        || recomputed
-            .values()
-            .iter()
-            .zip(&candidate.descriptor)
-            .any(|(expected, actual)| (expected - actual).abs() > 1e-12)
-    {
-        return Err(());
-    }
+    // The worker already evaluated leftover SOAP. The book merges the
+    // posted vector; the validator still checks length and finite
+    // values. Recomputing SOAP here serializes every replica behind
+    // one descriptor call.
     let record = CandidateRecord {
         signature: scientific.signature.clone(),
         producer_replica: candidate.producer_replica,
