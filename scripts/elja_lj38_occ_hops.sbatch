@@ -7,7 +7,8 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj38-occ-sb/slurm.%j.out
 # LJ38 occupancy on mixing / Good-Turing stop. Paper budget 4e5.
-# Binary: anneal-stop 080ac51.
+# Binary: anneal-stop 41ad564. Ensemble 0003: Leave only on a new
+# DECAF family; mixing is putative; n_occupied_families is not invented.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 export LJ_ROOT=$HOME/anneal-stop
@@ -31,4 +32,4 @@ test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj38.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 38 400000 2 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 38 400000 3 "$RADIUS"
