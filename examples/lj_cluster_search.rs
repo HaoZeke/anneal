@@ -2721,7 +2721,7 @@ fn run_capnp_catalog(
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                         .expect("source descriptor work must enter the cooperative ledger");
                     path_active = cooperative
-                        .record_current(replica, candidate)
+                        .post_record_current(replica, candidate)
                         .map(|outcome| outcome != TransitionRecordOutcome::Rejected)
                         .unwrap_or(false);
                 }
@@ -2734,7 +2734,7 @@ fn run_capnp_catalog(
                         .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
                         .expect("destination descriptor work must enter the cooperative ledger");
                     path_active = cooperative
-                        .record_transition(
+                        .post_record_transition(
                             replica,
                             action,
                             TransitionDestination::Resolved(destination),
@@ -3029,7 +3029,7 @@ fn run_capnp_catalog(
                 }
             }
             let crossing = match cooperative
-                .boundary_crossing(replica, parent.descriptor, draw)
+                .try_boundary_crossing(replica, parent.descriptor, draw)
                 .expect("population frontier access must preserve local execution")
             {
                 CatalogBoundaryOutcome::Crossing(crossing) => {
@@ -3453,7 +3453,7 @@ fn run_capnp_catalog(
                 trace.policy_role = PolicyRole::Exploit;
                 trace.proposal_family = ProposalFamily::CatalogSample;
                 if let CatalogSampleOutcome::Candidate(candidate) = cooperative
-                    .sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
+                    .try_sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
                     .expect("incumbent sample must preserve local execution")
                 {
                     let improves = candidate.energy < snapshot.current_energy() - 1e-10;
@@ -3583,7 +3583,7 @@ fn run_capnp_catalog(
                 trace.policy_role = PolicyRole::Explore;
                 trace.proposal_family = ProposalFamily::BoundaryTransport;
                 if let CatalogBoundaryOutcome::Crossing(crossing) = cooperative
-                    .boundary_crossing(replica, descriptor.clone(), transport_rng.random())
+                    .try_boundary_crossing(replica, descriptor.clone(), transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
                     if shared_bias_enabled {

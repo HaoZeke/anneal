@@ -470,6 +470,13 @@ mod run {
         last_hole: Option<DescriptorHoleProposal>,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
+        last_sample: Option<CatalogCandidate>,
+        sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
+        sample_pending: bool,
+        last_crossing: Option<BoundaryCrossingRecord>,
+        crossing_slot:
+            Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
+        crossing_pending: bool,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -506,6 +513,12 @@ mod run {
                             last_hole: None,
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
+                            last_sample: None,
+                            sample_slot: Arc::new(Mutex::new(None)),
+                            sample_pending: false,
+                            last_crossing: None,
+                            crossing_slot: Arc::new(Mutex::new(None)),
+                            crossing_pending: false,
                         },
                     )
                 })
@@ -530,6 +543,12 @@ mod run {
             state.hole_pending = false;
             *state.hole_slot.lock().expect("hole slot") = None;
             state.last_hole = None;
+            state.sample_pending = false;
+            *state.sample_slot.lock().expect("sample slot") = None;
+            state.last_sample = None;
+            state.crossing_pending = false;
+            *state.crossing_slot.lock().expect("crossing slot") = None;
+            state.last_crossing = None;
             Ok(())
         }
 
@@ -699,6 +718,45 @@ mod run {
                 })
             };
             self.handle_transition_record(replica, action, resolved, adopted, result)
+        }
+
+        /// Queue a current-state visit. The hop does not wait.
+        pub fn post_record_current(
+            &mut self,
+            replica: u32,
+            candidate: CatalogCandidate,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(TransitionRecordOutcome::SharingDisabled);
+            }
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.post(move |client| {
+                    let _ = client.record_visit(rpc_sequence, candidate);
+                });
+            }
+            Ok(TransitionRecordOutcome::LocalFallback)
+        }
+
+        /// Queue a transition record. The hop does not wait.
+        pub fn post_record_transition(
+            &mut self,
+            replica: u32,
+            action: impl Into<String>,
+            destination: TransitionDestination,
+            adopted: bool,
+        ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(TransitionRecordOutcome::SharingDisabled);
+            }
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let action = action.into();
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.post(move |client| {
+                    let _ = client.record_transition(rpc_sequence, action, destination, adopted);
+                });
+            }
+            Ok(TransitionRecordOutcome::LocalFallback)
         }
 
         /// Record one validated local perturb--quench independently of RPC registration.
@@ -998,6 +1056,59 @@ mod run {
             }
         }
 
+        /// Post a sample request and return the last candidate. Hop never waits.
+        pub fn try_sample_candidate(
+            &mut self,
+            replica: u32,
+            draw: u64,
+        ) -> Result<CatalogSampleOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(CatalogSampleOutcome::SharingDisabled);
+            }
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.sample_pending {
+                    state.sample_slot.lock().expect("sample slot").take()
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = finished {
+                self.replica_mut(replica)?.sample_pending = false;
+                match result {
+                    Ok(Some(candidate)) => {
+                        self.replica_mut(replica)?.last_sample = Some(candidate.clone());
+                        return Ok(CatalogSampleOutcome::Candidate(candidate));
+                    }
+                    Ok(None) => return Ok(CatalogSampleOutcome::Empty),
+                    Err(CatalogClientError::Rejected(_)) => {
+                        return Ok(CatalogSampleOutcome::Rejected);
+                    }
+                    Err(_) => return Ok(CatalogSampleOutcome::LocalFallback),
+                }
+            }
+            if !self.replica_mut(replica)?.sample_pending {
+                let rpc_sequence = self.next_rpc_sequence(replica)?;
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.sample_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    mailbox.post(move |client| {
+                        let answer = client.sample_candidate(rpc_sequence, draw);
+                        *slot.lock().expect("sample slot") = Some(answer);
+                    });
+                    state.sample_pending = true;
+                }
+            }
+            if let Some(candidate) = self
+                .replicas
+                .get(&replica)
+                .and_then(|state| state.last_sample.clone())
+            {
+                return Ok(CatalogSampleOutcome::Candidate(candidate));
+            }
+            Ok(CatalogSampleOutcome::LocalFallback)
+        }
+
         /// Request one seeded target-free descriptor-hole proposal.
         pub fn descriptor_hole(
             &mut self,
@@ -1140,6 +1251,60 @@ mod run {
                     Ok(CatalogBoundaryOutcome::LocalFallback)
                 }
             }
+        }
+
+        /// Post a crossing request and return the last one. Hop never waits.
+        pub fn try_boundary_crossing(
+            &mut self,
+            replica: u32,
+            current: Vec<f64>,
+            draw: u64,
+        ) -> Result<CatalogBoundaryOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(CatalogBoundaryOutcome::SharingDisabled);
+            }
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.crossing_pending {
+                    state.crossing_slot.lock().expect("crossing slot").take()
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = finished {
+                self.replica_mut(replica)?.crossing_pending = false;
+                match result {
+                    Ok(Some(crossing)) => {
+                        self.replica_mut(replica)?.last_crossing = Some(crossing.clone());
+                        return Ok(CatalogBoundaryOutcome::Crossing(crossing));
+                    }
+                    Ok(None) => return Ok(CatalogBoundaryOutcome::Empty),
+                    Err(CatalogClientError::Rejected(_)) => {
+                        return Ok(CatalogBoundaryOutcome::Rejected);
+                    }
+                    Err(_) => return Ok(CatalogBoundaryOutcome::LocalFallback),
+                }
+            }
+            if !self.replica_mut(replica)?.crossing_pending {
+                let rpc_sequence = self.next_rpc_sequence(replica)?;
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.crossing_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    mailbox.post(move |client| {
+                        let answer = client.boundary_crossing(rpc_sequence, current, draw);
+                        *slot.lock().expect("crossing slot") = Some(answer);
+                    });
+                    state.crossing_pending = true;
+                }
+            }
+            if let Some(crossing) = self
+                .replicas
+                .get(&replica)
+                .and_then(|state| state.last_crossing.clone())
+            {
+                return Ok(CatalogBoundaryOutcome::Crossing(crossing));
+            }
+            Ok(CatalogBoundaryOutcome::LocalFallback)
         }
 
         /// Poll for a bridge segment assignment.
