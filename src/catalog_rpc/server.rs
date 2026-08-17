@@ -619,6 +619,19 @@ fn process_request(
             )
         });
     }
+    if matches!(request.operation, CatalogOperation::PolicyState { .. }) {
+        let reply = apply_request(config, &mut state, request.clone());
+        if matches!(
+            reply,
+            CatalogReply::Accepted(AcceptedReply {
+                duplicate: false,
+                ..
+            })
+        ) {
+            append_journal(config, &request).map_err(|error| error.to_string())?;
+        }
+        return Ok(reply);
+    }
     let mut next = state.snapshot_for_apply();
     let reply = apply_request(config, &mut next, request.clone());
     if matches!(
