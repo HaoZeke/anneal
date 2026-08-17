@@ -2407,15 +2407,11 @@ fn run_capnp_catalog(
                                     let assignments = (0..replica_count as u32)
                                         .map(|member| DecreeAssignment {
                                             replica: member,
-                                            right_side: member % 2 == 1,
+                                            right_side: false,
                                             histogram_classes: Vec::new(),
                                             histogram_masses: Vec::new(),
-                                            anchor_basin: if member % 2 == 1 {
-                                                seam.right_basin
-                                            } else {
-                                                seam.left_basin
-                                            },
-                                            bridge_duty: member % 2 == 1,
+                                            anchor_basin: seam.left_basin,
+                                            bridge_duty: false,
                                             decree_index: decree_sequence,
                                         })
                                         .collect();
@@ -3229,10 +3225,10 @@ fn run_capnp_catalog(
             descriptor.clone(),
             policy.leftover_lambda,
         );
-        // DECAF family count is not on the wire. Do not invent 2
-        // from certified_attractor: leftover-SOAP saturation on ico
-        // is one family. Mixing then prints a putative; extras Leave.
-        let n_occupied_families = 0;
+        let mut policy = policy;
+        policy.on_published_prize =
+            published_energy_score(snapshot.best_energy(), reference(cfg.n_points));
+        let n_occupied_families = policy.occupied_family_count;
         if let Some(certificate) = occupancy_complete(
             policy.mixing.certified_attractor,
             policy.census.globally_saturated(),

@@ -48,6 +48,12 @@ impl PackingBook {
     /// Grow the environment codebook from this structure, then count it
     /// toward a packing family.
     pub fn observe(&mut self, coordinates: &[f64]) -> Option<usize> {
+        if let Some(histogram) = self.cached(coordinates) {
+            if let Some(index) = self.family_of(&histogram) {
+                self.visits[index] = self.visits[index].saturating_add(1);
+                return Some(index);
+            }
+        }
         let histogram = self.assign_growing(coordinates)?;
         self.remember(coordinates, &histogram);
         if let Some(index) = self.family_of(&histogram) {

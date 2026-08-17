@@ -2252,6 +2252,8 @@ mod run {
             leftover_lambda: state.leftover_lambda,
             interface_rank: state.interface_rank,
             interface_threshold: state.interface_threshold,
+            occupied_family_count: state.occupied_family_count as usize,
+            on_published_prize: false,
         })
     }
 

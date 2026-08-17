@@ -32,10 +32,10 @@ pub use mixing::{
     stronger,
 };
 pub use occupancy::{
-    CHAMPION_RANK, InterfaceSeat, LeaveFrame, LeavePath, OccupancyCertificate, assign_interfaces,
-    in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
-    leftover_lambda, occupancy_complete, occupancy_retire, published_energy_score,
-    retis_exchange_adjacent, retis_should_swap,
+    CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat, LeaveFrame, LeavePath, OccupancyCertificate,
+    assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
+    leave_shot_accepted, leftover_lambda, occupancy_complete, occupancy_retire, promote_one_sided,
+    published_energy_score, retis_exchange_adjacent, retis_should_swap,
 };
 pub use packing::{
     PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family, packing_distance,

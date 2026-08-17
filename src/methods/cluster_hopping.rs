@@ -1188,37 +1188,19 @@ where
                     });
                 }
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
-                #[cfg(feature = "featomic")]
-                let quenched = {
-                    let (proposal_energy, proposal_state) = quenched;
-                    if adopt && crate::catalog::is_occupancy_leave_action(&action) {
-                        let wells = crate::featomic_hop::packing_archive();
-                        let rcut = 3.5 * cfg.length_scale;
-                        let same_family = from_state
-                            .as_slice()
-                            .zip(proposal_state.as_slice())
-                            .is_none_or(|(origin, trial)| {
-                                !crate::catalog::different_decaf_family(origin, trial)
-                            });
-                        if !wells.is_empty() && same_family {
-                            let retried = crate::featomic_hop::leave_occupied_packing(
-                                from_state.view(),
-                                &wells,
-                                rcut,
-                                cfg.species.as_deref(),
-                                None,
-                                |y| relax(ledger, y, cfg.relax_steps).1,
-                                rng,
-                            );
-                            relax(ledger, retried.view(), cfg.relax_steps)
-                        } else {
-                            (proposal_energy, proposal_state)
-                        }
-                    } else {
-                        (proposal_energy, proposal_state)
-                    }
-                };
                 let (proposal_energy, proposal_state) = quenched;
+                #[cfg(feature = "featomic")]
+                let adopt = if adopt && crate::catalog::is_occupancy_leave_action(&action) {
+                    let same_family = from_state
+                        .as_slice()
+                        .zip(proposal_state.as_slice())
+                        .is_none_or(|(origin, trial)| {
+                            !crate::catalog::different_decaf_family(origin, trial)
+                        });
+                    !same_family
+                } else {
+                    adopt
+                };
                 let proposal_sane = quench_is_sane(cfg, proposal_energy, proposal_state.view());
                 let gradient_required = grad.is_some();
                 let validation_gradient = if proposal_sane {
@@ -2966,22 +2948,11 @@ fn leave_boundary_start<R: Rng + ?Sized>(
 ) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
-        if !crate::catalog::is_occupancy_leave_action(action) {
-            return proposed;
-        }
-        let wells = crate::featomic_hop::packing_archive();
-        if wells.is_empty() {
-            return proposed;
-        }
-        crate::featomic_hop::leave_occupied_packing(
-            live,
-            &wells,
-            3.5 * cfg.length_scale,
-            cfg.species.as_deref(),
-            None,
-            |y| relax(ledger, y, cfg.relax_steps).1,
-            rng,
-        )
+        let _ = (live, cfg, ledger, relax, rng);
+        // Occupancy Leave already walked the leftover-SOAP hole.
+        // Re-running leave_occupied_packing from the live well throws
+        // that shoot away and quenches back onto the occupied family.
+        proposed
     }
     #[cfg(not(feature = "featomic"))]
     {

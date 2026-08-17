@@ -105,6 +105,7 @@ struct PolicyStateReply {
   interfaceRank @16 :UInt32;
   interfaceThreshold @17 :Float64;
   interfaceCount @18 :UInt32;
+  occupiedFamilyCount @19 :UInt32;
 }
 
 enum CatalogMutationKind {
