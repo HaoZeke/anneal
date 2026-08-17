@@ -81,7 +81,7 @@ docs-clean = "rm -rf docs/build docs/source/*.rst docs/source/*/*.rst"
 # in that case (see tla/README.org).
 #
 # Aggregator: `pixi run -e verify all` smoke-runs every artefact:
-#   proofs-test (pytest) -> proofs-derive (4 thm scripts) ->
+#   proofs-test (pytest) -> proofs-derive (4 thm scripts + occupancy) ->
 #   tlc-small (TLC on small.cfg) -> apalache-check (apalache.cfg).
 [feature.verify.dependencies]
 python      = ">=3.11"
@@ -104,7 +104,7 @@ pycutest = ">=1.8.1, <2"
 setup-tlc       = "test -f .verify/tla2tools.jar || (mkdir -p .verify && curl -L -o .verify/tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar)"
 setup-apalache  = "test -x .verify/apalache/bin/apalache-mc || (mkdir -p .verify && curl -L https://github.com/apalache-mc/apalache/releases/download/v0.57.0/apalache.tgz | tar xz -C .verify && (test -d .verify/apalache || mv .verify/apalache-* .verify/apalache))"
 proofs-test     = "pytest proofs/tests/ -v"
-proofs-derive   = "python -m proofs.thm1_bsa_visit && python -m proofs.thm2_fsa_visit && python -m proofs.thm3_metropolis && python -m proofs.thm4_log_cool"
+proofs-derive   = "python -m proofs.thm1_bsa_visit && python -m proofs.thm2_fsa_visit && python -m proofs.thm3_metropolis && python -m proofs.thm4_log_cool && python -m proofs.occupancy_cooperative_search"
 tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
 apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
 exp-test        = "pytest experiments/tests/ -v"
