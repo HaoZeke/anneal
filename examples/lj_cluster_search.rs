@@ -2309,13 +2309,13 @@ fn run_capnp_catalog(
     // replicates. Chains apply the newest committed decree at their
     // next checkpoint and never wait for one. Enabled by the brain
     // environment; absent variables spawn nothing.
-    #[cfg(feature = "nng-transport")]
+    #[cfg(feature = "bank-rpc")]
     let decree_slot: std::sync::Arc<
         std::sync::Mutex<Option<anneal_core::raft::wire::ExplorationDecree>>,
     > = std::sync::Arc::new(std::sync::Mutex::new(None));
-    #[cfg(feature = "nng-transport")]
+    #[cfg(feature = "bank-rpc")]
     let brain_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    #[cfg(feature = "nng-transport")]
+    #[cfg(feature = "bank-rpc")]
     let brain_handle = if let (Ok(listen), Ok(peers_raw)) = (
         std::env::var("CATALOG_BRAIN_LISTEN"),
         std::env::var("CATALOG_BRAIN_PEERS"),
@@ -3149,7 +3149,7 @@ fn run_capnp_catalog(
             return CheckpointAction::Continue;
         };
         let descriptor = position.values().to_vec();
-        #[cfg(feature = "nng-transport")]
+        #[cfg(feature = "bank-rpc")]
         let decree_assignment = decree_slot
             .try_lock()
             .ok()
@@ -3165,11 +3165,11 @@ fn run_capnp_catalog(
         // leader has seen a seam this chain cannot see locally), and
         // bridge duty turns bridge polling on for exactly the replicas
         // the leader named.
-        #[cfg(feature = "nng-transport")]
+        #[cfg(feature = "bank-rpc")]
         let (decree_stall_floor, decree_bridge_duty) = decree_assignment
             .as_ref()
             .map_or((4u32, false), |assignment| (2u32, assignment.bridge_duty));
-        #[cfg(not(feature = "nng-transport"))]
+        #[cfg(not(feature = "bank-rpc"))]
         let (decree_stall_floor, decree_bridge_duty) = (4u32, false);
         if (bridge_enabled || decree_bridge_duty)
             && let Some(assignment) = &active_bridge
@@ -3706,7 +3706,7 @@ fn run_capnp_catalog(
     if open_epoch != 0 {
         let _ = population_call(cooperative.abstain_population(replica, 0));
     }
-    #[cfg(feature = "nng-transport")]
+    #[cfg(feature = "bank-rpc")]
     {
         brain_stop.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(handle) = brain_handle {

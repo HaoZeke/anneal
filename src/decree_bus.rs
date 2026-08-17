@@ -1,18 +1,16 @@
-//! nng transport for consensus traffic between server brains.
+//! TCP transport for consensus traffic between server brains.
 //!
-//! Every brain owns one bus-protocol socket: it listens on its own
-//! address and dials every peer, and a send is a broadcast the
-//! receivers filter by the envelope's `to` field. Addressed delivery
-//! through a broadcast medium costs nothing at the handful of brains
-//! an ensemble runs and keeps the wiring one socket per process. All
-//! receives are bounded by a short timeout, so a poll never blocks the
-//! chain that hosts it; consensus tolerates the loss, reordering, and
-//! duplication a bus can produce, which is why nothing here retries.
+//! Occupancy talking is one brain per replica. The occupancy build is
+//! `featomic,ira,bank-rpc` and does not carry `nng-transport`, so the
+//! bus is raw TCP: each brain listens on its own address, dials every
+//! peer, and filters by the envelope `to` field. Receives are
+//! non-blocking. Consensus tolerates loss, reordering, and
+//! duplication, which is why nothing here retries a failed write.
 
 use crate::raft::NodeId;
-use nng::options::{Options, RecvTimeout};
-use nng::{Protocol, Socket};
-use std::time::Duration;
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::Mutex;
 
 /// Transport failure; consensus survives losses, so callers log and
 /// continue rather than unwind.
@@ -20,55 +18,172 @@ use std::time::Duration;
 #[error("decree bus: {0}")]
 pub struct BusError(String);
 
+struct PeerLink {
+    addr: SocketAddr,
+    stream: Option<TcpStream>,
+}
+
+struct Inbound {
+    stream: TcpStream,
+    buf: Vec<u8>,
+}
+
 /// One brain's connection to the others.
 pub struct DecreeBus {
-    socket: Socket,
     id: NodeId,
+    listener: TcpListener,
+    peers: Mutex<Vec<PeerLink>>,
+    inbound: Mutex<Vec<Inbound>>,
 }
 
 impl DecreeBus {
     /// Listen on `listen_url`, dial every peer, filter as `id`.
     ///
     /// Dials are asynchronous: a peer that has not started yet is
-    /// dialed again by nng when it appears, so start order between
-    /// brains does not matter.
+    /// dialed again on the next poll, so start order between brains
+    /// does not matter.
     pub fn new(id: NodeId, listen_url: &str, peer_urls: &[String]) -> Result<Self, BusError> {
-        let socket = Socket::new(Protocol::Bus0).map_err(|e| BusError(e.to_string()))?;
-        socket
-            .set_opt::<RecvTimeout>(Some(Duration::from_millis(1)))
-            .map_err(|e| BusError(e.to_string()))?;
-        socket
-            .listen(listen_url)
+        let listen = parse_tcp_url(listen_url)?;
+        let listener = TcpListener::bind(listen)
             .map_err(|e| BusError(format!("listen {listen_url}: {e}")))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| BusError(e.to_string()))?;
+        let mut peers = Vec::with_capacity(peer_urls.len());
         for url in peer_urls {
-            socket
-                .dial_async(url)
-                .map_err(|e| BusError(format!("dial {url}: {e}")))?;
+            peers.push(PeerLink {
+                addr: parse_tcp_url(url)?,
+                stream: None,
+            });
         }
-        Ok(Self { socket, id })
+        Ok(Self {
+            id,
+            listener,
+            peers: Mutex::new(peers),
+            inbound: Mutex::new(Vec::new()),
+        })
     }
 
     /// Broadcast one encoded envelope.
     pub fn send(&self, frame: &[u8]) -> Result<(), BusError> {
-        self.socket
-            .send(frame)
-            .map_err(|(_, e)| BusError(e.to_string()))
+        self.connect_peers();
+        let packet = encode_frame(frame);
+        if let Ok(mut peers) = self.peers.lock() {
+            for peer in peers.iter_mut() {
+                let Some(stream) = peer.stream.as_mut() else {
+                    continue;
+                };
+                if stream.write_all(&packet).is_err() {
+                    peer.stream = None;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Drain every frame currently queued that is addressed to this
-    /// brain. Never blocks longer than the socket's short timeout.
+    /// brain. Never blocks on a missing peer.
     pub fn poll(&self) -> Vec<Vec<u8>> {
+        self.accept_inbound();
+        self.connect_peers();
         let mut frames = Vec::new();
-        while let Ok(message) = self.socket.recv() {
-            let bytes = message.as_slice().to_vec();
-            if let Ok((_, to, _)) = crate::raft::wire::decode_envelope(&bytes)
-                && to == self.id
-            {
-                frames.push(bytes);
+        if let Ok(mut inbound) = self.inbound.lock() {
+            let mut index = 0;
+            while index < inbound.len() {
+                match read_available(&mut inbound[index]) {
+                    Ok(mut got) => {
+                        frames.append(&mut got);
+                        index += 1;
+                    }
+                    Err(()) => {
+                        inbound.swap_remove(index);
+                    }
+                }
             }
         }
+        frames.retain(|bytes| {
+            matches!(
+                crate::raft::wire::decode_envelope(bytes),
+                Ok((_, to, _)) if to == self.id
+            )
+        });
         frames
     }
+
+    fn accept_inbound(&self) {
+        let Ok(mut inbound) = self.inbound.lock() else {
+            return;
+        };
+        while let Ok((stream, _)) = self.listener.accept() {
+            let Ok(()) = stream.set_nonblocking(true) else {
+                continue;
+            };
+            inbound.push(Inbound {
+                stream,
+                buf: Vec::new(),
+            });
+        }
+    }
+
+    fn connect_peers(&self) {
+        let Ok(mut peers) = self.peers.lock() else {
+            return;
+        };
+        for peer in peers.iter_mut() {
+            if peer.stream.is_some() {
+                continue;
+            }
+            let Ok(stream) = TcpStream::connect(peer.addr) else {
+                continue;
+            };
+            if stream.set_nonblocking(true).is_err() {
+                continue;
+            };
+            peer.stream = Some(stream);
+        }
+    }
+}
+
+fn parse_tcp_url(url: &str) -> Result<SocketAddr, BusError> {
+    let rest = url
+        .strip_prefix("tcp://")
+        .ok_or_else(|| BusError(format!("brain url must be tcp://host:port, not {url}")))?;
+    rest.parse()
+        .map_err(|e| BusError(format!("{url}: {e}")))
+}
+
+fn encode_frame(frame: &[u8]) -> Vec<u8> {
+    let len = u32::try_from(frame.len()).unwrap_or(u32::MAX);
+    let mut packet = Vec::with_capacity(4 + frame.len());
+    packet.extend_from_slice(&len.to_le_bytes());
+    packet.extend_from_slice(frame);
+    packet
+}
+
+fn read_available(link: &mut Inbound) -> Result<Vec<Vec<u8>>, ()> {
+    let mut scratch = [0u8; 4096];
+    loop {
+        match link.stream.read(&mut scratch) {
+            Ok(0) => return Err(()),
+            Ok(n) => link.buf.extend_from_slice(&scratch[..n]),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return Err(()),
+        }
+    }
+    let mut frames = Vec::new();
+    loop {
+        if link.buf.len() < 4 {
+            break;
+        }
+        let len = u32::from_le_bytes(link.buf[..4].try_into().expect("four header bytes")) as usize;
+        if link.buf.len() < 4 + len {
+            break;
+        }
+        frames.push(link.buf[4..4 + len].to_vec());
+        link.buf.drain(..4 + len);
+    }
+    Ok(frames)
 }
 
 #[cfg(test)]

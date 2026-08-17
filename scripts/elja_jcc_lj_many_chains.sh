@@ -36,6 +36,19 @@ POPULATION_INTERVAL=${CATALOG_POPULATION_INTERVAL:-50000}
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=${SEED_OFFSET_BASE:-400000}
 REPLICA_LIST=$(seq -s, 0 $((REPLICAS - 1)))
+BRAIN_PORT_BASE=${CATALOG_BRAIN_PORT_BASE:-$((27000 + ${SLURM_JOB_ID:-0} % 2000))}
+brain_peers() {
+  local me=$1
+  local parts=()
+  local r
+  for r in $(seq 0 $((REPLICAS - 1))); do
+    if (( r != me )); then
+      parts+=("${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))")
+    fi
+  done
+  local IFS=,
+  printf '%s' "${parts[*]}"
+}
 
 if [[ -e $OUT ]]; then
   echo "ensemble output already exists: $OUT" >&2
@@ -138,6 +151,8 @@ while (( replica < REPLICAS )); do
       export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
+      export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
+      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica")"
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
