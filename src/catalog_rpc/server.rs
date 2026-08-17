@@ -29,7 +29,7 @@ use crate::catalog::{
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, assign_interfaces, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_lambda, occupant_rhat, prune, promote_one_sided, retis_exchange_adjacent,
-    rhat_series, same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
+    same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -2400,17 +2400,34 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
             }
         }
     }
-    let family_series: Vec<Vec<f64>> = scientific
-        .family_history
-        .values()
-        .map(|history| history.iter().copied().collect())
-        .filter(|series: &Vec<f64>| series.len() >= 2)
-        .collect();
     let mut evidence = invert_mixing(&attractors, &explore);
-    if explore_must_leave(&explore, &family_series, families.len(), assigned.len()) {
+    if explore_must_leave(
+        &explore,
+        n_on_incumbent_packing(scientific),
+        assigned.len(),
+    ) {
         evidence.explore_collapsed = true;
     }
     evidence
+}
+
+fn n_on_incumbent_packing(scientific: &ScientificState) -> usize {
+    let Some(incumbent) = scientific.catalog.incumbent() else {
+        return 0;
+    };
+    let Some(incumbent_hist) = scientific.packing.histogram(incumbent.coordinates()) else {
+        return 0;
+    };
+    scientific
+        .last_candidate_by_replica
+        .values()
+        .filter(|candidate| {
+            scientific
+                .packing
+                .histogram(&candidate.coordinates)
+                .is_some_and(|histogram| same_packing(&histogram, &incumbent_hist))
+        })
+        .count()
 }
 
 fn replica_packing(scientific: &ScientificState, replica: u32) -> Option<Vec<f64>> {

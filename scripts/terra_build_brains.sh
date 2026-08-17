@@ -27,6 +27,8 @@ cargo test --release --lib catalog_leave_keeps_the_hole
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
 cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
+cargo test --release --features bank-rpc --test catalog_policy explore_collapse_does_not_yank
+cargo test --release --features bank-rpc --test catalog_mixing
 cargo test --release --features bank-rpc --test catalog_packing leftover_soap_gt_plus
 cargo test --release --features bank-rpc --test catalog_packing packing_good_turing
 cargo build --release --features featomic,ira,bank-rpc \

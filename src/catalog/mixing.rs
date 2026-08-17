@@ -150,20 +150,21 @@ pub fn explore_collapsed(explore_series: &[Vec<f64>]) -> bool {
     mixed(rhat_series(explore_series))
 }
 
-/// Explore-role failure: mixed energy, or mixed leftover-SOAP / DECAF
-/// packing labels among two or more assigned walks.
+/// Explore-role failure: mixed energy, or two or more assigned walks
+/// rematched onto the frozen incumbent packing.
 ///
 /// One occupied packing with several occupants is a collapse. Waiting
-/// for a second family never opens that family. Distinct packing
-/// labels stay unmixed and do not force Leave.
+/// for a second family never opens that family. Live family-label
+/// \(\hat R\) is not this test: a growing DECAF codebook moves the
+/// label under the walks. Distinct packings rematched against the
+/// incumbent histogram do not force Leave.
 pub fn explore_must_leave(
     energy_explore: &[Vec<f64>],
-    family_series: &[Vec<f64>],
-    n_families: usize,
+    n_on_incumbent_packing: usize,
     n_assigned: usize,
 ) -> bool {
-    let _ = n_families;
-    explore_collapsed(energy_explore) || (n_assigned >= 2 && mixed(rhat_series(family_series)))
+    explore_collapsed(energy_explore)
+        || (n_assigned >= 2 && n_on_incumbent_packing >= 2)
 }
 
 /// Inverted Gelman--Rubin evidence consumed by the catalog policy.

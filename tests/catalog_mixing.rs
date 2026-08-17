@@ -188,7 +188,7 @@ fn mixed_decaf_labels_on_one_occupied_packing_force_leave() {
     ];
     assert!(!explore_collapsed(&energies));
     assert!(mixed(rhat_series(&families)));
-    assert!(explore_must_leave(&energies, &families, 1, 4));
+    assert!(explore_must_leave(&energies, 4, 4));
 }
 
 #[test]
@@ -200,12 +200,18 @@ fn mixed_labels_on_one_of_two_known_packings_force_leave() {
     ];
     let families = [constant(0.0, 8), constant(0.0, 8), constant(0.0, 8)];
     assert!(!explore_collapsed(&energies));
-    assert!(explore_must_leave(&energies, &families, 2, 3));
+    assert!(explore_must_leave(&energies, 3, 3));
 }
 
 #[test]
 fn distinct_packing_labels_are_not_a_mixed_explore_set() {
     let families = [constant(0.0, 8), constant(1.0, 8)];
     assert!(!mixed(rhat_series(&families)));
-    assert!(!explore_must_leave(&families, &families, 2, 2));
+    assert!(!explore_must_leave(&families, 1, 2));
+}
+
+#[test]
+fn a_lone_walk_on_the_incumbent_packing_is_not_collapse() {
+    let energies = [constant(-171.38, 8)];
+    assert!(!explore_must_leave(&energies, 1, 1));
 }
