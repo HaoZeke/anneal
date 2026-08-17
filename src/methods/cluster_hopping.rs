@@ -1190,16 +1190,45 @@ where
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
                 let (proposal_energy, proposal_state) = quenched;
                 #[cfg(feature = "featomic")]
-                let adopt = if adopt && crate::catalog::is_occupancy_leave_action(&action) {
-                    let same_family = from_state
+                let family_changed = crate::catalog::is_occupancy_leave_action(&action)
+                    && from_state
                         .as_slice()
                         .zip(proposal_state.as_slice())
                         .is_none_or(|(origin, trial)| {
-                            !crate::catalog::different_decaf_family(origin, trial)
+                            crate::catalog::different_decaf_family(origin, trial)
                         });
-                    !same_family
-                } else {
-                    adopt
+                #[cfg(not(feature = "featomic"))]
+                let family_changed = true;
+                let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
+                if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
+                    let (hole_energy, _) = relax(ledger, state.view(), 1);
+                    hops += 1;
+                    ledger.record(hole_energy, state.view());
+                    e = hole_energy;
+                    x = state;
+                    accepted += 1;
+                    current_validation_gradient = None;
+                    bias.deposit(x.view(), cfg.temperature);
+                    accepted_transitions.push(AcceptedTransition {
+                        hop: hops,
+                        action,
+                        from_energy,
+                        to_energy: hole_energy,
+                        from_state,
+                        from_gradient,
+                        to_state: x.clone(),
+                        to_gradient: None,
+                        validated: true,
+                        adopted: true,
+                    });
+                    continue;
+                }
+                let adopt = match leave {
+                    Some(crate::catalog::OccupancyLeaveAdopt::Quench) => true,
+                    Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) => {
+                        unreachable!("hole-step leave relocates before the quench path")
+                    }
+                    None => adopt,
                 };
                 let proposal_sane = quench_is_sane(cfg, proposal_energy, proposal_state.view());
                 let gradient_required = grad.is_some();
