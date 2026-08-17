@@ -31,4 +31,4 @@ test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
 test -x "$CATALOG_SERVER_BIN"
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj98.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 4 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 5 "$RADIUS"
