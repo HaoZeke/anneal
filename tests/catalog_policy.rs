@@ -108,7 +108,26 @@ fn global_saturation_never_forces_an_unrelated_replica_to_leave() {
 }
 
 #[test]
-fn same_decaf_packing_leaves_instead_of_exploring_isomers() {
+fn tis_extras_walk_isomers_until_pruned() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut extra = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    extra.interface_rank = 1;
+    extra.interface_threshold = 0.5;
+    let walk = CatalogPolicy::decide(extra);
+    assert_eq!(walk.action, PolicyAction::ContinueLocal);
+    assert_eq!(walk.reason, PolicyReason::IsomerWalk);
+    extra.mixing.pruned = true;
+    let leave = CatalogPolicy::decide(extra);
+    assert_eq!(leave.action, PolicyAction::Leave);
+    assert_eq!(leave.reason, PolicyReason::HyperbandPruned);
+}
+
+#[test]
+fn unseated_same_decaf_packing_leaves() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let state = input(
         ActiveCatalogRelation::SameBasin,

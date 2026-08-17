@@ -38,7 +38,8 @@ pub use occupancy::{
     published_energy_score, retis_exchange_adjacent, retis_should_swap,
 };
 pub use packing::{
-    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family, packing_distance,
+    OCCUPIED_FAMILY_VISITS, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
+    packing_distance,
     packing_fingerprint, packing_vector, same_packing,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};

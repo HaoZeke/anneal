@@ -40,7 +40,7 @@ fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
         .observe(oh.as_slice().unwrap())
         .expect("Oh opens a second family");
     assert_ne!(oh_family, ico_family);
-    assert_eq!(book.occupied_family_count(), 2);
+    assert_eq!(book.occupied_family_count(), 0);
 }
 
 #[test]
@@ -92,8 +92,57 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
     );
     assert_eq!(book.visits(ico_family), 1);
     assert_eq!(book.visits(marks_family), 1);
-    assert_eq!(book.occupied_family_count(), 2);
+    assert_eq!(book.occupied_family_count(), 0);
     assert!(book.novelty(&ico_after) > PACKING_MERGE);
+}
+
+#[test]
+fn singleton_packings_are_not_occupied_funnels() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(oh.as_slice().unwrap()).unwrap();
+    assert_eq!(
+        book.occupied_family_count(),
+        0,
+        "one quench of each packing is not two occupied funnels"
+    );
+}
+
+#[test]
+fn an_occupied_funnel_needs_repeated_decaf_visits() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    for _ in 0..8 {
+        book.observe(ico.as_slice().unwrap()).unwrap();
+    }
+    assert_eq!(book.occupied_family_count(), 1);
+    for _ in 0..8 {
+        book.observe(oh.as_slice().unwrap()).unwrap();
+    }
+    assert_eq!(book.occupied_family_count(), 2);
+}
+
+#[test]
+fn live_ico_isomers_are_one_occupied_family() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let mut nudged = ico.clone();
+    for atom in 0..8 {
+        nudged[3 * atom] += 0.08;
+    }
+    let mut book = PackingBook::default();
+    for _ in 0..8 {
+        book.observe(ico.as_slice().unwrap()).unwrap();
+        book.observe(nudged.as_slice().unwrap()).unwrap();
+    }
+    let live = [ico.as_slice().unwrap(), nudged.as_slice().unwrap()];
+    assert_eq!(
+        book.occupied_among(live),
+        1,
+        "two ico-like live structures are one occupied packing"
+    );
 }
 
 #[test]
@@ -104,7 +153,7 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     let second = book.observe(ico.as_slice().unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
-    assert_eq!(book.occupied_family_count(), 1);
+    assert_eq!(book.occupied_family_count(), 0);
     assert_eq!(
         book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()),
         0.0

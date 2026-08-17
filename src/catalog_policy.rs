@@ -231,6 +231,8 @@ pub enum PolicyReason {
     OccupiedPackingLeave,
     /// Explore-role chains have mixed; they must leave rather than keep exploring.
     ExploreCollapsed,
+    /// A TIS extra walks isomers of the occupied packing.
+    IsomerWalk,
     /// The incumbent attractor won the occupancy contest and stays occupied.
     CertifiedAttractor,
     /// Successive halving discarded a crowded-family walk at a rung.
@@ -253,6 +255,7 @@ impl PolicyReason {
             Self::UnrelatedCatalogExplore => "unrelated_catalog_explore",
             Self::SameBasinExplore => "same_basin_explore",
             Self::OccupiedPackingLeave => "occupied_packing_leave",
+            Self::IsomerWalk => "isomer_walk",
             Self::ExploreCollapsed => "explore_collapsed",
             Self::CertifiedAttractor => "certified_attractor",
             Self::HyperbandPruned => "hyperband_pruned",
@@ -353,6 +356,9 @@ impl CatalogPolicy {
             }
             ActiveCatalogRelation::SameBasin if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)
+            }
+            ActiveCatalogRelation::SameBasin if input.interface_rank != u32::MAX => {
+                decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
             ActiveCatalogRelation::SameBasin => {
                 decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
