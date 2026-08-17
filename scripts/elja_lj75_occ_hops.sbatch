@@ -7,7 +7,7 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-sb/slurm.%j.out
 # Occupancy catalog: inverted GR leave, leftover-SOAP / DECAF packing
-# identity, mixing / Good-Turing stop. Binary: anneal-stop 080ac51.
+# identity, mixing / Good-Turing stop. Binary: anneal-stop 41ad564.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 export LJ_ROOT=$HOME/anneal-stop
