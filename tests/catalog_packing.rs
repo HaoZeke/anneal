@@ -40,6 +40,7 @@ fn decaf_histogram_separates_lj38_oh_from_the_icosahedral_competitor() {
         .observe(oh.as_slice().unwrap())
         .expect("Oh opens a second family");
     assert_ne!(oh_family, ico_family);
+    assert_eq!(book.occupied_family_count(), 2);
 }
 
 #[test]
@@ -91,6 +92,7 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
     );
     assert_eq!(book.visits(ico_family), 1);
     assert_eq!(book.visits(marks_family), 1);
+    assert_eq!(book.occupied_family_count(), 2);
     assert!(book.novelty(&ico_after) > PACKING_MERGE);
 }
 
@@ -102,6 +104,7 @@ fn a_second_look_at_the_same_ico_does_not_open_a_family() {
     let second = book.observe(ico.as_slice().unwrap()).unwrap();
     assert_eq!(first, second);
     assert_eq!(book.visits(first), 2);
+    assert_eq!(book.occupied_family_count(), 1);
     assert_eq!(
         book.novelty(&book.histogram(ico.as_slice().unwrap()).unwrap()),
         0.0
