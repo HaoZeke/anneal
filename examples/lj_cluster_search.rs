@@ -1867,6 +1867,62 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     anneal_core::soap::step_away_fivefold_measured(x, rmsd)
 }
 
+/// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
+/// in the shared occupied cloud. That hole is the ensemble superbasin
+/// list, not this replica's private well trail.
+#[cfg(feature = "bank-rpc")]
+fn step_toward_catalog_hole(
+    x: ArrayView1<f64>,
+    target: &[f64],
+    space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: Option<&[u32]>,
+    length_scale: f64,
+) -> Option<Array1<f64>> {
+    use anneal_core::catalog_policy::proposal::pullback_increment;
+    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
+    if target.is_empty() || !length_scale.is_finite() || length_scale <= 0.0 {
+        return None;
+    }
+    let mut cur = x.to_owned();
+    let constraints = PullbackConstraints {
+        frozen_coordinates: vec![false; cur.len()],
+        rigid_group_labels: Vec::new(),
+        remove_translation: true,
+    };
+    let config = PullbackConfig {
+        damping: 1e-3,
+        trust_radius: 2.0,
+        length_scale,
+    };
+    let weights = Array1::ones(target.len());
+    let target = Array1::from(target.to_vec());
+    let mut moved = false;
+    for _ in 0..8 {
+        let desc = space.describe(cur.view(), species).ok()?;
+        if desc.values().len() != target.len() {
+            return None;
+        }
+        let increment = &target - &Array1::from(desc.values().to_vec());
+        let inc_norm = increment.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if inc_norm < 1e-8 {
+            break;
+        }
+        let jacobian = space.jacobian_analytic(cur.view(), species).ok()?;
+        let pulled = pullback_increment(
+            jacobian.view(),
+            increment.view(),
+            weights.view(),
+            Some(cur.view()),
+            &constraints,
+            config,
+        )
+        .ok()?;
+        cur = &cur + pulled.step();
+        moved = true;
+    }
+    moved.then_some(cur)
+}
+
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -3480,13 +3536,15 @@ fn run_capnp_catalog(
                         &mut shared_wells,
                     );
                 }
-                let _ = cooperative.descriptor_hole(
-                    replica,
-                    descriptor.clone(),
-                    128,
-                    transport_rng.random(),
-                );
-                let left = leave_packing_state(
+                let hole = cooperative
+                    .try_descriptor_hole(
+                        replica,
+                        descriptor.clone(),
+                        128,
+                        transport_rng.random(),
+                    )
+                    .expect("catalog hole access must preserve local execution");
+                let local = leave_packing_state(
                     snapshot.current_state(),
                     0.35,
                     &shared_wells,
@@ -3494,6 +3552,17 @@ fn run_capnp_catalog(
                     coop_species.as_deref(),
                     &mut transport_rng,
                 );
+                let left = match hole {
+                    CatalogHoleOutcome::Proposal(proposal) => step_toward_catalog_hole(
+                        snapshot.current_state(),
+                        &proposal.target,
+                        &descriptor_space,
+                        coop_species.as_deref(),
+                        run_cfg.length_scale,
+                    )
+                    .unwrap_or(local),
+                    _ => local,
+                };
                 if left
                     .iter()
                     .zip(snapshot.current_state().iter())
