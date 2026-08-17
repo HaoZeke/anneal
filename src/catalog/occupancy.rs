@@ -326,20 +326,20 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Ensemble stop. Mixing names a putative; extras still Leave.
-/// Retire only when two occupied DECAF families are on file and
-/// leftover-SOAP Good--Turing is saturated. A fabricated family
-/// count of `2 * certified` is not that count.
+/// Ensemble stop. Leftover-SOAP Good--Turing names a putative; extras
+/// still search. Twenty leftover-SOAP visits on 24 talking chains is
+/// not two occupied funnels. Retire only when inverted-GR mixing is
+/// certified, two rematched DECAF families are on file, and that
+/// leftover-SOAP census is saturated. A fabricated family count of
+/// `2 * certified` is not that count.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
     n_occupied_families: usize,
 ) -> bool {
     n_occupied_families >= 2
-        && match certificate {
-            OccupancyCertificate::CatalogSaturated => true,
-            OccupancyCertificate::MixingCertified => catalog_saturated,
-        }
+        && catalog_saturated
+        && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
 
 #[cfg(test)]
@@ -384,7 +384,20 @@ mod tests {
     }
 
     #[test]
-    fn good_turing_with_a_competing_family_is_done() {
+    fn leftover_soap_gt_with_two_packings_is_putative() {
+        assert_eq!(
+            occupancy_complete(false, true, 2),
+            Some(OccupancyCertificate::CatalogSaturated)
+        );
+        assert!(!occupancy_retire(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            2
+        ));
+    }
+
+    #[test]
+    fn good_turing_with_a_competing_family_is_a_certificate() {
         assert_eq!(
             occupancy_complete(false, true, 2),
             Some(OccupancyCertificate::CatalogSaturated)
@@ -416,7 +429,7 @@ mod tests {
             true,
             2
         ));
-        assert!(occupancy_retire(
+        assert!(!occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
             true,
             2

@@ -22,6 +22,7 @@ cargo test --release --features bank-rpc --test elja_submission_contract occupan
 cargo test --release --features bank-rpc --test cooperative_search visit_merges_the_posted
 cargo test --release --features bank-rpc --lib two_brains_exchange
 cargo test --release --lib leftover_lambda
+cargo test --release --lib leftover_soap_gt_with_two
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
 cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
