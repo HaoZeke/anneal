@@ -972,7 +972,7 @@ fn apply_request(
                     .values()
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
-                occupied_family_count: scientific.packing.occupied_among(
+                occupied_family_count: scientific.packing.certificate_family_count(
                     scientific
                         .last_candidate_by_replica
                         .values()
