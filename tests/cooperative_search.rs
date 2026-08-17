@@ -177,6 +177,23 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 }
 
 #[test]
+fn visit_merges_the_posted_leftover_soap_without_a_recompute() {
+    let server = server();
+    let digest = signature().digest();
+    let mut client =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+
+    let mut posted = candidate(0, 1, 1.2);
+    for value in &mut posted.descriptor {
+        *value += 0.05;
+    }
+    let accepted = client.record_visit(1, posted).unwrap();
+    assert_eq!(accepted.version, 1);
+    assert_eq!(client.snapshot(2).unwrap().census_visits, 1);
+}
+
+#[test]
 fn registered_policy_query_assigns_the_live_chain_to_a_census_basin() {
     let server = server();
     let digest = signature().digest();
