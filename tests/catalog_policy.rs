@@ -263,7 +263,7 @@ fn explore_collapse_leaves_instead_of_adopting_a_lower_funnel() {
 }
 
 #[test]
-fn explore_collapse_forces_leave_instead_of_explore() {
+fn explore_collapse_does_not_yank_a_different_packing() {
     let (census, _) = census_with_repeated_visits(2);
     let mut state = input(
         ActiveCatalogRelation::Unrelated {
@@ -275,9 +275,8 @@ fn explore_collapse_forces_leave_instead_of_explore() {
     state.mixing.explore_collapsed = true;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::ExploreCollapsed);
-    assert_eq!(decision.reason.code(), "explore_collapsed");
+    assert_eq!(decision.action, PolicyAction::Explore);
+    assert_eq!(decision.reason, PolicyReason::UnrelatedCatalogExplore);
 }
 
 #[test]

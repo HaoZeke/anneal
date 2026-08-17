@@ -283,13 +283,13 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// Explore-role mixing forces extras to Leave. The incumbent of
-    /// the occupied packing stays and walks isomers: that is the
-    /// serial Marks path. Extra occupants of a crowded packing are
-    /// pruned at occupancy rungs and reseed. A better isomer of the
-    /// occupied packing may be taken when the ensemble is not
-    /// collapsed. A certified incumbent stays. A deeper different
-    /// funnel is not copied onto every chain.
+    /// Collapse forces extras of the occupied packing to Leave. The
+    /// incumbent stays and walks isomers. A walk rematched to a
+    /// different DECAF family is not collapse: yanking it would
+    /// abandon the second funnel. Extra occupants of a crowded
+    /// packing are pruned at occupancy rungs and reseed. A better
+    /// isomer of the occupied packing may be taken when the ensemble
+    /// is not collapsed. A certified incumbent stays.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -325,7 +325,13 @@ impl CatalogPolicy {
                 )
             }
             _ if input.mixing.explore_collapsed
-                && !matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
+                && !matches!(input.relation, ActiveCatalogRelation::Incumbent)
+                && !matches!(
+                    input.relation,
+                    ActiveCatalogRelation::Unrelated {
+                        lower_energy_anchor: false
+                    }
+                ) =>
             {
                 decision(PolicyAction::Leave, PolicyReason::ExploreCollapsed)
             }
