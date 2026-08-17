@@ -688,12 +688,13 @@ mod run {
         ) -> Result<TransitionRecordOutcome, CooperativeRunError> {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let action = action.into();
+            let action_rpc = action.clone();
             let resolved = matches!(destination, TransitionDestination::Resolved(_));
             let result = {
                 let state = self.replica_mut(replica)?;
                 state.client.as_ref().map(|mailbox| {
                     mailbox.exec(move |client| {
-                        client.record_transition(rpc_sequence, action.clone(), destination, adopted)
+                        client.record_transition(rpc_sequence, action_rpc, destination, adopted)
                     })
                 })
             };
