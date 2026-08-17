@@ -241,6 +241,10 @@ fn occupancy_many_chains_starts_one_brain_per_replica() {
         source.contains(r#"${r}=tcp://127.0.0.1:$((BRAIN_PORT_BASE + r))"#),
         "brain peers must be replica=tcp://host:port pairs the worker already parses"
     );
+    assert!(
+        source.contains(r#"brain_peers "$replica" "$wave_start" "$wave_end""#),
+        "brain peers must be the live wave, not all 48 replicas"
+    );
 }
 
 #[test]
