@@ -899,6 +899,16 @@ mod run {
             if let Some(policy) = self.replicas.get(&replica).and_then(|state| state.last_policy)
             {
                 let input = policy_input_from_state(policy, local_stall_slices, local_deepened)?;
+                let version = self
+                    .replicas
+                    .get(&replica)
+                    .and_then(|state| state.snapshot)
+                    .map(|snapshot| snapshot.version);
+                self.push_event(replica, TraceKind::SnapshotRefresh, version, None)?;
+                self.events
+                    .last_mut()
+                    .expect("snapshot-refresh push appends one trace event")
+                    .policy = Some(policy_trace(policy, energy));
                 return Ok(PolicyEvidenceOutcome::Remote(input));
             }
             self.push_event(replica, TraceKind::RpcFallback, None, None)?;

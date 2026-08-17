@@ -22,7 +22,7 @@ if ! grep -a -F -q different_decaf_family "$BIN"; then
   exit 2
 fi
 
-OUT=$HOME/ljwork/jcc/lj38-occ-sb/lj38/shared/lj38-shared-0003
+OUT=$HOME/ljwork/jcc/lj38-occ-sb/lj38/shared/lj38-shared-0004
 if [[ -e $OUT ]]; then
   echo "refusing submit: $OUT already exists" >&2
   exit 2
