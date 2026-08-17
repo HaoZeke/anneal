@@ -30,7 +30,26 @@ fn input(
         leftover_lambda: 0.0,
         interface_rank: u32::MAX,
         interface_threshold: 0.0,
+        occupied_family_count: 0,
+        on_published_prize: false,
     }
+}
+
+#[test]
+fn extras_on_a_published_prize_keep() {
+    let (census, basin_id) = census_with_repeated_visits(4);
+    let mut extra = input(
+        ActiveCatalogRelation::Incumbent,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(90, 100).unwrap(),
+    );
+    extra.interface_rank = 1;
+    extra.on_published_prize = true;
+    let decision = CatalogPolicy::decide(extra);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    extra.on_published_prize = false;
+    let leave = CatalogPolicy::decide(extra);
+    assert_eq!(leave.action, PolicyAction::Leave);
 }
 
 #[test]
@@ -399,6 +418,8 @@ fn decision_table_covers_every_discrete_input_state() {
                                 leftover_lambda: 0.0,
                                 interface_rank: u32::MAX,
                                 interface_threshold: 0.0,
+                                occupied_family_count: 0,
+                                on_published_prize: false,
                             });
                             assert!(!decision.reason.code().is_empty());
                             if relation == ActiveCatalogRelation::Incumbent

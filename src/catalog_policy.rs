@@ -180,6 +180,10 @@ pub struct CatalogPolicyInput {
     pub interface_rank: u32,
     /// Threshold \(\lambda_i\) this extra must reach on Leave.
     pub interface_threshold: f64,
+    /// Occupied DECAF families on the book. Not leftover-SOAP basins.
+    pub occupied_family_count: usize,
+    /// Published-energy score: this replica sits on a known hurdle GM.
+    pub on_published_prize: bool,
 }
 
 /// Selectable action for one cooperative search slice.
@@ -307,6 +311,18 @@ impl CatalogPolicy {
             }
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
+            }
+            _ if input.interface_rank != u32::MAX
+                && input.on_published_prize
+                && matches!(input.relation, ActiveCatalogRelation::Incumbent) =>
+            {
+                decision(
+                    PolicyAction::ContinueLocal,
+                    PolicyReason::IncumbentLocalSearch,
+                )
+            }
+            _ if input.interface_rank != u32::MAX => {
+                decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
             }
             _ if input.mixing.explore_collapsed
                 && !matches!(input.relation, ActiveCatalogRelation::Incumbent) =>

@@ -28,8 +28,8 @@ use crate::catalog::{
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, assign_interfaces, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupant_rhat, prune, retis_exchange_adjacent, rhat_series, same_packing,
-    CHAMPION_RANK, InterfaceSeat,
+    leftover_lambda, occupant_rhat, prune, promote_one_sided, retis_exchange_adjacent,
+    rhat_series, same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -959,6 +959,7 @@ fn apply_request(
                     .values()
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
+                occupied_family_count: scientific.packing.occupied_family_count() as u32,
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -2470,13 +2471,10 @@ fn assign_leftover_interfaces(
         .filter(|(id, _)| Some(**id) != champion)
         .map(|(id, value)| (*id, *value))
         .collect();
-    extras.sort_by_key(|(id, _)| *id);
-    let horizon = extras
-        .iter()
-        .map(|(_, value)| *value)
-        .fold(0.0, f64::max)
-        .max(1e-6);
+    extras.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
+    let horizon = INTERFACE_HORIZON;
     let mut seats = assign_interfaces(&extras, horizon);
+    let _ = promote_one_sided(&mut seats);
     let _ = retis_exchange_adjacent(&mut seats);
     scientific.interface_seat_by_replica.clear();
     if let Some(id) = champion {

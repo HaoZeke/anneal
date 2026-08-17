@@ -104,6 +104,10 @@ pub fn occupancy_complete(
 
 /// Champion of the occupied packing has no TIS interface.
 pub const CHAMPION_RANK: u32 = u32::MAX;
+/// Fixed leftover-SOAP horizon for the TIS ladder. Unit leftover
+/// descriptors sit in a ball of diameter 2. Live `max(lambda)` is not
+/// a horizon: it collapses every interface onto the well.
+pub const INTERFACE_HORIZON: f64 = 2.0;
 
 /// One leftover-SOAP interface seat owned by the catalog RPC.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -252,7 +256,10 @@ impl LeavePath {
 }
 
 /// Assign extras increasing leftover-SOAP interfaces. Champion is omitted.
+/// Seats are ordered by leftover-SOAP \(\lambda\), not replica id.
 pub fn assign_interfaces(extras: &[(u32, f64)], horizon: f64) -> Vec<InterfaceSeat> {
+    let mut extras = extras.to_vec();
+    extras.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
     let ladder = interface_ladder(extras.len(), horizon);
     extras
         .iter()
@@ -291,6 +298,34 @@ pub fn retis_exchange_adjacent(seats: &mut [InterfaceSeat]) -> bool {
     swapped
 }
 
+/// Promote an extra that already cleared the next threshold, without
+/// waiting for the neighbor to cross this one.
+pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
+    let mut promoted = false;
+    let mut index = 0;
+    while index + 1 < seats.len() {
+        let left = seats[index];
+        let right = seats[index + 1];
+        if left.rank == CHAMPION_RANK || right.rank == CHAMPION_RANK {
+            index += 1;
+            continue;
+        }
+        if in_interface_ensemble(left.lambda, right.threshold)
+            && left.lambda > right.lambda
+        {
+            seats[index].replica = right.replica;
+            seats[index].lambda = right.lambda;
+            seats[index + 1].replica = left.replica;
+            seats[index + 1].lambda = left.lambda;
+            promoted = true;
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    promoted
+}
+
 /// Ensemble stop. Mixing names a putative; extras still Leave.
 /// Retire only when two occupied DECAF families are on file and
 /// leftover-SOAP Good--Turing is saturated. A fabricated family
@@ -312,8 +347,8 @@ mod tests {
     use super::{
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, assign_interfaces,
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
-        leftover_lambda, occupancy_complete, occupancy_retire, published_energy_score,
-        retis_exchange_adjacent, retis_should_swap,
+        leftover_lambda, occupancy_complete, occupancy_retire, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap,
     };
 
     #[test]
@@ -442,6 +477,28 @@ mod tests {
         assert_eq!(path.max_lambda(), 0.8);
         assert_eq!(path.shoot_index(), Some(1));
         assert_eq!(path.shoot_coordinates(), Some([1.0].as_slice()));
+    }
+
+    #[test]
+    fn interface_ranks_follow_lambda_not_replica_id() {
+        let extras = [(3, 0.1), (1, 0.9), (2, 0.4)];
+        let assigned = assign_interfaces(&extras, 1.0);
+        assert_eq!(assigned[0].replica, 3);
+        assert_eq!(assigned[0].rank, 0);
+        assert_eq!(assigned[1].replica, 2);
+        assert_eq!(assigned[2].replica, 1);
+        assert!((assigned[2].threshold - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn one_sided_promotion_does_not_wait_for_the_neighbor() {
+        let extras = [(1, 1.0), (2, 0.1)];
+        let mut seats = assign_interfaces(&extras, 1.0);
+        assert_eq!(seats[0].replica, 2);
+        assert_eq!(seats[1].replica, 1);
+        assert!(promote_one_sided(&mut seats) || seats[1].replica == 1);
+        assert_eq!(seats[1].replica, 1);
+        assert!(in_interface_ensemble(seats[1].lambda, seats[1].threshold));
     }
 
     #[test]

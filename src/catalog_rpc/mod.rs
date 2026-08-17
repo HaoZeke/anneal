@@ -368,6 +368,8 @@ pub struct PolicyState {
     pub interface_threshold: f64,
     /// Number of leftover-SOAP interfaces in the current ladder.
     pub interface_count: u32,
+    /// Occupied DECAF families on the packing book.
+    pub occupied_family_count: u32,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1017,6 +1019,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_interface_rank(state.interface_rank);
                     output.set_interface_threshold(state.interface_threshold);
                     output.set_interface_count(state.interface_count);
+                    output.set_occupied_family_count(state.occupied_family_count);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1208,6 +1211,7 @@ pub(crate) fn decode_reply_reader(
                         interface_rank: state.get_interface_rank(),
                         interface_threshold: state.get_interface_threshold(),
                         interface_count: state.get_interface_count(),
+                        occupied_family_count: state.get_occupied_family_count(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {
