@@ -38,11 +38,15 @@
 //!
 //! ## Stop
 //!
-//! Occupancy retires on a mixing certificate or on Good--Turing
-//! saturation of a catalog that already holds two occupied families.
-//! Occupant \(\hat R\) uses [`crate::catalog::CERTIFY_MIN_SAMPLES`]
-//! traces; two-point quenches on two random-start families are not a
-//! certificate.
+//! A mixing certificate names a putative: uniquely deepest, occupant
+//! mixed, a mixed competitor, strictly more occupied. It does not
+//! retire extras. On LJ75 that putative is the icosahedral shelf
+//! until a second funnel is deeper, so retiring on mixing alone
+//! stops the search before Marks. Occupancy retires when Good--Turing
+//! saturates two occupied families, or when mixing and that
+//! saturation hold together. Occupant \(\hat R\) uses
+//! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
+//! on two random-start families are not a certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
 //! stop. Leftover-SOAP saturation on one family is collapse, not
 //! completeness: revisiting an icosahedral well drives the unseen
@@ -98,12 +102,14 @@ pub fn occupancy_complete(
     }
 }
 
-/// Either certificate retires the replica. A published energy does not.
-pub fn occupancy_retire(certificate: OccupancyCertificate) -> bool {
-    matches!(
-        certificate,
-        OccupancyCertificate::MixingCertified | OccupancyCertificate::CatalogSaturated
-    )
+/// Ensemble stop. Mixing names a putative; extras still Leave.
+/// Saturation of two occupied families, alone or with mixing, retires.
+/// A published energy is not an argument.
+pub fn occupancy_retire(certificate: OccupancyCertificate, catalog_saturated: bool) -> bool {
+    match certificate {
+        OccupancyCertificate::CatalogSaturated => true,
+        OccupancyCertificate::MixingCertified => catalog_saturated,
+    }
 }
 
 #[cfg(test)]
@@ -162,9 +168,19 @@ mod tests {
     }
 
     #[test]
-    fn occupancy_retires_on_either_certificate_never_on_a_score() {
-        assert!(occupancy_retire(OccupancyCertificate::MixingCertified));
-        assert!(occupancy_retire(OccupancyCertificate::CatalogSaturated));
+    fn mixing_alone_does_not_retire_extras_before_good_turing() {
+        assert!(!occupancy_retire(
+            OccupancyCertificate::MixingCertified,
+            false
+        ));
+        assert!(occupancy_retire(
+            OccupancyCertificate::MixingCertified,
+            true
+        ));
+        assert!(occupancy_retire(
+            OccupancyCertificate::CatalogSaturated,
+            true
+        ));
         assert_eq!(occupancy_complete(false, false, 8), None);
     }
 }

@@ -3172,20 +3172,31 @@ fn run_capnp_catalog(
             policy.census.globally_saturated(),
             n_occupied_families,
         ) {
+            let saturated = policy.census.globally_saturated();
+            if occupancy_retire(certificate, saturated) {
+                if !announced_done {
+                    println!(
+                        "  done {}  hops {}  best {:.6}",
+                        certificate.as_str(),
+                        snapshot.hops(),
+                        snapshot.best_energy()
+                    );
+                    let _ = std::io::stdout().flush();
+                    announced_done = true;
+                }
+                return CheckpointAction::Retire {
+                    reason: certificate.as_str().to_owned(),
+                };
+            }
             if !announced_done {
                 println!(
-                    "  done {}  hops {}  best {:.6}",
+                    "  putative {}  hops {}  best {:.6}",
                     certificate.as_str(),
                     snapshot.hops(),
                     snapshot.best_energy()
                 );
                 let _ = std::io::stdout().flush();
                 announced_done = true;
-            }
-            if occupancy_retire(certificate) {
-                return CheckpointAction::Retire {
-                    reason: certificate.as_str().to_owned(),
-                };
             }
         }
         let policy_trace = cooperative
