@@ -41,4 +41,4 @@ if ! grep -a -F -q step_toward_catalog_hole "$LJ_BIN"; then
   exit 2
 fi
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj38.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 38 400000 4 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 38 400000 5 "$RADIUS"
