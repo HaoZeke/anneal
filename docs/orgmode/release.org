@@ -1,0 +1,74 @@
+#+TITLE: Release process
+
+A PyPI, crates.io, or GitHub Release upload happens only when a
+=vX.Y.Z= tag is pushed. That is the entire publish gate.
+
+* Tag name
+
+=.github/workflows/release.yml= listens for =push.tags: 'v*'=. The
+publish jobs also require =startsWith(github.ref, 'refs/tags/v')=.
+
+- Correct: =v0.9.0=, =v0.7.2=
+- Wrong: =0.8.0=, =release-0.9.0=, a branch named =v0.9.0=
+
+An unprefixed tag such as =0.8.0= is a Git object only. It does not
+start the workflow, so it does not upload wheels, does not publish
+=anneal-core=, and does not open a GitHub Release.
+
+Leave a mistaken unprefixed tag in place. Add the =v= tag on the same
+commit. Do not move or delete the old name.
+
+* Version triple
+
+=validate-release= reads three files and requires them to equal the
+tag with the leading =v= stripped:
+
+- =Cargo.toml= =[package].version=
+- =pyproject.toml= =[project].version=
+- =CITATION.cff= =version:=
+
+If any one disagrees, the workflow stops before wheels and nothing
+is published. Bump all three in the same =chore(release):= commit.
+
+* Steps
+
+1. Add towncrier fragments under =docs/newsfragments/= for every
+   user-visible change.
+2. Bump the version triple to the new =X.Y.Z=.
+3. Run =pixi r towncrier-build= so =CHANGELOG.md= carries that version.
+4. Commit. Push =main=.
+5. Create an annotated, signed tag named *exactly* =vX.Y.Z= on that
+   commit (the same object the changelog describes, not a later
+   campaign commit):
+
+#+BEGIN_SRC bash
+git tag -a vX.Y.Z <commit> -m "vX.Y.Z"
+git push origin vX.Y.Z
+#+END_SRC
+
+6. Confirm the =Release= workflow on that tag is green and that
+   https://pypi.org/project/anneal/X.Y.Z/ exists.
+
+Do not use =workflow_dispatch= as a substitute for the tag. Dispatch
+builds artifacts; it does not publish unless =github.ref= is a =v*= tag.
+
+* What the tag starts
+
+On =vX.Y.Z= the workflow builds abi3 wheels, an sdist, and native
+library tarballs, then publishes the Python artifacts to PyPI, publishes
+=anneal-core= to crates.io if that version is absent, and opens the
+GitHub Release.
+
+* Why 0.8.0 and 0.9.0 were missing from PyPI
+
+PyPI and crates.io stopped at =0.7.2= (=v0.7.2=, 2026-08-01).
+
+- =0.8.0= (2026-08-08) was tagged =0.8.0=, not =v0.8.0=. The workflow
+  never ran. That commit also left =CITATION.cff= at =0.7.2=, so a
+  later =v0.8.0= on the same tree still fails =validate-release=.
+- =0.9.0= had matching =0.9.0= metadata and assembled notes
+  (=df28dd2=) and no tag at all.
+
+The corrective tags are =v0.8.0= on =0.8.0= (name only; that tree
+cannot publish) and =v0.9.0= on =df28dd2= (the first post-0.7.2 tree
+that can publish).
