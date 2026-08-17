@@ -118,6 +118,12 @@ impl PackingBook {
         self.visits.get(family).copied().unwrap_or(0)
     }
 
+    /// Occupied DECAF families on file. Visit count, not leftover-SOAP
+    /// basin count. Empty until `observe` records a histogram.
+    pub fn occupied_family_count(&self) -> usize {
+        self.visits.iter().filter(|&&visits| visits > 0).count()
+    }
+
     /// L1 to the nearest family that is not this histogram's family.
     pub fn novelty(&self, histogram: &[f64]) -> f64 {
         let local = self.family_of(histogram);
