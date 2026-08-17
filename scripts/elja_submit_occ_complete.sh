@@ -18,7 +18,7 @@ if [[ $SRC != "$WANT" ]]; then
 fi
 test -x "$BIN"
 test -x "$SERVER"
-if ! strings "$BIN" | grep -q 'different_decaf_family'; then
+if ! grep -a -F -q different_decaf_family "$BIN"; then
   echo "refusing submit: $BIN missing different_decaf_family" >&2
   exit 2
 fi
