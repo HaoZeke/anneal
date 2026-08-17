@@ -219,6 +219,25 @@ pub fn same_packing(left: &[f64], right: &[f64]) -> bool {
     packing_distance(left, right) <= PACKING_MERGE
 }
 
+/// Whether `trial` is a different DECAF packing family from `origin`.
+///
+/// One throwaway book: observe `origin`, then histogram `trial` against
+/// that codebook. Occupancy Leave accepts a quench only when this is
+/// true. Leftover-SOAP off-well is not a family change.
+pub fn different_decaf_family(origin: &[f64], trial: &[f64]) -> bool {
+    let mut book = PackingBook::default();
+    if book.observe(origin).is_none() {
+        return false;
+    }
+    let Some(home) = book.histogram(origin) else {
+        return false;
+    };
+    match book.histogram(trial) {
+        Some(away) => !same_packing(&home, &away),
+        None => true,
+    }
+}
+
 /// Dense histogram used by tests that do not hold a coordinator book.
 pub fn packing_vector(coordinates: &[f64]) -> Array1<f64> {
     let mut book = PackingBook::default();
