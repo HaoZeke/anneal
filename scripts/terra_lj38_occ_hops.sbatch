@@ -36,5 +36,9 @@ if ! grep -a -F -q different_decaf_family "$LJ_BIN"; then
   echo "refusing: $LJ_BIN missing different_decaf_family" >&2
   exit 2
 fi
+if ! grep -a -F -q step_toward_catalog_hole "$LJ_BIN"; then
+  echo "refusing: $LJ_BIN missing step_toward_catalog_hole" >&2
+  exit 2
+fi
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj38.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 38 400000 3 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 38 400000 4 "$RADIUS"
