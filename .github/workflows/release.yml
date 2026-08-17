@@ -10,11 +10,16 @@ permissions:
   contents: write
 
 # Release flow (abi3 wheels + towncrier changelog):
+# - The tag name MUST be vX.Y.Z. A tag named 0.8.0 does not match
+#   push.tags v* and does not publish to PyPI or crates.io.
+# - Cargo.toml, pyproject.toml, and CITATION.cff versions must equal
+#   the tag with the leading v stripped, or validate-release fails.
 # - Cargo.toml enables abi3-py310: wheels job builds one wheel per
 #   platform (no --find-interpreter, no per-Python matrix).
 # - Release preparation: run `pixi r towncrier-build` after fragments are
 #   merged so CHANGELOG.md is up to date under the marker.
 # - GH Release uses --generate-notes (supplements the towncrier history).
+# - Full steps: docs/orgmode/release.org
 
 jobs:
   validate-release:

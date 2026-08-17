@@ -113,6 +113,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    :caption: Development
 
    contributing
+   release
    dev/best_practices
    code_of_conduct
 #+end_export

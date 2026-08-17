@@ -39,6 +39,10 @@ pixi r towncrier-build   # write to CHANGELOG.md and consume fragments
 Run the build step as part of preparing a release tag (after version bump in relevant files).
 Fragments are required for changes that should appear in release notes.
 
+The publish tag must be named =vX.Y.Z=. An unprefixed tag does not
+start =.github/workflows/release.yml= and does not upload to PyPI.
+See [[file:release.org][Release process]].
+
 * Style
 
 Rust code is formatted with =cargo fmt= and linted with =cargo clippy --all-features -- -D warnings=.
