@@ -45,6 +45,7 @@ use rand::Rng;
 /// return, and the cell it returns to is chosen the same way, by
 /// weighting a cell's demonstrated success against how little it has
 /// been tried.
+#[derive(Clone, Debug)]
 pub struct Archive {
     /// Representative descriptor of each cell.
     centres: Vec<Vec<f64>>,
