@@ -484,6 +484,7 @@ mod run {
         ledger: CooperativeLedger,
         replicas: BTreeMap<u32, ReplicaState>,
         events: Vec<TraceEvent>,
+        on_published_prize: bool,
     }
 
     impl CooperativeRun {
@@ -527,7 +528,17 @@ mod run {
                 ledger,
                 replicas,
                 events: Vec::new(),
+                on_published_prize: false,
             })
+        }
+
+        /// Whether the run has reached a published reference energy.
+        ///
+        /// The coordinator holds no published reference and the policy
+        /// state carries no best energy, so this is the caller's to
+        /// report; every policy input built afterwards carries it.
+        pub fn set_on_published_prize(&mut self, reached: bool) {
+            self.on_published_prize = reached;
         }
 
         /// Attach or replace the coordinator connection for one replica.
@@ -868,8 +879,12 @@ mod run {
                     Ok(PolicyEvidenceOutcome::SharingDisabled)
                 }
                 Some(Ok(receipt)) => {
-                    let input =
-                        policy_input_from_state(receipt.state, local_stall_slices, local_deepened)?;
+                    let input = policy_input_from_state(
+                        receipt.state,
+                        local_stall_slices,
+                        local_deepened,
+                        self.on_published_prize,
+                    )?;
                     self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                     self.push_event(
                         replica,
@@ -956,6 +971,7 @@ mod run {
                             receipt.state,
                             local_stall_slices,
                             local_deepened,
+                            self.on_published_prize,
                         )?;
                         self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                         self.push_event(
@@ -1005,7 +1021,12 @@ mod run {
             }
             if let Some(policy) = self.replicas.get(&replica).and_then(|state| state.last_policy)
             {
-                let input = policy_input_from_state(policy, local_stall_slices, local_deepened)?;
+                let input = policy_input_from_state(
+                    policy,
+                    local_stall_slices,
+                    local_deepened,
+                    self.on_published_prize,
+                )?;
                 let version = self
                     .replicas
                     .get(&replica)
@@ -2220,6 +2241,7 @@ mod run {
         state: PolicyState,
         local_stall_slices: u32,
         local_deepened: bool,
+        on_published_prize: bool,
     ) -> Result<CatalogPolicyInput, PolicyInputError> {
         let relation = match state.relation {
             CatalogRelation::Empty => ActiveCatalogRelation::Empty,
@@ -2253,7 +2275,7 @@ mod run {
             interface_rank: state.interface_rank,
             interface_threshold: state.interface_threshold,
             occupied_family_count: state.occupied_family_count as usize,
-            on_published_prize: false,
+            on_published_prize,
         })
     }
 

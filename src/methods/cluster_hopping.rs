@@ -1152,8 +1152,10 @@ where
                     None
                 }
                 CheckpointAction::BoundaryProposal { state, action } => {
-                    let state =
-                        leave_boundary_start(state, &action, x.view(), cfg, ledger, relax, rng);
+                    // The boundary start is taken as offered. Occupancy
+                    // Leave already walked the leftover-SOAP hole, and
+                    // re-walking it from the live well throws that shoot
+                    // away and quenches back onto the occupied family.
                     Some((state, action, true))
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
@@ -2972,30 +2974,6 @@ pub fn repack_rigid_groups<R: Rng + ?Sized>(
         }
     }
     y
-}
-
-fn leave_boundary_start<R: Rng + ?Sized>(
-    proposed: Array1<f64>,
-    action: &str,
-    live: ArrayView1<f64>,
-    cfg: &Config,
-    ledger: &mut Ledger,
-    relax: Relax<'_>,
-    rng: &mut R,
-) -> Array1<f64> {
-    #[cfg(feature = "featomic")]
-    {
-        let _ = (live, cfg, ledger, relax, rng);
-        // Occupancy Leave already walked the leftover-SOAP hole.
-        // Re-running leave_occupied_packing from the live well throws
-        // that shoot away and quenches back onto the occupied family.
-        proposed
-    }
-    #[cfg(not(feature = "featomic"))]
-    {
-        let _ = (action, live, cfg, ledger, relax, rng);
-        proposed
-    }
 }
 
 fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
