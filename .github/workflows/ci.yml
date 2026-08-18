@@ -9,6 +9,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Every feature a runner can satisfy. `lammps` is excluded on purpose:
+  # its build script requires LAMMPS_LIB_DIR pointing at a liblammps that
+  # no runner installs, so --all-features cannot resolve here.
+  CI_FEATURES: ira,nng-transport,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex
+
 jobs:
   lint:
     name: Lint (fmt + clippy)
@@ -61,7 +67,7 @@ jobs:
             >> "$GITHUB_ENV"
 
       - name: cargo clippy
-        run: cargo clippy --all-features --all-targets -- -D warnings
+        run: cargo clippy --features "$CI_FEATURES" --all-targets -- -D warnings
 
       - name: Install Cocogitto
         uses: taiki-e/install-action@v2
@@ -175,17 +181,17 @@ jobs:
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           test
 
-      - name: cargo test --all-features
+      - name: cargo test (all satisfiable features)
         if: runner.os != 'macOS'
-        run: cargo test --all-features
+        run: cargo test --features "$CI_FEATURES"
 
-      - name: cargo test --all-features (macOS)
+      - name: cargo test (all satisfiable features, macOS)
         if: runner.os == 'macOS'
         run: >-
           cargo
           --config 'target.x86_64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
           --config 'target.aarch64-apple-darwin.rustflags=["-C","link-arg=-undefined","-C","link-arg=dynamic_lookup"]'
-          test --all-features
+          test --features "$CI_FEATURES"
 
       - name: Create virtualenv
         shell: bash
