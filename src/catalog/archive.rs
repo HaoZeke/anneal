@@ -63,8 +63,10 @@ impl Tessellation {
                 chosen.push(index);
             }
         }
-        let mut centroids: Vec<Vec<f64>> =
-            chosen.into_iter().map(|index| samples[index].clone()).collect();
+        let mut centroids: Vec<Vec<f64>> = chosen
+            .into_iter()
+            .map(|index| samples[index].clone())
+            .collect();
         for _ in 0..iterations {
             let mut sums = vec![vec![0.0; width]; niches];
             let mut counts = vec![0usize; niches];
