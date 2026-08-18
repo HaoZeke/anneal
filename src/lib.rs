@@ -144,6 +144,8 @@ pub mod replica_exchange;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
 pub mod runner;
+/// Run-time distributions: what a search's time to target supports.
+pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;
 pub mod screen;
