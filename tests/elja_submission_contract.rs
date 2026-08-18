@@ -307,10 +307,17 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
             source.contains("export CATALOG_MIN_FAMILIES=2"),
             "{name} must set CATALOG_MIN_FAMILIES=2"
         );
+        let wave = if name.starts_with("elja_") { 48 } else { 24 };
         assert!(
-            source.contains("export CATALOG_WAVE=24"),
-            "{name} must set CATALOG_WAVE=24"
+            source.contains(&format!("export CATALOG_WAVE={wave}")),
+            "{name} must set CATALOG_WAVE={wave}"
         );
+        if name.starts_with("elja_") {
+            assert!(
+                source.contains("#SBATCH --exclusive"),
+                "{name} must take one node so all 48 replicas run at once"
+            );
+        }
         assert!(
             source.contains(&format!("elja_jcc_lj_many_chains.sh {launch}")),
             "{name} must launch paper-budget ensemble {launch}"

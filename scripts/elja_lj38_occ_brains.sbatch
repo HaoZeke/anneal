@@ -4,8 +4,9 @@
 #SBATCH --account=chem-ui
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=40G
+#SBATCH --cpus-per-task=48
+#SBATCH --exclusive
+#SBATCH --mem=0
 #SBATCH --time=2-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj38-occ-elja/slurm.%j.out
 # LJ38 occupancy. Paper budget 4e5, hop 60000, 48 replicas.
@@ -22,7 +23,7 @@ export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
 export LD_LIBRARY_PATH=$HOME/ira/lib:$GCCLIB:${LD_LIBRARY_PATH:-}
 export CATALOG_REPLICAS=48
-export CATALOG_WAVE=24
+export CATALOG_WAVE=48
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
