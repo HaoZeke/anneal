@@ -401,21 +401,27 @@ mod tests {
 
     #[test]
     fn an_untried_cell_still_wins_draws() {
-        // The property a decay heuristic does not have: a cell tried
-        // twice has a wide posterior and keeps being explored, so
+        // The property a decay heuristic does not have: a cell with no
+        // evidence keeps a wide posterior and keeps being explored, so
         // effort leaves it only once there is evidence to leave on.
+        //
+        // The rate is not a guess. Against Beta(13,1) an untried
+        // Beta(1,1) is uniform, so it wins with probability
+        // \(\int_0^1 13x^{12}(1-x)\,dx = 1/14\), about seven per
+        // cent, which is 28 of 400 with a standard deviation near 5.
+        // Ten is three standard deviations below that and still well
+        // clear of the 0.95 per cent a once-penalised cell would give.
         let mut bandit = Curiosity::new(2);
         for _ in 0..12 {
             bandit.reward(0);
         }
-        bandit.penalise(1);
         let mut rng = StdRng::seed_from_u64(19);
         let explored = (0..400)
             .filter(|_| bandit.select(&[0, 1], &mut rng) == Some(1))
             .count();
         assert!(
             explored > 10,
-            "barely-tried cell explored only {explored} of 400"
+            "untried cell explored only {explored} of 400, against 28 expected"
         );
     }
 
