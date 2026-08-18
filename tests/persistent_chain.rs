@@ -242,9 +242,16 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
     // quenched 0.0, so a ledger that recorded it would say so here.
     assert_eq!(outcome.best, 0.0);
     assert_eq!(outcome.best_state.as_ref(), Some(&start));
+    // The trajectory keeps the hop and tags it, which is what the
+    // `validated` field is for: a history of record improvements alone
+    // cannot reconstruct the region the chain occupies.
+    let [transition] = outcome.accepted_transitions.as_slice() else {
+        panic!("the screened hop is the one state change this run makes")
+    };
+    assert!(transition.adopted);
     assert!(
-        outcome.accepted_transitions.is_empty(),
-        "an unvalidated partial relaxation entered the accepted trajectory"
+        !transition.validated,
+        "a partial relaxation was tagged as meeting the quench-validity contract"
     );
 }
 
