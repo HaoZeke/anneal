@@ -3238,10 +3238,10 @@ fn run_capnp_catalog(
         let n_occupied_families = policy.occupied_family_count;
         if let Some(certificate) = occupancy_complete(
             policy.mixing.certified_attractor,
-            policy.census.globally_saturated(),
+            policy.packing_saturated,
             n_occupied_families,
         ) {
-            let saturated = policy.census.globally_saturated();
+            let saturated = policy.packing_saturated;
             if occupancy_retire(certificate, saturated, n_occupied_families) {
                 if !announced_done {
                     println!(

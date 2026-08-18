@@ -106,6 +106,8 @@ struct PolicyStateReply {
   interfaceThreshold @17 :Float64;
   interfaceCount @18 :UInt32;
   occupiedFamilyCount @19 :UInt32;
+  # DECAF-family Good-Turing: unseen packing mass is small.
+  packingSaturated @20 :Bool;
 }
 
 enum CatalogMutationKind {

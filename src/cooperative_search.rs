@@ -2286,6 +2286,7 @@ mod run {
             interface_rank: state.interface_rank,
             interface_threshold: state.interface_threshold,
             occupied_family_count: state.occupied_family_count as usize,
+            packing_saturated: state.packing_saturated,
             on_published_prize,
         })
     }

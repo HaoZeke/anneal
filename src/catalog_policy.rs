@@ -182,6 +182,8 @@ pub struct CatalogPolicyInput {
     pub interface_threshold: f64,
     /// Occupied DECAF families on the book. Not leftover-SOAP basins.
     pub occupied_family_count: usize,
+    /// DECAF-family Good--Turing: unseen packing mass is small.
+    pub packing_saturated: bool,
     /// Published-energy score: this replica sits on a known hurdle GM.
     pub on_published_prize: bool,
 }
