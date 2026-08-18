@@ -24,14 +24,14 @@ use super::{
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog,
-    BasinCensus, BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
-    FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence,
-    OCCUPANCY_NICHES, PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature,
-    Tessellation, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
-    explore_must_leave, invert_mixing, leftover_arrivals_saturated, leftover_lambda,
-    occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
-    retis_exchange_adjacent, same_packing, seat_extras,
+    AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
+    CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
+    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, OCCUPANCY_NICHES,
+    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, Tessellation,
+    ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave,
+    invert_mixing, leftover_arrivals_saturated, leftover_lambda, occupancy_min_families,
+    occupant_rhat, packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing,
+    seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
