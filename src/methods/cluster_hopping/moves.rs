@@ -134,12 +134,7 @@ impl MoveLibrary {
                         cfg.length_scale,
                     )
                 };
-                let mobile: Vec<usize> = groups.iter().flatten().copied().collect();
-                let mobile = if mobile.len() == cfg.n_points {
-                    None
-                } else {
-                    Some(mobile)
-                };
+                let mobile = mobile_atoms(cfg, &groups);
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
@@ -1304,6 +1299,40 @@ impl ClusterMove {
     }
 }
 
+/// Atoms the SOAP pullback is allowed to move.
+///
+/// Rigid groups say what moves *together*; `active_region` and
+/// `frozen` say what moves *at all*, and on a slab those disagree:
+/// every atom belongs to a water while only the adsorbate is free.
+/// Reading the groups alone therefore hands the pullback the frozen
+/// layer to displace, the quench pins it straight back, and the
+/// descriptor target the step was computed for is never reached.
+///
+/// `active_region` first because it names the movers directly, then
+/// the complement of `frozen`, and only then the grouped atoms, which
+/// is the free-cluster case where all three agree anyway.
+fn mobile_atoms(cfg: &Config, groups: &[Vec<usize>]) -> Option<Vec<usize>> {
+    if let Some((seeds, _)) = cfg.active_region.as_ref()
+        && !seeds.is_empty()
+        && seeds.len() != cfg.n_points
+    {
+        return Some(seeds.clone());
+    }
+    if let Some(frozen) = cfg.frozen.as_ref() {
+        let free: Vec<usize> = frozen
+            .iter()
+            .enumerate()
+            .filter(|(_, held)| !**held)
+            .map(|(index, _)| index)
+            .collect();
+        if free.len() != frozen.len() {
+            return Some(free);
+        }
+    }
+    let grouped: Vec<usize> = groups.iter().flatten().copied().collect();
+    (grouped.len() != cfg.n_points).then_some(grouped)
+}
+
 impl MoveKernel<f64> for ClusterMove {
     fn propose<R: Rng + ?Sized>(&self, i: ArrayView1<f64>, t: f64, rng: &mut R) -> Array1<f64> {
         ClusterMove::propose(self, i, t, rng)
@@ -1647,6 +1676,38 @@ mod move_scaling_tests {
                 .all(|kernel| !matches!(kernel, ClusterMove::Soap { .. })),
             "off mode retained a SOAP proposal"
         );
+    }
+
+    /// The shape a real slab has: every atom is in a rigid group, so
+    /// the grouped set covers the structure and says nothing, while
+    /// the active region names the two atoms that actually move. The
+    /// existing mask test uses groups that are already a strict
+    /// subset, so it never sees this.
+    #[test]
+    fn a_fully_grouped_slab_still_masks_to_its_active_region() {
+        let mut rec = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        rec.n_points = 6;
+        rec.active_region = Some((vec![0, 1, 2], 0));
+        rec.frozen = Some(vec![false, false, false, true, true, true]);
+        let soap = rec
+            .move_library
+            .kernels(&rec)
+            .into_iter()
+            .find(|k| matches!(k, ClusterMove::Soap { .. }));
+        match soap {
+            Some(ClusterMove::Soap { mobile, .. }) => {
+                assert_eq!(
+                    mobile.as_deref(),
+                    Some(&[0, 1, 2][..]),
+                    "the pullback was handed the frozen layer to move"
+                );
+            }
+            _ => panic!("slab recommended library has no SOAP arm"),
+        }
     }
 
     #[test]
