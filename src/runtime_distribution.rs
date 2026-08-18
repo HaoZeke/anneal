@@ -175,13 +175,33 @@ mod tests {
     }
 
     #[test]
-    fn the_fit_recovers_an_offset_and_a_rate() {
-        // Offset 100, excess mean 50, so rate 1/50.
+    fn the_fit_corrects_the_offset_downward() {
         let runs: Vec<RunTime> = vec![Some(100), Some(120), Some(180)];
-        let (offset, rate) = shifted_exponential_fit(&runs).expect("three runs fit");
-        assert!((offset - 100.0).abs() < 1e-9);
-        // mean 133.333..., excess 33.333..., rate 0.03
-        assert!((rate - 0.03).abs() < 1e-6, "rate {rate}");
+        let (offset, _) = shifted_exponential_fit(&runs).expect("three runs fit");
+        // The smallest observation is 100 and it is biased high as an
+        // offset, because no draw can fall below the true one. The
+        // correction subtracts (mean - min)/(n - 1) = 33.33/2.
+        assert!(offset < 100.0, "offset {offset} was not corrected");
+        assert!(
+            (offset - (100.0 - 100.0 / 6.0)).abs() < 1e-6,
+            "offset {offset}"
+        );
+    }
+
+    #[test]
+    fn an_offset_read_off_few_arrivals_is_not_resolved() {
+        // The LJ38 shape: an offset comparable to the excess, read off
+        // tens of arrivals. This is the case that moved from 4629 to
+        // 2815 between 96 and 384 runs, taking the ceiling from 2.84 to
+        // 4.89, so the guard has to refuse it.
+        let few: Vec<RunTime> = (0..10).map(|i| Some(3000 + i * 900)).collect();
+        assert!(
+            !offset_is_resolved(&few),
+            "ten arrivals should not resolve an offset of this size"
+        );
+        // Same shape, far more arrivals.
+        let many: Vec<RunTime> = (0..4000).map(|i| Some(3000 + (i % 90) * 100)).collect();
+        assert!(offset_is_resolved(&many));
     }
 
     #[test]
