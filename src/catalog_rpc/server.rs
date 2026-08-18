@@ -24,13 +24,13 @@ use super::{
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
-    CHAMPION_RANK, CandidateRecord, CandidateValidator, FreshEvaluation, GoodTuringSample,
-    INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
-    REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
-    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_arrivals_saturated,
-    leftover_lambda, occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
-    retis_exchange_adjacent, same_packing, seat_extras,
+    ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog,
+    BasinCensus, BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, FreshEvaluation,
+    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
+    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_arrivals_saturated, leftover_lambda, occupancy_min_families, occupant_rhat,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -817,7 +817,14 @@ fn apply_request(
             {
                 // u64::MAX is the incumbent draw: exploit a deeper
                 // catalog representative rather than a random slot.
-                let entry = if *draw == crate::catalog_rpc::INCUMBENT_SAMPLE_DRAW {
+                let sparse = (*draw == crate::catalog_rpc::SPARSE_SAMPLE_DRAW)
+                    .then(|| sparsest_family_entry(scientific))
+                    .flatten();
+                let entry = if let Some(entry) = sparse {
+                    entry
+                } else if *draw == crate::catalog_rpc::INCUMBENT_SAMPLE_DRAW
+                    || *draw == crate::catalog_rpc::SPARSE_SAMPLE_DRAW
+                {
                     scientific
                         .catalog
                         .incumbent()
@@ -2303,6 +2310,46 @@ fn observe_packing(
             history.pop_front();
         }
     }
+}
+
+/// Catalog representative of the packing family the fewest live
+/// replicas occupy.
+///
+/// Occupancy is counted over the last candidate each replica reported,
+/// through the query path so that counting cannot grow the codebook.
+/// A family with no catalog representative cannot be drawn from, and a
+/// family no replica stands on counts zero, which is what makes it the
+/// one to hand out.
+fn sparsest_family_entry(scientific: &ScientificState) -> Option<&ActiveBasinEntry> {
+    let mut occupancy: BTreeMap<usize, usize> = BTreeMap::new();
+    for candidate in scientific.last_candidate_by_replica.values() {
+        if let Some(histogram) = scientific.packing.histogram(&candidate.coordinates)
+            && let Some(family) = scientific.packing.family_of(&histogram)
+        {
+            *occupancy.entry(family).or_insert(0) += 1;
+        }
+    }
+    scientific
+        .catalog
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let histogram = scientific.packing.histogram(entry.coordinates())?;
+            let family = scientific.packing.family_of(&histogram)?;
+            let crowd = occupancy.get(&family).copied().unwrap_or(0);
+            Some((crowd, entry))
+        })
+        // Ties go to the deeper entry: among equally empty funnels the
+        // better one is the better place to send a replica.
+        .min_by(|left, right| {
+            left.0.cmp(&right.0).then(
+                left.1
+                    .energy()
+                    .partial_cmp(&right.1.energy())
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        })
+        .map(|(_, entry)| entry)
 }
 
 fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {

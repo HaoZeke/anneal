@@ -21,6 +21,16 @@ pub const PROTOCOL_VERSION: u16 = 11;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
+/// `Sample` draw that returns a representative of the packing family
+/// the fewest live replicas are standing on.
+///
+/// A replica leaving a crowded packing cannot reach another funnel by
+/// perturbing within its own: a move drawn inside a funnel and relaxed
+/// downhill lands back in it, which is what a funnel is. Crossing has
+/// to be a draw from somewhere else. This is that draw, with the
+/// catalog standing in for a fitted model of each funnel.
+pub const SPARSE_SAMPLE_DRAW: u64 = u64::MAX - 1;
+
 /// Complete identity carried by every catalog request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogIdentity {
