@@ -296,6 +296,9 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
         ("terra_lj38_occ_brains.sbatch", "38 400000 13"),
         ("terra_lj75_occ_brains.sbatch", "75 4000000 1"),
         ("terra_lj98_occ_brains.sbatch", "98 4000000 0"),
+        ("elja_lj38_occ_brains.sbatch", "38 400000 0"),
+        ("elja_lj75_occ_brains.sbatch", "75 4000000 0"),
+        ("elja_lj98_occ_brains.sbatch", "98 4000000 0"),
     ];
     for (name, launch) in cases {
         let source = fs::read_to_string(scripts.join(name))
