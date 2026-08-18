@@ -154,3 +154,33 @@ fn a_sub_threshold_displacement_reuses_the_decaf_histogram() {
     let reused = book.histogram(nudged.as_slice().unwrap()).unwrap();
     assert_eq!(first, reused);
 }
+
+#[test]
+fn a_query_histogram_does_not_change_what_the_book_learns() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let marks = marks.as_slice().unwrap();
+
+    // The coordinator queries every live structure on each policy
+    // request, and a query folds environments the codebook has not seen
+    // into one shared bin. Crediting a visit from that histogram counts
+    // the structure against a family it was never assigned to and leaves
+    // its environments out of the codebook for good.
+    let mut queried = PackingBook::default();
+    queried.observe(ico).expect("LJ75 ico has a class histogram");
+    let _ = queried.histogram(marks).expect("a query answers");
+    let queried_family = queried.observe(marks).expect("Marks opens a family");
+
+    let mut direct = PackingBook::default();
+    direct.observe(ico).expect("LJ75 ico has a class histogram");
+    let direct_family = direct.observe(marks).expect("Marks opens a family");
+
+    assert_eq!(queried_family, direct_family);
+    assert_eq!(
+        queried.histogram(marks).unwrap(),
+        direct.histogram(marks).unwrap()
+    );
+    assert_eq!(queried.visits(direct_family), direct.visits(direct_family));
+    assert_eq!(queried.occupied_family_count(), 2);
+}
