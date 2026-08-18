@@ -599,7 +599,10 @@ impl CatalogClient {
         event_sequence: u64,
         crossing: crate::catalog_rpc::BridgeCrossingRecord,
     ) -> Result<(), CatalogClientError> {
-        self.call(event_sequence, CatalogOperation::BridgeCrossing { crossing })?;
+        self.call(
+            event_sequence,
+            CatalogOperation::BridgeCrossing { crossing },
+        )?;
         Ok(())
     }
 

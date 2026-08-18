@@ -3,9 +3,7 @@
 //! Cluster control is the Elja paper-budget table, not this file.
 //! This drives molecule and slab through `run_with_gradient`.
 
-use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, run_with_gradient,
-};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, run_with_gradient};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use ndarray::{Array1, ArrayView1};

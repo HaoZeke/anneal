@@ -55,8 +55,8 @@ fn read_journal(path: &str) -> Vec<Structure> {
             Ok(8) => {}
             Ok(_) | Err(_) => panic!("{path}: truncated frame length"),
         }
-        let length = usize::try_from(u64::from_le_bytes(length_bytes))
-            .expect("frame length fits usize");
+        let length =
+            usize::try_from(u64::from_le_bytes(length_bytes)).expect("frame length fits usize");
         let mut bytes = vec![0u8; length];
         file.read_exact(&mut bytes)
             .expect("journal frame must be complete");
@@ -75,11 +75,7 @@ fn read_journal(path: &str) -> Vec<Structure> {
             best.insert(replica, (candidate.energy, candidate.coordinates.clone()));
         }
     }
-    let stem = path
-        .rsplit('/')
-        .nth(2)
-        .unwrap_or(path)
-        .to_owned();
+    let stem = path.rsplit('/').nth(2).unwrap_or(path).to_owned();
     best.into_iter()
         .map(|(replica, (energy, coordinates))| Structure {
             label: format!("{stem}/r{replica}"),
@@ -119,7 +115,9 @@ fn main() {
         .iter()
         .map(|structure| {
             let local = local_nu3_z(structure.coordinates.view(), spec, None);
-            (0..local.nrows()).map(|i| local.row(i).to_owned()).collect()
+            (0..local.nrows())
+                .map(|i| local.row(i).to_owned())
+                .collect()
         })
         .collect();
 
@@ -181,8 +179,10 @@ fn main() {
         let energy = structure
             .energy
             .map_or(String::new(), |e| format!(" e={e:.6}"));
-        let mut classes: Vec<(usize, usize)> =
-            histogram.iter().map(|(class, count)| (*class, *count)).collect();
+        let mut classes: Vec<(usize, usize)> = histogram
+            .iter()
+            .map(|(class, count)| (*class, *count))
+            .collect();
         classes.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
         let rendered: Vec<String> = classes
             .iter()

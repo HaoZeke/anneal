@@ -35,8 +35,12 @@ fn write_resolved_config(cfg: &Config) {
     let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") else {
         return;
     };
-    std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
-        .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+    std::fs::write(
+        &path,
+        cfg.resolved_json()
+            .expect("serialize resolved configuration"),
+    )
+    .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
 }
 
 fn main() {

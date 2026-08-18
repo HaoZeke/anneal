@@ -106,9 +106,7 @@ impl BridgeString {
         let b = &self.images[self.images.len() - 1];
         let ab = b - a;
         let ab2 = ab.iter().map(|v| v * v).sum::<f64>();
-        let t = ((descriptor - a).iter().zip(ab.iter()).map(|(x, y)| x * y))
-            .sum::<f64>()
-            / ab2;
+        let t = ((descriptor - a).iter().zip(ab.iter()).map(|(x, y)| x * y)).sum::<f64>() / ab2;
         let t = t.clamp(0.0, 1.0);
         let closest = a + &(ab * t);
         distance(&closest, descriptor)
@@ -163,9 +161,7 @@ impl BridgeString {
                 };
                 &curve[segment - 1] * (1.0 - t) + &curve[segment] * t
             };
-            let mut arcs: Vec<f64> = (0..k)
-                .map(|i| total * i as f64 / (k - 1) as f64)
-                .collect();
+            let mut arcs: Vec<f64> = (0..k).map(|i| total * i as f64 / (k - 1) as f64).collect();
             for _ in 0..32 {
                 let points: Vec<Array1<f64>> = arcs.iter().map(|s| point_at(*s)).collect();
                 let mut chord = vec![0.0_f64; k];
@@ -456,8 +452,7 @@ mod tests {
     fn a_converged_string_reports_vanishing_movement() {
         let (a, b) = endpoints();
         let mut string = BridgeString::chord(&a, &b, 6).unwrap();
-        let means: Vec<Option<Array1<f64>>> =
-            string.images().iter().cloned().map(Some).collect();
+        let means: Vec<Option<Array1<f64>>> = string.images().iter().cloned().map(Some).collect();
         let moved = string.update(&means, 0.5);
         assert!(moved < 1e-12, "chord at its own means still moved {moved}");
     }
@@ -529,6 +524,9 @@ mod tests {
         // Oldest evicted: survivors are 2.0 and 3.0.
         assert_eq!(lists.draw(1, 0).unwrap()[0], 2.0);
         assert_eq!(lists.draw(1, 5).unwrap()[0], 3.0);
-        assert_eq!(lists.push(9, array![0.0]).unwrap_err(), BridgeError::RegionOutOfRange);
+        assert_eq!(
+            lists.push(9, array![0.0]).unwrap_err(),
+            BridgeError::RegionOutOfRange
+        );
     }
 }

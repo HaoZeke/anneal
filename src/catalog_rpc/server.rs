@@ -25,14 +25,12 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
-    CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
-    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_arrivals_saturated, leftover_lambda, occupant_rhat, occupancy_min_families,
-    packing_role, prune, GoodTuringSample,
-    promote_one_sided, retis_exchange_adjacent, same_packing, seat_extras, CHAMPION_RANK,
-    INTERFACE_HORIZON,
-    InterfaceSeat, PackingRole,
+    CHAMPION_RANK, CandidateRecord, CandidateValidator, FreshEvaluation, GoodTuringSample,
+    INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
+    REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
+    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_arrivals_saturated,
+    leftover_lambda, occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
+    retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -2522,11 +2520,7 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
         }
     }
     let mut evidence = invert_mixing(&attractors, &explore);
-    if explore_must_leave(
-        &explore,
-        n_on_incumbent_packing(scientific),
-        assigned.len(),
-    ) {
+    if explore_must_leave(&explore, n_on_incumbent_packing(scientific), assigned.len()) {
         evidence.explore_collapsed = true;
     }
     evidence
@@ -2679,7 +2673,9 @@ fn assign_leftover_interfaces(
         );
     }
     for seat in seats {
-        scientific.interface_seat_by_replica.insert(seat.replica, seat);
+        scientific
+            .interface_seat_by_replica
+            .insert(seat.replica, seat);
     }
     let seat = scientific
         .interface_seat_by_replica
@@ -2728,9 +2724,8 @@ fn packing_relation(
         compared = true;
         if same_packing(&local, &entry_fp) {
             same_as_any = true;
-            best_of_family = Some(best_of_family.map_or(entry.energy(), |best| {
-                best.min(entry.energy())
-            }));
+            best_of_family =
+                Some(best_of_family.map_or(entry.energy(), |best| best.min(entry.energy())));
             if entry.energy() < energy - 1e-10 {
                 same_as_lower_isomer = true;
             }
@@ -2742,9 +2737,8 @@ fn packing_relation(
         };
         if same_packing(&local, &other) {
             same_as_any = true;
-            best_of_family = Some(best_of_family.map_or(candidate.energy, |best| {
-                best.min(candidate.energy)
-            }));
+            best_of_family =
+                Some(best_of_family.map_or(candidate.energy, |best| best.min(candidate.energy)));
             if candidate.energy < energy - 1e-10 {
                 same_as_lower_isomer = true;
             }

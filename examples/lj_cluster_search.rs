@@ -15,8 +15,7 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    LeavePath, occupancy_complete, occupancy_min_families, occupancy_retire,
-    published_energy_score,
+    LeavePath, occupancy_complete, occupancy_min_families, occupancy_retire, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -2264,9 +2263,9 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
-        CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-        PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-        SliceTrace, SliceValidation, TransitionRecordOutcome,
+        CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
+        ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+        TransitionRecordOutcome,
     };
     use anneal_core::methods::feynman_kac::{
         population_family_position, population_rejuvenation_draw,
@@ -2448,10 +2447,7 @@ fn run_capnp_catalog(
         run_cfg.max_hops = Some(hops);
         println!("  hop cap {hops}");
         println!("  leftover-SOAP TIS seats");
-        println!(
-            "  occupancy min families {}",
-            occupancy_min_families()
-        );
+        println!("  occupancy min families {}", occupancy_min_families());
         println!(
             "  gt stop leftover-well+packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
             anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,
@@ -3558,12 +3554,8 @@ fn run_capnp_catalog(
                 }
                 let live = snapshot.current_state();
                 let live_slice = live.as_slice().unwrap_or(&[]);
-                let shoot_coords = leave_path
-                    .shoot_coordinates()
-                    .unwrap_or(live_slice);
-                let shoot_leftover = leave_path
-                    .shoot_leftover()
-                    .unwrap_or(descriptor.as_slice());
+                let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
+                let shoot_leftover = leave_path.shoot_leftover().unwrap_or(descriptor.as_slice());
                 let hole = cooperative
                     .try_descriptor_hole(
                         replica,

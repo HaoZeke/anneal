@@ -39,10 +39,7 @@ fn hexamer_signature_records_gfn2_kind_and_leftover_dim() {
         l_max: 6,
         rcut_nn: spec.rcut_nn,
     };
-    assert_eq!(
-        leftover_dim,
-        18 * leftover_spec.feat_dim(Some(&species))
-    );
+    assert_eq!(leftover_dim, 18 * leftover_spec.feat_dim(Some(&species)));
     assert_eq!(signature.length_scale, length_scale(&species).unwrap());
     let molecular = Config::for_molecular(
         species.clone(),
@@ -64,7 +61,10 @@ fn leftover_space_describe_has_the_leftover_dimension() {
             Some(&species),
         )
         .unwrap();
-    assert_eq!(described.values().len(), leftover_descriptor_dim(&species).unwrap());
+    assert_eq!(
+        described.values().len(),
+        leftover_descriptor_dim(&species).unwrap()
+    );
 }
 
 #[test]

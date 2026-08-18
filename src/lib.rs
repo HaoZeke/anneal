@@ -76,6 +76,9 @@ pub mod contextual;
 pub mod cool;
 pub mod cooperative_search;
 pub mod curvature;
+/// TCP transport for consensus traffic between server brains.
+#[cfg(feature = "bank-rpc")]
+pub mod decree_bus;
 pub mod delayed;
 /// Versioned multiscale invariant coordinates for basin catalogs.
 pub mod descriptor_space;
@@ -114,16 +117,11 @@ pub mod laws;
 pub mod localkey;
 /// Short MD segments through external engines (LAMMPS, GROMACS).
 pub mod md_engine;
-/// Leader consensus over exploration decrees between server brains.
-pub mod raft;
 /// Annealing-method extensions built on the typed algebra:
 /// MCMC-style multi-chain SA with Gelman-Rubin termination, Bayesian
 /// pilot adaptation, parallel tempering, etc.
 pub mod methods;
 pub mod model_hessian;
-/// TCP transport for consensus traffic between server brains.
-#[cfg(feature = "bank-rpc")]
-pub mod decree_bus;
 /// The move-kernel trait: temperature-indexed proposal sampling.
 pub mod movekernel;
 /// The neighborhood trait: `state -> set-of-states`.
@@ -137,10 +135,12 @@ pub mod noise_accept;
 pub mod path;
 pub mod potentials;
 pub mod quench;
-/// GMRF residual intensity on the class graph.
-pub mod residual_field;
+/// Leader consensus over exploration decrees between server brains.
+pub mod raft;
 /// Joint population assignment across fixed-probe attraction regions.
 pub mod region_assignment;
+/// GMRF residual intensity on the class graph.
+pub mod residual_field;
 pub mod runner;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
 pub mod sampler;

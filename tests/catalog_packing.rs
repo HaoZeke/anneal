@@ -191,7 +191,9 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
     // the structure against a family it was never assigned to and leaves
     // its environments out of the codebook for good.
     let mut queried = PackingBook::default();
-    queried.observe(ico).expect("LJ75 ico has a class histogram");
+    queried
+        .observe(ico)
+        .expect("LJ75 ico has a class histogram");
     let _ = queried.histogram(marks).expect("a query answers");
     let queried_family = queried.observe(marks).expect("Marks opens a family");
 

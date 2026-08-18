@@ -1031,10 +1031,7 @@ pub struct PackingOccupant {
 /// cap: they stay self-parented so the client reseeds instead of
 /// cloning the well. A destination never receives a parent from a
 /// different packing.
-pub fn assign_parents_by_packing(
-    occupants: &[PackingOccupant],
-    max_offspring: usize,
-) -> Vec<u32> {
+pub fn assign_parents_by_packing(occupants: &[PackingOccupant], max_offspring: usize) -> Vec<u32> {
     let _ = max_offspring;
     if occupants.is_empty() {
         return Vec::new();

@@ -8,8 +8,8 @@ use capnp::serialize;
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
     QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, bridge_assignment,
-    candidate_record, catalog_mutation_reply, catalog_reply, catalog_request,
-    policy_state_reply, population_epoch_reply, transition_record,
+    candidate_record, catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
+    population_epoch_reply, transition_record,
 };
 
 pub mod client;
@@ -740,7 +740,8 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             wire.set_from_region(crossing.from_region);
             wire.set_to_region(crossing.to_region);
             fill_f64(
-                wire.reborrow().init_descriptor(crossing.descriptor.len() as u32),
+                wire.reborrow()
+                    .init_descriptor(crossing.descriptor.len() as u32),
                 &crossing.descriptor,
             );
             fill_f64(
@@ -987,7 +988,9 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_from_basin(assignment.from_basin);
                     output.set_to_basin(assignment.to_basin);
                     fill_f64(
-                        output.reborrow().init_images(assignment.images.len() as u32),
+                        output
+                            .reborrow()
+                            .init_images(assignment.images.len() as u32),
                         &assignment.images,
                     );
                     output.set_image_count(assignment.image_count);

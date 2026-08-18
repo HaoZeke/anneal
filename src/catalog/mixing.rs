@@ -163,8 +163,7 @@ pub fn explore_must_leave(
     n_on_incumbent_packing: usize,
     n_assigned: usize,
 ) -> bool {
-    explore_collapsed(energy_explore)
-        || (n_assigned >= 2 && n_on_incumbent_packing >= 2)
+    explore_collapsed(energy_explore) || (n_assigned >= 2 && n_on_incumbent_packing >= 2)
 }
 
 /// Inverted Gelman--Rubin evidence consumed by the catalog policy.

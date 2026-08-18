@@ -559,10 +559,9 @@ fn leftover_stack(local: &Array2<f64>, species: Option<&[u32]>) -> Vec<f64> {
             let mut mean = vec![vec![0.0; cols]; channels.len()];
             let mut count = vec![0.0; channels.len()];
             for row in 0..rows {
-                let Some(channel) = labels
-                    .get(row)
-                    .and_then(|atomic_number| channels.iter().position(|value| value == atomic_number))
-                else {
+                let Some(channel) = labels.get(row).and_then(|atomic_number| {
+                    channels.iter().position(|value| value == atomic_number)
+                }) else {
                     continue;
                 };
                 count[channel] += 1.0;
@@ -578,10 +577,9 @@ fn leftover_stack(local: &Array2<f64>, species: Option<&[u32]>) -> Vec<f64> {
                 }
             }
             for row in 0..rows {
-                let Some(channel) = labels
-                    .get(row)
-                    .and_then(|atomic_number| channels.iter().position(|value| value == atomic_number))
-                else {
+                let Some(channel) = labels.get(row).and_then(|atomic_number| {
+                    channels.iter().position(|value| value == atomic_number)
+                }) else {
                     continue;
                 };
                 for column in 0..cols {
