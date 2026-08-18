@@ -282,7 +282,13 @@ fn soap_on_vs_off_water4_eight_seeds() {
 
 #[test]
 fn soap_on_vs_off_slab_water4_eight_seeds() {
-    const SEEDS: u64 = 8;
+    // Thirty-two rather than eight. A success rate of two or three in
+    // eight is one seed of difference, which is inside the spread of a
+    // rate that size, so at eight seeds this comparison cannot tell the
+    // arms apart whatever it prints. The slab is the cheapest of the
+    // three by an order of magnitude, tens of hops a seed against
+    // hundreds, so the resolution is affordable here and nowhere else.
+    const SEEDS: u64 = 32;
     const BUDGET: usize = 2_500;
     let mut on_better = 0usize;
     let mut off_better = 0usize;
