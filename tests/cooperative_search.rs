@@ -1098,6 +1098,10 @@ fn distributed_trace_uses_the_coordinator_aggregate_counter() {
     second
         .record_work(1, ChargeKind::AcceptedQuench, 40)
         .unwrap();
+    // record_work posts and returns, so the aggregate the coordinator
+    // reports next is only guaranteed to include replica 1 once its
+    // mailbox has drained.
+    second.flush(1).unwrap();
     first.synchronize(0).unwrap();
 
     assert_eq!(first.ledger().ensemble_total(), 60);

@@ -51,6 +51,15 @@ impl CatalogMailbox {
         rx.recv().expect("catalog I/O thread answers exec")
     }
 
+    /// Wait for every job posted before this call to finish.
+    ///
+    /// The queue is FIFO on one thread, so an empty job that answers is
+    /// a barrier. A caller that posted work and then wants to read what
+    /// the coordinator made of it has no other way to know it landed.
+    pub fn drain(&self) {
+        self.exec(|_| ());
+    }
+
     /// Queue work. The hop thread does not wait.
     pub fn post<F>(&self, work: F)
     where
