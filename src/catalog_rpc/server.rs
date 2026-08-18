@@ -943,7 +943,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
-            let seat = assign_leftover_interfaces(
+            let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
                 descriptor,
@@ -965,7 +965,7 @@ fn apply_request(
                 explore_collapsed: mixing.explore_collapsed,
                 certified_attractor: mixing.certified_attractor,
                 pruned: mixing.pruned,
-                leftover_lambda: seat.lambda,
+                leftover_lambda: frame_lambda,
                 interface_rank: seat.rank,
                 interface_threshold: seat.threshold,
                 interface_count: scientific
@@ -2486,13 +2486,17 @@ fn replica_family_index(
         })
 }
 
+/// Seat this replica and report the \(\lambda\) of the descriptor it
+/// just posted. The seat carries the path maximum, which is the TIS
+/// order parameter for interface crossing; the second value is this
+/// frame alone, so a client can rank the frames of its own path.
 fn assign_leftover_interfaces(
     scientific: &mut ScientificState,
     replica: u32,
     descriptor: &[f64],
     posted_lambda: f64,
     relation: CatalogRelation,
-) -> InterfaceSeat {
+) -> (InterfaceSeat, f64) {
     let centroid = scientific
         .catalog
         .incumbent()
@@ -2521,7 +2525,7 @@ fn assign_leftover_interfaces(
             lambda,
         };
         scientific.interface_seat_by_replica.insert(replica, seat);
-        return seat;
+        return (seat, computed);
     }
     let extras: Vec<(u32, f64)> = scientific
         .leftover_lambda_by_replica
@@ -2557,7 +2561,7 @@ fn assign_leftover_interfaces(
     for seat in seats {
         scientific.interface_seat_by_replica.insert(seat.replica, seat);
     }
-    scientific
+    let seat = scientific
         .interface_seat_by_replica
         .get(&replica)
         .copied()
@@ -2566,7 +2570,8 @@ fn assign_leftover_interfaces(
             rank: 0,
             threshold: horizon,
             lambda,
-        })
+        });
+    (seat, computed)
 }
 
 fn packing_or_region_relation(
