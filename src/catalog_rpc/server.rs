@@ -24,14 +24,13 @@ use super::{
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
-    AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
-    CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
-    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, OCCUPANCY_NICHES,
-    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, Tessellation,
-    ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave,
-    invert_mixing, leftover_arrivals_saturated, leftover_lambda, occupancy_min_families,
-    occupant_rhat, packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing,
-    seat_extras,
+    AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
+    BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
+    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
+    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_arrivals_saturated, leftover_lambda, occupancy_min_families, occupant_rhat,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -270,14 +269,13 @@ struct ScientificState {
     /// Family each replica was last handed a representative of, so the
     /// reward can be attributed to the cell the start came from.
     drawn_from_by_replica: BTreeMap<u32, usize>,
-    /// Fixed tessellation of descriptor space, once enough descriptors
-    /// have been seen to relax one. Families are discovered by
-    /// clustering and their number is whatever the data gave, which
-    /// leaves coverage a ratio with a moving denominator; cells here
-    /// are chosen once and do not move, so coverage means something.
-    tessellation: Option<Tessellation>,
-    /// Descriptors seen, kept until there are enough to tessellate.
-    tessellation_samples: Vec<Vec<f64>>,
+    /// Archive of descriptor cells at an annealed radius: conformational
+    /// space annealing's Dcut rule doing the niching, and
+    /// return-then-explore choosing which cell a Leave goes back to.
+    archive: Archive,
+    /// Fraction of the ensemble budget spent, which is what the archive
+    /// radius anneals against.
+    archive_progress: f64,
     last_gt_report: Option<(u64, u64, u64, u64, u32, bool)>,
     evaluate: Arc<FreshEvaluator>,
 }
@@ -367,8 +365,8 @@ impl CoordinatorState {
                     arrival_basin_by_replica: BTreeMap::new(),
                     curiosity: Curiosity::default(),
                     drawn_from_by_replica: BTreeMap::new(),
-                    tessellation: None,
-                    tessellation_samples: Vec::new(),
+                    archive: Archive::new(scientific.census_radius.max(1e-6), ARCHIVE_RADIUS_FLOOR),
+                    archive_progress: 0.0,
                     last_gt_report: None,
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
@@ -1021,6 +1019,12 @@ fn apply_request(
                 *leftover_lambda,
                 relation,
             );
+            // The archive radius anneals against the ensemble's spend,
+            // so it needs to know it. This is the only place the
+            // coordinator sees both halves.
+            if ensemble_budget > 0 {
+                scientific.archive_progress = ensemble_total as f64 / ensemble_budget as f64;
+            }
             payload = AcceptedPayload::PolicyState(PolicyState {
                 total_visits: scientific.census.total_visits(),
                 singleton_basins: scientific.census.singleton_count(),
@@ -1572,8 +1576,10 @@ fn apply_request(
                     scientific.curiosity.ensure(family + 1);
                     if matches!(outcome, AdmissionOutcome::Rejected { .. }) {
                         scientific.curiosity.penalise(family);
+                        scientific.archive.penalise(family);
                     } else {
                         scientific.curiosity.reward(family);
+                        scientific.archive.reward(family);
                     }
                 }
                 let incumbent = scientific
@@ -2396,14 +2402,19 @@ fn archive_cell(
     descriptor: &[f64],
     coordinates: &[f64],
 ) -> Option<usize> {
-    if let Some(tessellation) = scientific.tessellation.as_ref()
-        && let Some(cell) = tessellation.assign(descriptor)
-    {
+    if let Some(cell) = scientific.archive.assign(descriptor) {
         return Some(cell);
     }
     let histogram = scientific.packing.histogram(coordinates)?;
     scientific.packing.family_of(&histogram)
 }
+
+/// Floor of the archive radius as a fraction of where it starts.
+///
+/// The same floor conformational space annealing uses for Dcut, so the
+/// archive coarsens and refines on a schedule the bank already trusts
+/// rather than on a second one invented here.
+const ARCHIVE_RADIUS_FLOOR: f64 = 0.4;
 
 /// Feed a descriptor to the tessellation, and relax one once there is
 /// enough to relax.
@@ -2412,27 +2423,16 @@ fn archive_cell(
 /// would make coverage incomparable between one moment and the next,
 /// which is the property the tessellation exists to provide.
 fn observe_descriptor(scientific: &mut ScientificState, descriptor: &[f64]) {
-    if scientific.tessellation.is_some() || descriptor.is_empty() {
+    if descriptor.is_empty() {
         return;
     }
-    scientific.tessellation_samples.push(descriptor.to_vec());
-    // Four samples a cell before fixing them, so the centroids sit
-    // where the search has actually been.
-    if scientific.tessellation_samples.len() < 4 * OCCUPANCY_NICHES {
-        return;
-    }
-    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
-        scientific.tessellation_samples.len() as u64,
-    );
-    scientific.tessellation = Tessellation::build(
-        OCCUPANCY_NICHES,
-        &scientific.tessellation_samples,
-        16,
-        &mut rng,
-    );
-    if scientific.tessellation.is_some() {
-        scientific.tessellation_samples = Vec::new();
-    }
+    scientific.archive.observe(descriptor);
+    // The radius follows the ensemble's spend, so the archive is coarse
+    // while the budget is young and fine once it is not: asked to be
+    // different first and better second, which is the annealing half of
+    // conformational space annealing applied to diversity.
+    let progress = scientific.archive_progress.clamp(0.0, 1.0);
+    scientific.archive.anneal(progress);
 }
 
 /// Fraction of archive cells any live replica occupies.
@@ -2440,13 +2440,15 @@ fn observe_descriptor(scientific: &mut ScientificState, descriptor: &[f64]) {
 /// A fixed denominator, which is what makes this a coverage rather
 /// than a count. Falls back to nothing when no tessellation exists yet.
 fn archive_coverage(scientific: &ScientificState) -> Option<f64> {
-    let tessellation = scientific.tessellation.as_ref()?;
+    if scientific.archive.cells() == 0 {
+        return None;
+    }
     let descriptors: Vec<&[f64]> = scientific
         .last_candidate_by_replica
         .values()
         .map(|candidate| candidate.descriptor.as_slice())
         .collect();
-    Some(tessellation.coverage(descriptors))
+    Some(scientific.archive.coverage(descriptors))
 }
 
 /// Family and catalog slot to hand a replica that is leaving a crowded
@@ -2518,7 +2520,14 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
     // discovered since the last credit still competes.
     let mut curiosity = scientific.curiosity.clone();
     curiosity.ensure(allowed.iter().copied().max().unwrap_or(0) + 1);
-    let chosen = curiosity.select(&allowed, rng)?;
+    // Return then explore: the cell is chosen on what it has produced,
+    // discounted by how heavily it has already been visited, so a thin
+    // cell is worth going back to before it has any record at all.
+    let chosen = scientific.archive.select(&allowed, rng).or_else(|| {
+        let mut curiosity = scientific.curiosity.clone();
+        curiosity.ensure(allowed.iter().copied().max().unwrap_or(0) + 1);
+        curiosity.select(&allowed, rng)
+    })?;
     elites.get(&chosen).map(|(_, slot, _)| (chosen, *slot))
 }
 
