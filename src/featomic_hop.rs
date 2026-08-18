@@ -823,7 +823,9 @@ pub fn in_stored_well(
 
 /// Leave an occupied packing: hole, quench, keep the quench only when
 /// DECAF says it is a different family. Leftover-SOAP off-well is not
-/// a family change. Talking extras start a new packing walk.
+/// a family change. Same-family leftover holes are not a Leave: `None`
+/// fails the shot so occupancy_leave_adopt can Refuse and another
+/// trial can run.
 pub fn leave_occupied_packing<R, Q>(
     x: ArrayView1<f64>,
     wells: &[Array1<f64>],
@@ -832,13 +834,13 @@ pub fn leave_occupied_packing<R, Q>(
     mobile: Option<&[usize]>,
     mut quench: Q,
     rng: &mut R,
-) -> Array1<f64>
+) -> Option<Array1<f64>>
 where
     R: Rng + ?Sized,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
     if wells.is_empty() {
-        return x.to_owned();
+        return None;
     }
     let mut cur = x.to_owned();
     for attempt in 0..6 {
@@ -848,13 +850,11 @@ where
         let origin = x.as_slice().unwrap_or(&[]);
         let trial = q.as_slice().unwrap_or(&[]);
         if crate::catalog::different_decaf_family(origin, trial) {
-            return q;
+            return Some(q);
         }
         cur = q;
     }
-    // Same-family leftover hole is not a Leave. Hand back the origin
-    // so occupancy_leave_adopt Refuse does not install ico-as-hole.
-    x.to_owned()
+    None
 }
 
 /// Kick mean SOAP in the null space of the occupied packing *and*
@@ -1330,7 +1330,8 @@ mod tests {
             None,
             |_y| marks.clone(),
             &mut rng,
-        );
+        )
+        .expect("a Marks quench is a new DECAF family");
         assert_eq!(left, marks);
         assert!(crate::catalog::different_decaf_family(
             ico75.as_slice().unwrap(),
@@ -1339,7 +1340,7 @@ mod tests {
     }
 
     #[test]
-    fn leave_occupied_packing_returns_origin_when_every_quench_stays_ico() {
+    fn leave_occupied_packing_is_none_when_every_quench_stays_ico() {
         let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
         let mut rng = StdRng::seed_from_u64(11);
@@ -1353,11 +1354,10 @@ mod tests {
             |_y| ico75.clone(),
             &mut rng,
         );
-        assert_eq!(left, ico75);
-        assert!(!crate::catalog::different_decaf_family(
-            ico75.as_slice().unwrap(),
-            left.as_slice().unwrap()
-        ));
+        assert!(
+            left.is_none(),
+            "same-family leftover SOAP is not an accepted Leave"
+        );
     }
 
     #[test]
@@ -1383,7 +1383,8 @@ mod tests {
                 }
             },
             &mut rng,
-        );
+        )
+        .expect("a later Marks quench is a new DECAF family");
         assert!(
             n >= 3,
             "leave must quench more than once when the first snaps stay ico, n={n}"
