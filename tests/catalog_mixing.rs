@@ -199,6 +199,7 @@ fn mixed_labels_on_one_of_two_known_packings_force_leave() {
         constant(-166.64, 8),
     ];
     let families = [constant(0.0, 8), constant(0.0, 8), constant(0.0, 8)];
+    assert!(mixed(rhat_series(&families)));
     assert!(!explore_collapsed(&energies));
     assert!(explore_must_leave(&energies, 3, 3));
 }

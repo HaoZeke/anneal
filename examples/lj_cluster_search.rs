@@ -3210,6 +3210,10 @@ fn run_capnp_catalog(
                 }
             }
         }
+        cooperative.set_on_published_prize(published_energy_score(
+            snapshot.best_energy(),
+            reference(cfg.n_points),
+        ));
         let policy = match cooperative
             .try_policy_input_with_lambda(
                 replica,
@@ -3231,9 +3235,6 @@ fn run_capnp_catalog(
             descriptor.clone(),
             policy.leftover_lambda,
         );
-        let mut policy = policy;
-        policy.on_published_prize =
-            published_energy_score(snapshot.best_energy(), reference(cfg.n_points));
         let n_occupied_families = policy.occupied_family_count;
         if let Some(certificate) = occupancy_complete(
             policy.mixing.certified_attractor,
