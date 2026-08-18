@@ -57,16 +57,26 @@ impl TcpDecreeBus {
     /// Dials are asynchronous: a peer that has not started yet is
     /// dialed again on the next poll, so start order between brains
     /// does not matter.
-    pub fn new(id: NodeId, listen_url: &str, peer_urls: &[String]) -> Result<Self, BusError> {
+    ///
+    /// Peer identity is taken but not routed on here. This transport
+    /// broadcasts and filters on receipt, which is what the deployed
+    /// occupancy build runs; the nng transport routes by it. Changing
+    /// the send path of a bus a campaign is talking over is not worth
+    /// the saved writes.
+    pub fn new(
+        id: NodeId,
+        listen_url: &str,
+        peers: &[(NodeId, String)],
+    ) -> Result<Self, BusError> {
         let listen = parse_tcp_url(listen_url)?;
         let listener =
             TcpListener::bind(listen).map_err(|e| BusError(format!("listen {listen_url}: {e}")))?;
         listener
             .set_nonblocking(true)
             .map_err(|e| BusError(e.to_string()))?;
-        let mut peers = Vec::with_capacity(peer_urls.len());
-        for url in peer_urls {
-            peers.push(PeerLink {
+        let mut links = Vec::with_capacity(peers.len());
+        for (_, url) in peers {
+            links.push(PeerLink {
                 addr: parse_tcp_url(url)?,
                 stream: None,
             });
@@ -74,7 +84,7 @@ impl TcpDecreeBus {
         Ok(Self {
             id,
             listener,
-            peers: Mutex::new(peers),
+            peers: Mutex::new(links),
             inbound: Mutex::new(Vec::new()),
         })
     }
@@ -200,11 +210,14 @@ fn read_available(link: &mut Inbound) -> Result<Vec<Vec<u8>>, ()> {
     Ok(frames)
 }
 
-/// nng `Bus0` transport, and a read-only view of the same bus.
+/// nng transport: directed consensus traffic, published observation.
 #[cfg(feature = "nng-transport")]
 mod nng_bus {
     use super::BusError;
+    use crate::raft::wire::decode_envelope;
     use crate::raft::{NodeId, RaftMessage};
+    use nng::options::Options;
+    use nng::options::protocol::pubsub::Subscribe;
     use nng::{Protocol, Socket};
     use std::sync::Mutex;
 
@@ -217,119 +230,192 @@ mod nng_bus {
         }
     }
 
-    /// Dial every peer that is not connected yet, and report which
-    /// stayed down. A peer that has not started is dialed again on the
-    /// next call, so start order between brains does not matter.
-    fn dial_pending(socket: &Socket, pending: &mut Vec<String>) {
-        pending.retain(|url| socket.dial(url).is_err());
+    /// Topic a published envelope carries, ahead of the capnp bytes.
+    ///
+    /// Subscriptions in nng match a byte prefix, so the fields are
+    /// fixed width and ordered coarse to fine: `raft/007/` is every
+    /// message node seven sent, and `raft/007/003/` is what it sent to
+    /// node three. The newline ends the topic and never appears in it.
+    fn topic(from: NodeId, to: NodeId, message: &RaftMessage) -> Vec<u8> {
+        let kind = match message {
+            RaftMessage::RequestVote { .. } => "vote_request",
+            RaftMessage::VoteReply { granted: true, .. } => "vote_granted",
+            RaftMessage::VoteReply { .. } => "vote_refused",
+            RaftMessage::AppendEntries { entries, .. } if entries.is_empty() => "heartbeat",
+            RaftMessage::AppendEntries { .. } => "append",
+            RaftMessage::AppendReply { success: true, .. } => "append_accepted",
+            RaftMessage::AppendReply { .. } => "append_rejected",
+        };
+        format!("raft/{from:03}/{to:03}/{kind}\n").into_bytes()
     }
 
-    /// One brain's connection to the others over an nng bus.
+    /// Split a published message back into its topic and its envelope.
+    fn strip_topic(bytes: &[u8]) -> Option<&[u8]> {
+        let end = bytes.iter().position(|byte| *byte == b'\n')?;
+        bytes.get(end + 1..)
+    }
+
+    /// One peer's outbound pipe.
+    struct Peer {
+        id: NodeId,
+        url: String,
+        push: Socket,
+        dialed: bool,
+    }
+
+    impl Peer {
+        /// Dial on first use and after a peer restarts, so start order
+        /// between brains does not matter.
+        fn ready(&mut self) -> bool {
+            if !self.dialed {
+                self.dialed = self.push.dial(&self.url).is_ok();
+            }
+            self.dialed
+        }
+    }
+
+    /// One brain's connection to the others.
+    ///
+    /// The consensus plane is a `Pull0` inbox that every peer pushes
+    /// into, and one `Push0` pipe per peer. Raft addresses each message
+    /// to one node, so this delivers it to that node rather than
+    /// broadcasting to all and discarding what the others were not
+    /// meant to read.
+    ///
+    /// The observation plane is a separate `Pub0` socket, opened only
+    /// when [`DecreeBus::publishing`] names an address. Consensus never
+    /// waits on it: a subscriber that cannot keep up loses messages
+    /// instead of applying backpressure to the brains.
     pub struct DecreeBus {
         id: NodeId,
-        socket: Socket,
-        pending: Mutex<Vec<String>>,
+        inbox: Socket,
+        peers: Mutex<Vec<Peer>>,
+        publish: Option<Socket>,
     }
 
     impl DecreeBus {
-        /// Listen on `listen_url`, dial every peer, filter as `id`.
-        pub fn new(id: NodeId, listen_url: &str, peer_urls: &[String]) -> Result<Self, BusError> {
-            let socket = Socket::new(Protocol::Bus0)
-                .map_err(|error| BusError(format!("bus socket: {error}")))?;
-            socket
+        /// Listen on `listen_url` and pipe to each `(id, url)` peer.
+        pub fn new(
+            id: NodeId,
+            listen_url: &str,
+            peers: &[(NodeId, String)],
+        ) -> Result<Self, BusError> {
+            let inbox = Socket::new(Protocol::Pull0)
+                .map_err(|error| BusError(format!("inbox socket: {error}")))?;
+            inbox
                 .listen(&bus_url(listen_url))
                 .map_err(|error| BusError(format!("listen {listen_url}: {error}")))?;
-            let mut pending: Vec<String> = peer_urls.iter().map(|url| bus_url(url)).collect();
-            dial_pending(&socket, &mut pending);
+            let mut pipes = Vec::with_capacity(peers.len());
+            for (peer_id, url) in peers {
+                let push = Socket::new(Protocol::Push0)
+                    .map_err(|error| BusError(format!("peer socket: {error}")))?;
+                let mut peer = Peer {
+                    id: *peer_id,
+                    url: bus_url(url),
+                    push,
+                    dialed: false,
+                };
+                peer.ready();
+                pipes.push(peer);
+            }
             Ok(Self {
                 id,
-                socket,
-                pending: Mutex::new(pending),
+                inbox,
+                peers: Mutex::new(pipes),
+                publish: None,
             })
         }
 
-        /// Broadcast one encoded envelope. A bus message is already
-        /// framed, so nothing here prefixes a length.
+        /// Also publish every envelope this brain sends, on `url`.
+        ///
+        /// Separate from the consensus address on purpose, so a reader
+        /// attaches to the observation plane and never to the inbox.
+        pub fn publishing(mut self, url: &str) -> Result<Self, BusError> {
+            let socket = Socket::new(Protocol::Pub0)
+                .map_err(|error| BusError(format!("publish socket: {error}")))?;
+            socket
+                .listen(&bus_url(url))
+                .map_err(|error| BusError(format!("publish {url}: {error}")))?;
+            self.publish = Some(socket);
+            Ok(self)
+        }
+
+        /// Deliver one encoded envelope to the node it names.
         pub fn send(&self, frame: &[u8]) -> Result<(), BusError> {
-            self.redial();
-            // A refused send is a lost message, which consensus
-            // survives, and the message nng hands back is dropped with
-            // it rather than queued behind a peer that may never come.
-            let _ = self.socket.try_send(frame);
+            let Ok((from, to, message)) = decode_envelope(frame) else {
+                return Err(BusError("send: envelope does not decode".into()));
+            };
+            if let Some(publish) = self.publish.as_ref() {
+                let mut published = topic(from, to, &message);
+                published.extend_from_slice(frame);
+                // Observation is lossy by design: a slow reader must
+                // never hold up consensus.
+                let _ = publish.try_send(&published[..]);
+            }
+            if let Ok(mut peers) = self.peers.lock()
+                && let Some(peer) = peers.iter_mut().find(|peer| peer.id == to)
+                && peer.ready()
+            {
+                // A refused push is a lost message, which consensus
+                // survives; queueing it behind a peer that may never
+                // return would not help.
+                let _ = peer.push.try_send(frame);
+            }
             Ok(())
         }
 
-        /// Drain every frame currently queued that is addressed to this
-        /// brain. Never blocks on a missing peer.
+        /// Drain the inbox. Never blocks on a missing peer.
         pub fn poll(&self) -> Vec<Vec<u8>> {
-            self.redial();
-            drain(&self.socket)
-                .into_iter()
-                .filter(|bytes| {
-                    matches!(
-                        crate::raft::wire::decode_envelope(bytes),
-                        Ok((_, to, _)) if to == self.id
-                    )
-                })
-                .collect()
-        }
-
-        fn redial(&self) {
-            if let Ok(mut pending) = self.pending.lock()
-                && !pending.is_empty()
-            {
-                dial_pending(&self.socket, &mut pending);
+            let mut frames = Vec::new();
+            while let Ok(message) = self.inbox.try_recv() {
+                frames.push(message[..].to_vec());
             }
+            frames.retain(|bytes| matches!(decode_envelope(bytes), Ok((_, to, _)) if to == self.id));
+            frames
         }
     }
 
     /// A reader of the consensus stream that is not a peer of it.
     ///
-    /// The observer joins the same bus and never sends, so every
-    /// envelope the brains exchange decodes here, addressed to whoever
-    /// it was addressed to. Consensus does not know it exists and does
-    /// not wait for it.
+    /// Subscribes to the brains' observation plane, so every envelope
+    /// they send decodes here whoever it was addressed to. Consensus
+    /// does not know it exists and does not wait for it.
     pub struct DecreeObserver {
         socket: Socket,
-        pending: Mutex<Vec<String>>,
     }
 
     impl DecreeObserver {
-        /// Dial every brain, listening only.
-        pub fn new(peer_urls: &[String]) -> Result<Self, BusError> {
-            let socket = Socket::new(Protocol::Bus0)
+        /// Watch every publisher in `publish_urls`, keeping the traffic
+        /// whose topic starts with `prefix`. An empty prefix is all of
+        /// it; `raft/007/` is one node's outbound traffic.
+        pub fn new(publish_urls: &[String], prefix: &str) -> Result<Self, BusError> {
+            let socket = Socket::new(Protocol::Sub0)
                 .map_err(|error| BusError(format!("observer socket: {error}")))?;
-            let mut pending: Vec<String> = peer_urls.iter().map(|url| bus_url(url)).collect();
-            dial_pending(&socket, &mut pending);
-            Ok(Self {
-                socket,
-                pending: Mutex::new(pending),
-            })
+            socket
+                .set_opt::<Subscribe>(prefix.as_bytes().to_vec())
+                .map_err(|error| BusError(format!("subscribe {prefix}: {error}")))?;
+            for url in publish_urls {
+                // A publisher that has not started yet is simply not
+                // seen; an observer is not worth failing a brain over.
+                let _ = socket.dial(&bus_url(url));
+            }
+            Ok(Self { socket })
         }
 
         /// Every envelope seen since the last call, decoded. Unlike a
         /// brain's poll this keeps traffic addressed to anyone, which
         /// is the point of watching rather than participating.
         pub fn poll(&self) -> Vec<(NodeId, NodeId, RaftMessage)> {
-            if let Ok(mut pending) = self.pending.lock()
-                && !pending.is_empty()
-            {
-                dial_pending(&self.socket, &mut pending);
+            let mut seen = Vec::new();
+            while let Ok(message) = self.socket.try_recv() {
+                if let Some(envelope) = strip_topic(&message[..])
+                    && let Ok(decoded) = decode_envelope(envelope)
+                {
+                    seen.push(decoded);
+                }
             }
-            drain(&self.socket)
-                .into_iter()
-                .filter_map(|bytes| crate::raft::wire::decode_envelope(&bytes).ok())
-                .collect()
+            seen
         }
-    }
-
-    /// Take every message the socket has without waiting for one.
-    fn drain(socket: &Socket) -> Vec<Vec<u8>> {
-        let mut frames = Vec::new();
-        while let Ok(message) = socket.try_recv() {
-            frames.push(message[..].to_vec());
-        }
-        frames
     }
 }
 
@@ -347,13 +433,13 @@ mod tests {
         let a = DecreeBus::new(
             0,
             "tcp://127.0.0.1:47331",
-            &["tcp://127.0.0.1:47332".to_owned()],
+            &[(1, "tcp://127.0.0.1:47332".to_owned())],
         )
         .unwrap();
         let b = DecreeBus::new(
             1,
             "tcp://127.0.0.1:47332",
-            &["tcp://127.0.0.1:47331".to_owned()],
+            &[(0, "tcp://127.0.0.1:47331".to_owned())],
         )
         .unwrap();
         // Dials settle asynchronously.
