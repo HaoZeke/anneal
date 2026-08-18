@@ -29,7 +29,7 @@ cargo test --release --lib leftover_soap_gt_with_two
 cargo test --release --lib packing_role_is_per_family
 cargo test --release --lib a_user_family_floor_of_one
 cargo test --release --lib catalog_leave_refuses_a_same_family
-cargo test --release --lib occupancy_leave_is_another_family
+cargo test --release --lib occupancy_leave_is_another_family_or_an_archive
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
 cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
@@ -44,7 +44,7 @@ cargo build --release --features featomic,ira,bank-rpc \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-for symbol in different_decaf_family occupancy_leave_target CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop leftover-well"; do
+for symbol in different_decaf_family "occupancy leave archive hole" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop leftover-well"; do
   if ! grep -a -F -q "$symbol" "$BIN"; then
     echo "built binary missing $symbol" >&2
     exit 1

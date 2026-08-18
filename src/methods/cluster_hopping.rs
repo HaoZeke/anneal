@@ -1203,9 +1203,53 @@ where
                 let family_changed = true;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
-                    // Extra Leave stayed in the family. A leftover-SOAP
-                    // requench lands on a nearby packing ("other"), not
-                    // on a new funnel. Draw a fresh box start.
+                    // Extra Leave stayed in the family. One hole and
+                    // quench returns to the same packing. Requench and
+                    // widen, then kick the packing null space, before
+                    // a box start.
+                    #[cfg(feature = "featomic")]
+                    let escaped = {
+                        let rcut = 3.5 * cfg.length_scale;
+                        let well = crate::featomic_hop::soap_cloud_mean(
+                            from_state.view(),
+                            rcut,
+                            cfg.species.as_deref(),
+                            None,
+                        );
+                        let mut quench = |v: ArrayView1<f64>| relax(ledger, v, cfg.relax_steps).1;
+                        let left = crate::featomic_hop::leave_occupied_packing(
+                            state.view(),
+                            std::slice::from_ref(&well),
+                            rcut,
+                            cfg.species.as_deref(),
+                            None,
+                            &mut quench,
+                            rng,
+                        );
+                        let changed = from_state.as_slice().zip(left.as_slice()).is_none_or(
+                            |(origin, trial)| crate::catalog::different_decaf_family(origin, trial),
+                        );
+                        changed.then_some(left)
+                    };
+                    #[cfg(not(feature = "featomic"))]
+                    let escaped: Option<Array1<f64>> = None;
+                    if let Some(left) = escaped {
+                        let (le, lx) = relax(ledger, left.view(), 0);
+                        if quench_is_sane(cfg, le, lx.view()) {
+                            hops += 1;
+                            ledger.record(le, lx.view());
+                            let reached = identity.basin_of(lx.view());
+                            let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
+                            feedback.observe(Some(from), reached);
+                            here = Some(reached);
+                            e = le;
+                            x = lx;
+                            accepted += 1;
+                            current_validation_gradient = None;
+                            bias.deposit(x.view(), cfg.temperature);
+                            continue;
+                        }
+                    }
                     let s0 =
                         random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
                     let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
