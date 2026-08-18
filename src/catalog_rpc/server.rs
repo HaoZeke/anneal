@@ -2752,9 +2752,7 @@ fn packing_relation(
         PackingRole::FamilyChampion | PackingRole::FamilyExtra if same_as_lower_isomer => {
             Some(CatalogRelation::UnrelatedLowerAnchor)
         }
-        PackingRole::FamilyChampion | PackingRole::FamilyExtra => {
-            Some(CatalogRelation::SameBasin)
-        }
+        PackingRole::FamilyChampion | PackingRole::FamilyExtra => Some(CatalogRelation::SameBasin),
     }
 }
 
