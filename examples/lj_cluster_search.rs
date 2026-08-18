@@ -2447,6 +2447,32 @@ fn run_capnp_catalog(
 
     let mut run_cfg = cfg.clone();
     run_cfg.budget_window = true;
+    // An ensemble at one temperature is one search repeated. Spreading
+    // replicas across a geometric ladder is the reference answer to the
+    // funnel problem, so it is available here, opt-in: the recommended
+    // protocol leaves the temperature alone and the published runs used
+    // it that way, so this only applies when a ladder top is named.
+    if let Some(top) = std::env::var("CATALOG_TEMP_LADDER")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        let rungs = std::env::var("CATALOG_BRAIN_PEERS")
+            .ok()
+            .map(|peers| peers.split(',').filter(|p| !p.is_empty()).count() + 1)
+            .unwrap_or(1);
+        let walked = anneal_core::replica_exchange::replica_temperature(
+            replica,
+            rungs,
+            run_cfg.temperature,
+            top,
+        );
+        println!(
+            "  temperature ladder rung {replica}/{rungs}: {walked:.4} (base {:.4} top {top:.4})",
+            run_cfg.temperature
+        );
+        run_cfg.temperature = walked;
+    }
     if let Ok(hops) = std::env::var("CATALOG_MAX_HOPS") {
         let hops: usize = hops
             .parse()
