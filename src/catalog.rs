@@ -43,7 +43,7 @@ pub use occupancy::{
     published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
 };
 pub use packing::{
-    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
+    PACKING_MERGE, PACKING_MOVE_EPS, GoodTuringSample, PackingBook, different_decaf_family,
     leftover_arrivals_saturated, packing_distance, packing_fingerprint, packing_vector,
     same_packing,
 };

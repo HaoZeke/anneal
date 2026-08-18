@@ -174,7 +174,12 @@ impl PackingBook {
     /// family. Same floor and unseen-mass ceiling as the leftover-SOAP
     /// census. Hop re-observes are not draws.
     pub fn families_saturated(&self) -> bool {
-        arrival_good_turing(self.well_visits.iter().copied())
+        self.well_sample().saturated()
+    }
+
+    /// Leftover-well arrivals credited to packing families.
+    pub fn well_sample(&self) -> GoodTuringSample {
+        GoodTuringSample::from_counts(self.well_visits.iter().copied())
     }
 
     /// Distinct rematched packings among live structures.
@@ -318,19 +323,46 @@ pub fn same_packing(left: &[f64], right: &[f64]) -> bool {
     packing_distance(left, right) <= PACKING_MERGE
 }
 
+/// Good--Turing sample: `n` arrivals, `n1` singletons, unseen mass `n1/n`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GoodTuringSample {
+    /// Independent draws (leftover-well arrivals, not hops).
+    pub n: u64,
+    /// Types seen exactly once.
+    pub n1: u64,
+}
+
+impl GoodTuringSample {
+    /// Collapse a multiplicity list to `n` and `n1`. Zero counts drop.
+    pub fn from_counts(arrivals: impl IntoIterator<Item = u64>) -> Self {
+        let counts: Vec<u64> = arrivals.into_iter().filter(|&visits| visits > 0).collect();
+        Self {
+            n: counts.iter().copied().sum(),
+            n1: counts.iter().filter(|&&visits| visits == 1).count() as u64,
+        }
+    }
+
+    /// Estimated probability the next draw is a new type.
+    pub fn unseen(self) -> Option<f64> {
+        (self.n != 0).then(|| self.n1 as f64 / self.n as f64)
+    }
+
+    /// Production floor and unseen-mass ceiling.
+    pub fn saturated(self) -> bool {
+        self.n >= crate::catalog::PRODUCTION_MINIMUM_VISITS
+            && self
+                .unseen()
+                .is_some_and(|mass| mass < crate::catalog::PRODUCTION_MAX_UNSEEN_MASS)
+    }
+}
+
 /// Good--Turing on leftover-well arrivals. `n` is arrivals, not hops.
 pub fn leftover_arrivals_saturated(arrivals: impl IntoIterator<Item = u64>) -> bool {
-    arrival_good_turing(arrivals)
+    GoodTuringSample::from_counts(arrivals).saturated()
 }
 
 fn arrival_good_turing(arrivals: impl IntoIterator<Item = u64>) -> bool {
-    let counts: Vec<u64> = arrivals.into_iter().filter(|&visits| visits > 0).collect();
-    let total: u64 = counts.iter().copied().sum();
-    if total < crate::catalog::PRODUCTION_MINIMUM_VISITS {
-        return false;
-    }
-    let singles = counts.iter().filter(|&&visits| visits == 1).count() as u64;
-    (singles as f64 / total as f64) < crate::catalog::PRODUCTION_MAX_UNSEEN_MASS
+    GoodTuringSample::from_counts(arrivals).saturated()
 }
 
 /// Whether `trial` is a different DECAF packing family from `origin`.
