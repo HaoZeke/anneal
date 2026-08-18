@@ -360,7 +360,12 @@ pub struct PolicyState {
     pub certified_attractor: bool,
     /// Successive halving discarded this walk at a rung.
     pub pruned: bool,
-    /// Leftover-SOAP \(\lambda\) the coordinator assigned this replica.
+    /// Leftover-SOAP \(\lambda\) of the descriptor in this request.
+    ///
+    /// One frame, not the replica's path maximum: the coordinator holds
+    /// the maximum for the interface ladder, and a client that tagged
+    /// every frame with it would have a non-decreasing series in which
+    /// no frame is further from the occupied well than any other.
     pub leftover_lambda: f64,
     /// TIS interface rank. `u32::MAX` is the occupied-packing champion.
     pub interface_rank: u32,

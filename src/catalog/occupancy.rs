@@ -275,6 +275,13 @@ impl LeavePath {
         }
     }
 
+    /// Drop the climbing window. Once the Leave is issued the frames
+    /// that led to it describe a funnel the chain has left, and a later
+    /// shoot taken from them re-enters it.
+    pub fn clear(&mut self) {
+        self.frames.clear();
+    }
+
     /// Highest leftover-SOAP \(\lambda\) on the path.
     pub fn max_lambda(&self) -> f64 {
         self.frames
@@ -648,6 +655,17 @@ mod tests {
         assert_eq!(path.max_lambda(), 0.8);
         assert_eq!(path.shoot_index(), Some(1));
         assert_eq!(path.shoot_coordinates(), Some([1.0].as_slice()));
+    }
+
+    #[test]
+    fn a_cleared_leave_path_has_no_shoot_frame() {
+        let mut path = LeavePath::default();
+        path.push(vec![0.0], vec![0.0], 0.1);
+        path.push(vec![1.0], vec![1.0], 0.8);
+        path.clear();
+        assert_eq!(path.shoot_index(), None);
+        assert_eq!(path.shoot_coordinates(), None);
+        assert_eq!(path.max_lambda(), 0.0);
     }
 
     #[test]

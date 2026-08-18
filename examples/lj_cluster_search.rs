@@ -3526,6 +3526,7 @@ fn run_capnp_catalog(
                     });
                     trace.proposal_family = ProposalFamily::HyperbandReseed;
                     trace.adoption = SliceAdoption::Adopted;
+                    leave_path.clear();
                     cooperative
                         .record_slice(replica, trace)
                         .expect("checkpoint trace must remain complete");
@@ -3584,6 +3585,7 @@ fn run_capnp_catalog(
                     .any(|(a, b)| (a - b).abs() > 1e-12)
                 {
                     trace.adoption = SliceAdoption::Adopted;
+                    leave_path.clear();
                     cooperative
                         .record_slice(replica, trace)
                         .expect("checkpoint trace must remain complete");
