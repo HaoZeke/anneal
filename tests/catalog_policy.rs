@@ -66,8 +66,8 @@ fn incumbent_replica_stays_in_the_well_until_it_stalls() {
 
     let local = CatalogPolicy::decide(relaxing);
     assert_eq!(local.action, PolicyAction::ContinueLocal);
-    assert_eq!(local.reason, PolicyReason::IncumbentLocalSearch);
-    assert_eq!(local.reason.code(), "incumbent_local_search");
+    assert_eq!(local.reason, PolicyReason::IsomerWalk);
+    assert_eq!(local.reason.code(), "isomer_walk");
 
     let leave = CatalogPolicy::decide(stalled);
     assert_eq!(leave.action, PolicyAction::Leave);
@@ -109,29 +109,33 @@ fn global_saturation_never_forces_an_unrelated_replica_to_leave() {
 }
 
 #[test]
-fn tis_extras_walk_isomers_until_pruned() {
+fn a_family_extra_of_a_crowded_packing_leaves_it() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let mut extra = input(
         ActiveCatalogRelation::SameBasin,
         CensusEvidence::from_census(&census, Some(basin_id)),
         AggregateProgress::new(20, 100).unwrap(),
     );
+    let unseated = CatalogPolicy::decide(extra);
+    assert_eq!(unseated.action, PolicyAction::Leave);
+    assert_eq!(unseated.reason, PolicyReason::OccupiedPackingLeave);
     extra.interface_rank = 1;
     extra.interface_threshold = 0.5;
-    let walk = CatalogPolicy::decide(extra);
-    assert_eq!(walk.action, PolicyAction::ContinueLocal);
-    assert_eq!(walk.reason, PolicyReason::IsomerWalk);
-    extra.mixing.pruned = true;
     let leave = CatalogPolicy::decide(extra);
     assert_eq!(leave.action, PolicyAction::Leave);
-    assert_eq!(leave.reason, PolicyReason::HyperbandPruned);
+    assert_eq!(leave.reason, PolicyReason::OccupiedPackingLeave);
+    assert_eq!(leave.reason.code(), "occupied_packing_leave");
+    extra.mixing.pruned = true;
+    let pruned = CatalogPolicy::decide(extra);
+    assert_eq!(pruned.action, PolicyAction::Leave);
+    assert_eq!(pruned.reason, PolicyReason::HyperbandPruned);
 }
 
 #[test]
 fn a_packing_champion_walks_isomers_rather_than_leaving() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let state = input(
-        ActiveCatalogRelation::SameBasin,
+        ActiveCatalogRelation::Incumbent,
         CensusEvidence::from_census(&census, Some(basin_id)),
         AggregateProgress::new(20, 100).unwrap(),
     );
@@ -154,8 +158,8 @@ fn a_seated_extra_leaves_once_it_crosses_its_own_interface() {
 
     extra.leftover_lambda = 0.4;
     let below = CatalogPolicy::decide(extra);
-    assert_eq!(below.action, PolicyAction::ContinueLocal);
-    assert_eq!(below.reason, PolicyReason::IsomerWalk);
+    assert_eq!(below.action, PolicyAction::Leave);
+    assert_eq!(below.reason, PolicyReason::OccupiedPackingLeave);
 
     extra.leftover_lambda = 0.5;
     let crossed = CatalogPolicy::decide(extra);
@@ -314,7 +318,7 @@ fn a_mixed_uncertified_incumbent_keeps_the_isomer_walk() {
 
     let decision = CatalogPolicy::decide(state);
     assert_eq!(decision.action, PolicyAction::ContinueLocal);
-    assert_eq!(decision.reason, PolicyReason::IncumbentLocalSearch);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
 }
 
 #[test]

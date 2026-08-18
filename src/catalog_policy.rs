@@ -232,9 +232,11 @@ pub enum PolicyReason {
     /// A TIS extra reached its leftover-SOAP interface. Shoot from the
     /// path that got there rather than keep walking the packing.
     InterfaceCrossed,
+    /// A FamilyExtra of a crowded packing Leaves it. The champion stays.
+    OccupiedPackingLeave,
     /// Explore-role chains have mixed; they must leave rather than keep exploring.
     ExploreCollapsed,
-    /// A TIS extra walks isomers of the occupied packing.
+    /// The packing champion walks isomers of the occupied family.
     IsomerWalk,
     /// The incumbent attractor won the occupancy contest and stays occupied.
     CertifiedAttractor,
@@ -258,6 +260,7 @@ impl PolicyReason {
             Self::UnrelatedCatalogExplore => "unrelated_catalog_explore",
             Self::SameBasinExplore => "same_basin_explore",
             Self::InterfaceCrossed => "interface_crossed",
+            Self::OccupiedPackingLeave => "occupied_packing_leave",
             Self::IsomerWalk => "isomer_walk",
             Self::ExploreCollapsed => "explore_collapsed",
             Self::CertifiedAttractor => "certified_attractor",
@@ -286,13 +289,14 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// Collapse forces extras of the occupied packing to Leave. The
-    /// incumbent stays and walks isomers. A walk rematched to a
-    /// different DECAF family is not collapse: yanking it would
-    /// abandon the second funnel. Extra occupants of a crowded
-    /// packing are pruned at occupancy rungs and reseed. A better
-    /// isomer of the occupied packing may be taken when the ensemble
-    /// is not collapsed. A certified incumbent stays.
+    /// A FamilyExtra of a crowded packing Leaves it. The champion
+    /// stays and walks isomers. Collapse also forces extras of the
+    /// occupied packing to Leave. A walk rematched to a different
+    /// DECAF family is not collapse: yanking it would abandon the
+    /// second funnel. Surplus extras are pruned at occupancy rungs
+    /// and reseed. A better isomer of the occupied packing may be
+    /// taken when the ensemble is not collapsed. A certified
+    /// incumbent stays.
     pub fn decide(input: CatalogPolicyInput) -> PolicyDecision {
         if input.validation == ValidationState::Rejected {
             return decision(
@@ -354,10 +358,9 @@ impl CatalogPolicy {
             ActiveCatalogRelation::Incumbent if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)
             }
-            ActiveCatalogRelation::Incumbent => decision(
-                PolicyAction::ContinueLocal,
-                PolicyReason::IncumbentLocalSearch,
-            ),
+            ActiveCatalogRelation::Incumbent => {
+                decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
+            }
             ActiveCatalogRelation::SameBasin
                 if input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE =>
             {
@@ -373,7 +376,7 @@ impl CatalogPolicy {
                 decision(PolicyAction::Leave, PolicyReason::InterfaceCrossed)
             }
             ActiveCatalogRelation::SameBasin => {
-                decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
+                decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: false,
