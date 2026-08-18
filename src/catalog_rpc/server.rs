@@ -27,10 +27,11 @@ use crate::catalog::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog,
     BasinCensus, BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
     FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence,
-    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
-    ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_arrivals_saturated, leftover_lambda, occupancy_min_families, occupant_rhat,
-    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    OCCUPANCY_NICHES, PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature,
+    Tessellation, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
+    explore_must_leave, invert_mixing, leftover_arrivals_saturated, leftover_lambda,
+    occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
+    retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -269,6 +270,14 @@ struct ScientificState {
     /// Family each replica was last handed a representative of, so the
     /// reward can be attributed to the cell the start came from.
     drawn_from_by_replica: BTreeMap<u32, usize>,
+    /// Fixed tessellation of descriptor space, once enough descriptors
+    /// have been seen to relax one. Families are discovered by
+    /// clustering and their number is whatever the data gave, which
+    /// leaves coverage a ratio with a moving denominator; cells here
+    /// are chosen once and do not move, so coverage means something.
+    tessellation: Option<Tessellation>,
+    /// Descriptors seen, kept until there are enough to tessellate.
+    tessellation_samples: Vec<Vec<f64>>,
     last_gt_report: Option<(u64, u64, u64, u64, u32, bool)>,
     evaluate: Arc<FreshEvaluator>,
 }
@@ -358,6 +367,8 @@ impl CoordinatorState {
                     arrival_basin_by_replica: BTreeMap::new(),
                     curiosity: Curiosity::default(),
                     drawn_from_by_replica: BTreeMap::new(),
+                    tessellation: None,
+                    tessellation_samples: Vec::new(),
                     last_gt_report: None,
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
@@ -1073,6 +1084,10 @@ fn apply_request(
                 None,
                 false,
             );
+            // The tessellation learns from the same structures the
+            // packing book does, so its cells sit where the search has
+            // been rather than where a box was drawn.
+            observe_descriptor(scientific, &validated.candidate.descriptor);
             record_energy(scientific, request.identity.replica, validated.fresh.energy);
             let packing = scientific
                 .packing
@@ -1438,6 +1453,10 @@ fn apply_request(
                     Some(observation.basin_id),
                     arrival,
                 );
+                // The tessellation learns from the same structures the
+                // packing book does, so its cells sit where the search has
+                // been rather than where a box was drawn.
+                observe_descriptor(scientific, &validated.candidate.descriptor);
                 record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
                     .population
@@ -1518,6 +1537,10 @@ fn apply_request(
                     Some(observation.basin_id),
                     arrival,
                 );
+                // The tessellation learns from the same structures the
+                // packing book does, so its cells sit where the search has
+                // been rather than where a box was drawn.
+                observe_descriptor(scientific, &validated.candidate.descriptor);
                 record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
                     .population
@@ -2362,6 +2385,70 @@ fn observe_packing(
 /// A family with no catalog representative cannot be drawn from, and a
 /// family no replica stands on counts zero, which is what makes it the
 /// one to hand out.
+/// Archive cell a descriptor belongs to.
+///
+/// The tessellation once it exists, and the leader-clustered family
+/// until then. Cells from a tessellation are fixed in number and equal
+/// by construction, so occupancy over them is a distribution rather
+/// than a count over a support that grows while it is measured.
+fn archive_cell(
+    scientific: &ScientificState,
+    descriptor: &[f64],
+    coordinates: &[f64],
+) -> Option<usize> {
+    if let Some(tessellation) = scientific.tessellation.as_ref()
+        && let Some(cell) = tessellation.assign(descriptor)
+    {
+        return Some(cell);
+    }
+    let histogram = scientific.packing.histogram(coordinates)?;
+    scientific.packing.family_of(&histogram)
+}
+
+/// Feed a descriptor to the tessellation, and relax one once there is
+/// enough to relax.
+///
+/// Built once and then left alone: cells that moved under the search
+/// would make coverage incomparable between one moment and the next,
+/// which is the property the tessellation exists to provide.
+fn observe_descriptor(scientific: &mut ScientificState, descriptor: &[f64]) {
+    if scientific.tessellation.is_some() || descriptor.is_empty() {
+        return;
+    }
+    scientific.tessellation_samples.push(descriptor.to_vec());
+    // Four samples a cell before fixing them, so the centroids sit
+    // where the search has actually been.
+    if scientific.tessellation_samples.len() < 4 * OCCUPANCY_NICHES {
+        return;
+    }
+    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
+        scientific.tessellation_samples.len() as u64,
+    );
+    scientific.tessellation = Tessellation::build(
+        OCCUPANCY_NICHES,
+        &scientific.tessellation_samples,
+        16,
+        &mut rng,
+    );
+    if scientific.tessellation.is_some() {
+        scientific.tessellation_samples = Vec::new();
+    }
+}
+
+/// Fraction of archive cells any live replica occupies.
+///
+/// A fixed denominator, which is what makes this a coverage rather
+/// than a count. Falls back to nothing when no tessellation exists yet.
+fn archive_coverage(scientific: &ScientificState) -> Option<f64> {
+    let tessellation = scientific.tessellation.as_ref()?;
+    let descriptors: Vec<&[f64]> = scientific
+        .last_candidate_by_replica
+        .values()
+        .map(|candidate| candidate.descriptor.as_slice())
+        .collect();
+    Some(tessellation.coverage(descriptors))
+}
+
 /// Family and catalog slot to hand a replica that is leaving a crowded
 /// packing.
 ///
@@ -2376,27 +2463,35 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
 ) -> Option<(usize, usize)> {
     let mut occupancy: BTreeMap<usize, usize> = BTreeMap::new();
     for candidate in scientific.last_candidate_by_replica.values() {
-        if let Some(histogram) = scientific.packing.histogram(&candidate.coordinates)
-            && let Some(family) = scientific.packing.family_of(&histogram)
+        if let Some(cell) = archive_cell(scientific, &candidate.descriptor, &candidate.coordinates)
         {
-            *occupancy.entry(family).or_insert(0) += 1;
+            *occupancy.entry(cell).or_insert(0) += 1;
         }
     }
+    // Where the ensemble already is, for the novelty of a candidate
+    // start measured against it.
+    let occupied: Vec<Vec<f64>> = scientific
+        .last_candidate_by_replica
+        .values()
+        .map(|candidate| candidate.descriptor.clone())
+        .collect();
     // One representative per family, the deepest, which is the elite of
     // that cell.
     let mut elites: BTreeMap<usize, (usize, usize, f64)> = BTreeMap::new();
     for (slot, entry) in scientific.catalog.entries().iter().enumerate() {
-        let Some(histogram) = scientific.packing.histogram(entry.coordinates()) else {
+        let Some(cell) = archive_cell(scientific, entry.descriptor(), entry.coordinates()) else {
             continue;
         };
-        let Some(family) = scientific.packing.family_of(&histogram) else {
-            continue;
-        };
-        let crowd = occupancy.get(&family).copied().unwrap_or(0);
+        let crowd = occupancy.get(&cell).copied().unwrap_or(0);
+        // The elite of a cell is its most novel deep structure, not
+        // simply its deepest: two entries of equal depth in one cell
+        // are worth different amounts to a replica being sent away
+        // from where the ensemble already stands.
+        let score = -crate::catalog::novelty(entry.descriptor(), &occupied, 4);
         elites
-            .entry(family)
+            .entry(cell)
             .and_modify(|held| {
-                if entry.energy() < held.2 {
+                if entry.energy() < held.2 || (entry.energy() == held.2 && score < held.2) {
                     *held = (crowd, slot, entry.energy());
                 }
             })
@@ -2428,9 +2523,28 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
 }
 
 fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
+    // Coverage over a fixed tessellation is the one of these three with
+    // a denominator that does not move while it is measured. An
+    // ensemble standing on a small fraction of the cells has not
+    // finished looking, whatever the Good--Turing statistics over a
+    // discovered support say.
+    if let Some(coverage) = archive_coverage(scientific)
+        && coverage < ARCHIVE_COVERAGE_STOP
+    {
+        return false;
+    }
     scientific.packing.families_saturated()
         && leftover_arrivals_saturated(scientific.leftover_arrivals.values().copied())
 }
+
+/// Fraction of archive cells an ensemble must have reached before
+/// occupancy is allowed to call itself saturated.
+///
+/// A wave of twenty-four against sixty-four cells cannot exceed
+/// three-eighths at any instant, so this sits below that: the test is
+/// that the search has spread, not that it has been everywhere at
+/// once.
+const ARCHIVE_COVERAGE_STOP: f64 = 0.25;
 
 fn report_occupancy_gt(scientific: &mut ScientificState) {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
