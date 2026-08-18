@@ -31,10 +31,12 @@
 //! ## Leave start
 //!
 //! Another DECAF family already on file: take a catalog representative
-//! of the least-occupied one ([`occupancy_leave_target`]). None on
-//! file: a new random start. Leftover-SOAP off-well is still the
-//! occupied packing and is not a Leave destination. Feynman--Kac
-//! surplus extras may still step a SOAP hole; occupancy extras do not.
+//! of the least-occupied one (funnel exchange). None on file: record
+//! the occupied packing in the shared SOAP archive and step into a
+//! hole of that archive, or amplify the fivefold residual when the
+//! archive is empty. Occupancy extras do not draw a random cluster.
+//! A single hole-and-quench returns to the same family; the hop
+//! then requenches and widens until DECAF says the family changed.
 //!
 //! ## Modes
 //!
@@ -86,18 +88,16 @@ pub enum OccupancyLeaveAdopt {
 
 /// Where an occupancy extra goes when it Leaves.
 ///
-/// Leftover-SOAP off-well is not a target. 0012 measured 361
-/// leftover-SOAP `catalog_leave` hops: all landed on "other", none
-/// on Oh, six left Oh. Ico versus Oh is DECAF L1 0.69, outside the
-/// leftover-SOAP well. The extra takes a catalog representative of
-/// a different family (Oh once it is on file), or a new start so
-/// the first Oh can be discovered the way a serial seed is.
+/// Funnel exchange first: a catalog representative of a different,
+/// under-occupied packing. That is how Leave includes Oh once Oh is
+/// on file. Otherwise a hole of the shared occupied-packing archive,
+/// not a random cluster. Serial recommended is a different mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different DECAF family.
     OtherFamily,
-    /// No other family on file. Draw a new start.
-    Reseed,
+    /// Shared SOAP archive hole, or fivefold residual if the archive is empty.
+    ArchiveHole,
 }
 
 /// Leave destination from whether the catalog already holds another family.
@@ -105,7 +105,7 @@ pub fn occupancy_leave_target(other_family_in_catalog: bool) -> OccupancyLeaveTa
     if other_family_in_catalog {
         OccupancyLeaveTarget::OtherFamily
     } else {
-        OccupancyLeaveTarget::Reseed
+        OccupancyLeaveTarget::ArchiveHole
     }
 }
 
@@ -559,16 +559,19 @@ mod tests {
     }
 
     #[test]
-    fn occupancy_leave_is_another_family_or_a_reseed() {
-        // Leftover-SOAP off-well is still the occupied packing
-        // (ico vs Oh DECAF L1 is 0.69). A Leave that is only a SOAP
-        // hole cannot land on Oh. The extra takes a catalog
-        // representative of a different family, or a new start.
+    fn occupancy_leave_is_another_family_or_an_archive_hole() {
         assert_eq!(
             occupancy_leave_target(true),
             OccupancyLeaveTarget::OtherFamily
         );
-        assert_eq!(occupancy_leave_target(false), OccupancyLeaveTarget::Reseed);
+        assert_eq!(
+            occupancy_leave_target(false),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_ne!(
+            occupancy_leave_target(false),
+            OccupancyLeaveTarget::OtherFamily
+        );
     }
 
     #[test]

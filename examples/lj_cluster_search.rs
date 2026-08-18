@@ -1840,6 +1840,92 @@ fn remember_packing_well(
     }
 }
 
+fn leave_packing_state<R: rand::Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rmsd: f64,
+    wells: &[Array1<f64>],
+    rcut: f64,
+    species: Option<&[u32]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    #[cfg(feature = "featomic")]
+    {
+        if !wells.is_empty() {
+            return anneal_core::featomic_hop::step_into_hole(
+                x,
+                wells,
+                anneal_core::featomic_hop::SOAP_PACK_MERGE,
+                rcut,
+                species,
+                None,
+                rng,
+            );
+        }
+        let _ = (rcut, species);
+    }
+    #[cfg(not(feature = "featomic"))]
+    {
+        let _ = (wells, rcut, species, rng);
+    }
+    anneal_core::soap::step_away_fivefold_measured(x, rmsd)
+}
+
+/// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
+/// in the shared occupied cloud. That hole is the ensemble superbasin
+/// list, not this replica's private well trail.
+#[cfg(feature = "bank-rpc")]
+fn step_toward_catalog_hole(
+    x: ArrayView1<f64>,
+    target: &[f64],
+    space: &anneal_core::descriptor_space::DescriptorSpace,
+    species: Option<&[u32]>,
+    length_scale: f64,
+) -> Option<Array1<f64>> {
+    use anneal_core::catalog_policy::proposal::pullback_increment;
+    use anneal_core::descriptor_space::pullback::{PullbackConfig, PullbackConstraints};
+    if target.is_empty() || !length_scale.is_finite() || length_scale <= 0.0 {
+        return None;
+    }
+    let mut cur = x.to_owned();
+    let constraints = PullbackConstraints {
+        frozen_coordinates: vec![false; cur.len()],
+        rigid_group_labels: Vec::new(),
+        remove_translation: true,
+    };
+    let config = PullbackConfig {
+        damping: 1e-3,
+        trust_radius: 2.0,
+        length_scale,
+    };
+    let weights = Array1::ones(target.len());
+    let target = Array1::from(target.to_vec());
+    let mut moved = false;
+    for _ in 0..8 {
+        let desc = space.describe(cur.view(), species).ok()?;
+        if desc.values().len() != target.len() {
+            return None;
+        }
+        let increment = &target - &Array1::from(desc.values().to_vec());
+        let inc_norm = increment.iter().map(|z| z * z).sum::<f64>().sqrt();
+        if inc_norm < 1e-8 {
+            break;
+        }
+        let jacobian = space.jacobian_analytic(cur.view(), species).ok()?;
+        let pulled = pullback_increment(
+            jacobian.view(),
+            increment.view(),
+            weights.view(),
+            Some(cur.view()),
+            &constraints,
+            config,
+        )
+        .ok()?;
+        cur = &cur + pulled.step();
+        moved = true;
+    }
+    moved.then_some(cur)
+}
+
 fn packing_of(x: ArrayView1<f64>, cfg: &Config) -> Array1<f64> {
     #[cfg(feature = "featomic")]
     {
@@ -2397,6 +2483,7 @@ fn run_capnp_catalog(
         println!("  hop cap {hops}");
         println!("  leftover-SOAP TIS seats");
         println!("  occupancy min families {}", occupancy_min_families());
+        println!("  occupancy leave archive hole");
         println!(
             "  gt stop leftover-well+packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
             anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,
@@ -3504,11 +3591,12 @@ fn run_capnp_catalog(
                         action: "hyperband_reseed".to_owned(),
                     };
                 }
-                // Crossing a funnel is a draw from another one, not a
-                // leftover-SOAP step out of this one: off-well ico is
-                // still ico. Ask the coordinator for a representative
-                // of the packing the fewest replicas stand on, and take
-                // it if it is a different family. Otherwise reseed.
+                // Funnel exchange first: a representative of the
+                // packing the fewest replicas stand on. That is how
+                // Leave includes Oh once Oh is on file. Otherwise a
+                // hole of the shared occupied-packing archive, or the
+                // fivefold residual if the archive is empty. Occupancy
+                // extras do not draw a random cluster.
                 let other_family = {
                     if let CatalogSampleOutcome::Candidate(sparse) = cooperative
                         .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
@@ -3549,7 +3637,8 @@ fn run_capnp_catalog(
                             action: "catalog_leave".to_owned(),
                         };
                     }
-                    OccupancyLeaveTarget::Reseed => {
+                    OccupancyLeaveTarget::ArchiveHole => {
+                        trace.proposal_family = ProposalFamily::DescriptorHole;
                         if coop_wells_enabled {
                             remember_packing_well(
                                 snapshot.current_state(),
@@ -3558,18 +3647,54 @@ fn run_capnp_catalog(
                                 &mut shared_wells,
                             );
                         }
-                        let n = snapshot.current_state().len() / 3;
-                        let state = random_cluster(n, 0.7, 0.5, &mut transport_rng);
-                        trace.proposal_family = ProposalFamily::HyperbandReseed;
-                        trace.adoption = SliceAdoption::Adopted;
-                        leave_path.clear();
-                        cooperative
-                            .record_slice(replica, trace)
-                            .expect("checkpoint trace must remain complete");
-                        return CheckpointAction::BoundaryProposal {
-                            state,
-                            action: "hyperband_reseed".to_owned(),
+                        let live = snapshot.current_state();
+                        let live_slice = live.as_slice().unwrap_or(&[]);
+                        let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
+                        let shoot_leftover =
+                            leave_path.shoot_leftover().unwrap_or(descriptor.as_slice());
+                        let hole = cooperative
+                            .try_descriptor_hole(
+                                replica,
+                                shoot_leftover.to_vec(),
+                                128,
+                                transport_rng.random(),
+                            )
+                            .expect("catalog hole access must preserve local execution");
+                        let local = leave_packing_state(
+                            ArrayView1::from(shoot_coords),
+                            0.35,
+                            &shared_wells,
+                            coop_rcut,
+                            coop_species.as_deref(),
+                            &mut transport_rng,
+                        );
+                        let left = match hole {
+                            CatalogHoleOutcome::Proposal(proposal) => step_toward_catalog_hole(
+                                ArrayView1::from(shoot_coords),
+                                &proposal.target,
+                                &descriptor_space,
+                                coop_species.as_deref(),
+                                run_cfg.length_scale,
+                            )
+                            .unwrap_or(local),
+                            _ => local,
                         };
+                        if left
+                            .iter()
+                            .zip(snapshot.current_state().iter())
+                            .any(|(a, b)| (a - b).abs() > 1e-12)
+                        {
+                            trace.adoption = SliceAdoption::Adopted;
+                            leave_path.clear();
+                            cooperative
+                                .record_slice(replica, trace)
+                                .expect("checkpoint trace must remain complete");
+                            return CheckpointAction::BoundaryProposal {
+                                state: left,
+                                action: "catalog_leave".to_owned(),
+                            };
+                        }
+                        trace.adoption = SliceAdoption::Rejected;
                     }
                 }
             }

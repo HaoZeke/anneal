@@ -315,8 +315,8 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
         assert!(
             source.contains(r#"grep -a -F -q "$symbol""#)
                 && source.contains("occupancy min families")
-                && source.contains("occupancy_leave_target"),
-            "{name} must grep the binary for occupancy min families and occupancy_leave_target"
+                && source.contains("occupancy leave archive hole"),
+            "{name} must grep the binary for occupancy min families and occupancy leave archive hole"
         );
         assert!(
             source.contains(r#"grep -a -F -q "Refuse""#)
