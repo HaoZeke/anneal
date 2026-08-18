@@ -1201,11 +1201,19 @@ where
                 let family_changed = true;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
-                    let (hole_energy, _) = relax(ledger, state.view(), 1);
+                    // Zero descent steps: the chain takes the hole geometry
+                    // itself, so what it needs is that geometry's energy. A
+                    // relaxed energy carried onto the unrelaxed coordinates
+                    // biases every later Metropolis test in the chain.
+                    let (hole_energy, hole_state) = relax(ledger, state.view(), 0);
                     hops += 1;
-                    ledger.record(hole_energy, state.view());
+                    ledger.record(hole_energy, hole_state.view());
+                    let reached = identity.basin_of(hole_state.view());
+                    let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
+                    feedback.observe(Some(from), reached);
+                    here = Some(reached);
                     e = hole_energy;
-                    x = state;
+                    x = hole_state;
                     accepted += 1;
                     current_validation_gradient = None;
                     bias.deposit(x.view(), cfg.temperature);
@@ -1218,7 +1226,7 @@ where
                         from_gradient,
                         to_state: x.clone(),
                         to_gradient: None,
-                        validated: true,
+                        validated: false,
                         adopted: true,
                     });
                     continue;
