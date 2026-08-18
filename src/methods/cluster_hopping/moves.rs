@@ -1678,6 +1678,61 @@ mod move_scaling_tests {
         );
     }
 
+    /// What the slab arm actually proposes, as opposed to what mask it
+    /// carries. A proposal that never moves is worth no budget at all,
+    /// and one that moves the frozen layer is worth less than none,
+    /// because the quench pins that part back and the descriptor step
+    /// is spent on coordinates that cannot keep it.
+    #[test]
+    fn the_slab_soap_proposal_moves_the_adsorbate_and_not_the_slab() {
+        use rand::SeedableRng;
+        let mut rec = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5], vec![6, 7, 8], vec![9, 10, 11]],
+            1.0,
+        );
+        rec.n_points = 12;
+        rec.active_region = Some((vec![0, 1, 2, 3, 4, 5], 0));
+        rec.frozen = Some(vec![
+            false, false, false, false, false, false, true, true, true, true, true, true,
+        ]);
+        let proto = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+        let origins = [
+            [0.0, 0.0, 3.3],
+            [1.7, 1.7, 4.1],
+            [0.0, 0.0, 0.0],
+            [3.4, 0.0, 0.0],
+        ];
+        let mut coordinates = Vec::with_capacity(36);
+        for origin in &origins {
+            for point in &proto {
+                for axis in 0..3 {
+                    coordinates.push(point[axis] + origin[axis]);
+                }
+            }
+        }
+        let x = Array1::from(coordinates);
+        let soap = rec
+            .move_library
+            .kernels(&rec)
+            .into_iter()
+            .find(|k| matches!(k, ClusterMove::Soap { .. }))
+            .expect("slab library has a SOAP arm");
+        let mut rng = rand::rngs::StdRng::seed_from_u64(5);
+        let y = ClusterMove::propose(&soap, x.view(), 1.0, &mut rng);
+
+        let adsorbate: f64 = (0..18).map(|i| (y[i] - x[i]).abs()).sum();
+        let slab: f64 = (18..36).map(|i| (y[i] - x[i]).abs()).sum();
+        assert!(
+            adsorbate > 1e-9,
+            "the slab SOAP proposal did not move the adsorbate at all"
+        );
+        assert!(
+            slab < 1e-9,
+            "the slab SOAP proposal displaced the frozen layer by {slab}, which the quench pins back"
+        );
+    }
+
     /// The shape a real slab has: every atom is in a rigid group, so
     /// the grouped set covers the structure and says nothing, while
     /// the active region names the two atoms that actually move. The
