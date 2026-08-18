@@ -2,7 +2,7 @@
 
 pub mod proposal;
 
-use crate::catalog::{BasinCensus, BasinId, MixingEvidence};
+use crate::catalog::{BasinCensus, BasinId, MixingEvidence, in_interface_ensemble};
 
 /// Exact local visit count that classifies one occupied basin as exhausted.
 pub const LOCAL_CENSUS_LEAVE: u64 = 8;
@@ -227,8 +227,9 @@ pub enum PolicyReason {
     UnrelatedCatalogExplore,
     /// A related but unexhausted basin requests exploration.
     SameBasinExplore,
-    /// Another walk already occupies this DECAF packing. Leave it.
-    OccupiedPackingLeave,
+    /// A TIS extra reached its leftover-SOAP interface. Shoot from the
+    /// path that got there rather than keep walking the packing.
+    InterfaceCrossed,
     /// Explore-role chains have mixed; they must leave rather than keep exploring.
     ExploreCollapsed,
     /// A TIS extra walks isomers of the occupied packing.
@@ -254,7 +255,7 @@ impl PolicyReason {
             Self::GlobalCensusSaturatedExplore => "global_census_saturated_explore",
             Self::UnrelatedCatalogExplore => "unrelated_catalog_explore",
             Self::SameBasinExplore => "same_basin_explore",
-            Self::OccupiedPackingLeave => "occupied_packing_leave",
+            Self::InterfaceCrossed => "interface_crossed",
             Self::IsomerWalk => "isomer_walk",
             Self::ExploreCollapsed => "explore_collapsed",
             Self::CertifiedAttractor => "certified_attractor",
@@ -363,11 +364,14 @@ impl CatalogPolicy {
             ActiveCatalogRelation::SameBasin if input.local_stall_slices >= LOCAL_STALL_LEAVE => {
                 decision(PolicyAction::Leave, PolicyReason::LocalStall)
             }
-            ActiveCatalogRelation::SameBasin if input.interface_rank != u32::MAX => {
-                decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
+            ActiveCatalogRelation::SameBasin
+                if input.interface_rank != u32::MAX
+                    && in_interface_ensemble(input.leftover_lambda, input.interface_threshold) =>
+            {
+                decision(PolicyAction::Leave, PolicyReason::InterfaceCrossed)
             }
             ActiveCatalogRelation::SameBasin => {
-                decision(PolicyAction::Leave, PolicyReason::OccupiedPackingLeave)
+                decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
             ActiveCatalogRelation::Unrelated {
                 lower_energy_anchor: false,

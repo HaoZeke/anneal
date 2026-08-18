@@ -127,7 +127,7 @@ fn tis_extras_walk_isomers_until_pruned() {
 }
 
 #[test]
-fn unseated_same_decaf_packing_leaves() {
+fn a_packing_champion_walks_isomers_rather_than_leaving() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let state = input(
         ActiveCatalogRelation::SameBasin,
@@ -136,8 +136,30 @@ fn unseated_same_decaf_packing_leaves() {
     );
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::OccupiedPackingLeave);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+}
+
+#[test]
+fn a_seated_extra_leaves_once_it_crosses_its_own_interface() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut extra = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    extra.interface_rank = 1;
+    extra.interface_threshold = 0.5;
+
+    extra.leftover_lambda = 0.4;
+    let below = CatalogPolicy::decide(extra);
+    assert_eq!(below.action, PolicyAction::ContinueLocal);
+    assert_eq!(below.reason, PolicyReason::IsomerWalk);
+
+    extra.leftover_lambda = 0.5;
+    let crossed = CatalogPolicy::decide(extra);
+    assert_eq!(crossed.action, PolicyAction::Leave);
+    assert_eq!(crossed.reason, PolicyReason::InterfaceCrossed);
 }
 
 #[test]

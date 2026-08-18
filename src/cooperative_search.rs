@@ -884,6 +884,7 @@ mod run {
                         local_stall_slices,
                         local_deepened,
                         self.on_published_prize,
+                        leftover_lambda,
                     )?;
                     self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                     self.push_event(
@@ -972,6 +973,7 @@ mod run {
                             local_stall_slices,
                             local_deepened,
                             self.on_published_prize,
+                            leftover_lambda,
                         )?;
                         self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
                         self.push_event(
@@ -1026,6 +1028,7 @@ mod run {
                     local_stall_slices,
                     local_deepened,
                     self.on_published_prize,
+                    leftover_lambda,
                 )?;
                 let version = self
                     .replicas
@@ -2242,6 +2245,7 @@ mod run {
         local_stall_slices: u32,
         local_deepened: bool,
         on_published_prize: bool,
+        path_lambda: f64,
     ) -> Result<CatalogPolicyInput, PolicyInputError> {
         let relation = match state.relation {
             CatalogRelation::Empty => ActiveCatalogRelation::Empty,
@@ -2271,7 +2275,14 @@ mod run {
                 certified_attractor: state.certified_attractor,
                 pruned: state.pruned,
             },
-            leftover_lambda: state.leftover_lambda,
+            // The TIS order parameter is the maximum over the path, and
+            // the state reports one frame. The client posted the maximum
+            // of the frames before this one, so the two together are it.
+            leftover_lambda: if path_lambda.is_finite() {
+                path_lambda.max(state.leftover_lambda)
+            } else {
+                state.leftover_lambda
+            },
             interface_rank: state.interface_rank,
             interface_threshold: state.interface_threshold,
             occupied_family_count: state.occupied_family_count as usize,
