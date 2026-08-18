@@ -71,15 +71,26 @@ pub fn resolvable_shortfall(hits_a: usize, hits_b: usize, runs: usize) -> f64 {
 
 /// Shifted-exponential fit to the runs that reached the target.
 ///
-/// Returns the offset and the rate beyond it. The maximum-likelihood
-/// estimates are the smallest observed time for the offset and the
-/// reciprocal of the mean excess over it for the rate. The offset is
-/// the part of the search no amount of parallelism removes, so it is
-/// the quantity that decides whether replicas are worth their cores.
+/// Returns the offset and the rate beyond it.
+///
+/// The offset is the awkward one and a caller has to know why. Its
+/// maximum-likelihood estimate is the smallest observed time, an
+/// extreme-order statistic: it can only fall as runs are added, so the
+/// estimate drifts down and every quantity drawn from it, the speedup
+/// ceiling above all, drifts up. Measured on LJ38 the offset read 4629
+/// over 96 arrivals and 2815 over 384, taking the ceiling from 2.84 to
+/// 4.89 on the same search, and the two arms swapped which of them had
+/// the lower one.
+///
+/// This returns the bias-corrected estimate,
+/// \(t_{(1)} - (\bar t - t_{(1)})/(n-1)\), which removes the leading
+/// bias but not the drift. An offset read off tens of arrivals is not a
+/// converged number and must not be quoted as one;
+/// [`offset_is_resolved`] is the guard.
 ///
 /// Censored runs are excluded, which biases the fit optimistic when
-/// most runs never arrive; [`success_rate`] is what says whether to
-/// trust it.
+/// most runs never arrive; [`success_rate`] says whether to trust it at
+/// all.
 pub fn shifted_exponential_fit(runs: &[RunTime]) -> Option<(f64, f64)> {
     let mut reached: Vec<f64> = runs
         .iter()
@@ -89,13 +100,38 @@ pub fn shifted_exponential_fit(runs: &[RunTime]) -> Option<(f64, f64)> {
         return None;
     }
     reached.sort_by(f64::total_cmp);
-    let offset = reached[0];
-    let mean = reached.iter().sum::<f64>() / reached.len() as f64;
+    let n = reached.len() as f64;
+    let smallest = reached[0];
+    let mean = reached.iter().sum::<f64>() / n;
+    let raw_excess = mean - smallest;
+    if !(raw_excess > 0.0) {
+        return None;
+    }
+    let offset = (smallest - raw_excess / (n - 1.0)).max(0.0);
     let excess = mean - offset;
     if !(excess > 0.0) {
         return None;
     }
     Some((offset, 1.0 / excess))
+}
+
+/// Whether an offset estimate is worth quoting.
+///
+/// The offset's standard error goes as \(1/(n\lambda)\) in the
+/// arrivals, so it is placed to within a tenth of itself only once the
+/// arrivals are numerous relative to the excess-to-offset ratio. Below
+/// that the estimate is still moving and a ceiling drawn from it is a
+/// property of the sample rather than of the search.
+pub fn offset_is_resolved(runs: &[RunTime]) -> bool {
+    let arrivals = runs.iter().filter(|run| run.is_some()).count();
+    let Some((offset, rate)) = shifted_exponential_fit(runs) else {
+        return false;
+    };
+    if offset <= 0.0 {
+        return arrivals >= 30;
+    }
+    let standard_error = 1.0 / (arrivals as f64 * rate);
+    standard_error < 0.1 * offset
 }
 
 /// Expected time to target when `processors` independent runs race.
