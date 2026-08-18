@@ -2,6 +2,16 @@
 
 /// Quality-diversity archive: tessellation, curiosity, novelty.
 pub mod archive;
+
+/// Cells the occupancy archive tessellates descriptor space into.
+///
+/// A parameter rather than an outcome, which is the whole point:
+/// leader-clustered families numbered twenty-two on a twenty-four
+/// replica wave, so coverage was a ratio whose denominator grew as it
+/// was measured. Set above the wave size so an ensemble cannot occupy
+/// every cell and coverage stays informative, and below the point
+/// where cells hold one structure each and the archive is a list.
+pub const OCCUPANCY_NICHES: usize = 64;
 pub mod basin;
 pub mod calibration;
 pub mod census;
