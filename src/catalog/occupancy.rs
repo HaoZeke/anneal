@@ -50,10 +50,12 @@
 //! A mixing certificate names a putative: uniquely deepest, occupant
 //! mixed, a mixed competitor, strictly more occupied. On LJ75 that
 //! putative is the icosahedral shelf until a second funnel is deeper.
-//! Occupancy retires when rematched DECAF Good--Turing saturates at
-//! least [`occupancy_min_families`] families (`CATALOG_MIN_FAMILIES`,
-//! default 2 for two-funnel paper hurdles; 1 is Good--Turing alone),
-//! or when mixing and that saturation hold together. Occupant \(\hat R\) uses
+//! Occupancy retires when rematched DECAF Good--Turing says no new
+//! packings are appearing (`packing_saturated`).
+//! [`occupancy_min_families`] (`CATALOG_MIN_FAMILIES`) is an optional
+//! floor so a known two-funnel hurdle does not stop on one packing.
+//! Default 1 is Good--Turing alone. Mixing names a putative; it
+//! retires only with that saturation. Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
@@ -118,10 +120,10 @@ pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
     published.is_some_and(|target| best < target + 1e-4)
 }
 
-/// Default floor on rematched occupied families. Two-funnel paper
-/// hurdles (ico/Oh, ico/Marks). Override with `CATALOG_MIN_FAMILIES`.
-/// `1` is Good--Turing alone.
-pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 2;
+/// Default floor on rematched occupied families. `1` is Good--Turing
+/// alone: stop when no new packings appear. Set
+/// `CATALOG_MIN_FAMILIES=2` for two-funnel paper hurdles.
+pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 1;
 
 /// User floor on occupied DECAF families before saturation retires.
 pub fn occupancy_min_families() -> usize {
@@ -565,8 +567,17 @@ mod tests {
 
     #[test]
     fn leftover_soap_saturation_on_one_family_is_not_done() {
-        assert_eq!(occupancy_complete(false, true, 1), None);
-        assert_eq!(occupancy_complete(false, true, 0), None);
+        assert_eq!(occupancy_complete_at(false, true, 1, 2), None);
+        assert_eq!(occupancy_complete_at(false, true, 0, 2), None);
+    }
+
+    #[test]
+    fn packing_good_turing_with_no_new_families_is_saturated() {
+        assert_eq!(
+            occupancy_complete_at(false, true, 1, 1),
+            Some(OccupancyCertificate::CatalogSaturated)
+        );
+        assert_eq!(occupancy_complete_at(false, false, 5, 1), None);
     }
 
     #[test]
@@ -580,10 +591,11 @@ mod tests {
             true,
             2
         ));
-        assert!(!occupancy_retire(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
-            1
+            1,
+            2
         ));
     }
 
@@ -630,25 +642,29 @@ mod tests {
             false,
             2
         ));
-        assert!(!occupancy_retire(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
-            1
+            1,
+            2
         ));
-        assert!(occupancy_retire(
+        assert!(occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
+            2,
             2
         ));
-        assert!(occupancy_retire(
+        assert!(occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
+            2,
             2
         ));
-        assert!(!occupancy_retire(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
-            1
+            1,
+            2
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
     }

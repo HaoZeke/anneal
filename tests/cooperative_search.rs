@@ -1159,6 +1159,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         interface_rank: u32::MAX,
         interface_threshold: 0.0,
         occupied_family_count: 0,
+        packing_saturated: false,
         on_published_prize: false,
     };
     assert_eq!(

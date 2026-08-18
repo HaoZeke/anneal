@@ -31,6 +31,7 @@ fn input(
         interface_rank: u32::MAX,
         interface_threshold: 0.0,
         occupied_family_count: 0,
+        packing_saturated: false,
         on_published_prize: false,
     }
 }
@@ -459,6 +460,7 @@ fn decision_table_covers_every_discrete_input_state() {
                                 interface_rank: u32::MAX,
                                 interface_threshold: 0.0,
                                 occupied_family_count: 0,
+                                packing_saturated: false,
                                 on_published_prize: false,
                             });
                             assert!(!decision.reason.code().is_empty());

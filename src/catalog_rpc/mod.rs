@@ -17,7 +17,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 10;
+pub const PROTOCOL_VERSION: u16 = 11;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -375,6 +375,8 @@ pub struct PolicyState {
     pub interface_count: u32,
     /// Occupied DECAF families on the packing book.
     pub occupied_family_count: u32,
+    /// DECAF-family Good--Turing: unseen packing mass is small.
+    pub packing_saturated: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1025,6 +1027,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_interface_threshold(state.interface_threshold);
                     output.set_interface_count(state.interface_count);
                     output.set_occupied_family_count(state.occupied_family_count);
+                    output.set_packing_saturated(state.packing_saturated);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1217,6 +1220,7 @@ pub(crate) fn decode_reply_reader(
                         interface_threshold: state.get_interface_threshold(),
                         interface_count: state.get_interface_count(),
                         occupied_family_count: state.get_occupied_family_count(),
+                        packing_saturated: state.get_packing_saturated(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {
