@@ -46,7 +46,7 @@ pub const SOAP_PACK_MERGE: f64 = 0.10;
 /// DECAF family every time, at every distance. Distance is not what
 /// separates packings here, so there is nothing to buy by walking
 /// further, and the extra Cartesian displacement is not free.
-/// Leaving takes the requench loop in [`leave_occupied_packing`].
+/// Occupancy Leave does not use this walk as a destination.
 pub const SOAP_PACK_ESCAPE: f64 = SOAP_PACK_MERGE;
 /// Packing-class gap on unit mean SOAP. Ico isomers sit under
 /// [`SOAP_PACK_MERGE`]. Mackay vs Marks is 0.163. A bank sample
