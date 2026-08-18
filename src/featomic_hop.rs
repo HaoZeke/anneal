@@ -978,6 +978,17 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
         if !archive.is_empty() {
             return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
         }
+        // A uniform leftover on a free cluster means a closed packing
+        // with nothing local to follow, and the kick is the escape from
+        // it. On a masked structure it means something else: an
+        // adsorbate of a few atoms is all surface and all alike, so the
+        // veto fires whatever the geometry does, and kicking on it
+        // spends a quench and a move slot on a proposal the residual
+        // never asked for. Decline instead, and let the arm the
+        // allocator would otherwise have skipped take the hop.
+        if mobile.is_some_and(|set| set.len() < x.len() / 3) {
+            return x.to_owned();
+        }
         return packing_kick(x, &s, rmsd, mobile, rng);
     }
     focus_patch(&mut s, x, rcut, rng);
