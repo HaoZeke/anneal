@@ -1268,11 +1268,26 @@ impl ClusterMove {
                 if *class && packing {
                     crate::soap::step_away(x, &[], spec, *rmsd, rng)
                 } else if packing {
-                    // Measured LJ hop: SOFI C5 residual on the best
-                    // axis, gated only by fivefold length. The multi-axis
-                    // hop yields on disordered LJ38 and never leaves.
-                    let _ = rng;
-                    crate::soap::step_away_fivefold_measured(x, *rmsd)
+                    // SOFI C5 residual on a fivefold axis. The measured
+                    // single-axis hop is a deterministic function of x,
+                    // so drawing this arm twice from one minimum
+                    // proposes the same trial twice and pays for it
+                    // twice; a chain that revisits a minimum pays every
+                    // time. The drawn-axis hop varies, but yields on a
+                    // disordered shell where too few axes are still
+                    // fivefold, and a proposal that never moves is
+                    // worse than a repeated one. So draw first and keep
+                    // the measured hop for when the draw declines.
+                    let drawn = crate::soap::step_away_fivefold(x, *rmsd, rng);
+                    let moved = drawn
+                        .iter()
+                        .zip(x.iter())
+                        .any(|(after, before)| (after - before).abs() > 1e-12);
+                    if moved {
+                        drawn
+                    } else {
+                        crate::soap::step_away_fivefold_measured(x, *rmsd)
+                    }
                 } else {
                     crate::soap::step_away_cloud(
                         x,
