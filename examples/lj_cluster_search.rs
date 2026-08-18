@@ -2264,7 +2264,7 @@ fn run_capnp_catalog(
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
-        CooperativeRun, CooperativeRunError, PolicyEvidenceOutcome, PolicyRole,
+        CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
         PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
         SliceTrace, SliceValidation, TransitionRecordOutcome,
     };
