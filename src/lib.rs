@@ -139,6 +139,8 @@ pub mod quench;
 pub mod raft;
 /// Joint population assignment across fixed-probe attraction regions.
 pub mod region_assignment;
+/// Temperature spread across a cooperative ensemble and its exchange.
+pub mod replica_exchange;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
 pub mod runner;
