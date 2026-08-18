@@ -616,6 +616,14 @@ fn process_request(
             request.event_sequence,
         ));
     }
+    // Identity before the replay cache. The cache is keyed by replica
+    // and sequence alone, so a caller from another campaign or ensemble
+    // that happens to share a replica id collides with a stored request
+    // and is told its sequence replayed rather than that it is talking
+    // to the wrong coordinator.
+    if let Some(reason) = identity_rejection(config, &request.identity) {
+        return Ok(rejected(&state, request.event_sequence, reason));
+    }
     let key = (request.identity.replica, request.event_sequence);
     if let Some((stored, payload)) = state.requests.get(&key) {
         return Ok(if stored == &request {
