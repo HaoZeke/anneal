@@ -38,21 +38,16 @@ pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
 /// superbasin and not the other funnel.
 pub const SOAP_PACK_MERGE: f64 = 0.10;
 
-/// Cloud-mean distance a hole step must reach to have left a packing.
+/// Cloud-mean distance a hole step walks before it stops.
 ///
-/// Merge is the radius at which two packings count as one. Leaving is
-/// a different question: the quench that follows a hole step is a
-/// downhill minimiser, and started from the merge boundary it runs
-/// back into the well it was meant to leave. So the walk has to clear
-/// the separation between packings, not the radius of one.
-///
-/// The factor is the sealed LJ75 ratio in [`crate::catalog::packing`]:
-/// icosahedral versus Marks measures 0.69 against a merge of 0.20, so
-/// distinct packings sit about three and a half merge radii apart.
-/// That measurement is in the DECAF histogram L1, and this threshold
-/// is in the cloud-mean L2, so it is a prior carried across metrics
-/// rather than a measurement in this one.
-pub const SOAP_PACK_ESCAPE: f64 = 3.5 * SOAP_PACK_MERGE;
+/// Measured on the LJ75 icosahedral fixture, twelve seeds, sweeping
+/// this from one to five merge radii: the walk reaches 0.33 to 0.55 in
+/// the cloud mean and the quench that follows returns to the same
+/// DECAF family every time, at every distance. Distance is not what
+/// separates packings here, so there is nothing to buy by walking
+/// further, and the extra Cartesian displacement is not free.
+/// Leaving takes the requench loop in [`leave_occupied_packing`].
+pub const SOAP_PACK_ESCAPE: f64 = SOAP_PACK_MERGE;
 /// Packing-class gap on unit mean SOAP. Ico isomers sit under
 /// [`SOAP_PACK_MERGE`]. Mackay vs Marks is 0.163. A bank sample
 /// closer than this is the same funnel, not a class another chain
@@ -1319,66 +1314,70 @@ mod tests {
         );
     }
 
-    /// What a Leave has to cover, measured rather than assumed.
+    /// What it takes to leave a packing, measured.
     ///
-    /// The escape constant was set from the sealed LJ75 ratio, ico
-    /// versus Marks at 0.69 against a merge of 0.20, which is measured
-    /// in the DECAF histogram L1 while the exit test runs in the
-    /// cloud-mean L2. This sweeps the escape distance and quenches
-    /// from each hole step, so the factor rests on the family-change
-    /// rate in the metric that uses it. Run with --nocapture to read
-    /// the table.
+    /// A single hole step does not do it. Sweeping the escape distance
+    /// from one to five merge radii on the LJ75 icosahedral fixture,
+    /// the walk reaches 0.33 to 0.55 in the cloud mean and the quench
+    /// returns to the same DECAF family in every one of twelve seeds
+    /// at every distance. What leaves is the requench loop: step,
+    /// quench, continue from the quenched structure with a wider
+    /// scale, and kick in the occupied packing's null space if six
+    /// attempts all come home.
+    ///
+    /// This is the contrast a regression would break, so it is what
+    /// the test asserts. Run with --nocapture to read the counts.
     #[test]
-    fn the_escape_distance_is_where_a_quench_stops_falling_back() {
+    fn leaving_a_packing_takes_the_requench_loop_not_one_hole_step() {
         const SEEDS: u64 = 12;
         let ico = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let origin = ico.as_slice().expect("fixture is contiguous");
         let rcut = 3.5;
         let well = unit(&spectrum(ico.view(), rcut, None, None).cloud_mean);
-        let mut changed_at_merge = 0usize;
-        let mut changed_at_escape = 0usize;
-        for factor in [1.0_f64, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0] {
-            let escape = factor * SOAP_PACK_MERGE;
-            let mut changed = 0usize;
-            let mut reached = 0.0_f64;
-            for seed in 0..SEEDS {
-                let mut rng = StdRng::seed_from_u64(seed);
-                let left = step_into_hole_escaping(
-                    ico.view(),
-                    std::slice::from_ref(&well),
-                    SOAP_PACK_MERGE,
-                    escape,
-                    rcut,
-                    None,
-                    None,
-                    &mut rng,
-                );
-                let moved = unit(&spectrum(left.view(), rcut, None, None).cloud_mean);
-                reached += soap_l2_pack(moved.view(), well.view());
-                let (_, quenched) = quench_lj(left.view());
-                let trial = quenched.as_slice().expect("quench is contiguous");
-                if crate::catalog::different_decaf_family(origin, trial) {
-                    changed += 1;
-                }
-            }
-            println!(
-                "escape {factor:.1}x merge: reached {:.4} mean, family changed {changed}/{SEEDS}",
-                reached / SEEDS as f64
+        let mut single = 0usize;
+        let mut looped = 0usize;
+        for seed in 0..SEEDS {
+            let mut rng = StdRng::seed_from_u64(seed);
+            let one = step_into_hole(
+                ico.view(),
+                std::slice::from_ref(&well),
+                SOAP_PACK_MERGE,
+                rcut,
+                None,
+                None,
+                &mut rng,
             );
-            if (factor - 1.0).abs() < 1e-9 {
-                changed_at_merge = changed;
+            let (_, quenched) = quench_lj(one.view());
+            if crate::catalog::different_decaf_family(
+                origin,
+                quenched.as_slice().expect("quench is contiguous"),
+            ) {
+                single += 1;
             }
-            if (factor - SOAP_PACK_ESCAPE / SOAP_PACK_MERGE).abs() < 1e-9 {
-                changed_at_escape = changed;
+
+            let mut rng = StdRng::seed_from_u64(seed);
+            let many = leave_occupied_packing(
+                ico.view(),
+                std::slice::from_ref(&well),
+                rcut,
+                None,
+                None,
+                |v| quench_lj(v).1,
+                &mut rng,
+            );
+            if crate::catalog::different_decaf_family(
+                origin,
+                many.as_slice().expect("leave is contiguous"),
+            ) {
+                looped += 1;
             }
         }
-        // The claim the constant rests on: stopping at sameness leaves
-        // the quench inside the well it was told to leave, and the
-        // escape distance is far enough out that it does not.
+        println!("single hole step {single}/{SEEDS}, requench loop {looped}/{SEEDS}");
         assert!(
-            changed_at_escape > changed_at_merge,
-            "escape {changed_at_escape}/{SEEDS} is no better than stopping at merge \
-             {changed_at_merge}/{SEEDS}; the factor is not earning itself"
+            looped > single,
+            "the requench loop left the packing {looped}/{SEEDS} against one step's \
+             {single}/{SEEDS}; if one step is enough the loop is dead weight, and if \
+             neither leaves then a Leave cannot leave"
         );
     }
 
