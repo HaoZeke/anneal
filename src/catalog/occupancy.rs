@@ -181,7 +181,9 @@ pub enum PackingRole {
     NovelFamily,
 }
 
-/// Per-family champion, not the catalog-wide energy incumbent.
+/// Per-family energy class, not the catalog-wide incumbent.
+/// Equal energy to the family best is Champion here; the coordinator
+/// keeps one replica via family_champion_replicas so extras Leave.
 pub fn packing_role(same_family: bool, energy: f64, best_of_family: Option<f64>) -> PackingRole {
     if !same_family {
         return PackingRole::NovelFamily;

@@ -2745,13 +2745,16 @@ fn packing_relation(
     if !compared {
         return None;
     }
+    let unique_champion = family_champion_replicas(scientific).contains(&replica);
     match packing_role(same_as_any, energy, best_of_family) {
         PackingRole::NovelFamily => Some(CatalogRelation::UnrelatedNoAnchor),
-        PackingRole::FamilyChampion => Some(CatalogRelation::Incumbent),
-        PackingRole::FamilyExtra if same_as_lower_isomer => {
+        PackingRole::FamilyChampion if unique_champion => Some(CatalogRelation::Incumbent),
+        PackingRole::FamilyChampion | PackingRole::FamilyExtra if same_as_lower_isomer => {
             Some(CatalogRelation::UnrelatedLowerAnchor)
         }
-        PackingRole::FamilyExtra => Some(CatalogRelation::SameBasin),
+        PackingRole::FamilyChampion | PackingRole::FamilyExtra => {
+            Some(CatalogRelation::SameBasin)
+        }
     }
 }
 
