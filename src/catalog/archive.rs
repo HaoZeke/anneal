@@ -141,75 +141,132 @@ fn nearest(centroids: &[Vec<f64>], point: &[f64]) -> Option<usize> {
     best.map(|(index, _)| index)
 }
 
-/// Per-cell curiosity, in the MAP-Elites sense.
+/// Per-cell Beta-Bernoulli bandit over the archive.
 ///
-/// Selecting always from the emptiest cell is the obvious archive
-/// policy and the wrong one once the descriptor is noisy: an empty
-/// cell that nothing can reach is chosen forever. Curiosity scores
-/// answer that by paying a cell when a start drawn from it produced
-/// something the archive kept, and charging it when it did not, so
-/// effort follows what has recently worked.
+/// Choosing which cell to draw a start from is a bandit problem and
+/// deserves to be treated as one. The reward is binary, the catalog
+/// kept what came back or it did not, so the conjugate model is Beta
+/// over a Bernoulli rate and the selection rule is Thompson sampling:
+/// draw a rate from each cell's posterior and take the highest.
+///
+/// That is better than the reward-and-decay heuristic it replaces on
+/// three counts. It has no constants to pick, where the heuristic had
+/// a decay and a floor chosen by hand. Its exploration is automatic:
+/// a cell tried twice has a wide posterior and still wins draws, while
+/// a cell tried two hundred times does not, so effort moves off a cell
+/// only once there is evidence to move it. And it cannot write a cell
+/// off, because a Beta posterior never reaches zero, which matters
+/// because a descriptor can be wrong where a cell is right.
+///
+/// The allocator over move kernels in [`crate::allocate`] is the same
+/// idea over a Gaussian reward; this is the Bernoulli case.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Curiosity {
-    scores: Vec<f64>,
+    /// Successes plus one: starts from this cell the catalog kept.
+    alpha: Vec<f64>,
+    /// Failures plus one: starts it did not keep.
+    beta: Vec<f64>,
 }
 
 impl Curiosity {
-    /// Scores for `cells`, each starting neutral.
+    /// A bandit over `cells`, each with a uniform prior.
     pub fn new(cells: usize) -> Self {
         Self {
-            scores: vec![1.0; cells],
+            alpha: vec![1.0; cells],
+            beta: vec![1.0; cells],
         }
     }
 
-    /// Grow the table so `cells` are scored, new ones neutral.
+    /// Grow the table so `cells` are armed, new ones uniform.
     ///
-    /// Families are discovered as the search runs, so the table cannot
-    /// be sized once. Growing never disturbs a score already earned.
+    /// Cells are discovered as the search runs, so the table cannot be
+    /// sized once. Growing never disturbs a posterior already earned.
     pub fn ensure(&mut self, cells: usize) {
-        if cells > self.scores.len() {
-            self.scores.resize(cells, 1.0);
+        if cells > self.alpha.len() {
+            self.alpha.resize(cells, 1.0);
+            self.beta.resize(cells, 1.0);
         }
     }
 
-    /// Score of one cell, or zero when it is not a cell.
+    /// Posterior mean success rate of a cell, or the uniform prior for
+    /// one the table has not armed.
     pub fn score(&self, cell: usize) -> f64 {
-        self.scores.get(cell).copied().unwrap_or(0.0)
+        let alpha = self.alpha.get(cell).copied().unwrap_or(1.0);
+        let beta = self.beta.get(cell).copied().unwrap_or(1.0);
+        alpha / (alpha + beta)
     }
 
-    /// A start drawn from this cell produced something kept.
+    /// Times this cell has been drawn from.
+    pub fn draws(&self, cell: usize) -> f64 {
+        let alpha = self.alpha.get(cell).copied().unwrap_or(1.0);
+        let beta = self.beta.get(cell).copied().unwrap_or(1.0);
+        alpha + beta - 2.0
+    }
+
+    /// A start drawn from this cell produced something the catalog kept.
     pub fn reward(&mut self, cell: usize) {
-        if let Some(score) = self.scores.get_mut(cell) {
-            *score += 1.0;
+        if let Some(alpha) = self.alpha.get_mut(cell) {
+            *alpha += 1.0;
         }
     }
 
     /// A start drawn from this cell produced nothing.
-    ///
-    /// Floored above zero so a cell is never removed from
-    /// consideration outright: the descriptor may be wrong, not the
-    /// cell, and a scheme that can permanently exclude a region of the
-    /// space cannot recover from a bad descriptor.
     pub fn penalise(&mut self, cell: usize) {
-        if let Some(score) = self.scores.get_mut(cell) {
-            *score = (*score * 0.5).max(0.05);
+        if let Some(beta) = self.beta.get_mut(cell) {
+            *beta += 1.0;
         }
     }
 
-    /// Draw a cell in proportion to curiosity, restricted to `allowed`.
+    /// Thompson draw: sample a rate from each allowed cell's posterior
+    /// and take the highest.
     pub fn select<R: Rng + ?Sized>(&self, allowed: &[usize], rng: &mut R) -> Option<usize> {
-        let total: f64 = allowed.iter().map(|cell| self.score(*cell)).sum();
-        if allowed.is_empty() || !(total > 0.0) {
-            return allowed.first().copied();
-        }
-        let mut draw = rng.random::<f64>() * total;
+        let mut best: Option<(usize, f64)> = None;
         for cell in allowed {
-            draw -= self.score(*cell);
-            if draw <= 0.0 {
-                return Some(*cell);
+            let alpha = self.alpha.get(*cell).copied().unwrap_or(1.0);
+            let beta = self.beta.get(*cell).copied().unwrap_or(1.0);
+            let sampled = sample_beta(alpha, beta, rng);
+            if best.is_none_or(|(_, held)| sampled > held) {
+                best = Some((*cell, sampled));
             }
         }
-        allowed.last().copied()
+        best.map(|(cell, _)| cell)
+    }
+}
+
+/// One Beta draw, as the ratio of two Gammas.
+fn sample_beta<R: Rng + ?Sized>(alpha: f64, beta: f64, rng: &mut R) -> f64 {
+    let x = sample_gamma(alpha, rng);
+    let y = sample_gamma(beta, rng);
+    if x + y <= 0.0 { 0.5 } else { x / (x + y) }
+}
+
+/// One Gamma draw by Marsaglia and Tsang, with the shape boost that
+/// carries shapes below one.
+fn sample_gamma<R: Rng + ?Sized>(shape: f64, rng: &mut R) -> f64 {
+    if !shape.is_finite() || shape <= 0.0 {
+        return 0.0;
+    }
+    if shape < 1.0 {
+        let boosted = sample_gamma(shape + 1.0, rng);
+        let u: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+        return boosted * u.powf(1.0 / shape);
+    }
+    let d = shape - 1.0 / 3.0;
+    let c = 1.0 / (9.0 * d).sqrt();
+    loop {
+        // Box-Muller for the standard normal the method needs.
+        let u1: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+        let u2: f64 = rng.random::<f64>();
+        let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+        let v = 1.0 + c * normal;
+        if v <= 0.0 {
+            continue;
+        }
+        let v = v * v * v;
+        let u: f64 = rng.random::<f64>().max(f64::MIN_POSITIVE);
+        if u.ln() < 0.5 * normal * normal + d - d * v + d * v.ln() {
+            return d * v;
+        }
     }
 }
 
@@ -303,48 +360,100 @@ mod tests {
     }
 
     #[test]
-    fn curiosity_follows_what_worked() {
-        let mut curiosity = Curiosity::new(3);
-        assert_eq!(curiosity.score(0), 1.0);
-        curiosity.reward(1);
-        curiosity.reward(1);
-        curiosity.penalise(2);
-        assert!(curiosity.score(1) > curiosity.score(0));
-        assert!(curiosity.score(2) < curiosity.score(0));
+    fn the_posterior_follows_what_worked() {
+        let mut bandit = Curiosity::new(3);
+        // A uniform prior is an even rate and no draws behind it.
+        assert!((bandit.score(0) - 0.5).abs() < 1e-12);
+        assert_eq!(bandit.draws(0), 0.0);
+        bandit.reward(1);
+        bandit.reward(1);
+        bandit.penalise(2);
+        assert!(bandit.score(1) > bandit.score(0));
+        assert!(bandit.score(2) < bandit.score(0));
+        assert_eq!(bandit.draws(1), 2.0);
     }
 
     #[test]
-    fn a_penalised_cell_is_never_written_off() {
-        let mut curiosity = Curiosity::new(1);
+    fn a_failing_cell_is_never_written_off() {
+        let mut bandit = Curiosity::new(1);
         for _ in 0..200 {
-            curiosity.penalise(0);
+            bandit.penalise(0);
         }
-        // A descriptor can be wrong where a cell is not, so a scheme
-        // that permanently excludes a region cannot recover from one.
-        assert!(curiosity.score(0) > 0.0);
+        // A Beta posterior cannot reach zero, which is what stops a
+        // descriptor that is wrong about a cell from excluding the
+        // region behind it for good.
+        assert!(bandit.score(0) > 0.0);
     }
 
     #[test]
-    fn selection_prefers_the_curious_cell() {
-        let mut curiosity = Curiosity::new(2);
-        for _ in 0..10 {
-            curiosity.reward(0);
+    fn thompson_sampling_prefers_the_cell_that_pays() {
+        let mut bandit = Curiosity::new(2);
+        for _ in 0..30 {
+            bandit.reward(0);
+            bandit.penalise(1);
         }
-        curiosity.penalise(1);
         let mut rng = StdRng::seed_from_u64(13);
-        let picked = (0..200)
-            .filter(|_| curiosity.select(&[0, 1], &mut rng) == Some(0))
+        let picked = (0..300)
+            .filter(|_| bandit.select(&[0, 1], &mut rng) == Some(0))
             .count();
-        assert!(picked > 150, "curious cell chosen only {picked} of 200");
+        assert!(picked > 270, "paying cell chosen only {picked} of 300");
+    }
+
+    #[test]
+    fn an_untried_cell_still_wins_draws() {
+        // The property a decay heuristic does not have: a cell tried
+        // twice has a wide posterior and keeps being explored, so
+        // effort leaves it only once there is evidence to leave on.
+        let mut bandit = Curiosity::new(2);
+        for _ in 0..12 {
+            bandit.reward(0);
+        }
+        bandit.penalise(1);
+        let mut rng = StdRng::seed_from_u64(19);
+        let explored = (0..400)
+            .filter(|_| bandit.select(&[0, 1], &mut rng) == Some(1))
+            .count();
+        assert!(
+            explored > 10,
+            "barely-tried cell explored only {explored} of 400"
+        );
     }
 
     #[test]
     fn selection_answers_even_with_nothing_to_go_on() {
-        let curiosity = Curiosity::default();
+        let bandit = Curiosity::default();
         let mut rng = StdRng::seed_from_u64(17);
-        assert_eq!(curiosity.select(&[], &mut rng), None);
-        // Cells outside the score table score zero; still an answer.
-        assert_eq!(curiosity.select(&[4], &mut rng), Some(4));
+        assert_eq!(bandit.select(&[], &mut rng), None);
+        // Cells outside the table carry the uniform prior; still an
+        // answer, and still a fair one.
+        assert_eq!(bandit.select(&[4], &mut rng), Some(4));
+    }
+
+    #[test]
+    fn a_beta_draw_stays_in_the_unit_interval() {
+        let mut rng = StdRng::seed_from_u64(23);
+        for (alpha, beta) in [(0.5, 0.5), (1.0, 1.0), (30.0, 2.0), (2.0, 30.0)] {
+            for _ in 0..200 {
+                let drawn = sample_beta(alpha, beta, &mut rng);
+                assert!(
+                    (0.0..=1.0).contains(&drawn),
+                    "Beta({alpha},{beta}) drew {drawn}"
+                );
+            }
+        }
+        // A shape the method cannot use answers zero rather than
+        // looping or returning a NaN into a comparison.
+        assert_eq!(sample_gamma(0.0, &mut rng), 0.0);
+        assert_eq!(sample_gamma(f64::NAN, &mut rng), 0.0);
+    }
+
+    #[test]
+    fn a_lopsided_posterior_concentrates() {
+        let mut rng = StdRng::seed_from_u64(29);
+        let draws: Vec<f64> = (0..500).map(|_| sample_beta(60.0, 2.0, &mut rng)).collect();
+        let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+        // Beta(60,2) has mean 60/62; the sampler should find it.
+        assert!((mean - 60.0 / 62.0).abs() < 0.02, "mean {mean}");
     }
 
     #[test]
