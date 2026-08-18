@@ -21,8 +21,8 @@ use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, ru
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::PairPotential;
 use anneal_core::runtime_distribution::{
-    RunTime, parallel_speedup, reached_quantile, resolvable_shortfall, runs_for_resolution,
-    shifted_exponential_fit, speedup_ceiling, success_rate,
+    RunTime, offset_is_resolved, parallel_speedup, reached_quantile, resolvable_shortfall,
+    runs_for_resolution, shifted_exponential_fit, speedup_ceiling, success_rate,
 };
 use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
@@ -94,13 +94,31 @@ fn report(label: &str, runs: &[RunTime], processors: usize) -> usize {
                 "    shifted-exponential offset {offset:.0}, mean excess {:.0}",
                 1.0 / lambda
             );
-            println!(
-                "    predicted speedup at {processors} replicas {:.2}, ceiling {:.2}",
-                parallel_speedup(offset, lambda, processors),
-                speedup_ceiling(offset, lambda)
-            );
+            // The offset is estimated from the smallest arrival, which
+            // can only fall as runs are added, so a ceiling drawn from
+            // too few of them rises with the sample and is a property
+            // of the sample. Print it either way, but say which it is.
+            if offset_is_resolved(runs) {
+                println!(
+                    "    predicted speedup at {processors} replicas {:.2}, ceiling {:.2}",
+                    parallel_speedup(offset, lambda, processors),
+                    speedup_ceiling(offset, lambda)
+                );
+            } else {
+                println!(
+                    "    ceiling {:.2} NOT RESOLVED at {hits} arrivals; the offset is an \
+                     order statistic and this number will move",
+                    speedup_ceiling(offset, lambda)
+                );
+            }
         }
         None => println!("    too few arrivals to fit a distribution"),
+    }
+    if rate < 0.25 {
+        println!(
+            "    {:.0}% of runs never arrived; every fit above sees only the rest",
+            100.0 * (1.0 - rate)
+        );
     }
     hits
 }
