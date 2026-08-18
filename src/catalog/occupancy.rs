@@ -30,11 +30,11 @@
 //!
 //! ## Leave start
 //!
-//! Hole on the leftover-SOAP sphere: 48 unit samples in the open
-//! hemisphere away from the occupied-well centroid, scored by
-//! nearest-well distance. Walk the packing mean toward that hole.
-//! Quench; if the quench sits in a stored well, retry. Feynman--Kac
-//! extras use this start. They do not draw a random cluster.
+//! Another DECAF family already on file: take a catalog representative
+//! of the least-occupied one ([`occupancy_leave_target`]). None on
+//! file: a new random start. Leftover-SOAP off-well is still the
+//! occupied packing and is not a Leave destination. Feynman--Kac
+//! surplus extras may still step a SOAP hole; occupancy extras do not.
 //!
 //! ## Modes
 //!
@@ -82,6 +82,31 @@ pub enum OccupancyLeaveAdopt {
     /// Same-family leftover hole. Do not adopt; the extra stays put
     /// and the hop loop draws another Leave.
     Refuse,
+}
+
+/// Where an occupancy extra goes when it Leaves.
+///
+/// Leftover-SOAP off-well is not a target. 0012 measured 361
+/// leftover-SOAP `catalog_leave` hops: all landed on "other", none
+/// on Oh, six left Oh. Ico versus Oh is DECAF L1 0.69, outside the
+/// leftover-SOAP well. The extra takes a catalog representative of
+/// a different family (Oh once it is on file), or a new start so
+/// the first Oh can be discovered the way a serial seed is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccupancyLeaveTarget {
+    /// Coordinator has a representative of a different DECAF family.
+    OtherFamily,
+    /// No other family on file. Draw a new start.
+    Reseed,
+}
+
+/// Leave destination from whether the catalog already holds another family.
+pub fn occupancy_leave_target(other_family_in_catalog: bool) -> OccupancyLeaveTarget {
+    if other_family_in_catalog {
+        OccupancyLeaveTarget::OtherFamily
+    } else {
+        OccupancyLeaveTarget::Reseed
+    }
 }
 
 /// Occupancy Leave that quenches onto a new DECAF family is taken.
@@ -517,11 +542,11 @@ pub fn occupancy_retire_at(
 mod tests {
     use super::{
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
-        PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
-        is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
-        occupancy_complete_at, occupancy_leave_adopt, occupancy_retire, occupancy_retire_at,
-        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, seat_extras,
+        OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
+        interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
+        occupancy_complete, occupancy_complete_at, occupancy_leave_adopt, occupancy_leave_target,
+        occupancy_retire, occupancy_retire_at, packing_role, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
     };
 
     #[test]
@@ -531,6 +556,19 @@ mod tests {
         assert!(is_occupancy_leave_action("catalog_leave"));
         assert!(!is_occupancy_leave_action("catalog_incumbent"));
         assert!(!is_occupancy_leave_action("bridge"));
+    }
+
+    #[test]
+    fn occupancy_leave_is_another_family_or_a_reseed() {
+        // Leftover-SOAP off-well is still the occupied packing
+        // (ico vs Oh DECAF L1 is 0.69). A Leave that is only a SOAP
+        // hole cannot land on Oh. The extra takes a catalog
+        // representative of a different family, or a new start.
+        assert_eq!(
+            occupancy_leave_target(true),
+            OccupancyLeaveTarget::OtherFamily
+        );
+        assert_eq!(occupancy_leave_target(false), OccupancyLeaveTarget::Reseed);
     }
 
     #[test]

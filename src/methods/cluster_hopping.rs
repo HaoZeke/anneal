@@ -1203,67 +1203,9 @@ where
                 let family_changed = true;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
-                    // Extra Leave stayed in the family. Energy Metropolis
-                    // would keep the GM, so the chain has to be moved.
-                    //
-                    // One hole step does not move it: measured on the
-                    // LJ75 icosahedral fixture over twelve seeds, a
-                    // single step and quench returns to the same DECAF
-                    // family every time, at every escape distance from
-                    // one to five merge radii. The requench loop leaves
-                    // it every time, by quenching each attempt and
-                    // continuing from the quenched structure with a
-                    // wider scale, then kicking in the packing's null
-                    // space if six attempts all come home.
-                    //
-                    // Try that before a box start. A structure that
-                    // left the funnel is worth more than a random one
-                    // that has to find its way back to a funnel at all.
-                    #[cfg(feature = "featomic")]
-                    let escaped = {
-                        let rcut = 3.5 * cfg.length_scale;
-                        let well = crate::featomic_hop::soap_cloud_mean(
-                            from_state.view(),
-                            rcut,
-                            cfg.species.as_deref(),
-                            None,
-                        );
-                        let mut quench = |v: ArrayView1<f64>| relax(ledger, v, cfg.relax_steps).1;
-                        let left = crate::featomic_hop::leave_occupied_packing(
-                            state.view(),
-                            std::slice::from_ref(&well),
-                            rcut,
-                            cfg.species.as_deref(),
-                            None,
-                            &mut quench,
-                            rng,
-                        );
-                        let changed = from_state.as_slice().zip(left.as_slice()).is_none_or(
-                            |(origin, trial)| crate::catalog::different_decaf_family(origin, trial),
-                        );
-                        changed.then_some(left)
-                    };
-                    #[cfg(not(feature = "featomic"))]
-                    let escaped: Option<Array1<f64>> = None;
-                    if let Some(left) = escaped {
-                        let (le, lx) = relax(ledger, left.view(), 0);
-                        if quench_is_sane(cfg, le, lx.view()) {
-                            hops += 1;
-                            ledger.record(le, lx.view());
-                            let reached = identity.basin_of(lx.view());
-                            let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                            feedback.observe(Some(from), reached);
-                            here = Some(reached);
-                            e = le;
-                            x = lx;
-                            accepted += 1;
-                            current_validation_gradient = None;
-                            bias.deposit(x.view(), cfg.temperature);
-                            continue;
-                        }
-                    }
-                    // Six attempts and a null-space kick all came home.
-                    // Draw a fresh box start and take it.
+                    // Extra Leave stayed in the family. A leftover-SOAP
+                    // requench lands on a nearby packing ("other"), not
+                    // on a new funnel. Draw a fresh box start.
                     let s0 =
                         random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
                     let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
