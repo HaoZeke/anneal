@@ -1203,7 +1203,26 @@ where
                 let family_changed = true;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
-                    hops += 1;
+                    // Extra Leave stayed in the family. Energy Metropolis
+                    // would keep the GM. Draw a fresh box start and take it.
+                    let s0 = random_cluster_in_radius(
+                        n,
+                        cfg.start_radius(),
+                        cfg.min_separation,
+                        rng,
+                    );
+                    let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
+                    if quench_is_sane(cfg, e0, x0.view()) {
+                        hops += 1;
+                        ledger.record(e0, x0.view());
+                        e = e0;
+                        x = x0;
+                        accepted += 1;
+                        current_validation_gradient = None;
+                        bias.deposit(x.view(), cfg.temperature);
+                    } else {
+                        hops += 1;
+                    }
                     continue;
                 }
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
