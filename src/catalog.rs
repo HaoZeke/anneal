@@ -13,6 +13,7 @@ pub mod packing;
 pub mod signature;
 pub mod validator;
 
+pub use archive::{Curiosity, Tessellation, novelty};
 pub use basin::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, BasinCatalog, BasinCatalogError,
 };
