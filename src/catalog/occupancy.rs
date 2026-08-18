@@ -50,8 +50,10 @@
 //! A mixing certificate names a putative: uniquely deepest, occupant
 //! mixed, a mixed competitor, strictly more occupied. On LJ75 that
 //! putative is the icosahedral shelf until a second funnel is deeper.
-//! Occupancy retires when rematched DECAF Good--Turing says no new
-//! packings are appearing (`packing_saturated`).
+//! Occupancy retires when rematched DECAF Good--Turing on leftover-well
+//! arrivals says no new packings are appearing (`packing_saturated`),
+//! and leftover-well arrivals themselves are saturated. Hop re-observes
+//! of the same well are not draws.
 //! [`occupancy_min_families`] (`CATALOG_MIN_FAMILIES`) is an optional
 //! floor so a known two-funnel hurdle does not stop on one packing.
 //! Default 1 is Good--Turing alone. Mixing names a putative; it

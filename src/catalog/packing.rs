@@ -41,6 +41,11 @@ pub struct PackingBook {
     env_leaders: Vec<Vec<f64>>,
     families: Vec<Vec<f64>>,
     visits: Vec<u64>,
+    /// Leftover-well arrivals per family. Hop re-observes of the same
+    /// well do not increment this; that sample is 48 autocorrelated
+    /// copies of the first quench and is not a packing Good--Turing
+    /// draw.
+    well_visits: Vec<u64>,
     histogram_cache: RefCell<Vec<CachedHistogram>>,
 }
 
@@ -74,7 +79,19 @@ impl PackingBook {
         }
         self.families.push(histogram);
         self.visits.push(1);
+        self.well_visits.push(0);
         Some(self.families.len() - 1)
+    }
+
+    /// Credit one leftover-SOAP well arrival to this packing family.
+    pub fn credit_well(&mut self, family: usize) {
+        if family >= self.families.len() {
+            return;
+        }
+        if self.well_visits.len() < self.families.len() {
+            self.well_visits.resize(self.families.len(), 0);
+        }
+        self.well_visits[family] = self.well_visits[family].saturating_add(1);
     }
 
     /// Normalized class histogram against the current codebook.
@@ -153,15 +170,11 @@ impl PackingBook {
         self.visits.iter().filter(|&&visits| visits > 0).count()
     }
 
-    /// Production Good--Turing on DECAF family visits. Same floor and
-    /// unseen-mass ceiling as the leftover-SOAP census.
+    /// Production Good--Turing on leftover-well arrivals per DECAF
+    /// family. Same floor and unseen-mass ceiling as the leftover-SOAP
+    /// census. Hop re-observes are not draws.
     pub fn families_saturated(&self) -> bool {
-        let total: u64 = self.visits.iter().copied().sum();
-        if total < crate::catalog::PRODUCTION_MINIMUM_VISITS {
-            return false;
-        }
-        let singles = self.visits.iter().filter(|&&visits| visits == 1).count() as u64;
-        (singles as f64 / total as f64) < crate::catalog::PRODUCTION_MAX_UNSEEN_MASS
+        arrival_good_turing(&self.well_visits)
     }
 
     /// Distinct rematched packings among live structures.
@@ -303,6 +316,21 @@ pub fn packing_distance(left: &[f64], right: &[f64]) -> f64 {
 /// Whether two histograms belong to one packing family.
 pub fn same_packing(left: &[f64], right: &[f64]) -> bool {
     packing_distance(left, right) <= PACKING_MERGE
+}
+
+/// Good--Turing on leftover-well arrivals. `n` is arrivals, not hops.
+pub fn leftover_arrivals_saturated(arrivals: impl IntoIterator<Item = u64>) -> bool {
+    arrival_good_turing(arrivals)
+}
+
+fn arrival_good_turing(arrivals: impl IntoIterator<Item = u64>) -> bool {
+    let counts: Vec<u64> = arrivals.into_iter().filter(|&visits| visits > 0).collect();
+    let total: u64 = counts.iter().copied().sum();
+    if total < crate::catalog::PRODUCTION_MINIMUM_VISITS {
+        return false;
+    }
+    let singles = counts.iter().filter(|&&visits| visits == 1).count() as u64;
+    (singles as f64 / total as f64) < crate::catalog::PRODUCTION_MAX_UNSEEN_MASS
 }
 
 /// Whether `trial` is a different DECAF packing family from `origin`.

@@ -1011,6 +1011,9 @@ fn cooperative_run_builds_policy_input_from_exact_remote_evidence() {
         .unwrap();
         run.record_work(replica, ChargeKind::AcceptedQuench, 60)
             .unwrap();
+        // The aggregate this run reads below is the coordinator's, and
+        // record_work only posts toward it.
+        run.flush(replica).unwrap();
     }
     let admitted = candidate(0, 1, 1.2);
     assert_eq!(
@@ -1126,6 +1129,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         .unwrap();
         run.record_work(replica, ChargeKind::AcceptedQuench, 5)
             .unwrap();
+        run.flush(replica).unwrap();
     }
 
     assert_eq!(

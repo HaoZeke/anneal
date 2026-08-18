@@ -44,8 +44,8 @@ pub use occupancy::{
 };
 pub use packing::{
     PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
-    packing_distance,
-    packing_fingerprint, packing_vector, same_packing,
+    leftover_arrivals_saturated, packing_distance, packing_fingerprint, packing_vector,
+    same_packing,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
