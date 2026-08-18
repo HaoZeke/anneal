@@ -18,22 +18,12 @@ git rev-parse HEAD >SOURCE_COMMIT
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "rustc=$(rustc --version)"
-cargo test --release --features bank-rpc --test elja_submission_contract occupancy_
-cargo test --release --features bank-rpc --test cooperative_search visit_merges_the_posted
-cargo test --release --features bank-rpc --lib two_brains_exchange
-cargo test --release --lib leftover_lambda
-cargo test --release --lib leftover_soap_gt_with_two
-cargo test --release --lib packing_role_is_per_family
-cargo test --release --lib a_user_family_floor_of_one
-cargo test --release --lib catalog_leave_refuses_a_same_family
-cargo test --release --lib interface_ranks_follow
-cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
-cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
-cargo test --release --features bank-rpc --test catalog_policy explore_collapse_does_not_yank
-cargo test --release --features bank-rpc --test catalog_mixing
-cargo test --release --features bank-rpc --test catalog_packing leftover_soap_gt_plus
-cargo test --release --features bank-rpc --test catalog_packing leftover_first_wave
-cargo test --release --features bank-rpc --test catalog_packing packing_good_turing
+# The whole suite, not a name-filtered list. A filtered gate cannot see
+# a test it does not select, which is how a red RETIS test shipped.
+cargo test --release --features bank-rpc --no-fail-fast
+# What CI enforces, so drift is caught here rather than on push.
+cargo fmt --all -- --check
+cargo clippy --release --features bank-rpc,featomic,ira --all-targets -- -D warnings
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
