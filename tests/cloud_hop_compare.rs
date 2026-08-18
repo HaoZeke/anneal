@@ -226,9 +226,28 @@ fn soap_on_vs_off_water4_eight_seeds() {
         sum_on / n,
         sum_off / n
     );
+    // The comparison exists to answer whether the proposal helps, so
+    // that is what it asserts. Both arms are charged the same budget
+    // through the same relax closure, and a SOAP draw charges nothing
+    // of its own, so the budget is equal by construction and the only
+    // question left is what each arm did with it.
+    assert_eq!(
+        off_better, 0,
+        "SOAP lost a seed it used to win: on {on_better} off {off_better} of {SEEDS}"
+    );
     assert!(
-        hops_on * 2 >= hops_off,
-        "SOAP is a budget tax: hops_on {hops_on} hops_off {hops_off}"
+        sum_on / n <= sum_off / n,
+        "SOAP made the mean worse: mean_on {:.6} mean_off {:.6}",
+        sum_on / n,
+        sum_off / n
+    );
+    // A floor, not a budget: SOAP buys fewer and deeper relaxations
+    // with the same evaluations, so a hop count below the off arm is
+    // the method working. What this catches is the proposal collapsing
+    // to almost no hops at all.
+    assert!(
+        hops_on * 4 >= hops_off,
+        "SOAP hop count collapsed: hops_on {hops_on} hops_off {hops_off}"
     );
 }
 
@@ -279,6 +298,18 @@ fn soap_on_vs_off_slab_water4_eight_seeds() {
     let n = SEEDS as f64;
     println!(
         "slab summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws} hops_on {hops_on} hops_off {hops_off}",
+        sum_on / n,
+        sum_off / n
+    );
+    // Same question as the molecular comparison, and the same equal
+    // budget behind it: did turning the proposal on help.
+    assert_eq!(
+        off_better, 0,
+        "SOAP lost seeds: on {on_better} off {off_better} of {SEEDS}"
+    );
+    assert!(
+        sum_on / n <= sum_off / n,
+        "SOAP made the mean worse: mean_on {:.6} mean_off {:.6}",
         sum_on / n,
         sum_off / n
     );
@@ -344,6 +375,18 @@ fn soap_on_vs_off_lj38_eight_seeds() {
     let n = SEEDS as f64;
     println!(
         "lj38 summary: on_better {on_better}/{SEEDS} off_better {off_better}/{SEEDS} tie {tie} mean_on {:.6} mean_off {:.6} soap_draws {soap_draws}",
+        sum_on / n,
+        sum_off / n
+    );
+    // Same question as the molecular comparison, and the same equal
+    // budget behind it: did turning the proposal on help.
+    assert_eq!(
+        off_better, 0,
+        "SOAP lost seeds: on {on_better} off {off_better} of {SEEDS}"
+    );
+    assert!(
+        sum_on / n <= sum_off / n,
+        "SOAP made the mean worse: mean_on {:.6} mean_off {:.6}",
         sum_on / n,
         sum_off / n
     );
