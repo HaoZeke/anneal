@@ -117,6 +117,20 @@ pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
     published.is_some_and(|target| best < target + 1e-4)
 }
 
+/// Default floor on rematched occupied families. Two-funnel paper
+/// hurdles (ico/Oh, ico/Marks). Override with `CATALOG_MIN_FAMILIES`.
+/// `1` is Good--Turing alone.
+pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 2;
+
+/// User floor on occupied DECAF families before saturation retires.
+pub fn occupancy_min_families() -> usize {
+    std::env::var("CATALOG_MIN_FAMILIES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|&count| count >= 1)
+        .unwrap_or(DEFAULT_MIN_OCCUPIED_FAMILIES)
+}
+
 /// Generic occupancy completeness. `n_occupied_families` is the DECAF
 /// packing count, not leftover-SOAP basin count.
 pub fn occupancy_complete(
@@ -124,9 +138,24 @@ pub fn occupancy_complete(
     catalog_saturated: bool,
     n_occupied_families: usize,
 ) -> Option<OccupancyCertificate> {
+    occupancy_complete_at(
+        mixing_certified,
+        catalog_saturated,
+        n_occupied_families,
+        occupancy_min_families(),
+    )
+}
+
+/// Completeness at an explicit family floor.
+pub fn occupancy_complete_at(
+    mixing_certified: bool,
+    catalog_saturated: bool,
+    n_occupied_families: usize,
+    min_occupied_families: usize,
+) -> Option<OccupancyCertificate> {
     if mixing_certified {
         Some(OccupancyCertificate::MixingCertified)
-    } else if catalog_saturated && n_occupied_families >= 2 {
+    } else if catalog_saturated && n_occupied_families >= min_occupied_families {
         Some(OccupancyCertificate::CatalogSaturated)
     } else {
         None
@@ -451,7 +480,22 @@ pub fn occupancy_retire(
     catalog_saturated: bool,
     n_occupied_families: usize,
 ) -> bool {
-    n_occupied_families >= 2
+    occupancy_retire_at(
+        certificate,
+        catalog_saturated,
+        n_occupied_families,
+        occupancy_min_families(),
+    )
+}
+
+/// Retire at an explicit family floor. Good--Turing alone is floor 1.
+pub fn occupancy_retire_at(
+    certificate: OccupancyCertificate,
+    catalog_saturated: bool,
+    n_occupied_families: usize,
+    min_occupied_families: usize,
+) -> bool {
+    n_occupied_families >= min_occupied_families
         && catalog_saturated
         && matches!(
             certificate,
@@ -465,7 +509,8 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
         PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
         is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
-        occupancy_leave_adopt, occupancy_retire, packing_role, promote_one_sided,
+        occupancy_complete_at, occupancy_leave_adopt, occupancy_retire, occupancy_retire_at,
+        packing_role, promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap,
     };
 
@@ -605,6 +650,26 @@ mod tests {
             1
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
+    }
+
+    #[test]
+    fn a_user_family_floor_of_one_is_good_turing_alone() {
+        assert_eq!(
+            occupancy_complete_at(false, true, 1, 1),
+            Some(OccupancyCertificate::CatalogSaturated)
+        );
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            1,
+            1
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            2,
+            3
+        ));
     }
 
     #[test]

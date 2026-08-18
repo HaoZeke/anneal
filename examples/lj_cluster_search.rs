@@ -15,7 +15,8 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    LeavePath, occupancy_complete, occupancy_retire, published_energy_score,
+    LeavePath, occupancy_complete, occupancy_min_families, occupancy_retire,
+    published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -2447,6 +2448,10 @@ fn run_capnp_catalog(
         run_cfg.max_hops = Some(hops);
         println!("  hop cap {hops}");
         println!("  leftover-SOAP TIS seats");
+        println!(
+            "  occupancy min families {}",
+            occupancy_min_families()
+        );
     }
     // Cooperative wells: the SOAP archive the hole step walks away
     // from, fed with every minimum the coordinator hands this replica.
