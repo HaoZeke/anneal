@@ -3137,7 +3137,15 @@ mod tests {
         );
     }
 
+    /// Every atom of a regular tetrahedron has the same environment, so
+    /// the descriptor carries no direction to step away in. The native
+    /// pullback answers that by standing still. The featomic path reads
+    /// a vanishing leftover as a packing rather than as an absence of
+    /// signal and kicks along the cloud mean, which is the escape
+    /// `packing_kick` exists to provide; a hop of the requested size is
+    /// the contract there, not a freeze.
     #[test]
+    #[cfg(not(feature = "featomic"))]
     fn equivalent_tetra_yields() {
         let spec = SoapSpec::default();
         let x = tetra();
@@ -3146,6 +3154,27 @@ mod tests {
         for i in 0..x.len() {
             assert_eq!(y[i], x[i], "equivalent tetra hopped at {i}");
         }
+    }
+
+    #[test]
+    #[cfg(feature = "featomic")]
+    fn equivalent_tetra_takes_the_packing_kick() {
+        let spec = SoapSpec::default();
+        let x = tetra();
+        let mut rng = StdRng::seed_from_u64(3);
+        let y = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut rng);
+        let moved = (0..x.len())
+            .map(|i| (y[i] - x[i]) * (y[i] - x[i]))
+            .sum::<f64>();
+        let atom_rms = (moved / (x.len() / 3) as f64).sqrt();
+        assert!(
+            atom_rms > 0.0,
+            "a degenerate leftover must still leave the packing"
+        );
+        assert!(
+            atom_rms <= 0.4 + 1e-8,
+            "packing kick overshot its cap: {atom_rms}"
+        );
     }
 
     #[test]
