@@ -288,3 +288,39 @@ fn cooperative_share_optimization_is_one_quench_not_ten() {
         "ten full quenches per record spend a short replica on one improvement"
     );
 }
+
+#[test]
+fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
+    let scripts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts");
+    let cases = [
+        ("terra_lj38_occ_brains.sbatch", "38 400000 13"),
+        ("terra_lj75_occ_brains.sbatch", "75 4000000 1"),
+        ("terra_lj98_occ_brains.sbatch", "98 4000000 0"),
+    ];
+    for (name, launch) in cases {
+        let source = fs::read_to_string(scripts.join(name))
+            .unwrap_or_else(|error| panic!("failed to read {name}: {error}"));
+        assert!(
+            source.contains("export CATALOG_MIN_FAMILIES=2"),
+            "{name} must set CATALOG_MIN_FAMILIES=2"
+        );
+        assert!(
+            source.contains("export CATALOG_WAVE=24"),
+            "{name} must set CATALOG_WAVE=24"
+        );
+        assert!(
+            source.contains(&format!("elja_jcc_lj_many_chains.sh {launch}")),
+            "{name} must launch paper-budget ensemble {launch}"
+        );
+        assert!(
+            source.contains(r#"grep -a -F -q "$symbol""#)
+                && source.contains("occupancy min families"),
+            "{name} must grep the binary for occupancy min families"
+        );
+        assert!(
+            source.contains(r#"grep -a -F -q "Refuse""#)
+                && source.contains(r#"grep -a -F -q "gt stop leftover-well""#),
+            "{name} must grep the binary for Refuse or gt stop leftover-well"
+        );
+    }
+}
