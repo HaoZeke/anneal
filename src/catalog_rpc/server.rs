@@ -27,9 +27,10 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog, BasinCensus, BasinId,
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, assign_interfaces, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupant_rhat, prune, promote_one_sided, retis_exchange_adjacent,
-    same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_lambda, occupant_rhat, packing_role, prune, promote_one_sided,
+    retis_exchange_adjacent, same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
+    PackingRole,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -2411,6 +2412,28 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
     evidence
 }
 
+fn family_champion_replicas(scientific: &ScientificState) -> BTreeSet<u32> {
+    let mut best: BTreeMap<usize, (u32, f64)> = BTreeMap::new();
+    for (id, candidate) in &scientific.last_candidate_by_replica {
+        let Some(histogram) = scientific.packing.histogram(&candidate.coordinates) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        match best.get(&family) {
+            None => {
+                best.insert(family, (*id, candidate.energy));
+            }
+            Some((_, energy)) if candidate.energy < *energy - 1e-12 => {
+                best.insert(family, (*id, candidate.energy));
+            }
+            _ => {}
+        }
+    }
+    best.values().map(|(id, _)| *id).collect()
+}
+
 fn n_on_incumbent_packing(scientific: &ScientificState) -> usize {
     let Some(incumbent) = scientific.catalog.incumbent() else {
         return 0;
@@ -2486,7 +2509,11 @@ fn assign_leftover_interfaces(
     scientific
         .leftover_lambda_by_replica
         .insert(replica, lambda);
-    if matches!(relation, CatalogRelation::Incumbent) || centroid.is_none() {
+    let champions = family_champion_replicas(scientific);
+    if matches!(relation, CatalogRelation::Incumbent)
+        || champions.contains(&replica)
+        || centroid.is_none()
+    {
         let seat = InterfaceSeat {
             replica,
             rank: CHAMPION_RANK,
@@ -2496,14 +2523,10 @@ fn assign_leftover_interfaces(
         scientific.interface_seat_by_replica.insert(replica, seat);
         return seat;
     }
-    let champion = scientific
-        .catalog
-        .incumbent()
-        .map(crate::catalog::ActiveBasinEntry::producer_replica);
     let mut extras: Vec<(u32, f64)> = scientific
         .leftover_lambda_by_replica
         .iter()
-        .filter(|(id, _)| Some(**id) != champion)
+        .filter(|(id, _)| !champions.contains(*id))
         .map(|(id, value)| (*id, *value))
         .collect();
     extras.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
@@ -2512,16 +2535,16 @@ fn assign_leftover_interfaces(
     let _ = promote_one_sided(&mut seats);
     let _ = retis_exchange_adjacent(&mut seats);
     scientific.interface_seat_by_replica.clear();
-    if let Some(id) = champion {
+    for id in &champions {
         scientific.interface_seat_by_replica.insert(
-            id,
+            *id,
             InterfaceSeat {
-                replica: id,
+                replica: *id,
                 rank: CHAMPION_RANK,
                 threshold: 0.0,
                 lambda: scientific
                     .leftover_lambda_by_replica
-                    .get(&id)
+                    .get(id)
                     .copied()
                     .unwrap_or(0.0),
             },
@@ -2566,47 +2589,49 @@ fn packing_relation(
     }
     let local = replica_packing(scientific, replica)?;
     let mut compared = false;
-    let mut same_as_incumbent = false;
     let mut same_as_any = false;
     let mut same_as_lower_isomer = false;
+    let mut best_of_family: Option<f64> = None;
     for entry in scientific.catalog.entries() {
         let Some(entry_fp) = scientific.packing.histogram(entry.coordinates()) else {
             continue;
         };
         compared = true;
-        let same = same_packing(&local, &entry_fp);
-        if same {
+        if same_packing(&local, &entry_fp) {
             same_as_any = true;
+            best_of_family = Some(best_of_family.map_or(entry.energy(), |best| {
+                best.min(entry.energy())
+            }));
             if entry.energy() < energy - 1e-10 {
                 same_as_lower_isomer = true;
             }
         }
-        if scientific.catalog.incumbent().map(|inc| inc.census_id()) == Some(entry.census_id())
-            && same
-        {
-            same_as_incumbent = true;
+    }
+    for candidate in scientific.last_candidate_by_replica.values() {
+        let Some(other) = scientific.packing.histogram(&candidate.coordinates) else {
+            continue;
+        };
+        if same_packing(&local, &other) {
+            same_as_any = true;
+            best_of_family = Some(best_of_family.map_or(candidate.energy, |best| {
+                best.min(candidate.energy)
+            }));
+            if candidate.energy < energy - 1e-10 {
+                same_as_lower_isomer = true;
+            }
         }
     }
     if !compared {
         return None;
     }
-    // Better isomer of the occupied packing only. A deeper different
-    // funnel is not copied: that mixes explore chains onto one
-    // attractor and destroys the occupancy certificate.
-    if same_as_lower_isomer {
-        return Some(CatalogRelation::UnrelatedLowerAnchor);
-    }
-    if same_as_incumbent {
-        let incumbent_energy = scientific.catalog.incumbent().map(|entry| entry.energy());
-        if incumbent_energy.is_some_and(|best| (energy - best).abs() <= 1e-8) {
-            return Some(CatalogRelation::Incumbent);
+    match packing_role(same_as_any, energy, best_of_family) {
+        PackingRole::NovelFamily => Some(CatalogRelation::UnrelatedNoAnchor),
+        PackingRole::FamilyChampion => Some(CatalogRelation::Incumbent),
+        PackingRole::FamilyExtra if same_as_lower_isomer => {
+            Some(CatalogRelation::UnrelatedLowerAnchor)
         }
-        return Some(CatalogRelation::SameBasin);
+        PackingRole::FamilyExtra => Some(CatalogRelation::SameBasin),
     }
-    if same_as_any {
-        return Some(CatalogRelation::SameBasin);
-    }
-    Some(CatalogRelation::UnrelatedNoAnchor)
 }
 
 fn attraction_region_relation(
