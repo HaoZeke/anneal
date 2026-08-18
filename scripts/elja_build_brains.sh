@@ -34,7 +34,10 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   exit 1
 fi
 cd "$ROOT"
-git rev-parse HEAD >SOURCE_COMMIT
+if [[ ! -s SOURCE_COMMIT ]]; then
+  echo "missing SOURCE_COMMIT; write it on the login node" >&2
+  exit 1
+fi
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "rustc=$(rustc --version)"
