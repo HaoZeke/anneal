@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=terra-lj75-brains
+#SBATCH --job-name=terra-lj98-brains
 #SBATCH --partition=long
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,15 +7,14 @@
 #SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
 #SBATCH --output=slurm.%j.out
-# LJ75 occupancy with one talking brain per replica. Paper budget 4e6,
-# hop 60000, 48 replicas. Binary must print occupancy min families.
+# LJ98 occupancy. Paper budget 4e6, hop 60000, 48 replicas.
 set -euo pipefail
 export SLURM_CONF=/etc/slurm-llnl/slurm.conf
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 export LJ_ROOT=$HOME/anneal-occ-brains
 export LJ_BIN=$HOME/anneal-occ-brains/target/release/examples/lj_cluster_search
 export CATALOG_SERVER_BIN=$HOME/anneal-occ-brains/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=lj75-occ-terra
+export CATALOG_CAMPAIGN=lj98-occ-terra
 export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-occ-brains/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
@@ -25,12 +24,11 @@ export CATALOG_WAVE=24
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
-# Two-funnel paper hurdle (ico vs Marks). Unset and the floor is still 2;
-# set 1 for Good-Turing alone.
+# Two-funnel paper hurdle (Leary). Set 1 for Good-Turing alone.
 export CATALOG_MIN_FAMILIES=2
-export SEED_OFFSET_BASE=1800000
+export SEED_OFFSET_BASE=1900000
 export LJ_OUT=$HOME/ljwork/terra
-mkdir -p "$LJ_OUT/lj75-occ-brains"
+mkdir -p "$LJ_OUT/lj98-occ-brains"
 cd "$LJ_ROOT"
 test -s "$JCC_SOURCE_COMMIT_FILE"
 test -x "$LJ_BIN"
@@ -41,5 +39,5 @@ for symbol in different_decaf_family step_toward_catalog_hole CATALOG_BRAIN_LIST
     exit 2
   fi
 done
-RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj75.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 1 "$RADIUS"
+RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj98.json\"))[\"census_radius\"])")
+exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 0 "$RADIUS"
