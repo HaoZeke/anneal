@@ -29,8 +29,8 @@ use crate::catalog::{
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_lambda, occupant_rhat, packing_role, prune, promote_one_sided,
-    retis_exchange_adjacent, same_packing, CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat,
-    PackingRole,
+    retis_exchange_adjacent, same_packing, seat_extras, CHAMPION_RANK, INTERFACE_HORIZON,
+    InterfaceSeat, PackingRole,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -2523,15 +2523,19 @@ fn assign_leftover_interfaces(
         scientific.interface_seat_by_replica.insert(replica, seat);
         return seat;
     }
-    let mut extras: Vec<(u32, f64)> = scientific
+    let extras: Vec<(u32, f64)> = scientific
         .leftover_lambda_by_replica
         .iter()
         .filter(|(id, _)| !champions.contains(*id))
         .map(|(id, value)| (*id, *value))
         .collect();
-    extras.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
     let horizon = INTERFACE_HORIZON;
-    let mut seats = assign_interfaces(&extras, horizon);
+    let held: Vec<InterfaceSeat> = scientific
+        .interface_seat_by_replica
+        .values()
+        .copied()
+        .collect();
+    let mut seats = seat_extras(&held, &extras, horizon);
     let _ = promote_one_sided(&mut seats);
     let _ = retis_exchange_adjacent(&mut seats);
     scientific.interface_seat_by_replica.clear();
