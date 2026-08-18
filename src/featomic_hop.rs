@@ -1314,6 +1314,46 @@ mod tests {
         );
     }
 
+    /// Whether the leftover has anything to say on a small mobile set.
+    ///
+    /// step_away_featomic follows the leftover residual, and when its
+    /// rms falls under DEFECT it stops following anything and kicks
+    /// instead. A slab adsorbate is six mobile atoms in a frozen
+    /// environment, which is the smallest mobile set the recommended
+    /// molecular config is used on, so this is where a residual would
+    /// run out first. Printed rather than asserted at a threshold,
+    /// because the number is the finding.
+    #[test]
+    fn the_slab_adsorbate_leftover_against_the_defect_floor() {
+        let proto = [[0.0, 0.0, 0.0], [0.96, 0.0, 0.0], [-0.24, 0.93, 0.0]];
+        let origins = [
+            [0.0, 0.0, 3.3],
+            [1.7, 1.7, 4.1],
+            [0.0, 0.0, 0.0],
+            [3.4, 0.0, 0.0],
+        ];
+        let mut coordinates = Vec::with_capacity(36);
+        for origin in &origins {
+            for point in &proto {
+                for axis in 0..3 {
+                    coordinates.push(point[axis] + origin[axis]);
+                }
+            }
+        }
+        let x = Array1::from(coordinates);
+        let species = [8u32, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1];
+        let mobile = [0usize, 1, 2, 3, 4, 5];
+        let s = spectrum(x.view(), 3.5, Some(&species), Some(&mobile));
+        let nnu = (s.n_at * s.n_feat).max(1) as f64;
+        let rms = (s.leftover.iter().map(|v| v * v).sum::<f64>() / nnu).sqrt();
+        println!(
+            "slab adsorbate leftover rms {rms:.3e} against DEFECT {DEFECT:.3e}; \
+             shell_leftover {}",
+            shell_leftover(&s)
+        );
+        assert!(rms.is_finite(), "the slab leftover is not a number");
+    }
+
     /// What it takes to leave a packing, measured.
     ///
     /// A single hole step does not do it. Sweeping the escape distance
