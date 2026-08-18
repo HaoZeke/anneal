@@ -1208,6 +1208,12 @@ where
                     // relaxed energy carried onto the unrelaxed coordinates
                     // biases every later Metropolis test in the chain.
                     let (hole_energy, hole_state) = relax(ledger, state.view(), 0);
+                    if !quench_is_sane(cfg, hole_energy, hole_state.view()) {
+                        // An exhausted budget answers with an infinite
+                        // energy. Moving the chain onto that would accept
+                        // every later trial, so the Leave fails instead.
+                        continue;
+                    }
                     hops += 1;
                     ledger.record(hole_energy, hole_state.view());
                     let reached = identity.basin_of(hole_state.view());
