@@ -10,6 +10,6 @@
 #SBATCH --output=/users/home/rog32/anneal-occ-brains/slurm-brains-build.%j.out
 # Isolated occupancy build. Does not touch anneal-stop or h5/hq.
 set -euo pipefail
-export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
+export PATH="$HOME/.pixi/bin:/usr/bin:$HOME/.cargo/bin:$PATH"
 cd "${LJ_ROOT:-$HOME/anneal-occ-brains}"
 exec scripts/elja_build_brains.sh
