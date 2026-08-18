@@ -236,8 +236,12 @@ fn unvalidated_screen_result_never_becomes_the_live_chain_state() {
         &mut rng,
     );
 
-    assert_eq!(outcome.final_state.as_ref(), Some(&start));
-    assert_eq!(outcome.final_energy, 0.0);
+    // A screened trial still faces the acceptance law and may carry the
+    // chain: that is how a short screen finds basins at all. What it may
+    // never be is an answer. The screen returns -10.0 against the
+    // quenched 0.0, so a ledger that recorded it would say so here.
+    assert_eq!(outcome.best, 0.0);
+    assert_eq!(outcome.best_state.as_ref(), Some(&start));
     assert!(
         outcome.accepted_transitions.is_empty(),
         "an unvalidated partial relaxation entered the accepted trajectory"
