@@ -133,6 +133,10 @@ name = "catalog_server"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "ttt_lj38"
+required-features = []
+
+[[example]]
 name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
