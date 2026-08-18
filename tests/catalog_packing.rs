@@ -97,6 +97,13 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
 }
 
 #[test]
+fn leftover_first_wave_arrivals_are_not_saturated() {
+    use anneal_core::catalog::leftover_arrivals_saturated;
+    assert!(!leftover_arrivals_saturated(std::iter::repeat_n(1u64, 48)));
+    assert!(leftover_arrivals_saturated(std::iter::repeat_n(2u64, 20)));
+}
+
+#[test]
 fn leftover_soap_gt_plus_two_singleton_packings_is_not_a_certificate() {
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
@@ -115,9 +122,20 @@ fn packing_good_turing_uses_the_census_production_floor() {
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
     let mut book = PackingBook::default();
+    let ico_family = book.observe(ico.as_slice().unwrap()).unwrap();
+    let oh_family = book.observe(oh.as_slice().unwrap()).unwrap();
+    assert!(!book.families_saturated());
     for _ in 0..PRODUCTION_MINIMUM_VISITS {
         book.observe(ico.as_slice().unwrap()).unwrap();
         book.observe(oh.as_slice().unwrap()).unwrap();
+    }
+    assert!(
+        !book.families_saturated(),
+        "hop re-observes of the same two structures are not leftover-well arrivals"
+    );
+    for _ in 0..PRODUCTION_MINIMUM_VISITS {
+        book.credit_well(ico_family);
+        book.credit_well(oh_family);
     }
     let live = [ico.as_slice().unwrap(), oh.as_slice().unwrap()];
     assert!(book.families_saturated());

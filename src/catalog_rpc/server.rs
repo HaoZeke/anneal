@@ -28,8 +28,9 @@ use crate::catalog::{
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupant_rhat, packing_role, prune, promote_one_sided,
-    retis_exchange_adjacent, same_packing, seat_extras, CHAMPION_RANK, INTERFACE_HORIZON,
+    leftover_arrivals_saturated, leftover_lambda, occupant_rhat, packing_role, prune,
+    promote_one_sided, retis_exchange_adjacent, same_packing, seat_extras, CHAMPION_RANK,
+    INTERFACE_HORIZON,
     InterfaceSeat, PackingRole,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -259,6 +260,7 @@ struct ScientificState {
     pending_reseed: BTreeSet<u32>,
     leftover_lambda_by_replica: BTreeMap<u32, f64>,
     interface_seat_by_replica: BTreeMap<u32, crate::catalog::InterfaceSeat>,
+    leftover_arrivals: BTreeMap<u64, u64>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -344,6 +346,7 @@ impl CoordinatorState {
                     pending_reseed: BTreeSet::new(),
                     leftover_lambda_by_replica: BTreeMap::new(),
                     interface_seat_by_replica: BTreeMap::new(),
+                    leftover_arrivals: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -1003,7 +1006,7 @@ fn apply_request(
                         .values()
                         .map(|candidate| candidate.coordinates.as_slice()),
                 ) as u32,
-                packing_saturated: scientific.packing.families_saturated(),
+                packing_saturated: packing_and_leftover_saturated(scientific),
             });
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
@@ -1033,6 +1036,8 @@ fn apply_request(
                 scientific,
                 request.identity.replica,
                 &validated.candidate.coordinates,
+                None,
+                false,
             );
             record_energy(scientific, request.identity.replica, validated.fresh.energy);
             let packing = scientific
@@ -1389,10 +1394,13 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
+                let arrival = previous != Some(observation.basin_id);
                 observe_packing(
                     scientific,
                     request.identity.replica,
                     &validated.candidate.coordinates,
+                    Some(observation.basin_id),
+                    arrival,
                 );
                 record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
@@ -1463,10 +1471,16 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
+                let previous = scientific
+                    .last_basin_by_replica
+                    .insert(request.identity.replica, observation.basin_id);
+                let arrival = previous != Some(observation.basin_id);
                 observe_packing(
                     scientific,
                     request.identity.replica,
                     &validated.candidate.coordinates,
+                    Some(observation.basin_id),
+                    arrival,
                 );
                 record_energy(scientific, request.identity.replica, validated.fresh.energy);
                 if scientific
@@ -2261,14 +2275,34 @@ fn realize_population_plan(
     })
 }
 
-fn observe_packing(scientific: &mut ScientificState, replica: u32, coordinates: &[f64]) {
+fn observe_packing(
+    scientific: &mut ScientificState,
+    replica: u32,
+    coordinates: &[f64],
+    basin: Option<BasinId>,
+    arrival: bool,
+) {
     if let Some(index) = scientific.packing.observe(coordinates) {
+        if arrival {
+            scientific.packing.credit_well(index);
+            if let Some(basin) = basin {
+                *scientific
+                    .leftover_arrivals
+                    .entry(basin.as_raw())
+                    .or_insert(0) += 1;
+            }
+        }
         let history = scientific.family_history.entry(replica).or_default();
         history.push_back(index as f64);
         while history.len() > 64 {
             history.pop_front();
         }
     }
+}
+
+fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
+    scientific.packing.families_saturated()
+        && leftover_arrivals_saturated(scientific.leftover_arrivals.values().copied())
 }
 
 fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {
