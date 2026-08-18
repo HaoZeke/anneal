@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Elja compute-node occupancy tests and per-replica brain build.
-# Isolated tree. Does not touch anneal-stop, anneal-accel, or h5/hq.
-# Compilers and cmake come from `pixi run -e cluster`, not OHPC gcc.
+# Occupancy tests and per-replica brain build via `pixi run -e cluster`.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
   echo "elja_build_brains.sh: run under srun, not on $(hostname)" >&2
@@ -13,7 +11,6 @@ if [[ ! -x $PIXI ]]; then
   echo "missing pixi at $PIXI" >&2
   exit 1
 fi
-# Compute /tmp is not the login NFS cache. Keep rattler on $HOME.
 export PIXI_CACHE_DIR=${PIXI_CACHE_DIR:-$HOME/.cache/pixi}
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
@@ -23,11 +20,11 @@ fi
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 cd "$ROOT"
 if [[ ! -s SOURCE_COMMIT ]]; then
-  echo "missing SOURCE_COMMIT; write it on the login node" >&2
+  echo "missing SOURCE_COMMIT" >&2
   exit 1
 fi
 if [[ ! -d .pixi/envs/cluster ]]; then
-  echo "missing .pixi/envs/cluster; run pixi install -e cluster on login" >&2
+  echo "missing .pixi/envs/cluster; run pixi install -e cluster first" >&2
   exit 1
 fi
 echo "host=$(hostname) job=$SLURM_JOB_ID"
@@ -35,8 +32,7 @@ echo "source=$(cat SOURCE_COMMIT)"
 echo "pixi=$($PIXI --version)"
 echo "rustc=$($PIXI run -e cluster rustc --version)"
 echo "gcc=$($PIXI run -e cluster gcc --version | head -1)"
-# Occupancy contract, not crate CI. Crates from the login cargo fetch.
-# rustfmt lives in the login rustup, not in the cluster conda env.
+# Occupancy contract, not crate CI.
 if command -v rustfmt >/dev/null 2>&1; then
   "$PIXI" run -e cluster cargo fmt --all -- --check
 fi

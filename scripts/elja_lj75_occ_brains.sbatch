@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=elja-lj75-brains
+#SBATCH --job-name=occ-lj75-brains
 #SBATCH --partition=long
 #SBATCH --account=chem-ui
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=48
-#SBATCH --exclusive
-#SBATCH --mem=0
+#SBATCH --cpus-per-task=32
+#SBATCH --mem=44G
 #SBATCH --time=4-00:00:00
-#SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-elja/slurm.%j.out
+#SBATCH --output=slurm.%j.out
 # LJ75 occupancy. Paper budget 4e6, hop 60000, 48 replicas.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
@@ -19,10 +18,9 @@ export CATALOG_CAMPAIGN=lj75-occ-elja
 export JCC_SOURCE_COMMIT_FILE=$HOME/anneal-occ-brains/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
-export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
-export LD_LIBRARY_PATH=$HOME/ira/lib:$GCCLIB:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=$HOME/ira/lib:${LD_LIBRARY_PATH:-}
 export CATALOG_REPLICAS=48
-export CATALOG_WAVE=48
+export CATALOG_WAVE=24
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
@@ -46,4 +44,4 @@ if ! grep -a -F -q "Refuse" "$LJ_BIN" && ! grep -a -F -q "gt stop leftover-well"
   exit 2
 fi
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj75.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 1 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 75 4000000 0 "$RADIUS"
