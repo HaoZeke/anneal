@@ -753,6 +753,31 @@ pub fn step_into_hole<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    step_into_hole_escaping(
+        x,
+        wells,
+        soap_step,
+        SOAP_PACK_ESCAPE,
+        rcut,
+        species,
+        mobile,
+        rng,
+    )
+}
+
+/// [`step_into_hole`] with the escape distance supplied, so the
+/// distance a Leave has to cover can be measured rather than assumed.
+#[allow(clippy::too_many_arguments)]
+pub fn step_into_hole_escaping<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    wells: &[Array1<f64>],
+    soap_step: f64,
+    escape: f64,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
     let mut cur = x.to_owned();
     let step = soap_step.max(SOAP_PACK_MERGE);
     let cart_guard = 2.0;
@@ -779,7 +804,7 @@ pub fn step_into_hole<R: Rng + ?Sized>(
             .filter(|w| w.len() == mu.len())
             .map(|w| soap_l2_pack(mu.view(), w.view()))
             .fold(f64::INFINITY, f64::min);
-        if !wells.is_empty() && nearest >= SOAP_PACK_ESCAPE {
+        if !wells.is_empty() && nearest >= escape {
             break;
         }
         let mut dp = Array1::<f64>::zeros(mu.len());
@@ -1291,6 +1316,69 @@ mod tests {
         assert!(
             d_iso < SOAP_PACK_GAP && d_marks > SOAP_PACK_GAP,
             "adopt gap {SOAP_PACK_GAP} must sit between ico isomer {d_iso} and Marks {d_marks}"
+        );
+    }
+
+    /// What a Leave has to cover, measured rather than assumed.
+    ///
+    /// The escape constant was set from the sealed LJ75 ratio, ico
+    /// versus Marks at 0.69 against a merge of 0.20, which is measured
+    /// in the DECAF histogram L1 while the exit test runs in the
+    /// cloud-mean L2. This sweeps the escape distance and quenches
+    /// from each hole step, so the factor rests on the family-change
+    /// rate in the metric that uses it. Run with --nocapture to read
+    /// the table.
+    #[test]
+    fn the_escape_distance_is_where_a_quench_stops_falling_back() {
+        const SEEDS: u64 = 12;
+        let ico = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let origin = ico.as_slice().expect("fixture is contiguous");
+        let rcut = 3.5;
+        let well = unit(&spectrum(ico.view(), rcut, None, None).cloud_mean);
+        let mut changed_at_merge = 0usize;
+        let mut changed_at_escape = 0usize;
+        for factor in [1.0_f64, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0] {
+            let escape = factor * SOAP_PACK_MERGE;
+            let mut changed = 0usize;
+            let mut reached = 0.0_f64;
+            for seed in 0..SEEDS {
+                let mut rng = StdRng::seed_from_u64(seed);
+                let left = step_into_hole_escaping(
+                    ico.view(),
+                    std::slice::from_ref(&well),
+                    SOAP_PACK_MERGE,
+                    escape,
+                    rcut,
+                    None,
+                    None,
+                    &mut rng,
+                );
+                let moved = unit(&spectrum(left.view(), rcut, None, None).cloud_mean);
+                reached += soap_l2_pack(moved.view(), well.view());
+                let (_, quenched) = quench_lj(left.view());
+                let trial = quenched.as_slice().expect("quench is contiguous");
+                if crate::catalog::different_decaf_family(origin, trial) {
+                    changed += 1;
+                }
+            }
+            println!(
+                "escape {factor:.1}x merge: reached {:.4} mean, family changed {changed}/{SEEDS}",
+                reached / SEEDS as f64
+            );
+            if (factor - 1.0).abs() < 1e-9 {
+                changed_at_merge = changed;
+            }
+            if (factor - SOAP_PACK_ESCAPE / SOAP_PACK_MERGE).abs() < 1e-9 {
+                changed_at_escape = changed;
+            }
+        }
+        // The claim the constant rests on: stopping at sameness leaves
+        // the quench inside the well it was told to leave, and the
+        // escape distance is far enough out that it does not.
+        assert!(
+            changed_at_escape > changed_at_merge,
+            "escape {changed_at_escape}/{SEEDS} is no better than stopping at merge \
+             {changed_at_merge}/{SEEDS}; the factor is not earning itself"
         );
     }
 
