@@ -117,6 +117,25 @@ impl Archive {
         }
     }
 
+    /// Nearest cell to this descriptor, however far away it is.
+    ///
+    /// For classifying, not for opening. Every descriptor an open
+    /// archive is asked about gets an answer in the archive's own
+    /// numbering, which matters because the alternative namespace, the
+    /// leader-clustered packing families, uses the same integers for
+    /// unrelated things. Falling back from one to the other credits
+    /// occupancy and reward to whatever cell happens to share the
+    /// number.
+    pub fn nearest(&self, descriptor: &[f64]) -> Option<usize> {
+        self.centres
+            .iter()
+            .enumerate()
+            .filter(|(_, centre)| centre.len() == descriptor.len())
+            .map(|(index, centre)| (index, distance(centre, descriptor)))
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .map(|(index, _)| index)
+    }
+
     /// Cell this descriptor belongs to without opening one.
     pub fn assign(&self, descriptor: &[f64]) -> Option<usize> {
         let radius = self.radius.current();
@@ -181,6 +200,12 @@ impl Archive {
     }
 
     /// Fraction of open cells that any of `descriptors` occupies.
+    ///
+    /// The denominator is the cells opened so far and it grows as the
+    /// radius anneals down, so this is a diagnostic and not a stopping
+    /// criterion: a run can drive it down by discovering structure
+    /// rather than by failing to. Anything that stops on it stops on
+    /// the shape of the schedule.
     pub fn coverage<'a, I>(&self, descriptors: I) -> f64
     where
         I: IntoIterator<Item = &'a [f64]>,
@@ -453,6 +478,23 @@ mod tests {
             .filter(|_| archive.select(&[0, 1], &mut rng) == Some(0))
             .count();
         assert!(picked > 250, "paying cell chosen only {picked} of 300");
+    }
+
+    #[test]
+    fn an_open_archive_answers_for_every_descriptor() {
+        let mut archive = Archive::new(1.0, 0.4);
+        archive.observe(&[0.0, 0.0]);
+        archive.observe(&[5.0, 0.0]);
+        // Beyond every radius, so assign declines: that is what opens
+        // cells correctly and what would have fallen through to the
+        // packing families, whose cell numbers mean something else.
+        assert_eq!(archive.assign(&[80.0, 0.0]), None);
+        // Classification still answers, in this archive's numbering.
+        assert_eq!(archive.nearest(&[80.0, 0.0]), Some(1));
+        assert_eq!(archive.nearest(&[-80.0, 0.0]), Some(0));
+        // An archive with no cells has nothing to answer with, which is
+        // the only case where another numbering may take over.
+        assert_eq!(Archive::new(1.0, 0.4).nearest(&[0.0, 0.0]), None);
     }
 
     #[test]
