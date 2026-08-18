@@ -52,6 +52,21 @@ if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
   ldd "$IRA_LIB_DIR/libira.so"
   exit 1
 fi
+# nng-sys builds the nng C library through cmake at build time, so the
+# sysroot cmake above is a build input and not only a link input. The
+# crate itself has to be in the NFS registry already: compute has no
+# outbound network, so a cache miss here fails as an unresolved
+# dependency rather than as a download, which reads like a lockfile
+# problem and is not one.
+if ! ls "${CARGO_HOME:-$HOME/.cargo}"/registry/cache/*/nng-sys-*.crate >/dev/null 2>&1; then
+  echo "nng-sys is not in the offline registry; run on the login node:" >&2
+  echo "  cargo fetch --locked" >&2
+  exit 1
+fi
+"$SYS/bin/cmake" --version >/dev/null 2>&1 || {
+  echo "nng-sys needs a working cmake at $SYS/bin/cmake" >&2
+  exit 1
+}
 # Registry is on NFS from the login fetch. Compute may have no outbound net.
 cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
