@@ -2260,7 +2260,9 @@ fn run_capnp_catalog(
     use anneal_core::catalog_policy::{PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
-    use anneal_core::catalog_rpc::{CatalogIdentity, INCUMBENT_SAMPLE_DRAW, TransitionDestination};
+    use anneal_core::catalog_rpc::{
+        CatalogIdentity, INCUMBENT_SAMPLE_DRAW, SPARSE_SAMPLE_DRAW, TransitionDestination,
+    };
     use anneal_core::cooperative_search::ledger::ChargeKind;
     use anneal_core::cooperative_search::{
         CatalogBoundaryOutcome, CatalogBridgeOutcome, CatalogHoleOutcome, CatalogSampleOutcome,
@@ -3548,6 +3550,45 @@ fn run_capnp_catalog(
                         state,
                         action: "hyperband_reseed".to_owned(),
                     };
+                }
+                // Crossing a funnel is a draw from another one, not a
+                // push out of this one: a move made inside a funnel and
+                // relaxed downhill comes back. Ask the coordinator for a
+                // representative of the packing the fewest replicas are
+                // standing on, and take it if it is a different family
+                // from the one being left.
+                if let CatalogSampleOutcome::Candidate(sparse) = cooperative
+                    .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
+                    .expect("catalog sample access must preserve local execution")
+                    && sparse.coordinates.len() == snapshot.current_state().len()
+                {
+                    let elsewhere = {
+                        #[cfg(feature = "featomic")]
+                        {
+                            snapshot.current_state().as_slice().is_none_or(|here| {
+                                anneal_core::catalog::different_decaf_family(
+                                    here,
+                                    &sparse.coordinates,
+                                )
+                            })
+                        }
+                        #[cfg(not(feature = "featomic"))]
+                        {
+                            true
+                        }
+                    };
+                    if elsewhere {
+                        trace.proposal_family = ProposalFamily::DescriptorHole;
+                        trace.adoption = SliceAdoption::Adopted;
+                        leave_path.clear();
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state: Array1::from(sparse.coordinates.clone()),
+                            action: "catalog_leave".to_owned(),
+                        };
+                    }
                 }
                 trace.proposal_family = ProposalFamily::DescriptorHole;
                 if coop_wells_enabled {
