@@ -2329,17 +2329,16 @@ fn run_capnp_catalog(
         };
         use anneal_core::raft::{RaftNode, Role};
         let mut peer_ids = Vec::new();
-        let mut peer_urls = Vec::new();
+        let mut peers = Vec::new();
         for part in peers_raw.split(',').filter(|p| !p.is_empty()) {
             let (peer_id, url) = part
                 .split_once('=')
                 .expect("CATALOG_BRAIN_PEERS holds id=url pairs");
-            peer_ids.push(
-                peer_id
-                    .parse::<u32>()
-                    .expect("brain peer id must be an unsigned integer"),
-            );
-            peer_urls.push(url.to_owned());
+            let peer_id = peer_id
+                .parse::<u32>()
+                .expect("brain peer id must be an unsigned integer");
+            peer_ids.push(peer_id);
+            peers.push((peer_id, url.to_owned()));
         }
         let slot = std::sync::Arc::clone(&decree_slot);
         let stop = std::sync::Arc::clone(&brain_stop);
@@ -2347,9 +2346,22 @@ fn run_capnp_catalog(
         let brain_campaign = campaign.clone();
         let brain_ensemble = ensemble.clone();
         let replica_count = peer_ids.len() + 1;
+        let brain_publish = std::env::var("CATALOG_BRAIN_PUBLISH").ok();
         Some(std::thread::spawn(move || {
-            let bus = anneal_core::decree_bus::DecreeBus::new(replica, &listen, &peer_urls)
+            let bus = anneal_core::decree_bus::DecreeBus::new(replica, &listen, &peers)
                 .expect("brain bus must bind its own address");
+            // Observation is opt-in and only the nng transport carries
+            // it, so a build without the feature ignores the address
+            // rather than pretending to publish on it.
+            #[cfg(feature = "nng-transport")]
+            let bus = match brain_publish.as_deref() {
+                Some(url) => bus
+                    .publishing(url)
+                    .expect("brain publish address must bind"),
+                None => bus,
+            };
+            #[cfg(not(feature = "nng-transport"))]
+            let _ = brain_publish;
             let mut node = RaftNode::new(replica, peer_ids, 200, 37);
             let mut observer = None;
             let mut now = 0u64;
