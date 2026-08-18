@@ -210,7 +210,7 @@ impl RaftNode {
     }
 
     fn quorum(&self) -> usize {
-        (self.peers.len() + 1) / 2 + 1
+        self.peers.len().div_ceil(2) + 1
     }
 
     fn broadcast(&self, message: RaftMessage) -> Vec<(NodeId, RaftMessage)> {
@@ -640,7 +640,7 @@ mod tests {
 #[cfg(feature = "bank-rpc")]
 pub mod wire {
     use super::{Decree, NodeId, RaftMessage};
-    use crate::Raft_capnp::{decree, exploration_decree, raft_envelope, replica_assignment};
+    use crate::Raft_capnp::{exploration_decree, raft_envelope};
     use capnp::message::{Builder, ReaderOptions};
     use capnp::serialize;
     use std::io::Cursor;

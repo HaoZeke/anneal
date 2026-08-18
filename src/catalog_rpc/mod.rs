@@ -542,6 +542,7 @@ pub struct CoordinatorStatus {
     pub seam: Option<LandscapeSeam>,
 }
 
+/// Scientific record an accepted reply carries alongside the snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AcceptedPayload {
     /// Snapshot or mutation response without an additional scientific record.
