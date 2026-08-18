@@ -174,7 +174,7 @@ impl PackingBook {
     /// family. Same floor and unseen-mass ceiling as the leftover-SOAP
     /// census. Hop re-observes are not draws.
     pub fn families_saturated(&self) -> bool {
-        arrival_good_turing(&self.well_visits)
+        arrival_good_turing(self.well_visits.iter().copied())
     }
 
     /// Distinct rematched packings among live structures.
