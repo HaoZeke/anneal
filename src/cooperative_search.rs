@@ -617,6 +617,19 @@ mod run {
             Ok(())
         }
 
+        /// Wait for this replica's posted work to reach the coordinator.
+        ///
+        /// [`CooperativeRun::record_work`] posts and returns, which is
+        /// what keeps the hop loop off the socket. A caller that then
+        /// reads an ensemble aggregate is reading a counter the
+        /// coordinator may not have been told about yet.
+        pub fn flush(&mut self, replica: u32) -> Result<(), CooperativeRunError> {
+            if let Some(mailbox) = self.replica_mut(replica)?.client.as_ref() {
+                mailbox.drain();
+            }
+            Ok(())
+        }
+
         /// Offer one candidate and convert rejection or transport loss into trace state.
         pub fn offer_candidate(
             &mut self,
