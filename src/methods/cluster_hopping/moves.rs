@@ -1679,12 +1679,17 @@ mod move_scaling_tests {
     }
 
     /// What the slab arm actually proposes, as opposed to what mask it
-    /// carries. A proposal that never moves is worth no budget at all,
-    /// and one that moves the frozen layer is worth less than none,
-    /// because the quench pins that part back and the descriptor step
-    /// is spent on coordinates that cannot keep it.
+    /// carries.
+    ///
+    /// A two-water adsorbate is all surface and all alike, so the
+    /// leftover has nothing local in it and `shell_leftover` vetoes
+    /// following the residual. The arm then declines rather than
+    /// kicking: a kick the residual never asked for costs a quench and
+    /// takes the hop from a move that had something to say. Whatever it
+    /// returns, it must never displace the frozen layer, because the
+    /// quench pins that straight back.
     #[test]
-    fn the_slab_soap_proposal_moves_the_adsorbate_and_not_the_slab() {
+    fn the_slab_soap_proposal_declines_rather_than_kicking() {
         use rand::SeedableRng;
         let mut rec = Config::recommended_molecular(
             vec![8, 1, 1, 8, 1, 1, 8, 1, 1, 8, 1, 1],
@@ -1724,12 +1729,12 @@ mod move_scaling_tests {
         let adsorbate: f64 = (0..18).map(|i| (y[i] - x[i]).abs()).sum();
         let slab: f64 = (18..36).map(|i| (y[i] - x[i]).abs()).sum();
         assert!(
-            adsorbate > 1e-9,
-            "the slab SOAP proposal did not move the adsorbate at all"
-        );
-        assert!(
             slab < 1e-9,
             "the slab SOAP proposal displaced the frozen layer by {slab}, which the quench pins back"
+        );
+        assert!(
+            adsorbate < 1e-9,
+            "the arm kicked ({adsorbate}) on a leftover with nothing local in it"
         );
     }
 
