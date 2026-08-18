@@ -76,7 +76,7 @@ pub mod contextual;
 pub mod cool;
 pub mod cooperative_search;
 pub mod curvature;
-/// TCP transport for consensus traffic between server brains.
+/// nng transport for consensus traffic between server brains.
 #[cfg(feature = "bank-rpc")]
 pub mod decree_bus;
 pub mod delayed;
