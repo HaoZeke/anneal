@@ -2996,15 +2996,7 @@ mod tests {
             &mut expected_rng,
         );
         let mut actual_rng = StdRng::seed_from_u64(19);
-        let actual = step_away_cloud(
-            x.view(),
-            spec,
-            0.4,
-            None,
-            None,
-            None,
-            &mut actual_rng,
-        );
+        let actual = step_away_cloud(x.view(), spec, 0.4, None, None, None, &mut actual_rng);
         for index in 0..x.len() {
             assert!(
                 (actual[index] - expected[index]).abs() < 1e-12,

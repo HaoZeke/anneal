@@ -79,12 +79,7 @@ fn calibration_identity_requires_energy_gradient_and_ira_evidence() {
         8e-6,
         2e-4,
     ));
-    assert!(!accepts_repeated_quench(
-        -397.492331,
-        f64::NAN,
-        8e-6,
-        2e-5,
-    ));
+    assert!(!accepts_repeated_quench(-397.492331, f64::NAN, 8e-6, 2e-5,));
 }
 
 #[test]

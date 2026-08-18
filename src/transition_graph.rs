@@ -117,9 +117,7 @@ impl TransitionGraph {
                 .ok_or(TransitionGraphError::NodeIndexOverflow)?,
             TransitionOutcome::Unresolved => 0,
         };
-        self.register_node(
-            from.max(destination_nodes.saturating_sub(1)),
-        )?;
+        self.register_node(from.max(destination_nodes.saturating_sub(1)))?;
 
         let counts = self.actions.entry(action.into()).or_default();
         counts.resize(self.nodes);

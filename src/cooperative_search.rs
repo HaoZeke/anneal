@@ -16,9 +16,9 @@ mod run {
     use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
-        CatalogMutation, CatalogRelation,
-        CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-        PopulationSelection, ProtocolRejection, TransitionDestination,
+        CatalogMutation, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
+        PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolRejection,
+        TransitionDestination,
     };
     use crate::methods::feynman_kac::population_family_position;
 
@@ -639,10 +639,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.offer_candidate(rpc_sequence, candidate)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.offer_candidate(rpc_sequence, candidate))
+                })
             };
             match result {
                 None => {
@@ -707,10 +706,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.record_visit(rpc_sequence, candidate))
+                })
             };
             self.handle_transition_record(
                 replica,
@@ -967,11 +965,7 @@ mod run {
             let finished = {
                 let state = self.replica_mut(replica)?;
                 if state.policy_pending {
-                    state
-                        .policy_slot
-                        .lock()
-                        .expect("policy slot")
-                        .take()
+                    state.policy_slot.lock().expect("policy slot").take()
                 } else {
                     None
                 }
@@ -1034,7 +1028,10 @@ mod run {
                     state.policy_pending = true;
                 }
             }
-            if let Some(policy) = self.replicas.get(&replica).and_then(|state| state.last_policy)
+            if let Some(policy) = self
+                .replicas
+                .get(&replica)
+                .and_then(|state| state.last_policy)
             {
                 let input = policy_input_from_state(
                     policy,
@@ -1114,10 +1111,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.sample_candidate(rpc_sequence, draw)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.sample_candidate(rpc_sequence, draw))
+                })
             };
             match result {
                 None => {
@@ -1206,10 +1202,11 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.descriptor_hole(rpc_sequence, current, samples, draw)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.descriptor_hole(rpc_sequence, current, samples, draw)
+                    })
+                })
             };
             match result {
                 None => {
@@ -1284,8 +1281,7 @@ mod run {
                 let slot = Arc::clone(&state.hole_slot);
                 if let Some(mailbox) = state.client.as_ref() {
                     mailbox.post(move |client| {
-                        let answer =
-                            client.descriptor_hole(rpc_sequence, current, samples, draw);
+                        let answer = client.descriptor_hole(rpc_sequence, current, samples, draw);
                         *slot.lock().expect("hole slot") = Some(answer);
                     });
                     state.hole_pending = true;
@@ -1311,10 +1307,10 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.boundary_crossing(rpc_sequence, current, draw)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox
+                        .exec(move |client| client.boundary_crossing(rpc_sequence, current, draw))
+                })
             };
             match result {
                 None => {
@@ -1402,10 +1398,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.bridge_assignment(rpc_sequence, draw)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.bridge_assignment(rpc_sequence, draw))
+                })
             };
             match result {
                 None => Ok(CatalogBridgeOutcome::SharingDisabled),
@@ -1436,10 +1431,9 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.bridge_crossing(rpc_sequence, crossing)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.bridge_crossing(rpc_sequence, crossing))
+                })
             };
             match result {
                 None | Some(Ok(())) => Ok(()),
@@ -1489,10 +1483,11 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.population_join_with_snapshot(rpc_sequence, epoch)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.population_join_with_snapshot(rpc_sequence, epoch)
+                    })
+                })
             };
             self.handle_population_result(replica, epoch, result)
         }
@@ -1506,10 +1501,11 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.population_abstain_with_snapshot(rpc_sequence, epoch)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.population_abstain_with_snapshot(rpc_sequence, epoch)
+                    })
+                })
             };
             self.handle_population_result(replica, epoch, result)
         }
@@ -1523,10 +1519,11 @@ mod run {
             let rpc_sequence = self.next_rpc_sequence(replica)?;
             let result = {
                 let state = self.replica_mut(replica)?;
-                state
-                    .client
-                    .as_ref()
-                    .map(|mailbox| mailbox.exec(move |client| client.population_plan_with_snapshot(rpc_sequence, epoch)))
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| {
+                        client.population_plan_with_snapshot(rpc_sequence, epoch)
+                    })
+                })
             };
             self.handle_population_result(replica, epoch, result)
         }

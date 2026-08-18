@@ -44,8 +44,8 @@ impl DecreeBus {
     /// does not matter.
     pub fn new(id: NodeId, listen_url: &str, peer_urls: &[String]) -> Result<Self, BusError> {
         let listen = parse_tcp_url(listen_url)?;
-        let listener = TcpListener::bind(listen)
-            .map_err(|e| BusError(format!("listen {listen_url}: {e}")))?;
+        let listener =
+            TcpListener::bind(listen).map_err(|e| BusError(format!("listen {listen_url}: {e}")))?;
         listener
             .set_nonblocking(true)
             .map_err(|e| BusError(e.to_string()))?;
@@ -148,8 +148,7 @@ fn parse_tcp_url(url: &str) -> Result<SocketAddr, BusError> {
     let rest = url
         .strip_prefix("tcp://")
         .ok_or_else(|| BusError(format!("brain url must be tcp://host:port, not {url}")))?;
-    rest.parse()
-        .map_err(|e| BusError(format!("{url}: {e}")))
+    rest.parse().map_err(|e| BusError(format!("{url}: {e}")))
 }
 
 fn encode_frame(frame: &[u8]) -> Vec<u8> {

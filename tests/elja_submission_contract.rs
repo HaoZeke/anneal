@@ -142,7 +142,9 @@ fn molecular_submission_pairs_every_system_and_arm() {
 #[test]
 fn physical_drivers_accept_and_record_every_soap_mode() {
     for driver in ["molecular_cluster.rs", "slab_adsorption.rs"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples").join(driver);
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(driver);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
         for required in [

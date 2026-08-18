@@ -22,10 +22,9 @@ use anneal_core::catalog_rpc::{
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome,
-    CooperativeRun,
-    PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome, ProposalFamily,
-    RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation, SynchronizationOutcome,
-    TraceKind, TransitionRecordOutcome,
+    CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
+    ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+    SynchronizationOutcome, TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,

@@ -1,8 +1,8 @@
 #![cfg(feature = "bank-rpc")]
 
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest, PROTOCOL_VERSION,
-    BridgeCrossingRecord, ProtocolError, TransitionDestination, decode_request, encode_request,
+    BridgeCrossingRecord, CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest,
+    PROTOCOL_VERSION, ProtocolError, TransitionDestination, decode_request, encode_request,
     validate_identity,
 };
 

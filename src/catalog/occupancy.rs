@@ -518,8 +518,8 @@ mod tests {
         PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
         is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
         occupancy_complete_at, occupancy_leave_adopt, occupancy_retire, occupancy_retire_at,
-        packing_role, promote_one_sided,
-        published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
+        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
+        retis_should_swap, seat_extras,
     };
 
     #[test]

@@ -92,8 +92,11 @@ mod lammps_ffi {
     use std::ffi::{CString, c_char, c_double, c_int, c_void};
 
     unsafe extern "C" {
-        fn lammps_open_no_mpi(argc: c_int, argv: *mut *mut c_char, ptr: *mut *mut c_void)
-            -> *mut c_void;
+        fn lammps_open_no_mpi(
+            argc: c_int,
+            argv: *mut *mut c_char,
+            ptr: *mut *mut c_void,
+        ) -> *mut c_void;
         fn lammps_close(handle: *mut c_void);
         fn lammps_command(handle: *mut c_void, cmd: *const c_char) -> *mut c_char;
         fn lammps_scatter_atoms(
@@ -204,10 +207,7 @@ mod lammps_ffi {
             .iter()
             .map(|s| CString::new(*s).expect("static strings carry no nul"))
             .collect();
-        let mut argv: Vec<*mut c_char> = args
-            .iter()
-            .map(|s| s.as_ptr().cast_mut())
-            .collect();
+        let mut argv: Vec<*mut c_char> = args.iter().map(|s| s.as_ptr().cast_mut()).collect();
         let handle = unsafe {
             lammps_open_no_mpi(argv.len() as c_int, argv.as_mut_ptr(), std::ptr::null_mut())
         };
@@ -253,7 +253,10 @@ mod lammps_ffi {
         ) -> Result<Array1<f64>, EngineError> {
             let atoms = x.len() / 3;
             let mut slot = self.instance.borrow_mut();
-            if slot.as_ref().is_some_and(|instance| instance.atoms != atoms) {
+            if slot
+                .as_ref()
+                .is_some_and(|instance| instance.atoms != atoms)
+            {
                 let stale = slot.take().expect("occupied slot just observed");
                 unsafe { lammps_close(stale.handle) };
             }
@@ -281,9 +284,7 @@ mod lammps_ffi {
             )?;
             run_command(
                 instance.handle,
-                &format!(
-                    "fix lang all langevin {temperature} {temperature} 0.5 {thermostat_seed}"
-                ),
+                &format!("fix lang all langevin {temperature} {temperature} 0.5 {thermostat_seed}"),
             )?;
             run_command(instance.handle, &format!("run {steps}"))?;
             run_command(instance.handle, "unfix lang")?;

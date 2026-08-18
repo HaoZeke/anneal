@@ -117,11 +117,7 @@ impl LandscapeGraph {
         if n < 2 {
             return Err(GraphError::TooSmall);
         }
-        let ceiling = 2.0
-            * (0..n)
-                .map(|i| self.degree(i))
-                .fold(0.0_f64, f64::max)
-            + 1.0;
+        let ceiling = 2.0 * (0..n).map(|i| self.degree(i)).fold(0.0_f64, f64::max) + 1.0;
         // Deterministic start with a gradient along the index order so
         // the projection onto the Fiedler direction cannot vanish by
         // symmetry for the graphs a catalog produces.
@@ -199,7 +195,11 @@ impl LandscapeGraph {
             }
         }
         let denominator = volume_left.min(volume_right);
-        let conductance = if denominator > 0.0 { cut / denominator } else { 0.0 };
+        let conductance = if denominator > 0.0 {
+            cut / denominator
+        } else {
+            0.0
+        };
 
         let anchor = |members: &[u64]| -> u64 {
             members
@@ -237,11 +237,7 @@ impl LandscapeGraph {
                 return Err(GraphError::UnknownBasin);
             }
         }
-        let absorbing: Vec<bool> = self
-            .basins
-            .iter()
-            .map(|b| targets.contains(b))
-            .collect();
+        let absorbing: Vec<bool> = self.basins.iter().map(|b| targets.contains(b)).collect();
         if targets.is_empty() || absorbing.iter().all(|&a| a) {
             return Err(GraphError::BadAbsorbingSet);
         }
@@ -258,19 +254,10 @@ impl LandscapeGraph {
                 }
             }
         }
-        let transient: Vec<usize> = (0..n)
-            .filter(|&i| !absorbing[i] && reachable[i])
-            .collect();
+        let transient: Vec<usize> = (0..n).filter(|&i| !absorbing[i] && reachable[i]).collect();
         let mut times = HashMap::new();
         for (i, &basin) in self.basins.iter().enumerate() {
-            times.insert(
-                basin,
-                if absorbing[i] {
-                    0.0
-                } else {
-                    f64::INFINITY
-                },
-            );
+            times.insert(basin, if absorbing[i] { 0.0 } else { f64::INFINITY });
         }
         if transient.is_empty() {
             return Ok(times);
@@ -342,12 +329,20 @@ mod tests {
         let mut right = split.right.clone();
         left.sort_unstable();
         right.sort_unstable();
-        let (low, high) = if left[0] < 10 { (left, right) } else { (right, left) };
+        let (low, high) = if left[0] < 10 {
+            (left, right)
+        } else {
+            (right, left)
+        };
         assert_eq!(low, vec![0, 1, 2, 3]);
         assert_eq!(high, vec![10, 11, 12, 13]);
         // The weak seam makes the landscape nearly disconnected.
         assert!(split.algebraic_connectivity < 0.5);
-        assert!(split.conductance < 0.02, "conductance {}", split.conductance);
+        assert!(
+            split.conductance < 0.02,
+            "conductance {}",
+            split.conductance
+        );
         // Representatives sit on opposite sides and are the anchored
         // members: the joint basins carry the extra seam weight. The
         // side order is not promised, only the pairing.

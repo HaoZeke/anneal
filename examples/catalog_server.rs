@@ -124,9 +124,9 @@ fn run_gfn2_water_coordinator() -> Result<(), Box<dyn std::error::Error>> {
     let concentration = optional_parse(&args, 12, 0.5_f64)?;
     let diffusion_steps = optional_parse(&args, 13, 2_usize)?;
 
-    let engine_path = std::env::var("RGPOT_XTB_ENGINE").map_err(|_| {
-        "CATALOG_SYSTEM=gfn2-water requires RGPOT_XTB_ENGINE (path of libxtb_engine.so)"
-    })?;
+    let engine_path = std::env::var("RGPOT_XTB_ENGINE").map_err(
+        |_| "CATALOG_SYSTEM=gfn2-water requires RGPOT_XTB_ENGINE (path of libxtb_engine.so)",
+    )?;
     let engine_bytes = std::fs::read(&engine_path)
         .map_err(|error| format!("read RGPOT_XTB_ENGINE {engine_path}: {error}"))?;
     if engine_bytes.is_empty() {

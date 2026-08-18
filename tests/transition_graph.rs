@@ -1,17 +1,19 @@
-use anneal_core::transition_graph::{
-    AttractionRegionConfig, TransitionGraph, TransitionOutcome,
-};
+use anneal_core::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 #[test]
 fn fixed_probe_matrix_does_not_pool_adaptive_actions() {
     let mut graph = TransitionGraph::new();
-    graph.observe("adaptive", 0, TransitionOutcome::Resolved(0))
+    graph
+        .observe("adaptive", 0, TransitionOutcome::Resolved(0))
         .unwrap();
-    graph.observe("adaptive", 0, TransitionOutcome::Resolved(1))
+    graph
+        .observe("adaptive", 0, TransitionOutcome::Resolved(1))
         .unwrap();
-    graph.observe("adaptive", 0, TransitionOutcome::Resolved(1))
+    graph
+        .observe("adaptive", 0, TransitionOutcome::Resolved(1))
         .unwrap();
-    graph.observe("probe", 0, TransitionOutcome::Unresolved)
+    graph
+        .observe("probe", 0, TransitionOutcome::Unresolved)
         .unwrap();
 
     let matrix = graph.posterior_matrix("probe", 0.5).unwrap();
@@ -43,11 +45,14 @@ fn every_probe_row_is_a_probability_distribution_with_unresolved_mass() {
 #[test]
 fn action_counts_remain_independent() {
     let mut graph = TransitionGraph::new();
-    graph.observe("probe", 0, TransitionOutcome::Resolved(1))
+    graph
+        .observe("probe", 0, TransitionOutcome::Resolved(1))
         .unwrap();
-    graph.observe("transport", 0, TransitionOutcome::Resolved(1))
+    graph
+        .observe("transport", 0, TransitionOutcome::Resolved(1))
         .unwrap();
-    graph.observe("transport", 0, TransitionOutcome::Resolved(1))
+    graph
+        .observe("transport", 0, TransitionOutcome::Resolved(1))
         .unwrap();
 
     assert_eq!(graph.count("probe", 0, TransitionOutcome::Resolved(1)), 1);

@@ -228,7 +228,8 @@ impl RaftNode {
         } else {
             self.log[usize::try_from(prev_log_index - 1).expect("log fits memory")].term
         };
-        let entries = self.log[usize::try_from(prev_log_index).expect("log fits memory")..].to_vec();
+        let entries =
+            self.log[usize::try_from(prev_log_index).expect("log fits memory")..].to_vec();
         RaftMessage::AppendEntries {
             term: self.term,
             prev_log_index,
@@ -249,8 +250,7 @@ impl RaftNode {
                 .iter()
                 .filter(|peer| self.match_index.get(peer).copied().unwrap_or(0) >= index)
                 .count();
-            let entry_term =
-                self.log[usize::try_from(index - 1).expect("log fits memory")].term;
+            let entry_term = self.log[usize::try_from(index - 1).expect("log fits memory")].term;
             if replicated >= self.quorum() && entry_term == self.term {
                 candidate = index;
             }
@@ -392,7 +392,9 @@ impl RaftNode {
                         RaftMessage::AppendReply {
                             term: self.term,
                             success: false,
-                            match_index: self.last_log_index().min(prev_log_index.saturating_sub(1)),
+                            match_index: self
+                                .last_log_index()
+                                .min(prev_log_index.saturating_sub(1)),
                         },
                     )];
                 }
@@ -525,7 +527,12 @@ mod tests {
     fn a_quiet_cluster_elects_exactly_one_leader() {
         let mut cluster = Cluster::new(3);
         cluster.run(60);
-        assert_eq!(cluster.leaders().len(), 1, "leaders: {:?}", cluster.leaders());
+        assert_eq!(
+            cluster.leaders().len(),
+            1,
+            "leaders: {:?}",
+            cluster.leaders()
+        );
         // The stagger makes node 0 time out first, every replay.
         assert_eq!(cluster.leaders(), vec![0]);
         let mut replay = Cluster::new(3);
@@ -560,8 +567,7 @@ mod tests {
         cluster.run(20);
         for node in &mut cluster.nodes {
             let committed = node.take_committed();
-            let payloads: Vec<&[u8]> =
-                committed.iter().map(|d| d.payload.as_slice()).collect();
+            let payloads: Vec<&[u8]> = committed.iter().map(|d| d.payload.as_slice()).collect();
             assert_eq!(
                 payloads,
                 vec![b"decree-a".as_slice(), b"decree-b".as_slice()],

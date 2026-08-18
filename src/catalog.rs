@@ -35,15 +35,15 @@ pub use mixing::{
     stronger,
 };
 pub use occupancy::{
-    CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat, LeaveFrame, LeavePath, OccupancyCertificate,
-    OccupancyLeaveAdopt, PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
-    is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
-    occupancy_complete_at, occupancy_leave_adopt, occupancy_min_families, occupancy_retire,
-    occupancy_retire_at, packing_role, promote_one_sided, DEFAULT_MIN_OCCUPIED_FAMILIES,
+    CHAMPION_RANK, DEFAULT_MIN_OCCUPIED_FAMILIES, INTERFACE_HORIZON, InterfaceSeat, LeaveFrame,
+    LeavePath, OccupancyCertificate, OccupancyLeaveAdopt, PackingRole, assign_interfaces,
+    in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+    leftover_lambda, occupancy_complete, occupancy_complete_at, occupancy_leave_adopt,
+    occupancy_min_families, occupancy_retire, occupancy_retire_at, packing_role, promote_one_sided,
     published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
 };
 pub use packing::{
-    PACKING_MERGE, PACKING_MOVE_EPS, GoodTuringSample, PackingBook, different_decaf_family,
+    GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
     leftover_arrivals_saturated, packing_distance, packing_fingerprint, packing_vector,
     same_packing,
 };

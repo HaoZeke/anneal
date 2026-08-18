@@ -5,9 +5,7 @@
 
 mod common;
 
-use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, SoapProposalMode, covalent_radius,
-};
+use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, covalent_radius};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::RgpotObjective;
@@ -34,8 +32,12 @@ fn write_resolved_config(cfg: &Config) {
     let Ok(path) = std::env::var("ANNEAL_RESOLVED_CONFIG") else {
         return;
     };
-    std::fs::write(&path, cfg.resolved_json().expect("serialize resolved configuration"))
-        .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
+    std::fs::write(
+        &path,
+        cfg.resolved_json()
+            .expect("serialize resolved configuration"),
+    )
+    .unwrap_or_else(|error| panic!("write resolved configuration {path}: {error}"));
 }
 
 fn read_system(path: &str) -> (Array1<f64>, Vec<u32>, Vec<usize>, [f64; 9]) {
