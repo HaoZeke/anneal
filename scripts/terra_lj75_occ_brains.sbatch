@@ -29,6 +29,7 @@ export CATALOG_MAX_HOPS=60000
 # Two-funnel paper hurdle (ico vs Marks). Unset and the floor is still 2;
 # set 1 for Good-Turing alone.
 export CATALOG_MIN_FAMILIES=2
+export CATALOG_SHARED_BIAS=1
 export SEED_OFFSET_BASE=1800000
 export LJ_OUT=$HOME/ljwork/terra
 mkdir -p "$LJ_OUT/lj75-occ-brains"
