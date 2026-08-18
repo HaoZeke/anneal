@@ -46,4 +46,4 @@ if ! grep -a -F -q "Refuse" "$LJ_BIN" && ! grep -a -F -q "gt stop leftover-well"
   exit 2
 fi
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj98.json\"))[\"census_radius\"])")
-exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 0 "$RADIUS"
+exec scripts/elja_jcc_lj_many_chains.sh 98 4000000 1 "$RADIUS"
