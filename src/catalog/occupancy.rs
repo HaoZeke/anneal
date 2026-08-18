@@ -79,18 +79,21 @@ pub enum OccupancyLeaveAdopt {
     Quench,
     /// The quench sat in the occupied family. Keep the unquenched hole step.
     HoleStep,
+    /// Same-family leftover hole. Do not adopt; the extra stays put
+    /// and the hop loop draws another Leave.
+    Refuse,
 }
 
-/// Occupancy Leave that quenches back onto the occupied packing must
-/// still move the chain to the hole step. A discarded same-family
-/// quench is a no-op Leave. Reseeds take the new start even when
+/// Occupancy Leave that quenches onto a new DECAF family is taken.
+/// A leftover-SOAP hole that stays in the occupied family is refused:
+/// off-well ico is still ico. Reseeds take the new start even when
 /// DECAF still names the old family.
 pub fn occupancy_leave_adopt(action: &str, family_changed: bool) -> Option<OccupancyLeaveAdopt> {
     if !is_occupancy_leave_action(action) {
         return None;
     }
     if action == "catalog_leave" && !family_changed {
-        Some(OccupancyLeaveAdopt::HoleStep)
+        Some(OccupancyLeaveAdopt::Refuse)
     } else {
         Some(OccupancyLeaveAdopt::Quench)
     }
@@ -529,10 +532,10 @@ mod tests {
     }
 
     #[test]
-    fn catalog_leave_keeps_the_hole_step_when_the_quench_stays_home() {
+    fn catalog_leave_refuses_a_same_family_hole() {
         assert_eq!(
             occupancy_leave_adopt("catalog_leave", false),
-            Some(OccupancyLeaveAdopt::HoleStep)
+            Some(OccupancyLeaveAdopt::Refuse)
         );
         assert_eq!(
             occupancy_leave_adopt("catalog_leave", true),

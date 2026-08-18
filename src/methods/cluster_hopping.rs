@@ -1202,6 +1202,10 @@ where
                 #[cfg(not(feature = "featomic"))]
                 let family_changed = true;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
+                if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
+                    hops += 1;
+                    continue;
+                }
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
                     // Zero descent steps: the chain takes the hole geometry
                     // itself, so what it needs is that geometry's energy. A
@@ -1243,6 +1247,9 @@ where
                     Some(crate::catalog::OccupancyLeaveAdopt::Quench) => true,
                     Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) => {
                         unreachable!("hole-step leave relocates before the quench path")
+                    }
+                    Some(crate::catalog::OccupancyLeaveAdopt::Refuse) => {
+                        unreachable!("same-family leave is refused before the quench path")
                     }
                     None => adopt,
                 };
