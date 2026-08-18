@@ -134,7 +134,7 @@ impl MoveLibrary {
                         cfg.length_scale,
                     )
                 };
-                let mobile = mobile_atoms(cfg, &groups);
+                let mobile = mobile_atoms(cfg, groups);
                 if cfg.soap_mode != SoapProposalMode::Off {
                     kernels.push(soap_arm(cfg, mobile, Some(groups.clone())));
                 }
