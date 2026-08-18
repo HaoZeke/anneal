@@ -13,6 +13,8 @@ if [[ ! -x $PIXI ]]; then
   echo "missing pixi at $PIXI" >&2
   exit 1
 fi
+# Compute /tmp is not the login NFS cache. Keep rattler on $HOME.
+export PIXI_CACHE_DIR=${PIXI_CACHE_DIR:-$HOME/.cache/pixi}
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   echo "missing $IRA_LIB_DIR/libira.so; run scripts/elja_rebuild_ira.sh" >&2
