@@ -50,9 +50,10 @@
 //! A mixing certificate names a putative: uniquely deepest, occupant
 //! mixed, a mixed competitor, strictly more occupied. On LJ75 that
 //! putative is the icosahedral shelf until a second funnel is deeper.
-//! Occupancy retires when rematched DECAF Good--Turing saturates two
-//! occupied families, or when mixing and that saturation hold
-//! together. Occupant \(\hat R\) uses
+//! Occupancy retires when rematched DECAF Good--Turing saturates at
+//! least [`occupancy_min_families`] families (`CATALOG_MIN_FAMILIES`,
+//! default 2 for two-funnel paper hurdles; 1 is Good--Turing alone),
+//! or when mixing and that saturation hold together. Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
