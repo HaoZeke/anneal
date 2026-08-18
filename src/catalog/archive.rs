@@ -26,119 +26,183 @@
 
 use rand::Rng;
 
-/// A centroidal Voronoi tessellation of a descriptor space.
+/// An archive of descriptor cells with an annealed radius.
 ///
-/// Cells are named by their centroid and assignment is nearest
-/// centroid, so the number of cells is chosen once and does not move.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Tessellation {
-    centroids: Vec<Vec<f64>>,
+/// Cells are not a grid and not discovered at a fixed radius. A
+/// structure joins the nearest cell within `Dcut` and opens a new one
+/// beyond it, and `Dcut` anneals from half the mean pairwise distance
+/// down to a floor over the run, which is conformational space
+/// annealing's rule and [`crate::diversity::DiversityAnnealer`] is
+/// already the schedule for it. Early on the archive is coarse and the
+/// search is asked only to be different; late on it is fine and the
+/// search is asked to be better. That is the simulated-annealing half
+/// of CSA applied to diversity rather than to acceptance.
+///
+/// Selection is the exploration half, and the reference is not the
+/// physics literature. Hard-exploration Atari was solved by keeping an
+/// archive of visited cells, returning to a promising one, and
+/// exploring from there: first return, then explore. A Leave is that
+/// return, and the cell it returns to is chosen the same way, by
+/// weighting a cell's demonstrated success against how little it has
+/// been tried.
+pub struct Archive {
+    /// Representative descriptor of each cell.
+    centres: Vec<Vec<f64>>,
+    /// Times a structure landed in each cell.
+    visits: Vec<u64>,
+    /// Successes plus one: starts from this cell the catalog kept.
+    alpha: Vec<f64>,
+    /// Failures plus one.
+    beta: Vec<f64>,
+    /// The annealed radius that decides what counts as a new cell.
+    radius: crate::diversity::DiversityAnnealer,
 }
 
-impl Tessellation {
-    /// Relax `niches` centroids onto `samples` by Lloyd iteration.
-    ///
-    /// Samples are descriptors already seen, which is what makes the
-    /// cells follow the region the search actually occupies rather
-    /// than a box drawn around it. Returns `None` when there is no
-    /// space to tessellate or fewer samples than niches asked for.
-    pub fn build<R: Rng + ?Sized>(
-        niches: usize,
-        samples: &[Vec<f64>],
-        iterations: usize,
-        rng: &mut R,
-    ) -> Option<Self> {
-        if niches == 0 || samples.len() < niches {
-            return None;
+impl Archive {
+    /// An archive whose radius starts at `initial` and anneals to
+    /// `floor_fraction` of it.
+    pub fn new(initial: f64, floor_fraction: f64) -> Self {
+        Self {
+            centres: Vec::new(),
+            visits: Vec::new(),
+            alpha: Vec::new(),
+            beta: Vec::new(),
+            radius: crate::diversity::DiversityAnnealer::from_initial(initial)
+                .with_final_fraction(floor_fraction),
         }
-        let width = samples[0].len();
-        if width == 0 || samples.iter().any(|sample| sample.len() != width) {
-            return None;
-        }
-        // Seed on distinct samples so no centroid starts empty.
-        let mut chosen: Vec<usize> = Vec::with_capacity(niches);
-        while chosen.len() < niches {
-            let index = rng.random_range(0..samples.len());
-            if !chosen.contains(&index) {
-                chosen.push(index);
-            }
-        }
-        let mut centroids: Vec<Vec<f64>> = chosen
-            .into_iter()
-            .map(|index| samples[index].clone())
-            .collect();
-        for _ in 0..iterations {
-            let mut sums = vec![vec![0.0; width]; niches];
-            let mut counts = vec![0usize; niches];
-            for sample in samples {
-                let cell = nearest(&centroids, sample)?;
-                counts[cell] += 1;
-                for (axis, value) in sample.iter().enumerate() {
-                    sums[cell][axis] += value;
-                }
-            }
-            for (cell, count) in counts.iter().enumerate() {
-                if *count == 0 {
-                    // An empty cell keeps its centroid rather than
-                    // collapsing onto another, so the count stays put.
-                    continue;
-                }
-                for axis in 0..width {
-                    centroids[cell][axis] = sums[cell][axis] / *count as f64;
-                }
-            }
-        }
-        Some(Self { centroids })
     }
 
-    /// Cells in the tessellation. Fixed by construction.
-    pub fn niches(&self) -> usize {
-        self.centroids.len()
+    /// Cells opened so far.
+    pub fn cells(&self) -> usize {
+        self.centres.len()
     }
 
-    /// Cell a descriptor belongs to, or `None` on a width mismatch.
+    /// Current radius.
+    pub fn radius(&self) -> f64 {
+        self.radius.current()
+    }
+
+    /// Advance the radius to where `progress` through the run puts it.
+    pub fn anneal(&mut self, progress: f64) -> f64 {
+        self.radius.threshold(progress)
+    }
+
+    /// Cell this descriptor belongs to, opening one if it is further
+    /// than the radius from every cell already open.
+    pub fn observe(&mut self, descriptor: &[f64]) -> Option<usize> {
+        if descriptor.is_empty() {
+            return None;
+        }
+        let radius = self.radius.current();
+        let nearest = self
+            .centres
+            .iter()
+            .enumerate()
+            .filter(|(_, centre)| centre.len() == descriptor.len())
+            .map(|(index, centre)| (index, distance(centre, descriptor)))
+            .min_by(|left, right| left.1.total_cmp(&right.1));
+        match nearest {
+            Some((index, gap)) if gap <= radius => {
+                self.visits[index] = self.visits[index].saturating_add(1);
+                Some(index)
+            }
+            _ => {
+                self.centres.push(descriptor.to_vec());
+                self.visits.push(1);
+                self.alpha.push(1.0);
+                self.beta.push(1.0);
+                Some(self.centres.len() - 1)
+            }
+        }
+    }
+
+    /// Cell this descriptor belongs to without opening one.
     pub fn assign(&self, descriptor: &[f64]) -> Option<usize> {
-        nearest(&self.centroids, descriptor)
+        let radius = self.radius.current();
+        self.centres
+            .iter()
+            .enumerate()
+            .filter(|(_, centre)| centre.len() == descriptor.len())
+            .map(|(index, centre)| (index, distance(centre, descriptor)))
+            .min_by(|left, right| left.1.total_cmp(&right.1))
+            .filter(|(_, gap)| *gap <= radius)
+            .map(|(index, _)| index)
     }
 
-    /// Fraction of cells that any of `descriptors` reaches.
+    /// Posterior mean success rate of a cell.
+    pub fn score(&self, cell: usize) -> f64 {
+        let alpha = self.alpha.get(cell).copied().unwrap_or(1.0);
+        let beta = self.beta.get(cell).copied().unwrap_or(1.0);
+        alpha / (alpha + beta)
+    }
+
+    /// Times a structure landed in a cell.
+    pub fn visits(&self, cell: usize) -> u64 {
+        self.visits.get(cell).copied().unwrap_or(0)
+    }
+
+    /// A start drawn from this cell produced something the catalog kept.
+    pub fn reward(&mut self, cell: usize) {
+        if let Some(alpha) = self.alpha.get_mut(cell) {
+            *alpha += 1.0;
+        }
+    }
+
+    /// A start drawn from this cell produced nothing.
+    pub fn penalise(&mut self, cell: usize) {
+        if let Some(beta) = self.beta.get_mut(cell) {
+            *beta += 1.0;
+        }
+    }
+
+    /// Return to a cell: a Thompson draw on what the cell has produced,
+    /// discounted by how heavily it has already been visited.
     ///
-    /// This is the quantity a saturation test wants and the one a
-    /// discovered-cell scheme cannot supply, because there the
-    /// denominator moves.
+    /// The posterior is the exploit term and the count is the explore
+    /// term, which is the shape of the cell-selection rule that made
+    /// return-then-explore work: a cell nothing has visited is worth
+    /// returning to even with no evidence, and a cell visited a hundred
+    /// times has to keep earning it.
+    pub fn select<R: Rng + ?Sized>(&self, allowed: &[usize], rng: &mut R) -> Option<usize> {
+        let mut best: Option<(usize, f64)> = None;
+        for cell in allowed {
+            let alpha = self.alpha.get(*cell).copied().unwrap_or(1.0);
+            let beta = self.beta.get(*cell).copied().unwrap_or(1.0);
+            let promise = sample_beta(alpha, beta, rng);
+            let seen = self.visits.get(*cell).copied().unwrap_or(0) as f64;
+            let bonus = 1.0 / (1.0 + seen).sqrt();
+            let weight = promise * bonus;
+            if best.is_none_or(|(_, held)| weight > held) {
+                best = Some((*cell, weight));
+            }
+        }
+        best.map(|(cell, _)| cell)
+    }
+
+    /// Fraction of open cells that any of `descriptors` occupies.
     pub fn coverage<'a, I>(&self, descriptors: I) -> f64
     where
         I: IntoIterator<Item = &'a [f64]>,
     {
-        if self.centroids.is_empty() {
+        if self.centres.is_empty() {
             return 0.0;
         }
-        let mut seen = vec![false; self.centroids.len()];
+        let mut seen = vec![false; self.centres.len()];
         for descriptor in descriptors {
             if let Some(cell) = self.assign(descriptor) {
                 seen[cell] = true;
             }
         }
-        seen.iter().filter(|reached| **reached).count() as f64 / self.centroids.len() as f64
+        seen.iter().filter(|reached| **reached).count() as f64 / self.centres.len() as f64
     }
 }
 
-fn nearest(centroids: &[Vec<f64>], point: &[f64]) -> Option<usize> {
-    let mut best: Option<(usize, f64)> = None;
-    for (index, centroid) in centroids.iter().enumerate() {
-        if centroid.len() != point.len() {
-            return None;
-        }
-        let distance: f64 = centroid
-            .iter()
-            .zip(point)
-            .map(|(a, b)| (a - b) * (a - b))
-            .sum();
-        if best.is_none_or(|(_, held)| distance < held) {
-            best = Some((index, distance));
-        }
-    }
-    best.map(|(index, _)| index)
+fn distance(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt()
 }
 
 /// Per-cell Beta-Bernoulli bandit over the archive.
@@ -307,56 +371,100 @@ mod tests {
     use rand::SeedableRng;
     use rand::rngs::StdRng;
 
-    fn two_clouds() -> Vec<Vec<f64>> {
-        let mut samples = Vec::new();
-        for i in 0..20 {
-            let jitter = i as f64 * 0.01;
-            samples.push(vec![0.0 + jitter, 0.0]);
-            samples.push(vec![5.0 + jitter, 5.0]);
+    #[test]
+    fn the_radius_anneals_from_coarse_to_fine() {
+        let mut archive = Archive::new(1.0, 0.4);
+        assert!((archive.radius() - 1.0).abs() < 1e-12);
+        archive.anneal(1.0);
+        // The floor is a fraction of the start, so late in a run the
+        // archive separates what it merged early: different first,
+        // better second.
+        assert!(
+            archive.radius() <= 0.4 + 1e-9,
+            "radius {}",
+            archive.radius()
+        );
+        assert!(archive.radius() > 0.0);
+    }
+
+    #[test]
+    fn a_far_structure_opens_a_cell_and_a_near_one_joins() {
+        let mut archive = Archive::new(1.0, 0.4);
+        assert_eq!(archive.observe(&[0.0, 0.0]), Some(0));
+        // Inside the radius: same cell, and the visit is counted.
+        assert_eq!(archive.observe(&[0.2, 0.0]), Some(0));
+        assert_eq!(archive.visits(0), 2);
+        // Beyond it: a cell of its own.
+        assert_eq!(archive.observe(&[5.0, 0.0]), Some(1));
+        assert_eq!(archive.cells(), 2);
+        assert_eq!(archive.assign(&[0.1, 0.0]), Some(0));
+        // Nowhere near anything open, and assign does not open cells.
+        assert_eq!(archive.assign(&[50.0, 0.0]), None);
+        assert_eq!(archive.cells(), 2);
+    }
+
+    #[test]
+    fn a_shrinking_radius_splits_what_it_had_merged() {
+        let mut archive = Archive::new(1.0, 0.1);
+        archive.observe(&[0.0, 0.0]);
+        // Half a unit away joins while the radius is one.
+        assert_eq!(archive.observe(&[0.5, 0.0]), Some(0));
+        archive.anneal(1.0);
+        // Once the radius is a tenth it does not, which is the point of
+        // annealing it rather than fixing it.
+        assert_eq!(archive.observe(&[0.5, 0.0]), Some(1));
+    }
+
+    #[test]
+    fn an_unvisited_cell_is_worth_returning_to() {
+        let mut archive = Archive::new(1.0, 0.4);
+        archive.observe(&[0.0, 0.0]);
+        archive.observe(&[5.0, 0.0]);
+        // Cell zero visited heavily and paying; cell one barely seen.
+        for _ in 0..60 {
+            archive.observe(&[0.05, 0.0]);
+            archive.reward(0);
         }
-        samples
+        let mut rng = StdRng::seed_from_u64(31);
+        let returned = (0..400)
+            .filter(|_| archive.select(&[0, 1], &mut rng) == Some(1))
+            .count();
+        // The count discount is what makes a thin cell worth a return
+        // even against a cell with a far better record: sixty visits
+        // against one is a bonus ratio near eight.
+        assert!(
+            returned > 100,
+            "barely-visited cell returned to only {returned} of 400"
+        );
     }
 
     #[test]
-    fn the_cell_count_is_chosen_not_discovered() {
-        let mut rng = StdRng::seed_from_u64(3);
-        let tessellation = Tessellation::build(8, &two_clouds(), 10, &mut rng).expect("builds");
-        // The point of the exercise: twenty-two families across
-        // twenty-four replicas is what discovery gives; this gives
-        // whatever was asked for.
-        assert_eq!(tessellation.niches(), 8);
+    fn a_paying_cell_still_wins_against_an_equally_thin_one() {
+        let mut archive = Archive::new(1.0, 0.4);
+        archive.observe(&[0.0, 0.0]);
+        archive.observe(&[5.0, 0.0]);
+        for _ in 0..30 {
+            archive.reward(0);
+            archive.penalise(1);
+        }
+        let mut rng = StdRng::seed_from_u64(37);
+        let picked = (0..300)
+            .filter(|_| archive.select(&[0, 1], &mut rng) == Some(0))
+            .count();
+        assert!(picked > 250, "paying cell chosen only {picked} of 300");
     }
 
     #[test]
-    fn a_tessellation_separates_two_clouds() {
-        let mut rng = StdRng::seed_from_u64(5);
-        let tessellation = Tessellation::build(2, &two_clouds(), 20, &mut rng).expect("builds");
-        let low = tessellation.assign(&[0.0, 0.0]).expect("assigns");
-        let high = tessellation.assign(&[5.0, 5.0]).expect("assigns");
-        assert_ne!(low, high, "both clouds landed in one cell");
-    }
-
-    #[test]
-    fn a_tessellation_refuses_what_it_cannot_tessellate() {
-        let mut rng = StdRng::seed_from_u64(7);
-        assert!(Tessellation::build(0, &two_clouds(), 5, &mut rng).is_none());
-        // More niches than samples.
-        assert!(Tessellation::build(500, &two_clouds(), 5, &mut rng).is_none());
-        // Ragged descriptors, which is what a growing class histogram
-        // looks like and the reason it is not the input here.
-        let ragged = vec![vec![0.0, 1.0], vec![0.0]];
-        assert!(Tessellation::build(1, &ragged, 5, &mut rng).is_none());
-    }
-
-    #[test]
-    fn coverage_has_a_denominator_that_does_not_move() {
-        let mut rng = StdRng::seed_from_u64(11);
-        let tessellation = Tessellation::build(4, &two_clouds(), 20, &mut rng).expect("builds");
+    fn coverage_counts_the_cells_the_ensemble_stands_on() {
+        let mut archive = Archive::new(1.0, 0.4);
+        archive.observe(&[0.0, 0.0]);
+        archive.observe(&[5.0, 0.0]);
+        archive.observe(&[10.0, 0.0]);
+        let here = [0.0, 0.0];
+        let covered = archive.coverage(vec![&here[..]]);
+        assert!((covered - 1.0 / 3.0).abs() < 1e-9, "coverage {covered}");
         let nothing: Vec<&[f64]> = Vec::new();
-        assert_eq!(tessellation.coverage(nothing), 0.0);
-        let one = [0.0, 0.0];
-        let covered = tessellation.coverage(vec![&one[..]]);
-        assert!(covered > 0.0 && covered <= 0.5, "coverage {covered}");
+        assert_eq!(archive.coverage(nothing), 0.0);
     }
 
     #[test]
