@@ -160,6 +160,16 @@ impl Curiosity {
         }
     }
 
+    /// Grow the table so `cells` are scored, new ones neutral.
+    ///
+    /// Families are discovered as the search runs, so the table cannot
+    /// be sized once. Growing never disturbs a score already earned.
+    pub fn ensure(&mut self, cells: usize) {
+        if cells > self.scores.len() {
+            self.scores.resize(cells, 1.0);
+        }
+    }
+
     /// Score of one cell, or zero when it is not a cell.
     pub fn score(&self, cell: usize) -> f64 {
         self.scores.get(cell).copied().unwrap_or(0.0)

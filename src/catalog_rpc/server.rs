@@ -25,10 +25,10 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     ActiveBasinEntry, AdmissionOutcome, AdmissionRejection, AttractorStrength, BasinCatalog,
-    BasinCensus, BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, FreshEvaluation,
-    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
-    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    BasinCensus, BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
+    FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence,
+    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
+    ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
     leftover_arrivals_saturated, leftover_lambda, occupancy_min_families, occupant_rhat,
     packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
@@ -261,6 +261,14 @@ struct ScientificState {
     /// visit per arrival. Kept apart from `last_basin_by_replica`,
     /// which names the source a recorded transition departs from.
     arrival_basin_by_replica: BTreeMap<u32, BasinId>,
+    /// Per-family curiosity, in the MAP-Elites sense: a family is paid
+    /// when a replica sent there produced a candidate the catalog kept
+    /// and charged when it did not, so effort follows what has worked
+    /// rather than whichever cell happens to be emptiest.
+    curiosity: Curiosity,
+    /// Family each replica was last handed a representative of, so the
+    /// reward can be attributed to the cell the start came from.
+    drawn_from_by_replica: BTreeMap<u32, usize>,
     last_gt_report: Option<(u64, u64, u64, u64, u32, bool)>,
     evaluate: Arc<FreshEvaluator>,
 }
@@ -348,6 +356,8 @@ impl CoordinatorState {
                     interface_seat_by_replica: BTreeMap::new(),
                     leftover_arrivals: BTreeMap::new(),
                     arrival_basin_by_replica: BTreeMap::new(),
+                    curiosity: Curiosity::default(),
+                    drawn_from_by_replica: BTreeMap::new(),
                     last_gt_report: None,
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
@@ -812,16 +822,30 @@ fn apply_request(
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::Sample { draw } => {
-            if let Some(scientific) = state.scientific.as_ref()
+            if let Some(scientific) = state.scientific.as_mut()
                 && !scientific.catalog.is_empty()
             {
                 // u64::MAX is the incumbent draw: exploit a deeper
                 // catalog representative rather than a random slot.
-                let sparse = (*draw == crate::catalog_rpc::SPARSE_SAMPLE_DRAW)
-                    .then(|| sparsest_family_entry(scientific))
-                    .flatten();
-                let entry = if let Some(entry) = sparse {
-                    entry
+                let sparse = if *draw == crate::catalog_rpc::SPARSE_SAMPLE_DRAW {
+                    let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
+                        draw ^ u64::from(request.identity.replica),
+                    );
+                    let picked = sparsest_family_entry(scientific, &mut rng);
+                    if let Some((family, _)) = picked {
+                        // Remember which cell this start came from, so
+                        // the curiosity credit lands on it when the
+                        // replica reports back.
+                        scientific
+                            .drawn_from_by_replica
+                            .insert(request.identity.replica, family);
+                    }
+                    picked.map(|(_, slot)| slot)
+                } else {
+                    None
+                };
+                let entry = if let Some(slot) = sparse {
+                    &scientific.catalog.entries()[slot]
                 } else if *draw == crate::catalog_rpc::INCUMBENT_SAMPLE_DRAW
                     || *draw == crate::catalog_rpc::SPARSE_SAMPLE_DRAW
                 {
@@ -1511,6 +1535,24 @@ fn apply_request(
                     observation.basin_visits,
                     validated,
                 );
+                // Curiosity credit for the cell this replica's start was
+                // drawn from. A start that led somewhere the catalog
+                // kept makes that cell worth drawing from again; one
+                // that led nowhere makes it less so, without ever
+                // writing the cell off, because a descriptor can be
+                // wrong where a cell is not.
+                if let Some(family) = scientific
+                    .drawn_from_by_replica
+                    .get(&request.identity.replica)
+                    .copied()
+                {
+                    scientific.curiosity.ensure(family + 1);
+                    if matches!(outcome, AdmissionOutcome::Rejected { .. }) {
+                        scientific.curiosity.penalise(family);
+                    } else {
+                        scientific.curiosity.reward(family);
+                    }
+                }
                 let incumbent = scientific
                     .catalog
                     .incumbent()
@@ -2320,7 +2362,18 @@ fn observe_packing(
 /// A family with no catalog representative cannot be drawn from, and a
 /// family no replica stands on counts zero, which is what makes it the
 /// one to hand out.
-fn sparsest_family_entry(scientific: &ScientificState) -> Option<&ActiveBasinEntry> {
+/// Family and catalog slot to hand a replica that is leaving a crowded
+/// packing.
+///
+/// Indices rather than a borrow, so the caller can record the draw
+/// before reading the entry. The selection is deterministic in the
+/// draw the client sent, because this runs again on journal replay and
+/// a coordinator that rebuilt itself differently would not be the same
+/// coordinator.
+fn sparsest_family_entry<R: rand::Rng + ?Sized>(
+    scientific: &ScientificState,
+    rng: &mut R,
+) -> Option<(usize, usize)> {
     let mut occupancy: BTreeMap<usize, usize> = BTreeMap::new();
     for candidate in scientific.last_candidate_by_replica.values() {
         if let Some(histogram) = scientific.packing.histogram(&candidate.coordinates)
@@ -2329,27 +2382,49 @@ fn sparsest_family_entry(scientific: &ScientificState) -> Option<&ActiveBasinEnt
             *occupancy.entry(family).or_insert(0) += 1;
         }
     }
-    scientific
-        .catalog
-        .entries()
+    // One representative per family, the deepest, which is the elite of
+    // that cell.
+    let mut elites: BTreeMap<usize, (usize, usize, f64)> = BTreeMap::new();
+    for (slot, entry) in scientific.catalog.entries().iter().enumerate() {
+        let Some(histogram) = scientific.packing.histogram(entry.coordinates()) else {
+            continue;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            continue;
+        };
+        let crowd = occupancy.get(&family).copied().unwrap_or(0);
+        elites
+            .entry(family)
+            .and_modify(|held| {
+                if entry.energy() < held.2 {
+                    *held = (crowd, slot, entry.energy());
+                }
+            })
+            .or_insert((crowd, slot, entry.energy()));
+    }
+    if elites.is_empty() {
+        return None;
+    }
+    // Under-occupied first: the point of the draw is to send a replica
+    // where replicas are not. Among those, curiosity decides, because
+    // always taking the emptiest cell keeps choosing one nothing can
+    // reach as soon as the descriptor is noisy.
+    let least = elites
+        .values()
+        .map(|(crowd, _, _)| *crowd)
+        .min()
+        .unwrap_or(0);
+    let allowed: Vec<usize> = elites
         .iter()
-        .filter_map(|entry| {
-            let histogram = scientific.packing.histogram(entry.coordinates())?;
-            let family = scientific.packing.family_of(&histogram)?;
-            let crowd = occupancy.get(&family).copied().unwrap_or(0);
-            Some((crowd, entry))
-        })
-        // Ties go to the deeper entry: among equally empty funnels the
-        // better one is the better place to send a replica.
-        .min_by(|left, right| {
-            left.0.cmp(&right.0).then(
-                left.1
-                    .energy()
-                    .partial_cmp(&right.1.energy())
-                    .unwrap_or(std::cmp::Ordering::Equal),
-            )
-        })
-        .map(|(_, entry)| entry)
+        .filter(|(_, (crowd, _, _))| *crowd == least)
+        .map(|(family, _)| *family)
+        .collect();
+    // Families the table has not seen score neutral, so a cell
+    // discovered since the last credit still competes.
+    let mut curiosity = scientific.curiosity.clone();
+    curiosity.ensure(allowed.iter().copied().max().unwrap_or(0) + 1);
+    let chosen = curiosity.select(&allowed, rng)?;
+    elites.get(&chosen).map(|(_, slot, _)| (chosen, *slot))
 }
 
 fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
