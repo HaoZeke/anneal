@@ -2257,7 +2257,7 @@ fn run_capnp_catalog(
     endpoint: Option<&str>,
 ) -> Outcome {
     use anneal_core::catalog::lj::{descriptor_space, system_signature};
-    use anneal_core::catalog_policy::{PolicyAction, PolicyReason};
+    use anneal_core::catalog_policy::{ActiveCatalogRelation, PolicyAction, PolicyReason};
     use anneal_core::catalog_rpc::client::{CatalogClient, ClientConfig};
     use anneal_core::catalog_rpc::{BridgeAssignmentRecord, BridgeCrossingRecord};
     use anneal_core::catalog_rpc::{
@@ -3505,6 +3505,18 @@ fn run_capnp_catalog(
             }
             PolicyAction::Leave => {
                 trace.policy_role = PolicyRole::Leave;
+                // Energy landscape paving, with occupancy for the
+                // histogram. Standing on a packing another replica owns
+                // deposits under the replica's own feet, so the funnel
+                // it keeps quenching back into becomes expensive to it
+                // and the pile stops re-forming after each Leave.
+                // Nothing else makes an occupied funnel unattractive to
+                // the replica already in it, only to the coordinator
+                // watching. One deposit per checkpoint spent here is
+                // the count: the repetition is the histogram.
+                if shared_bias_enabled && policy.relation == ActiveCatalogRelation::SameBasin {
+                    pending_deposits.push(snapshot.current_state().to_owned());
+                }
                 if decision.reason == PolicyReason::HyperbandPruned {
                     if coop_wells_enabled {
                         remember_packing_well(
