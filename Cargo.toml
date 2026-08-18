@@ -139,5 +139,13 @@ name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "catalog_status"
+required-features = ["bank-rpc"]
+
+[[example]]
+name = "decaf_local_classes"
+required-features = ["bank-rpc"]
+
+[[example]]
 name = "lj_census_calibration"
 required-features = ["ira"]
