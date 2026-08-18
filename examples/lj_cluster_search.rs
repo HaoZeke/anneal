@@ -2324,8 +2324,7 @@ fn run_capnp_catalog(
         std::env::var("CATALOG_BRAIN_PEERS"),
     ) {
         use anneal_core::raft::wire::{
-            ExplorationDecree, ReplicaAssignment as DecreeAssignment, decode_decree,
-            decode_envelope, encode_decree, encode_envelope,
+            ExplorationDecree, ReplicaAssignment as DecreeAssignment, decode_decree, encode_decree,
         };
         use anneal_core::raft::{RaftNode, Role};
         let mut peer_ids = Vec::new();
@@ -2350,18 +2349,14 @@ fn run_capnp_catalog(
         Some(std::thread::spawn(move || {
             let bus = anneal_core::decree_bus::DecreeBus::new(replica, &listen, &peers)
                 .expect("brain bus must bind its own address");
-            // Observation is opt-in and only the nng transport carries
-            // it, so a build without the feature ignores the address
-            // rather than pretending to publish on it.
-            #[cfg(feature = "nng-transport")]
+            // Observation is opt-in: without an address the brain
+            // opens no publisher and nothing watches it.
             let bus = match brain_publish.as_deref() {
                 Some(url) => bus
                     .publishing(url)
                     .expect("brain publish address must bind"),
                 None => bus,
             };
-            #[cfg(not(feature = "nng-transport"))]
-            let _ = brain_publish;
             let mut node = RaftNode::new(replica, peer_ids, 200, 37);
             let mut observer = None;
             let mut now = 0u64;
@@ -2371,13 +2366,11 @@ fn run_capnp_catalog(
                 std::thread::sleep(std::time::Duration::from_millis(10));
                 now += 1;
                 for (to, message) in node.tick(now) {
-                    let _ = bus.send(&encode_envelope(replica, to, &message));
+                    let _ = bus.send(to, &message);
                 }
-                for frame in bus.poll() {
-                    if let Ok((from, _, message)) = decode_envelope(&frame) {
-                        for (to, out) in node.receive(from, message, now) {
-                            let _ = bus.send(&encode_envelope(replica, to, &out));
-                        }
+                for (from, message) in bus.poll() {
+                    for (to, out) in node.receive(from, message, now) {
+                        let _ = bus.send(to, &out);
                     }
                 }
                 for decree in node.take_committed() {

@@ -21,8 +21,6 @@ ira = []
 # In-process MD segments through the LAMMPS C library. Needs liblammps on
 # the link path via LAMMPS_LIB_DIR.
 lammps = []
-# Consensus traffic between server brains over nng sockets.
-nng-transport = ["dep:nng"]
 # Exact basin identity by canonical contact-graph labelling through nauty.
 graphkey = ["dep:petgraph", "dep:nauty-pet"]
 # featomic SOAP power spectrum leftover. Off by default because the
@@ -31,7 +29,7 @@ featomic = ["dep:featomic", "dep:metatensor"]
 # Neighbour construction through the vesin cell lists.
 vesin-nl = []
 # Cap'n Proto shared bank. Chains are separate processes.
-bank-rpc = ["dep:capnp"]
+bank-rpc = ["dep:capnp", "dep:nng"]
 capi = ["eindir-core/capi"]
 python = ["dep:pyo3", "dep:numpy", "dlpk/pyo3", "eindir-core/py-objective"]
 # Examples using an in-process rgpot eindir handle (xtb / CuH2 via
