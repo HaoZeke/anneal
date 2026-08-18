@@ -2452,6 +2452,12 @@ fn run_capnp_catalog(
             "  occupancy min families {}",
             occupancy_min_families()
         );
+        println!(
+            "  gt stop leftover-well+packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
+            anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,
+            anneal_core::catalog::PRODUCTION_MAX_UNSEEN_MASS,
+            occupancy_min_families()
+        );
     }
     // Cooperative wells: the SOAP archive the hole step walks away
     // from, fed with every minimum the coordinator hands this replica.

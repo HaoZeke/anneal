@@ -98,9 +98,14 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
 
 #[test]
 fn leftover_first_wave_arrivals_are_not_saturated() {
-    use anneal_core::catalog::leftover_arrivals_saturated;
+    use anneal_core::catalog::{GoodTuringSample, leftover_arrivals_saturated};
     assert!(!leftover_arrivals_saturated(std::iter::repeat_n(1u64, 48)));
     assert!(leftover_arrivals_saturated(std::iter::repeat_n(2u64, 20)));
+    let first = GoodTuringSample::from_counts(std::iter::repeat_n(1u64, 48));
+    assert_eq!(first.n, 48);
+    assert_eq!(first.n1, 48);
+    assert!((first.unseen().unwrap() - 1.0).abs() < 1e-12);
+    assert!(!first.saturated());
 }
 
 #[test]

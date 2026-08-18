@@ -28,7 +28,8 @@ use crate::catalog::{
     CandidateRecord, CandidateValidator, FreshEvaluation, MixingEvidence, PackingBook,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_arrivals_saturated, leftover_lambda, occupant_rhat, packing_role, prune,
+    leftover_arrivals_saturated, leftover_lambda, occupant_rhat, occupancy_min_families,
+    packing_role, prune, GoodTuringSample,
     promote_one_sided, retis_exchange_adjacent, same_packing, seat_extras, CHAMPION_RANK,
     INTERFACE_HORIZON,
     InterfaceSeat, PackingRole,
@@ -265,6 +266,7 @@ struct ScientificState {
     /// visit per arrival. Kept apart from `last_basin_by_replica`,
     /// which names the source a recorded transition departs from.
     arrival_basin_by_replica: BTreeMap<u32, BasinId>,
+    last_gt_report: Option<(u64, u64, u64, u64, u32, bool)>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -352,6 +354,7 @@ impl CoordinatorState {
                     interface_seat_by_replica: BTreeMap::new(),
                     leftover_arrivals: BTreeMap::new(),
                     arrival_basin_by_replica: BTreeMap::new(),
+                    last_gt_report: None,
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -1013,6 +1016,7 @@ fn apply_request(
                 ) as u32,
                 packing_saturated: packing_and_leftover_saturated(scientific),
             });
+            report_occupancy_gt(scientific);
         }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let Some(scientific) = state.scientific.as_mut() else {
@@ -2311,6 +2315,58 @@ fn observe_packing(
 fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
     scientific.packing.families_saturated()
         && leftover_arrivals_saturated(scientific.leftover_arrivals.values().copied())
+}
+
+fn report_occupancy_gt(scientific: &mut ScientificState) {
+    let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
+    let packing = scientific.packing.well_sample();
+    let families = scientific.packing.occupied_among(
+        scientific
+            .last_candidate_by_replica
+            .values()
+            .map(|candidate| candidate.coordinates.as_slice()),
+    ) as u32;
+    let min_families = occupancy_min_families() as u32;
+    let leftover_sat = leftover.saturated();
+    let packing_sat = packing.saturated();
+    let stop = leftover_sat && packing_sat && families >= min_families;
+    let key = (
+        leftover.n,
+        leftover.n1,
+        packing.n,
+        packing.n1,
+        families,
+        stop,
+    );
+    if scientific.last_gt_report == Some(key) {
+        return;
+    }
+    scientific.last_gt_report = Some(key);
+    let leftover_p0 = leftover
+        .unseen()
+        .map(|mass| format!("{mass:.4}"))
+        .unwrap_or_else(|| "null".to_owned());
+    let packing_p0 = packing
+        .unseen()
+        .map(|mass| format!("{mass:.4}"))
+        .unwrap_or_else(|| "null".to_owned());
+    println!(
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"stop\":{}}}",
+        leftover.n,
+        leftover.n1,
+        leftover_p0,
+        leftover_sat,
+        packing.n,
+        packing.n1,
+        packing_p0,
+        packing_sat,
+        families,
+        min_families,
+        crate::catalog::PRODUCTION_MINIMUM_VISITS,
+        crate::catalog::PRODUCTION_MAX_UNSEEN_MASS,
+        stop,
+    );
+    let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
 fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {

@@ -39,12 +39,17 @@ cargo build --release --features featomic,ira,bank-rpc \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-for symbol in different_decaf_family step_toward_catalog_hole CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families"; do
+for symbol in different_decaf_family step_toward_catalog_hole CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop leftover-well"; do
   if ! grep -a -F -q "$symbol" "$BIN"; then
     echo "built binary missing $symbol" >&2
     exit 1
   fi
 done
+SERVER=target/release/examples/catalog_server
+if ! grep -a -F -q occupancy_gt "$SERVER"; then
+  echo "built binary missing occupancy_gt" >&2
+  exit 1
+fi
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
