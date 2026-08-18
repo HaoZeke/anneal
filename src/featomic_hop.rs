@@ -37,6 +37,22 @@ pub const SOAP_DCUT_FALLBACK: f64 = 0.05;
 /// packing gap, so a well-tempered deposit fills the occupied
 /// superbasin and not the other funnel.
 pub const SOAP_PACK_MERGE: f64 = 0.10;
+
+/// Cloud-mean distance a hole step must reach to have left a packing.
+///
+/// Merge is the radius at which two packings count as one. Leaving is
+/// a different question: the quench that follows a hole step is a
+/// downhill minimiser, and started from the merge boundary it runs
+/// back into the well it was meant to leave. So the walk has to clear
+/// the separation between packings, not the radius of one.
+///
+/// The factor is the sealed LJ75 ratio in [`crate::catalog::packing`]:
+/// icosahedral versus Marks measures 0.69 against a merge of 0.20, so
+/// distinct packings sit about three and a half merge radii apart.
+/// That measurement is in the DECAF histogram L1, and this threshold
+/// is in the cloud-mean L2, so it is a prior carried across metrics
+/// rather than a measurement in this one.
+pub const SOAP_PACK_ESCAPE: f64 = 3.5 * SOAP_PACK_MERGE;
 /// Packing-class gap on unit mean SOAP. Ico isomers sit under
 /// [`SOAP_PACK_MERGE`]. Mackay vs Marks is 0.163. A bank sample
 /// closer than this is the same funnel, not a class another chain
@@ -754,10 +770,16 @@ pub fn step_into_hole<R: Rng + ?Sized>(
         if mu.is_empty() || s.mean_jac.nrows() != mu.len() {
             break;
         }
-        let known = wells
+        // Stop on the separation, not on sameness. Breaking as soon as
+        // the point is no longer within the merge radius ends the walk
+        // on the boundary of the well it is leaving, which is exactly
+        // where a quench returns from.
+        let nearest = wells
             .iter()
-            .any(|w| w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE);
-        if !known && !wells.is_empty() {
+            .filter(|w| w.len() == mu.len())
+            .map(|w| soap_l2_pack(mu.view(), w.view()))
+            .fold(f64::INFINITY, f64::min);
+        if !wells.is_empty() && nearest >= SOAP_PACK_ESCAPE {
             break;
         }
         let mut dp = Array1::<f64>::zeros(mu.len());
@@ -1269,6 +1291,33 @@ mod tests {
         assert!(
             d_iso < SOAP_PACK_GAP && d_marks > SOAP_PACK_GAP,
             "adopt gap {SOAP_PACK_GAP} must sit between ico isomer {d_iso} and Marks {d_marks}"
+        );
+    }
+
+    /// A hole step that stops at the merge radius has not left the
+    /// packing: it ends on the boundary of the well, which is where
+    /// the quench that follows it comes straight back from. The walk
+    /// has to clear the separation between packings.
+    #[test]
+    fn a_hole_step_clears_the_escape_distance_not_the_merge_radius() {
+        let ico = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let rcut = 3.5;
+        let well = unit(&spectrum(ico.view(), rcut, None, None).cloud_mean);
+        let mut rng = StdRng::seed_from_u64(11);
+        let left = step_into_hole(
+            ico.view(),
+            std::slice::from_ref(&well),
+            SOAP_PACK_MERGE,
+            rcut,
+            None,
+            None,
+            &mut rng,
+        );
+        let moved = unit(&spectrum(left.view(), rcut, None, None).cloud_mean);
+        let distance = soap_l2_pack(moved.view(), well.view());
+        assert!(
+            distance >= SOAP_PACK_ESCAPE,
+            "hole step stopped {distance} from the well it left, inside the escape {SOAP_PACK_ESCAPE}"
         );
     }
 
