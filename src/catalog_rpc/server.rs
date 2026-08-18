@@ -271,6 +271,9 @@ struct CoordinatorState {
     maximum_sequence: BTreeMap<u32, u64>,
     ledger: Option<CooperativeLedger>,
     scientific: Option<ScientificState>,
+    /// A journal append failed after the live state had already moved,
+    /// so a replay of the log no longer reproduces this coordinator.
+    journal_broken: bool,
 }
 
 impl CoordinatorState {
@@ -283,6 +286,7 @@ impl CoordinatorState {
             maximum_sequence: self.maximum_sequence.clone(),
             ledger: self.ledger.clone(),
             scientific: self.scientific.clone(),
+            journal_broken: self.journal_broken,
         }
     }
 
@@ -357,6 +361,7 @@ impl CoordinatorState {
             maximum_sequence: BTreeMap::new(),
             ledger,
             scientific,
+            journal_broken: false,
         })
     }
 }
@@ -587,6 +592,9 @@ fn process_request(
         Ok(state) => state,
         Err(poisoned) => poisoned.into_inner(),
     };
+    if state.journal_broken {
+        return Err("catalog request journal is behind the coordinator state".to_owned());
+    }
     if matches!(request.operation, CatalogOperation::ObserverStatus) {
         // Observation is not history: the reply is assembled from the live
         // state, never journaled, and never advances a replica's sequence.
@@ -621,6 +629,12 @@ fn process_request(
         });
     }
     if matches!(request.operation, CatalogOperation::PolicyState { .. }) {
+        // Policy evidence applies to the live state: the snapshot the
+        // general path takes clones the whole scientific state, and this
+        // is the request every replica sends on every checkpoint. The
+        // price is that a failed append cannot be rolled back, so the
+        // coordinator stops serving instead of answering from a state
+        // its own log cannot reproduce.
         let reply = apply_request(config, &mut state, request.clone());
         if matches!(
             reply,
@@ -628,8 +642,10 @@ fn process_request(
                 duplicate: false,
                 ..
             })
-        ) {
-            append_journal(config, &request).map_err(|error| error.to_string())?;
+        ) && let Err(error) = append_journal(config, &request)
+        {
+            state.journal_broken = true;
+            return Err(error.to_string());
         }
         return Ok(reply);
     }

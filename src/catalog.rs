@@ -38,7 +38,8 @@ pub use occupancy::{
     CHAMPION_RANK, INTERFACE_HORIZON, InterfaceSeat, LeaveFrame, LeavePath, OccupancyCertificate,
     OccupancyLeaveAdopt, PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
     is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
-    occupancy_leave_adopt, occupancy_retire, packing_role, promote_one_sided,
+    occupancy_complete_at, occupancy_leave_adopt, occupancy_min_families, occupancy_retire,
+    occupancy_retire_at, packing_role, promote_one_sided, DEFAULT_MIN_OCCUPIED_FAMILIES,
     published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
 };
 pub use packing::{
