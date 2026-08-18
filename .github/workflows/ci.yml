@@ -10,10 +10,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Every feature a runner can satisfy. `lammps` is excluded on purpose:
-  # its build script requires LAMMPS_LIB_DIR pointing at a liblammps that
-  # no runner installs, so --all-features cannot resolve here.
-  CI_FEATURES: ira,nng-transport,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex
+  # Every feature a runner can satisfy that gates code today.
+  # `lammps` is excluded because its build script requires
+  # LAMMPS_LIB_DIR pointing at a liblammps no runner installs, so
+  # --all-features cannot resolve here. `nng-transport` is excluded
+  # because it gates no source at all yet and its dependency builds
+  # the nng C library through cmake; put it back the day it does.
+  CI_FEATURES: ira,graphkey,featomic,vesin-nl,bank-rpc,capi,python,rgpot-ex
 
 jobs:
   lint:
