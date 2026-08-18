@@ -1,5 +1,7 @@
 //! Search catalogs with explicit event and descriptor-basin identities.
 
+/// Quality-diversity archive: tessellation, curiosity, novelty.
+pub mod archive;
 pub mod basin;
 pub mod calibration;
 pub mod census;
