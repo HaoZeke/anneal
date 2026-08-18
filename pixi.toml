@@ -157,6 +157,18 @@ agox = "*"
 chemparseplot = ">=1.10.2"
 xyzrender = ">=0.3"
 
+# conda compilers and cmake so nng-sys sees a sysroot with headers.
+[feature.cluster]
+platforms = ["linux-64"]
+
+[feature.cluster.dependencies]
+cmake = "*"
+ninja = "*"
+make = "*"
+pkg-config = "*"
+c-compiler = "*"
+cxx-compiler = "*"
+
 [environments]
 default = { solve-group = "default" }
 python  = { features = ["python"], solve-group = "default" }
@@ -164,3 +176,4 @@ gpu     = { features = ["python", "gpu"], solve-group = "default" }
 docs    = { features = ["docs"],   solve-group = "default" }
 verify  = { features = ["python", "verify"], solve-group = "default" }
 chem    = { features = ["chem"], solve-group = "chem" }
+cluster = { features = ["cluster"], solve-group = "default" }
