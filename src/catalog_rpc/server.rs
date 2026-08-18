@@ -261,6 +261,10 @@ struct ScientificState {
     leftover_lambda_by_replica: BTreeMap<u32, f64>,
     interface_seat_by_replica: BTreeMap<u32, crate::catalog::InterfaceSeat>,
     leftover_arrivals: BTreeMap<u64, u64>,
+    /// Basin each replica last arrived in, for crediting one well
+    /// visit per arrival. Kept apart from `last_basin_by_replica`,
+    /// which names the source a recorded transition departs from.
+    arrival_basin_by_replica: BTreeMap<u32, BasinId>,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -347,6 +351,7 @@ impl CoordinatorState {
                     leftover_lambda_by_replica: BTreeMap::new(),
                     interface_seat_by_replica: BTreeMap::new(),
                     leftover_arrivals: BTreeMap::new(),
+                    arrival_basin_by_replica: BTreeMap::new(),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -1394,7 +1399,10 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
-                let arrival = previous != Some(observation.basin_id);
+                let arrival = scientific
+                    .arrival_basin_by_replica
+                    .insert(request.identity.replica, observation.basin_id)
+                    != Some(observation.basin_id);
                 observe_packing(
                     scientific,
                     request.identity.replica,
@@ -1471,10 +1479,10 @@ fn apply_request(
                         .insert(request.identity.replica, canonical.clone());
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
-                let previous = scientific
-                    .last_basin_by_replica
-                    .insert(request.identity.replica, observation.basin_id);
-                let arrival = previous != Some(observation.basin_id);
+                let arrival = scientific
+                    .arrival_basin_by_replica
+                    .insert(request.identity.replica, observation.basin_id)
+                    != Some(observation.basin_id);
                 observe_packing(
                     scientific,
                     request.identity.replica,
