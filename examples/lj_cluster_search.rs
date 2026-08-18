@@ -2065,6 +2065,7 @@ fn bridge_region_of(images: &[f64], dim: usize, descriptor: &[f64], tube: f64) -
     (best_distance <= tube).then_some(best)
 }
 
+#[cfg(feature = "bank-rpc")]
 fn boundary_crossing_trial<R: rand::Rng + ?Sized>(
     current: ArrayView1<f64>,
     crossing: &anneal_core::catalog_rpc::BoundaryCrossingRecord,
