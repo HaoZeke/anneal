@@ -852,15 +852,9 @@ where
         }
         cur = q;
     }
-    step_into_hole(
-        cur.view(),
-        wells,
-        SOAP_PACK_MERGE * 4.0,
-        rcut,
-        species,
-        mobile,
-        rng,
-    )
+    // Same-family leftover hole is not a Leave. Hand back the origin
+    // so occupancy_leave_adopt Refuse does not install ico-as-hole.
+    x.to_owned()
 }
 
 /// Kick mean SOAP in the null space of the occupied packing *and*
@@ -1345,45 +1339,31 @@ mod tests {
     }
 
     #[test]
-    fn leave_occupied_packing_retries_when_the_quench_returns_to_the_well() {
+    fn leave_occupied_packing_returns_origin_when_every_quench_stays_ico() {
         let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
         let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
         let mut rng = StdRng::seed_from_u64(11);
         let wells = [mu];
-        let hole = surplus_reseed(ico75.view(), &wells, 3.5, None, None, &mut rng)
-            .expect("occupied packing must yield a hole start");
-        let snapped = ico75.clone();
-        let d_snap = soap_l2_pack(
-            unit(&soap_cloud_mean(snapped.view(), 3.5, None, None)).view(),
-            wells[0].view(),
-        );
-        assert!(
-            d_snap <= SOAP_PACK_MERGE,
-            "ico projector must sit in the occupied well, d={d_snap}"
-        );
         let left = leave_occupied_packing(
             ico75.view(),
             &wells,
             3.5,
             None,
             None,
-            |_y| snapped.clone(),
+            |_y| ico75.clone(),
             &mut rng,
         );
-        let d_left = soap_l2_pack(
-            unit(&soap_cloud_mean(left.view(), 3.5, None, None)).view(),
-            wells[0].view(),
-        );
-        assert!(
-            d_left > SOAP_PACK_MERGE,
-            "leave must retry the hole after a quench that snaps back, d={d_left}"
-        );
-        let _ = hole;
+        assert_eq!(left, ico75);
+        assert!(!crate::catalog::different_decaf_family(
+            ico75.as_slice().unwrap(),
+            left.as_slice().unwrap()
+        ));
     }
 
     #[test]
-    fn leave_occupied_packing_requenches_until_the_start_is_off_the_well() {
+    fn leave_occupied_packing_requenches_until_the_family_changes() {
         let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
         let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
         let mut rng = StdRng::seed_from_u64(11);
         let wells = [mu];
@@ -1394,24 +1374,25 @@ mod tests {
             3.5,
             None,
             None,
-            |y| {
+            |_y| {
                 n += 1;
-                if n < 3 { ico75.clone() } else { y.to_owned() }
+                if n < 3 {
+                    ico75.clone()
+                } else {
+                    marks.clone()
+                }
             },
             &mut rng,
         );
         assert!(
             n >= 3,
-            "leave must quench more than once when the first snaps return to ico, n={n}"
+            "leave must quench more than once when the first snaps stay ico, n={n}"
         );
-        let d_left = soap_l2_pack(
-            unit(&soap_cloud_mean(left.view(), 3.5, None, None)).view(),
-            wells[0].view(),
-        );
-        assert!(
-            d_left > SOAP_PACK_MERGE,
-            "leave must return an off-well start, d={d_left}"
-        );
+        assert_eq!(left, marks);
+        assert!(crate::catalog::different_decaf_family(
+            ico75.as_slice().unwrap(),
+            left.as_slice().unwrap()
+        ));
     }
 
     #[test]
