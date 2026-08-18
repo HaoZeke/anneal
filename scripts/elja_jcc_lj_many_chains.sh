@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Many short LJ catalog replicas in one Slurm allocation.
-# Workers launch in waves so one 32-core node does not OOM.
+# Many LJ catalog replicas in one batch allocation.
+# CATALOG_WAVE is the live replica count in that allocation.
 set -euo pipefail
 
-if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_jcc_lj_many_chains.sh requires a Slurm allocation" >&2
+if [[ -z ${SLURM_JOB_ID:-} && -z ${HQ_JOB_ID:-} ]]; then
+  echo "elja_jcc_lj_many_chains.sh requires a batch allocation" >&2
   exit 1
 fi
 
