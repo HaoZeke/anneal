@@ -65,11 +65,11 @@ impl PackingBook {
     /// Grow the environment codebook from this structure, then count it
     /// toward a packing family.
     pub fn observe(&mut self, coordinates: &[f64]) -> Option<usize> {
-        if let Some(histogram) = self.cached(coordinates, true) {
-            if let Some(index) = self.family_of(&histogram) {
-                self.visits[index] = self.visits[index].saturating_add(1);
-                return Some(index);
-            }
+        if let Some(histogram) = self.cached(coordinates, true)
+            && let Some(index) = self.family_of(&histogram)
+        {
+            self.visits[index] = self.visits[index].saturating_add(1);
+            return Some(index);
         }
         let histogram = self.assign_growing(coordinates)?;
         self.remember(coordinates, &histogram, true);
@@ -358,10 +358,6 @@ impl GoodTuringSample {
 
 /// Good--Turing on leftover-well arrivals. `n` is arrivals, not hops.
 pub fn leftover_arrivals_saturated(arrivals: impl IntoIterator<Item = u64>) -> bool {
-    GoodTuringSample::from_counts(arrivals).saturated()
-}
-
-fn arrival_good_turing(arrivals: impl IntoIterator<Item = u64>) -> bool {
     GoodTuringSample::from_counts(arrivals).saturated()
 }
 

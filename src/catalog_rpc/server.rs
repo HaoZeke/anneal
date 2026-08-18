@@ -236,7 +236,6 @@ pub enum CatalogServerError {
 #[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
-    descriptor_space: DescriptorSpace,
     validator: CandidateValidator,
     census: BasinCensus,
     catalog: BasinCatalog,
@@ -305,7 +304,6 @@ impl CoordinatorState {
             .map(|scientific| {
                 Ok::<ScientificState, CatalogServerError>(ScientificState {
                     signature: scientific.signature.clone(),
-                    descriptor_space: scientific.descriptor_space.clone(),
                     validator: CandidateValidator::new(
                         scientific.signature.clone(),
                         scientific.validator.clone(),
@@ -1272,7 +1270,6 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let open_epoch = scientific.population.open_epoch();
             let Ok(outcome) = scientific
                 .population
                 .abstain(*epoch, request.identity.replica)
@@ -2707,7 +2704,7 @@ fn packing_or_region_relation(
     if let Some(relation) = packing_relation(scientific, replica, energy, mixing) {
         return relation;
     }
-    attraction_region_relation(scientific, replica, local_basin, energy)
+    attraction_region_relation(scientific, replica, local_basin)
 }
 
 fn packing_relation(
@@ -2770,7 +2767,6 @@ fn attraction_region_relation(
     scientific: &ScientificState,
     replica: u32,
     local_basin: Option<BasinId>,
-    energy: f64,
 ) -> CatalogRelation {
     let Some(local_basin) = local_basin else {
         return CatalogRelation::Empty;

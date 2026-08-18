@@ -1306,7 +1306,7 @@ fn main() {
                 // its own quenches. Only near-minima enter this loop, so the
                 // cost lands on the rare states worth validating.
                 let mut chunks = 0;
-                while gnorm >= 1e-5 && gnorm < 1e-3 && chunks < 10 && led.remaining() > 0 {
+                while (1e-5..1e-3).contains(&gnorm) && chunks < 10 && led.remaining() > 0 {
                     // A stalled line search poisons the curvature memory; a
                     // restarted optimizer descends where a warm one stands
                     // still, which is the difference between the plateau a
@@ -1329,7 +1329,7 @@ fn main() {
                     // near a minimum the gradient direction is exact enough
                     // and each step is one charged evaluation.
                     let mut descents = 0;
-                    while gnorm >= 1e-5 && gnorm < 3e-5 && descents < 200 && led.charge() {
+                    while (1e-5..3e-5).contains(&gnorm) && descents < 200 && led.charge() {
                         // Fixed step alpha = 0.01 sits well under the
                         // stability bound 2 over the stiffest LJ curvature,
                         // so every mode contracts and the few percent above
@@ -2046,7 +2046,7 @@ fn fixed_probe_trial<R: rand::Rng + ?Sized>(
 /// `None` when the descriptor sits farther than the tube radius from
 /// every image.
 fn bridge_region_of(images: &[f64], dim: usize, descriptor: &[f64], tube: f64) -> Option<usize> {
-    if dim == 0 || images.len() % dim != 0 || images.is_empty() {
+    if dim == 0 || !images.len().is_multiple_of(dim) || images.is_empty() {
         return None;
     }
     let mut best = 0usize;
@@ -3941,7 +3941,7 @@ fn adaptive_catalog_operations(
         }
         let continues_registered_path = registered_state
             .as_ref()
-            .is_some_and(|state| state == &transition.from_state);
+            .is_some_and(|state| *state == transition.from_state);
         if !continues_registered_path {
             let source_sequence = candidate_sequence
                 .checked_add(1)
