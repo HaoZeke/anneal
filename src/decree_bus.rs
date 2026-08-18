@@ -1,11 +1,22 @@
-//! TCP transport for consensus traffic between server brains.
+//! Transport for consensus traffic between server brains.
 //!
-//! Occupancy talking is one brain per replica. The occupancy build is
-//! `featomic,ira,bank-rpc` and does not carry `nng-transport`, so the
-//! bus is raw TCP: each brain listens on its own address, dials every
-//! peer, and filters by the envelope `to` field. Receives are
-//! non-blocking. Consensus tolerates loss, reordering, and
-//! duplication, which is why nothing here retries a failed write.
+//! Occupancy talking is one brain per replica, and what travels is the
+//! capnp envelope [`crate::raft::wire`] encodes. Two transports carry
+//! it, chosen by the `nng-transport` feature and sharing one API, so a
+//! caller names neither:
+//!
+//! - Default: raw TCP. Each brain listens on its own address, dials
+//!   every peer, and filters by the envelope `to` field.
+//! - `nng-transport`: an nng `Bus0` socket. The protocol already is a
+//!   broadcast mesh with reconnection, so the transport stops being
+//!   hand-rolled, and a reader that only listens can join the same bus
+//!   and decode the whole stream. That is what
+//!   [`DecreeObserver`] is: analysis over live consensus traffic
+//!   without becoming a peer of it.
+//!
+//! Receives never block on either. Consensus tolerates loss,
+//! reordering, and duplication, which is why nothing here retries a
+//! failed write.
 
 use crate::raft::NodeId;
 use std::io::{Read, Write};
@@ -28,15 +39,19 @@ struct Inbound {
     buf: Vec<u8>,
 }
 
-/// One brain's connection to the others.
-pub struct DecreeBus {
+/// One brain's connection to the others over raw TCP.
+pub struct TcpDecreeBus {
     id: NodeId,
     listener: TcpListener,
     peers: Mutex<Vec<PeerLink>>,
     inbound: Mutex<Vec<Inbound>>,
 }
 
-impl DecreeBus {
+/// The transport this build carries.
+#[cfg(not(feature = "nng-transport"))]
+pub type DecreeBus = TcpDecreeBus;
+
+impl TcpDecreeBus {
     /// Listen on `listen_url`, dial every peer, filter as `id`.
     ///
     /// Dials are asynchronous: a peer that has not started yet is
@@ -184,6 +199,142 @@ fn read_available(link: &mut Inbound) -> Result<Vec<Vec<u8>>, ()> {
     }
     Ok(frames)
 }
+
+/// nng `Bus0` transport, and a read-only view of the same bus.
+#[cfg(feature = "nng-transport")]
+mod nng_bus {
+    use super::BusError;
+    use crate::raft::{NodeId, RaftMessage};
+    use nng::{Protocol, Socket};
+    use std::sync::Mutex;
+
+    /// nng wants a scheme; a brain is configured with `host:port`.
+    fn bus_url(url: &str) -> String {
+        if url.contains("://") {
+            url.to_owned()
+        } else {
+            format!("tcp://{url}")
+        }
+    }
+
+    /// Dial every peer that is not connected yet, and report which
+    /// stayed down. A peer that has not started is dialed again on the
+    /// next call, so start order between brains does not matter.
+    fn dial_pending(socket: &Socket, pending: &mut Vec<String>) {
+        pending.retain(|url| socket.dial(url).is_err());
+    }
+
+    /// One brain's connection to the others over an nng bus.
+    pub struct DecreeBus {
+        id: NodeId,
+        socket: Socket,
+        pending: Mutex<Vec<String>>,
+    }
+
+    impl DecreeBus {
+        /// Listen on `listen_url`, dial every peer, filter as `id`.
+        pub fn new(id: NodeId, listen_url: &str, peer_urls: &[String]) -> Result<Self, BusError> {
+            let socket = Socket::new(Protocol::Bus0)
+                .map_err(|error| BusError(format!("bus socket: {error}")))?;
+            socket
+                .listen(&bus_url(listen_url))
+                .map_err(|error| BusError(format!("listen {listen_url}: {error}")))?;
+            let mut pending: Vec<String> = peer_urls.iter().map(|url| bus_url(url)).collect();
+            dial_pending(&socket, &mut pending);
+            Ok(Self {
+                id,
+                socket,
+                pending: Mutex::new(pending),
+            })
+        }
+
+        /// Broadcast one encoded envelope. A bus message is already
+        /// framed, so nothing here prefixes a length.
+        pub fn send(&self, frame: &[u8]) -> Result<(), BusError> {
+            self.redial();
+            // A refused send is a lost message, which consensus
+            // survives, and the message nng hands back is dropped with
+            // it rather than queued behind a peer that may never come.
+            let _ = self.socket.try_send(frame);
+            Ok(())
+        }
+
+        /// Drain every frame currently queued that is addressed to this
+        /// brain. Never blocks on a missing peer.
+        pub fn poll(&self) -> Vec<Vec<u8>> {
+            self.redial();
+            drain(&self.socket)
+                .into_iter()
+                .filter(|bytes| {
+                    matches!(
+                        crate::raft::wire::decode_envelope(bytes),
+                        Ok((_, to, _)) if to == self.id
+                    )
+                })
+                .collect()
+        }
+
+        fn redial(&self) {
+            if let Ok(mut pending) = self.pending.lock()
+                && !pending.is_empty()
+            {
+                dial_pending(&self.socket, &mut pending);
+            }
+        }
+    }
+
+    /// A reader of the consensus stream that is not a peer of it.
+    ///
+    /// The observer joins the same bus and never sends, so every
+    /// envelope the brains exchange decodes here, addressed to whoever
+    /// it was addressed to. Consensus does not know it exists and does
+    /// not wait for it.
+    pub struct DecreeObserver {
+        socket: Socket,
+        pending: Mutex<Vec<String>>,
+    }
+
+    impl DecreeObserver {
+        /// Dial every brain, listening only.
+        pub fn new(peer_urls: &[String]) -> Result<Self, BusError> {
+            let socket = Socket::new(Protocol::Bus0)
+                .map_err(|error| BusError(format!("observer socket: {error}")))?;
+            let mut pending: Vec<String> = peer_urls.iter().map(|url| bus_url(url)).collect();
+            dial_pending(&socket, &mut pending);
+            Ok(Self {
+                socket,
+                pending: Mutex::new(pending),
+            })
+        }
+
+        /// Every envelope seen since the last call, decoded. Unlike a
+        /// brain's poll this keeps traffic addressed to anyone, which
+        /// is the point of watching rather than participating.
+        pub fn poll(&self) -> Vec<(NodeId, NodeId, RaftMessage)> {
+            if let Ok(mut pending) = self.pending.lock()
+                && !pending.is_empty()
+            {
+                dial_pending(&self.socket, &mut pending);
+            }
+            drain(&self.socket)
+                .into_iter()
+                .filter_map(|bytes| crate::raft::wire::decode_envelope(&bytes).ok())
+                .collect()
+        }
+    }
+
+    /// Take every message the socket has without waiting for one.
+    fn drain(socket: &Socket) -> Vec<Vec<u8>> {
+        let mut frames = Vec::new();
+        while let Ok(message) = socket.try_recv() {
+            frames.push(message[..].to_vec());
+        }
+        frames
+    }
+}
+
+#[cfg(feature = "nng-transport")]
+pub use nng_bus::{DecreeBus, DecreeObserver};
 
 #[cfg(test)]
 mod tests {
