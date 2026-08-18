@@ -23,6 +23,7 @@ cargo test --release --features bank-rpc --test cooperative_search visit_merges_
 cargo test --release --features bank-rpc --lib two_brains_exchange
 cargo test --release --lib leftover_lambda
 cargo test --release --lib leftover_soap_gt_with_two
+cargo test --release --lib packing_role_is_per_family
 cargo test --release --lib catalog_leave_keeps_the_hole
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published

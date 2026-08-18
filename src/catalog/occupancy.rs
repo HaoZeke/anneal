@@ -36,21 +36,28 @@
 //! Quench; if the quench sits in a stored well, retry. Feynman--Kac
 //! extras use this start. They do not draw a random cluster.
 //!
+//! ## Modes
+//!
+//! Serial recommended: independent seeds, each tries to find the
+//! published GM. Hit rate (58/72 Oh) is that mode.
+//! Occupancy: the ensemble divides the PES. Each DECAF family has one
+//! champion (lowest energy) that walks isomers. Extras of that family
+//! Leave. Success is find-and-certify the putative GM, not every
+//! replica landing on it.
+//!
 //! ## Stop
 //!
 //! A mixing certificate names a putative: uniquely deepest, occupant
-//! mixed, a mixed competitor, strictly more occupied. It does not
-//! retire extras. On LJ75 that putative is the icosahedral shelf
-//! until a second funnel is deeper, so retiring on mixing alone
-//! stops the search before Marks. Occupancy retires when Good--Turing
-//! saturates two occupied families, or when mixing and that
-//! saturation hold together. Occupant \(\hat R\) uses
+//! mixed, a mixed competitor, strictly more occupied. On LJ75 that
+//! putative is the icosahedral shelf until a second funnel is deeper.
+//! Occupancy retires when rematched DECAF Good--Turing saturates two
+//! occupied families, or when mixing and that saturation hold
+//! together. Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
 //! stop. Leftover-SOAP saturation on one family is collapse, not
-//! completeness: revisiting an icosahedral well drives the unseen
-//! mass down without opening a second funnel.
+//! completeness.
 
 /// Actions that must land off the occupied leftover-SOAP well.
 pub fn is_occupancy_leave_action(action: &str) -> bool {
@@ -123,6 +130,29 @@ pub fn occupancy_complete(
         Some(OccupancyCertificate::CatalogSaturated)
     } else {
         None
+    }
+}
+
+/// Role of one walk against DECAF packing families.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackingRole {
+    /// Lowest energy occupant of this family. Isomer walk.
+    FamilyChampion,
+    /// Same family, not the champion. Leave or keep-fraction extra.
+    FamilyExtra,
+    /// No catalog or live walk shares this packing.
+    NovelFamily,
+}
+
+/// Per-family champion, not the catalog-wide energy incumbent.
+pub fn packing_role(same_family: bool, energy: f64, best_of_family: Option<f64>) -> PackingRole {
+    if !same_family {
+        return PackingRole::NovelFamily;
+    }
+    match best_of_family {
+        None => PackingRole::FamilyChampion,
+        Some(best) if energy <= best + 1e-8 => PackingRole::FamilyChampion,
+        Some(_) => PackingRole::FamilyExtra,
     }
 }
 
@@ -282,22 +312,75 @@ impl LeavePath {
 /// Assign extras increasing leftover-SOAP interfaces. Champion is omitted.
 /// Seats are ordered by leftover-SOAP \(\lambda\), not replica id.
 pub fn assign_interfaces(extras: &[(u32, f64)], horizon: f64) -> Vec<InterfaceSeat> {
-    let mut extras = extras.to_vec();
-    extras.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
+    seat_extras(&[], extras, horizon)
+}
+
+/// Seat extras on the TIS ladder, keeping the rank each replica already
+/// holds in `previous`. An interface is an ensemble a replica owns until
+/// an exchange move hands it on: ranking every request by live
+/// \(\lambda\) leaves [`retis_exchange_adjacent`] and
+/// [`promote_one_sided`] with an ordering they can never repair, and
+/// discards their result on the next request. Unseated extras take the
+/// free ranks in \(\lambda\) order, so an empty `previous` is the
+/// fresh ladder.
+pub fn seat_extras(
+    previous: &[InterfaceSeat],
+    extras: &[(u32, f64)],
+    horizon: f64,
+) -> Vec<InterfaceSeat> {
     let ladder = interface_ladder(extras.len(), horizon);
-    extras
+    let mut order = extras.to_vec();
+    order.sort_by(|left, right| left.1.total_cmp(&right.1).then(left.0.cmp(&right.0)));
+    let mut holder: Vec<Option<(u32, f64)>> = vec![None; extras.len()];
+    let mut seated: Vec<u32> = Vec::new();
+    for seat in previous {
+        let rank = seat.rank as usize;
+        if seat.rank == CHAMPION_RANK || rank >= holder.len() || holder[rank].is_some() {
+            continue;
+        }
+        if seated.contains(&seat.replica) {
+            continue;
+        }
+        let Some(extra) = order.iter().find(|(id, _)| *id == seat.replica) else {
+            continue;
+        };
+        holder[rank] = Some(*extra);
+        seated.push(seat.replica);
+    }
+    let mut free = holder
         .iter()
         .enumerate()
-        .map(|(index, (replica, lambda))| InterfaceSeat {
-            replica: *replica,
-            rank: index as u32,
-            threshold: ladder.get(index).copied().unwrap_or(horizon),
-            lambda: *lambda,
+        .filter_map(|(rank, slot)| slot.is_none().then_some(rank))
+        .collect::<Vec<_>>()
+        .into_iter();
+    for extra in &order {
+        if seated.contains(&extra.0) {
+            continue;
+        }
+        let Some(rank) = free.next() else {
+            break;
+        };
+        holder[rank] = Some(*extra);
+    }
+    holder
+        .into_iter()
+        .enumerate()
+        .filter_map(|(rank, slot)| {
+            let (replica, lambda) = slot?;
+            Some(InterfaceSeat {
+                replica,
+                rank: rank as u32,
+                threshold: ladder.get(rank).copied().unwrap_or(horizon),
+                lambda,
+            })
         })
         .collect()
 }
 
-/// Swap adjacent interface seats when both extras have crossed.
+/// Swap adjacent interface seats when both extras have crossed and the
+/// higher \(\lambda\) sits on the lower interface. The ordering guard is
+/// what makes the move settle: two samples that each satisfy the other's
+/// interface would otherwise trade seats on every request.
 pub fn retis_exchange_adjacent(seats: &mut [InterfaceSeat]) -> bool {
     let mut swapped = false;
     let mut index = 0;
@@ -308,7 +391,9 @@ pub fn retis_exchange_adjacent(seats: &mut [InterfaceSeat]) -> bool {
             index += 1;
             continue;
         }
-        if retis_should_swap(left.lambda, left.threshold, right.lambda, right.threshold) {
+        if retis_should_swap(left.lambda, left.threshold, right.lambda, right.threshold)
+            && left.lambda > right.lambda
+        {
             seats[index].replica = right.replica;
             seats[index].lambda = right.lambda;
             seats[index + 1].replica = left.replica;
@@ -335,7 +420,7 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
             continue;
         }
         if in_interface_ensemble(left.lambda, right.threshold)
-            && left.lambda > right.lambda
+            && !in_interface_ensemble(right.lambda, left.threshold)
         {
             seats[index].replica = right.replica;
             seats[index].lambda = right.lambda;
@@ -350,12 +435,10 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Ensemble stop. Leftover-SOAP Good--Turing names a putative; extras
-/// still search. Twenty leftover-SOAP visits on 24 talking chains is
-/// not two occupied funnels. Retire only when inverted-GR mixing is
-/// certified, two rematched DECAF families are on file, and that
-/// leftover-SOAP census is saturated. A fabricated family count of
-/// `2 * certified` is not that count.
+/// Ensemble stop. Two rematched occupied DECAF families plus
+/// leftover-SOAP Good--Turing, or mixing certified on that pair.
+/// `n_occupied_families` is the rematched packing count, not a
+/// leftover-SOAP basin count and not `2 * certified`.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
@@ -363,16 +446,19 @@ pub fn occupancy_retire(
 ) -> bool {
     n_occupied_families >= 2
         && catalog_saturated
-        && matches!(certificate, OccupancyCertificate::MixingCertified)
+        && matches!(
+            certificate,
+            OccupancyCertificate::CatalogSaturated | OccupancyCertificate::MixingCertified
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
-        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_shot_accepted, occupancy_leave_adopt,
-        leftover_lambda, occupancy_complete, occupancy_retire, promote_one_sided,
+        PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
+        is_occupancy_leave_action, leave_shot_accepted, leftover_lambda, occupancy_complete,
+        occupancy_leave_adopt, occupancy_retire, packing_role, promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap,
     };
 
@@ -436,11 +522,36 @@ mod tests {
             occupancy_complete(false, true, 2),
             Some(OccupancyCertificate::CatalogSaturated)
         );
-        assert!(!occupancy_retire(
+        assert!(occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
             true,
             2
         ));
+        assert!(!occupancy_retire(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            1
+        ));
+    }
+
+    #[test]
+    fn packing_role_is_per_family_not_catalog_wide() {
+        assert_eq!(
+            packing_role(true, -173.252378, Some(-173.252378)),
+            PackingRole::FamilyChampion
+        );
+        assert_eq!(
+            packing_role(true, -173.134317, Some(-173.252378)),
+            PackingRole::FamilyExtra
+        );
+        assert_eq!(
+            packing_role(false, -173.928427, Some(-173.252378)),
+            PackingRole::NovelFamily
+        );
+        assert_eq!(
+            packing_role(true, -173.928427, Some(-173.252378)),
+            PackingRole::FamilyChampion
+        );
     }
 
     #[test]
@@ -476,7 +587,7 @@ mod tests {
             true,
             2
         ));
-        assert!(!occupancy_retire(
+        assert!(occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
             true,
             2
@@ -552,13 +663,27 @@ mod tests {
 
     #[test]
     fn one_sided_promotion_does_not_wait_for_the_neighbor() {
-        let extras = [(1, 1.0), (2, 0.1)];
-        let mut seats = assign_interfaces(&extras, 1.0);
+        let mut seats = vec![
+            InterfaceSeat {
+                replica: 1,
+                rank: 0,
+                threshold: 0.5,
+                lambda: 1.0,
+            },
+            InterfaceSeat {
+                replica: 2,
+                rank: 1,
+                threshold: 1.0,
+                lambda: 0.2,
+            },
+        ];
+        let mut unexchanged = seats.clone();
+        assert!(!retis_exchange_adjacent(&mut unexchanged));
+        assert!(promote_one_sided(&mut seats));
+        assert_eq!(seats[1].replica, 1);
         assert_eq!(seats[0].replica, 2);
-        assert_eq!(seats[1].replica, 1);
-        assert!(promote_one_sided(&mut seats) || seats[1].replica == 1);
-        assert_eq!(seats[1].replica, 1);
         assert!(in_interface_ensemble(seats[1].lambda, seats[1].threshold));
+        assert!(!promote_one_sided(&mut seats));
     }
 
     #[test]
@@ -576,11 +701,55 @@ mod tests {
 
     #[test]
     fn retis_exchanges_adjacent_seats_when_both_have_crossed() {
-        let extras = [(1, 1.0), (2, 0.8)];
-        let mut seats = assign_interfaces(&extras, 1.0);
+        let mut seats = vec![
+            InterfaceSeat {
+                replica: 1,
+                rank: 0,
+                threshold: 0.5,
+                lambda: 1.0,
+            },
+            InterfaceSeat {
+                replica: 2,
+                rank: 1,
+                threshold: 1.0,
+                lambda: 0.8,
+            },
+        ];
         assert!(retis_exchange_adjacent(&mut seats));
         assert_eq!(seats[0].replica, 2);
         assert_eq!(seats[1].replica, 1);
         assert!(!retis_exchange_adjacent(&mut seats));
+    }
+
+    #[test]
+    fn a_seated_extra_keeps_its_interface_when_lambda_moves() {
+        let first = assign_interfaces(&[(1, 0.1), (2, 0.4), (3, 0.9)], 1.0);
+        assert_eq!(first[0].replica, 1);
+        assert_eq!(first[2].replica, 3);
+        let climbed = seat_extras(&first, &[(1, 0.95), (2, 0.4), (3, 0.9)], 1.0);
+        assert_eq!(climbed[0].replica, 1);
+        assert_eq!(climbed[0].rank, 0);
+        assert!((climbed[0].lambda - 0.95).abs() < 1e-12);
+        assert_eq!(climbed[2].replica, 3);
+    }
+
+    #[test]
+    fn a_new_extra_takes_the_rank_a_departed_one_freed() {
+        let first = assign_interfaces(&[(1, 0.1), (2, 0.4)], 1.0);
+        assert_eq!(first[1].replica, 2);
+        let swapped = seat_extras(&first, &[(1, 0.1), (7, 0.4)], 1.0);
+        assert_eq!(swapped[0].replica, 1);
+        assert_eq!(swapped[1].replica, 7);
+        assert_eq!(swapped[1].rank, 1);
+    }
+
+    #[test]
+    fn a_shrunk_ladder_reseats_every_extra() {
+        let first = assign_interfaces(&[(1, 0.1), (2, 0.4), (3, 0.9)], 1.0);
+        let shrunk = seat_extras(&first, &[(3, 0.9)], 1.0);
+        assert_eq!(shrunk.len(), 1);
+        assert_eq!(shrunk[0].replica, 3);
+        assert_eq!(shrunk[0].rank, 0);
+        assert!((shrunk[0].threshold - 1.0).abs() < 1e-12);
     }
 }
