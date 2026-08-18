@@ -37,8 +37,9 @@ fi
 export CPATH="${GLIBC_INCLUDE}${CPATH:+:$CPATH}"
 export C_INCLUDE_PATH="${GLIBC_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
 export CPLUS_INCLUDE_PATH="${GLIBC_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-export CFLAGS="-I${GLIBC_INCLUDE} ${CFLAGS:-}"
-export CPPFLAGS="-I${GLIBC_INCLUDE} ${CPPFLAGS:-}"
+export CFLAGS="-idirafter ${GLIBC_INCLUDE} ${CFLAGS:-}"
+export CPPFLAGS="-idirafter ${GLIBC_INCLUDE} ${CPPFLAGS:-}"
+export CMAKE_C_FLAGS="-idirafter ${GLIBC_INCLUDE} ${CMAKE_C_FLAGS:-}"
 export CMAKE_INCLUDE_PATH="${GLIBC_INCLUDE}${CMAKE_INCLUDE_PATH:+:$CMAKE_INCLUDE_PATH}"
 if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   echo "missing $IRA_LIB_DIR/libira.so; run scripts/elja_rebuild_ira.sh" >&2
