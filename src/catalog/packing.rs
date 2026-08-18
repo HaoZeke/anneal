@@ -41,21 +41,33 @@ pub struct PackingBook {
     env_leaders: Vec<Vec<f64>>,
     families: Vec<Vec<f64>>,
     visits: Vec<u64>,
-    histogram_cache: RefCell<Vec<(Vec<f64>, Vec<f64>)>>,
+    histogram_cache: RefCell<Vec<CachedHistogram>>,
+}
+
+/// One remembered histogram and the path that built it.
+#[derive(Clone, Debug)]
+struct CachedHistogram {
+    coordinates: Vec<f64>,
+    histogram: Vec<f64>,
+    /// Built by `assign_growing`, so every environment in it is a
+    /// codebook leader. A query histogram folds unseen environments
+    /// into one shared bin, which makes two structurally distinct
+    /// packings look alike, and it must not credit a visit.
+    grown: bool,
 }
 
 impl PackingBook {
     /// Grow the environment codebook from this structure, then count it
     /// toward a packing family.
     pub fn observe(&mut self, coordinates: &[f64]) -> Option<usize> {
-        if let Some(histogram) = self.cached(coordinates) {
+        if let Some(histogram) = self.cached(coordinates, true) {
             if let Some(index) = self.family_of(&histogram) {
                 self.visits[index] = self.visits[index].saturating_add(1);
                 return Some(index);
             }
         }
         let histogram = self.assign_growing(coordinates)?;
-        self.remember(coordinates, &histogram);
+        self.remember(coordinates, &histogram, true);
         if let Some(index) = self.family_of(&histogram) {
             self.visits[index] = self.visits[index].saturating_add(1);
             return Some(index);
@@ -72,38 +84,49 @@ impl PackingBook {
     /// whose atoms have not moved by [`PACKING_MOVE_EPS`] reuses the
     /// last histogram; DECAF cannot change family on that displacement.
     pub fn histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        if let Some(histogram) = self.cached(coordinates) {
+        if let Some(histogram) = self.cached(coordinates, false) {
             return Some(histogram);
         }
         let histogram = self.assign_histogram(coordinates)?;
-        self.remember(coordinates, &histogram);
+        self.remember(coordinates, &histogram, false);
         Some(histogram)
     }
 
-    fn cached(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
-        self.histogram_cache
-            .borrow()
-            .iter()
-            .find_map(|(stored, histogram)| {
-                if !atom_moved(stored, coordinates, PACKING_MOVE_EPS) {
-                    Some(histogram.clone())
-                } else {
-                    None
-                }
-            })
+    /// Remembered histogram for a structure that has not moved by
+    /// [`PACKING_MOVE_EPS`]. `grown_only` restricts the answer to
+    /// entries the growing path built, which is what a caller that is
+    /// about to credit a visit needs.
+    fn cached(&self, coordinates: &[f64], grown_only: bool) -> Option<Vec<f64>> {
+        self.histogram_cache.borrow().iter().find_map(|entry| {
+            if (entry.grown || !grown_only)
+                && !atom_moved(&entry.coordinates, coordinates, PACKING_MOVE_EPS)
+            {
+                Some(entry.histogram.clone())
+            } else {
+                None
+            }
+        })
     }
 
-    fn remember(&self, coordinates: &[f64], histogram: &[f64]) {
+    fn remember(&self, coordinates: &[f64], histogram: &[f64], grown: bool) {
         let mut cache = self.histogram_cache.borrow_mut();
         if let Some(slot) = cache
             .iter_mut()
-            .find(|(stored, _)| !atom_moved(stored, coordinates, PACKING_MOVE_EPS))
+            .find(|entry| !atom_moved(&entry.coordinates, coordinates, PACKING_MOVE_EPS))
         {
-            slot.0 = coordinates.to_vec();
-            slot.1 = histogram.to_vec();
+            if slot.grown && !grown {
+                return;
+            }
+            slot.coordinates = coordinates.to_vec();
+            slot.histogram = histogram.to_vec();
+            slot.grown = grown;
             return;
         }
-        cache.push((coordinates.to_vec(), histogram.to_vec()));
+        cache.push(CachedHistogram {
+            coordinates: coordinates.to_vec(),
+            histogram: histogram.to_vec(),
+            grown,
+        });
         const CACHE_CAP: usize = 64;
         if cache.len() > CACHE_CAP {
             cache.remove(0);
