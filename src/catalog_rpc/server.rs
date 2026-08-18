@@ -61,7 +61,6 @@ pub struct ServerConfig {
 #[derive(Clone)]
 struct ScientificConfig {
     signature: SystemSignature,
-    descriptor_space: DescriptorSpace,
     validator: ValidatorConfig,
     catalog_capacity: usize,
     census_radius: f64,
@@ -166,7 +165,6 @@ impl ServerConfig {
             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?;
         self.scientific = Some(ScientificConfig {
             signature,
-            descriptor_space,
             validator,
             catalog_capacity,
             census_radius,
