@@ -2402,7 +2402,14 @@ fn archive_cell(
     descriptor: &[f64],
     coordinates: &[f64],
 ) -> Option<usize> {
-    if let Some(cell) = scientific.archive.assign(descriptor) {
+    // Nearest, not within-radius. An archive with cells answers for
+    // every descriptor in its own numbering, because the fallback
+    // numbering is the packing families and the two use the same
+    // integers for unrelated cells: mixing them credits occupancy and
+    // reward to whichever cell shares the number. The families answer
+    // only while the archive is empty, when there is nothing to
+    // collide with.
+    if let Some(cell) = scientific.archive.nearest(descriptor) {
         return Some(cell);
     }
     let histogram = scientific.packing.histogram(coordinates)?;
@@ -2532,28 +2539,15 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
 }
 
 fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
-    // Coverage over a fixed tessellation is the one of these three with
-    // a denominator that does not move while it is measured. An
-    // ensemble standing on a small fraction of the cells has not
-    // finished looking, whatever the Good--Turing statistics over a
-    // discovered support say.
-    if let Some(coverage) = archive_coverage(scientific)
-        && coverage < ARCHIVE_COVERAGE_STOP
-    {
-        return false;
-    }
+    // Coverage is not a stopping criterion here and gating on it was a
+    // mistake. Its denominator is the cells opened so far, which grows
+    // as the archive radius anneals down, so coverage falls over a run
+    // whether or not the search is still finding anything and a gate
+    // below a fixed fraction becomes harder to clear the longer a
+    // campaign runs. A wave could refuse to stop for good.
     scientific.packing.families_saturated()
         && leftover_arrivals_saturated(scientific.leftover_arrivals.values().copied())
 }
-
-/// Fraction of archive cells an ensemble must have reached before
-/// occupancy is allowed to call itself saturated.
-///
-/// A wave of twenty-four against sixty-four cells cannot exceed
-/// three-eighths at any instant, so this sits below that: the test is
-/// that the search has spread, not that it has been everywhere at
-/// once.
-const ARCHIVE_COVERAGE_STOP: f64 = 0.25;
 
 fn report_occupancy_gt(scientific: &mut ScientificState) {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
