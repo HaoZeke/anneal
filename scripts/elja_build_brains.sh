@@ -29,6 +29,17 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C linker=${GCC}/bin/gcc -C link-arg=-B${SYS} -
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
+GLIBC_INCLUDE=${ELJA_GLIBC_INCLUDE:-$HOME/elja-glibc-include}
+if [[ ! -f $GLIBC_INCLUDE/stdint.h ]]; then
+  echo "missing $GLIBC_INCLUDE/stdint.h; run scripts/elja_stage_glibc_include.sh on login" >&2
+  exit 1
+fi
+export CPATH="${GLIBC_INCLUDE}${CPATH:+:$CPATH}"
+export C_INCLUDE_PATH="${GLIBC_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
+export CPLUS_INCLUDE_PATH="${GLIBC_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+export CFLAGS="-I${GLIBC_INCLUDE} ${CFLAGS:-}"
+export CPPFLAGS="-I${GLIBC_INCLUDE} ${CPPFLAGS:-}"
+export CMAKE_INCLUDE_PATH="${GLIBC_INCLUDE}${CMAKE_INCLUDE_PATH:+:$CMAKE_INCLUDE_PATH}"
 if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   echo "missing $IRA_LIB_DIR/libira.so; run scripts/elja_rebuild_ira.sh" >&2
   exit 1
