@@ -123,7 +123,7 @@ mod tests {
     fn the_cold_chain_does_not_casually_give_up_what_it_has() {
         // Cold chain (a) holds the lower energy: swapping is possible
         // but must not be certain, or the ladder discards its best.
-        let exponent = (1.0 / 0.1 - 1.0 / 1.0) * (-12.0 - -10.0);
+        let exponent: f64 = (1.0 / 0.1 - 1.0 / 1.0) * (-12.0 - -10.0);
         let probability = exponent.exp();
         assert!(probability < 1.0);
         assert!(!replica_exchange_accepts(-12.0, 0.1, -10.0, 1.0, 0.5));
