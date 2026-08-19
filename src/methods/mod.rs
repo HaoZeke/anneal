@@ -57,6 +57,8 @@ pub mod sketchmap;
 pub mod tpe;
 pub mod tps_shoot;
 /// Quasi-Newton relaxation whose curvature persists between calls.
+///
+/// Handle around [`xtsci_optimize::Lbfgs`].
 pub mod warm_lbfgs;
 
 pub use additive_independence::{AdditiveIndependenceResult, additive_independence_sa};
