@@ -39,7 +39,7 @@ use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
 use crate::methods::amsa::{AM_ALPHA_TARGET, AM_BARRIER_EMA, AM_STAGNANT_RESEED, AmSaState};
 use crate::methods::bayesian_pilot::{
-    LaplacePosterior, PilotObservation, PilotPrior, fit_laplace, pilot_draws_qmc,
+    LaplacePosterior, PilotObservation, PilotPrior, fit_laplace_skew_corrected, pilot_draws_qmc,
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
@@ -1809,7 +1809,7 @@ where
     }
 
     (observations.len() >= 2).then(|| PilotState {
-        posterior: fit_laplace(&observations, &PilotPrior::default()),
+        posterior: fit_laplace_skew_corrected(&observations, &PilotPrior::default()),
         anchor: best_anchor,
     })
 }

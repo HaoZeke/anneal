@@ -64,7 +64,7 @@ pub use amsa::{AmsaResult, amsa_optimize};
 pub use bayesian_mixing::{BayesianMixingResult, BayesianMixingSampler};
 pub use bayesian_pilot::{
     LaplacePosterior, PilotObservation, PilotPrior, Q_V_MAX, Q_V_MIN, TARGET_ACCEPT_RATE,
-    fit_laplace, pilot_draws, pilot_draws_qmc,
+    fit_laplace, fit_laplace_skew_corrected, pilot_draws, pilot_draws_qmc,
 };
 pub use bfwt::{
     BfwtMode, BfwtResult, EULER_E, THETA_STAR as BFWT_THETA_STAR, bfwt_optimize,

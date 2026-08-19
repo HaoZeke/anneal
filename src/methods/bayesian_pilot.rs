@@ -268,6 +268,66 @@ pub fn fit_laplace(obs: &[PilotObservation], prior: &PilotPrior) -> LaplacePoste
     }
 }
 
+/// Apply the first skew correction to the marginal posterior means.
+pub fn fit_laplace_skew_corrected(
+    obs: &[PilotObservation],
+    prior: &PilotPrior,
+) -> LaplacePosterior {
+    let mut posterior = fit_laplace(obs, prior);
+    let best_val_ref = obs
+        .iter()
+        .map(|o| o.best_val)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let h = 1e-3;
+    let mut params = [
+        posterior.t_init_map.ln(),
+        posterior.sigma_map.ln(),
+        posterior.q_v_map,
+    ];
+    let curvatures = [
+        posterior.log_t_init_sd,
+        posterior.log_sigma_sd,
+        posterior.q_v_sd,
+    ];
+    for axis in 0..3 {
+        let mut plus = params;
+        let mut minus = params;
+        let mut plus2 = params;
+        let mut minus2 = params;
+        plus[axis] += h;
+        minus[axis] -= h;
+        plus2[axis] += 2.0 * h;
+        minus2[axis] -= 2.0 * h;
+        let f0 = neg_log_posterior(
+            params[0], params[1], params[2], obs, prior, best_val_ref,
+        );
+        let fp = neg_log_posterior(plus[0], plus[1], plus[2], obs, prior, best_val_ref);
+        let fm = neg_log_posterior(minus[0], minus[1], minus[2], obs, prior, best_val_ref);
+        let f2p = neg_log_posterior(
+            plus2[0], plus2[1], plus2[2], obs, prior, best_val_ref,
+        );
+        let f2m = neg_log_posterior(
+            minus2[0], minus2[1], minus2[2], obs, prior, best_val_ref,
+        );
+        let d2 = (fp - 2.0 * f0 + fm) / (h * h);
+        let d3 = (f2p - 2.0 * fp + 2.0 * fm - f2m) / (2.0 * h * h * h);
+        if d2.is_finite() && d3.is_finite() && d2 > 0.0 {
+            let shift = -d3 / (2.0 * d2 * d2);
+            if shift.is_finite() && shift.abs() <= 3.0 * curvatures[axis].max(h) {
+                params[axis] += shift;
+            }
+        }
+    }
+    params[2] = params[2].clamp(Q_V_MIN + 1e-9, Q_V_MAX - 1e-9);
+    posterior.t_init_map = params[0].exp();
+    posterior.sigma_map = params[1].exp();
+    posterior.q_v_map = params[2];
+    posterior.neg_log_post_map = neg_log_posterior(
+        params[0], params[1], params[2], obs, prior, best_val_ref,
+    );
+    posterior
+}
+
 /// Draw `n_pilot` (T_0, sigma, q_v) triples from the prior.
 /// The pilot phase itself (running chains, recording acceptance rates +
 /// best vals) happens in user code so this module stays Sampler-agnostic.
@@ -358,6 +418,22 @@ mod tests {
             "MAP q_v {} far from observation peak at 2.0",
             post.q_v_map
         );
+    }
+
+    #[test]
+    fn skew_corrected_laplace_stays_finite_and_in_bounds() {
+        let prior = PilotPrior::default();
+        let obs = vec![
+            fake_obs(0.4, 0.2, 1.2, 0.2, 4.0),
+            fake_obs(0.8, 0.7, 1.6, 0.5, 1.0),
+            fake_obs(1.5, 1.1, 2.1, 0.8, -2.0),
+            fake_obs(2.5, 1.8, 2.5, 0.9, -3.0),
+        ];
+        let posterior = fit_laplace_skew_corrected(&obs, &prior);
+        assert!(posterior.t_init_map.is_finite() && posterior.t_init_map > 0.0);
+        assert!(posterior.sigma_map.is_finite() && posterior.sigma_map > 0.0);
+        assert!(posterior.q_v_map > Q_V_MIN && posterior.q_v_map < Q_V_MAX);
+        assert!(posterior.neg_log_post_map.is_finite());
     }
 
     #[test]
