@@ -25,12 +25,12 @@ use super::{
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
-    BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
-    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence,
-    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
-    ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor, occupancy_min_families,
-    DEFAULT_MIN_OCCUPIED_FAMILIES, occupant_rhat,
+    BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
+    DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
+    InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
+    REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
+    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
+    occupancy_ei_exhausted, occupancy_family_floor, occupancy_min_families, occupant_rhat,
     packing_fingerprint, packing_role, promote_one_sided, prune, retis_exchange_adjacent,
     same_packing, seat_extras,
 };
