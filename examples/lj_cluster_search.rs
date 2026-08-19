@@ -2963,40 +2963,39 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                let Some(left) = left else {
-                    return CheckpointAction::Continue;
-                };
-                slice_sequence = slice_sequence
-                    .checked_add(1)
-                    .expect("slice sequence must fit u64");
-                let reconfiguration = SliceTrace {
-                    slice: slice_sequence,
-                    current_basin: None,
-                    active_relation: None,
-                    policy_role: PolicyRole::Explore,
-                    policy_reason: "population_reseed",
-                    proposal_family: ProposalFamily::HyperbandReseed,
-                    sampled_basin: parent.census_basin,
-                    descriptor_step_norm: None,
-                    cartesian_step_norm: Some(vector_distance(
-                        live,
-                        left.as_slice().expect("LJ proposal is contiguous"),
-                    )),
-                    validation: SliceValidation::Accepted,
-                    quench: SliceQuench::Converged,
-                    adoption: SliceAdoption::Adopted,
-                    novelty: None,
-                    energy: Some(snapshot.current_energy()),
-                    charged_work: u64::try_from(checkpoint_charged)
-                        .expect("checkpoint charge must fit u64"),
-                };
-                cooperative
-                    .record_slice(replica, reconfiguration)
-                    .expect("population checkpoint trace must remain complete");
-                return CheckpointAction::BoundaryProposal {
-                    state: left,
-                    action: "population_reseed".to_owned(),
-                };
+                if let Some(left) = left {
+                    slice_sequence = slice_sequence
+                        .checked_add(1)
+                        .expect("slice sequence must fit u64");
+                    let reconfiguration = SliceTrace {
+                        slice: slice_sequence,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Explore,
+                        policy_reason: "population_reseed",
+                        proposal_family: ProposalFamily::HyperbandReseed,
+                        sampled_basin: parent.census_basin,
+                        descriptor_step_norm: None,
+                        cartesian_step_norm: Some(vector_distance(
+                            live,
+                            left.as_slice().expect("LJ proposal is contiguous"),
+                        )),
+                        validation: SliceValidation::Accepted,
+                        quench: SliceQuench::Converged,
+                        adoption: SliceAdoption::Adopted,
+                        novelty: None,
+                        energy: Some(snapshot.current_energy()),
+                        charged_work: u64::try_from(checkpoint_charged)
+                            .expect("checkpoint charge must fit u64"),
+                    };
+                    cooperative
+                        .record_slice(replica, reconfiguration)
+                        .expect("population checkpoint trace must remain complete");
+                    return CheckpointAction::BoundaryProposal {
+                        state: left,
+                        action: "population_reseed".to_owned(),
+                    };
+                }
             }
             let foreign_parent = parent.producer_replica != replica;
             if foreign_parent && parent.coordinates.len() == live_state.len() {
