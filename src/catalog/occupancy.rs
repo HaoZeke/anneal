@@ -614,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn leftover_soap_saturation_on_one_family_is_not_done() {
+    fn packing_saturation_below_the_family_floor_is_not_done() {
         assert_eq!(occupancy_complete_at(false, true, 1, 2), None);
         assert_eq!(occupancy_complete_at(false, true, 0, 2), None);
     }
@@ -629,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn leftover_soap_gt_with_two_packings_is_putative() {
+    fn packing_gt_with_two_families_meets_the_paper_floor() {
         assert_eq!(
             occupancy_complete(false, true, 2),
             Some(OccupancyCertificate::CatalogSaturated)
