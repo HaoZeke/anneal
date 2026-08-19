@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    AttractorStrength, MIXED_RHAT, certified_global_minimum, explore_collapsed, explore_must_leave,
-    invert_mixing, mixed, occupant_rhat, rhat_series, stronger,
+    certified_global_minimum, explore_collapsed, explore_must_leave, invert_mixing, mixed,
+    occupant_rhat, rhat_series, stronger, AttractorStrength, MIXED_RHAT,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
@@ -131,6 +131,17 @@ fn energy_tie_is_not_uniquely_deepest() {
     let verdict = invert_mixing(&[left, right], &[constant(-173.25, 8), constant(-170.0, 8)]);
     assert!(!verdict.certified_attractor);
     assert!(!verdict.explore_collapsed);
+}
+
+#[test]
+fn occupant_rhat_of_an_off_family_prefix_is_not_a_floor_certificate() {
+    let mut prefix_then_floor = vec![-170.0; 8];
+    prefix_then_floor.extend(constant(-173.252378, 16));
+    let rhat = occupant_rhat(&[prefix_then_floor.clone(), prefix_then_floor]);
+    assert!(
+        !mixed(rhat),
+        "energy recorded on another packing is not occupant mixing of the floor"
+    );
 }
 
 #[test]

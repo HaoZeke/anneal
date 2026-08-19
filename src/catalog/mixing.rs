@@ -8,7 +8,8 @@
 //!   have mixed onto it *and* it is uniquely deepest *and* it is
 //!   strictly more occupied than every competing basin.
 //!
-//! Mixing onto a lone icosahedral floor is a false certificate.
+//! Mixing onto a lone icosahedral floor is the sampled-mode
+//! certificate. Unseen modes are leftover dwell and FunnelModel EI.
 
 use std::cmp::Ordering;
 
