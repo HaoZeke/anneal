@@ -1375,7 +1375,7 @@ def bgsa_metad(
       q_a (acceptance) <- q_map (Andricioaei & Straub 1996 GSA pairing)
       metad_sigma      <- sigma_rw (bias-bump width matches proposal)
       metad_w0         <- 0.05 * t_map (bump height scales with T)
-      metad_gamma      <- 1 / (q_map - 1) (Tsallis-coherent coupling)
+      metad_gamma      <- DEFAULT_METAD_GAMMA (independent MetaD tuning)
     `w0_decay_exp` enables the adaptive diminishing-deposition
     schedule from design pass 19 (Theorem 7' open problem 3): set
     to 1/3 for the K^{-1/3} decay that pushes the equilibration
