@@ -110,16 +110,17 @@ pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
         }
         let left_mean = left.iter().sum::<f64>() / window as f64;
         let right_mean = right.iter().sum::<f64>() / window as f64;
-        let variance = left
+        let left_variance = left
             .iter()
-            .chain(right.iter())
-            .map(|value| {
-                let centered = value - (left_mean + right_mean) / 2.0;
-                centered * centered
-            })
+            .map(|value| (value - left_mean).powi(2))
             .sum::<f64>()
-            / (2 * window) as f64;
-        let scale = variance.sqrt();
+            / window as f64;
+        let right_variance = right
+            .iter()
+            .map(|value| (value - right_mean).powi(2))
+            .sum::<f64>()
+            / window as f64;
+        let scale = left_variance.max(right_variance).sqrt();
         flags[center] = (right_mean - left_mean).abs() > 3.0 * scale.max(f64::EPSILON);
     }
     flags
