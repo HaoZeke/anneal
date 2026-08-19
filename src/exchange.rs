@@ -73,6 +73,13 @@ impl<T: Float> TsallisExchange<T> {
 }
 
 impl<T: Float + Send + Sync> Exchange<T> for TsallisExchange<T> {
+    fn satisfies_detailed_balance(&self) -> bool {
+        // This scalar q-deformation is a heuristic GSA exchange rule. A
+        // detailed-balance Tsallis replica exchange needs the ratio of the
+        // two replica weight functions evaluated at both configurations.
+        false
+    }
+
     fn swap_accept_prob(&self, f_i: T, t_i: T, f_j: T, t_j: T) -> T {
         if (self.q - T::one()).abs() < T::epsilon() {
             return MetropolisExchange.swap_accept_prob(f_i, t_i, f_j, t_j);
@@ -145,5 +152,6 @@ mod tests {
         // Tsallis: bracket = 1 - 0.5*1*1.5 = 0.25; p = 0.25^{1/0.5}.
         assert!(a_t > 0.0 && a_t < 1.0);
         assert!((a_t - 0.0625).abs() < 1e-9);
+        assert!(!t.satisfies_detailed_balance());
     }
 }
