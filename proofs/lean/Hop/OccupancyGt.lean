@@ -33,10 +33,10 @@ theorem leftover_nick_then_rise :
     (4 : Rat) / 21 < 1 / 5 ∧ (5 : Rat) / 22 > 1 / 5 := by
   grind
 
-/-- Occupancy retire: a certificate and packing saturation and the
-family floor. -/
+/-- Occupancy retire: mixing certified and packing saturation and the
+family floor. CatalogSaturated does not retire. -/
 def retire (mixing packingSat floorMet : Bool) : Bool :=
-  (mixing || packingSat) && packingSat && floorMet
+  mixing && packingSat && floorMet
 
 /-- Mixing names a putative. It does not retire without packing
 saturation. -/
@@ -50,9 +50,14 @@ theorem paper_floor_blocks_one_family :
     retire false true false = false := by
   rfl
 
-/-- Packing saturation with the family floor retires. -/
-theorem packing_sat_and_floor_retires :
-    retire false true true = true := by
+/-- Packing saturation with the family floor does not retire. -/
+theorem packing_sat_and_floor_does_not_retire :
+    retire false true true = false := by
+  rfl
+
+/-- Mixing plus packing saturation plus the floor retires. -/
+theorem mixing_and_packing_sat_retires :
+    retire true true true = true := by
   rfl
 
 end Hop

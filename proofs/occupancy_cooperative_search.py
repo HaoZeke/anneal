@@ -296,9 +296,12 @@ def identity_mixing_does_not_retire_without_packing():
     saturation and the rematched family floor.
     """
     mixing, packing_sat, floor_met = sp.symbols("mixing packing_sat floor_met")
-    retire = And(Or(mixing, packing_sat), packing_sat, floor_met)
+    retire = And(mixing, packing_sat, floor_met)
     blocked = Implies(And(mixing, Not(packing_sat)), Not(retire))
-    return _tautology(blocked)
+    saturated_only = Implies(And(Not(mixing), packing_sat, floor_met), Not(retire))
+    ok_b, r_b = _tautology(blocked)
+    ok_s, r_s = _tautology(saturated_only)
+    return ok_b and ok_s, r_b if not ok_b else r_s
 
 
 # ---------------------------------------------------------------------------
