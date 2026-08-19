@@ -2299,6 +2299,7 @@ mod run {
             packing_saturated: state.packing_saturated,
             leftover_dwell: state.leftover_dwell,
             ei_exhausted: state.ei_exhausted,
+            min_families: state.min_families as usize,
             on_published_prize,
         })
     }

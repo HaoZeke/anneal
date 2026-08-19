@@ -63,9 +63,10 @@
 //! certified and that packing census is saturated and leftover SOAP
 //! has dwelt under the unseen-mass ceiling and FunnelModel EI on
 //! the seen packings is exhausted and the rematched
-//! family floor is met. The floor is the landscape Fiedler split
-//! (two weakly coupled hop-graph communities), not a named two-funnel
-//! prior. `CATALOG_MIN_FAMILIES` is an override.
+//! family floor is met. The floor is the Fiedler split of the hop
+//! graph after DECAF labels the sides: two when the seam separates
+//! distinct packing families, one when the seam is leftover wells of
+//! one packing (a superbasin). `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
@@ -175,8 +176,7 @@ pub enum OccupancyCertificate {
     /// is strictly more occupied than every mixed competitor.
     MixingCertified,
     /// Packing Good--Turing unseen mass is small, and the rematched
-    /// family count meets [`occupancy_min_families`]. Default floor 1
-    /// is Good--Turing alone; paper ensembles set 2.
+    /// family count meets the measured Fiedler-and-DECAF floor.
     CatalogSaturated,
 }
 
@@ -203,19 +203,30 @@ pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 1;
 /// weakly coupled communities of the explored landscape.
 pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
 
-/// Family floor from the landscape Fiedler split.
+/// Family floor from the landscape Fiedler split after DECAF labels
+/// the sides.
 ///
-/// DECAF counts packings. Superbasin merge is leftover-SOAP wells of
-/// one packing. The spectral split is how many weakly coupled
-/// communities the hop graph actually has. A one-sided or well-mixed
-/// graph is one community. `CATALOG_MIN_FAMILIES` remains an override.
+/// The hop-graph Fiedler vector names two weakly coupled leftover-SOAP
+/// communities. Superbasin merge is leftover wells of one packing, so
+/// a seam whose basins are the same DECAF family is one community.
+/// Two is only when the seam separates distinct rematched packings.
+/// A one-sided or well-mixed graph is one community.
+/// `CATALOG_MIN_FAMILIES` remains an override.
 pub fn occupancy_family_floor(
     conductance: Option<f64>,
     n_left: usize,
     n_right: usize,
+    distinct_packing_sides: bool,
 ) -> usize {
     match conductance {
-        Some(c) if c < OCCUPANCY_SEAM_CONDUCTANCE && n_left > 0 && n_right > 0 => 2,
+        Some(c)
+            if c < OCCUPANCY_SEAM_CONDUCTANCE
+                && n_left > 0
+                && n_right > 0
+                && distinct_packing_sides =>
+        {
+            2
+        }
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
 }
@@ -619,14 +630,14 @@ pub fn occupancy_retire_at(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
-        OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
-        interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
-        leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
-        occupancy_family_floor, OCCUPANCY_SEAM_CONDUCTANCE,
-        occupancy_leave_adopt, occupancy_leave_target, occupancy_retire, occupancy_retire_at,
-        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, seat_extras,
+        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
+        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
+        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+        leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_leave_adopt,
+        occupancy_leave_target, occupancy_retire, occupancy_retire_at, packing_role,
+        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
+        seat_extras,
     };
 
     #[test]
@@ -946,12 +957,13 @@ mod tests {
 
     #[test]
     fn spectral_seam_is_two_communities_otherwise_one() {
-        assert_eq!(occupancy_family_floor(None, 0, 0), 1);
-        assert_eq!(occupancy_family_floor(Some(0.2), 4, 5), 1);
-        assert_eq!(occupancy_family_floor(Some(0.05), 4, 0), 1);
-        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5), 2);
+        assert_eq!(occupancy_family_floor(None, 0, 0, false), 1);
+        assert_eq!(occupancy_family_floor(Some(0.2), 4, 5, true), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), 4, 0, true), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5, false), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5, true), 2);
         assert_eq!(
-            occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), 4, 5),
+            occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), 4, 5, true),
             1
         );
     }

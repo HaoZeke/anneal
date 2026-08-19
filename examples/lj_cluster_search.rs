@@ -15,8 +15,8 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    LeavePath, OccupancyLeaveTarget, occupancy_complete, occupancy_leave_target,
-    occupancy_min_families, occupancy_retire, published_energy_score,
+    LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_leave_target,
+    occupancy_retire_at, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -2482,13 +2482,12 @@ fn run_capnp_catalog(
         run_cfg.max_hops = Some(hops);
         println!("  hop cap {hops}");
         println!("  leftover-SOAP TIS seats");
-        println!("  occupancy min families {}", occupancy_min_families());
+        println!("  occupancy min families spectral");
         println!("  occupancy leave archive hole");
         println!(
-            "  gt stop packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
+            "  gt stop packing  n>={}  p0<{}  families>=spectral  (coordinator occupancy_gt)",
             anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,
             anneal_core::catalog::PRODUCTION_MAX_UNSEEN_MASS,
-            occupancy_min_families()
         );
     }
     // Cooperative wells: the SOAP archive the hole step walks away
@@ -3263,18 +3262,20 @@ fn run_capnp_catalog(
             policy.leftover_lambda,
         );
         let n_occupied_families = policy.occupied_family_count;
-        if let Some(certificate) = occupancy_complete(
+        if let Some(certificate) = occupancy_complete_at(
             policy.mixing.certified_attractor,
             policy.packing_saturated,
             n_occupied_families,
+            policy.min_families,
         ) {
             let saturated = policy.packing_saturated;
-            if occupancy_retire(
+            if occupancy_retire_at(
                 certificate,
                 saturated,
                 policy.leftover_dwell,
                 policy.ei_exhausted,
                 n_occupied_families,
+                policy.min_families,
             ) {
                 if !announced_done {
                     println!(

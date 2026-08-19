@@ -1267,13 +1267,15 @@ visit stream is the referee's evidence"). Consumed by
 =referee_community_coverage= (server.rs:1507, holds one family slot
 open for a submission on the population plan's currently abandoned
 community when conductance stays under 0.1, so resampling cannot
-strand a weakly-coupled community once discovered) and by the
-=observerStatus= reply (server.rs:1964-1997), which reports
-=landscape_basins= and a =LandscapeSeam= (algebraic connectivity,
-conductance, community sizes, representative basins) as the seam
-fields of =CoordinatorStatus= (=landscapeBasins @9= through
-=seamRightBasin @15=, schema/Catalog.capnp); rendered as a =seam= JSON
-object by =examples/catalog_status.rs:76-104=.
+strand a weakly-coupled community once discovered), by
+=occupancy_floor= (server.rs, Fiedler split after DECAF labels the
+sides: leftover wells of one packing are one family, a packing seam
+is two), and by the =observerStatus= reply (server.rs:1964-1997),
+which reports =landscape_basins= and a =LandscapeSeam= (algebraic
+connectivity, conductance, community sizes, representative basins)
+as the seam fields of =CoordinatorStatus= (=landscapeBasins @9=
+through =seamRightBasin @15=, schema/Catalog.capnp); rendered as a
+=seam= JSON object by =examples/catalog_status.rs:76-104=.
 
 * Population methods
 

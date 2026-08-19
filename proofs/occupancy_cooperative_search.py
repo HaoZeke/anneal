@@ -9,8 +9,9 @@ Source of the constants and the predicates:
 - ``src/catalog/mixing.rs``: Brooks--Gelman ``R-hat``, ``MIXED_RHAT``,
   occupant certificate, lone-floor exclusion.
 - ``src/catalog/occupancy.rs``: packing Good--Turing stop plus
-  ``occupancy_min_families`` (default 1 is Good--Turing alone; paper
-  ensembles set 2). Leftover-SOAP saturation is the hole generator,
+  ``occupancy_family_floor`` (Fiedler split after DECAF labels the
+  sides; default 1 is Good--Turing alone; 2 only on a packing seam).
+  Leftover-SOAP saturation is the hole generator,
   not the stop. Mixing names a putative; retirement still needs
   packing saturation and the family floor.
 - ``src/catalog/census.rs``: unseen mass ``n1/N``.
@@ -253,8 +254,9 @@ def identity_one_family_saturation_is_not_stop():
 
 
 def identity_gt_stop_needs_two_families():
-    """Paper ``F = 2``: ``stop_GT`` needs saturation and two rematched
-    families. Mixing is a separate certificate, not a retire.
+    """Fiedler-and-DECAF ``F = 2``: ``stop_GT`` needs saturation and
+    two rematched families. Mixing is a separate certificate, not a
+    retire.
     """
     saturated, two_or_more = sp.symbols("saturated two_or_more")
     stop_gt = And(saturated, two_or_more)
@@ -587,7 +589,7 @@ def derive() -> bool:
         ("nonsingleton revisit does not raise P0", identity_revisit_nonsingleton_drops_mass()[0]),
         ("fixed K => P0 -> 0", identity_fixed_family_mass_vanishes()[0]),
         ("paper F=2: one-family saturation is not a stop", identity_one_family_saturation_is_not_stop()[0]),
-        ("paper F=2: GT stop needs two rematched families", identity_gt_stop_needs_two_families()[0]),
+        ("Fiedler-DECAF F=2: GT stop needs two rematched families", identity_gt_stop_needs_two_families()[0]),
         ("default F=1 is packing GT alone", identity_default_floor_is_packing_gt_alone()[0]),
         ("new leftover type raises P0; packing n1=0 does not", identity_new_type_raises_p0()[0]),
         ("mixing does not retire without packing saturation", identity_mixing_does_not_retire_without_packing()[0]),

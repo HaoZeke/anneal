@@ -27,7 +27,6 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 # Two-funnel paper hurdle (ico vs Oh). Set 1 for Good-Turing alone.
-export CATALOG_MIN_FAMILIES=2
 # Extras deposit into their own bias so a crowded funnel is expensive
 # to the replica standing in it. Off, the pile reforms after every Leave.
 export CATALOG_SHARED_BIAS=1

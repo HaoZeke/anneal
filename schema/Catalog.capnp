@@ -112,6 +112,8 @@ struct PolicyStateReply {
   leftoverDwell @21 :Bool;
   # FunnelModel Jones EI on seen packings is at most the model noise.
   eiExhausted @22 :Bool;
+  # Fiedler split after DECAF labels the sides: 2 only on a packing seam.
+  minFamilies @23 :UInt32;
 }
 
 enum CatalogMutationKind {

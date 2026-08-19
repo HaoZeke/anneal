@@ -188,6 +188,8 @@ pub struct CatalogPolicyInput {
     pub leftover_dwell: bool,
     /// FunnelModel Jones EI on seen packings is at most the model noise.
     pub ei_exhausted: bool,
+    /// Measured Fiedler-and-DECAF family floor for this hop graph.
+    pub min_families: usize,
     /// Published-energy score: this replica sits on a known hurdle GM.
     pub on_published_prize: bool,
 }

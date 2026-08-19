@@ -1169,6 +1169,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         packing_saturated: false,
         leftover_dwell: false,
         ei_exhausted: false,
+        min_families: 1,
         on_published_prize: false,
     };
     assert_eq!(
