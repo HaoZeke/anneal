@@ -26,10 +26,11 @@ use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
-    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
-    QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
-    occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
+    GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence,
+    PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
+    ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
+    leftover_lambda, occupancy_min_families, occupant_rhat, packing_role, promote_one_sided,
+    prune,
     retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -277,6 +278,9 @@ struct ScientificState {
     /// radius anneals against.
     archive_progress: f64,
     last_gt_report: Option<(u64, u64, u64, u64, u32, bool)>,
+    leftover_sat_streak: u32,
+    leftover_n_for_streak: u64,
+    leftover_dwell: bool,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -368,6 +372,9 @@ impl CoordinatorState {
                     archive: Archive::new(scientific.census_radius.max(1e-6), ARCHIVE_RADIUS_FLOOR),
                     archive_progress: 0.0,
                     last_gt_report: None,
+                    leftover_sat_streak: 0,
+                    leftover_n_for_streak: 0,
+                    leftover_dwell: false,
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -1055,6 +1062,7 @@ fn apply_request(
                         .map(|candidate| candidate.coordinates.as_slice()),
                 ) as u32,
                 packing_saturated: packing_census_saturated(scientific),
+                leftover_dwell: leftover_census_dwell(scientific),
             });
             report_occupancy_gt(scientific);
         }
@@ -2547,6 +2555,21 @@ fn packing_census_saturated(scientific: &ScientificState) -> bool {
     scientific.packing.families_saturated()
 }
 
+fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
+    let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
+    if leftover.saturated() {
+        if leftover.n > scientific.leftover_n_for_streak {
+            scientific.leftover_sat_streak = scientific.leftover_sat_streak.saturating_add(1);
+            scientific.leftover_n_for_streak = leftover.n;
+        }
+    } else {
+        scientific.leftover_sat_streak = 0;
+    }
+    scientific.leftover_dwell =
+        usize::try_from(scientific.leftover_sat_streak).unwrap_or(0) >= LEFTOVER_SAT_DWELL;
+    scientific.leftover_dwell
+}
+
 fn report_occupancy_gt(scientific: &mut ScientificState) {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
     let packing = scientific.packing.well_sample();
@@ -2581,11 +2604,12 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|mass| format!("{mass:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
         leftover_sat,
+        scientific.leftover_dwell,
         packing.n,
         packing.n1,
         packing_p0,

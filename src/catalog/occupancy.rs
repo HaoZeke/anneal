@@ -58,7 +58,8 @@
 //! of the same well are not draws. A saturated packing census of
 //! shallow families is not retire: extras keep Leaving so an unseen
 //! funnel can still appear. Replicas retire when a mixing putative is
-//! certified and that packing census is saturated and the rematched
+//! certified and that packing census is saturated and leftover SOAP
+//! has dwelt under the unseen-mass ceiling and the rematched
 //! family floor is met. [`occupancy_min_families`]
 //! (`CATALOG_MIN_FAMILIES`) is the floor so a known two-funnel hurdle
 //! does not stop on one packing. Default 1 is Good--Turing alone.
@@ -103,12 +104,34 @@ pub enum OccupancyLeaveTarget {
     ArchiveHole,
 }
 
-/// Leave destination from whether the catalog already holds another family.
-pub fn occupancy_leave_target(other_family_in_catalog: bool) -> OccupancyLeaveTarget {
-    if other_family_in_catalog {
-        OccupancyLeaveTarget::OtherFamily
-    } else {
+/// Consecutive leftover-SOAP occupancy_gt records under the unseen-mass
+/// ceiling that count as a dwell. One leftover-sat nick is not enough:
+/// a hatch raises \(\hat p_0\) by \((n-n_1)/(n(n+1))\).
+pub const LEFTOVER_SAT_DWELL: usize = 5;
+
+/// Leftover dwell from consecutive leftover-sat bits, newest last.
+///
+/// The last [`LEFTOVER_SAT_DWELL`] records must all be saturated.
+/// A one-shot nick, or a nick then a hatch, is not a dwell.
+pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
+    consecutive.len() >= LEFTOVER_SAT_DWELL
+        && consecutive
+            .iter()
+            .rev()
+            .take(LEFTOVER_SAT_DWELL)
+            .all(|&sat| sat)
+}
+
+/// Leave destination. After packing saturation OtherFamily only
+/// rematches families on file, so Leave is the archive hole.
+pub fn occupancy_leave_target(
+    other_family_in_catalog: bool,
+    packing_saturated: bool,
+) -> OccupancyLeaveTarget {
+    if packing_saturated || !other_family_in_catalog {
         OccupancyLeaveTarget::ArchiveHole
+    } else {
+        OccupancyLeaveTarget::OtherFamily
     }
 }
 
@@ -510,20 +533,24 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Replica retire. Mixing certified, packing Good--Turing, and the
-/// rematched family floor. CatalogSaturated names census completeness
-/// and does not retire: extras keep Leaving.
+/// Replica retire. Mixing certified, packing Good--Turing, leftover
+/// dwell, and the rematched family floor. CatalogSaturated names
+/// census completeness and does not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
+/// `leftover_dwell` is consecutive leftover-sat occupancy_gt records,
+/// not a one-shot leftover nick.
 /// `n_occupied_families` is the rematched packing count, not a
 /// leftover-SOAP basin count and not `2 * certified`.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
+    leftover_dwell: bool,
     n_occupied_families: usize,
 ) -> bool {
     occupancy_retire_at(
         certificate,
         catalog_saturated,
+        leftover_dwell,
         n_occupied_families,
         occupancy_min_families(),
     )
@@ -533,11 +560,13 @@ pub fn occupancy_retire(
 pub fn occupancy_retire_at(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
+    leftover_dwell: bool,
     n_occupied_families: usize,
     min_occupied_families: usize,
 ) -> bool {
     n_occupied_families >= min_occupied_families
         && catalog_saturated
+        && leftover_dwell
         && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
 
@@ -547,8 +576,9 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
         OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
         interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
-        occupancy_complete, occupancy_complete_at, occupancy_leave_adopt, occupancy_leave_target,
-        occupancy_retire, occupancy_retire_at, packing_role, promote_one_sided,
+        leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_leave_adopt,
+        occupancy_leave_target, occupancy_retire, occupancy_retire_at, packing_role,
+        promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
     };
 
@@ -564,16 +594,40 @@ mod tests {
     #[test]
     fn occupancy_leave_is_another_family_or_an_archive_hole() {
         assert_eq!(
-            occupancy_leave_target(true),
+            occupancy_leave_target(true, false),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
-            occupancy_leave_target(false),
+            occupancy_leave_target(false, false),
             OccupancyLeaveTarget::ArchiveHole
         );
         assert_ne!(
-            occupancy_leave_target(false),
+            occupancy_leave_target(false, false),
             OccupancyLeaveTarget::OtherFamily
+        );
+    }
+
+    #[test]
+    fn packing_sat_leave_is_archive_hole_not_other_family() {
+        assert_eq!(
+            occupancy_leave_target(true, true),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_ne!(
+            occupancy_leave_target(true, true),
+            OccupancyLeaveTarget::OtherFamily
+        );
+        assert_eq!(
+            occupancy_leave_target(false, true),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_eq!(
+            occupancy_leave_target(true, false),
+            OccupancyLeaveTarget::OtherFamily
+        );
+        assert_eq!(
+            occupancy_leave_target(false, false),
+            OccupancyLeaveTarget::ArchiveHole
         );
     }
 
@@ -640,10 +694,12 @@ mod tests {
         assert!(!occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
             true,
+            true,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             1,
             2
@@ -654,6 +710,7 @@ mod tests {
     fn catalog_saturation_does_not_retire_without_mixing() {
         assert!(!occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             2
         ));
@@ -700,10 +757,12 @@ mod tests {
         assert!(!occupancy_retire(
             OccupancyCertificate::MixingCertified,
             false,
+            true,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
+            true,
             true,
             1,
             2
@@ -711,22 +770,93 @@ mod tests {
         assert!(occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
-            2,
-            2
-        ));
-        assert!(!occupancy_retire_at(
-            OccupancyCertificate::CatalogSaturated,
             true,
             2,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
+            true,
+            2,
+            2
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             1,
             2
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
+    }
+
+    #[test]
+    fn leftover_unsaturated_does_not_retire_with_mixing_and_packing_sat() {
+        assert!(!leftover_sat_dwell(&[false]));
+        assert!(!leftover_sat_dwell(&[true]));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            2,
+            2
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            false,
+            2,
+            2
+        ));
+    }
+
+    #[test]
+    fn leftover_nick_is_not_a_retire_dwell() {
+        assert!(!leftover_sat_dwell(&[true, false]));
+        assert!(!leftover_sat_dwell(&[false, true]));
+        assert!(!leftover_sat_dwell(&[true; 4]));
+        assert!(leftover_sat_dwell(&[true; 5]));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            leftover_sat_dwell(&[true]),
+            2,
+            2
+        ));
+    }
+
+    #[test]
+    fn leftover_dwell_plus_mixing_plus_packing_sat_plus_floor_retires() {
+        assert!(leftover_sat_dwell(&[true; 5]));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            true,
+            2,
+            2
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            false,
+            true,
+            2,
+            2
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            true,
+            1,
+            2
+        ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::CatalogSaturated,
+            true,
+            true,
+            2,
+            2
+        ));
     }
 
     #[test]
@@ -738,11 +868,13 @@ mod tests {
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
+            true,
             1,
             1
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             2,
             3
