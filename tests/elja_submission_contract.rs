@@ -323,8 +323,8 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
         );
         assert!(
             source.contains(r#"grep -a -F -q "Refuse""#)
-                && source.contains(r#"grep -a -F -q "gt stop leftover-well""#),
-            "{name} must grep the binary for Refuse or gt stop leftover-well"
+                && source.contains(r#"grep -a -F -q "gt stop packing""#),
+            "{name} must grep the binary for Refuse or gt stop packing"
         );
     }
 }
