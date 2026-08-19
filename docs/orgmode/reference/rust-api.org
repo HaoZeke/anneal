@@ -4,6 +4,7 @@
 * Rust API Reference
 
 The =anneal-core= crate provides the typed sampler components, preset drivers, Bayesian pilot and mixer machinery, GLE-Langevin moves, surrogate independence proposals, local polish helpers, and the Rust surfaces behind the Python and C bindings.
+Hopping polish (=methods::warm_lbfgs::WarmLbfgs=) holds an =xtsci_optimize::Lbfgs=; the two-loop recursion and strong Wolfe search live in that crate.
 
 The API documentation below is generated from the crate source through =sphinxcontrib_rust= and =sphinx-rustdoc-postprocess=, then linked into this site under the same reference tree as the user-facing parameter tables.
 
