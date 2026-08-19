@@ -49,13 +49,14 @@ pub use mixing::{
 };
 pub use occupancy::{
     CHAMPION_RANK, DEFAULT_MIN_OCCUPIED_FAMILIES, INTERFACE_HORIZON, InterfaceSeat,
-    LEFTOVER_SAT_DWELL, LeaveFrame, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
-    OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
-    interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
-    leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_leave_adopt,
-    occupancy_leave_target, occupancy_min_families, occupancy_retire, occupancy_retire_at,
-    packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-    retis_should_swap, seat_extras,
+    LEFTOVER_SAT_DWELL, LeaveFrame, LeavePath, OCCUPANCY_EI_MIN_OBS, OccupancyCertificate,
+    OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
+    in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+    leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
+    occupancy_ei_exhausted, occupancy_leave_adopt, occupancy_leave_target,
+    occupancy_min_families, occupancy_retire, occupancy_retire_at, packing_role,
+    promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
+    seat_extras,
 };
 pub use packing::{
     GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,

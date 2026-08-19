@@ -295,25 +295,34 @@ def identity_mixing_does_not_retire_without_packing():
     """Mixing names a putative. Retirement still needs packing
     saturation and the rematched family floor.
     """
-    mixing, packing_sat, leftover_dwell, floor_met = sp.symbols(
-        "mixing packing_sat leftover_dwell floor_met"
+    mixing, packing_sat, leftover_dwell, ei_exhausted, floor_met = sp.symbols(
+        "mixing packing_sat leftover_dwell ei_exhausted floor_met"
     )
-    retire = And(mixing, packing_sat, leftover_dwell, floor_met)
+    retire = And(mixing, packing_sat, leftover_dwell, ei_exhausted, floor_met)
     blocked = Implies(And(mixing, Not(packing_sat)), Not(retire))
     saturated_only = Implies(
-        And(Not(mixing), packing_sat, leftover_dwell, floor_met), Not(retire)
+        And(Not(mixing), packing_sat, leftover_dwell, ei_exhausted, floor_met),
+        Not(retire),
     )
     leftover_blocks = Implies(
-        And(mixing, packing_sat, Not(leftover_dwell), floor_met), Not(retire)
+        And(mixing, packing_sat, Not(leftover_dwell), ei_exhausted, floor_met),
+        Not(retire),
+    )
+    ei_blocks = Implies(
+        And(mixing, packing_sat, leftover_dwell, Not(ei_exhausted), floor_met),
+        Not(retire),
     )
     ok_b, r_b = _tautology(blocked)
     ok_s, r_s = _tautology(saturated_only)
     ok_l, r_l = _tautology(leftover_blocks)
+    ok_e, r_e = _tautology(ei_blocks)
     if not ok_b:
         return False, r_b
     if not ok_s:
         return False, r_s
-    return ok_l, r_l
+    if not ok_l:
+        return False, r_l
+    return ok_e, r_e
 
 
 # ---------------------------------------------------------------------------

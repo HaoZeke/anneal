@@ -389,6 +389,8 @@ pub struct PolicyState {
     pub packing_saturated: bool,
     /// Consecutive leftover-SOAP occupancy_gt records under the ceiling.
     pub leftover_dwell: bool,
+    /// FunnelModel Jones EI on seen packings is at most the model noise.
+    pub ei_exhausted: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1045,6 +1047,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_occupied_family_count(state.occupied_family_count);
                     output.set_packing_saturated(state.packing_saturated);
                     output.set_leftover_dwell(state.leftover_dwell);
+                    output.set_ei_exhausted(state.ei_exhausted);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1239,6 +1242,7 @@ pub(crate) fn decode_reply_reader(
                         occupied_family_count: state.get_occupied_family_count(),
                         packing_saturated: state.get_packing_saturated(),
                         leftover_dwell: state.get_leftover_dwell(),
+                        ei_exhausted: state.get_ei_exhausted(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

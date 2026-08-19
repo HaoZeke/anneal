@@ -2298,6 +2298,7 @@ mod run {
             occupied_family_count: state.occupied_family_count as usize,
             packing_saturated: state.packing_saturated,
             leftover_dwell: state.leftover_dwell,
+            ei_exhausted: state.ei_exhausted,
             on_published_prize,
         })
     }

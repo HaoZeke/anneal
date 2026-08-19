@@ -3273,6 +3273,7 @@ fn run_capnp_catalog(
                 certificate,
                 saturated,
                 policy.leftover_dwell,
+                policy.ei_exhausted,
                 n_occupied_families,
             ) {
                 if !announced_done {

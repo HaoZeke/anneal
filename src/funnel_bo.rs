@@ -246,6 +246,22 @@ impl FunnelModel {
         // EI = (best - mean) Phi(z) + sd phi(z).
         (best - mean) * normal_cdf(z) + sd * normal_pdf(z)
     }
+
+    /// Largest expected improvement at the morphologies already observed.
+    ///
+    /// Occupancy retire uses this as the remaining-improvement bound on
+    /// the seen packing codebook. Unseen families stay leftover-dwell's
+    /// job. Empty and unfitted models return infinity so they cannot
+    /// look exhausted.
+    pub fn max_expected_improvement_at_data(&mut self) -> f64 {
+        if self.xs.is_empty() {
+            return f64::INFINITY;
+        }
+        let sites: Vec<Array1<f64>> = self.xs.clone();
+        sites.iter().fold(0.0_f64, |held, x| {
+            held.max(self.expected_improvement(x.view()))
+        })
+    }
 }
 
 fn normal_pdf(z: f64) -> f64 {
@@ -376,6 +392,18 @@ mod tests {
             mean < -300.0,
             "far-field mean {mean} should revert to the data's scale, not zero"
         );
+    }
+
+    #[test]
+    fn max_ei_at_data_is_finite_after_three_observations() {
+        let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
+        assert!(m.max_expected_improvement_at_data().is_infinite());
+        m.observe(pt(&[0.0, 0.0]).view(), -44.0);
+        m.observe(pt(&[0.2, 0.0]).view(), -40.0);
+        m.observe(pt(&[0.0, 0.2]).view(), -42.0);
+        let max_ei = m.max_expected_improvement_at_data();
+        assert!(max_ei.is_finite(), "max EI at data {max_ei}");
+        assert!(max_ei >= 0.0, "max EI at data {max_ei}");
     }
 
     #[test]
