@@ -39,8 +39,11 @@ pub struct PtResult {
     /// Number of accepted swaps.
     pub swap_accepts: usize,
     /// Diagnostic log partition-function ratio `log(Z_cold / Z_hot)`.
+    /// `NaN` means the exchange operator does not certify detailed balance;
+    /// interpretation also requires fixed-rung Boltzmann inner samples.
     pub log_z_ratio_est: f64,
-    /// Delta-method standard error for `log_z_ratio_est`.
+    /// Delta-method standard error for `log_z_ratio_est`, with the same
+    /// validity conditions as `log_z_ratio_est`.
     pub log_z_ratio_se: f64,
 }
 
@@ -227,8 +230,11 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
         for history in &mut chain_histories {
             history.refresh_stationarity_flags();
         }
-        let (log_z_ratio_est, log_z_ratio_se) =
-            estimate_log_z_ratio(&hot_energies, self.temps[0], self.temps[m - 1]);
+        let (log_z_ratio_est, log_z_ratio_se) = if self.exchange.satisfies_detailed_balance() {
+            estimate_log_z_ratio(&hot_energies, self.temps[0], self.temps[m - 1])
+        } else {
+            (f64::NAN, f64::NAN)
+        };
 
         PtResult {
             chain_histories,

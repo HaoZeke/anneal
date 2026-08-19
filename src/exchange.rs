@@ -24,12 +24,10 @@ pub trait Exchange<T: Float>: Send + Sync {
     /// Returns the swap-accept probability in `[0, 1]`.
     fn swap_accept_prob(&self, f_i: T, t_i: T, f_j: T, t_j: T) -> T;
 
-    /// Optional witness for E1 (detailed balance). Default returns true
-    /// since the Metropolis swap below satisfies E1 by construction;
-    /// custom `Exchange` impls can override when they need executable
-    /// proptest sweeps.
+    /// Optional witness for E1 (detailed balance). Implementations must opt
+    /// in after establishing that their ratio targets the stated law.
     fn satisfies_detailed_balance(&self) -> bool {
-        true
+        false
     }
 }
 
@@ -40,6 +38,10 @@ pub trait Exchange<T: Float>: Send + Sync {
 pub struct MetropolisExchange;
 
 impl<T: Float + Send + Sync> Exchange<T> for MetropolisExchange {
+    fn satisfies_detailed_balance(&self) -> bool {
+        true
+    }
+
     fn swap_accept_prob(&self, f_i: T, t_i: T, f_j: T, t_j: T) -> T {
         let inv_diff = T::one() / t_i - T::one() / t_j;
         let log_alpha = inv_diff * (f_i - f_j);
@@ -51,14 +53,15 @@ impl<T: Float + Send + Sync> Exchange<T> for MetropolisExchange {
     }
 }
 
-/// Tsallis-q exchange rule: the q-deformed analogue of the canonical
-/// Metropolis swap, matching the GSA acceptance family. At `q = 1`
+/// Tsallis-q exchange rule: a q-deformed heuristic exchange probability,
+/// matching the GSA acceptance family. At `q = 1`
 /// reduces to `MetropolisExchange`.
 ///
 /// Swap probability is the q-deformed expression
 /// max(0, [1 - (q - 1) * (F_i - F_j) * (1/T_i - 1/T_j)]^{1/(q-1)}),
-/// clamped to `[0, 1]`. Reduces to standard PT via the Metropolis
-/// limit Theorem 3 of the IISE manuscript at `q -> 1`.
+/// clamped to `[0, 1]`. Reduces to standard PT in the limit `q -> 1`.
+/// This rule is not a detailed-balance witness for a product of q-canonical
+/// replica targets; equilibrium exchange requires the weight-ratio form.
 #[derive(Clone, Copy, Debug)]
 pub struct TsallisExchange<T: Float> {
     /// Tsallis index. `q = 1` reduces to Metropolis.

@@ -212,7 +212,7 @@ pub fn softmax_probs(energies: &[f64], beta: f64) -> Vec<f64> {
     let mut z = 0.0;
     for &e in energies {
         let w = if e.is_finite() {
-            (-beta * (e - e_min)).exp().max(1e-300)
+            (-beta * (e - e_min)).exp()
         } else {
             0.0
         };
@@ -1653,6 +1653,14 @@ mod tests {
                 "progress={progress}: H(beta*)={h} vs H*={h_star} beta={beta}"
             );
         }
+    }
+
+    #[test]
+    fn softmax_does_not_assign_mass_to_underflowed_states() {
+        let p = softmax_probs(&[0.0, 1.0e6], 1.0);
+        assert_eq!(p[0], 1.0);
+        assert_eq!(p[1], 0.0);
+        assert_eq!(softmax_entropy(&[0.0, 1.0e6], 1.0), 0.0);
     }
 
     /// D8 residual control preserves target size and returns finite beta*.
