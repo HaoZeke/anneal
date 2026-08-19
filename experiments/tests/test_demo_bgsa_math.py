@@ -4,7 +4,9 @@ import pytest
 from experiments.scripts.demo_bgsa import (
     _log_pseudo_marginal_weight,
     continuous_time_tempering,
+    metad_gamma_from_qv,
     pmsa_metad,
+    smc_pt_log_z_estimator,
 )
 
 
@@ -53,3 +55,21 @@ def test_continuous_tempering_counts_each_objective_evaluation_once():
     )
     assert calls == 1 + 3 * 2
     assert len(beta_history) == 3
+
+
+def test_pt_evidence_uses_paired_importance_weights_not_swap_acceptance():
+    estimate, _, _, _ = smc_pt_log_z_estimator(
+        [0.0, np.log(2.0)],
+        [0.0, 0.0],
+    )
+    assert np.isclose(estimate, np.log(1.5))
+
+
+def test_pt_evidence_rejects_unpaired_weights():
+    with pytest.raises(ValueError, match="equal lengths"):
+        smc_pt_log_z_estimator([0.0], [0.0, 1.0])
+
+
+def test_metad_bias_factor_is_independent_of_tsallis_visiting_index():
+    assert metad_gamma_from_qv(1.1) == metad_gamma_from_qv(2.9)
+    assert metad_gamma_from_qv(2.9) > 1.0
