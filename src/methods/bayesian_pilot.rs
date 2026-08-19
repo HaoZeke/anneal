@@ -148,7 +148,7 @@ pub fn empirical_prior_from_observations(
         })
         .collect();
     scored.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let keep = scored.len().div_ceil(4).max(1);
+    let keep = scored.len().div_ceil(4).max(2).min(scored.len());
     let selected = &scored[..keep];
 
     let moments = |values: Vec<f64>, mean: f64, sd: f64| {
