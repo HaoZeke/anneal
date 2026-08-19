@@ -130,8 +130,9 @@ pub enum OccupancyCertificate {
     /// Occupant chains mixed onto a uniquely deepest attractor that
     /// is strictly more occupied than every mixed competitor.
     MixingCertified,
-    /// Good--Turing unseen mass of the observed census is small, and
-    /// at least two occupied packing families are on file.
+    /// Packing Good--Turing unseen mass is small, and the rematched
+    /// family count meets [`occupancy_min_families`]. Default floor 1
+    /// is Good--Turing alone; paper ensembles set 2.
     CatalogSaturated,
 }
 
