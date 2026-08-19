@@ -57,6 +57,31 @@ fn occupied_packing_extras_do_not_reseed_a_random_cluster() {
 }
 
 #[test]
+fn putative_saturated_does_not_latch_the_done_line() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let retire = source
+        .split("if occupancy_retire_at(")
+        .nth(1)
+        .expect("retire latch must exist");
+    let after_retire = retire
+        .split("let policy_trace = cooperative")
+        .next()
+        .expect("retire block must end at the policy trace");
+    assert!(
+        after_retire.contains("announced_putative"),
+        "CatalogSaturated putative must not share the done latch"
+    );
+    assert!(
+        !after_retire
+            .split("return CheckpointAction::Retire")
+            .nth(1)
+            .expect("putative print follows Retire")
+            .contains("announced_done = true"),
+        "putative saturated must not suppress a later done mixing line"
+    );
+}
+
+#[test]
 fn foreign_parent_population_reseed_is_not_a_box_start() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let extra = source

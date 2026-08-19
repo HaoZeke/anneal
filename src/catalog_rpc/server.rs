@@ -280,7 +280,6 @@ struct ScientificState {
     archive_progress: f64,
     last_gt_report: Option<(u64, u64, u64, u64, u32, u32, bool)>,
     leftover_sat_streak: u32,
-    leftover_n_for_streak: u64,
     leftover_dwell: bool,
     funnel: crate::funnel_bo::FunnelModel,
     evaluate: Arc<FreshEvaluator>,
@@ -375,7 +374,6 @@ impl CoordinatorState {
                     archive_progress: 0.0,
                     last_gt_report: None,
                     leftover_sat_streak: 0,
-                    leftover_n_for_streak: 0,
                     leftover_dwell: false,
                     funnel: crate::funnel_bo::FunnelModel::new(0.15, 20.0, 1e-2),
                     evaluate: Arc::clone(&scientific.evaluate),
@@ -1716,6 +1714,22 @@ fn apply_request(
                             request.identity.replica,
                             destination_candidate.clone(),
                         );
+                        let arrival = scientific
+                            .arrival_basin_by_replica
+                            .insert(request.identity.replica, observation.basin_id)
+                            != Some(observation.basin_id);
+                        observe_packing(
+                            scientific,
+                            request.identity.replica,
+                            &destination_candidate.coordinates,
+                            Some(observation.basin_id),
+                            arrival,
+                        );
+                        record_energy(
+                            scientific,
+                            request.identity.replica,
+                            destination_candidate.energy,
+                        );
                         if scientific.transition_capacity > 0
                             && source_basin != observation.basin_id
                             && let Some(source_candidate) = source_candidate.as_ref()
@@ -2714,12 +2728,7 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
-    if leftover.saturated() {
-        if leftover.n > scientific.leftover_n_for_streak {
-            scientific.leftover_sat_streak = scientific.leftover_sat_streak.saturating_add(1);
-            scientific.leftover_n_for_streak = leftover.n;
-        }
-    } else {
+    if !leftover.saturated() {
         scientific.leftover_sat_streak = 0;
     }
     scientific.leftover_dwell =
@@ -2755,6 +2764,13 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         return;
     }
     scientific.last_gt_report = Some(key);
+    if leftover_sat {
+        scientific.leftover_sat_streak = scientific.leftover_sat_streak.saturating_add(1);
+    } else {
+        scientific.leftover_sat_streak = 0;
+    }
+    scientific.leftover_dwell =
+        usize::try_from(scientific.leftover_sat_streak).unwrap_or(0) >= LEFTOVER_SAT_DWELL;
     let leftover_p0 = leftover
         .unseen()
         .map(|mass| format!("{mass:.4}"))

@@ -2689,6 +2689,7 @@ fn run_capnp_catalog(
     let mut best_at_checkpoint = f64::INFINITY;
     let mut announced_score = false;
     let mut announced_personal = None;
+    let mut announced_putative = false;
     let mut announced_done = false;
     let mut population_progress = PopulationEpochProgress::default();
     let mut stall = 0u32;
@@ -3326,7 +3327,7 @@ fn run_capnp_catalog(
                     reason: certificate.as_str().to_owned(),
                 };
             }
-            if !announced_done {
+            if !announced_putative {
                 println!(
                     "  putative {}  hops {}  best {:.6}",
                     certificate.as_str(),
@@ -3334,7 +3335,7 @@ fn run_capnp_catalog(
                     snapshot.best_energy()
                 );
                 let _ = std::io::stdout().flush();
-                announced_done = true;
+                announced_putative = true;
             }
         }
         let policy_trace = cooperative
