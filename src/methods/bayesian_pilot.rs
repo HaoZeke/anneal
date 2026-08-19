@@ -110,6 +110,87 @@ impl Default for PilotPrior {
     }
 }
 
+/// Fit empirical-Bayes hyperparameters from the strongest pilot observations.
+pub fn empirical_prior_from_observations(
+    observations: &[PilotObservation],
+    fallback: &PilotPrior,
+) -> PilotPrior {
+    if observations.is_empty() {
+        return *fallback;
+    }
+    let finite_best: Vec<f64> = observations
+        .iter()
+        .filter_map(|o| o.best_val.is_finite().then_some(o.best_val))
+        .collect();
+    let (best_max, best_range) = if finite_best.is_empty() {
+        (0.0, 1.0)
+    } else {
+        let max = finite_best
+            .iter()
+            .copied()
+            .fold(f64::NEG_INFINITY, f64::max);
+        let min = finite_best.iter().copied().fold(f64::INFINITY, f64::min);
+        (max, (max - min).max(1e-12))
+    };
+    let target_logit = (TARGET_ACCEPT_RATE / (1.0 - TARGET_ACCEPT_RATE)).ln();
+    let mut scored: Vec<(f64, &PilotObservation)> = observations
+        .iter()
+        .map(|o| {
+            let a = o.accept_rate.clamp(1e-6, 1.0 - 1e-6);
+            let accept_score = ((a / (1.0 - a)).ln() - target_logit).powi(2);
+            let improvement_score = if o.best_val.is_finite() {
+                let normalized = (best_max - o.best_val) / best_range;
+                (1.0 - normalized).powi(2)
+            } else {
+                1.0
+            };
+            (accept_score + improvement_score, o)
+        })
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let keep = scored.len().div_ceil(4).max(1);
+    let selected = &scored[..keep];
+
+    let moments = |values: Vec<f64>, mean: f64, sd: f64| {
+        if values.len() < 2 {
+            return (mean, sd);
+        }
+        let m = values.iter().sum::<f64>() / values.len() as f64;
+        let variance =
+            values.iter().map(|v| (v - m).powi(2)).sum::<f64>() / (values.len() - 1) as f64;
+        (m, variance.sqrt().max(0.1))
+    };
+    let (log_t_mean, log_t_sd) = moments(
+        selected
+            .iter()
+            .map(|(_, o)| o.t_init.max(1e-12).ln())
+            .collect(),
+        fallback.log_t_init_mean,
+        fallback.log_t_init_sd,
+    );
+    let (log_sigma_mean, log_sigma_sd) = moments(
+        selected
+            .iter()
+            .map(|(_, o)| o.sigma.max(1e-12).ln())
+            .collect(),
+        fallback.log_sigma_mean,
+        fallback.log_sigma_sd,
+    );
+    let (q_v_mean, q_v_sd) = moments(
+        selected.iter().map(|(_, o)| o.q_v).collect(),
+        fallback.q_v_mean,
+        fallback.q_v_sd,
+    );
+    PilotPrior {
+        log_t_init_mean: log_t_mean,
+        log_t_init_sd: log_t_sd,
+        log_sigma_mean,
+        log_sigma_sd,
+        q_v_mean: q_v_mean.clamp(Q_V_MIN + 1e-6, Q_V_MAX - 1e-6),
+        q_v_sd,
+    }
+}
+
 /// Sample a `(T_0, sigma, q_v)` triple from the prior, returning the linear-scale values.
 fn sample_prior(prior: &PilotPrior, rng: &mut StdRng) -> (f64, f64, f64) {
     // Box-Muller for two log-Normals
@@ -298,17 +379,11 @@ pub fn fit_laplace_skew_corrected(
         minus[axis] -= h;
         plus2[axis] += 2.0 * h;
         minus2[axis] -= 2.0 * h;
-        let f0 = neg_log_posterior(
-            params[0], params[1], params[2], obs, prior, best_val_ref,
-        );
+        let f0 = neg_log_posterior(params[0], params[1], params[2], obs, prior, best_val_ref);
         let fp = neg_log_posterior(plus[0], plus[1], plus[2], obs, prior, best_val_ref);
         let fm = neg_log_posterior(minus[0], minus[1], minus[2], obs, prior, best_val_ref);
-        let f2p = neg_log_posterior(
-            plus2[0], plus2[1], plus2[2], obs, prior, best_val_ref,
-        );
-        let f2m = neg_log_posterior(
-            minus2[0], minus2[1], minus2[2], obs, prior, best_val_ref,
-        );
+        let f2p = neg_log_posterior(plus2[0], plus2[1], plus2[2], obs, prior, best_val_ref);
+        let f2m = neg_log_posterior(minus2[0], minus2[1], minus2[2], obs, prior, best_val_ref);
         let d2 = (fp - 2.0 * f0 + fm) / (h * h);
         let d3 = (f2p - 2.0 * fp + 2.0 * fm - f2m) / (2.0 * h * h * h);
         if d2.is_finite() && d3.is_finite() && d2 > 0.0 {
@@ -322,9 +397,8 @@ pub fn fit_laplace_skew_corrected(
     posterior.t_init_map = params[0].exp();
     posterior.sigma_map = params[1].exp();
     posterior.q_v_map = params[2];
-    posterior.neg_log_post_map = neg_log_posterior(
-        params[0], params[1], params[2], obs, prior, best_val_ref,
-    );
+    posterior.neg_log_post_map =
+        neg_log_posterior(params[0], params[1], params[2], obs, prior, best_val_ref);
     posterior
 }
 
@@ -434,6 +508,21 @@ mod tests {
         assert!(posterior.sigma_map.is_finite() && posterior.sigma_map > 0.0);
         assert!(posterior.q_v_map > Q_V_MIN && posterior.q_v_map < Q_V_MAX);
         assert!(posterior.neg_log_post_map.is_finite());
+    }
+
+    #[test]
+    fn empirical_prior_follows_the_best_quartile() {
+        let fallback = PilotPrior::default();
+        let obs = vec![
+            fake_obs(0.2, 0.1, 1.2, 0.23, 10.0),
+            fake_obs(0.4, 0.2, 1.3, 0.24, 9.0),
+            fake_obs(2.0, 1.0, 2.4, 0.9, -4.0),
+            fake_obs(3.0, 1.5, 2.6, 0.8, -3.0),
+        ];
+        let prior = empirical_prior_from_observations(&obs, &fallback);
+        assert!(prior.log_t_init_mean < 0.0);
+        assert!(prior.log_sigma_mean < 0.0);
+        assert!(prior.q_v_mean < 1.5);
     }
 
     #[test]

@@ -47,9 +47,19 @@ fn constant_traces_at_different_floors_are_not_mixed() {
 }
 
 #[test]
-fn a_lone_mixed_floor_is_not_a_certified_global_minimum() {
+fn a_lone_mixed_floor_is_the_sampled_mode_certificate() {
     let ico = ico_floor();
     assert!(ico.mixed());
+    assert!(certified_global_minimum(&ico, &[], true));
+}
+
+#[test]
+fn an_unmixed_lone_floor_is_not_certified() {
+    let ico = AttractorStrength {
+        energy: -173.252378,
+        occupancy: 4,
+        occupant_rhat: f64::INFINITY,
+    };
     assert!(!certified_global_minimum(&ico, &[], true));
 }
 
@@ -164,7 +174,7 @@ fn a_lone_ico_collapse_is_explore_failure_not_a_certificate() {
         constant(-173.252378, 8),
     ];
     let verdict = invert_mixing(&[ico_floor()], &series);
-    assert!(!verdict.certified_attractor);
+    assert!(verdict.certified_attractor);
     assert!(verdict.explore_collapsed);
     assert!(explore_collapsed(&series));
 }

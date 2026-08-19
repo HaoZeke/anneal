@@ -39,7 +39,8 @@ use crate::exchange::TsallisExchange;
 use crate::hmc::{HmcSaSampler, OmelyanIntegrator, QGaussianMomentum};
 use crate::methods::amsa::{AM_ALPHA_TARGET, AM_BARRIER_EMA, AM_STAGNANT_RESEED, AmSaState};
 use crate::methods::bayesian_pilot::{
-    LaplacePosterior, PilotObservation, PilotPrior, fit_laplace_skew_corrected, pilot_draws_qmc,
+    LaplacePosterior, PilotObservation, PilotPrior, empirical_prior_from_observations,
+    fit_laplace_skew_corrected, pilot_draws_qmc,
 };
 use crate::methods::gle_langevin::gle_langevin_preconditioned_sa;
 use crate::methods::local_polish::{
@@ -1738,79 +1739,90 @@ where
     let bounds = obj.bounds().clone();
     let dim = bounds.dims;
     let width_scale = mean_width(&bounds) / 10.0;
-    let prior = PilotPrior::default();
-    let draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed);
+    let fallback_prior = PilotPrior::default();
+    let scout_draws = pilot_draws_qmc(&fallback_prior, PILOT_CHAINS, seed);
     let per_chain = bayesian_pilot_steps_per_chain(pilot_budget, min_steps_per_chain);
     let start_used = ledger.used_get();
     let mut observations = Vec::with_capacity(PILOT_CHAINS);
     let mut best_anchor = None;
     let mut best_anchor_val = f64::INFINITY;
 
-    for (t_init, sigma, q_v) in draws {
-        if ledger.exhausted() || ledger.used_get().saturating_sub(start_used) >= pilot_budget {
-            break;
-        }
-        let mut cur = Array1::from_iter((0..dim).map(|j| {
-            let w = bounds.high[j] - bounds.low[j];
-            bounds.low[j] + rng.random::<f64>() * if w > 0.0 { w } else { 0.0 }
-        }));
-        let mut cur_val = obj.eval(cur.view());
-        let mut best_val = cur_val;
-        let mut chain_best = cur.clone();
-        let mut accepts = 0usize;
-        let mut steps = 0usize;
-        let cooling = TsallisCool::new(t_init, q_v);
-        for step in 0..per_chain {
+    let mut run_draws = |draws: Vec<(f64, f64, f64)>,
+                         steps_per_chain: usize,
+                         observations: &mut Vec<PilotObservation>| {
+        for (t_init, sigma, q_v) in draws {
             if ledger.exhausted() || ledger.used_get().saturating_sub(start_used) >= pilot_budget {
                 break;
             }
-            let temp = cooling.temperature(step / 10);
-            let mut prop = cur.clone();
-            for value in prop.iter_mut() {
-                let noise: f64 = rand_distr::StandardNormal.sample(rng);
-                *value += sigma * width_scale * noise;
-            }
-            // Reflect (not clip) the symmetric Gaussian random-walk proposal
-            // back into the box so the Metropolis test below keeps detailed
-            // balance: clipping piles mass on the boundary and breaks symmetry.
-            let prop = crate::movekernel::reflect_into_box(prop.view(), &bounds);
-            let prop_val = obj.eval(prop.view());
-            steps += 1;
-            let accepted = accept_move(
-                noise_sigma,
-                |_r| energy_delta(obj.eval(prop.view()), obj.eval(cur.view())),
-                energy_delta(prop_val, cur_val),
-                temp,
-                rng,
-            );
-            if prop_val.is_finite() && accepted {
-                cur = prop;
-                cur_val = prop_val;
-                accepts += 1;
-                if prop_val < best_val {
-                    best_val = prop_val;
-                    chain_best = cur.clone();
+            let mut cur = Array1::from_iter((0..dim).map(|j| {
+                let w = bounds.high[j] - bounds.low[j];
+                bounds.low[j] + rng.random::<f64>() * if w > 0.0 { w } else { 0.0 }
+            }));
+            let mut cur_val = obj.eval(cur.view());
+            let mut best_val = cur_val;
+            let mut chain_best = cur.clone();
+            let mut accepts = 0usize;
+            let mut steps = 0usize;
+            let cooling = TsallisCool::new(t_init, q_v);
+            for step in 0..steps_per_chain {
+                if ledger.exhausted()
+                    || ledger.used_get().saturating_sub(start_used) >= pilot_budget
+                {
+                    break;
+                }
+                let temp = cooling.temperature(step / 10);
+                let mut prop = cur.clone();
+                for value in prop.iter_mut() {
+                    let noise: f64 = rand_distr::StandardNormal.sample(rng);
+                    *value += sigma * width_scale * noise;
+                }
+                // Reflect (not clip) the symmetric Gaussian random-walk proposal
+                // back into the box so the Metropolis test below keeps detailed
+                // balance: clipping piles mass on the boundary and breaks symmetry.
+                let prop = crate::movekernel::reflect_into_box(prop.view(), &bounds);
+                let prop_val = obj.eval(prop.view());
+                steps += 1;
+                let accepted = accept_move(
+                    noise_sigma,
+                    |_r| energy_delta(obj.eval(prop.view()), obj.eval(cur.view())),
+                    energy_delta(prop_val, cur_val),
+                    temp,
+                    rng,
+                );
+                if prop_val.is_finite() && accepted {
+                    cur = prop;
+                    cur_val = prop_val;
+                    accepts += 1;
+                    if prop_val < best_val {
+                        best_val = prop_val;
+                        chain_best = cur.clone();
+                    }
                 }
             }
-        }
-        if steps > 0 && best_val.is_finite() {
-            if best_val < best_anchor_val {
-                best_anchor_val = best_val;
-                best_anchor = Some(chain_best);
+            if steps > 0 && best_val.is_finite() {
+                if best_val < best_anchor_val {
+                    best_anchor_val = best_val;
+                    best_anchor = Some(chain_best);
+                }
+                observations.push(PilotObservation {
+                    t_init,
+                    sigma,
+                    q_v,
+                    accept_rate: accepts as f64 / steps as f64,
+                    best_val,
+                    final_pos: cur.to_vec(),
+                });
             }
-            observations.push(PilotObservation {
-                t_init,
-                sigma,
-                q_v,
-                accept_rate: accepts as f64 / steps as f64,
-                best_val,
-                final_pos: cur.to_vec(),
-            });
         }
-    }
+    };
+
+    run_draws(scout_draws, (per_chain / 4).max(1), &mut observations);
+    let prior = empirical_prior_from_observations(&observations, &fallback_prior);
+    let main_draws = pilot_draws_qmc(&prior, PILOT_CHAINS, seed.wrapping_add(1));
+    run_draws(main_draws, per_chain, &mut observations);
 
     (observations.len() >= 2).then(|| PilotState {
-        posterior: fit_laplace_skew_corrected(&observations, &PilotPrior::default()),
+        posterior: fit_laplace_skew_corrected(&observations, &prior),
         anchor: best_anchor,
     })
 }

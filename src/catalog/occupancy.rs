@@ -52,8 +52,9 @@
 //! ## Stop
 //!
 //! A mixing certificate names a putative: uniquely deepest, occupant
-//! mixed, a mixed competitor, strictly more occupied. On LJ75 that
-//! putative is the icosahedral shelf until a second funnel is deeper.
+//! mixed. A mixed competitor is required only when a competitor is
+//! on file. A lone mixed floor is Gelman--Rubin on the sampled mode.
+//! Unseen funnels are leftover-dwell and EI, not a second R-hat.
 //! Packing Good--Turing names completeness of the seen codebook
 //! (`packing_saturated`). Leftover-SOAP arrivals stay the hole
 //! generator; leftover Good--Turing is not the stop. Hop re-observes
@@ -172,8 +173,8 @@ pub fn occupancy_leave_adopt(action: &str, family_changed: bool) -> Option<Occup
 /// Why occupancy may retire a replica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyCertificate {
-    /// Occupant chains mixed onto a uniquely deepest attractor that
-    /// is strictly more occupied than every mixed competitor.
+    /// Occupant chains mixed onto a uniquely deepest attractor.
+    /// A competitor, when one exists, must be mixed and less occupied.
     MixingCertified,
     /// Packing Good--Turing unseen mass is small, and the rematched
     /// family count meets the measured Fiedler-and-DECAF floor.
