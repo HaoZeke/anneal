@@ -267,25 +267,19 @@ def log_cool(t_init, k0, epoch):
     return t_init * np.log(k0) / np.log(epoch + k0)
 
 
-def metad_gamma_from_qv(q_v):
-    """Derive the well-tempered MetaD gamma from the Tsallis visiting q_v.
+DEFAULT_METAD_GAMMA = 8.0
 
-    The GSA-MetaD pairing argument: q_v controls the heavy-tail of the
-    visiting distribution; gamma controls the asymptotic flattening of
-    F. Both encode "how far above the typical T the kernel pretends to
-    be". Tsallis-q-Gaussian visiting at q_v has effective temperature
-    T_eff = T * (q_v - 1)^(-1) (Tsallis & Stariolo 1996,
-    doi:10.1016/S0378-4371(96)00271-3); requiring this to match the
-    well-tempered effective T (Barducci/Bussi/Parrinello 2008,
-    doi:10.1103/PhysRevLett.100.020603, T_eff = gamma * T) gives
-    gamma = 1/(q_v - 1). q_v -> 1+ recovers
-    Boltzmann (gamma -> infinity, no flattening); larger q_v gives
-    smaller gamma (more aggressive flattening).
 
-    Clamped to [2, 50]: gamma <= 1 is unphysical (negative bias drift),
-    gamma > 50 collapses to no flattening at all and is observationally
-    indistinguishable from gamma = 50."""
-    return float(min(50.0, max(2.0, 1.0 / max(q_v - 1.0, 0.05))))
+def metad_gamma_from_qv(_q_v):
+    """Return the independent default MetaD bias factor.
+
+    The Tsallis visiting index and the well-tempered MetaD bias factor
+    parameterize different kernels. Their effective-temperature scales are
+    not interchangeable, and ``1 / (q_v - 1)`` falls below the required
+    ``gamma > 1`` domain for ``q_v > 2``. Keep the compatibility helper for
+    existing driver signatures while leaving MetaD tuning independent.
+    """
+    return DEFAULT_METAD_GAMMA
 
 
 def tsallis_cool(t_init, q_v, epoch):
@@ -1895,39 +1889,46 @@ def trajectory_inla_diagnostic(traj_vals):
     return phi, sigma_eps, sigma_t, flags
 
 
-def smc_pt_log_z_estimator(swap_log_alphas):
-    """Issue 005 -- SMC-on-PT free log-Z-ratio estimator.
+def smc_pt_log_z_estimator(log_num_weights, log_den_weights):
+    """Estimate a PT partition-function ratio from paired importance weights.
 
-    Each PT swap step produces a log_alpha = (1/T_low - 1/T_high) *
-    (F_low - F_high). The bridge sampling identity (Del Moral/Doucet/
-    Jasra 2006 Eq.(8), doi:10.1111/j.1467-9868.2006.00553.x; Neal
-    2001 AIS, doi:10.1023/A:1008923215028) gives an unbiased estimator
-    of log Z(T_low) / Z(T_high) as the LOG-MEAN-EXP of the per-swap
-    log-alphas:
+    For samples from a frozen biased rung ``j`` with inverse temperature
+    ``beta_j`` and bias ``B``, the numerator and denominator weights are
 
-        log Z_ratio_est = log mean exp(log_alpha_i)
+        w_num = exp(-(beta_i-beta_j) F + beta_j B),
+        w_den = exp(beta_j B).
 
-    Bootstrap CI from N_BOOT=200 resamples of the swap series.
+    Their ratio estimates ``Z_0(beta_i) / Z_0(beta_j)`` for the unbiased
+    objective. This is a self-normalized importance estimate; swap
+    log-acceptance values are not importance weights. The estimate is
+    statistically valid only when the samples represent a fixed-rung
+    distribution, so adaptive-bias runs should treat it as diagnostic.
+
+    Bootstrap CI from N_BOOT=200 paired resamples.
     Returns (log_z_est, log_z_se, ci_low, ci_high)."""
-    if not swap_log_alphas:
+    if not log_num_weights or not log_den_weights:
         return float("nan"), float("nan"), float("nan"), float("nan")
-    arr = np.asarray(swap_log_alphas, dtype=float)
-    arr = arr[np.isfinite(arr)]
-    if len(arr) == 0:
+    if len(log_num_weights) != len(log_den_weights):
+        raise ValueError("importance-weight arrays must have equal lengths")
+    num = np.asarray(log_num_weights, dtype=float)
+    den = np.asarray(log_den_weights, dtype=float)
+    finite = np.isfinite(num) & np.isfinite(den)
+    num, den = num[finite], den[finite]
+    if len(num) == 0:
         return float("nan"), float("nan"), float("nan"), float("nan")
 
     def log_mean_exp(x):
         m = float(np.max(x))
         return m + float(np.log(np.mean(np.exp(x - m))))
 
-    point = log_mean_exp(arr)
+    point = log_mean_exp(num) - log_mean_exp(den)
     rng = np.random.default_rng(0xBA7CE57)
-    n = len(arr)
+    n = len(num)
     n_boot = 200
     boots = np.empty(n_boot)
     for b in range(n_boot):
         idx = rng.integers(0, n, size=n)
-        boots[b] = log_mean_exp(arr[idx])
+        boots[b] = log_mean_exp(num[idx]) - log_mean_exp(den[idx])
     se = float(boots.std(ddof=1))
     lo = float(np.quantile(boots, 0.025))
     hi = float(np.quantile(boots, 0.975))
@@ -1998,9 +1999,8 @@ def pt_metad_shared(
     deposit_counter = 0
     swap_attempts = 0
     swap_accepts = 0
-    # Issue 005: collect per-swap log_alphas keyed by adjacent rung
-    # pair so log Z(T_i)/Z(T_{i+1}) can be estimated post-hoc.
-    swap_log_alpha_pairs = [[] for _ in range(n_chains - 1)]
+    # Issue 005: collect paired importance weights keyed by adjacent rung.
+    log_weight_pairs = [[] for _ in range(n_chains - 1)]
     # Andrieu/Thoms 2008 per-rung adaptive sigma. Each PT rung has its
     # own log_sigma adapted toward 0.234 RW-Metropolis acceptance.
     log_sigmas = [float(np.log(max(sigma_rw, 1e-6))) for _ in range(n_chains)]
@@ -2040,18 +2040,27 @@ def pt_metad_shared(
                 F_i = chain_val[i] + bias.potential(bias.cv(chain_pos[i]))
                 F_j = chain_val[i + 1] + bias.potential(bias.cv(chain_pos[i + 1]))
                 log_alpha = (1.0 / T_i - 1.0 / T_j) * (F_i - F_j)
-                swap_log_alpha_pairs[i].append(log_alpha)
+                bias_j = bias.potential(bias.cv(chain_pos[i + 1]))
+                beta_i, beta_j = 1.0 / T_i, 1.0 / T_j
+                log_weight_pairs[i].append(
+                    (
+                        -(beta_i - beta_j) * chain_val[i + 1] + beta_j * bias_j,
+                        beta_j * bias_j,
+                    )
+                )
                 swap_attempts += 1
                 if rngs[0].random() < _log_accept_probability(log_alpha):
                     chain_pos[i], chain_pos[i + 1] = chain_pos[i + 1], chain_pos[i]
                     chain_val[i], chain_val[i + 1] = chain_val[i + 1], chain_val[i]
                     swap_accepts += 1
 
-    # Issue 005: compute per-pair log Z(T_i) / Z(T_{i+1}) and
-    # accumulate into log Z(T_cold) / Z(T_hot) by chaining.
+    # Issue 005: compute per-pair unbiased-objective ratios using the
+    # bias-corrected paired weights and accumulate by chaining.
     z_pair_estimates = []
-    for pair_idx, alphas in enumerate(swap_log_alpha_pairs):
-        log_z_est, _, _, _ = smc_pt_log_z_estimator(alphas)
+    for pairs in log_weight_pairs:
+        nums = [pair[0] for pair in pairs]
+        dens = [pair[1] for pair in pairs]
+        log_z_est, _, _, _ = smc_pt_log_z_estimator(nums, dens)
         z_pair_estimates.append(log_z_est)
     log_z_cold_to_hot = (
         sum(z for z in z_pair_estimates if np.isfinite(z))

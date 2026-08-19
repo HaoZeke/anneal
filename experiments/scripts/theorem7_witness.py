@@ -104,19 +104,18 @@ def main():
     # p_inf(x; T) = exp_q(-(q_v - 1) F / T) / Z:
     # for a q-Gaussian-like F-density, <F> ~ T / (q_v - 1) * c
     # where c is a landscape-dependent constant of O(1).
-    # The KEY DIAGNOSTIC: <F>(q_v=q1) / <F>(q_v=q2) should equal
-    # (q2 - 1) / (q1 - 1).
+    # The diagnostic varies q_v while holding the independent MetaD bias
+    # factor fixed. It does not infer a MetaD gamma from q_v.
     # For p_inf(x) = exp_q(-(q_v-1) F / T) / Z, the median F is at
     # F_med ~ T/(q_v - 1) * (2^((q_v-1)) - 1) / (q_v - 1)
     # which simplifies to <F> ~ T * c(q) / (q_v - 1) for c(q) of O(1).
     # We report the predicted F_typical = T / (q_v - 1) for orientation;
     # the empirical <F> should match this scaling at moderate q_v where
-    # the bias has converged to V_inf (large enough q_v that
-    # gamma = 1/(q_v-1) is small enough for V to equilibrate).
+    # the bias has converged to V_inf.
     print("\nMean-F diagnostic (Theorem 7: typical F ~ T/(q_v-1)):")
     print(f"{'q_v':>6} {'gamma':>7} {'F_typ_pred':>11} {'<F>':>9} {'F/F_pred':>10}")
     for q_v in qv_list:
-        gamma_q = d.metad_gamma_from_qv(q_v)
+        gamma_q = d.DEFAULT_METAD_GAMMA
         beta_pred = (q_v - 1.0) / T
         all_betas = []
         for seed in range(args.seeds):
