@@ -3118,13 +3118,48 @@ fn run_capnp_catalog(
                 }
             }
             if foreign_parent {
-                let n = snapshot.current_state().len() / 3;
-                let left = anneal_core::methods::cluster_hopping::random_cluster(
-                    n,
-                    0.7,
-                    0.5,
-                    &mut transport_rng,
-                );
+                let live = snapshot.current_state();
+                let left = {
+                    #[cfg(feature = "featomic")]
+                    {
+                        anneal_core::featomic_hop::surplus_reseed(
+                            live,
+                            &shared_wells,
+                            coop_rcut,
+                            coop_species.as_deref(),
+                            None,
+                            &mut transport_rng,
+                        )
+                        .unwrap_or_else(|| {
+                            leave_packing_state(
+                                live,
+                                0.35,
+                                &shared_wells,
+                                coop_rcut,
+                                coop_species.as_deref(),
+                                &mut transport_rng,
+                            )
+                        })
+                    }
+                    #[cfg(not(feature = "featomic"))]
+                    {
+                        leave_packing_state(
+                            live,
+                            0.35,
+                            &shared_wells,
+                            coop_rcut,
+                            coop_species.as_deref(),
+                            &mut transport_rng,
+                        )
+                    }
+                };
+                if left
+                    .iter()
+                    .zip(live.iter())
+                    .all(|(a, b)| (a - b).abs() <= 1e-12)
+                {
+                    return CheckpointAction::Continue;
+                }
                 slice_sequence = slice_sequence
                     .checked_add(1)
                     .expect("slice sequence must fit u64");

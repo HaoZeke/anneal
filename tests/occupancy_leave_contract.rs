@@ -55,3 +55,20 @@ fn occupied_packing_extras_do_not_reseed_a_random_cluster() {
         "occupied-packing extras Leave a hole, they do not box-start"
     );
 }
+
+#[test]
+fn foreign_parent_population_reseed_is_not_a_box_start() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let extra = source
+        .split("if foreign_parent {")
+        .nth(1)
+        .expect("foreign-parent population reseed arm must exist");
+    let arm = extra
+        .split("slice_sequence = slice_sequence")
+        .next()
+        .expect("foreign-parent arm must end at the slice record");
+    assert!(
+        !arm.contains("random_cluster"),
+        "Feynman-Kac extras Leave a SOAP hole or packing kick, not a box start"
+    );
+}
