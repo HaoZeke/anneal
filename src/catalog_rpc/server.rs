@@ -29,7 +29,8 @@ use crate::catalog::{
     GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence,
     PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
     ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
+    leftover_lambda, occupancy_ei_exhausted, occupancy_min_families, occupant_rhat,
+    packing_fingerprint, packing_role, promote_one_sided, prune,
     retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -280,6 +281,7 @@ struct ScientificState {
     leftover_sat_streak: u32,
     leftover_n_for_streak: u64,
     leftover_dwell: bool,
+    funnel: crate::funnel_bo::FunnelModel,
     evaluate: Arc<FreshEvaluator>,
 }
 
@@ -374,6 +376,7 @@ impl CoordinatorState {
                     leftover_sat_streak: 0,
                     leftover_n_for_streak: 0,
                     leftover_dwell: false,
+                    funnel: crate::funnel_bo::FunnelModel::new(0.15, 20.0, 1e-2),
                     evaluate: Arc::clone(&scientific.evaluate),
                 })
             })
@@ -846,7 +849,11 @@ fn apply_request(
                     let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(
                         draw ^ u64::from(request.identity.replica),
                     );
-                    let picked = sparsest_family_entry(scientific, &mut rng);
+                    let picked = if scientific.funnel.len() >= 3 {
+                        highest_ei_family_entry(scientific)
+                    } else {
+                        sparsest_family_entry(scientific, &mut rng)
+                    };
                     if let Some((family, _)) = picked {
                         // Remember which cell this start came from, so
                         // the curiosity credit lands on it when the
@@ -1062,6 +1069,7 @@ fn apply_request(
                 ) as u32,
                 packing_saturated: packing_census_saturated(scientific),
                 leftover_dwell: leftover_census_dwell(scientific),
+                ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
             });
             report_occupancy_gt(scientific);
         }
@@ -2545,6 +2553,39 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
     elites.get(&chosen).map(|(_, slot, _)| (chosen, *slot))
 }
 
+fn highest_ei_family_entry(scientific: &mut ScientificState) -> Option<(usize, usize)> {
+    let sites: Vec<(usize, Vec<f64>, Vec<f64>)> = scientific
+        .catalog
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(slot, entry)| {
+            (
+                slot,
+                entry.coordinates().to_vec(),
+                entry.descriptor().to_vec(),
+            )
+        })
+        .collect();
+    let mut best: Option<(f64, usize, usize)> = None;
+    for (slot, coordinates, descriptor) in &sites {
+        let Some(histogram) = packing_fingerprint(coordinates) else {
+            continue;
+        };
+        let ei = scientific
+            .funnel
+            .expected_improvement(ndarray::Array1::from(histogram).view());
+        if !ei.is_finite() {
+            continue;
+        }
+        let family = archive_cell(scientific, descriptor, coordinates).unwrap_or(*slot);
+        if best.is_none_or(|(held, _, _)| ei > held) {
+            best = Some((ei, family, *slot));
+        }
+    }
+    best.map(|(_, family, slot)| (family, slot))
+}
+
 fn packing_census_saturated(scientific: &ScientificState) -> bool {
     // Packing Good--Turing is the certificate. Leftover-SOAP arrivals
     // keep hatching wells if the walk continues; that grain is the
@@ -2552,6 +2593,23 @@ fn packing_census_saturated(scientific: &ScientificState) -> bool {
     // criterion either: its denominator grows as the archive radius
     // anneals down.
     scientific.packing.families_saturated()
+}
+
+fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
+    let observations: Vec<(Vec<f64>, f64)> = scientific
+        .last_candidate_by_replica
+        .values()
+        .map(|candidate| (candidate.coordinates.clone(), candidate.energy))
+        .collect();
+    for (coordinates, energy) in observations {
+        if let Some(histogram) = packing_fingerprint(&coordinates) {
+            scientific
+                .funnel
+                .observe(ndarray::Array1::from(histogram).view(), energy);
+        }
+    }
+    let max_ei = scientific.funnel.max_expected_improvement_at_data();
+    occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise)
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {

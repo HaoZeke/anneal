@@ -61,7 +61,8 @@
 //! shallow families is not retire: extras keep Leaving so an unseen
 //! funnel can still appear. Replicas retire when a mixing putative is
 //! certified and that packing census is saturated and leftover SOAP
-//! has dwelt under the unseen-mass ceiling and the rematched
+//! has dwelt under the unseen-mass ceiling and FunnelModel EI on
+//! the seen packings is exhausted and the rematched
 //! family floor is met. [`occupancy_min_families`]
 //! (`CATALOG_MIN_FAMILIES`) is the floor so a known two-funnel hurdle
 //! does not stop on one packing. Default 1 is Good--Turing alone.
@@ -112,6 +113,19 @@ pub enum OccupancyLeaveTarget {
 /// ceiling that count as a dwell. One leftover-sat nick is not enough:
 /// a hatch raises \(\hat p_0\) by \((n-n_1)/(n(n+1))\).
 pub const LEFTOVER_SAT_DWELL: usize = 5;
+
+/// Bank and CSA turn FunnelModel EI on at three observed morphologies.
+pub const OCCUPANCY_EI_MIN_OBS: usize = 3;
+
+/// Jones remaining improvement on seen packing morphologies.
+///
+/// The FunnelModel is the bank/CSA GP. Exhausted when that model has
+/// the bank observation floor and the largest EI at observed packings
+/// is at most the model's noise. Unseen families are leftover-dwell,
+/// not a far-field GP probe.
+pub fn occupancy_ei_exhausted(max_ei: f64, n_obs: usize, noise: f64) -> bool {
+    n_obs >= OCCUPANCY_EI_MIN_OBS && max_ei.is_finite() && max_ei <= noise
+}
 
 /// Leftover dwell from consecutive leftover-sat bits, newest last.
 ///
@@ -538,23 +552,28 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 }
 
 /// Replica retire. Mixing certified, packing Good--Turing, leftover
-/// dwell, and the rematched family floor. CatalogSaturated names
-/// census completeness and does not retire: extras keep Leaving.
+/// dwell, FunnelModel EI exhausted on seen packings, and the rematched
+/// family floor. CatalogSaturated names census completeness and does
+/// not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// `leftover_dwell` is consecutive leftover-sat occupancy_gt records,
 /// not a one-shot leftover nick.
+/// `ei_exhausted` is Jones remaining improvement on observed
+/// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the rematched packing count, not a
 /// leftover-SOAP basin count and not `2 * certified`.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
     leftover_dwell: bool,
+    ei_exhausted: bool,
     n_occupied_families: usize,
 ) -> bool {
     occupancy_retire_at(
         certificate,
         catalog_saturated,
         leftover_dwell,
+        ei_exhausted,
         n_occupied_families,
         occupancy_min_families(),
     )
@@ -565,12 +584,14 @@ pub fn occupancy_retire_at(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
     leftover_dwell: bool,
+    ei_exhausted: bool,
     n_occupied_families: usize,
     min_occupied_families: usize,
 ) -> bool {
     n_occupied_families >= min_occupied_families
         && catalog_saturated
         && leftover_dwell
+        && ei_exhausted
         && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
 
@@ -580,8 +601,9 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
         OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
         interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
-        leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_leave_adopt,
-        occupancy_leave_target, occupancy_retire, occupancy_retire_at, packing_role,
+        leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
+        occupancy_leave_adopt, occupancy_leave_target, occupancy_retire, occupancy_retire_at,
+        packing_role,
         promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
     };
@@ -699,10 +721,12 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             true,
+            true,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             true,
             1,
@@ -714,6 +738,7 @@ mod tests {
     fn catalog_saturation_does_not_retire_without_mixing() {
         assert!(!occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             true,
             2
@@ -762,10 +787,12 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             false,
             true,
+            true,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
+            true,
             true,
             true,
             1,
@@ -775,6 +802,7 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             true,
             true,
+            true,
             2,
             2
         ));
@@ -782,11 +810,13 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             true,
+            true,
             2,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             true,
             1,
@@ -803,6 +833,7 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             true,
             false,
+            true,
             2,
             2
         ));
@@ -810,6 +841,7 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             false,
+            true,
             2,
             2
         ));
@@ -831,6 +863,7 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             true,
             leftover_sat_dwell(&[true]),
+            true,
             2,
             2
         ));
@@ -843,6 +876,7 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             true,
             leftover_sat_dwell(&[true; 5]),
+            true,
             2,
             2
         ));
@@ -850,11 +884,13 @@ mod tests {
             OccupancyCertificate::MixingCertified,
             false,
             true,
+            true,
             2,
             2
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
+            true,
             true,
             true,
             1,
@@ -864,9 +900,27 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             true,
+            true,
             2,
             2
         ));
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            true,
+            false,
+            2,
+            2
+        ));
+    }
+
+    #[test]
+    fn funnel_ei_below_noise_with_three_observations_is_exhausted() {
+        assert!(!occupancy_ei_exhausted(1.0, 3, 1e-2));
+        assert!(!occupancy_ei_exhausted(0.0, 2, 1e-2));
+        assert!(occupancy_ei_exhausted(0.0, 3, 1e-2));
+        assert!(occupancy_ei_exhausted(1e-2, 3, 1e-2));
+        assert!(!occupancy_ei_exhausted(f64::INFINITY, 3, 1e-2));
     }
 
     #[test]
@@ -879,11 +933,13 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             true,
+            true,
             1,
             1
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
+            true,
             true,
             true,
             2,

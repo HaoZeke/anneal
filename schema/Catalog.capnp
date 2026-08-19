@@ -110,6 +110,8 @@ struct PolicyStateReply {
   packingSaturated @20 :Bool;
   # Consecutive leftover-SOAP occupancy_gt records under the ceiling.
   leftoverDwell @21 :Bool;
+  # FunnelModel Jones EI on seen packings is at most the model noise.
+  eiExhausted @22 :Bool;
 }
 
 enum CatalogMutationKind {
