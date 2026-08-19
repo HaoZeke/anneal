@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family, packing_distance,
-    packing_fingerprint, same_packing,
+    different_decaf_family, occupancy_retire_at, packing_distance, packing_fingerprint,
+    same_packing, OccupancyCertificate, PackingBook, PACKING_MERGE, PACKING_MOVE_EPS,
 };
 use ndarray::Array1;
 
@@ -98,7 +98,7 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
 
 #[test]
 fn leftover_first_wave_arrivals_are_not_saturated() {
-    use anneal_core::catalog::{GoodTuringSample, leftover_arrivals_saturated};
+    use anneal_core::catalog::{leftover_arrivals_saturated, GoodTuringSample};
     assert!(!leftover_arrivals_saturated(std::iter::repeat_n(1u64, 48)));
     assert!(leftover_arrivals_saturated(std::iter::repeat_n(2u64, 20)));
     let first = GoodTuringSample::from_counts(std::iter::repeat_n(1u64, 48));
@@ -148,6 +148,45 @@ fn packing_good_turing_uses_the_census_production_floor() {
     assert_eq!(
         book.occupied_among([ico.as_slice().unwrap(), ico.as_slice().unwrap()]),
         1
+    );
+}
+
+#[test]
+fn leftover_waiver_uses_book_families_not_live_rematch() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(oh.as_slice().unwrap()).unwrap();
+    assert_eq!(book.occupied_family_count(), 2);
+    assert_eq!(book.occupied_among([ico.as_slice().unwrap()]), 1);
+    assert!(
+        !occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            book.occupied_family_count(),
+            1
+        ),
+        "Oh on the book is a second Boender cell; extras Leaving it must not waive leftover SOAP"
+    );
+}
+
+#[test]
+fn throwaway_fingerprint_is_not_the_shared_book() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let ico = ico.as_slice().unwrap();
+    let oh = oh.as_slice().unwrap();
+    let fp_oh = packing_fingerprint(oh).expect("Oh has a private codebook histogram");
+    let mut book = PackingBook::default();
+    book.observe(ico).unwrap();
+    book.observe(oh).unwrap();
+    let shared_oh = book.histogram(oh).unwrap();
+    assert_ne!(
+        fp_oh, shared_oh,
+        "FunnelModel EI must observe the coordinator book, not a per-structure codebook"
     );
 }
 

@@ -31,7 +31,7 @@ use crate::catalog::{
     REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
     euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_min_families, occupant_rhat,
-    packing_fingerprint, packing_role, promote_one_sided, prune, retis_exchange_adjacent,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent,
     same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -1062,12 +1062,7 @@ fn apply_request(
                     .values()
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
-                occupied_family_count: scientific.packing.occupied_among(
-                    scientific
-                        .last_candidate_by_replica
-                        .values()
-                        .map(|candidate| candidate.coordinates.as_slice()),
-                ) as u32,
+                occupied_family_count: scientific.packing.occupied_family_count() as u32,
                 packing_saturated: packing_census_saturated(scientific),
                 leftover_dwell: leftover_census_dwell(scientific),
                 ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
@@ -2392,6 +2387,14 @@ fn observe_packing(
                     .or_insert(0) += 1;
             }
         }
+        let changed = scientific
+            .family_history
+            .get(&replica)
+            .and_then(|history| history.back().copied())
+            .is_some_and(|previous| previous as usize != index);
+        if changed {
+            scientific.energy_history.remove(&replica);
+        }
         let history = scientific.family_history.entry(replica).or_default();
         history.push_back(index as f64);
         while history.len() > 64 {
@@ -2571,7 +2574,7 @@ fn highest_ei_family_entry(scientific: &mut ScientificState) -> Option<(usize, u
         .collect();
     let mut best: Option<(f64, usize, usize)> = None;
     for (slot, coordinates, descriptor) in &sites {
-        let Some(histogram) = packing_fingerprint(coordinates) else {
+        let Some(histogram) = scientific.packing.histogram(coordinates) else {
             continue;
         };
         let ei = scientific
@@ -2598,17 +2601,40 @@ fn packing_census_saturated(scientific: &ScientificState) -> bool {
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
-    let observations: Vec<(Vec<f64>, f64)> = scientific
-        .last_candidate_by_replica
-        .values()
-        .map(|candidate| (candidate.coordinates.clone(), candidate.energy))
-        .collect();
-    for (coordinates, energy) in observations {
-        if let Some(histogram) = packing_fingerprint(&coordinates) {
-            scientific
-                .funnel
-                .observe(ndarray::Array1::from(histogram).view(), energy);
+    let mut best: BTreeMap<usize, (Vec<f64>, f64)> = BTreeMap::new();
+    {
+        let packing = &scientific.packing;
+        let mut consider = |coordinates: &[f64], energy: f64| {
+            if !energy.is_finite() {
+                return;
+            }
+            let Some(histogram) = packing.histogram(coordinates) else {
+                return;
+            };
+            let Some(family) = packing.family_of(&histogram) else {
+                return;
+            };
+            match best.get(&family) {
+                Some((_, held)) if energy >= *held - 1e-15 => {}
+                _ => {
+                    best.insert(family, (histogram, energy));
+                }
+            }
+        };
+        for candidate in scientific.last_candidate_by_replica.values() {
+            consider(&candidate.coordinates, candidate.energy);
         }
+        for candidate in scientific.best_candidate_by_replica.values() {
+            consider(&candidate.coordinates, candidate.energy);
+        }
+        for entry in scientific.catalog.entries() {
+            consider(entry.coordinates(), entry.energy());
+        }
+    }
+    for (histogram, energy) in best.values() {
+        scientific
+            .funnel
+            .observe(ndarray::Array1::from(histogram.clone()).view(), *energy);
     }
     let max_ei = scientific.funnel.max_expected_improvement_at_data();
     occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise)
@@ -2798,11 +2824,7 @@ fn hyperband_prune(scientific: &ScientificState, replica: u32) -> bool {
         .last_candidate_by_replica
         .iter()
         .map(|(id, candidate)| {
-            let family = scientific
-                .family_history
-                .get(id)
-                .and_then(|history| history.back().copied())
-                .map(|index| index as usize);
+            let family = replica_family_index(scientific, *id, Some(candidate));
             WalkRecord {
                 id: *id,
                 resource: scientific.trial_hops.get(id).copied().unwrap_or(0),
@@ -2849,17 +2871,7 @@ fn mixing_from_state(scientific: &ScientificState) -> MixingEvidence {
     for (replica, candidate) in &scientific.last_candidate_by_replica {
         assigned.insert(*replica);
         let series = replica_series(scientific, *replica);
-        let family = scientific
-            .family_history
-            .get(replica)
-            .and_then(|history| history.back().copied())
-            .map(|index| index as usize)
-            .or_else(|| {
-                scientific
-                    .packing
-                    .histogram(&candidate.coordinates)
-                    .and_then(|histogram| scientific.packing.family_of(&histogram))
-            });
+        let family = replica_family_index(scientific, *replica, Some(candidate));
         let Some(index) = family else {
             continue;
         };
@@ -2984,25 +2996,25 @@ fn replica_family_index(
     replica: u32,
     candidate: Option<&CatalogCandidate>,
 ) -> Option<usize> {
+    let coordinates = candidate
+        .map(|candidate| candidate.coordinates.as_slice())
+        .or_else(|| {
+            scientific
+                .last_candidate_by_replica
+                .get(&replica)
+                .map(|candidate| candidate.coordinates.as_slice())
+        });
+    if let Some(family) = coordinates
+        .and_then(|coordinates| scientific.packing.histogram(coordinates))
+        .and_then(|histogram| scientific.packing.family_of(&histogram))
+    {
+        return Some(family);
+    }
     scientific
         .family_history
         .get(&replica)
         .and_then(|history| history.back().copied())
         .map(|index| index as usize)
-        .or_else(|| {
-            let coordinates = candidate
-                .map(|candidate| candidate.coordinates.as_slice())
-                .or_else(|| {
-                    scientific
-                        .last_candidate_by_replica
-                        .get(&replica)
-                        .map(|candidate| candidate.coordinates.as_slice())
-                })?;
-            scientific
-                .packing
-                .histogram(coordinates)
-                .and_then(|histogram| scientific.packing.family_of(&histogram))
-        })
 }
 
 /// Seat this replica and report the \(\lambda\) of the descriptor it

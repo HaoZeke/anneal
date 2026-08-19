@@ -62,9 +62,9 @@
 //! shallow families is not retire: extras keep Leaving so an unseen
 //! funnel can still appear. Replicas retire when a mixing putative is
 //! certified and that packing census is saturated and leftover SOAP
-//! has dwelt under the unseen-mass ceiling and FunnelModel EI on
-//! the seen packings is exhausted and the rematched
-//! family floor is met. The floor is the Fiedler split of the hop
+//! has dwelt under the unseen-mass ceiling (or the packing book holds
+//! one family) and FunnelModel EI on the seen packings is exhausted
+//! and the rematched family floor is met. The floor is the Fiedler split of the hop
 //! graph after DECAF labels the sides: two when the seam separates
 //! distinct packing families, one when the seam is leftover wells of
 //! one packing (a superbasin). `CATALOG_MIN_FAMILIES` is an override.
@@ -590,15 +590,18 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 /// not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// `leftover_dwell` is consecutive leftover-sat occupancy_gt records,
-/// not a one-shot leftover nick. Required whenever more than one
-/// packing is rematched. A single rematched packing is Boender--Rinnooy
+/// not a one-shot leftover nick. Required whenever the packing book
+/// holds more than one family. A single book family is Boender--Rinnooy
 /// Kan on one cell: leftover-SOAP hatches are intra-well and do not
-/// block. A one-community Fiedler floor with many DECAF packings is
-/// not that case.
+/// block. Live rematch of last candidates after extras Leave is not
+/// that count. A one-community Fiedler floor with many DECAF packings
+/// is not that case.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
-/// `n_occupied_families` is the rematched packing count, not a
-/// leftover-SOAP basin count and not `2 * certified`.
+/// `n_occupied_families` is the packing-book occupied-family count
+/// (visits > 0), not live rematch of last candidates and not a
+/// leftover-SOAP basin count. One book family is Boender--Rinnooy Kan
+/// on one cell. Many book families with extras already Left is not.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
@@ -635,14 +638,14 @@ pub fn occupancy_retire_at(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
-        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
-        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
-        leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
-        occupancy_ei_exhausted, occupancy_family_floor, occupancy_leave_adopt,
-        occupancy_leave_target, occupancy_retire, occupancy_retire_at, packing_role,
-        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
-        seat_extras,
+        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
+        leave_shot_accepted, leftover_lambda, leftover_sat_dwell, occupancy_complete,
+        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
+        occupancy_leave_adopt, occupancy_leave_target, occupancy_retire, occupancy_retire_at,
+        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
+        retis_should_swap, seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate,
+        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, CHAMPION_RANK,
+        OCCUPANCY_SEAM_CONDUCTANCE,
     };
 
     #[test]

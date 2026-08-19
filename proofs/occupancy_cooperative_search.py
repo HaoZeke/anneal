@@ -14,7 +14,8 @@ Source of the constants and the predicates:
   sides; default 1 is Good--Turing alone; 2 only on a packing seam).
   Leftover-SOAP saturation is the hole generator,
   not the stop. Mixing names a putative; retirement still needs
-  packing saturation and the family floor.
+  packing saturation, leftover dwell or one book family, and the
+  family floor.
 - ``src/catalog/census.rs``: unseen mass ``n1/N``.
 - ``src/catalog/hyperband.rs``: champion Keep, ``floor(n_extra/eta)``
   extras Keep, surplus Leave, ``eta = 3``. Not a Li--Jamieson schedule.
@@ -302,18 +303,39 @@ def identity_mixing_does_not_retire_without_packing():
     """Mixing names a putative. Retirement still needs packing
     saturation and the rematched family floor.
     """
-    mixing, packing_sat, leftover_dwell, ei_exhausted, floor_met = sp.symbols(
-        "mixing packing_sat leftover_dwell ei_exhausted floor_met"
+    mixing, packing_sat, leftover_dwell, ei_exhausted, floor_met, one_cell = (
+        sp.symbols(
+            "mixing packing_sat leftover_dwell ei_exhausted floor_met one_cell"
+        )
     )
-    retire = And(mixing, packing_sat, leftover_dwell, ei_exhausted, floor_met)
+    leftover_ok = Or(leftover_dwell, one_cell)
+    retire = And(mixing, packing_sat, leftover_ok, ei_exhausted, floor_met)
     blocked = Implies(And(mixing, Not(packing_sat)), Not(retire))
     saturated_only = Implies(
         And(Not(mixing), packing_sat, leftover_dwell, ei_exhausted, floor_met),
         Not(retire),
     )
     leftover_blocks = Implies(
-        And(mixing, packing_sat, Not(leftover_dwell), ei_exhausted, floor_met),
+        And(
+            mixing,
+            packing_sat,
+            Not(leftover_dwell),
+            Not(one_cell),
+            ei_exhausted,
+            floor_met,
+        ),
         Not(retire),
+    )
+    one_cell_waives = Implies(
+        And(
+            mixing,
+            packing_sat,
+            Not(leftover_dwell),
+            one_cell,
+            ei_exhausted,
+            floor_met,
+        ),
+        retire,
     )
     ei_blocks = Implies(
         And(mixing, packing_sat, leftover_dwell, Not(ei_exhausted), floor_met),
@@ -322,6 +344,7 @@ def identity_mixing_does_not_retire_without_packing():
     ok_b, r_b = _tautology(blocked)
     ok_s, r_s = _tautology(saturated_only)
     ok_l, r_l = _tautology(leftover_blocks)
+    ok_c, r_c = _tautology(one_cell_waives)
     ok_e, r_e = _tautology(ei_blocks)
     if not ok_b:
         return False, r_b
@@ -329,6 +352,8 @@ def identity_mixing_does_not_retire_without_packing():
         return False, r_s
     if not ok_l:
         return False, r_l
+    if not ok_c:
+        return False, r_c
     return ok_e, r_e
 
 
