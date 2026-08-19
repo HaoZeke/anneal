@@ -550,10 +550,11 @@ def identity_copy_collapse_is_not_certificate():
     A lone mixed deepest attractor can be certified while extras Leave.
     Unseen modes stay leftover-dwell, not a missing competitor.
     """
-    certified, packing, dwell, ei, floor, collapse = sp.symbols(
-        "certified packing dwell ei floor collapse"
+    certified, packing, dwell, ei, floor, one_cell, collapse = sp.symbols(
+        "certified packing dwell ei floor one_cell collapse"
     )
-    retire = And(certified, packing, dwell, ei, floor)
+    leftover_ok = Or(dwell, one_cell)
+    retire = And(certified, packing, leftover_ok, ei, floor)
     return _tautology(Implies(And(retire, collapse), retire))
 
 
