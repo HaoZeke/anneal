@@ -3611,10 +3611,7 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                match occupancy_leave_target(
-                    other_family.is_some(),
-                    policy.packing_saturated,
-                ) {
+                match occupancy_leave_target(other_family.is_some(), policy.packing_saturated) {
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
                         trace.proposal_family = ProposalFamily::CatalogSample;
