@@ -391,6 +391,8 @@ pub struct PolicyState {
     pub leftover_dwell: bool,
     /// FunnelModel Jones EI on seen packings is at most the model noise.
     pub ei_exhausted: bool,
+    /// Measured Fiedler-and-DECAF family floor for this hop graph.
+    pub min_families: u32,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1048,6 +1050,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_packing_saturated(state.packing_saturated);
                     output.set_leftover_dwell(state.leftover_dwell);
                     output.set_ei_exhausted(state.ei_exhausted);
+                    output.set_min_families(state.min_families);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1243,6 +1246,7 @@ pub(crate) fn decode_reply_reader(
                         packing_saturated: state.get_packing_saturated(),
                         leftover_dwell: state.get_leftover_dwell(),
                         ei_exhausted: state.get_ei_exhausted(),
+                        min_families: state.get_min_families(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

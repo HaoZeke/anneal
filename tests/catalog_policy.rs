@@ -34,6 +34,7 @@ fn input(
         packing_saturated: false,
         leftover_dwell: false,
         ei_exhausted: false,
+        min_families: 1,
         on_published_prize: false,
     }
 }
@@ -469,6 +470,7 @@ fn decision_table_covers_every_discrete_input_state() {
                                 packing_saturated: false,
                                 leftover_dwell: false,
                                 ei_exhausted: false,
+                                min_families: 1,
                                 on_published_prize: false,
                             });
                             assert!(!decision.reason.code().is_empty());

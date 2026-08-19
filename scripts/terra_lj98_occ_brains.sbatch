@@ -26,7 +26,6 @@ export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 # Two-funnel paper hurdle (Leary). Set 1 for Good-Turing alone.
-export CATALOG_MIN_FAMILIES=2
 export CATALOG_SHARED_BIAS=1
 export SEED_OFFSET_BASE=1900000
 export LJ_OUT=$HOME/ljwork/terra

@@ -304,8 +304,8 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
         let source = fs::read_to_string(scripts.join(name))
             .unwrap_or_else(|error| panic!("failed to read {name}: {error}"));
         assert!(
-            source.contains("export CATALOG_MIN_FAMILIES=2"),
-            "{name} must set CATALOG_MIN_FAMILIES=2"
+            !source.contains("CATALOG_MIN_FAMILIES"),
+            "{name} must not override the Fiedler-and-DECAF family floor"
         );
         assert!(
             source.contains("export CATALOG_WAVE=24"),

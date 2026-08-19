@@ -47,8 +47,9 @@ theorem mixing_alone_does_not_retire (leftoverDwellMet eiMet floorMet : Bool) :
     retire true false leftoverDwellMet eiMet floorMet = false := by
   cases leftoverDwellMet <;> cases eiMet <;> cases floorMet <;> rfl
 
-/-- Paper floor: packing saturation with one rematched family does not
-retire when `F = 2`. -/
+/-- Fiedler-and-DECAF floor: packing saturation with one rematched
+family does not retire when the hop-graph seam names two packing
+families. -/
 theorem paper_floor_blocks_one_family :
     retire false true true true false = false := by
   rfl
