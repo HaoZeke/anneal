@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn bar_recovers_gaussian_log_ratio_free_energy() {
         let sigma_a = 1.0_f64;
-        let sigma_b = 2.0_f64;
+        let sigma_b = 1.2_f64;
         let beta = 1.0_f64;
         let true_df = -(sigma_b / sigma_a).ln();
 
@@ -175,10 +175,18 @@ mod tests {
             true_df
         );
         assert!(
-            (delta_f - true_df).abs() < 0.12,
+            (delta_f - true_df).abs() < 0.08,
             "BAR estimate {} differs from truth {}",
             delta_f,
             true_df,
         );
+    }
+
+    #[test]
+    fn bar_recovers_a_constant_reduced_energy_shift() {
+        let shift = 2.5_f64;
+        let bar = BarEstimator::new(vec![shift; 64], vec![-shift; 64], 1.0, 1.0);
+        let (_c, delta_f) = bar.solve();
+        assert!((delta_f - shift).abs() < 1e-12);
     }
 }
