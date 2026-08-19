@@ -28,9 +28,9 @@ use crate::catalog::{
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity, FreshEvaluation,
     GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
-    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupancy_min_families, occupant_rhat,
-    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
+    occupancy_min_families, occupant_rhat, packing_role, promote_one_sided, prune,
+    retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
