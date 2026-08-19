@@ -52,14 +52,17 @@
 //! A mixing certificate names a putative: uniquely deepest, occupant
 //! mixed, a mixed competitor, strictly more occupied. On LJ75 that
 //! putative is the icosahedral shelf until a second funnel is deeper.
-//! Occupancy retires when rematched DECAF packing Good--Turing says no
-//! new packings are appearing (`packing_saturated`). Leftover-SOAP
-//! arrivals stay the hole generator; leftover Good--Turing is not the
-//! stop. Hop re-observes of the same well are not draws.
-//! [`occupancy_min_families`] (`CATALOG_MIN_FAMILIES`) is an optional
-//! floor so a known two-funnel hurdle does not stop on one packing.
-//! Default 1 is Good--Turing alone. Mixing names a putative; it
-//! retires only with that saturation. Occupant \(\hat R\) uses
+//! Packing Good--Turing names completeness of the seen codebook
+//! (`packing_saturated`). Leftover-SOAP arrivals stay the hole
+//! generator; leftover Good--Turing is not the stop. Hop re-observes
+//! of the same well are not draws. A saturated packing census of
+//! shallow families is not retire: extras keep Leaving so an unseen
+//! funnel can still appear. Replicas retire when a mixing putative is
+//! certified and that packing census is saturated and the rematched
+//! family floor is met. [`occupancy_min_families`]
+//! (`CATALOG_MIN_FAMILIES`) is the floor so a known two-funnel hurdle
+//! does not stop on one packing. Default 1 is Good--Turing alone.
+//! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
 //! A published energy (Cambridge or otherwise) is a score, not a
@@ -507,8 +510,9 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Ensemble stop. Rematched occupied DECAF families at the floor plus
-/// packing Good--Turing, or mixing certified on that pair.
+/// Replica retire. Mixing certified, packing Good--Turing, and the
+/// rematched family floor. CatalogSaturated names census completeness
+/// and does not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// `n_occupied_families` is the rematched packing count, not a
 /// leftover-SOAP basin count and not `2 * certified`.
@@ -534,10 +538,7 @@ pub fn occupancy_retire_at(
 ) -> bool {
     n_occupied_families >= min_occupied_families
         && catalog_saturated
-        && matches!(
-            certificate,
-            OccupancyCertificate::CatalogSaturated | OccupancyCertificate::MixingCertified
-        )
+        && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
 
 #[cfg(test)]
@@ -636,7 +637,7 @@ mod tests {
             occupancy_complete(false, true, 2),
             Some(OccupancyCertificate::CatalogSaturated)
         );
-        assert!(occupancy_retire(
+        assert!(!occupancy_retire(
             OccupancyCertificate::CatalogSaturated,
             true,
             2
@@ -645,6 +646,15 @@ mod tests {
             OccupancyCertificate::CatalogSaturated,
             true,
             1,
+            2
+        ));
+    }
+
+    #[test]
+    fn catalog_saturation_does_not_retire_without_mixing() {
+        assert!(!occupancy_retire(
+            OccupancyCertificate::CatalogSaturated,
+            true,
             2
         ));
     }
@@ -704,7 +714,7 @@ mod tests {
             2,
             2
         ));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
             2,
@@ -725,7 +735,7 @@ mod tests {
             occupancy_complete_at(false, true, 1, 1),
             Some(OccupancyCertificate::CatalogSaturated)
         );
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
             true,
             1,

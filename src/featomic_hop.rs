@@ -886,7 +886,7 @@ where
         return x.to_owned();
     }
     let mut cur = x.to_owned();
-    for attempt in 0..6 {
+    for attempt in 0..12 {
         let scale = SOAP_PACK_MERGE * (1.0 + 0.5 * f64::from(attempt));
         let y = step_into_hole(cur.view(), wells, scale, rcut, species, mobile, rng);
         let q = quench(y.view());
