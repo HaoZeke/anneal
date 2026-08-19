@@ -2946,7 +2946,6 @@ fn run_capnp_catalog(
                     && same_packing_coordinates(live, &candidate.coordinates)
             });
             if parent.producer_replica == replica && extra_of_occupied_packing {
-                let n = live_state.len() / 3;
                 let left = {
                     #[cfg(feature = "featomic")]
                     {
@@ -2958,24 +2957,14 @@ fn run_capnp_catalog(
                             None,
                             &mut transport_rng,
                         )
-                        .unwrap_or_else(|| {
-                            anneal_core::methods::cluster_hopping::random_cluster(
-                                n,
-                                0.7,
-                                0.5,
-                                &mut transport_rng,
-                            )
-                        })
                     }
                     #[cfg(not(feature = "featomic"))]
                     {
-                        anneal_core::methods::cluster_hopping::random_cluster(
-                            n,
-                            0.7,
-                            0.5,
-                            &mut transport_rng,
-                        )
+                        None
                     }
+                };
+                let Some(left) = left else {
+                    return CheckpointAction::Continue;
                 };
                 slice_sequence = slice_sequence
                     .checked_add(1)
@@ -3554,7 +3543,6 @@ fn run_capnp_catalog(
                             &mut shared_wells,
                         );
                     }
-                    let n = snapshot.current_state().len() / 3;
                     let left = {
                         #[cfg(feature = "featomic")]
                         {
@@ -3572,24 +3560,18 @@ fn run_capnp_catalog(
                             None
                         }
                     };
-                    let state = left.unwrap_or_else(|| {
-                        anneal_core::methods::cluster_hopping::random_cluster(
-                            n,
-                            0.7,
-                            0.5,
-                            &mut transport_rng,
-                        )
-                    });
-                    trace.proposal_family = ProposalFamily::HyperbandReseed;
-                    trace.adoption = SliceAdoption::Adopted;
-                    leave_path.clear();
-                    cooperative
-                        .record_slice(replica, trace)
-                        .expect("checkpoint trace must remain complete");
-                    return CheckpointAction::BoundaryProposal {
-                        state,
-                        action: "hyperband_reseed".to_owned(),
-                    };
+                    if let Some(state) = left {
+                        trace.proposal_family = ProposalFamily::HyperbandReseed;
+                        trace.adoption = SliceAdoption::Adopted;
+                        leave_path.clear();
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::BoundaryProposal {
+                            state,
+                            action: "hyperband_reseed".to_owned(),
+                        };
+                    }
                 }
                 // Funnel exchange first: a representative of the
                 // packing the fewest replicas stand on. That is how

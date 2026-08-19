@@ -1205,8 +1205,8 @@ where
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
                     // Extra Leave stayed in the family. One hole and
                     // quench returns to the same packing. Requench and
-                    // widen, then kick the packing null space, before
-                    // a box start.
+                    // widen, then kick the packing null space. A box
+                    // start is not occupancy Leave.
                     #[cfg(feature = "featomic")]
                     let escaped = {
                         let rcut = 3.5 * cfg.length_scale;
@@ -1250,20 +1250,7 @@ where
                             continue;
                         }
                     }
-                    let s0 =
-                        random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, rng);
-                    let (e0, x0) = relax(ledger, s0.view(), cfg.relax_steps);
-                    if quench_is_sane(cfg, e0, x0.view()) {
-                        hops += 1;
-                        ledger.record(e0, x0.view());
-                        e = e0;
-                        x = x0;
-                        accepted += 1;
-                        current_validation_gradient = None;
-                        bias.deposit(x.view(), cfg.temperature);
-                    } else {
-                        hops += 1;
-                    }
+                    hops += 1;
                     continue;
                 }
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
