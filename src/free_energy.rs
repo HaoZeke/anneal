@@ -14,7 +14,7 @@ fn fermi(x: f64) -> f64 {
         1.0 / (1.0 + x.exp())
     } else {
         let e = x.exp();
-        e / (1.0 + e)
+        1.0 - e / (1.0 + e)
     }
 }
 
