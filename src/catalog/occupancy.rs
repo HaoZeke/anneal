@@ -590,7 +590,9 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 /// not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// `leftover_dwell` is consecutive leftover-sat occupancy_gt records,
-/// not a one-shot leftover nick.
+/// not a one-shot leftover nick. Required when the floor is two
+/// packing communities. When the floor is one, leftover-SOAP hatches
+/// are intra-well (Boender--Rinnooy Kan on one cell) and do not block.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the rematched packing count, not a
@@ -623,7 +625,7 @@ pub fn occupancy_retire_at(
 ) -> bool {
     n_occupied_families >= min_occupied_families
         && catalog_saturated
-        && leftover_dwell
+        && (leftover_dwell || min_occupied_families <= DEFAULT_MIN_OCCUPIED_FAMILIES)
         && ei_exhausted
         && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
@@ -899,6 +901,14 @@ mod tests {
             true,
             2,
             2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
         ));
     }
 
