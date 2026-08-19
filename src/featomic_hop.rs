@@ -824,8 +824,8 @@ pub fn step_into_hole_escaping<R: Rng + ?Sized>(
 
 /// Surplus Hyperband start: step the current packing mean into a SOAP
 /// hole of the occupied cloud. Empty wells yield `None` so the caller
-/// may draw a random cluster. Not a parent clone and not a named
-/// morphology.
+/// Leaves OtherFamily or ArchiveHole. Not a parent clone and not a
+/// named morphology.
 pub fn surplus_reseed<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     wells: &[Array1<f64>],
