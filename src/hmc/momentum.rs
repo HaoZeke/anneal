@@ -95,7 +95,7 @@ impl QGaussianMomentum {
     /// before sampling -- the `dim` arrives at sample time.
     pub fn new(q: f64) -> Self {
         assert!(
-            q > 1.0,
+            q.is_finite() && q > 1.0,
             "q-Gaussian requires q > 1; for q = 1 use GaussianMomentum"
         );
         Self { q }

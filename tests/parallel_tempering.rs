@@ -54,6 +54,8 @@ fn pt_with_tsallis_exchange_runs() {
     // Tsallis exchange is stricter than Metropolis -> may have fewer
     // accepts but the run should still produce a finite best_val.
     assert!(result.best_val.is_finite());
+    assert!(result.log_z_ratio_est.is_nan());
+    assert!(result.log_z_ratio_se.is_nan());
 }
 
 #[test]
