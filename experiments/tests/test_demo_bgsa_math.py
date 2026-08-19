@@ -1,7 +1,11 @@
 import numpy as np
 import pytest
 
-from experiments.scripts.demo_bgsa import _log_pseudo_marginal_weight, pmsa_metad
+from experiments.scripts.demo_bgsa import (
+    _log_pseudo_marginal_weight,
+    continuous_time_tempering,
+    pmsa_metad,
+)
 
 
 def test_pseudo_marginal_weight_is_unbiased_for_gaussian_energy_noise():
@@ -36,3 +40,16 @@ def test_pseudo_marginal_driver_rejects_tsallis_acceptance():
             q_a=1.2,
             n_eval_per_step=1,
         )
+
+
+def test_continuous_tempering_counts_each_objective_evaluation_once():
+    _, calls, beta_history = continuous_time_tempering(
+        seed=2,
+        n_epochs=3,
+        k_inner=2,
+        t_min=0.5,
+        t_max=2.0,
+        q_v=1.1,
+    )
+    assert calls == 1 + 3 * 2
+    assert len(beta_history) == 3
