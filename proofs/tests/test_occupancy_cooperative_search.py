@@ -21,7 +21,7 @@ from proofs.occupancy_cooperative_search import (
     identity_constant_traces_b_vanishes_iff_equal,
     identity_mcmc_skip_misclassifies_unmixed,
     identity_mixed_threshold_bw,
-    identity_lone_floor_not_certificate,
+    identity_lone_floor_is_sampled_mode_certificate,
     identity_certificate_four_conjuncts,
     identity_equal_occupancy_not_stronger,
     identity_strict_occupancy_is_stronger,
@@ -96,8 +96,8 @@ def test_mixed_rhat_is_bw_inequality():
     assert residual == 0
 
 
-def test_lone_mixed_floor_is_not_a_certificate():
-    ok, tautology = identity_lone_floor_not_certificate()
+def test_lone_mixed_floor_is_the_sampled_mode_certificate():
+    ok, tautology = identity_lone_floor_is_sampled_mode_certificate()
     assert ok
     assert tautology is True
 
@@ -249,7 +249,7 @@ def test_copying_one_floor_mixes_explore_chains():
     assert mixed is True
 
 
-def test_copy_collapse_is_a_lone_floor_not_a_certificate():
+def test_explore_collapse_is_leave_not_a_retire_conjunct():
     ok, tautology = identity_copy_collapse_is_not_certificate()
     assert ok
     assert tautology is True

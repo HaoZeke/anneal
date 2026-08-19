@@ -7,7 +7,8 @@ refusal, and same-packing Exploit versus different-packing Explore.
 Source of the constants and the predicates:
 
 - ``src/catalog/mixing.rs``: Brooks--Gelman ``R-hat``, ``MIXED_RHAT``,
-  occupant certificate, lone-floor exclusion.
+  occupant certificate. A lone mixed floor is the sampled-mode
+  certificate; unseen modes are leftover-dwell.
 - ``src/catalog/occupancy.rs``: packing Good--Turing stop plus
   ``occupancy_family_floor`` (Fiedler split after DECAF labels the
   sides; default 1 is Good--Turing alone; 2 only on a packing seam).
@@ -135,24 +136,28 @@ def identity_mixed_threshold_bw():
     return _zero(cutoff - (11 * n + 25) / 25)
 
 
-def identity_lone_floor_not_certificate():
-    """An empty competitor set makes ``exists_mixed`` false, so the
-    certificate is false even if the lone floor itself is mixed.
+def identity_lone_floor_is_sampled_mode_certificate():
+    """An empty competitor set is Gelman--Rubin on the sampled mode.
+
+    uniquely-deepest AND occupant-mixed is the certificate. A missing
+    competitor does not falsify it. Unseen modes are leftover-dwell.
     """
-    uniquely_deepest, occupant_mixed, exists_comp_mixed, all_stronger = sp.symbols(
-        "uniquely_deepest occupant_mixed exists_comp_mixed all_stronger"
+    uniquely_deepest, occupant_mixed, competitors_empty = sp.symbols(
+        "uniquely_deepest occupant_mixed competitors_empty"
     )
-    cert = And(uniquely_deepest, occupant_mixed, exists_comp_mixed, all_stronger)
-    lone = Implies(Not(exists_comp_mixed), Not(cert))
+    exists_comp_mixed, all_stronger = sp.symbols("exists_comp_mixed all_stronger")
+    contest = Or(competitors_empty, And(exists_comp_mixed, all_stronger))
+    cert = And(uniquely_deepest, occupant_mixed, contest)
+    lone = Implies(And(uniquely_deepest, occupant_mixed, competitors_empty), cert)
     return _tautology(lone)
 
 
 def identity_certificate_four_conjuncts():
-    """The certificate is exactly the four-way conjunction.
+    """When a competitor is on file the contest is three extra conjuncts.
 
-    uniquely-deepest AND occupant-mixed AND at least one competitor
-    mixed AND strictly more occupied than every competitor.
-    Dropping any conjunct falsifies the certificate.
+    uniquely-deepest AND occupant-mixed AND a mixed competitor AND
+    strictly more occupied. Dropping any of those falsifies. The empty
+    competitor case is ``identity_lone_floor_is_sampled_mode_certificate``.
     """
     u, p, e, a = sp.symbols("u p e a")
     cert = And(u, p, e, a)
@@ -515,17 +520,16 @@ def identity_copy_collapse_is_mixed():
 
 
 def identity_copy_collapse_is_not_certificate():
-    """A mixed explore collapse onto one copied packing is a lone floor.
+    """Explore collapse is extras Leave. It is not a retire conjunct.
 
-    ``exists_comp_mixed`` is false, so the certificate is false. That
-    is why a different packing is Explore and is never copied.
+    A lone mixed deepest attractor can be certified while extras Leave.
+    Unseen modes stay leftover-dwell, not a missing competitor.
     """
-    uniquely_deepest, occupant_mixed, exists_comp_mixed, all_stronger = sp.symbols(
-        "uniquely_deepest occupant_mixed exists_comp_mixed all_stronger"
+    certified, packing, dwell, ei, floor, collapse = sp.symbols(
+        "certified packing dwell ei floor collapse"
     )
-    cert = And(uniquely_deepest, occupant_mixed, exists_comp_mixed, all_stronger)
-    collapse = Implies(Not(exists_comp_mixed), Not(cert))
-    return _tautology(collapse)
+    retire = And(certified, packing, dwell, ei, floor)
+    return _tautology(Implies(And(retire, collapse), retire))
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +545,7 @@ def all_identities() -> bool:
         identity_constant_traces_b_vanishes_iff_equal()[0],
         identity_mcmc_skip_misclassifies_unmixed()[0],
         identity_mixed_threshold_bw()[0],
-        identity_lone_floor_not_certificate()[0],
+        identity_lone_floor_is_sampled_mode_certificate()[0],
         identity_certificate_four_conjuncts()[0],
         identity_equal_occupancy_not_stronger()[0],
         identity_strict_occupancy_is_stronger()[0],
@@ -580,7 +584,7 @@ def derive() -> bool:
         ("B = 0 iff constant floors coincide", identity_constant_traces_b_vanishes_iff_equal()[0]),
         ("MCMC W=0 skip reports mixed; inverted does not", identity_mcmc_skip_misclassifies_unmixed()[0]),
         ("R-hat < 6/5 iff B/W < (11n+25)/25", identity_mixed_threshold_bw()[0]),
-        ("lone mixed floor is not a certificate", identity_lone_floor_not_certificate()[0]),
+        ("lone mixed floor is the sampled-mode certificate", identity_lone_floor_is_sampled_mode_certificate()[0]),
         ("certificate = four conjuncts", identity_certificate_four_conjuncts()[0]),
         ("equal occupancy is not stronger", identity_equal_occupancy_not_stronger()[0]),
         ("strict occupancy is stronger", identity_strict_occupancy_is_stronger()[0]),
@@ -605,7 +609,7 @@ def derive() -> bool:
         ("Exploit <=> same packing and lower energy", identity_exploit_is_same_packing_lower()[0]),
         ("different packing => Explore, not Exploit", identity_different_packing_never_exploit()[0]),
         ("copying one floor mixes explore (R-hat^2 = (n-1)/n)", identity_copy_collapse_is_mixed()[0]),
-        ("copy collapse is a lone floor, not a certificate", identity_copy_collapse_is_not_certificate()[0]),
+        ("explore collapse is Leave, not a retire conjunct", identity_copy_collapse_is_not_certificate()[0]),
     ]
     print("Occupancy cooperative-search identities")
     failed = 0

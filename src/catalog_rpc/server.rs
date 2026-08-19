@@ -2638,8 +2638,25 @@ fn occupancy_seam_floor(
 ) -> (usize, Option<f64>, Option<f64>, usize, usize, usize) {
     match scientific.landscape.spectral_split() {
         Ok(split) => {
+            let live: BTreeSet<u64> = scientific
+                .last_candidate_by_replica
+                .values()
+                .filter_map(|candidate| candidate.census_basin)
+                .collect();
+            let left_live: Vec<u64> = split
+                .left
+                .iter()
+                .copied()
+                .filter(|basin| live.contains(basin))
+                .collect();
+            let right_live: Vec<u64> = split
+                .right
+                .iter()
+                .copied()
+                .filter(|basin| live.contains(basin))
+                .collect();
             let mut families = BTreeSet::new();
-            for basin in split.left.iter().chain(split.right.iter()) {
+            for basin in left_live.iter().chain(right_live.iter()) {
                 if let Some(family) = basin_packing_family(scientific, *basin) {
                     families.insert(family);
                 }
@@ -2647,8 +2664,8 @@ fn occupancy_seam_floor(
             (
                 occupancy_family_floor(
                     Some(split.conductance),
-                    split.left.len(),
-                    split.right.len(),
+                    left_live.len(),
+                    right_live.len(),
                     families.len() >= 2,
                 ),
                 Some(split.conductance),

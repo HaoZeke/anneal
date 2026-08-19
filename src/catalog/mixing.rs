@@ -69,9 +69,9 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
 }
 
 /// MCMC mixing threshold. Below this, occupant chains have collapsed
-/// onto one attractor. For explore that is failure; for an incumbent
-/// that is certification only if the attractor wins the occupancy
-/// contest against at least one competitor.
+/// onto one attractor. For explore that is Leave. For an incumbent
+/// that is the sampled-mode certificate; a competitor, when present,
+/// must also mix and lose the occupancy contest.
 pub const MIXED_RHAT: f64 = 1.2;
 /// Occupant traces shorter than this are not a Gelman--Rubin
 /// certificate. Two quench reports on two random-start families
@@ -128,20 +128,28 @@ pub fn stronger(left: &AttractorStrength, right: &AttractorStrength) -> bool {
     }
 }
 
-/// A putative global minimum is certified only when occupant chains
-/// have mixed onto it, it is uniquely deepest, at least one competing
-/// basin has also mixed (it is an attractor, not a flyby), and the
-/// putative is strictly more occupied than every competitor. Mixing
-/// onto a lone floor, or beating a single unmixed walk, is not a
-/// certificate.
+/// A putative global minimum is certified when occupant chains have
+/// mixed onto a uniquely deepest attractor.
+///
+/// Gelman--Rubin and Vehtari certify the *sampled* target. A second
+/// mixed competitor is required only when a competitor is on file:
+/// that competitor must be mixed (an attractor, not a flyby) and the
+/// putative must be strictly more occupied. An empty competitor set
+/// is one sampled mode, not a missed mode. Unseen modes are leftover
+/// dwell and FunnelModel EI, the Boender--Rinnooy Kan / Good--Turing
+/// stop, not a second R-hat series that does not exist.
 pub fn certified_global_minimum(
     putative: &AttractorStrength,
     competitors: &[AttractorStrength],
     uniquely_deepest: bool,
 ) -> bool {
-    uniquely_deepest
-        && putative.mixed()
-        && competitors.iter().any(AttractorStrength::mixed)
+    if !uniquely_deepest || !putative.mixed() {
+        return false;
+    }
+    if competitors.is_empty() {
+        return true;
+    }
+    competitors.iter().any(AttractorStrength::mixed)
         && competitors.iter().all(|other| stronger(putative, other))
 }
 
@@ -171,8 +179,8 @@ pub fn explore_must_leave(
 pub struct MixingEvidence {
     /// Explore-role (or lone-floor) series have mixed.
     pub explore_collapsed: bool,
-    /// Incumbent attractor is uniquely deepest, occupant-mixed, and
-    /// strictly more occupied than every competitor.
+    /// Incumbent attractor is uniquely deepest and occupant-mixed.
+    /// A competitor, when one exists, must also be mixed and less occupied.
     pub certified_attractor: bool,
     /// Asynchronous successive halving discarded this walk at a rung.
     pub pruned: bool,
