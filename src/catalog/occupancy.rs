@@ -67,7 +67,9 @@
 //! and the rematched family floor is met. The floor is the Fiedler split of the hop
 //! graph after DECAF labels the sides: two when the seam separates
 //! distinct packing families, one when the seam is leftover wells of
-//! one packing (a superbasin). `CATALOG_MIN_FAMILIES` is an override.
+//! one packing (a superbasin). A landfold (Torgerson MDS of DECAF L1,
+//! then 2-means) floor is reported beside it and does not retire.
+//! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
@@ -230,6 +232,255 @@ pub fn occupancy_family_floor(
         }
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
+}
+
+/// Secondary family floor from a 2-D folding of packing histograms.
+///
+/// Torgerson MDS of DECAF L1, then a 2-means split. Two when the sides
+/// rematch to distinct packings and the centroids do not overlap.
+/// Leftover wells of one packing stay one community. This is a
+/// descriptor-distance floor, not the hop-graph Fiedler split, and it
+/// does not retire.
+pub fn occupancy_map_floor(xy: &[[f64; 2]], family: &[usize]) -> usize {
+    occupancy_map_split(xy, family).0
+}
+
+/// Map floor and the 2-means side counts.
+pub fn occupancy_map_split(xy: &[[f64; 2]], family: &[usize]) -> (usize, usize, usize) {
+    if xy.len() < 2 || xy.len() != family.len() {
+        return (1, xy.len(), 0);
+    }
+    let Some((left, right)) = two_means(xy) else {
+        return (1, xy.len(), 0);
+    };
+    if left.is_empty() || right.is_empty() {
+        return (1, xy.len(), 0);
+    }
+    if family.iter().all(|&f| f == family[0]) {
+        return (1, left.len(), right.len());
+    }
+    let Some(left_family) = majority_family(family, &left) else {
+        return (1, left.len(), right.len());
+    };
+    let Some(right_family) = majority_family(family, &right) else {
+        return (1, left.len(), right.len());
+    };
+    if left_family == right_family {
+        return (1, left.len(), right.len());
+    }
+    let (c0, r0) = centroid_radius(xy, &left);
+    let (c1, r1) = centroid_radius(xy, &right);
+    let gap = ((c0[0] - c1[0]).powi(2) + (c0[1] - c1[1]).powi(2)).sqrt();
+    let floor = if gap > r0 + r1 { 2 } else { 1 };
+    (floor, left.len(), right.len())
+}
+
+/// Torgerson 2-D map of DECAF histograms under L1, then
+/// [`occupancy_map_floor`].
+pub fn occupancy_landfold_floor(histograms: &[Vec<f64>], family: &[usize]) -> usize {
+    occupancy_landfold_split(histograms, family).0
+}
+
+/// Landfold floor and 2-means side counts of DECAF histograms.
+pub fn occupancy_landfold_split(
+    histograms: &[Vec<f64>],
+    family: &[usize],
+) -> (usize, usize, usize) {
+    let Some(xy) = occupancy_map_from_histograms(histograms) else {
+        return (1, histograms.len(), 0);
+    };
+    occupancy_map_split(&xy, family)
+}
+
+/// Torgerson (1952) classical MDS of DECAF L1 distances.
+pub fn occupancy_map_from_histograms(histograms: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
+    let n = histograms.len();
+    if n < 2 {
+        return None;
+    }
+    let mut dist = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = super::packing::packing_distance(&histograms[i], &histograms[j]);
+            if !d.is_finite() {
+                return None;
+            }
+            dist[i][j] = d;
+            dist[j][i] = d;
+        }
+    }
+    torgerson_2d(&dist)
+}
+
+fn majority_family(family: &[usize], members: &[usize]) -> Option<usize> {
+    let mut best: Option<(usize, usize)> = None;
+    for &i in members {
+        let f = *family.get(i)?;
+        let count = members
+            .iter()
+            .filter(|&&j| family.get(j) == Some(&f))
+            .count();
+        match best {
+            Some((_, held)) if count <= held => {}
+            _ => best = Some((f, count)),
+        }
+    }
+    best.map(|(f, _)| f)
+}
+
+fn centroid_radius(xy: &[[f64; 2]], members: &[usize]) -> ([f64; 2], f64) {
+    let n = members.len().max(1) as f64;
+    let mut c = [0.0, 0.0];
+    for &i in members {
+        c[0] += xy[i][0];
+        c[1] += xy[i][1];
+    }
+    c[0] /= n;
+    c[1] /= n;
+    let radius = members
+        .iter()
+        .map(|&i| {
+            let dx = xy[i][0] - c[0];
+            let dy = xy[i][1] - c[1];
+            (dx * dx + dy * dy).sqrt()
+        })
+        .fold(0.0, f64::max);
+    (c, radius)
+}
+
+fn two_means(xy: &[[f64; 2]]) -> Option<(Vec<usize>, Vec<usize>)> {
+    let n = xy.len();
+    let (a, b) = farthest_pair(xy)?;
+    let mut c0 = xy[a];
+    let mut c1 = xy[b];
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for _ in 0..16 {
+        left.clear();
+        right.clear();
+        for i in 0..n {
+            if dist2(xy[i], c0) <= dist2(xy[i], c1) {
+                left.push(i);
+            } else {
+                right.push(i);
+            }
+        }
+        if left.is_empty() || right.is_empty() {
+            return None;
+        }
+        c0 = mean2(xy, &left);
+        c1 = mean2(xy, &right);
+    }
+    Some((left, right))
+}
+
+fn farthest_pair(xy: &[[f64; 2]]) -> Option<(usize, usize)> {
+    let n = xy.len();
+    if n < 2 {
+        return None;
+    }
+    let mut best = (0, 1);
+    let mut best_d = -1.0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = dist2(xy[i], xy[j]);
+            if d > best_d {
+                best_d = d;
+                best = (i, j);
+            }
+        }
+    }
+    Some(best)
+}
+
+fn mean2(xy: &[[f64; 2]], members: &[usize]) -> [f64; 2] {
+    let n = members.len().max(1) as f64;
+    let mut c = [0.0, 0.0];
+    for &i in members {
+        c[0] += xy[i][0];
+        c[1] += xy[i][1];
+    }
+    [c[0] / n, c[1] / n]
+}
+
+fn dist2(a: [f64; 2], b: [f64; 2]) -> f64 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    dx * dx + dy * dy
+}
+
+fn torgerson_2d(dist: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
+    let n = dist.len();
+    if n < 2 {
+        return None;
+    }
+    let mut d2 = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in 0..n {
+            d2[i][j] = dist[i][j] * dist[i][j];
+        }
+    }
+    let mut row_mean = vec![0.0; n];
+    let mut col_mean = vec![0.0; n];
+    let mut total = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            row_mean[i] += d2[i][j];
+            col_mean[j] += d2[i][j];
+            total += d2[i][j];
+        }
+    }
+    let nf = n as f64;
+    for i in 0..n {
+        row_mean[i] /= nf;
+        col_mean[i] /= nf;
+    }
+    total /= nf * nf;
+    let mut b = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in 0..n {
+            b[i][j] = -0.5 * (d2[i][j] - row_mean[i] - col_mean[j] + total);
+        }
+    }
+    let mut y = vec![[0.0; 2]; n];
+    for k in 0..2 {
+        let mut v = vec![1.0 / nf.sqrt(); n];
+        if k == 1 {
+            let prev: f64 = v.iter().zip(y.iter()).map(|(a, row)| a * row[0]).sum();
+            for i in 0..n {
+                v[i] -= prev * y[i][0];
+            }
+            let norm = v.iter().map(|z| z * z).sum::<f64>().sqrt().max(1e-15);
+            for z in &mut v {
+                *z /= norm;
+            }
+        }
+        let mut lambda = 0.0;
+        for _ in 0..80 {
+            let mut w = vec![0.0; n];
+            for i in 0..n {
+                for j in 0..n {
+                    w[i] += b[i][j] * v[j];
+                }
+            }
+            if k == 1 {
+                let prev: f64 = w.iter().zip(y.iter()).map(|(a, row)| a * row[0]).sum();
+                for i in 0..n {
+                    w[i] -= prev * y[i][0];
+                }
+            }
+            lambda = w.iter().zip(v.iter()).map(|(a, c)| a * c).sum();
+            let norm = w.iter().map(|z| z * z).sum::<f64>().sqrt().max(1e-15);
+            for i in 0..n {
+                v[i] = w[i] / norm;
+            }
+        }
+        let scale = lambda.max(0.0).sqrt();
+        for i in 0..n {
+            y[i][k] = scale * v[i];
+        }
+    }
+    Some(y)
 }
 
 /// Occupied-family floor. Spectral split unless `CATALOG_MIN_FAMILIES`
@@ -641,11 +892,11 @@ mod tests {
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_lambda, leftover_sat_dwell, occupancy_complete,
         occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
-        occupancy_leave_adopt, occupancy_leave_target, occupancy_retire, occupancy_retire_at,
-        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate,
-        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, CHAMPION_RANK,
-        OCCUPANCY_SEAM_CONDUCTANCE,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_target,
+        occupancy_map_floor, occupancy_retire, occupancy_retire_at, packing_role,
+        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
+        seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
+        OccupancyLeaveTarget, PackingRole, CHAMPION_RANK, OCCUPANCY_SEAM_CONDUCTANCE,
     };
 
     #[test]
@@ -977,6 +1228,34 @@ mod tests {
         assert!(occupancy_ei_exhausted(0.0, 3, 1e-2));
         assert!(occupancy_ei_exhausted(1e-2, 3, 1e-2));
         assert!(!occupancy_ei_exhausted(f64::INFINITY, 3, 1e-2));
+    }
+
+    #[test]
+    fn map_floor_keeps_one_packing_together() {
+        let xy = [[0.0, 0.0], [0.1, 0.0], [0.0, 0.1], [8.0, 8.0]];
+        assert_eq!(occupancy_map_floor(&xy, &[0, 0, 0, 0]), 1);
+    }
+
+    #[test]
+    fn map_floor_splits_two_separated_packings() {
+        let xy = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
+        assert_eq!(occupancy_map_floor(&xy, &[0, 0, 1, 1]), 2);
+    }
+
+    #[test]
+    fn landfold_floor_on_identical_histograms_is_one() {
+        let ico = vec![1.0, 0.0];
+        assert_eq!(
+            occupancy_landfold_floor(&[ico.clone(), ico.clone()], &[0, 0]),
+            1
+        );
+    }
+
+    #[test]
+    fn landfold_floor_on_separated_histograms_is_two() {
+        let ico = vec![1.0, 0.0];
+        let oh = vec![0.0, 1.0];
+        assert_eq!(occupancy_landfold_floor(&[ico, oh], &[0, 1]), 2);
     }
 
     #[test]
