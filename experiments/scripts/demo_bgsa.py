@@ -1561,7 +1561,8 @@ def select_bgsa_driver(features, q_map):
     Returns the driver name string that bgsa_auto should call."""
     grad_sens = features["grad_sens"]
     cv = features["best_val_cv"]
-    if grad_sens > 0.4 and cv < 0.5:
+    sigma_sens = features["sigma_sens"]
+    if grad_sens > 0.4 and grad_sens > 3.0 * max(sigma_sens, 1e-12):
         return "bgsa"
     if cv > 1.0:
         return "bgsa_pt_metad"
@@ -3013,34 +3014,17 @@ def bgsa_auto(
     pilot_calls,
     parallel=True,
 ):
-    """bGSA-auto = parallel ensemble of candidate drivers.
+    """Select and run one full-budget bGSA driver from pilot features.
 
-    Runs the four bGSA-family production drivers concurrently from
-    the same pilot, with each driver allocated 1/n_drivers of the
-    requested epoch budget so the ENSEMBLE matches the single-driver
-    feval cost. Returns (best_val_across_drivers, total_fevals,
-    "ensemble[<best>]") -- the chosen tag carries the driver that
-    achieved the minimum best_val on this seed.
-
-    No feature heuristic; the framework picks the winner by actual
-    observed outcome. Parallel-tempering motivation follows Earl/Deem
-    2005 (doi:10.1039/B509983H). Optional `parallel=True` uses
-    concurrent.futures.ThreadPoolExecutor; numpy releases the GIL on
-    bulk ops so threads see real CPU parallelism. Set parallel=False
-    to run sequentially when reproducibility-by-thread-order is
-    required."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    # Allocate budget per driver so the ensemble matches the single-
-    # driver wall-clock target. n_epochs / n_drivers per driver,
-    # rounded up so each driver gets >= 1 epoch.
-    n_drivers = 4
-    n_epochs_each = max(1, n_epochs // n_drivers)
-
-    def _run_bgsa():
-        bv, nc, _ = hmc_sa(
+    ``parallel`` remains in the compatibility signature but selection is a
+    single-driver operation. The returned tag records the selected driver.
+    """
+    del parallel
+    selected = select_bgsa_driver(features, q_map)
+    if selected == "bgsa":
+        bv, calls, _ = hmc_sa(
             seed,
-            n_epochs_each,
+            n_epochs,
             k_per_epoch,
             t_map,
             e_map,
@@ -3048,12 +3032,25 @@ def bgsa_auto(
             x0=best_pilot_pos,
             q=q_map,
         )
-        return "bgsa", bv, nc
-
-    def _run_bgsa_metad():
-        bv, nc, _, _, _, _ = bgsa_metad(
-            seed + 1,
-            n_epochs_each,
+    elif selected == "bgsa_pt_metad":
+        bv, calls, *_ = bgsa_pt_metad(
+            seed,
+            n_epochs,
+            n_chains,
+            t_rw_map,
+            e_map,
+            L_map,
+            q_map,
+            pilot_calls=0,
+            k_inner=20,
+            k_swap=5,
+            sigma_rw=sigma_map,
+            t_hot=t_hot,
+        )
+    else:
+        bv, calls, *_ = bgsa_metad(
+            seed,
+            n_epochs,
             k_per_epoch,
             t_rw_map,
             e_map,
@@ -3063,54 +3060,7 @@ def bgsa_auto(
             sigma_rw=sigma_map,
             best_pilot_pos=best_pilot_pos,
         )
-        return "bgsa_metad", bv, nc
-
-    def _run_bgsa_pt_metad():
-        bv, nc, _, _, _, _, _, _, _ = bgsa_pt_metad(
-            seed + 2,
-            n_epochs_each,
-            n_chains,
-            t_rw_map,
-            e_map,
-            L_map,
-            q_map,
-            pilot_calls=0,
-            k_inner=20,
-            k_swap=5,
-            sigma_rw=sigma_map,
-            t_hot=t_hot,
-        )
-        return "bgsa_pt_metad", bv, nc
-
-    def _run_bgsa_pt_hybrid_v2():
-        bv, nc, _, _, _, _, _, _ = bgsa_pt_hybrid_v2(
-            seed + 3,
-            n_epochs_each,
-            n_chains,
-            t_map,
-            e_map,
-            L_map,
-            q_map,
-            pilot_calls=0,
-            k_inner=20,
-            k_swap=5,
-            t_hot=t_hot,
-        )
-        return "bgsa_pt_hybrid_v2", bv, nc
-
-    runners = [_run_bgsa, _run_bgsa_metad, _run_bgsa_pt_metad, _run_bgsa_pt_hybrid_v2]
-
-    if parallel:
-        with ThreadPoolExecutor(max_workers=len(runners)) as ex:
-            outcomes = list(ex.map(lambda f: f(), runners))
-    else:
-        outcomes = [f() for f in runners]
-
-    # Pick the winner by min best_val.
-    best_name, best_bv, _ = min(outcomes, key=lambda x: x[1])
-    total_calls = pilot_calls + sum(o[2] for o in outcomes)
-    return best_bv, total_calls, f"ensemble[{best_name}]"
-
+    return bv, pilot_calls + calls, f"auto[{selected}]"
 
 def bgsa(
     seed, n_epochs, k_per_epoch, t_map, e_map, L_map, q_map, best_pilot_pos, pilot_calls
