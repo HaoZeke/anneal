@@ -3405,6 +3405,10 @@ pub mod policy_state_reply {
     pub fn get_packing_saturated(self) -> bool {
       self.reader.get_bool_field(196)
     }
+    #[inline]
+    pub fn get_leftover_dwell(self) -> bool {
+      self.reader.get_bool_field(197)
+    }
   }
 
   pub struct Builder<'a> { builder: ::capnp::private::layout::StructBuilder<'a> }
@@ -3620,6 +3624,14 @@ pub mod policy_state_reply {
     #[inline]
     pub fn set_packing_saturated(&mut self, value: bool)  {
       self.builder.set_bool_field(196, value);
+    }
+    #[inline]
+    pub fn get_leftover_dwell(self) -> bool {
+      self.builder.get_bool_field(197)
+    }
+    #[inline]
+    pub fn set_leftover_dwell(&mut self, value: bool)  {
+      self.builder.set_bool_field(197, value);
     }
   }
 

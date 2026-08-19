@@ -295,13 +295,25 @@ def identity_mixing_does_not_retire_without_packing():
     """Mixing names a putative. Retirement still needs packing
     saturation and the rematched family floor.
     """
-    mixing, packing_sat, floor_met = sp.symbols("mixing packing_sat floor_met")
-    retire = And(mixing, packing_sat, floor_met)
+    mixing, packing_sat, leftover_dwell, floor_met = sp.symbols(
+        "mixing packing_sat leftover_dwell floor_met"
+    )
+    retire = And(mixing, packing_sat, leftover_dwell, floor_met)
     blocked = Implies(And(mixing, Not(packing_sat)), Not(retire))
-    saturated_only = Implies(And(Not(mixing), packing_sat, floor_met), Not(retire))
+    saturated_only = Implies(
+        And(Not(mixing), packing_sat, leftover_dwell, floor_met), Not(retire)
+    )
+    leftover_blocks = Implies(
+        And(mixing, packing_sat, Not(leftover_dwell), floor_met), Not(retire)
+    )
     ok_b, r_b = _tautology(blocked)
     ok_s, r_s = _tautology(saturated_only)
-    return ok_b and ok_s, r_b if not ok_b else r_s
+    ok_l, r_l = _tautology(leftover_blocks)
+    if not ok_b:
+        return False, r_b
+    if not ok_s:
+        return False, r_s
+    return ok_l, r_l
 
 
 # ---------------------------------------------------------------------------

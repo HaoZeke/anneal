@@ -33,6 +33,10 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         !arm.contains("random_cluster"),
         "occupancy extras Leave OtherFamily or ArchiveHole, not a random cluster"
     );
+    assert!(
+        arm.contains("packing_saturated") || arm.contains("policy.packing_saturated"),
+        "after packing sat Leave must see packing_saturated and choose ArchiveHole"
+    );
 }
 
 #[test]

@@ -387,6 +387,8 @@ pub struct PolicyState {
     pub occupied_family_count: u32,
     /// DECAF-family Good--Turing: unseen packing mass is small.
     pub packing_saturated: bool,
+    /// Consecutive leftover-SOAP occupancy_gt records under the ceiling.
+    pub leftover_dwell: bool,
 }
 
 /// Which selection produced a barrier's parent map.
@@ -1042,6 +1044,7 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     output.set_interface_count(state.interface_count);
                     output.set_occupied_family_count(state.occupied_family_count);
                     output.set_packing_saturated(state.packing_saturated);
+                    output.set_leftover_dwell(state.leftover_dwell);
                 }
                 AcceptedPayload::PopulationEpoch(state) => {
                     let mut output = payload.init_population_epoch();
@@ -1235,6 +1238,7 @@ pub(crate) fn decode_reply_reader(
                         interface_count: state.get_interface_count(),
                         occupied_family_count: state.get_occupied_family_count(),
                         packing_saturated: state.get_packing_saturated(),
+                        leftover_dwell: state.get_leftover_dwell(),
                     })
                 }
                 accepted_reply::payload::PopulationEpoch(state) => {

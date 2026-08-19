@@ -184,6 +184,8 @@ pub struct CatalogPolicyInput {
     pub occupied_family_count: usize,
     /// DECAF-family Good--Turing: unseen packing mass is small.
     pub packing_saturated: bool,
+    /// Consecutive leftover-SOAP occupancy_gt records under the ceiling.
+    pub leftover_dwell: bool,
     /// Published-energy score: this replica sits on a known hurdle GM.
     pub on_published_prize: bool,
 }

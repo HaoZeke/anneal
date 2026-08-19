@@ -3269,7 +3269,12 @@ fn run_capnp_catalog(
             n_occupied_families,
         ) {
             let saturated = policy.packing_saturated;
-            if occupancy_retire(certificate, saturated, n_occupied_families) {
+            if occupancy_retire(
+                certificate,
+                saturated,
+                policy.leftover_dwell,
+                n_occupied_families,
+            ) {
                 if !announced_done {
                     println!(
                         "  done {}  hops {}  best {:.6}",
@@ -3605,7 +3610,10 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                match occupancy_leave_target(other_family.is_some()) {
+                match occupancy_leave_target(
+                    other_family.is_some(),
+                    policy.packing_saturated,
+                ) {
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
                         trace.proposal_family = ProposalFamily::CatalogSample;

@@ -108,6 +108,8 @@ struct PolicyStateReply {
   occupiedFamilyCount @19 :UInt32;
   # DECAF-family Good-Turing: unseen packing mass is small.
   packingSaturated @20 :Bool;
+  # Consecutive leftover-SOAP occupancy_gt records under the ceiling.
+  leftoverDwell @21 :Bool;
 }
 
 enum CatalogMutationKind {
