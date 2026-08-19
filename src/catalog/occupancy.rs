@@ -332,13 +332,18 @@ fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
     widest
 }
 
-/// Torgerson (1952) classical MDS of DECAF L1 distances.
+/// Torgerson (1952) classical MDS of DECAF L1 after a Ceriotti switch.
+///
+/// Raw L1 stretches a leftover-family chain so 2-means splits the
+/// ends. The switch \(F(d)=1-1/(1+(d/\sigma)^2)\) with \(\sigma\) the
+/// median pairwise L1 keeps intra-funnel distances short.
 pub fn occupancy_map_from_histograms(histograms: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
     let n = histograms.len();
     if n < 2 {
         return None;
     }
     let mut dist = vec![vec![0.0; n]; n];
+    let mut pairs = Vec::new();
     for i in 0..n {
         for j in (i + 1)..n {
             let d = super::packing::packing_distance(&histograms[i], &histograms[j]);
@@ -347,9 +352,36 @@ pub fn occupancy_map_from_histograms(histograms: &[Vec<f64>]) -> Option<Vec<[f64
             }
             dist[i][j] = d;
             dist[j][i] = d;
+            if d > 0.0 {
+                pairs.push(d);
+            }
+        }
+    }
+    let sigma = median(&mut pairs).unwrap_or(super::packing::PACKING_MERGE);
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            dist[i][j] = ceriotti_switch(dist[i][j], sigma);
         }
     }
     torgerson_2d(&dist)
+}
+
+fn ceriotti_switch(distance: f64, sigma: f64) -> f64 {
+    if !(distance.is_finite() && sigma.is_finite()) || sigma <= 0.0 {
+        return 0.0;
+    }
+    1.0 - 1.0 / (1.0 + (distance / sigma).powi(2))
+}
+
+fn median(values: &mut [f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.total_cmp(b));
+    Some(values[values.len() / 2])
 }
 
 fn majority_family(family: &[usize], members: &[usize]) -> Option<usize> {
