@@ -2485,7 +2485,7 @@ fn run_capnp_catalog(
         println!("  occupancy min families {}", occupancy_min_families());
         println!("  occupancy leave archive hole");
         println!(
-            "  gt stop leftover-well+packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
+            "  gt stop packing  n>={}  p0<{}  families>={}  (coordinator occupancy_gt)",
             anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,
             anneal_core::catalog::PRODUCTION_MAX_UNSEEN_MASS,
             occupancy_min_families()
