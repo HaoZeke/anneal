@@ -4,6 +4,7 @@ import pytest
 from experiments.scripts.demo_bgsa import (
     _log_pseudo_marginal_weight,
     continuous_time_tempering,
+    _laplace_third_moment_correction,
     metad_gamma_from_qv,
     pmsa_metad,
     smc_pt_log_z_estimator,
@@ -73,3 +74,14 @@ def test_pt_evidence_rejects_unpaired_weights():
 def test_metad_bias_factor_is_independent_of_tsallis_visiting_index():
     assert metad_gamma_from_qv(1.1) == metad_gamma_from_qv(2.9)
     assert metad_gamma_from_qv(2.9) > 1.0
+
+
+def test_tierney_kadane_correction_has_the_cubic_posterior_coefficient():
+    cubic = 0.8
+
+    def nll(params):
+        x = params[0]
+        return 0.5 * x * x + cubic * x**3 / 6.0
+
+    shift = _laplace_third_moment_correction(nll, [0.0], h=1e-3)[0]
+    assert np.isclose(shift, -cubic / 2.0, rtol=1e-4)
