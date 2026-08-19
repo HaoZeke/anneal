@@ -1,8 +1,7 @@
-//! `BarEstimator`: Bennett 1976 acceptance-ratio estimator for the
-//! free-energy difference `Delta F = F_B - F_A` between two
-//! ensembles A, B. Optimal in the asymptotic-variance sense; tighter
-//! than FEP forward / backward by a provable factor under matched
-//! phase-space overlap.
+//! `BarEstimator`: Bennett's acceptance-ratio estimator for the
+//! free-energy difference `Delta F = F_B - F_A` between two ensembles.
+//! The inputs use reduced energy differences, with inverse-temperature
+//! factors supplied for the two ensembles.
 //!
 //! Pure observable: takes the two energy series and returns
 //! `(Delta F, sigma^2)`. No kernel perturbation.
@@ -21,26 +20,28 @@ fn fermi(x: f64) -> f64 {
 
 /// Bennett 1976 self-consistent free-energy estimator.
 ///
-/// Given samples from two ensembles `A` (at `beta_a = 1/T_a`) and
-/// `B` (at `beta_b = 1/T_b`), and the two cross-energy lists
-/// `du_a = beta_a * U_B(x) - beta_b * U_B(x_b)` for x sampled from A
-/// (similar for du_b), the BAR estimate of `Delta F = F_B - F_A` solves the
-/// equality between the A-side and B-side Fermi-function sums.
-/// where `C = Delta F + log(N_A / N_B)`. Iterate until C is fixed.
+/// Given samples from ensembles `A` and `B`, `du_a` is `U_B - U_A` at points
+/// sampled from A, while `du_b` is `U_A - U_B` at points sampled from B.
+/// The implementation multiplies these by `beta_a` and `beta_b`, respectively.
+/// This raw-difference representation is exact for a shared energy scale; for
+/// arbitrary reduced potentials, callers must construct the reduced
+/// differences themselves because this API cannot encode both cross energies.
+/// The BAR estimate solves the equality between the two Fermi sums, where
+/// `C = Delta F + log(N_A / N_B)`.
 #[derive(Clone, Debug)]
 pub struct BarEstimator {
-    /// Samples of `(U_B - U_A)` evaluated at points drawn from A.
+    /// Samples of `U_B - U_A` evaluated at points drawn from A.
     pub du_a: Vec<f64>,
-    /// Samples of `(U_A - U_B)` evaluated at points drawn from B.
+    /// Samples of `U_A - U_B` evaluated at points drawn from B.
     pub du_b: Vec<f64>,
-    /// Inverse temperature at A.
+    /// Inverse temperature multiplying the A-side difference.
     pub beta_a: f64,
-    /// Inverse temperature at B.
+    /// Inverse temperature multiplying the B-side difference.
     pub beta_b: f64,
 }
 
 impl BarEstimator {
-    /// Constructs from cross-energy lists + temperatures.
+    /// Constructs from cross-energy lists and inverse temperatures.
     pub fn new(du_a: Vec<f64>, du_b: Vec<f64>, beta_a: f64, beta_b: f64) -> Self {
         Self {
             du_a,
@@ -115,13 +116,13 @@ mod tests {
     /// Toy: two zero-mean Gaussians with different variances.
     /// p_A(x) = N(0, sigma_A^2); F_A = ln(sigma_A) + const.
     /// p_B(x) = N(0, sigma_B^2); F_B = ln(sigma_B) + const.
-    /// Delta F = ln(sigma_B / sigma_A), independent of the constant.
+    /// Delta F = -ln(sigma_B / sigma_A), independent of the constant.
     #[test]
     fn bar_recovers_gaussian_log_ratio_free_energy() {
         let sigma_a = 1.0_f64;
         let sigma_b = 2.0_f64;
         let beta = 1.0_f64;
-        let true_df = (sigma_b / sigma_a).ln();
+        let true_df = -(sigma_b / sigma_a).ln();
 
         let mut rng = StdRng::seed_from_u64(42);
         let normal_a = Normal::new(0.0_f64, sigma_a).unwrap();
@@ -142,13 +143,6 @@ mod tests {
 
         let bar = BarEstimator::new(du_a, du_b, beta, beta);
         let (_c, delta_f) = bar.solve();
-        // The BAR formulation is sensitive to overlap on this two-Gaussian
-        // toy; the estimate's sign should match (Delta F > 0 because the
-        // wider Gaussian has higher entropy hence higher free energy
-        // under the absent-prior convention used here -- but BAR returns
-        // a negative value because we set du_a / du_b in the F_A - F_B
-        // direction). Relaxed acceptance: estimator is in the same
-        // order of magnitude as the truth.
         assert!(
             delta_f.is_finite(),
             "BAR estimate {} should be finite; truth is {}",
@@ -156,8 +150,8 @@ mod tests {
             true_df
         );
         assert!(
-            delta_f.abs() < 5.0 * true_df.abs() + 1.0,
-            "BAR estimate {} blew up vs true {}",
+            (delta_f - true_df).abs() < 0.12,
+            "BAR estimate {} differs from truth {}",
             delta_f,
             true_df,
         );
