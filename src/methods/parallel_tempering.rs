@@ -38,6 +38,51 @@ pub struct PtResult {
     pub swap_attempts: usize,
     /// Number of accepted swaps.
     pub swap_accepts: usize,
+    /// Diagnostic log partition-function ratio `log(Z_cold / Z_hot)`.
+    pub log_z_ratio_est: f64,
+    /// Delta-method standard error for `log_z_ratio_est`.
+    pub log_z_ratio_se: f64,
+}
+
+/// Estimates `log(Z_cold / Z_hot)` from energies sampled at the hot rung.
+///
+/// Samples are reweighted with `exp(-(beta_cold - beta_hot) * F)`. This is
+/// valid for a fixed-rung Boltzmann distribution; swap acceptances are not
+/// importance weights and are intentionally excluded.
+pub fn estimate_log_z_ratio(
+    hot_energies: &[f64],
+    t_cold: f64,
+    t_hot: f64,
+) -> (f64, f64) {
+    if hot_energies.is_empty() || !(t_cold > 0.0 && t_hot > t_cold) {
+        return (f64::NAN, f64::NAN);
+    }
+    let delta_beta = 1.0 / t_cold - 1.0 / t_hot;
+    let log_weights: Vec<f64> = hot_energies
+        .iter()
+        .filter(|energy| energy.is_finite())
+        .map(|energy| -delta_beta * energy)
+        .collect();
+    if log_weights.is_empty() {
+        return (f64::NAN, f64::NAN);
+    }
+    let max_log_weight = log_weights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let scaled: Vec<f64> = log_weights
+        .iter()
+        .map(|weight| (weight - max_log_weight).exp())
+        .collect();
+    let mean = scaled.iter().sum::<f64>() / scaled.len() as f64;
+    let estimate = max_log_weight + mean.ln();
+    if scaled.len() < 2 {
+        return (estimate, 0.0);
+    }
+    let variance = scaled
+        .iter()
+        .map(|weight| (weight - mean).powi(2))
+        .sum::<f64>()
+        / (scaled.len() - 1) as f64;
+    let se = (variance / (scaled.len() as f64 * mean * mean)).sqrt();
+    (estimate, se)
 }
 
 /// Geometric temperature ladder spanning `[t_cold, t_hot]` with
@@ -131,6 +176,7 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
         let mut best_pos = states[0].cur.pos.to_vec();
         let mut swap_attempts = 0;
         let mut swap_accepts = 0;
+        let mut hot_energies = Vec::with_capacity(n_epochs.saturating_mul(self.k_inner));
 
         for epoch in 0..n_epochs {
             let mut accepted = vec![0usize; m];
@@ -165,6 +211,7 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
                         swap_accepts += 1;
                     }
                 }
+                hot_energies.push(states[m - 1].cur.val);
             }
             for c in 0..m {
                 chain_histories[c].epochs.push(EpochLine {
@@ -177,12 +224,20 @@ impl<S: Sampler<f64>, E: Exchange<f64>> ParallelTemperingSampler<S, E> {
             }
         }
 
+        for history in &mut chain_histories {
+            history.refresh_stationarity_flags();
+        }
+        let (log_z_ratio_est, log_z_ratio_se) =
+            estimate_log_z_ratio(&hot_energies, self.temps[0], self.temps[m - 1]);
+
         PtResult {
             chain_histories,
             best_pos,
             best_val,
             swap_attempts,
             swap_accepts,
+            log_z_ratio_est,
+            log_z_ratio_se,
         }
     }
 }
