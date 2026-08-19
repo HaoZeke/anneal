@@ -237,10 +237,12 @@ pub fn occupancy_family_floor(
 /// Secondary family floor from a 2-D folding of packing histograms.
 ///
 /// Torgerson MDS of DECAF L1, then a 2-means split. Two when the sides
-/// rematch to distinct packings and the centroids do not overlap.
-/// Leftover wells of one packing stay one community. This is a
-/// descriptor-distance floor, not the hop-graph Fiedler split, and it
-/// does not retire.
+/// rematch to distinct packings, the centroids do not overlap, and the
+/// majority histograms are farther in L1 than the spread inside either
+/// side. Leftover DECAF slots of one funnel stay one community. Live
+/// rematch is the wrong input: fold the packing book so a family extras
+/// have Left still sits on the map. This is not the hop-graph Fiedler
+/// split and it does not retire.
 pub fn occupancy_map_floor(xy: &[[f64; 2]], family: &[usize]) -> usize {
     occupancy_map_split(xy, family).0
 }
@@ -289,7 +291,45 @@ pub fn occupancy_landfold_split(
     let Some(xy) = occupancy_map_from_histograms(histograms) else {
         return (1, histograms.len(), 0);
     };
-    occupancy_map_split(&xy, family)
+    let (floor, left_n, right_n) = occupancy_map_split(&xy, family);
+    if floor == 1 {
+        return (1, left_n, right_n);
+    }
+    let Some((left, right)) = two_means(&xy) else {
+        return (1, left_n, right_n);
+    };
+    let Some(left_family) = majority_family(family, &left) else {
+        return (1, left_n, right_n);
+    };
+    let Some(right_family) = majority_family(family, &right) else {
+        return (1, left_n, right_n);
+    };
+    let Some(left_i) = left.iter().copied().find(|&i| family[i] == left_family) else {
+        return (1, left_n, right_n);
+    };
+    let Some(right_i) = right.iter().copied().find(|&i| family[i] == right_family) else {
+        return (1, left_n, right_n);
+    };
+    let between = super::packing::packing_distance(&histograms[left_i], &histograms[right_i]);
+    let within = side_spread(histograms, &left).max(side_spread(histograms, &right));
+    if between > within {
+        (2, left_n, right_n)
+    } else {
+        (1, left_n, right_n)
+    }
+}
+
+fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
+    let mut widest = 0.0;
+    for (a, &i) in members.iter().enumerate() {
+        for &j in members.iter().skip(a + 1) {
+            let d = super::packing::packing_distance(&histograms[i], &histograms[j]);
+            if d > widest {
+                widest = d;
+            }
+        }
+    }
+    widest
 }
 
 /// Torgerson (1952) classical MDS of DECAF L1 distances.

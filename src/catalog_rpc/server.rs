@@ -2720,19 +2720,13 @@ fn occupancy_seam_floor(
     }
 }
 
-fn occupancy_landfold_from_live(scientific: &ScientificState) -> (usize, usize, usize) {
-    let mut histograms = Vec::new();
-    let mut families = Vec::new();
-    for candidate in scientific.last_candidate_by_replica.values() {
-        let Some(histogram) = scientific.packing.histogram(&candidate.coordinates) else {
-            continue;
-        };
-        let Some(family) = scientific.packing.family_of(&histogram) else {
-            continue;
-        };
-        histograms.push(histogram);
-        families.push(family);
-    }
+fn occupancy_landfold_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
+    let occupied = scientific.packing.occupied_histograms();
+    let histograms: Vec<Vec<f64>> = occupied
+        .iter()
+        .map(|(_, histogram)| histogram.clone())
+        .collect();
+    let families: Vec<usize> = occupied.iter().map(|(index, _)| *index).collect();
     occupancy_landfold_split(&histograms, &families)
 }
 
@@ -2768,7 +2762,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     ) as u32;
     let (measured_floor, conductance, algebraic, seam_left, seam_right, seam_packings) =
         occupancy_seam_floor(scientific);
-    let (landfold_floor, landfold_left, landfold_right) = occupancy_landfold_from_live(scientific);
+    let (landfold_floor, landfold_left, landfold_right) = occupancy_landfold_from_book(scientific);
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.saturated();

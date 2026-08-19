@@ -170,6 +170,20 @@ impl PackingBook {
         self.visits.iter().filter(|&&visits| visits > 0).count()
     }
 
+    /// Histogram of each occupied packing family, in family-index order.
+    ///
+    /// One row per book cell with visits, not one row per live replica.
+    /// The landfold floor folds these, so a packing extras have Left
+    /// still sits on the map.
+    pub fn occupied_histograms(&self) -> Vec<(usize, Vec<f64>)> {
+        self.families
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| self.visits.get(*index).copied().unwrap_or(0) > 0)
+            .map(|(index, histogram)| (index, histogram.clone()))
+            .collect()
+    }
+
     /// Production Good--Turing on leftover-well arrivals per DECAF
     /// family. Same floor and unseen-mass ceiling as the leftover-SOAP
     /// census. Hop re-observes are not draws.

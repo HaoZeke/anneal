@@ -153,6 +153,58 @@ fn packing_good_turing_uses_the_census_production_floor() {
 }
 
 #[test]
+fn landfold_floor_separates_lj75_marks_from_ico() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(marks.as_slice().unwrap()).unwrap();
+    let occupied = book.occupied_histograms();
+    assert_eq!(occupied.len(), 2);
+    let hists: Vec<Vec<f64>> = occupied.iter().map(|(_, h)| h.clone()).collect();
+    let fams: Vec<usize> = occupied.iter().map(|(i, _)| *i).collect();
+    assert_eq!(
+        occupancy_landfold_floor(&hists, &fams),
+        2,
+        "book ico and Marks must be two landfold communities"
+    );
+}
+
+#[test]
+fn landfold_floor_on_the_book_sees_oh_after_live_ico_only() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(oh.as_slice().unwrap()).unwrap();
+    let occupied = book.occupied_histograms();
+    let hists: Vec<Vec<f64>> = occupied.iter().map(|(_, h)| h.clone()).collect();
+    let fams: Vec<usize> = occupied.iter().map(|(i, _)| *i).collect();
+    assert_eq!(book.occupied_among([ico.as_slice().unwrap()]), 1);
+    assert_eq!(
+        occupancy_landfold_floor(&hists, &fams),
+        2,
+        "Oh on the book is a second map community after extras Leave it"
+    );
+}
+
+#[test]
+fn landfold_floor_keeps_a_leftover_decaf_cloud_as_one() {
+    let mut hists = Vec::new();
+    let mut fams = Vec::new();
+    for i in 0..8 {
+        let t = 0.01 * i as f64;
+        hists.push(vec![1.0 - t, t, 0.0]);
+        fams.push(i);
+    }
+    assert_eq!(
+        occupancy_landfold_floor(&hists, &fams),
+        1,
+        "nearby leftover DECAF slots are one funnel on the map"
+    );
+}
+
+#[test]
 fn landfold_floor_separates_lj38_oh_from_ico() {
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
     let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
