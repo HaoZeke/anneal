@@ -3,6 +3,7 @@
 //! periodic Metropolis swaps.
 
 use anneal_core::ParallelTemperingSampler;
+use anneal_core::methods::parallel_tempering::estimate_log_z_ratio;
 use anneal_core::exchange::{MetropolisExchange, TsallisExchange};
 use anneal_core::geometric_ladder;
 use anneal_core::variant::boltzmann;
@@ -64,4 +65,13 @@ fn pt_metropolis_exchange_default_used_via_new() {
     let result = pt.run(&cooling, 5, 1);
     assert_eq!(result.chain_histories.len(), 2);
     let _ = MetropolisExchange; // type-check the default exchange exists
+}
+
+#[test]
+fn fixed_rung_log_z_estimator_uses_energy_weights() {
+    let energies = [-1.0, -0.5, 0.0, 0.5, 1.0];
+    let (estimate, se) = estimate_log_z_ratio(&energies, 0.5, 2.0);
+    assert!(estimate.is_finite());
+    assert!(se.is_finite() && se > 0.0);
+    assert!(estimate_log_z_ratio(&[], 0.5, 2.0).0.is_nan());
 }
