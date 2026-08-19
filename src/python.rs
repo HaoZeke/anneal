@@ -288,6 +288,9 @@ pub struct PyHistory {
     /// Best objective value seen across the entire run.
     #[pyo3(get)]
     pub best_val: f64,
+    /// Robust rolling mean-shift diagnostic, one flag per epoch.
+    #[pyo3(get)]
+    pub stationarity_flags: Vec<bool>,
 }
 
 #[pymethods]
@@ -321,6 +324,7 @@ impl From<History> for PyHistory {
                 .collect(),
             best_pos: h.best.pos.to_vec(),
             best_val: h.best.val,
+            stationarity_flags: h.stationarity_flags,
         }
     }
 }

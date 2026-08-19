@@ -48,6 +48,7 @@ fn drive_rs<S: Sampler<f64>>(
         });
     }
 
+    history.refresh_stationarity_flags();
     history.best = state.best;
     history
 }
@@ -152,6 +153,7 @@ where
             best_val: state.best.val,
         });
     }
+    history.refresh_stationarity_flags();
     history.best = state.best.clone();
     (history, state.cur)
 }
