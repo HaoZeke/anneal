@@ -8,6 +8,7 @@ from experiments.scripts.demo_bgsa import (
     trajectory_inla_diagnostic,
     metad_gamma_from_qv,
     pmsa_metad,
+    select_bgsa_driver,
     smc_pt_log_z_estimator,
 )
 
@@ -75,6 +76,18 @@ def test_pt_evidence_rejects_unpaired_weights():
 def test_metad_bias_factor_is_independent_of_tsallis_visiting_index():
     assert metad_gamma_from_qv(1.1) == metad_gamma_from_qv(2.9)
     assert metad_gamma_from_qv(2.9) > 1.0
+
+
+def test_driver_selector_uses_gradient_sensitivity_ratio():
+    assert select_bgsa_driver(
+        {"grad_sens": 0.8, "sigma_sens": 0.1, "best_val_cv": 0.2}, 1.1
+    ) == "bgsa"
+    assert select_bgsa_driver(
+        {"grad_sens": 0.2, "sigma_sens": 0.1, "best_val_cv": 1.5}, 1.1
+    ) == "bgsa_pt_metad"
+    assert select_bgsa_driver(
+        {"grad_sens": 0.2, "sigma_sens": 0.1, "best_val_cv": 0.5}, 1.1
+    ) == "bgsa_metad"
 
 
 def test_tierney_kadane_correction_has_the_cubic_posterior_coefficient():
