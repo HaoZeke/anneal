@@ -506,8 +506,9 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Ensemble stop. Two rematched occupied DECAF families plus
-/// leftover-SOAP Good--Turing, or mixing certified on that pair.
+/// Ensemble stop. Rematched occupied DECAF families at the floor plus
+/// packing Good--Turing, or mixing certified on that pair.
+/// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// `n_occupied_families` is the rematched packing count, not a
 /// leftover-SOAP basin count and not `2 * certified`.
 pub fn occupancy_retire(
