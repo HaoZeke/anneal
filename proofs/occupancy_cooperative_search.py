@@ -8,8 +8,11 @@ Source of the constants and the predicates:
 
 - ``src/catalog/mixing.rs``: Brooks--Gelman ``R-hat``, ``MIXED_RHAT``,
   occupant certificate, lone-floor exclusion.
-- ``src/catalog/occupancy.rs``: Good--Turing stop with two occupied
-  families; leftover-SOAP saturation on one family is not completeness.
+- ``src/catalog/occupancy.rs``: packing Good--Turing stop plus
+  ``occupancy_min_families`` (default 1 is Good--Turing alone; paper
+  ensembles set 2). Leftover-SOAP saturation is the hole generator,
+  not the stop. Mixing names a putative; retirement still needs
+  packing saturation and the family floor.
 - ``src/catalog/census.rs``: unseen mass ``n1/N``.
 - ``src/catalog/hyperband.rs``: champion Keep, ``floor(n_extra/eta)``
   extras Keep, surplus Leave, ``eta = 3``. Not a Li--Jamieson schedule.
@@ -237,7 +240,11 @@ def identity_fixed_family_mass_vanishes():
 
 
 def identity_one_family_saturation_is_not_stop():
-    """``stop_GT = saturated and two_or_more``. One family blocks the stop."""
+    """Paper floor ``F = 2``: ``stop_GT = saturated and two_or_more``.
+
+    One rematched family blocks CatalogSaturated. Mixing still names a
+    putative. Library default ``F = 1`` is Good--Turing alone.
+    """
     saturated, two_or_more, mixing = sp.symbols("saturated two_or_more mixing")
     stop_gt = And(saturated, two_or_more)
     complete = Or(mixing, stop_gt)
@@ -246,8 +253,8 @@ def identity_one_family_saturation_is_not_stop():
 
 
 def identity_gt_stop_needs_two_families():
-    """``stop_GT`` holds only when saturation and ``n_occupied_families >= 2``
-    both hold. Mixing is a separate certificate.
+    """Paper ``F = 2``: ``stop_GT`` needs saturation and two rematched
+    families. Mixing is a separate certificate, not a retire.
     """
     saturated, two_or_more = sp.symbols("saturated two_or_more")
     stop_gt = And(saturated, two_or_more)
@@ -257,6 +264,41 @@ def identity_gt_stop_needs_two_families():
         Implies(And(saturated, two_or_more), stop_gt),
     )
     return _tautology(needs_both)
+
+
+def identity_default_floor_is_packing_gt_alone():
+    """Library default ``F = 1``: packing saturation with one rematched
+    family is CatalogSaturated.
+    """
+    saturated, one_or_more = sp.symbols("saturated one_or_more")
+    stop_gt = And(saturated, one_or_more)
+    holds = Implies(And(saturated, one_or_more), stop_gt)
+    return _tautology(holds)
+
+
+def identity_new_type_raises_p0():
+    """A newly hatched type: ``n1' = n1 + 1``, ``n' = n + 1``.
+
+    ``P0' - P0 = (n - n1) / (n (n + 1))``, strictly positive iff
+    ``n1 < n``. Leftover-SOAP Good--Turing can therefore unsaturate.
+    Packing with ``n1 = 0`` has ``P0 = 0`` for every ``n >= 1``.
+    """
+    n1, n = sp.symbols("n1 n", positive=True)
+    delta = (n1 + 1) / (n + 1) - n1 / n
+    expected = (n - n1) / (n * (n + 1))
+    ok, residual = _zero(sp.together(delta) - expected)
+    p0_n1_zero, p0_residual = _zero(sp.Integer(0) / n)
+    return ok and p0_n1_zero, residual + p0_residual
+
+
+def identity_mixing_does_not_retire_without_packing():
+    """Mixing names a putative. Retirement still needs packing
+    saturation and the rematched family floor.
+    """
+    mixing, packing_sat, floor_met = sp.symbols("mixing packing_sat floor_met")
+    retire = And(Or(mixing, packing_sat), packing_sat, floor_met)
+    blocked = Implies(And(mixing, Not(packing_sat)), Not(retire))
+    return _tautology(blocked)
 
 
 # ---------------------------------------------------------------------------
@@ -483,6 +525,9 @@ def all_identities() -> bool:
         identity_fixed_family_mass_vanishes()[0],
         identity_one_family_saturation_is_not_stop()[0],
         identity_gt_stop_needs_two_families()[0],
+        identity_default_floor_is_packing_gt_alone()[0],
+        identity_new_type_raises_p0()[0],
+        identity_mixing_does_not_retire_without_packing()[0],
         identity_keep_count_partitions()[0],
         identity_keep_independent_of_resource()[0],
         identity_champion_survives_where_halving_zeros()[0],
@@ -517,8 +562,11 @@ def derive() -> bool:
         ("singleton revisit strictly drops P0", identity_revisit_singleton_drops_mass()[0]),
         ("nonsingleton revisit does not raise P0", identity_revisit_nonsingleton_drops_mass()[0]),
         ("fixed K => P0 -> 0", identity_fixed_family_mass_vanishes()[0]),
-        ("one-family saturation is not a stop", identity_one_family_saturation_is_not_stop()[0]),
-        ("GT stop needs two occupied families", identity_gt_stop_needs_two_families()[0]),
+        ("paper F=2: one-family saturation is not a stop", identity_one_family_saturation_is_not_stop()[0]),
+        ("paper F=2: GT stop needs two rematched families", identity_gt_stop_needs_two_families()[0]),
+        ("default F=1 is packing GT alone", identity_default_floor_is_packing_gt_alone()[0]),
+        ("new leftover type raises P0; packing n1=0 does not", identity_new_type_raises_p0()[0]),
+        ("mixing does not retire without packing saturation", identity_mixing_does_not_retire_without_packing()[0]),
         ("n_keep + n_leave = 1 + n_extra", identity_keep_count_partitions()[0]),
         ("keep count independent of resource", identity_keep_independent_of_resource()[0]),
         ("champion survives the SH zero set", identity_champion_survives_where_halving_zeros()[0]),

@@ -31,6 +31,9 @@ from proofs.occupancy_cooperative_search import (
     identity_fixed_family_mass_vanishes,
     identity_one_family_saturation_is_not_stop,
     identity_gt_stop_needs_two_families,
+    identity_default_floor_is_packing_gt_alone,
+    identity_new_type_raises_p0,
+    identity_mixing_does_not_retire_without_packing,
     identity_keep_count_partitions,
     identity_keep_independent_of_resource,
     identity_champion_survives_where_halving_zeros,
@@ -151,6 +154,24 @@ def test_one_family_saturation_is_not_a_gt_stop():
 
 def test_gt_stop_requires_two_occupied_families():
     ok, tautology = identity_gt_stop_needs_two_families()
+    assert ok
+    assert tautology is True
+
+
+def test_default_family_floor_is_packing_gt_alone():
+    ok, tautology = identity_default_floor_is_packing_gt_alone()
+    assert ok
+    assert tautology is True
+
+
+def test_new_type_raises_unseen_mass():
+    ok, residual = identity_new_type_raises_p0()
+    assert ok
+    assert residual == 0
+
+
+def test_mixing_does_not_retire_without_packing_saturation():
+    ok, tautology = identity_mixing_does_not_retire_without_packing()
     assert ok
     assert tautology is True
 
