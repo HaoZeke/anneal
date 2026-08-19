@@ -109,7 +109,7 @@ impl QGaussianMomentum {
 
     /// Maximum dim for which this `q` gives a valid q-Gaussian.
     pub fn max_dim(&self) -> usize {
-        ((2.0 / (self.q - 1.0)).floor() as usize).saturating_sub(1)
+        (2.0 / (self.q - 1.0)).ceil() as usize - 1
     }
 }
 
@@ -172,6 +172,8 @@ mod tests {
         // q = 1.2 -> max_dim should be floor(2/0.2)-1 = 9
         let m2 = QGaussianMomentum::new(1.2);
         assert_eq!(m2.max_dim(), 9);
+        let near_boundary = QGaussianMomentum::new(1.50001);
+        assert_eq!(near_boundary.max_dim(), 3);
     }
 
     #[test]
