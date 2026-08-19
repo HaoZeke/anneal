@@ -107,7 +107,7 @@ proofs-test     = "pytest proofs/tests/ -v"
 proofs-derive   = "python -m proofs.thm1_bsa_visit && python -m proofs.thm2_fsa_visit && python -m proofs.thm3_metropolis && python -m proofs.thm4_log_cool && python -m proofs.occupancy_cooperative_search"
 tlc-small       = { cmd = "java -cp .verify/tla2tools.jar tlc2.TLC tla/Workflow.tla -config tla/small.cfg -workers auto -depth 30", depends-on = ["setup-tlc"] }
 apalache-check  = { cmd = ".verify/apalache/bin/apalache-mc check --config=tla/apalache.cfg --length=20 --inv=TypeOK tla/WorkflowApalache.tla", depends-on = ["setup-apalache"] }
-exp-test        = "pytest experiments/tests/ -v"
+exp-test        = "XDG_CACHE_HOME=.pixi/cache pytest experiments/tests/ -v"
 exp1            = "python -m experiments.exp1_underflow --out data/exp1_underflow.csv --samples 200000"
 exp2            = "python -m experiments.exp2_cancellation --out data/exp2_cancellation.csv"
 exp3            = "python -m experiments.exp3_trajectory_bias --out data/exp3_trajectory.csv --seeds 32 --n-epochs 200"
