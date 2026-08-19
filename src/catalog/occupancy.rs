@@ -30,11 +30,13 @@
 //!
 //! ## Leave start
 //!
-//! Another DECAF family already on file: take a catalog representative
-//! of the least-occupied one (funnel exchange). None on file: record
-//! the occupied packing in the shared SOAP archive and step into a
-//! hole of that archive, or amplify the fivefold residual when the
-//! archive is empty. Occupancy extras do not draw a random cluster.
+//! Another DECAF family already on file and packing not saturated:
+//! take a catalog representative of the least-occupied one (funnel
+//! exchange). After packing saturation, or if no other family is on
+//! file: record the occupied packing in the shared SOAP archive and
+//! step into a hole of that archive, or amplify the fivefold residual
+//! when the archive is empty. Occupancy extras do not draw a random
+//! cluster.
 //! A single hole-and-quench returns to the same family; the hop
 //! then requenches and widens until DECAF says the family changed.
 //!
@@ -92,10 +94,12 @@ pub enum OccupancyLeaveAdopt {
 
 /// Where an occupancy extra goes when it Leaves.
 ///
-/// Funnel exchange first: a catalog representative of a different,
-/// under-occupied packing. That is how Leave includes Oh once Oh is
-/// on file. Otherwise a hole of the shared occupied-packing archive,
-/// not a random cluster. Serial recommended is a different mode.
+/// Funnel exchange first, only while packing is unsaturated: a
+/// catalog representative of a different, under-occupied packing.
+/// That is how Leave includes Oh once Oh is on file. After packing
+/// saturation, or if no other family is on file, a hole of the
+/// shared occupied-packing archive, not a random cluster. Serial
+/// recommended is a different mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different DECAF family.
@@ -817,6 +821,12 @@ mod tests {
         assert!(!leftover_sat_dwell(&[false, true]));
         assert!(!leftover_sat_dwell(&[true; 4]));
         assert!(leftover_sat_dwell(&[true; 5]));
+        let mut hatch_then_dwell = vec![false];
+        hatch_then_dwell.extend(std::iter::repeat_n(true, 5));
+        assert!(leftover_sat_dwell(&hatch_then_dwell));
+        let mut dwell_then_hatch = vec![true; 5];
+        dwell_then_hatch.push(false);
+        assert!(!leftover_sat_dwell(&dwell_then_hatch));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
@@ -832,7 +842,7 @@ mod tests {
         assert!(occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
-            true,
+            leftover_sat_dwell(&[true; 5]),
             2,
             2
         ));
