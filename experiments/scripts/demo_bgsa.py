@@ -1767,7 +1767,7 @@ def continuous_time_tempering(
         for _ in range(k_inner):
             grad = OBJ_GRAD(cur_x)
             noise = rng.normal(0.0, 1.0, size=dim)
-            cur_x = cur_x - beta * eps_x * grad + np.sqrt(2.0 * eps_x / beta) * noise
+            cur_x = cur_x - beta * eps_x * grad + np.sqrt(2.0 * eps_x) * noise
             cur_x = np.clip(cur_x, LOW, HIGH)
             cur_v = OBJ_FN(cur_x)
             n_calls += 1
@@ -1777,8 +1777,6 @@ def continuous_time_tempering(
         # U_aug(beta) = beta * F(x) - log_prior(beta). With a uniform
         # log-prior on beta in [log_beta_min, log_beta_max] the drift
         # term reduces to -F(x) * d(beta)/d(log_beta) = -F(x) * beta.
-        cur_v = OBJ_FN(cur_x)
-        n_calls += 1
         # Symmetric RW proposal on log_beta with reflection at the
         # endpoints (instead of full Langevin to keep the integrator
         # simple at low cost).
