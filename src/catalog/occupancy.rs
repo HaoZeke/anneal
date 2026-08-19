@@ -237,12 +237,12 @@ pub fn occupancy_family_floor(
 /// Secondary family floor from a 2-D folding of packing histograms.
 ///
 /// Torgerson MDS of DECAF L1, then a 2-means split. Two when the sides
-/// rematch to distinct packings, the centroids do not overlap, and the
-/// majority histograms are farther in L1 than the spread inside either
-/// side. Leftover DECAF slots of one funnel stay one community. Live
-/// rematch is the wrong input: fold the packing book so a family extras
-/// have Left still sits on the map. This is not the hop-graph Fiedler
-/// split and it does not retire.
+/// rematch to distinct packings and the centroids do not overlap.
+/// Live rematch is the wrong input: fold the packing book so a family
+/// extras have Left still sits on the map. A 2-means split is a
+/// bipartition, not a leftover-cloud count; FES maxima stay the
+/// landfold figure path. This is not the hop-graph Fiedler split and
+/// it does not retire.
 pub fn occupancy_map_floor(xy: &[[f64; 2]], family: &[usize]) -> usize {
     occupancy_map_split(xy, family).0
 }
