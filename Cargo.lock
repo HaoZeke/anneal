@@ -468,9 +468,8 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
 name = "eindir-core"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6fb7523dd5458e184ceb87773846ff91659efe891a91411c57eea029e31afbe"
+version = "0.6.0"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=b3c704893e697a6588a12fbede59e1fa9428c61f#b3c704893e697a6588a12fbede59e1fa9428c61f"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1382,7 +1381,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=75896909589cb595a251271851e7c31bc6a9936e#75896909589cb595a251271851e7c31bc6a9936e"
+source = "git+https://github.com/HaoZeke/potlib.git?rev=db48f8c#db48f8ca452a844d92bb2db2ee0c9b264bd7530a"
 dependencies = [
  "dlpk",
  "eindir-core",
