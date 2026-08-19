@@ -469,7 +469,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=b3c704893e697a6588a12fbede59e1fa9428c61f#b3c704893e697a6588a12fbede59e1fa9428c61f"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=8d6887b#8d6887b76ebdff2f5a6b36ce2a3b0a3a667df69c"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1381,7 +1381,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/HaoZeke/potlib.git?rev=9020702#90207026ec614ba73b3a149f7444ca5d9048b2f0"
+source = "git+https://github.com/HaoZeke/potlib.git?rev=0ef9cfb#0ef9cfb9288efaacede0450477deed23c116a549"
 dependencies = [
  "dlpk",
  "eindir-core",

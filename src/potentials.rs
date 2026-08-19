@@ -20,7 +20,7 @@
 
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
-use eindir_core::gradient::Gradient;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
@@ -188,6 +188,12 @@ impl Gradient<f64> for PairPotential {
 
     fn dim(&self) -> usize {
         3 * self.n_points
+    }
+}
+
+impl DifferentiableObjective<f64> for PairPotential {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        PairPotential::value_and_gradient(self, x)
     }
 }
 
