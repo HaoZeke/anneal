@@ -189,7 +189,7 @@ fn landfold_floor_on_the_book_sees_oh_after_live_ico_only() {
 }
 
 #[test]
-fn landfold_floor_keeps_a_leftover_decaf_cloud_as_one() {
+fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
     let mut hists = Vec::new();
     let mut fams = Vec::new();
     for i in 0..8 {
@@ -199,8 +199,8 @@ fn landfold_floor_keeps_a_leftover_decaf_cloud_as_one() {
     }
     assert_eq!(
         occupancy_landfold_floor(&hists, &fams),
-        1,
-        "nearby leftover DECAF slots are one funnel on the map"
+        2,
+        "2-means splits a leftover DECAF chain; FES maxima are the landfold figure, not this floor"
     );
 }
 
