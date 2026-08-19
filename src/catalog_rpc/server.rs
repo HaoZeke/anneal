@@ -2720,7 +2720,11 @@ fn occupancy_seam_floor(
 }
 
 fn occupancy_floor(scientific: &ScientificState) -> usize {
-    if std::env::var("CATALOG_MIN_FAMILIES").is_ok() {
+    if std::env::var("CATALOG_MIN_FAMILIES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .is_some_and(|count: usize| count >= 1)
+    {
         return occupancy_min_families();
     }
     occupancy_seam_floor(scientific).0
