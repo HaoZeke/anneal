@@ -109,7 +109,14 @@ impl QGaussianMomentum {
 
     /// Maximum dim for which this `q` gives a valid q-Gaussian.
     pub fn max_dim(&self) -> usize {
-        (2.0 / (self.q - 1.0)).ceil() as usize - 1
+        let bound = 2.0 / (self.q - 1.0);
+        let nearest = bound.round();
+        let strict_ceil = if (bound - nearest).abs() <= 1e-12 * bound.abs().max(1.0) {
+            nearest as usize
+        } else {
+            bound.ceil() as usize
+        };
+        strict_ceil - 1
     }
 }
 
