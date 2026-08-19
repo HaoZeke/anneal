@@ -6,9 +6,13 @@
 
 #![allow(dead_code)]
 
-use eindir_core::ffi::{EindirObjectiveWrapper, eindir_objective_t};
+use eindir_core::ffi::{
+    eindir_core_abi_compatible, EindirObjectiveWrapper, eindir_objective_t,
+};
 use libloading::{Library, Symbol};
-use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
+use rgpot_core::eindir::{
+    rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
+};
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::tensor::{rgpot_tensor_data, rgpot_tensor_owned_cpu_f64_2d};
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -193,6 +197,12 @@ impl Drop for RgpotObjective {
 
 impl RgpotObjective {
     pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
+        let stamp = rgpot_eindir_abi_stamp();
+        assert_eq!(
+            unsafe { eindir_core_abi_compatible(&stamp) },
+            1,
+            "rgpot/eindir ABI stamp is incompatible with anneal's eindir boundary"
+        );
         let obj = unsafe { &*(self.pot as *const eindir_objective_t) };
         unsafe { EindirObjectiveWrapper::new(obj) }
     }
