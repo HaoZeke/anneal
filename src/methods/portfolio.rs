@@ -1759,11 +1759,12 @@ where
         let mut chain_best = cur.clone();
         let mut accepts = 0usize;
         let mut steps = 0usize;
+        let cooling = TsallisCool::new(t_init, q_v);
         for step in 0..per_chain {
             if ledger.exhausted() || ledger.used_get().saturating_sub(start_used) >= pilot_budget {
                 break;
             }
-            let temp = ladder_temperature(t_init, step / 10);
+            let temp = cooling.temperature(step / 10);
             let mut prop = cur.clone();
             for value in prop.iter_mut() {
                 let noise: f64 = rand_distr::StandardNormal.sample(rng);
