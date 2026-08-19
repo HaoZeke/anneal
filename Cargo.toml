@@ -44,7 +44,10 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-eindir-core = { version = "0.6.0", git = "https://github.com/HaoZeke/eindir.git", rev = "f3c4213" }
+# Sibling checkouts, same layout as landfold. Published pins stay on the
+# matching eindir git revision f3c4213.
+eindir-core = { path = "../eindir", version = "0.6.0" }
+xtsci-optimize = { path = "../xtsci-optimize", version = "0.1.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
