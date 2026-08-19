@@ -185,7 +185,7 @@ pub use error::Error;
 pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
 pub use free_energy::BarEstimator;
 pub use grad::{AnalyticGradient, DifferentiableObjective, FiniteDiffGradient, Gradient};
-pub use history::{EpochLine, History, State};
+pub use history::{trajectory_stationarity_flags, EpochLine, History, State};
 pub use hmc::{
     HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
     OMELYAN_LAMBDA, OmelyanIntegrator,
