@@ -25,7 +25,10 @@ use anneal_core::variant::boltzmann;
 use eindir_core::Objective;
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_objective_t};
 
-use rgpot_core::eindir::{rgpot_potential_free_eindir, rgpot_potential_new_eindir};
+use rgpot_core::eindir::{
+    rgpot_eindir_abi_compatible, rgpot_eindir_abi_stamp, rgpot_potential_free_eindir,
+    rgpot_potential_new_eindir,
+};
 use rgpot_core::status::rgpot_status_t;
 use rgpot_core::tensor::rgpot_tensor_owned_cpu_f64_2d;
 use rgpot_core::types::{rgpot_force_input_t, rgpot_force_out_t};
@@ -101,6 +104,10 @@ fn minimize_rgpot_with_anneal(
     assert!(!pot.is_null(), "rgpot potential construction failed");
 
     let result = {
+        let abi = rgpot_eindir_abi_stamp();
+        assert_eq!(abi.abi_major, 1);
+        assert_eq!(unsafe { rgpot_eindir_abi_compatible(&abi) }, 1);
+
         // 2. Zero-cost IS-A cast + eindir Rust view over the C objective.
         let obj_ptr = pot as *mut eindir_objective_t;
         let objective = unsafe { EindirObjectiveWrapper::new(&*obj_ptr) };
