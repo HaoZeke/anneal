@@ -8,7 +8,7 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --output=slurm.%j.out
 # LJ98 occupancy. Paper budget 4e6, hop 60000, 48 replicas.
-# Binary must print occupancy min families and Refuse or gt stop leftover-well.
+# Binary must print occupancy min families and Refuse or gt stop packing.
 set -euo pipefail
 export SLURM_CONF=/etc/slurm-llnl/slurm.conf
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
@@ -41,8 +41,8 @@ for symbol in different_decaf_family "occupancy leave archive hole" CATALOG_BRAI
     exit 2
   fi
 done
-if ! grep -a -F -q "Refuse" "$LJ_BIN" && ! grep -a -F -q "gt stop leftover-well" "$LJ_BIN"; then
-  echo "refusing: $LJ_BIN missing Refuse/gt stop leftover-well" >&2
+if ! grep -a -F -q "Refuse" "$LJ_BIN" && ! grep -a -F -q "gt stop packing" "$LJ_BIN"; then
+  echo "refusing: $LJ_BIN missing Refuse/gt stop packing" >&2
   exit 2
 fi
 RADIUS=$(python3 -c "import json; print(json.load(open(\"$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj98.json\"))[\"census_radius\"])")

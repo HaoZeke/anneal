@@ -29,7 +29,7 @@ use crate::catalog::{
     GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, MixingEvidence, PackingBook, PackingRole,
     QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig,
     WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_arrivals_saturated, leftover_lambda, occupancy_min_families, occupant_rhat,
+    leftover_lambda, occupancy_min_families, occupant_rhat,
     packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
@@ -1054,7 +1054,7 @@ fn apply_request(
                         .values()
                         .map(|candidate| candidate.coordinates.as_slice()),
                 ) as u32,
-                packing_saturated: packing_and_leftover_saturated(scientific),
+                packing_saturated: packing_census_saturated(scientific),
             });
             report_occupancy_gt(scientific);
         }
@@ -2538,15 +2538,13 @@ fn sparsest_family_entry<R: rand::Rng + ?Sized>(
     elites.get(&chosen).map(|(_, slot, _)| (chosen, *slot))
 }
 
-fn packing_and_leftover_saturated(scientific: &ScientificState) -> bool {
-    // Coverage is not a stopping criterion here and gating on it was a
-    // mistake. Its denominator is the cells opened so far, which grows
-    // as the archive radius anneals down, so coverage falls over a run
-    // whether or not the search is still finding anything and a gate
-    // below a fixed fraction becomes harder to clear the longer a
-    // campaign runs. A wave could refuse to stop for good.
+fn packing_census_saturated(scientific: &ScientificState) -> bool {
+    // Packing Good--Turing is the certificate. Leftover-SOAP arrivals
+    // keep hatching wells if the walk continues; that grain is the
+    // hole generator, not the stop. Coverage is not a stopping
+    // criterion either: its denominator grows as the archive radius
+    // anneals down.
     scientific.packing.families_saturated()
-        && leftover_arrivals_saturated(scientific.leftover_arrivals.values().copied())
 }
 
 fn report_occupancy_gt(scientific: &mut ScientificState) {
@@ -2561,7 +2559,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let min_families = occupancy_min_families() as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.saturated();
-    let stop = leftover_sat && packing_sat && families >= min_families;
+    let stop = packing_sat && families >= min_families;
     let key = (
         leftover.n,
         leftover.n1,
