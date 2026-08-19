@@ -134,13 +134,15 @@ fn energy_tie_is_not_uniquely_deepest() {
 }
 
 #[test]
-fn occupant_rhat_of_an_off_family_prefix_is_not_a_floor_certificate() {
-    let mut prefix_then_floor = vec![-170.0; 8];
-    prefix_then_floor.extend(constant(-173.252378, 16));
-    let rhat = occupant_rhat(&[prefix_then_floor.clone(), prefix_then_floor]);
+fn occupant_rhat_cannot_drop_an_off_family_prefix() {
+    let mut prefix_then_sibling = constant(-173.252378, 16);
+    prefix_then_sibling.push(-170.0);
     assert!(
-        !mixed(rhat),
-        "energy recorded on another packing is not occupant mixing of the floor"
+        mixed(occupant_rhat(&[
+            prefix_then_sibling.clone(),
+            prefix_then_sibling
+        ])),
+        "16 ico samples plus one sibling quench look mixed; the prefix must be dropped before occupant_rhat"
     );
 }
 
