@@ -21,7 +21,7 @@ fn fermi(x: f64) -> f64 {
 /// Bennett 1976 self-consistent free-energy estimator.
 ///
 /// Given samples from ensembles `A` and `B`, `du_a` is `U_B - U_A` at points
-/// sampled from A, while `du_b` is `U_A - U_B` at points sampled from B.
+/// sampled from A, while `du_b` is `U_B - U_A` at points sampled from B.
 /// The implementation multiplies these by `beta_a` and `beta_b`, respectively.
 /// This raw-difference representation is exact for a shared energy scale; for
 /// arbitrary reduced potentials, callers must construct the reduced
@@ -32,7 +32,7 @@ fn fermi(x: f64) -> f64 {
 pub struct BarEstimator {
     /// Samples of `U_B - U_A` evaluated at points drawn from A.
     pub du_a: Vec<f64>,
-    /// Samples of `U_A - U_B` evaluated at points drawn from B.
+    /// Samples of `U_B - U_A` evaluated at points drawn from B.
     pub du_b: Vec<f64>,
     /// Inverse temperature multiplying the A-side difference.
     pub beta_a: f64,
@@ -51,11 +51,11 @@ impl BarEstimator {
         }
     }
 
-    /// Returns `g(C) = sum_A f(beta_a * du_a - C) - sum_B f(beta_b * du_b + C)`.
+    /// Returns `g(C) = sum_A f(beta_a * du_a - C) - sum_B f(-beta_b * du_b + C)`.
     /// The BAR root is at `g(C) = 0`.
     fn root_residual(&self, c: f64) -> f64 {
         let lhs: f64 = self.du_a.iter().map(|du| fermi(self.beta_a * du - c)).sum();
-        let rhs: f64 = self.du_b.iter().map(|du| fermi(self.beta_b * du + c)).sum();
+        let rhs: f64 = self.du_b.iter().map(|du| fermi(-self.beta_b * du + c)).sum();
         lhs - rhs
     }
 
@@ -121,7 +121,7 @@ impl BarEstimator {
         let f_b: Vec<f64> = self
             .du_b
             .iter()
-            .map(|du| fermi(self.beta_b * du + c))
+            .map(|du| fermi(-self.beta_b * du + c))
             .collect();
         let mean_a: f64 = f_a.iter().sum::<f64>() / n_a;
         let mean_b: f64 = f_b.iter().sum::<f64>() / n_b;
@@ -163,7 +163,7 @@ mod tests {
             .collect();
         let du_b: Vec<f64> = xs_b
             .iter()
-            .map(|&x| 0.5 * (x / sigma_a).powi(2) - 0.5 * (x / sigma_b).powi(2))
+            .map(|&x| 0.5 * (x / sigma_b).powi(2) - 0.5 * (x / sigma_a).powi(2))
             .collect();
 
         let bar = BarEstimator::new(du_a, du_b, beta, beta);
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn bar_recovers_a_constant_reduced_energy_shift() {
         let shift = 2.5_f64;
-        let bar = BarEstimator::new(vec![shift; 64], vec![-shift; 64], 1.0, 1.0);
+        let bar = BarEstimator::new(vec![shift; 64], vec![shift; 64], 1.0, 1.0);
         let (_c, delta_f) = bar.solve();
         assert!((delta_f - shift).abs() < 1e-12);
     }
