@@ -2784,28 +2784,46 @@ def q_grid_bounds(dim, priors=None):
 
 
 def _pilot_t_hot_from_acceptance(pilot_obs, t_cold):
-    """Data-driven t_hot from the pilot's acceptance distribution.
+    """Invert a pilot empirical boundary-swap acceptance target.
 
-    Picks t_hot as the median t_init among pilot draws whose accept
-    rate sits in the upper quartile of all pilot accept rates -- i.e.,
-    the typical "this temperature is hot enough to mix freely" regime
-    inferred from the data. Eliminates the 0.95 quantile heuristic
-    (issue 008) without introducing a different arbitrary scalar:
-    the upper-quartile cut and the median selection are both
-    distribution-free.
+    Pilot best values provide an empirical low/high energy contrast. The
+    approximation uses their first and third quartiles and solves
 
-    Falls back to 2 * t_cold (a conservative lower bound for any
-    non-trivial PT ladder) if no pilot draw falls in the upper
-    quartile -- which can happen when all draws have similar
-    acceptance."""
-    accs = np.array([o["accept_rate"] for o in pilot_obs], dtype=float)
-    if len(accs) < 4:
-        return max(2.0 * t_cold, 1e-3)
-    q75 = float(np.quantile(accs, 0.75))
-    high_accept_t = [o["t_init"] for o in pilot_obs if o["accept_rate"] >= q75]
-    if not high_accept_t:
-        return max(2.0 * t_cold, 1e-3)
-    return float(np.median(high_accept_t))
+        exp((1/t_cold - 1/t_hot) * (F_low - F_hot)) = 0.234
+
+    by bisection. A ladder wider than the observed contrast is not justified,
+    so the upper bracket is returned when the target is unattainable.
+    """
+    t_cold = max(float(t_cold), 1e-12)
+    values = np.asarray(
+        [o["best_val"] for o in pilot_obs if np.isfinite(o["best_val"])],
+        dtype=float,
+    )
+    if values.size < 2:
+        return 2.0 * t_cold
+    f_low, f_hot = np.quantile(values, [0.25, 0.75])
+    delta_f = float(f_low - f_hot)
+    if delta_f >= 0.0:
+        return 2.0 * t_cold
+
+    target = 0.234
+
+    def predicted_acceptance(t_hot):
+        return float(np.exp((1.0 / t_cold - 1.0 / t_hot) * delta_f))
+
+    lo = t_cold
+    hi = max(2.0 * t_cold, t_cold + 1.0)
+    while predicted_acceptance(hi) > target and hi < 1e12 * t_cold:
+        hi *= 2.0
+    if predicted_acceptance(hi) > target:
+        return hi
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if predicted_acceptance(mid) > target:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 def bgsa_smc_ensemble(

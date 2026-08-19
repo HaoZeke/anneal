@@ -9,6 +9,7 @@ from experiments.scripts.demo_bgsa import (
     metad_gamma_from_qv,
     pmsa_metad,
     select_bgsa_driver,
+    _pilot_t_hot_from_acceptance,
     smc_pt_log_z_estimator,
 )
 
@@ -88,6 +89,13 @@ def test_driver_selector_uses_gradient_sensitivity_ratio():
     assert select_bgsa_driver(
         {"grad_sens": 0.2, "sigma_sens": 0.1, "best_val_cv": 0.5}, 1.1
     ) == "bgsa_metad"
+
+
+def test_hot_temperature_inverts_empirical_swap_acceptance_target():
+    observations = [{"best_val": value} for value in (0.0, 0.0, 10.0, 10.0)]
+    hot = _pilot_t_hot_from_acceptance(observations, 1.0)
+    predicted = np.exp((1.0 - 1.0 / hot) * (0.0 - 10.0))
+    assert np.isclose(predicted, 0.234, rtol=1e-6)
 
 
 def test_tierney_kadane_correction_has_the_cubic_posterior_coefficient():
