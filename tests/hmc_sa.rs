@@ -143,6 +143,21 @@ fn hmc_sampler_can_start_from_supplied_position() {
 }
 
 #[test]
+fn hmc_sampler_clips_an_out_of_bounds_initial_position() {
+    let obj = StybTang2D::new();
+    let grad = FiniteDiffGradient::new(StybTang2D::new());
+    let cool = LogCool::new(5.0_f64, 2.0);
+    let integrator = OmelyanIntegrator::new(0.05, 5, 5.0);
+    let sampler = HmcSaSampler::new(obj, grad, cool, integrator)
+        .with_initial_pos(Array1::from_vec(vec![9.0, -9.0]));
+    let mut rng = rand::rngs::StdRng::seed_from_u64(4);
+
+    let state = sampler.initial_state(&mut rng);
+
+    assert_eq!(state.cur.pos.to_vec(), vec![5.0, -5.0]);
+}
+
+#[test]
 fn omelyan_integrator_uses_three_force_stages_per_step() {
     let grad = CountingZeroGradient::new(2);
     let integrator = OmelyanIntegrator::new(0.01, 1, 1.0);
