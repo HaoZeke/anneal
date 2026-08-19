@@ -1822,15 +1822,15 @@ def trajectory_inla_diagnostic(traj_vals):
     trajectory-INLA. Approximates the chain trajectory as an AR(1)
     latent field with sparse precision matrix Q (tridiagonal). Fits
     phi (the AR(1) coefficient) and sigma_eps (innovation SD), then
-    computes the diagonal of Q^{-1} via the Cholesky-then-Takahashi
-    recursion; the diagonal entries are the per-step marginal
-    variances sigma_t^2.
+    computes the stationary AR(1) marginal variance from the fitted
+    innovation scale. The finite-chain precision has endpoint variances
+    that are structurally different from interior values, so those endpoint
+    effects are not used as non-stationarity flags.
 
-    Returns (phi, sigma_eps, sigma_t_array, flags) where flags[t] is
-    True for any t whose sigma_t^2 deviates from the chain-mean
-    sigma^2 by > 3 standard deviations (the within-chain stationarity
-    test). Catches non-stationarity in a single chain at no extra
-    sampling cost.
+    Returns (phi, sigma_eps, sigma_t_array, flags) where flags[t] marks a
+    rolling local-mean departure from the global mean using a correlation-
+    adjusted three-standard-error threshold. Catches sustained mean shifts
+    without mistaking AR precision boundary effects for non-stationarity.
 
     References: Rue/Martino/Chopin 2009 INLA
     (doi:10.1111/j.1467-9868.2008.00700.x); Roberts/Rosenthal 2007
@@ -1853,39 +1853,37 @@ def trajectory_inla_diagnostic(traj_vals):
     if sigma_eps <= 0:
         sigma_eps = 1.0
 
-    # Tridiagonal precision matrix for AR(1):
-    #   Q[0,0] = 1/(sigma_eps^2 (1 - phi^2)) (stationary boundary)
-    #   Q[t,t] = (1 + phi^2) / sigma_eps^2 for interior
-    #   Q[t,t+1] = Q[t+1,t] = -phi / sigma_eps^2
-    # Marginal sigma_t^2 = (Q^{-1})_{tt}, computed via Takahashi
-    # recursion in O(n).
-    var_eps = sigma_eps * sigma_eps
-    diag = np.full(n, (1.0 + phi * phi) / var_eps)
-    diag[0] = 1.0 / max(var_eps * (1.0 - phi * phi), 1e-30)
-    diag[-1] = 1.0 / var_eps
-    off = np.full(n - 1, -phi / var_eps)
+    stationary_sd = sigma_eps / np.sqrt(max(1.0 - phi * phi, 1e-12))
+    sigma_t = np.full(n, stationary_sd)
 
-    # Cholesky of tridiagonal Q: lower bidiagonal L with diag d, off e.
-    d = np.empty(n)
-    e = np.empty(n - 1)
-    d[0] = np.sqrt(max(diag[0], 1e-30))
-    for t in range(1, n):
-        e[t - 1] = off[t - 1] / d[t - 1]
-        d[t] = np.sqrt(max(diag[t] - e[t - 1] ** 2, 1e-30))
-
-    # Takahashi recursion to extract diag(Q^{-1}) in O(n).
-    sigma2 = np.empty(n)
-    sigma2[-1] = 1.0 / (d[-1] ** 2)
-    for t in range(n - 2, -1, -1):
-        sigma2[t] = 1.0 / (d[t] ** 2) + (e[t] ** 2) * sigma2[t + 1]
-
-    sigma_t = np.sqrt(np.maximum(sigma2, 0.0))
-    mean_st = float(np.mean(sigma_t))
-    std_st = float(np.std(sigma_t)) if len(sigma_t) > 1 else 0.0
-    if std_st <= 0:
-        flags = np.zeros(n, dtype=bool)
-    else:
-        flags = np.abs(sigma_t - mean_st) > 3.0 * std_st
+    window = max(5, min(50, n // 10))
+    prefix = np.concatenate(([0.0], np.cumsum(arr)))
+    rolling_mean = (prefix[window:] - prefix[:-window]) / window
+    center = float(np.mean(arr))
+    differences = np.diff(arr)
+    diff_center = float(np.median(differences))
+    innovation_sd = float(
+        np.median(np.abs(differences - diff_center))
+        / (0.6744897501960817 * np.sqrt(2.0))
+    )
+    if not np.isfinite(innovation_sd) or innovation_sd <= 0.0:
+        innovation_sd = stationary_sd
+    corr = min(abs(phi), 0.8)
+    correlation_factor = np.sqrt((1.0 + corr) / (1.0 - corr))
+    mean_scale = max(stationary_sd, innovation_sd) * correlation_factor
+    mean_se = mean_scale / np.sqrt(window)
+    flags = np.zeros(n, dtype=bool)
+    local_flags = np.abs(rolling_mean - center) > 3.0 * max(mean_se, 1e-12)
+    for start, flagged in enumerate(local_flags):
+        if flagged:
+            flags[start : start + window] = True
+    midpoint = n // 2
+    if midpoint >= window:
+        first_mean = float(np.mean(arr[:midpoint]))
+        second_mean = float(np.mean(arr[midpoint:]))
+        split_se = mean_scale / np.sqrt(midpoint)
+        if abs(second_mean - first_mean) > 5.0 * max(split_se, 1e-12):
+            flags[midpoint:] = True
     return phi, sigma_eps, sigma_t, flags
 
 
