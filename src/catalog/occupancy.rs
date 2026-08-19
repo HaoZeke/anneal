@@ -444,7 +444,13 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
     }
     let mut y = vec![[0.0; 2]; n];
     for k in 0..2 {
-        let mut v = vec![1.0 / nf.sqrt(); n];
+        let mut v: Vec<f64> = (0..n)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let norm0 = v.iter().map(|z| z * z).sum::<f64>().sqrt().max(1e-15);
+        for z in &mut v {
+            *z /= norm0;
+        }
         if k == 1 {
             let prev: f64 = v.iter().zip(y.iter()).map(|(a, row)| a * row[0]).sum();
             for i in 0..n {
