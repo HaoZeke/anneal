@@ -62,6 +62,8 @@ pub mod bias;
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
+/// Versioned objective bridge compatibility descriptors.
+pub mod compatibility;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
 /// Pure cooperative-catalog policy and target-free proposals.
@@ -144,6 +146,8 @@ pub mod replica_exchange;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
 pub mod runner;
+/// Deterministic provenance records for engine-backed runs.
+pub mod run_manifest;
 /// Run-time distributions: what a search's time to target supports.
 pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.

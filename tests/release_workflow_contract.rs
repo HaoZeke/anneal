@@ -12,7 +12,7 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let workflow = include_str!("../.github/workflows/ci.yml");
 
     assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git ="));
-    assert!(manifest.contains("rev = \"75896909589cb595a251271851e7c31bc6a9936e\""));
+    assert!(manifest.contains("rev = \"0ef9cfb\""));
     assert!(workflow.contains("cargo publish --dry-run"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
 }
