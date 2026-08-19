@@ -29,7 +29,8 @@ use crate::catalog::{
     GoodTuringSample, INTERFACE_HORIZON, InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence,
     PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR, SystemSignature, ValidatedCandidate,
     ValidatorConfig, WalkRecord, euclidean_gradient_norm, explore_must_leave, invert_mixing,
-    leftover_lambda, occupancy_ei_exhausted, occupancy_min_families, occupant_rhat,
+    leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor, occupancy_min_families,
+    DEFAULT_MIN_OCCUPIED_FAMILIES, occupant_rhat,
     packing_fingerprint, packing_role, promote_one_sided, prune, retis_exchange_adjacent,
     same_packing, seat_extras,
 };
@@ -2612,6 +2613,20 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise)
 }
 
+fn occupancy_floor(scientific: &ScientificState) -> usize {
+    if std::env::var("CATALOG_MIN_FAMILIES").is_ok() {
+        return occupancy_min_families();
+    }
+    match scientific.landscape.spectral_split() {
+        Ok(split) => occupancy_family_floor(
+            Some(split.conductance),
+            split.left.len(),
+            split.right.len(),
+        ),
+        Err(_) => DEFAULT_MIN_OCCUPIED_FAMILIES,
+    }
+}
+
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
     if leftover.saturated() {
@@ -2636,7 +2651,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
             .values()
             .map(|candidate| candidate.coordinates.as_slice()),
     ) as u32;
-    let min_families = occupancy_min_families() as u32;
+    let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.saturated();
     let stop = packing_sat && families >= min_families;
