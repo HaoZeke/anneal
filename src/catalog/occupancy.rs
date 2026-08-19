@@ -63,9 +63,9 @@
 //! certified and that packing census is saturated and leftover SOAP
 //! has dwelt under the unseen-mass ceiling and FunnelModel EI on
 //! the seen packings is exhausted and the rematched
-//! family floor is met. [`occupancy_min_families`]
-//! (`CATALOG_MIN_FAMILIES`) is the floor so a known two-funnel hurdle
-//! does not stop on one packing. Default 1 is Good--Turing alone.
+//! family floor is met. The floor is the landscape Fiedler split
+//! (two weakly coupled hop-graph communities), not a named two-funnel
+//! prior. `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
 //! on two random-start families are not a certificate.
@@ -196,11 +196,32 @@ pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
 }
 
 /// Default floor on rematched occupied families. `1` is Good--Turing
-/// alone: stop when no new packings appear. Set
-/// `CATALOG_MIN_FAMILIES=2` for two-funnel paper hurdles.
+/// alone: stop when no new packings appear.
 pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 1;
 
-/// User floor on occupied DECAF families before saturation retires.
+/// Same seam as `commission_bridge`: conductance below this is two
+/// weakly coupled communities of the explored landscape.
+pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
+
+/// Family floor from the landscape Fiedler split.
+///
+/// DECAF counts packings. Superbasin merge is leftover-SOAP wells of
+/// one packing. The spectral split is how many weakly coupled
+/// communities the hop graph actually has. A one-sided or well-mixed
+/// graph is one community. `CATALOG_MIN_FAMILIES` remains an override.
+pub fn occupancy_family_floor(
+    conductance: Option<f64>,
+    n_left: usize,
+    n_right: usize,
+) -> usize {
+    match conductance {
+        Some(c) if c < OCCUPANCY_SEAM_CONDUCTANCE && n_left > 0 && n_right > 0 => 2,
+        _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
+    }
+}
+
+/// Occupied-family floor. Spectral split unless `CATALOG_MIN_FAMILIES`
+/// is set.
 pub fn occupancy_min_families() -> usize {
     std::env::var("CATALOG_MIN_FAMILIES")
         .ok()
@@ -602,6 +623,7 @@ mod tests {
         OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble,
         interface_ladder, is_occupancy_leave_action, leave_shot_accepted, leftover_lambda,
         leftover_sat_dwell, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
+        occupancy_family_floor, OCCUPANCY_SEAM_CONDUCTANCE,
         occupancy_leave_adopt, occupancy_leave_target, occupancy_retire, occupancy_retire_at,
         packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
         retis_should_swap, seat_extras,
@@ -920,6 +942,18 @@ mod tests {
         assert!(occupancy_ei_exhausted(0.0, 3, 1e-2));
         assert!(occupancy_ei_exhausted(1e-2, 3, 1e-2));
         assert!(!occupancy_ei_exhausted(f64::INFINITY, 3, 1e-2));
+    }
+
+    #[test]
+    fn spectral_seam_is_two_communities_otherwise_one() {
+        assert_eq!(occupancy_family_floor(None, 0, 0), 1);
+        assert_eq!(occupancy_family_floor(Some(0.2), 4, 5), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), 4, 0), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5), 2);
+        assert_eq!(
+            occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), 4, 5),
+            1
+        );
     }
 
     #[test]
