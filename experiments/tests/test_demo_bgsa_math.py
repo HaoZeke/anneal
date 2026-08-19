@@ -5,6 +5,7 @@ from experiments.scripts.demo_bgsa import (
     _log_pseudo_marginal_weight,
     continuous_time_tempering,
     _laplace_third_moment_correction,
+    trajectory_inla_diagnostic,
     metad_gamma_from_qv,
     pmsa_metad,
     smc_pt_log_z_estimator,
@@ -85,3 +86,22 @@ def test_tierney_kadane_correction_has_the_cubic_posterior_coefficient():
 
     shift = _laplace_third_moment_correction(nll, [0.0], h=1e-3)[0]
     assert np.isclose(shift, -cubic / 2.0, rtol=1e-4)
+
+
+def test_trajectory_diagnostic_does_not_flag_stationary_ar_endpoints():
+    rng = np.random.default_rng(4)
+    trajectory = np.zeros(2000)
+    for i in range(1, len(trajectory)):
+        trajectory[i] = 0.8 * trajectory[i - 1] + rng.normal()
+    phi, _, sigma_t, flags = trajectory_inla_diagnostic(trajectory)
+    assert 0.7 < phi < 0.9
+    assert np.allclose(sigma_t, sigma_t[0])
+    assert flags.sum() < 100
+
+
+def test_trajectory_diagnostic_flags_a_sustained_mean_shift():
+    rng = np.random.default_rng(5)
+    trajectory = rng.normal(size=1000)
+    trajectory[500:] += 8.0
+    _, _, _, flags = trajectory_inla_diagnostic(trajectory)
+    assert flags[500:].sum() > 300
