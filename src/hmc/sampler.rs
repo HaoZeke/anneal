@@ -108,6 +108,7 @@ where
         let pos = self
             .initial_pos
             .clone()
+            .map(|pos| self.obj.bounds().clip(pos.view()))
             .unwrap_or_else(|| self.obj.bounds().mkpoint(rng));
         let val = self.obj.eval(pos.view());
         let pair = FPair { pos, val };
@@ -139,6 +140,7 @@ where
         let u0 = state.cur.val;
 
         let obj = &self.obj;
+        let bounds = obj.bounds();
         let result = self.integrator.evolve(
             x0,
             p0,
@@ -146,7 +148,14 @@ where
             temp,
             &self.gradient,
             &self.momentum,
-            &|x: &ndarray::Array1<f64>| obj.eval(ArrayView1::from(x.as_slice().unwrap())),
+            &|x: &ndarray::Array1<f64>| {
+                let view = ArrayView1::from(x.as_slice().unwrap());
+                if bounds.contains(view) {
+                    obj.eval(view)
+                } else {
+                    f64::INFINITY
+                }
+            },
         );
 
         if result.diverged {
