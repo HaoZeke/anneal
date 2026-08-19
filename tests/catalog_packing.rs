@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
-    different_decaf_family, occupancy_retire_at, packing_distance, packing_fingerprint,
-    same_packing, OccupancyCertificate, PackingBook, PACKING_MERGE, PACKING_MOVE_EPS,
+    different_decaf_family, occupancy_landfold_floor, occupancy_retire_at, packing_distance,
+    packing_fingerprint, same_packing, OccupancyCertificate, PackingBook, PACKING_MERGE,
+    PACKING_MOVE_EPS,
 };
 use ndarray::Array1;
 
@@ -148,6 +149,49 @@ fn packing_good_turing_uses_the_census_production_floor() {
     assert_eq!(
         book.occupied_among([ico.as_slice().unwrap(), ico.as_slice().unwrap()]),
         1
+    );
+}
+
+#[test]
+fn landfold_floor_separates_lj38_oh_from_ico() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut book = PackingBook::default();
+    let ico_h = {
+        book.observe(ico.as_slice().unwrap()).unwrap();
+        book.histogram(ico.as_slice().unwrap()).unwrap()
+    };
+    let oh_h = {
+        book.observe(oh.as_slice().unwrap()).unwrap();
+        book.histogram(oh.as_slice().unwrap()).unwrap()
+    };
+    let ico_f = book.family_of(&ico_h).unwrap();
+    let oh_f = book.family_of(&oh_h).unwrap();
+    assert_ne!(ico_f, oh_f);
+    assert_eq!(
+        occupancy_landfold_floor(&[ico_h.clone(), ico_h, oh_h], &[ico_f, ico_f, oh_f]),
+        2,
+        "Torgerson of DECAF L1 must split Oh from leftover ico"
+    );
+}
+
+#[test]
+fn landfold_floor_does_not_split_leftover_ico() {
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let mut book = PackingBook::default();
+    let h = {
+        book.observe(ico.as_slice().unwrap()).unwrap();
+        book.histogram(ico.as_slice().unwrap()).unwrap()
+    };
+    let family = book.family_of(&h).unwrap();
+    let mut nudged = ico.clone();
+    nudged[0] += 0.2;
+    let h2 = book.histogram(nudged.as_slice().unwrap()).unwrap();
+    assert_eq!(book.family_of(&h2), Some(family));
+    assert_eq!(
+        occupancy_landfold_floor(&[h, h2], &[family, family]),
+        1,
+        "leftover ico wells of one packing are one landfold community"
     );
 }
 
