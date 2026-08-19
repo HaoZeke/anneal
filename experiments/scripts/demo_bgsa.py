@@ -1589,6 +1589,14 @@ def make_noisy_objective(noise_sigma):
     return noisy, lambda: counter[0]
 
 
+def _log_pseudo_marginal_weight(f_mean, temperature, sigma_F, n_eval_per_step):
+    """Log of the positive unbiased Boltzmann-weight estimator."""
+    variance_correction = sigma_F * sigma_F / (
+        2.0 * n_eval_per_step * temperature * temperature
+    )
+    return -f_mean / temperature - variance_correction
+
+
 def pmsa_metad(
     seed,
     n_epochs,
@@ -1607,11 +1615,16 @@ def pmsa_metad(
 ):
     """Issue 004 -- pseudo-marginal SA + MetaD for noisy F.
 
-    Andrieu & Roberts 2009 PM-MH (doi:10.1214/07-AOS574): replace
-    F(x) with an unbiased estimator F_hat(x) = mean(noisy_fn(x) over
-    n_eval_per_step repeats). The acceptance ratio under F_hat targets
-    the same posterior as under exact F, asymptotically as
-    n_eval -> infinity.
+    Andrieu & Roberts 2009 PM-MH (doi:10.1214/07-AOS574): use a positive
+    unbiased estimator of the Boltzmann target, not an unbiased estimator
+    of the energy. For Gaussian observations with known standard deviation
+    ``sigma_F``, the mean of ``n_eval_per_step`` observations gives
+
+        E[exp(-mean(F_hat) / T - sigma_F^2 / (2 n T^2))] = exp(-F / T).
+
+    The auxiliary estimate is accepted with the ordinary Metropolis ratio.
+    Tsallis acceptance does not preserve this pseudo-marginal target, so
+    ``q_a`` must be one; ``q_v`` remains the visiting/cooling parameter.
 
     For finite n_eval, the chain stationary distribution sits in a
     sigma_F^2 / n_eval neighbourhood of the noiseless target
@@ -1631,7 +1644,13 @@ def pmsa_metad(
     from metad_helpers import WellTemperedBias
 
     if q_a is None:
-        q_a = q_v
+        q_a = 1.0
+    if not np.isclose(q_a, 1.0):
+        raise ValueError("pseudo-marginal acceptance requires q_a == 1")
+    if sigma_F < 0.0 or not np.isfinite(sigma_F):
+        raise ValueError("sigma_F must be finite and non-negative")
+    if n_eval_per_step < 1:
+        raise ValueError("n_eval_per_step must be positive")
     rng = np.random.default_rng(seed)
     bias = WellTemperedBias(
         LOW, HIGH, sigma=metad_sigma, w0=metad_w0, gamma=metad_gamma
@@ -1640,6 +1659,11 @@ def pmsa_metad(
     def f_hat(x):
         return float(np.mean([noisy_fn(x) for _ in range(n_eval_per_step)]))
 
+    def log_target_estimate(f_mean, temperature, bias_value):
+        return _log_pseudo_marginal_weight(
+            f_mean, temperature, sigma_F, n_eval_per_step
+        ) - bias_value / temperature
+
     cur = low_discrepancy_init(rng, 1, LOW, HIGH)[0]
     cur_v = f_hat(cur)
     best = cur_v
@@ -1647,14 +1671,19 @@ def pmsa_metad(
     accept_count = 0
     for epoch in range(n_epochs):
         T = tsallis_cool(t_init, q_v, epoch)
-        q_a_eff = 1.0 + (q_a - 1.0) * T / max(t_init, 1e-12)
         for _ in range(k_inner):
             prop = np.clip(gaussian_propose(rng, cur, sigma_rw), LOW, HIGH)
             pv = f_hat(prop)
             n_calls += n_eval_per_step
-            cur_aug = cur_v + bias.potential(bias.cv(cur))
-            prop_aug = pv + bias.potential(bias.cv(prop))
-            if rng.random() < tsallis_accept_prob(prop_aug - cur_aug, T, q_a_eff):
+            cur_log_target = log_target_estimate(
+                cur_v, T, bias.potential(bias.cv(cur))
+            )
+            prop_log_target = log_target_estimate(
+                pv, T, bias.potential(bias.cv(prop))
+            )
+            if rng.random() < _log_accept_probability(
+                prop_log_target - cur_log_target
+            ):
                 cur, cur_v = prop, pv
                 accept_count += 1
                 if pv < best:
