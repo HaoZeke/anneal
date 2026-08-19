@@ -62,23 +62,48 @@ impl BarEstimator {
     /// Solves the BAR self-consistency by bisection. Returns the root
     /// `C` and the corresponding `Delta F = C - log(N_A / N_B)`.
     pub fn solve(&self) -> (f64, f64) {
-        let n_a = self.du_a.len() as f64;
-        let n_b = self.du_b.len() as f64;
-        // Initial bracket from a coarse sweep.
-        let mut lo = -50.0;
-        let mut hi = 50.0;
-        for _ in 0..80 {
+        let n_a = self.du_a.len();
+        let n_b = self.du_b.len();
+        if n_a == 0
+            || n_b == 0
+            || !(self.beta_a.is_finite() && self.beta_a > 0.0)
+            || !(self.beta_b.is_finite() && self.beta_b > 0.0)
+            || self.du_a.iter().any(|x| !x.is_finite())
+            || self.du_b.iter().any(|x| !x.is_finite())
+        {
+            return (f64::NAN, f64::NAN);
+        }
+
+        // The residual is monotone increasing in C. Expand from a finite
+        // central bracket so saturated Fermi tails cannot choose a false
+        // sign, then bisect only after both endpoint signs are established.
+        let mut lo = -1.0;
+        let mut hi = 1.0;
+        for _ in 0..100 {
+            if self.root_residual(lo) <= 0.0 {
+                break;
+            }
+            lo *= 2.0;
+        }
+        for _ in 0..100 {
+            if self.root_residual(hi) >= 0.0 {
+                break;
+            }
+            hi *= 2.0;
+        }
+        if self.root_residual(lo) > 0.0 || self.root_residual(hi) < 0.0 {
+            return (f64::NAN, f64::NAN);
+        }
+        for _ in 0..100 {
             let mid = 0.5 * (lo + hi);
-            let r_mid = self.root_residual(mid);
-            let r_lo = self.root_residual(lo);
-            if r_lo * r_mid <= 0.0 {
+            if self.root_residual(mid) > 0.0 {
                 hi = mid;
             } else {
                 lo = mid;
             }
         }
         let c = 0.5 * (lo + hi);
-        let delta_f = c - (n_a / n_b).ln();
+        let delta_f = c - (n_a as f64 / n_b as f64).ln();
         (c, delta_f)
     }
 
