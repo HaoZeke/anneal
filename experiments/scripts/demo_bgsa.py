@@ -926,7 +926,7 @@ def _laplace_third_moment_correction(nll_fn, params_map, h=0.05):
     derivative of the negative log posterior at the MAP via central
     differences, then return a skew-correction shift
 
-      delta_k = - (psi_kkk / psi_kk^2) / 6
+      delta_k = - psi_kkk / (2 psi_kk^2)
 
     where psi denotes derivatives of the NLL at the MAP. The shift
     catches asymmetry that basic Laplace ignores; on symmetric
@@ -958,7 +958,7 @@ def _laplace_third_moment_correction(nll_fn, params_map, h=0.05):
         if d2 <= 0:
             deltas.append(0.0)
             continue
-        deltas.append(-d3 / (6.0 * d2 * d2))
+        deltas.append(-d3 / (2.0 * d2 * d2))
     return deltas
 
 
