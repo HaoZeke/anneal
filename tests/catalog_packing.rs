@@ -247,6 +247,64 @@ fn landfold_floor_does_not_split_leftover_ico() {
     );
 }
 
+fn median_nn(x: &Array1<f64>) -> f64 {
+    let n = x.len() / 3;
+    let mut nn = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::INFINITY;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let mut d2 = 0.0;
+            for k in 0..3 {
+                let d = x[3 * i + k] - x[3 * j + k];
+                d2 += d * d;
+            }
+            best = best.min(d2.sqrt());
+        }
+        nn.push(best);
+    }
+    nn.sort_by(|a, b| a.total_cmp(b));
+    nn[n / 2]
+}
+
+fn rings(x: &Array1<f64>) -> (usize, usize, usize) {
+    let n = x.len() / 3;
+    let cutoff = 1.35 * median_nn(x);
+    anneal_core::structure::ring_profile(x.view(), n, cutoff)
+}
+
+#[test]
+fn primitive_rings_separate_packings_and_keep_leftover_ico() {
+    let ico38 = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh38 = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let ico75 = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks75 = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let r_ico38 = rings(&ico38);
+    let r_oh38 = rings(&oh38);
+    let r_ico75 = rings(&ico75);
+    let r_marks = rings(&marks75);
+    eprintln!("LJ38 ico rings {r_ico38:?} Oh {r_oh38:?}");
+    eprintln!("LJ75 ico rings {r_ico75:?} Marks {r_marks:?}");
+    assert_ne!(
+        r_ico38, r_oh38,
+        "LJ38 ico and Oh must differ in primitive 3/4/5 rings"
+    );
+    assert_ne!(
+        r_ico75, r_marks,
+        "LJ75 ico and Marks must differ in primitive 3/4/5 rings"
+    );
+    let mut nudged = ico38.clone();
+    nudged[0] += 0.2;
+    let r_left = rings(&nudged);
+    eprintln!("LJ38 leftover-ico rings {r_left:?}");
+    assert_eq!(
+        r_left, r_ico38,
+        "a leftover ico well must keep the ico ring profile"
+    );
+}
+
 #[test]
 fn leftover_waiver_uses_book_families_not_live_rematch() {
     let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
