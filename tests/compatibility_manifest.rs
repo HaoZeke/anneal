@@ -27,14 +27,17 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
 #[test]
 fn manifest_serialization_is_deterministic_and_verifies_artifacts() {
     let mut manifest = RunManifest::new("run-1", 42, 1000);
-    manifest.engine = EngineDescriptor::new(
+    let mut engine = EngineDescriptor::new(
         "rgpot",
         ProtocolVersion::new(1, 0),
         AbiStamp::anneal_default(),
     );
+    engine.build_identity = Some("rgpot-test@source-revision".to_owned());
+    manifest.engine = engine;
     manifest.add_artifact("input.xyz", b"H 0 0 0\n");
     let json = manifest.to_json().unwrap();
     assert_eq!(json, manifest.to_json().unwrap());
+    assert!(json.contains("rgpot-test@source-revision"));
     assert_eq!(manifest.artifacts[0].sha256, ArtifactDigest::of(b"H 0 0 0\n").sha256);
     assert!(manifest.verify_artifact("input.xyz", b"H 0 0 0\n").is_ok());
     assert!(manifest.verify_artifact("input.xyz", b"changed\n").is_err());

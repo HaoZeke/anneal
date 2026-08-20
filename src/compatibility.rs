@@ -58,6 +58,8 @@ pub struct EngineDescriptor {
     pub protocol: ProtocolVersion,
     /// Native bridge metadata.
     pub abi: AbiStamp,
+    /// Optional source or build identity supplied by the producer.
+    pub build_identity: Option<String>,
 }
 
 impl EngineDescriptor {
@@ -68,6 +70,7 @@ impl EngineDescriptor {
             protocol_family: PROTOCOL_FAMILY.to_owned(),
             protocol,
             abi,
+            build_identity: None,
         }
     }
 
@@ -78,7 +81,13 @@ impl EngineDescriptor {
         protocol: ProtocolVersion,
         abi: AbiStamp,
     ) -> Self {
-        Self { engine_id: engine_id.into(), protocol_family: protocol_family.into(), protocol, abi }
+        Self {
+            engine_id: engine_id.into(),
+            protocol_family: protocol_family.into(),
+            protocol,
+            abi,
+            build_identity: None,
+        }
     }
 
     /// Validate a producer against the requested protocol and bridge stamp.
