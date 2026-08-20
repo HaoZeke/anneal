@@ -209,7 +209,7 @@ jobs:
             echo "anneal-core ${ver} already on crates.io; nothing to upload."
             exit 0
           fi
-          cargo publish
+          cargo publish --locked
 
   github-release:
     name: GitHub Release
