@@ -34,7 +34,7 @@ mod tests {
         let stamp = eindir_core::ffi::eindir_abi_stamp_t {
             abi_major: 1,
             abi_minor: 2,
-            objective_layout: 2,
+            objective_layout: 3,
             objective_size: 64,
             objective_align: 8,
             dlpack_major: 1,
