@@ -47,7 +47,7 @@ dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
 # Sibling checkouts provide the local development surface; the Git revisions
 # are the reproducible source selected when this crate is consumed elsewhere.
 eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "091c6f7d6ea70821c3374152481fb9500e799af2", version = "0.6.0", features = ["capi"] }
-xtsci-optimize = { git = "https://github.com/HaoZeke/xtsci-optimize.git", rev = "d784953dfe7e2ef75f1dbe20130459e12436dcfd", version = "0.1.0" }
+xtsci-optimize = { git = "https://github.com/HaoZeke/xtsci-optimize.git", rev = "d7849538b85fa25a1118f9a22c379e311cb26a3c", version = "0.1.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
