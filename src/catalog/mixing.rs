@@ -69,13 +69,35 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
     (var_hat / w).sqrt()
 }
 
-/// MCMC mixing threshold. Below this, occupant chains have collapsed
-/// onto one attractor. For explore that is Leave. For an incumbent
-/// that is the sampled-mode certificate; a competitor, when present,
-/// must also mix and lose the occupancy contest.
-/// Gelman--Rubin 1992 conventional cut \(\hat R < 6/5\), equivalent
-/// to \(B/W < (11n+25)/25\) (`Hop.mixed_threshold_bw`).
-pub const MIXED_RHAT: f64 = 1.2;
+/// Vehtari split-\(\hat R\): each chain is cut in half, then
+/// [`rhat_series`] runs on the \(2m\) windows. Chains shorter than
+/// two [`CERTIFY_DRAWS_PER_HALF`] draws are dropped.
+pub fn rhat_split(chains: &[Vec<f64>]) -> f64 {
+    let min_half = CERTIFY_DRAWS_PER_HALF;
+    let usable: Vec<&[f64]> = chains
+        .iter()
+        .map(Vec::as_slice)
+        .filter(|chain| chain.len() >= 2 * min_half)
+        .collect();
+    // One chain split in half is not a mixing certificate: two
+    // halves of one constant walk have \(\hat R = 0\).
+    if usable.len() < 2 {
+        return f64::INFINITY;
+    }
+    let mut halves = Vec::new();
+    for chain in usable {
+        let mid = chain.len() / 2;
+        halves.push(chain[..mid].to_vec());
+        halves.push(chain[mid..].to_vec());
+    }
+    rhat_series(&halves)
+}
+
+/// Vehtari, Gelman, Simpson, Carpenter & Bürkner (2021),
+/// *Bayesian Anal.* 16:667-718: use the sample only if split
+/// \(\hat R<1.01\). Gelman & Rubin (1992) used 1.1; Brooks--Gelman
+/// \(6/5\) is the SI algebra identity, not the occupant cut.
+pub const MIXED_RHAT: f64 = 1.01;
 /// Occupant plus competitor, when a competitor is on file.
 pub const CERTIFY_CHAINS: usize = 2;
 /// Vehtari split-\(\hat R\) halves per chain.
@@ -94,17 +116,16 @@ pub fn mixed(rhat: f64) -> bool {
     rhat.is_finite() && rhat < MIXED_RHAT
 }
 
-/// Occupant \(\hat R\) for certification. Series shorter than
+/// Occupant split-\(\hat R\) for certification. Series shorter than
 /// [`CERTIFY_MIN_SAMPLES`] are dropped, so two-point quenches cannot
-/// certify. Explore-role collapse still uses [`rhat_series`] on the
-/// raw traces.
+/// certify. Explore-role collapse uses [`rhat_split`] on the raw traces.
 pub fn occupant_rhat(series: &[Vec<f64>]) -> f64 {
     let usable: Vec<Vec<f64>> = series
         .iter()
         .filter(|chain| chain.len() >= CERTIFY_MIN_SAMPLES)
         .cloned()
         .collect();
-    rhat_series(&usable)
+    rhat_split(&usable)
 }
 
 /// Occupancy and occupant mixing of one packing family or census basin.
@@ -166,7 +187,7 @@ pub fn certified_global_minimum(
 
 /// Explore-role chains have collapsed onto one attractor.
 pub fn explore_collapsed(explore_series: &[Vec<f64>]) -> bool {
-    mixed(rhat_series(explore_series))
+    mixed(rhat_split(explore_series))
 }
 
 /// Explore-role failure: mixed energy, or two or more assigned walks
