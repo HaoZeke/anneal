@@ -72,7 +72,7 @@ metatensor = { version = "=0.2.3", optional = true }
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"
 trybuild  = "1.0"
-readcon-core = "0.14"
+readcon-core = "=0.14.7"
 
 [build-dependencies]
 cbindgen = "0.29"
