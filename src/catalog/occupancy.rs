@@ -342,13 +342,24 @@ pub struct OccupancyFes {
 pub enum OccupancyFesError {
     /// A landfold coordinate is NaN or infinite.
     #[error("landfold point {index} is not finite")]
-    NonFinitePoint { index: usize },
+    NonFinitePoint {
+        /// Zero-based point index.
+        index: usize,
+    },
     /// A weight vector must have one entry per landfold point.
     #[error("weight count {weights} does not match point count {points}")]
-    WeightCountMismatch { points: usize, weights: usize },
+    WeightCountMismatch {
+        /// Number of landfold points.
+        points: usize,
+        /// Number of supplied weights.
+        weights: usize,
+    },
     /// Weights are finite and non-negative.
     #[error("landfold weight {index} is not finite and non-negative")]
-    InvalidWeight { index: usize },
+    InvalidWeight {
+        /// Zero-based weight index.
+        index: usize,
+    },
     /// A non-empty sample needs positive density mass.
     #[error("landfold sample has no positive weight")]
     NoPositiveWeight,
