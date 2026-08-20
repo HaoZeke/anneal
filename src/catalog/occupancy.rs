@@ -368,9 +368,10 @@ pub enum OccupancyFesError {
     MapUnavailable,
 }
 
-const FES_MEAN_SHIFT_ITERATIONS: usize = 128;
+const FES_MEAN_SHIFT_ITERATIONS: usize = 512;
 const FES_MEAN_SHIFT_TOLERANCE: f64 = 1e-10;
 const FES_MODE_MERGE_TOLERANCE: f64 = 1e-6;
+const FES_DIAMETER_BANDWIDTH: f64 = 1.0 / 3.0;
 
 /// Discrete packing \(\Delta F/kT = \ln(n_{\max}/n_2)\) from leftover-well
 /// counts. None when fewer than two occupied families have wells.
@@ -393,7 +394,8 @@ pub fn occupancy_fes_delta(counts: &[u64]) -> Option<f64> {
 /// Density is a Gaussian KDE. \(F_i/kT = -\ln(\rho_i/\rho_{\max})\).
 /// Minima of \(F\) are continuous maxima of \(\rho\), located by mean shift
 /// from every observed point and merged at a scale-relative tolerance.
-/// Bandwidth is \(\max(\mathrm{median\ NN}, 0.25\times\mathrm{diameter})\).
+/// Bandwidth is \(\max(\mathrm{median\ NN}, \mathrm{diameter}/3)\), broad
+/// enough that a connected interpolant chain remains a single basin.
 ///
 /// Returns an error for non-finite coordinates, malformed weights, or a
 /// non-empty sample with no positive density mass.
@@ -448,7 +450,9 @@ pub fn occupancy_fes(
         nearest.push(best);
     }
     nearest.sort_by(|a, b| a.total_cmp(b));
-    let sigma = nearest[n / 2].max(0.25 * diameter).max(1e-12);
+    let sigma = nearest[n / 2]
+        .max(FES_DIAMETER_BANDWIDTH * diameter)
+        .max(1e-12);
     let sample_weight = |i: usize| {
         weights
             .and_then(|values| values.get(i).copied())
@@ -1735,7 +1739,7 @@ mod tests {
         assert_eq!(fes.minima, 2);
         let delta = fes.delta.unwrap();
         assert!(
-            (delta - 0.692_586_871_889_264).abs() < 1e-12,
+            (delta - 0.672_940_481_892_900_6).abs() < 1e-12,
             "finite Gaussian tails contribute density across both modes: {delta}"
         );
     }
