@@ -45,7 +45,7 @@ dependencies = [
  "cc",
  "criterion",
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5be2c2564452cc57ce8a469d0e61dc0d4b)",
  "featomic",
  "libloading",
  "metatensor",
@@ -470,7 +470,22 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=03886f5#03886f5be2c2564452cc57ce8a469d0e61dc0d4b"
+dependencies = [
+ "cbindgen 0.29.4",
+ "dlpk",
+ "ndarray 0.17.2",
+ "num-traits",
+ "rand",
+ "rand_distr",
+ "rayon",
+ "thiserror",
+]
+
+[[package]]
+name = "eindir-core"
+version = "0.6.0"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=03886f5be2c2564452cc57ce8a469d0e61dc0d4b#03886f5be2c2564452cc57ce8a469d0e61dc0d4b"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1382,10 +1397,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=b19227f9197a4c927633f1225f1e7546794a6f1e#b19227f9197a4c927633f1225f1e7546794a6f1e"
+source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=805a0b9#805a0b991efa515c47d9f0cafde41f63f68bf0d5"
 dependencies = [
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5)",
 ]
 
 [[package]]
@@ -2018,11 +2033,11 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "xtsci-optimize"
 version = "0.1.0"
-source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=2c22d0619cba31026d6f7fa1e4518bb1522417d4#2c22d0619cba31026d6f7fa1e4518bb1522417d4"
+source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=767d3db#767d3db180b68714256bee40bfb8735c1f181bd2"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5be2c2564452cc57ce8a469d0e61dc0d4b)",
  "ndarray 0.17.2",
  "rand",
  "thiserror",
