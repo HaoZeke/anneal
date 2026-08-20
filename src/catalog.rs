@@ -68,9 +68,8 @@ pub use occupancy::{
 };
 pub use packing::{
     GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PACKING_SPEC, PackingBook,
-    different_decaf_family,
-    leftover_arrivals_saturated, packing_distance, packing_fingerprint, packing_vector,
-    same_packing,
+    different_decaf_family, leftover_arrivals_saturated, packing_distance, packing_fingerprint,
+    packing_vector, same_packing,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
