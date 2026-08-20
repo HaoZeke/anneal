@@ -13,7 +13,7 @@ pub const PROTOCOL_FAMILY: &str = "anneal.objective";
 pub struct ProtocolVersion {
     /// Wire-incompatible revision.
     pub major: u16,
-    /// Additive revision.
+    /// Additive revision bounded by the consumer's supported maximum.
     pub minor: u16,
 }
 
@@ -117,7 +117,7 @@ impl EngineDescriptor {
                 received: self.protocol.major,
             });
         }
-        if self.protocol.minor < expected_protocol.minor {
+        if self.protocol.minor > expected_protocol.minor {
             return Err(CompatibilityError::ProtocolMinor {
                 expected: expected_protocol.minor,
                 received: self.protocol.minor,
@@ -135,7 +135,7 @@ impl EngineDescriptor {
                 received: self.abi.abi_major,
             });
         }
-        if self.abi.abi_minor < expected_abi.abi_minor {
+        if self.abi.abi_minor > expected_abi.abi_minor {
             return Err(CompatibilityError::AbiMinor {
                 expected: expected_abi.abi_minor,
                 received: self.abi.abi_minor,
@@ -147,7 +147,7 @@ impl EngineDescriptor {
                 received: self.abi.dlpack_major,
             });
         }
-        if self.abi.dlpack_minor < expected_abi.dlpack_minor {
+        if self.abi.dlpack_minor > expected_abi.dlpack_minor {
             return Err(CompatibilityError::DlpackMinor {
                 expected: expected_abi.dlpack_minor,
                 received: self.abi.dlpack_minor,
