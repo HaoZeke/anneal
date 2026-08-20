@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use eindir_core::ffi::eindir_objective_t;
+
 /// Protocol family used by the anneal objective boundary.
 pub const PROTOCOL_FAMILY: &str = "anneal.objective";
 
@@ -143,13 +145,86 @@ impl EngineDescriptor {
 
 impl Default for EngineDescriptor {
     fn default() -> Self {
-        Self::new(PROTOCOL_FAMILY, ProtocolVersion::new(1, 0), AbiStamp::anneal_default())
+        Self::new(
+            PROTOCOL_FAMILY,
+            ProtocolVersion::new(1, 0),
+            AbiStamp::anneal_default(),
+        )
     }
+}
+
+/// Validate the memory and numerical shape invariants required by an eindir
+/// objective before adapting it to an [`eindir_core::Objective`].
+///
+/// The handle is borrowed and no callback is invoked. Semantic metadata such
+/// as units and force sign requires the versioned objective descriptor tracked
+/// separately from the embedded binary handle.
+///
+/// # Safety
+///
+/// `objective` must point to a readable `eindir_objective_t` whose bound
+/// pointers reference `objective.dim` readable `f64` values.
+pub unsafe fn validate_eindir_objective(
+    objective: *const eindir_objective_t,
+    expected_dim: usize,
+) -> Result<(), CompatibilityError> {
+    if objective.is_null() {
+        return Err(CompatibilityError::ObjectiveNull);
+    }
+    if expected_dim == 0 {
+        return Err(CompatibilityError::ObjectiveDimension {
+            expected: 1,
+            received: 0,
+        });
+    }
+
+    let objective = unsafe { &*objective };
+    if objective.dim != expected_dim {
+        return Err(CompatibilityError::ObjectiveDimension {
+            expected: expected_dim,
+            received: objective.dim,
+        });
+    }
+    if objective.low.is_null() {
+        return Err(CompatibilityError::ObjectiveBoundsNull { bound: "low" });
+    }
+    if objective.high.is_null() {
+        return Err(CompatibilityError::ObjectiveBoundsNull { bound: "high" });
+    }
+
+    let low = unsafe { std::slice::from_raw_parts(objective.low, objective.dim) };
+    let high = unsafe { std::slice::from_raw_parts(objective.high, objective.dim) };
+    for (index, (&lower, &upper)) in low.iter().zip(high.iter()).enumerate() {
+        if !lower.is_finite() || !upper.is_finite() || lower > upper {
+            return Err(CompatibilityError::ObjectiveBoundsInvalid {
+                index,
+                lower: lower.to_string(),
+                upper: upper.to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Reason an engine descriptor cannot be consumed.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum CompatibilityError {
+    /// The supplied objective handle is null.
+    #[error("eindir objective handle is NULL")]
+    ObjectiveNull,
+    /// The objective dimension does not match the consumer's request.
+    #[error("objective dimension mismatch: expected {expected}, received {received}")]
+    ObjectiveDimension { expected: usize, received: usize },
+    /// A required objective bound pointer is null.
+    #[error("eindir objective {bound} bounds are NULL")]
+    ObjectiveBoundsNull { bound: &'static str },
+    /// An objective bound is non-finite or inverted.
+    #[error("invalid objective bounds at index {index}: lower={lower}, upper={upper}")]
+    ObjectiveBoundsInvalid {
+        index: usize,
+        lower: String,
+        upper: String,
+    },
     /// The producer belongs to another protocol family.
     #[error("protocol family mismatch: expected {expected}, received {received}")]
     ProtocolFamily {
