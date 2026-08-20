@@ -95,8 +95,12 @@ jobs:
           cp anneal-core.h staging/include/
           cp include/anneal-core.hpp staging/include/
           cp target/${{ matrix.target }}/release/${{ matrix.static_lib }} staging/lib/
-          cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/ || true
+          cp target/${{ matrix.target }}/release/${{ matrix.shared_lib }} staging/lib/
           tar czf ${{ matrix.artifact }}.tar.gz -C staging .
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.h"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./include/anneal-core.hpp"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.static_lib }}"
+          tar tzf ${{ matrix.artifact }}.tar.gz | grep -Fq "./lib/${{ matrix.shared_lib }}"
 
       - uses: actions/upload-artifact@v4
         with:
