@@ -8,6 +8,7 @@ mod run {
     use std::sync::{Arc, Mutex};
 
     use crate::catalog::MixingEvidence;
+    use crate::compatibility::EngineDescriptor;
     use crate::catalog_policy::{
         ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput,
         CensusEvidence, PolicyAction, PolicyDecision, PolicyInputError, ValidationState,
@@ -278,6 +279,8 @@ mod run {
         pub ensemble: String,
         /// Whether a catalog transport is part of the run arm.
         pub sharing: bool,
+        /// Objective-engine protocol and native bridge descriptor.
+        pub engine: EngineDescriptor,
     }
 
     /// Result of offering a candidate without making RPC availability fatal.
@@ -1596,11 +1599,14 @@ mod run {
 
         /// Encode a manifest header followed by one JSON object per trace event.
         pub fn json_lines(&self, manifest: &RunManifest) -> String {
+            let engine = serde_json::to_string(&manifest.engine)
+                .expect("engine compatibility descriptor must serialize");
             let mut output = format!(
-                "{{\"kind\":\"manifest_header\",\"campaign\":\"{}\",\"ensemble\":\"{}\",\"sharing\":{}}}\n",
+                "{{\"kind\":\"manifest_header\",\"campaign\":\"{}\",\"ensemble\":\"{}\",\"sharing\":{},\"engine\":{}}}\n",
                 json_escape(&manifest.campaign),
                 json_escape(&manifest.ensemble),
-                manifest.sharing
+                manifest.sharing,
+                engine
             );
             for event in &self.events {
                 let version = event
@@ -2316,6 +2322,36 @@ mod run {
                 character => vec![character],
             })
             .collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
+
+        #[test]
+        fn json_manifest_header_contains_engine_compatibility_descriptor() {
+            let run = CooperativeRun::new([0], 1).expect("valid cooperative run");
+            let manifest = RunManifest {
+                campaign: "campaign".to_owned(),
+                ensemble: "ensemble".to_owned(),
+                sharing: false,
+                engine: EngineDescriptor::new(
+                    "rgpot",
+                    ProtocolVersion::new(1, 2),
+                    AbiStamp::anneal_default(),
+                ),
+            };
+
+            let trace = run.json_lines(&manifest);
+            let header = trace.lines().next().expect("manifest header");
+            let value: serde_json::Value =
+                serde_json::from_str(header).expect("manifest header is JSON");
+            assert_eq!(value["engine"]["engine_id"], "rgpot");
+            assert_eq!(value["engine"]["protocol"]["major"], 1);
+            assert_eq!(value["engine"]["protocol"]["minor"], 2);
+            assert_eq!(value["engine"]["abi"]["layout_revision"], 1);
+        }
     }
 }
 

@@ -1330,9 +1330,9 @@ dependencies = [
 
 [[package]]
 name = "readcon-core"
-version = "0.14.0"
+version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17721ccacc5ff103337b21b59a92081cb4e2d2491dc317cc4d7690c494db54a6"
+checksum = "ca69b9f5b44454a379af998150025a3ed07de4c0e12f3efef3879c03d61b1eda"
 dependencies = [
  "dlpk",
  "fast-float2",
