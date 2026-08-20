@@ -2018,7 +2018,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "xtsci-optimize"
 version = "0.1.0"
-source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=2c93ae9#2c93ae914bac4ba962e670f0d43b234482374a34"
+source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=d96686d#d96686d38749f6e4c0f5e933b0f07d49fe3e8897"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
