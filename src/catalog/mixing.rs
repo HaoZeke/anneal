@@ -73,11 +73,21 @@ pub fn rhat_series(chains: &[Vec<f64>]) -> f64 {
 /// onto one attractor. For explore that is Leave. For an incumbent
 /// that is the sampled-mode certificate; a competitor, when present,
 /// must also mix and lose the occupancy contest.
+/// Gelman--Rubin 1992 conventional cut \(\hat R < 6/5\), equivalent
+/// to \(B/W < (11n+25)/25\) (`Hop.mixed_threshold_bw`).
 pub const MIXED_RHAT: f64 = 1.2;
+/// Occupant plus competitor, when a competitor is on file.
+pub const CERTIFY_CHAINS: usize = 2;
+/// Vehtari split-\(\hat R\) halves per chain.
+pub const CERTIFY_SPLIT_HALVES: usize = 2;
+/// Vehtari minimum draws per split half.
+pub const CERTIFY_DRAWS_PER_HALF: usize = 4;
 /// Occupant traces shorter than this are not a Gelman--Rubin
 /// certificate. Two quench reports on two random-start families
 /// give \(\hat R = 0\) and are not a global minimum.
-pub const CERTIFY_MIN_SAMPLES: usize = 16;
+/// `2 × 2 × 4 = 16` (`Hop.certify_min_samples`).
+pub const CERTIFY_MIN_SAMPLES: usize =
+    CERTIFY_CHAINS * CERTIFY_SPLIT_HALVES * CERTIFY_DRAWS_PER_HALF;
 
 /// Whether \(\hat R\) says the chains have mixed.
 pub fn mixed(rhat: f64) -> bool {

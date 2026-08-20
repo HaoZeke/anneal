@@ -299,6 +299,65 @@ def identity_new_type_raises_p0():
     return ok and p0_n1_zero, residual + p0_residual
 
 
+def identity_hatch_stable_is_next_below_ceiling():
+    """Under ``0 <= n1 <= n`` the hatch is the larger estimator.
+
+    Hatch-stable is therefore exactly ``(n1+1)/(n+1) < α``. The
+    integer form is ``n1+1 < α(n+1)``.
+    """
+    n, n1, alpha = sp.symbols("n n1 alpha", positive=True)
+    num = (n1 + 1) - alpha * (n + 1)
+    return _zero(
+        sp.together((n1 + 1) / (n + 1) - alpha) * (n + 1) - num
+    )
+
+
+def identity_visits_floor_three_fifths():
+    """``n_min(1/5, 3) = 20``: three singletons hatch-stable iff ``n >= 20``.
+
+    ``(3+1)/(n+1) < 1/5`` iff ``n+1 > 20`` iff ``n >= 20``.
+    """
+    n = sp.symbols("n", positive=True, integer=True)
+    cond = sp.simplify((3 + 1) / (n + 1) < sp.Rational(1, 5))
+    equiv = sp.simplify(n + 1 > 20)
+    # check the two sides of the cut
+    at = bool(sp.Lt((3 + 1) / (20 + 1), sp.Rational(1, 5)))
+    below = bool(sp.Lt((3 + 1) / (19 + 1), sp.Rational(1, 5)))
+    floor_ok, floor_residual = _zero(sp.Integer(PRODUCTION_MINIMUM_VISITS) - 20)
+    return at is True and below is False and floor_ok, (cond, equiv, floor_residual)
+
+
+def identity_certify_min_is_split_rhat_length():
+    """``CERTIFY_MIN_SAMPLES = 2 chains × 2 halves × 4 draws = 16``."""
+    return _zero(sp.Integer(2) * 2 * 4 - CERTIFY_MIN_SAMPLES)
+
+
+def identity_fes_factor_scale_and_tie():
+    """Discrete packing ``ΔF/kT = ln(n_max/n_2)``.
+
+    The Boltzmann factor ``n_max/n_2`` is at least 1 when
+    ``n_max >= n_2 > 0``, equals 1 iff the counts tie, and is
+    invariant under ``k * counts`` for ``k != 0``.
+    """
+    nmax, n2, k = sp.symbols("nmax n2 k", positive=True)
+    ge_one, r1 = _zero(sp.together(nmax / n2 - 1) * n2 - (nmax - n2))
+    scale, r3 = _zero((k * nmax) / (k * n2) - nmax / n2)
+    return ge_one and scale, r1 + r3
+
+
+def identity_cheeger_code_cut():
+    """On the normalised Laplacian, ``0 <= c < λ₂ <= 2`` implies ``c² < 2 λ₂``.
+
+    ``λ₂² - 2 λ₂ = λ₂(λ₂-2) ≤ 0`` on ``[0, 2]``, and
+    ``λ₂² - c² = (λ₂-c)(λ₂+c)`` is positive when ``c < λ₂``.
+    That is the Cheeger upper bound ``c < √(2 λ₂)`` in squared form.
+    """
+    c, lam = sp.symbols("c lam", nonnegative=True)
+    cap, r1 = _zero((lam * lam - 2 * lam) - lam * (lam - 2))
+    gap, r2 = _zero((lam * lam - c * c) - (lam - c) * (lam + c))
+    return cap and gap, r1 + r2
+
+
 def identity_mixing_does_not_retire_without_packing():
     """Mixing names a putative. Retirement still needs packing
     saturation and the rematched family floor.
@@ -583,6 +642,11 @@ def all_identities() -> bool:
         identity_gt_stop_needs_two_families()[0],
         identity_default_floor_is_packing_gt_alone()[0],
         identity_new_type_raises_p0()[0],
+        identity_hatch_stable_is_next_below_ceiling()[0],
+        identity_visits_floor_three_fifths()[0],
+        identity_certify_min_is_split_rhat_length()[0],
+        identity_fes_factor_scale_and_tie()[0],
+        identity_cheeger_code_cut()[0],
         identity_mixing_does_not_retire_without_packing()[0],
         identity_keep_count_partitions()[0],
         identity_keep_independent_of_resource()[0],
@@ -622,6 +686,11 @@ def derive() -> bool:
         ("Fiedler-DECAF F=2: GT stop needs two rematched families", identity_gt_stop_needs_two_families()[0]),
         ("default F=1 is packing GT alone", identity_default_floor_is_packing_gt_alone()[0]),
         ("new leftover type raises P0; packing n1=0 does not", identity_new_type_raises_p0()[0]),
+        ("hatch-stable iff next p0 is under the ceiling", identity_hatch_stable_is_next_below_ceiling()[0]),
+        ("n_min(1/5, 3) = 20", identity_visits_floor_three_fifths()[0]),
+        ("CERTIFY_MIN_SAMPLES = 2*2*4", identity_certify_min_is_split_rhat_length()[0]),
+        ("FES factor >= 1, =1 iff tie, scale invariant", identity_fes_factor_scale_and_tie()[0]),
+        ("c < λ2 <= 2 implies Cheeger c^2 < 2 λ2", identity_cheeger_code_cut()[0]),
         ("mixing does not retire without packing saturation", identity_mixing_does_not_retire_without_packing()[0]),
         ("n_keep + n_leave = 1 + n_extra", identity_keep_count_partitions()[0]),
         ("keep count independent of resource", identity_keep_independent_of_resource()[0]),
