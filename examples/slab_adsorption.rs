@@ -11,7 +11,7 @@ use common::efficiency::{bank_label, report_trace};
 use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
-use eindir_core::gradient::Gradient;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
 use ndarray::{Array1, ArrayView1};
 use rand::Rng;
 use rand::SeedableRng;
@@ -154,6 +154,8 @@ impl<O: Gradient<f64>> Gradient<f64> for Mobile<'_, O> {
         g
     }
 }
+
+impl<O: Objective<f64> + Gradient<f64>> DifferentiableObjective<f64> for Mobile<'_, O> {}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
