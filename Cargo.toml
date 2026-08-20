@@ -68,6 +68,11 @@ nng = { version = "1.0", optional = true }
 featomic   = { version = "0.6.0", features = ["metatensor-static"], optional = true }
 metatensor = { version = "=0.2.3", optional = true }
 
+# rgpot-core names the same eindir package through its git source. Redirect
+# that source to the checked-out contract so the workspace has one ABI crate.
+[patch."https://github.com/HaoZeke/eindir.git"]
+eindir-core = { path = "../eindir" }
+
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
 proptest  = "1"

@@ -45,7 +45,7 @@ dependencies = [
  "cc",
  "criterion",
  "dlpk",
- "eindir-core 0.6.0",
+ "eindir-core",
  "featomic",
  "libloading",
  "metatensor",
@@ -477,21 +477,6 @@ dependencies = [
  "num-traits",
  "numpy",
  "pyo3",
- "rand",
- "rand_distr",
- "rayon",
- "thiserror",
-]
-
-[[package]]
-name = "eindir-core"
-version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c4213#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
-dependencies = [
- "cbindgen 0.29.4",
- "dlpk",
- "ndarray 0.17.2",
- "num-traits",
  "rand",
  "rand_distr",
  "rayon",
@@ -1399,7 +1384,7 @@ version = "3.0.2"
 source = "git+https://github.com/HaoZeke/potlib.git?rev=2c4f0cc#2c4f0cc24475c824157a1de58207c3317883e308"
 dependencies = [
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c4213)",
+ "eindir-core",
 ]
 
 [[package]]
@@ -2035,7 +2020,7 @@ version = "0.1.0"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core 0.6.0",
+ "eindir-core",
  "ndarray 0.17.2",
  "rand",
  "thiserror",
