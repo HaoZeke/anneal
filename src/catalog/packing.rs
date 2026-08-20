@@ -184,11 +184,11 @@ impl PackingBook {
             .collect()
     }
 
-    /// Production Good--Turing on leftover-well arrivals per DECAF
-    /// family. Same floor and unseen-mass ceiling as the leftover-SOAP
-    /// census. Hop re-observes are not draws.
+    /// Chao1 completeness of leftover-well arrivals per DECAF family.
+    /// Hop re-observes are not draws. Leftover SOAP still uses the
+    /// unseen-mass ceiling; packing does not.
     pub fn families_saturated(&self) -> bool {
-        self.well_sample().saturated()
+        self.well_sample().chao1_complete()
     }
 
     /// Leftover-well arrivals credited to packing families.
@@ -349,22 +349,25 @@ pub fn same_packing(left: &[f64], right: &[f64]) -> bool {
     packing_distance(left, right) <= PACKING_MERGE
 }
 
-/// Good--Turing sample: `n` arrivals, `n1` singletons, unseen mass `n1/n`.
+/// Good--Turing sample: `n` arrivals, `n1` singletons, `n2` doubletons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GoodTuringSample {
     /// Independent draws (leftover-well arrivals, not hops).
     pub n: u64,
     /// Types seen exactly once.
     pub n1: u64,
+    /// Types seen exactly twice. Chao1 uses this.
+    pub n2: u64,
 }
 
 impl GoodTuringSample {
-    /// Collapse a multiplicity list to `n` and `n1`. Zero counts drop.
+    /// Collapse a multiplicity list to `n`, `n1`, and `n2`. Zero counts drop.
     pub fn from_counts(arrivals: impl IntoIterator<Item = u64>) -> Self {
         let counts: Vec<u64> = arrivals.into_iter().filter(|&visits| visits > 0).collect();
         Self {
             n: counts.iter().copied().sum(),
             n1: counts.iter().filter(|&&visits| visits == 1).count() as u64,
+            n2: counts.iter().filter(|&&visits| visits == 2).count() as u64,
         }
     }
 
@@ -373,7 +376,27 @@ impl GoodTuringSample {
         (self.n != 0).then(|| self.n1 as f64 / self.n as f64)
     }
 
-    /// Production floor and unseen-mass ceiling.
+    /// Chao1 unseen-family lower bound \(n_1^2/(2n_2)\).
+    ///
+    /// Zero when \(n_1=0\). Unbounded when \(n_1>0\) and \(n_2=0\).
+    pub fn chao1_unseen(self) -> Option<f64> {
+        if self.n1 == 0 {
+            return Some(0.0);
+        }
+        if self.n2 == 0 {
+            return None;
+        }
+        Some((self.n1 as f64) * (self.n1 as f64) / (2.0 * self.n2 as f64))
+    }
+
+    /// Chao1 completeness of the packing codebook: no singletons, so
+    /// \(\hat S_{\mathrm{Chao1}}=S_{\mathrm{obs}}\). Leftover SOAP still
+    /// uses [`Self::saturated`] (hatch-stable coverage).
+    pub fn chao1_complete(self) -> bool {
+        self.n >= crate::catalog::PRODUCTION_MINIMUM_VISITS && self.n1 == 0
+    }
+
+    /// Production floor and unseen-mass ceiling. Leftover-SOAP dwell.
     pub fn saturated(self) -> bool {
         self.n >= crate::catalog::PRODUCTION_MINIMUM_VISITS
             && self

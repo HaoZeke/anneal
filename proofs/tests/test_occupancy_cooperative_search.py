@@ -40,6 +40,7 @@ from proofs.occupancy_cooperative_search import (
     identity_cheeger_code_cut,
     identity_path_rg2,
     identity_forest_edge_bound,
+    identity_chao1_complete_is_n1_zero,
     identity_mixing_does_not_retire_without_packing,
     identity_keep_count_partitions,
     identity_keep_independent_of_resource,
@@ -216,6 +217,12 @@ def test_forest_has_at_most_n_minus_c_edges():
     ok, tautology = identity_forest_edge_bound()
     assert ok
     assert tautology is True
+
+
+def test_chao1_vanishes_iff_no_singletons():
+    ok, residual = identity_chao1_complete_is_n1_zero()
+    assert ok
+    assert residual == 0
 
 
 def test_mixing_does_not_retire_without_packing_saturation():

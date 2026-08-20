@@ -108,6 +108,36 @@ fn leftover_first_wave_arrivals_are_not_saturated() {
     assert_eq!(first.n1, 48);
     assert!((first.unseen().unwrap() - 1.0).abs() < 1e-12);
     assert!(!first.saturated());
+    assert!(!first.chao1_complete());
+}
+
+#[test]
+fn packing_chao1_needs_no_singletons() {
+    use anneal_core::catalog::GoodTuringSample;
+    // n=20, n1=3, n2=0: leftover p0=0.15 is under the ceiling,
+    // Chao1 is unbounded, packing is not complete.
+    let leftover_ok = GoodTuringSample {
+        n: 20,
+        n1: 3,
+        n2: 0,
+    };
+    assert!(leftover_ok.saturated());
+    assert!(leftover_ok.chao1_unseen().is_none());
+    assert!(!leftover_ok.chao1_complete());
+    let complete = GoodTuringSample {
+        n: 20,
+        n1: 0,
+        n2: 4,
+    };
+    assert!(complete.chao1_complete());
+    assert_eq!(complete.chao1_unseen(), Some(0.0));
+    let bounded = GoodTuringSample {
+        n: 20,
+        n1: 4,
+        n2: 2,
+    };
+    assert!((bounded.chao1_unseen().unwrap() - 4.0).abs() < 1e-12);
+    assert!(!bounded.chao1_complete());
 }
 
 #[test]
@@ -146,6 +176,7 @@ fn packing_good_turing_uses_the_census_production_floor() {
     }
     let live = [ico.as_slice().unwrap(), oh.as_slice().unwrap()];
     assert!(book.families_saturated());
+    assert_eq!(book.well_sample().n1, 0);
     assert_eq!(book.certificate_family_count(live), 2);
     assert_eq!(
         book.occupied_among([ico.as_slice().unwrap(), ico.as_slice().unwrap()]),
