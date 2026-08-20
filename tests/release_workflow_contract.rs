@@ -11,8 +11,8 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let manifest = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/ci.yml");
 
-    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/OmniPotentRPC/rgpot.git\", rev = \"b19227f9197a4c927633f1225f1e7546794a6f1e\""));
-    assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9\""));
+    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/OmniPotentRPC/rgpot.git\", rev = \"805a0b9\""));
+    assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"03886f5be2c2564452cc57ce8a469d0e61dc0d4b\""));
     assert!(manifest.contains("xtsci-optimize = { git = \"https://github.com/HaoZeke/xtsci-optimize.git\", rev = \"2c22d0619cba31026d6f7fa1e4518bb1522417d4\""));
     assert!(workflow.contains("cargo publish --dry-run"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
