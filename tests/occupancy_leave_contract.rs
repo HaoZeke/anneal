@@ -122,11 +122,15 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     );
     assert!(
         arm.contains("policy.min_families"),
-        "OtherFamily is a Fiedler packing community, not leftover-SOAP wells"
+        "OtherFamily is a Fiedler packing community, not leftover wells"
     );
     assert!(
-        arm.contains("occupancy_archive_hole_is_fivefold"),
-        "ArchiveHole on a pentagon packing is the fivefold residual"
+        arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
+        "ArchiveHole is leftover-orthogonal, not a leftover hole"
+    );
+    assert!(
+        !arm.contains("step_away_fivefold"),
+        "ArchiveHole is not the serial fivefold morphology hop"
     );
 }
 

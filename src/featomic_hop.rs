@@ -890,12 +890,6 @@ where
     R: Rng + ?Sized,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    if x.as_slice()
-        .and_then(crate::catalog::occupancy_ring_profile)
-        .is_some_and(crate::catalog::occupancy_archive_hole_is_fivefold)
-    {
-        return crate::soap::step_away_fivefold(x, 0.35, rng);
-    }
     if wells.is_empty() {
         return x.to_owned();
     }
@@ -974,6 +968,27 @@ fn packing_kick<R: Rng + ?Sized>(
         crate::catalog::lens_ring_displacement(coords, delta);
     }
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
+}
+
+/// Extra ArchiveHole: leftover-orthogonal kick of the occupied packing.
+///
+/// Champion leftover walks isomers of that packing (`step_into_hole`
+/// of its wells). Fiedler \(F=1\) means every leftover well rematches
+/// the same packing, so an extra that steps into those wells is the
+/// champion walk. The extra increment is the leftover Jacobian
+/// pullback of a vector orthogonal to the occupied packing mean and
+/// the shared archive. Ring incidence only scales atoms. This is not
+/// a named morphology.
+pub fn leave_archive_hole<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rmsd: f64,
+    rng: &mut R,
+) -> Array1<f64> {
+    let s = spectrum(x, rcut, species, mobile);
+    packing_kick(x, &s, rmsd, mobile, rng)
 }
 
 /// SOAP hop through featomic `soap_power_spectrum`.
@@ -1475,6 +1490,32 @@ mod tests {
         assert!(
             distance >= SOAP_PACK_ESCAPE,
             "hole step stopped {distance} from the well it left, inside the escape {SOAP_PACK_ESCAPE}"
+        );
+    }
+
+    #[test]
+    fn leave_archive_hole_is_the_packing_null_kick() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mut rng = StdRng::seed_from_u64(7);
+        let y = leave_archive_hole(ico75.view(), 3.5, None, None, 0.35, &mut rng);
+        let d = soap_bank_distance(ico75.view(), y.view(), 3.5, None, None);
+        assert!(
+            d > SOAP_DCUT_FALLBACK,
+            "archive hole must leave occupied packing mean, d={d}"
+        );
+        let hole = step_into_hole(
+            ico75.view(),
+            std::slice::from_ref(&soap_cloud_mean(ico75.view(), 3.5, None, None)),
+            SOAP_PACK_MERGE,
+            3.5,
+            None,
+            None,
+            &mut StdRng::seed_from_u64(7),
+        );
+        let hole_d = soap_bank_distance(ico75.view(), hole.view(), 3.5, None, None);
+        assert!(
+            d > hole_d,
+            "archive hole {d} must move packing mean farther than a leftover well {hole_d}"
         );
     }
 

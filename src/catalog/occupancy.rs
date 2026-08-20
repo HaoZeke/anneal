@@ -33,14 +33,14 @@
 //!
 //! Another *packing community* already on file (Fiedler \(F\ge 2\)
 //! after DECAF labels the sides) and packing not saturated: take a
-//! catalog representative of the least-occupied community (funnel
-//! hopping, Pahl et al. 2020). Leftover-SOAP wells of one packing
-//! are a superbasin (\(F=1\)); they are not OtherFamily. After
-//! packing saturation, or if \(F=1\): amplify the fivefold residual
-//! when the occupied Franzblau profile has pentagons (ico), else
-//! step into a hole of the shared occupied-packing archive. A SOAP
-//! hole of an ico archive stays in the ico funnel (Doye, Miller and
-//! Wales 1999). Occupancy extras do not draw a random cluster.
+//! catalog representative of the least-occupied community. Leftover
+//! wells of one packing are a superbasin (\(F=1\)); they are not
+//! OtherFamily. Champion leftover walks isomers of the occupied
+//! packing. Extra ArchiveHole is the leftover-Jacobian pullback of a
+//! vector orthogonal to that packing mean and the shared archive
+//! (`packing_kick`). A leftover hole of the occupied wells is the
+//! champion walk, not Leave. Occupancy extras do not draw a random
+//! cluster.
 //! A single hole-and-quench returns to the same family; the hop
 //! then requenches and widens until DECAF says the family changed.
 //!
@@ -104,20 +104,17 @@ pub enum OccupancyLeaveAdopt {
 
 /// Where an occupancy extra goes when it Leaves.
 ///
-/// Funnel exchange first, only while packing is unsaturated *and*
-/// Fiedler \(F\ge 2\): a catalog representative of a different,
-/// under-occupied packing community (Pahl, Neuhaus and de Pablo,
-/// *J. Chem. Phys.* 152:144106, 2020, doi:10.1063/5.0004106). That
-/// is how Leave includes Oh once Oh is on file. Leftover-SOAP wells
-/// of one packing are \(F=1\) and are not a funnel draw. After
-/// packing saturation, or if \(F=1\), a fivefold residual when the
-/// occupied packing is pentagon-rich, else a hole of the shared
-/// archive. Serial recommended is a different mode.
+/// OtherFamily is a draw from another Fiedler community (\(F\ge 2\)).
+/// That is how Leave includes a packing once it is on file. Leftover
+/// wells of one packing are \(F=1\) and stay ArchiveHole. ArchiveHole
+/// is leftover-orthogonal to the occupied packing and the shared
+/// archive, not a leftover hole of those wells and not a named
+/// morphology. Serial recommended is a different mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// Fivefold residual on a pentagon packing, else a SOAP archive hole.
+    /// Leftover-orthogonal kick of the occupied packing and archive.
     ArchiveHole,
 }
 
@@ -213,16 +210,6 @@ pub fn occupancy_leave_target(
     } else {
         OccupancyLeaveTarget::OtherFamily
     }
-}
-
-/// ArchiveHole on a pentagon-rich packing is the fivefold residual.
-///
-/// Franzblau (1991), *Phys. Rev. B* 44:4925. Icosahedra are 5-ring
-/// rich; Marks and octahedra are not. A SOAP hole of an occupied
-/// ico archive is a leftover well of that funnel, not a packing
-/// exchange (Doye, Miller and Wales 1999, doi:10.1063/1.478595).
-pub fn occupancy_archive_hole_is_fivefold(profile: (usize, usize, usize)) -> bool {
-    profile.2 > 0
 }
 
 /// Franzblau (1991), *Phys. Rev. B* 44:4925: a new ring class is a
@@ -1502,7 +1489,7 @@ mod tests {
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
-        leftover_lambda, leftover_sat_dwell, occupancy_archive_hole_is_fivefold, occupancy_compact,
+        leftover_lambda, leftover_sat_dwell, occupancy_compact,
         occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
         occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_new_class,
@@ -1578,12 +1565,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_hole_on_pentagon_packing_is_fivefold() {
-        assert!(occupancy_archive_hole_is_fivefold((165, 17, 6)));
-        assert!(occupancy_archive_hole_is_fivefold((400, 42, 21)));
-        assert!(!occupancy_archive_hole_is_fivefold((152, 22, 0)));
-        assert!(!occupancy_archive_hole_is_fivefold((0, 0, 0)));
-    }
+
 
     #[test]
     fn catalog_leave_refuses_a_same_family_hole() {
