@@ -45,7 +45,7 @@ dependencies = [
  "cc",
  "criterion",
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5be2c2564452cc57ce8a469d0e61dc0d4b)",
+ "eindir-core",
  "featomic",
  "libloading",
  "metatensor",
@@ -466,21 +466,6 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
-
-[[package]]
-name = "eindir-core"
-version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=03886f5#03886f5be2c2564452cc57ce8a469d0e61dc0d4b"
-dependencies = [
- "cbindgen 0.29.4",
- "dlpk",
- "ndarray 0.17.2",
- "num-traits",
- "rand",
- "rand_distr",
- "rayon",
- "thiserror",
-]
 
 [[package]]
 name = "eindir-core"
@@ -1397,10 +1382,10 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=805a0b9#805a0b991efa515c47d9f0cafde41f63f68bf0d5"
+source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=e59c838#e59c8381f78b63d4a9f5269a009336eae03f7691"
 dependencies = [
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5)",
+ "eindir-core",
 ]
 
 [[package]]
@@ -2033,11 +2018,11 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "xtsci-optimize"
 version = "0.1.0"
-source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=767d3db#767d3db180b68714256bee40bfb8735c1f181bd2"
+source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=2c3ed28#2c3ed2874d26154d3973a9be2a7296dbdd551df6"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=03886f5be2c2564452cc57ce8a469d0e61dc0d4b)",
+ "eindir-core",
  "ndarray 0.17.2",
  "rand",
  "thiserror",
