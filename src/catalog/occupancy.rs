@@ -117,7 +117,7 @@ pub enum OccupancyLeaveTarget {
     ArchiveHole,
 }
 
-/// Consecutive leftover-SOAP occupancy_gt records under the unseen-mass
+/// Consecutive independent leftover-SOAP samples under the unseen-mass
 /// ceiling that count as a dwell. One leftover-sat nick is not enough:
 /// a hatch raises \(\hat p_0\) by \((n-n_1)/(n(n+1))\).
 pub const LEFTOVER_SAT_DWELL: usize = 5;
@@ -137,7 +137,7 @@ pub fn occupancy_ei_exhausted(max_ei: f64, n_obs: usize, noise: f64) -> bool {
 
 /// Leftover dwell from consecutive leftover-sat bits, newest last.
 ///
-/// The last [`LEFTOVER_SAT_DWELL`] records must all be saturated.
+/// The last [`LEFTOVER_SAT_DWELL`] samples must all be saturated.
 /// A one-shot nick, or a nick then a hatch, is not a dwell.
 pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
     consecutive.len() >= LEFTOVER_SAT_DWELL
@@ -391,8 +391,12 @@ pub fn occupancy_fes_delta(counts: &[u64]) -> Option<f64> {
 /// Map free energy from landfold points, optional per-point weights.
 ///
 /// Density is a Gaussian KDE. \(F_i/kT = -\ln(\rho_i/\rho_{\max})\).
-/// Minima of \(F\) are maxima of \(\rho\). Bandwidth is
-/// \(\max(\mathrm{median\ NN}, 0.25\times\mathrm{diameter})\).
+/// Minima of \(F\) are continuous maxima of \(\rho\), located by mean shift
+/// from every observed point and merged at a scale-relative tolerance.
+/// Bandwidth is \(\max(\mathrm{median\ NN}, 0.25\times\mathrm{diameter})\).
+///
+/// Returns an error for non-finite coordinates, malformed weights, or a
+/// non-empty sample with no positive density mass.
 pub fn occupancy_fes(
     xy: &[[f64; 2]],
     weights: Option<&[f64]>,
@@ -1221,12 +1225,12 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
 /// family floor. CatalogSaturated names census completeness and does
 /// not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
-/// `leftover_dwell` is consecutive leftover-sat occupancy_gt records,
-/// not a one-shot leftover nick. Required whenever the packing book
-/// holds more than one family. A single book family is Boender--Rinnooy
-/// Kan on one cell: leftover-SOAP hatches are intra-well and do not
-/// block. Live rematch of last candidates after extras Leave is not
-/// that count. A one-community Fiedler floor with many DECAF packings
+/// `leftover_dwell` is consecutive saturated independent leftover samples,
+/// not repeated diagnostic reports or a one-shot leftover nick. Required
+/// whenever the packing book holds more than one family. A single book
+/// family is Boender--Rinnooy Kan on one cell: leftover-SOAP hatches are
+/// intra-well and do not block. Live rematch of last candidates after extras
+/// Leave is not that count. A one-community Fiedler floor with many DECAF packings
 /// is not that case.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
