@@ -1,11 +1,25 @@
-use anneal_core::compatibility::{AbiStamp, CompatibilityError, EngineDescriptor, ProtocolVersion};
+use anneal_core::compatibility::{
+    validate_eindir_objective, AbiStamp, CompatibilityError, EngineDescriptor, ProtocolVersion,
+};
 use anneal_core::run_manifest::{ArtifactDigest, RunManifest};
+use eindir_core::ffi::{eindir_objective_t, eindir_status_t, EindirEvalFn};
+
+unsafe extern "C" fn constant_objective(
+    _user_data: *mut std::ffi::c_void,
+    _x: *const dlpk::sys::DLManagedTensorVersioned,
+    value_out: *mut f64,
+) -> eindir_status_t {
+    unsafe { *value_out = 0.0 };
+    eindir_status_t::EINDIR_SUCCESS
+}
 
 #[test]
 fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let expected = AbiStamp::anneal_default();
     let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 2), expected);
-    assert!(compatible.validate("anneal.objective", ProtocolVersion::new(1, 1), expected).is_ok());
+    assert!(compatible
+        .validate("anneal.objective", ProtocolVersion::new(1, 1), expected)
+        .is_ok());
 
     let wrong_major = EngineDescriptor::new("rgpot", ProtocolVersion::new(2, 0), expected);
     assert!(matches!(
@@ -16,7 +30,10 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let wrong_layout = EngineDescriptor::new(
         "rgpot",
         ProtocolVersion::new(1, 2),
-        AbiStamp { layout_revision: expected.layout_revision + 1, ..expected },
+        AbiStamp {
+            layout_revision: expected.layout_revision + 1,
+            ..expected
+        },
     );
     assert!(matches!(
         wrong_layout.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
@@ -38,7 +55,40 @@ fn manifest_serialization_is_deterministic_and_verifies_artifacts() {
     let json = manifest.to_json().unwrap();
     assert_eq!(json, manifest.to_json().unwrap());
     assert!(json.contains("rgpot-test@source-revision"));
-    assert_eq!(manifest.artifacts[0].sha256, ArtifactDigest::of(b"H 0 0 0\n").sha256);
+    assert_eq!(
+        manifest.artifacts[0].sha256,
+        ArtifactDigest::of(b"H 0 0 0\n").sha256
+    );
     assert!(manifest.verify_artifact("input.xyz", b"H 0 0 0\n").is_ok());
     assert!(manifest.verify_artifact("input.xyz", b"changed\n").is_err());
+}
+
+#[test]
+fn rejects_malformed_eindir_handles_before_evaluation() {
+    let mut low = [0.0, -1.0];
+    let mut high = [1.0, 1.0];
+    let objective = eindir_objective_t {
+        dim: 2,
+        low: low.as_mut_ptr(),
+        high: high.as_mut_ptr(),
+        eval_fn: constant_objective as EindirEvalFn,
+        grad_fn: None,
+        user_data: std::ptr::null_mut(),
+        free_fn: None,
+    };
+    assert!(unsafe { validate_eindir_objective(&objective, 2) }.is_ok());
+
+    let mut malformed = objective;
+    malformed.high = std::ptr::null_mut();
+    assert!(matches!(
+        unsafe { validate_eindir_objective(&malformed, 2) },
+        Err(CompatibilityError::ObjectiveBoundsNull { .. })
+    ));
+
+    let mut inverted = objective;
+    high[0] = -2.0;
+    assert!(matches!(
+        unsafe { validate_eindir_objective(&inverted, 2) },
+        Err(CompatibilityError::ObjectiveBoundsInvalid { index: 0, .. })
+    ));
 }

@@ -20,6 +20,7 @@
 
 use std::os::raw::c_void;
 
+use anneal_core::compatibility::validate_eindir_objective;
 use anneal_core::run_rs_qmc_variant;
 use anneal_core::variant::boltzmann;
 use eindir_core::Objective;
@@ -110,6 +111,8 @@ fn minimize_rgpot_with_anneal(
 
         // 2. Zero-cost IS-A cast + eindir Rust view over the C objective.
         let obj_ptr = pot as *mut eindir_objective_t;
+        unsafe { validate_eindir_objective(obj_ptr, dim) }
+            .expect("rgpot objective failed the anneal boundary contract");
         let objective = unsafe { EindirObjectiveWrapper::new(&*obj_ptr) };
 
         // Sanity: the wrapper reports the rgpot potential's dimensionality.
