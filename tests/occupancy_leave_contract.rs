@@ -66,6 +66,22 @@ fn occupancy_fes_report_key_tracks_the_discrete_gap() {
 }
 
 #[test]
+fn occupancy_fes_report_does_not_advance_leftover_dwell() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let report = source
+        .split("fn report_occupancy_gt(")
+        .nth(1)
+        .expect("occupancy report must exist")
+        .split("fn record_energy(")
+        .next()
+        .expect("occupancy report must end at energy recording");
+    assert!(
+        !report.contains("leftover_sat_streak"),
+        "diagnostic report changes must not advance the retirement dwell"
+    );
+}
+
+#[test]
 fn occupancy_leave_refuse_is_not_a_box_start() {
     let source = include_str!("../src/methods/cluster_hopping.rs");
     let after = source
