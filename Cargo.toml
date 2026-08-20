@@ -46,8 +46,8 @@ ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
 # Sibling checkouts provide the local development surface; the Git revisions
 # are the reproducible source selected when this crate is consumed elsewhere.
-eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "03886f5be2c2564452cc57ce8a469d0e61dc0d4b", version = "0.6.0", features = ["capi"] }
-xtsci-optimize = { git = "https://github.com/HaoZeke/xtsci-optimize.git", rev = "2c3ed28", version = "0.1.0" }
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "551c02137b66367564a7a833c3aafb8837e7ad1f", version = "0.6.0", features = ["capi"] }
+xtsci-optimize = { git = "https://github.com/HaoZeke/xtsci-optimize.git", rev = "d1ea149bebceb176c987ff089503d98c42c1fb72", version = "0.1.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
@@ -58,7 +58,7 @@ sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
-rgpot-core = { version = "=3.0.2", git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "e59c838", optional = true }
+rgpot-core = { version = "=3.0.2", git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "65370af8180ed7ea1ab9a69e5225be99b21272f3", optional = true }
 libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 nng = { version = "1.0", optional = true }
