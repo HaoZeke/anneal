@@ -345,6 +345,38 @@ def identity_fes_factor_scale_and_tie():
     return ge_one and scale, r1 + r3
 
 
+def identity_path_rg2():
+    """A straight chain of ``n`` sites spaced by ``a`` has
+    ``R_g^2 = a^2 (n^2 - 1) / 12``.
+
+    That is the variance of ``{0,...,n-1}`` times ``a^2``. A compact
+    packing sits strictly below this bound. Equality is the unravelled
+    line Wales's container is there to stop.
+    """
+    n = sp.symbols("n", positive=True)
+    # sum_{k=0}^{n-1} (k - (n-1)/2)^2 = n(n^2-1)/12
+    moment = (
+        (n - 1) * n * (2 * n - 1) / 6
+        - (n - 1) * (n - 1) * n / 2
+        + n * ((n - 1) / 2) ** 2
+    )
+    ok, residual = _zero(moment - n * (n * n - 1) / 12)
+    thirteen, r13 = _zero(sp.Integer(13 * 13 - 1) / 12 - 14)
+    return ok and thirteen, residual + r13
+
+
+def identity_forest_edge_bound():
+    """A forest on ``n`` vertices with ``c`` components has ``e ≤ n - c``.
+
+    Connected plus a cycle is ``e ≥ n``. A path is the tree ``e = n-1``.
+    """
+    n, c, e = sp.symbols("n c e", integer=True, nonnegative=True)
+    forest = sp.Le(e, n - c)
+    restated = sp.Le(c + e, n)
+    # the two forms agree whenever c ≤ n (so n-c is the Nat subtraction)
+    return _tautology(sp.Equivalent(forest, restated))
+
+
 def identity_cheeger_code_cut():
     """On the normalised Laplacian, ``0 <= c < λ₂ <= 2`` implies ``c² < 2 λ₂``.
 
@@ -647,6 +679,8 @@ def all_identities() -> bool:
         identity_certify_min_is_split_rhat_length()[0],
         identity_fes_factor_scale_and_tie()[0],
         identity_cheeger_code_cut()[0],
+        identity_path_rg2()[0],
+        identity_forest_edge_bound()[0],
         identity_mixing_does_not_retire_without_packing()[0],
         identity_keep_count_partitions()[0],
         identity_keep_independent_of_resource()[0],
@@ -691,6 +725,8 @@ def derive() -> bool:
         ("CERTIFY_MIN_SAMPLES = 2*2*4", identity_certify_min_is_split_rhat_length()[0]),
         ("FES factor >= 1, =1 iff tie, scale invariant", identity_fes_factor_scale_and_tie()[0]),
         ("c < λ2 <= 2 implies Cheeger c^2 < 2 λ2", identity_cheeger_code_cut()[0]),
+        ("path R_g^2 = a^2 (n^2-1)/12", identity_path_rg2()[0]),
+        ("forest e <= n - c", identity_forest_edge_bound()[0]),
         ("mixing does not retire without packing saturation", identity_mixing_does_not_retire_without_packing()[0]),
         ("n_keep + n_leave = 1 + n_extra", identity_keep_count_partitions()[0]),
         ("keep count independent of resource", identity_keep_independent_of_resource()[0]),

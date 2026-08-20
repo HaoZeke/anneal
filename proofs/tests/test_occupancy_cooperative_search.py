@@ -38,6 +38,8 @@ from proofs.occupancy_cooperative_search import (
     identity_certify_min_is_split_rhat_length,
     identity_fes_factor_scale_and_tie,
     identity_cheeger_code_cut,
+    identity_path_rg2,
+    identity_forest_edge_bound,
     identity_mixing_does_not_retire_without_packing,
     identity_keep_count_partitions,
     identity_keep_independent_of_resource,
@@ -202,6 +204,18 @@ def test_fiedler_cut_implies_cheeger_upper():
     ok, residual = identity_cheeger_code_cut()
     assert ok
     assert residual == 0
+
+
+def test_path_rg2_is_the_uniform_second_moment():
+    ok, residual = identity_path_rg2()
+    assert ok
+    assert residual == 0
+
+
+def test_forest_has_at_most_n_minus_c_edges():
+    ok, tautology = identity_forest_edge_bound()
+    assert ok
+    assert tautology is True
 
 
 def test_mixing_does_not_retire_without_packing_saturation():

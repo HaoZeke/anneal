@@ -593,6 +593,104 @@ pub fn occupancy_ring_profile(coordinates: &[f64]) -> Option<(usize, usize, usiz
     occupancy_ring_census(coordinates).map(|census| census.profile)
 }
 
+/// Contact-graph compactness of one quenched structure.
+///
+/// A cluster is one connected first-neighbour component with a cycle
+/// (Franzblau ring, or at least `N` contacts). A path or a forest is
+/// not a cluster: \(e\le N-c\) and no primitive ring. A straight
+/// chain saturates \(R_g^2=a^2(N^2-1)/12\). GMIN's spherical
+/// container is the same refusal of evaporated or unravelled atoms.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OccupancyCompact {
+    /// Atom count.
+    pub n: usize,
+    /// First-neighbour connected components.
+    pub components: usize,
+    /// Undirected contact edges.
+    pub edges: usize,
+    /// Franzblau 3-, 4- and 5-rings summed.
+    pub rings: usize,
+    /// Squared radius of gyration.
+    pub rg2: f64,
+    /// Straight-path \(R_g^2\) at the structure's median NN.
+    pub path_rg2: f64,
+}
+
+impl OccupancyCompact {
+    /// Connected contact graph with a cycle. Not a chain, not fragments.
+    pub fn is_cluster(&self) -> bool {
+        self.n >= 3 && self.components == 1 && (self.rings > 0 || self.edges >= self.n)
+    }
+
+    /// One component, a forest, no primitive ring: a path or a tree.
+    pub fn is_pathlike(&self) -> bool {
+        self.components == 1 && self.rings == 0 && self.edges + 1 <= self.n
+    }
+}
+
+/// Compactness census at the Franzblau first-neighbour cutoff.
+pub fn occupancy_compact(coordinates: &[f64]) -> Option<OccupancyCompact> {
+    let n = coordinates.len() / 3;
+    if n < 2 || coordinates.len() != 3 * n {
+        return None;
+    }
+    if coordinates.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let x = ndarray::ArrayView1::from(coordinates);
+    let (components, edges) = crate::structure::contact_census_nn(x, n);
+    let rings = if n >= 3 {
+        let profile = crate::structure::ring_census_nn(x, n).profile;
+        profile.0 + profile.1 + profile.2
+    } else {
+        0
+    };
+    let rg2 = crate::structure::radius_of_gyration2(x, n);
+    let path_rg2 = crate::structure::path_radius_of_gyration2(n, median_contact_spacing(x, n));
+    Some(OccupancyCompact {
+        n,
+        components,
+        edges,
+        rings,
+        rg2,
+        path_rg2,
+    })
+}
+
+fn median_contact_spacing(x: ndarray::ArrayView1<f64>, n: usize) -> f64 {
+    let mut nn = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::INFINITY;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let d2 = (0..3)
+                .map(|k| {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    d * d
+                })
+                .sum::<f64>();
+            if d2 < best {
+                best = d2;
+            }
+        }
+        if best.is_finite() {
+            nn.push(best.sqrt());
+        }
+    }
+    if nn.is_empty() {
+        return 1.0;
+    }
+    nn.sort_by(|a, b| a.total_cmp(b));
+    nn[nn.len() / 2]
+}
+
+/// Whether the coordinates are one compact cluster, not a chain or fragments.
+pub fn occupancy_is_cluster(coordinates: &[f64]) -> bool {
+    occupancy_compact(coordinates).is_some_and(|census| census.is_cluster())
+}
+
 /// Franzblau census of one structure, or `None` below three atoms.
 pub fn occupancy_ring_census(coordinates: &[f64]) -> Option<crate::structure::RingCensus> {
     let n = coordinates.len() / 3;
@@ -1297,7 +1395,8 @@ mod tests {
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_hatch_stable, leftover_lambda, leftover_sat_dwell,
-        occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
+        occupancy_compact, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
+        occupancy_family_floor, occupancy_is_cluster,
         occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_target,
         occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_floor,
@@ -1562,6 +1661,52 @@ mod tests {
                 * crate::catalog::CERTIFY_DRAWS_PER_HALF
         );
         assert_eq!(crate::catalog::CERTIFY_MIN_SAMPLES, 16);
+    }
+
+    #[test]
+    fn ico13_is_a_cluster_and_a_straight_chain_is_not() {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut verts = vec![[0.0, 0.0, 0.0]];
+        for s in [1.0_f64, -1.0] {
+            for t in [phi, -phi] {
+                verts.push([0.0, s, t]);
+                verts.push([s, t, 0.0]);
+                verts.push([t, 0.0, s]);
+            }
+        }
+        let mut ico = vec![0.0; 39];
+        for (i, p) in verts.iter().enumerate() {
+            for k in 0..3 {
+                ico[3 * i + k] = p[k] * 0.55;
+            }
+        }
+        let ico_c = occupancy_compact(&ico).unwrap();
+        assert!(ico_c.is_cluster());
+        assert!(!ico_c.is_pathlike());
+        assert!(ico_c.rg2 < ico_c.path_rg2);
+        assert!(occupancy_is_cluster(&ico));
+
+        let mut chain = vec![0.0; 39];
+        for i in 0..13 {
+            chain[3 * i] = i as f64;
+        }
+        let chain_c = occupancy_compact(&chain).unwrap();
+        assert_eq!(chain_c.components, 1);
+        assert!(chain_c.is_pathlike());
+        assert!(!chain_c.is_cluster());
+        assert!(!occupancy_is_cluster(&chain));
+        let expected = crate::structure::path_radius_of_gyration2(13, 1.0);
+        assert!((chain_c.rg2 - expected).abs() < 1e-12);
+        assert!((chain_c.path_rg2 - expected).abs() < 1e-12);
+
+        let mut split = ico.clone();
+        for i in 0..6 {
+            split[3 * i] += 20.0;
+        }
+        let split_c = occupancy_compact(&split).unwrap();
+        assert!(split_c.components >= 2);
+        assert!(!split_c.is_cluster());
+        assert!(!occupancy_is_cluster(&split));
     }
 
     #[test]

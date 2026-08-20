@@ -52,10 +52,11 @@ pub use mixing::{
 pub use occupancy::{
     CHAMPION_RANK, DEFAULT_MIN_OCCUPIED_FAMILIES, INTERFACE_HORIZON, InterfaceSeat,
     LEFTOVER_SAT_DWELL, LeaveFrame, LeavePath, OCCUPANCY_EI_MIN_OBS, OCCUPANCY_SEAM_CONDUCTANCE,
-    OccupancyCertificate, OccupancyFes, OccupancyFesError, OccupancyLeaveAdopt,
+    OccupancyCertificate, OccupancyCompact, OccupancyFes, OccupancyFesError, OccupancyLeaveAdopt,
     OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
     is_occupancy_leave_action, leave_shot_accepted, leftover_hatch_stable, leftover_lambda,
-    leftover_sat_dwell, lens_ring_displacement, occupancy_complete, occupancy_complete_at,
+    leftover_sat_dwell, lens_ring_displacement, occupancy_compact, occupancy_complete,
+    occupancy_complete_at, occupancy_is_cluster,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes, occupancy_fes_delta,
     occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_landfold_split,
     occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor,
