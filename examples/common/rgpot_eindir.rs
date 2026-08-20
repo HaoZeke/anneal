@@ -112,6 +112,10 @@ fn descriptor_from_stamp(
         "rgpot.potentials",
         ProtocolVersion::new(1, 0),
         AbiStamp {
+            abi_major: u16::try_from(stamp.abi_major)
+                .expect("eindir ABI major fits the manifest type"),
+            abi_minor: u16::try_from(stamp.abi_minor)
+                .expect("eindir ABI minor fits the manifest type"),
             layout_revision: stamp.objective_layout,
             dlpack_major: u16::try_from(stamp.dlpack_major)
                 .expect("eindir DLPack major fits the manifest type"),

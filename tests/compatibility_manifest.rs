@@ -29,6 +29,9 @@ fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
 #[test]
 fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let expected = AbiStamp::anneal_default();
+    assert_eq!(expected.abi_major, 1);
+    assert_eq!(expected.abi_minor, 1);
+    assert_eq!(expected.layout_revision, 3);
     let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 2), expected);
     assert!(compatible
         .validate("anneal.objective", ProtocolVersion::new(1, 1), expected)
@@ -51,6 +54,32 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     assert!(matches!(
         wrong_layout.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
         Err(CompatibilityError::AbiLayout { .. })
+    ));
+
+    let wrong_major = EngineDescriptor::new(
+        "rgpot",
+        ProtocolVersion::new(1, 2),
+        AbiStamp {
+            abi_major: expected.abi_major + 1,
+            ..expected
+        },
+    );
+    assert!(matches!(
+        wrong_major.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
+        Err(CompatibilityError::AbiMajor { .. })
+    ));
+
+    let old_minor = EngineDescriptor::new(
+        "rgpot",
+        ProtocolVersion::new(1, 2),
+        AbiStamp {
+            abi_minor: expected.abi_minor - 1,
+            ..expected
+        },
+    );
+    assert!(matches!(
+        old_minor.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
+        Err(CompatibilityError::AbiMinor { .. })
     ));
 }
 

@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use eindir_core::ffi::eindir_objective_t;
+use eindir_core::ffi::{
+    eindir_objective_t, EINDIR_ABI_FEATURE_BATCH, EINDIR_ABI_FEATURE_GRADIENT,
+};
 
 /// Protocol family used by the anneal objective boundary.
 pub const PROTOCOL_FAMILY: &str = "anneal.objective";
@@ -27,6 +29,10 @@ impl ProtocolVersion {
 /// Native objective bridge metadata shared by eindir-compatible consumers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AbiStamp {
+    /// Major ABI revision for the embedded eindir objective handle.
+    pub abi_major: u16,
+    /// Additive ABI revision for the embedded eindir objective handle.
+    pub abi_minor: u16,
     /// ABI layout revision for the embedded objective handle.
     pub layout_revision: u32,
     /// Major DLPack callback revision.
@@ -41,10 +47,12 @@ impl AbiStamp {
     /// The stamp required by the anneal-side bridge.
     pub const fn anneal_default() -> Self {
         Self {
-            layout_revision: 1,
+            abi_major: 1,
+            abi_minor: 1,
+            layout_revision: 3,
             dlpack_major: 1,
             dlpack_minor: 0,
-            features: 0,
+            features: EINDIR_ABI_FEATURE_GRADIENT | EINDIR_ABI_FEATURE_BATCH,
         }
     }
 }
@@ -121,6 +129,18 @@ impl EngineDescriptor {
             return Err(CompatibilityError::AbiLayout {
                 expected: expected_abi.layout_revision,
                 received: self.abi.layout_revision,
+            });
+        }
+        if self.abi.abi_major != expected_abi.abi_major {
+            return Err(CompatibilityError::AbiMajor {
+                expected: expected_abi.abi_major,
+                received: self.abi.abi_major,
+            });
+        }
+        if self.abi.abi_minor < expected_abi.abi_minor {
+            return Err(CompatibilityError::AbiMinor {
+                expected: expected_abi.abi_minor,
+                received: self.abi.abi_minor,
             });
         }
         if self.abi.dlpack_major != expected_abi.dlpack_major {
@@ -235,6 +255,22 @@ pub enum CompatibilityError {
         lower: String,
         /// Upper bound rendered for a stable diagnostic.
         upper: String,
+    },
+    /// The embedded objective ABI major differs.
+    #[error("ABI major mismatch: expected {expected}, received {received}")]
+    AbiMajor {
+        /// Consumer-required ABI major revision.
+        expected: u16,
+        /// Producer-reported ABI major revision.
+        received: u16,
+    },
+    /// The producer is older than the requested additive ABI revision.
+    #[error("ABI minor too old: expected at least {expected}, received {received}")]
+    AbiMinor {
+        /// Consumer-required ABI minor revision.
+        expected: u16,
+        /// Producer-reported ABI minor revision.
+        received: u16,
     },
     /// The producer belongs to another protocol family.
     #[error("protocol family mismatch: expected {expected}, received {received}")]
