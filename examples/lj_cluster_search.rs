@@ -15,8 +15,8 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_leave_target,
-    occupancy_retire_at, published_energy_score,
+    LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_is_cluster,
+    occupancy_leave_target, occupancy_retire_at, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -3304,6 +3304,10 @@ fn run_capnp_catalog(
             policy.min_families,
         ) {
             let saturated = policy.packing_saturated;
+            let putative = snapshot
+                .best_state()
+                .map(|state| state.to_vec())
+                .unwrap_or_else(|| snapshot.current_state().to_vec());
             if occupancy_retire_at(
                 certificate,
                 saturated,
@@ -3311,7 +3315,8 @@ fn run_capnp_catalog(
                 policy.ei_exhausted,
                 n_occupied_families,
                 policy.min_families,
-            ) {
+            ) && occupancy_is_cluster(&putative)
+            {
                 if !announced_done {
                     println!(
                         "  done {}  hops {}  best {:.6}",

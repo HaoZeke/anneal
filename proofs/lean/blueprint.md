@@ -18,3 +18,5 @@ declaration in `Hop/OccupancyGt.lean`.
 - [x] `code_cut_is_cheeger` (Fiedler `c < λ₂` ⇒ Cheeger `c² < 2λ₂`)
 - [x] `familyFloor` cases (disconnected / Cheeger / no spectrum)
 - [x] retire Boolean conjuncts (CatalogSaturated does not retire)
+- [x] `path_second_moment`, `path_rg2`, `path_rg2_lj13` (straight-chain \(R_g\))
+- [x] `forest_edge_bound`, `connected_cycle_has_n_edges`

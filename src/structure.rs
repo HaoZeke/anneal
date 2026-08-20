@@ -1032,6 +1032,92 @@ pub fn contact_cutoff_from_gr(x: ArrayView1<f64>, n: usize) -> f64 {
     RING_CUTOFF_SCALE * median_nearest_neighbour(x, n)
 }
 
+/// Connected components and undirected edges of the contact graph.
+pub fn contact_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize) {
+    if n == 0 {
+        return (0, 0);
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    let mut rank = vec![0u8; n];
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut edges = 0usize;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d2 = (0..3)
+                .map(|k| {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    d * d
+                })
+                .sum::<f64>();
+            if d2.sqrt() < cutoff {
+                edges += 1;
+                let a = find(&mut parent, i);
+                let b = find(&mut parent, j);
+                if a != b {
+                    if rank[a] < rank[b] {
+                        parent[a] = b;
+                    } else if rank[a] > rank[b] {
+                        parent[b] = a;
+                    } else {
+                        parent[b] = a;
+                        rank[a] = rank[a].saturating_add(1);
+                    }
+                }
+            }
+        }
+    }
+    let mut roots = vec![false; n];
+    for i in 0..n {
+        roots[find(&mut parent, i)] = true;
+    }
+    (roots.iter().filter(|&&r| r).count(), edges)
+}
+
+/// Contact census at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+pub fn contact_census_nn(x: ArrayView1<f64>, n: usize) -> (usize, usize) {
+    let cutoff = RING_CUTOFF_SCALE * median_nearest_neighbour(x, n);
+    contact_census(x, n, cutoff)
+}
+
+/// Squared radius of gyration about the centroid.
+pub fn radius_of_gyration2(x: ArrayView1<f64>, n: usize) -> f64 {
+    if n == 0 {
+        return 0.0;
+    }
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += x[3 * i + k];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for k in 0..3 {
+        com[k] *= inv;
+    }
+    let mut acc = 0.0;
+    for i in 0..n {
+        for k in 0..3 {
+            let d = x[3 * i + k] - com[k];
+            acc += d * d;
+        }
+    }
+    acc * inv
+}
+
+/// Straight-path \(R_g^2 = a^2(N^2-1)/12\) for \(N\) sites spaced by \(a\).
+pub fn path_radius_of_gyration2(n: usize, spacing: f64) -> f64 {
+    if n < 2 {
+        return 0.0;
+    }
+    spacing * spacing * ((n * n - 1) as f64) / 12.0
+}
+
 /// Franzblau census at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
 ///
 /// That scale sits between the first and second neighbour shells of

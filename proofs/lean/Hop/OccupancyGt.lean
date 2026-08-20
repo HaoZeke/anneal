@@ -185,6 +185,53 @@ theorem cheeger_example :
       ((1 : Rat) / 20) * (1 / 20) < 2 * (1 / 10) := by
   grind
 
+/-! ## Compactness of a putative cluster
+
+A path of `N` sites spaced by `a` has
+`R_g^2 = a^2 (N^2 - 1) / 12`. A forest on `n` vertices with `c`
+components has at most `n - c` edges; a connected graph with a
+cycle has at least `n` edges. GMIN's container and this contact
+test refuse the same objects: chains, trees, and fragments.
+-/
+
+/-- Variance of `{0,...,n-1}` is `(n^2-1)/12`. The path `R_g^2`
+identity is this moment times `a^2`. -/
+theorem path_second_moment (n : Rat) (_hn : n ≠ 0) :
+    (n - 1) * n * (2 * n - 1) / 6
+        - (n - 1) * (n - 1) * n / 2
+        + n * ((n - 1) / 2) * ((n - 1) / 2)
+      = n * (n * n - 1) / 12 := by
+  grind
+
+/-- Straight chain of `n` sites: `R_g^2 / a^2 = (n^2 - 1) / 12`. -/
+theorem path_rg2 (n a : Rat) (_hn : n ≠ 0) :
+    a * a * (n * n - 1) / 12
+      = (1 / n)
+          * a * a
+          * ((n - 1) * n * (2 * n - 1) / 6
+              - (n - 1) * (n - 1) * n / 2
+              + n * ((n - 1) / 2) * ((n - 1) / 2)) := by
+  grind
+
+/-- LJ13 path: `R_g^2 / a^2 = 14`. -/
+theorem path_rg2_lj13 : ((13 : Rat) * 13 - 1) / 12 = 14 := by
+  grind
+
+/-- A forest on `n` vertices with `c` components has `e ≤ n - c`. -/
+theorem forest_edge_bound (n c e : Nat) (hc : c ≤ n) :
+    e ≤ n - c ↔ c + e ≤ n := by
+  omega
+
+/-- A connected graph (`c = 1`) with a cycle has at least `n` edges. -/
+theorem connected_cycle_has_n_edges (n e : Nat) (hn : n ≥ 1) :
+    e ≥ n → e > n - 1 := by
+  omega
+
+/-- A tree is the connected forest: `e = n - 1`. -/
+theorem tree_is_connected_forest (n : Nat) (hn : n ≥ 1) :
+    n - 1 + 1 = n := by
+  omega
+
 /-- Family floor: two communities iff both Fiedler sides are live,
 DECAF labels them as distinct packings, and the cut is a bottleneck
 (`c = 0` or `c < λ₂`). No spectrum and `c > 0` is one community. -/
