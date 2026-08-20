@@ -32,12 +32,18 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     assert_eq!(expected.abi_major, 1);
     assert_eq!(expected.abi_minor, 1);
     assert_eq!(expected.layout_revision, 3);
-    let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 2), expected);
+    let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 0), expected);
     assert!(
         compatible
             .validate("anneal.objective", ProtocolVersion::new(1, 1), expected)
             .is_ok()
     );
+
+    let newer_protocol = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 2), expected);
+    assert!(matches!(
+        newer_protocol.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
+        Err(CompatibilityError::ProtocolMinor { .. })
+    ));
 
     let wrong_major = EngineDescriptor::new("rgpot", ProtocolVersion::new(2, 0), expected);
     assert!(matches!(
@@ -47,7 +53,7 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
 
     let wrong_layout = EngineDescriptor::new(
         "rgpot",
-        ProtocolVersion::new(1, 2),
+        ProtocolVersion::new(1, 0),
         AbiStamp {
             layout_revision: expected.layout_revision + 1,
             ..expected
@@ -60,7 +66,7 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
 
     let wrong_major = EngineDescriptor::new(
         "rgpot",
-        ProtocolVersion::new(1, 2),
+        ProtocolVersion::new(1, 0),
         AbiStamp {
             abi_major: expected.abi_major + 1,
             ..expected
@@ -71,16 +77,16 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
         Err(CompatibilityError::AbiMajor { .. })
     ));
 
-    let old_minor = EngineDescriptor::new(
+    let new_minor = EngineDescriptor::new(
         "rgpot",
-        ProtocolVersion::new(1, 2),
+        ProtocolVersion::new(1, 0),
         AbiStamp {
-            abi_minor: expected.abi_minor - 1,
+            abi_minor: expected.abi_minor + 1,
             ..expected
         },
     );
     assert!(matches!(
-        old_minor.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
+        new_minor.validate("anneal.objective", ProtocolVersion::new(1, 1), expected),
         Err(CompatibilityError::AbiMinor { .. })
     ));
 }
