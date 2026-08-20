@@ -323,6 +323,90 @@ pub fn occupancy_landfold_split(
     }
 }
 
+/// Local maxima of a Gaussian KDE on a landfold map.
+///
+/// \(F = -\ln(\rho/\rho_{\max})\) minima are density maxima. A leftover
+/// DECAF chain is one basin; two well-separated packings are two.
+/// 2-means cannot count leftover-cloud basins; this can. This is not
+/// the hop-graph Fiedler split and it does not retire.
+pub fn occupancy_fes_basins(xy: &[[f64; 2]]) -> usize {
+    let n = xy.len();
+    if n < 2 {
+        return 1;
+    }
+    let mut nearest = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::INFINITY;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            best = best.min(map_dist(xy[i], xy[j]));
+        }
+        nearest.push(best);
+    }
+    nearest.sort_by(|a, b| a.total_cmp(b));
+    let mut diameter = 0.0_f64;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            diameter = diameter.max(map_dist(xy[i], xy[j]));
+        }
+    }
+    let sigma = nearest[n / 2].max(0.25 * diameter).max(1e-12);
+    let mut density = vec![0.0; n];
+    for i in 0..n {
+        for j in 0..n {
+            let ratio = map_dist(xy[i], xy[j]) / sigma;
+            density[i] += (-0.5 * ratio * ratio).exp();
+        }
+    }
+    let mut basins = 0usize;
+    for i in 0..n {
+        let mut peak = true;
+        for j in 0..n {
+            if i == j || map_dist(xy[i], xy[j]) > sigma {
+                continue;
+            }
+            if density[j] > density[i] + 1e-15
+                || ((density[j] - density[i]).abs() <= 1e-15 && j < i)
+            {
+                peak = false;
+                break;
+            }
+        }
+        if peak {
+            basins += 1;
+        }
+    }
+    basins.max(1)
+}
+
+/// Landfold map of DECAF histograms, then [`occupancy_fes_basins`].
+pub fn occupancy_fes_from_histograms(histograms: &[Vec<f64>]) -> usize {
+    match histograms.len() {
+        0 | 1 => 1,
+        2 => {
+            if super::packing::packing_distance(&histograms[0], &histograms[1])
+                > super::packing::PACKING_MERGE
+            {
+                2
+            } else {
+                1
+            }
+        }
+        _ => match occupancy_map_from_histograms(histograms) {
+            Some(xy) => occupancy_fes_basins(&xy),
+            None => 1,
+        },
+    }
+}
+
+fn map_dist(a: [f64; 2], b: [f64; 2]) -> f64 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    (dx * dx + dy * dy).sqrt()
+}
+
 /// Secondary family floor from Franzblau primitive-ring profiles.
 ///
 /// One (triangles, squares, pentagons) per occupied DECAF family.
@@ -1056,11 +1140,11 @@ mod tests {
         OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
         leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
-        occupancy_ei_exhausted, occupancy_family_floor, occupancy_landfold_floor,
-        occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
-        occupancy_retire_at, occupancy_ring_floor, packing_role, promote_one_sided,
-        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
-        ring_novelty, seat_extras,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_basins,
+        occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_leave_adopt,
+        occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
+        occupancy_ring_floor, packing_role, promote_one_sided, published_energy_score,
+        retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1433,6 +1517,15 @@ mod tests {
     fn ring_floor_on_distinct_profiles_is_two() {
         assert_eq!(occupancy_ring_floor(&[(165, 17, 6), (152, 22, 0)]), 2);
         assert_eq!(occupancy_ring_floor(&[(400, 42, 21), (360, 55, 2)]), 2);
+    }
+
+    #[test]
+    fn fes_basins_keep_a_leftover_chain_and_split_two_clumps() {
+        let chain: Vec<[f64; 2]> = (0..8).map(|i| [i as f64, 0.0]).collect();
+        assert_eq!(occupancy_fes_basins(&chain), 1);
+        let clumps = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
+        assert_eq!(occupancy_fes_basins(&clumps), 2);
+        assert_eq!(occupancy_fes_from_histograms(&[vec![1.0, 0.0]]), 1);
     }
 
     #[test]
