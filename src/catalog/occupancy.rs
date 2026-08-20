@@ -211,7 +211,10 @@ pub fn occupancy_leave_target(
 /// packing signal SOAP \(L^1\) merge can miss. Icosahedra are
 /// 5-ring rich; octahedra and Marks are not.
 pub fn occupancy_ring_class_changed(origin: &[f64], trial: &[f64]) -> bool {
-    match (occupancy_ring_profile(origin), occupancy_ring_profile(trial)) {
+    match (
+        occupancy_ring_profile(origin),
+        occupancy_ring_profile(trial),
+    ) {
         (Some(left), Some(right)) => ring_novelty(left, right) > 0,
         _ => false,
     }
@@ -1481,15 +1484,14 @@ mod tests {
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
-        leftover_lambda, leftover_sat_dwell, occupancy_leave_new_class,
-        occupancy_ring_class_changed,
-        occupancy_compact, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
-        occupancy_family_floor, occupancy_is_cluster,
-        occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_target,
-        occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_floor,
-        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
+        leftover_lambda, leftover_sat_dwell, occupancy_compact, occupancy_complete,
+        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
+        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_new_class,
+        occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
+        occupancy_ring_class_changed, occupancy_ring_floor, packing_role, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
+        ring_novelty, seat_extras,
     };
 
     #[test]

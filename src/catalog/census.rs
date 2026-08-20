@@ -15,11 +15,7 @@ pub const PRODUCTION_SINGLETON_BUDGET: u64 = 3;
 ///
 /// `(k+1)/(n+1) < p/q` iff `n ≥ \lfloor (k+1) q / p \rfloor` when
 /// `p` divides `(k+1)q`. For `α = 1/5` and `k = 3` this is 20.
-pub const fn gt_min_visits(
-    ceiling_num: u64,
-    ceiling_den: u64,
-    singleton_budget: u64,
-) -> u64 {
+pub const fn gt_min_visits(ceiling_num: u64, ceiling_den: u64, singleton_budget: u64) -> u64 {
     (singleton_budget + 1) * ceiling_den / ceiling_num
 }
 

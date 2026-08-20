@@ -62,8 +62,6 @@ pub mod bias;
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
-/// Versioned objective bridge compatibility descriptors.
-pub mod compatibility;
 /// Event catalogue keyed by local topology.
 pub mod catalog;
 /// Pure cooperative-catalog policy and target-free proposals.
@@ -71,6 +69,8 @@ pub mod catalog_policy;
 /// Versioned cooperative catalog protocol.
 #[cfg(feature = "bank-rpc")]
 pub mod catalog_rpc;
+/// Versioned objective bridge compatibility descriptors.
+pub mod compatibility;
 /// Collective variables from the spectrum of the visited-basin graph.
 pub mod construct;
 /// The cooling-schedule trait: `epoch -> temperature`.
@@ -145,9 +145,9 @@ pub mod region_assignment;
 pub mod replica_exchange;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
-pub mod runner;
 /// Deterministic provenance records for engine-backed runs.
 pub mod run_manifest;
+pub mod runner;
 /// Run-time distributions: what a search's time to target supports.
 pub mod runtime_distribution;
 /// Stan-style single-step sampler trait: `trait Sampler<T>`.
@@ -189,7 +189,7 @@ pub use error::Error;
 pub use exchange::{Exchange, MetropolisExchange, TsallisExchange};
 pub use free_energy::BarEstimator;
 pub use grad::{AnalyticGradient, DifferentiableObjective, FiniteDiffGradient, Gradient};
-pub use history::{trajectory_stationarity_flags, EpochLine, History, State};
+pub use history::{EpochLine, History, State, trajectory_stationarity_flags};
 pub use hmc::{
     HmcIntegrator, HmcSaSampler, LeapfrogIntegrator, LeapfrogResult, NutsSaSampler, NutsTransition,
     OMELYAN_LAMBDA, OmelyanIntegrator,

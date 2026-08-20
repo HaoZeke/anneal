@@ -25,7 +25,11 @@ impl ArtifactDigest {
 
     fn named(name: impl Into<String>, bytes: &[u8]) -> Self {
         let digest = Sha256::digest(bytes);
-        Self { name: name.into(), sha256: format!("{digest:x}"), bytes: bytes.len() }
+        Self {
+            name: name.into(),
+            sha256: format!("{digest:x}"),
+            bytes: bytes.len(),
+        }
     }
 }
 
@@ -85,7 +89,9 @@ impl RunManifest {
             .ok_or_else(|| ManifestError::MissingArtifact(name.to_owned()))?;
         let actual = ArtifactDigest::named(name, bytes);
         if actual.sha256 != expected.sha256 || actual.bytes != expected.bytes {
-            return Err(ManifestError::DigestMismatch { name: name.to_owned() });
+            return Err(ManifestError::DigestMismatch {
+                name: name.to_owned(),
+            });
         }
         Ok(())
     }

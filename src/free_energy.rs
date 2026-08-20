@@ -55,7 +55,11 @@ impl BarEstimator {
     /// The BAR root is at `g(C) = 0`.
     fn root_residual(&self, c: f64) -> f64 {
         let lhs: f64 = self.du_a.iter().map(|du| fermi(self.beta_a * du - c)).sum();
-        let rhs: f64 = self.du_b.iter().map(|du| fermi(-self.beta_b * du + c)).sum();
+        let rhs: f64 = self
+            .du_b
+            .iter()
+            .map(|du| fermi(-self.beta_b * du + c))
+            .sum();
         lhs - rhs
     }
 
