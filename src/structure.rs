@@ -853,6 +853,37 @@ mod tests {
     }
 }
 
+/// Contact cutoff as a multiple of the structure's median nearest-neighbour
+/// distance. 1.35 sits above first-neighbour LJ and below the second shell.
+pub const RING_CUTOFF_SCALE: f64 = 1.35;
+
+fn median_nearest_neighbour(x: ArrayView1<f64>, n: usize) -> f64 {
+    if n < 2 {
+        return 1.0;
+    }
+    let mut nn = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut best = f64::INFINITY;
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            let d2 = (0..3)
+                .map(|k| {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    d * d
+                })
+                .sum::<f64>();
+            if d2 < best {
+                best = d2;
+            }
+        }
+        nn.push(best.sqrt());
+    }
+    nn.sort_by(|a, b| a.total_cmp(b));
+    nn[n / 2]
+}
+
 /// Primitive-ring profile of the contact graph: counts of 3-, 4- and 5-rings.
 ///
 /// The shortest-path ring criterion of Franzblau
@@ -910,6 +941,12 @@ pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize,
     // Each square is found once per traversal direction, each pentagon from
     // both end orderings; triangles are already unique by ordering.
     (tri, sq / 2, pent / 2)
+}
+
+/// Primitive-ring profile at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+pub fn ring_profile_nn(x: ArrayView1<f64>, n: usize) -> (usize, usize, usize) {
+    let cutoff = RING_CUTOFF_SCALE * median_nearest_neighbour(x, n);
+    ring_profile(x, n, cutoff)
 }
 
 #[cfg(test)]

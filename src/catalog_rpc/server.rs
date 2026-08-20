@@ -31,9 +31,8 @@ use crate::catalog::{
     REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
     euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_landfold_split,
-    occupancy_min_families, occupant_rhat,
-    packing_role, promote_one_sided, prune, retis_exchange_adjacent,
-    same_packing, seat_extras,
+    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split, occupant_rhat,
+    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -279,7 +278,7 @@ struct ScientificState {
     /// Fraction of the ensemble budget spent, which is what the archive
     /// radius anneals against.
     archive_progress: f64,
-    last_gt_report: Option<(u64, u64, u64, u64, u32, u32, usize, bool)>,
+    last_gt_report: Option<(u64, u64, u64, u64, u32, u32, usize, usize, bool)>,
     leftover_sat_streak: u32,
     leftover_dwell: bool,
     funnel: crate::funnel_bo::FunnelModel,
@@ -2730,6 +2729,52 @@ fn occupancy_landfold_from_book(scientific: &ScientificState) -> (usize, usize, 
     occupancy_landfold_split(&histograms, &families)
 }
 
+fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
+    let occupied: BTreeSet<usize> = scientific
+        .packing
+        .occupied_histograms()
+        .into_iter()
+        .map(|(index, _)| index)
+        .collect();
+    let mut best: BTreeMap<usize, (Vec<f64>, f64)> = BTreeMap::new();
+    let mut consider = |coordinates: &[f64], energy: f64| {
+        if !energy.is_finite() {
+            return;
+        }
+        let Some(histogram) = scientific.packing.histogram(coordinates) else {
+            return;
+        };
+        let Some(family) = scientific.packing.family_of(&histogram) else {
+            return;
+        };
+        if !occupied.contains(&family) {
+            return;
+        }
+        match best.get(&family) {
+            Some((_, held)) if energy >= *held - 1e-15 => {}
+            _ => {
+                best.insert(family, (coordinates.to_vec(), energy));
+            }
+        }
+    };
+    for candidate in scientific.last_candidate_by_replica.values() {
+        consider(&candidate.coordinates, candidate.energy);
+    }
+    for candidate in scientific.best_candidate_by_replica.values() {
+        consider(&candidate.coordinates, candidate.energy);
+    }
+    for entry in scientific.catalog.entries() {
+        consider(entry.coordinates(), entry.energy());
+    }
+    let mut profiles = Vec::new();
+    for (coordinates, _) in best.values() {
+        if let Some(profile) = occupancy_ring_profile(coordinates) {
+            profiles.push(profile);
+        }
+    }
+    occupancy_ring_split(&profiles)
+}
+
 fn occupancy_floor(scientific: &ScientificState) -> usize {
     if std::env::var("CATALOG_MIN_FAMILIES")
         .ok()
@@ -2763,6 +2808,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let (measured_floor, conductance, algebraic, seam_left, seam_right, seam_packings) =
         occupancy_seam_floor(scientific);
     let (landfold_floor, landfold_left, landfold_right) = occupancy_landfold_from_book(scientific);
+    let (ring_floor, ring_distinct, ring_n) = occupancy_ring_from_book(scientific);
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.saturated();
@@ -2775,6 +2821,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         families,
         min_families,
         landfold_floor,
+        ring_floor,
         stop,
     );
     if scientific.last_gt_report == Some(key) {
@@ -2803,7 +2850,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2826,6 +2873,9 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         landfold_floor,
         landfold_left,
         landfold_right,
+        ring_floor,
+        ring_distinct,
+        ring_n,
         stop,
     );
     let _ = std::io::Write::flush(&mut std::io::stdout());

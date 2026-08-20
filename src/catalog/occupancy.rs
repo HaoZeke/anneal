@@ -68,7 +68,8 @@
 //! graph after DECAF labels the sides: two when the seam separates
 //! distinct packing families, one when the seam is leftover wells of
 //! one packing (a superbasin). A landfold (Torgerson MDS of DECAF L1,
-//! then 2-means) floor is reported beside it and does not retire.
+//! then 2-means) floor and a Franzblau primitive-ring floor are
+//! reported beside it and do not retire.
 //! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
@@ -317,6 +318,40 @@ pub fn occupancy_landfold_split(
     } else {
         (1, left_n, right_n)
     }
+}
+
+/// Secondary family floor from Franzblau primitive-ring profiles.
+///
+/// One (triangles, squares, pentagons) per occupied DECAF family.
+/// Two when two occupied families differ in those counts; one when
+/// every occupied family shares a profile, so leftover ico wells of
+/// one packing stay one community. This is not the hop-graph Fiedler
+/// split and it does not retire.
+pub fn occupancy_ring_floor(profiles: &[(usize, usize, usize)]) -> usize {
+    occupancy_ring_split(profiles).0
+}
+
+/// Ring floor, distinct-profile count, and profile count.
+pub fn occupancy_ring_split(profiles: &[(usize, usize, usize)]) -> (usize, usize, usize) {
+    let n = profiles.len();
+    let mut distinct = std::collections::BTreeSet::new();
+    for &profile in profiles {
+        distinct.insert(profile);
+    }
+    let n_distinct = distinct.len();
+    let floor = if n_distinct >= 2 { 2 } else { 1 };
+    (floor, n_distinct, n)
+}
+
+/// Franzblau (tri, sq, pent) at [`crate::structure::RING_CUTOFF_SCALE`]
+/// times the structure's median nearest-neighbour distance.
+pub fn occupancy_ring_profile(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
+    let n = coordinates.len() / 3;
+    if n < 3 || coordinates.len() != 3 * n {
+        return None;
+    }
+    let x = ndarray::ArrayView1::from(coordinates);
+    Some(crate::structure::ring_profile_nn(x, n))
 }
 
 fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
@@ -967,14 +1002,14 @@ pub fn occupancy_retire_at(
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_shot_accepted, leftover_lambda, leftover_sat_dwell, occupancy_complete,
-        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_target,
-        occupancy_map_floor, occupancy_retire, occupancy_retire_at, packing_role,
-        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
-        seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate, OccupancyLeaveAdopt,
-        OccupancyLeaveTarget, PackingRole, CHAMPION_RANK, OCCUPANCY_SEAM_CONDUCTANCE,
+        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
+        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
+        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
+        leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_landfold_floor,
+        occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
+        occupancy_retire_at, occupancy_ring_floor, packing_role, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
     };
 
     #[test]
@@ -1334,6 +1369,19 @@ mod tests {
         let ico = vec![1.0, 0.0];
         let oh = vec![0.0, 1.0];
         assert_eq!(occupancy_landfold_floor(&[ico, oh], &[0, 1]), 2);
+    }
+
+    #[test]
+    fn ring_floor_on_one_profile_is_one() {
+        assert_eq!(occupancy_ring_floor(&[]), 1);
+        assert_eq!(occupancy_ring_floor(&[(165, 17, 6)]), 1);
+        assert_eq!(occupancy_ring_floor(&[(165, 17, 6), (165, 17, 6)]), 1);
+    }
+
+    #[test]
+    fn ring_floor_on_distinct_profiles_is_two() {
+        assert_eq!(occupancy_ring_floor(&[(165, 17, 6), (152, 22, 0)]), 2);
+        assert_eq!(occupancy_ring_floor(&[(400, 42, 21), (360, 55, 2)]), 2);
     }
 
     #[test]
