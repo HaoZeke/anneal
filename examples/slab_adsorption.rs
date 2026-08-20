@@ -8,7 +8,7 @@ mod common;
 use anneal_core::methods::cluster_hopping::{Config, Ledger, SoapProposalMode, covalent_radius};
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
-use common::rgpot_eindir::RgpotObjective;
+use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use eindir_core::Objective;
 use eindir_core::bounds::Bounds;
 use eindir_core::gradient::Gradient;
@@ -196,6 +196,7 @@ fn main() {
     cfg.soap_mode = soap_mode_from_env();
     write_resolved_config(&cfg);
     let pot = RgpotObjective::cuh2(&atmnrs, box_);
+    emit_engine_manifest("cuh2");
     let inner = pot.wrapper();
     let mut active = vec![false; n];
     for &i in &free_seeds {
