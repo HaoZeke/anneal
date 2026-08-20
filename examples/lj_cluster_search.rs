@@ -1851,9 +1851,7 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     let _ = wells;
     #[cfg(feature = "featomic")]
     {
-        return anneal_core::featomic_hop::leave_archive_hole(
-            x, rcut, species, None, rmsd, rng,
-        );
+        return anneal_core::featomic_hop::leave_archive_hole(x, rcut, species, None, rmsd, rng);
     }
     #[cfg(not(feature = "featomic"))]
     {
