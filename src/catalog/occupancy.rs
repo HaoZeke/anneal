@@ -337,6 +337,10 @@ pub struct OccupancyFes {
     pub delta: Option<f64>,
 }
 
+const FES_MEAN_SHIFT_ITERATIONS: usize = 128;
+const FES_MEAN_SHIFT_TOLERANCE: f64 = 1e-10;
+const FES_MODE_MERGE_TOLERANCE: f64 = 1e-6;
+
 /// Discrete packing \(\Delta F/kT = \ln(n_{\max}/n_2)\) from leftover-well
 /// counts. None when fewer than two occupied families have wells.
 pub fn occupancy_fes_delta(counts: &[u64]) -> Option<f64> {
@@ -384,17 +388,60 @@ pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
     }
     nearest.sort_by(|a, b| a.total_cmp(b));
     let sigma = nearest[n / 2].max(0.25 * diameter).max(1e-12);
-    let mut density = vec![0.0; n];
-    for i in 0..n {
-        let w_i = weights.and_then(|w| w.get(i).copied()).unwrap_or(1.0);
-        if !w_i.is_finite() || w_i <= 0.0 {
-            continue;
+    let sample_weight = |i: usize| {
+        weights
+            .and_then(|values| values.get(i).copied())
+            .unwrap_or(1.0)
+    };
+    let mut modes: Vec<[f64; 2]> = Vec::new();
+    for &seed in xy {
+        let mut center = seed;
+        for _ in 0..FES_MEAN_SHIFT_ITERATIONS {
+            let mut total = 0.0;
+            let mut next = [0.0, 0.0];
+            for (i, &point) in xy.iter().enumerate() {
+                let weight = sample_weight(i);
+                if !weight.is_finite() || weight <= 0.0 {
+                    continue;
+                }
+                let ratio = map_dist(center, point) / sigma;
+                let kernel_weight = weight * (-0.5 * ratio * ratio).exp();
+                total += kernel_weight;
+                next[0] += kernel_weight * point[0];
+                next[1] += kernel_weight * point[1];
+            }
+            if total <= 0.0 {
+                break;
+            }
+            next[0] /= total;
+            next[1] /= total;
+            let shift = map_dist(center, next);
+            center = next;
+            if shift <= FES_MEAN_SHIFT_TOLERANCE * sigma {
+                break;
+            }
         }
-        for j in 0..n {
-            let ratio = map_dist(xy[i], xy[j]) / sigma;
-            density[j] += w_i * (-0.5 * ratio * ratio).exp();
+        if modes
+            .iter()
+            .all(|&mode| map_dist(mode, center) > FES_MODE_MERGE_TOLERANCE * sigma)
+        {
+            modes.push(center);
         }
     }
+    let density_at = |point: [f64; 2]| {
+        xy.iter()
+            .enumerate()
+            .filter_map(|(i, &sample)| {
+                let weight = sample_weight(i);
+                if !weight.is_finite() || weight <= 0.0 {
+                    return None;
+                }
+                let ratio = map_dist(point, sample) / sigma;
+                Some(weight * (-0.5 * ratio * ratio).exp())
+            })
+            .sum::<f64>()
+    };
+    let density: Vec<f64> = modes.iter().copied().map(density_at).collect();
     let rho_max = density.iter().copied().fold(0.0_f64, f64::max);
     if rho_max <= 0.0 {
         return OccupancyFes {
@@ -402,33 +449,11 @@ pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
             delta: None,
         };
     }
-    let mut f = vec![0.0; n];
-    for i in 0..n {
-        if density[i] > 0.0 {
-            f[i] = -(density[i] / rho_max).ln();
-        } else {
-            f[i] = f64::INFINITY;
-        }
-    }
-    let mut minima_f = Vec::new();
-    for i in 0..n {
-        if !f[i].is_finite() {
-            continue;
-        }
-        let mut low = true;
-        for j in 0..n {
-            if i == j || map_dist(xy[i], xy[j]) > sigma || !f[j].is_finite() {
-                continue;
-            }
-            if f[j] < f[i] - 1e-15 || ((f[j] - f[i]).abs() <= 1e-15 && j < i) {
-                low = false;
-                break;
-            }
-        }
-        if low {
-            minima_f.push(f[i]);
-        }
-    }
+    let mut minima_f: Vec<f64> = density
+        .into_iter()
+        .filter(|&rho| rho > 0.0)
+        .map(|rho| -(rho / rho_max).ln())
+        .collect();
     minima_f.sort_by(|a, b| a.total_cmp(b));
     let minima = minima_f.len().max(1);
     let delta = if minima_f.len() >= 2 {
