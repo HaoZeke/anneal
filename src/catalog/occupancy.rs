@@ -1616,6 +1616,14 @@ mod tests {
     }
 
     #[test]
+    fn fes_map_rejects_malformed_samples() {
+        assert!(occupancy_fes(&[[f64::NAN, 0.0]], None).is_err());
+        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0])).is_err());
+        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0, -1.0])).is_err());
+        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[0.0, 0.0])).is_err());
+    }
+
+    #[test]
     fn fes_map_is_free_energy_not_a_decaf_split() {
         let chain: Vec<[f64; 2]> = (0..8).map(|i| [i as f64, 0.0]).collect();
         let chain_fes = occupancy_fes(&chain, None);
