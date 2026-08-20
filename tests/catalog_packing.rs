@@ -169,7 +169,7 @@ fn landfold_floor_separates_lj75_marks_from_ico() {
         2,
         "book ico and Marks must be two landfold communities"
     );
-    let fes = occupancy_fes_from_histograms(&hists);
+    let fes = occupancy_fes_from_histograms(&hists).unwrap();
     assert_eq!(fes.minima, 1, "two equal-weight packings have the same F");
     assert!(fes.delta.is_none());
     let ico_f = fams[0];
@@ -219,7 +219,7 @@ fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
         2,
         "2-means splits a leftover DECAF chain; FES maxima are the landfold figure, not this floor"
     );
-    let fes = occupancy_fes_from_histograms(&hists);
+    let fes = occupancy_fes_from_histograms(&hists).unwrap();
     assert_eq!(
         fes.minima, 1,
         "the connected interpolant chain has one landfold KDE mode"
