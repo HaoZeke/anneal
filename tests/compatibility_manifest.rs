@@ -22,6 +22,7 @@ fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
         grad_fn: None,
         user_data: std::ptr::null_mut(),
         free_fn: None,
+        descriptor: std::ptr::null(),
     }
 }
 
