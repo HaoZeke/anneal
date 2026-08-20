@@ -1,7 +1,7 @@
 use anneal_core::catalog::{
-    different_decaf_family, occupancy_landfold_floor, occupancy_retire_at, packing_distance,
-    packing_fingerprint, same_packing, OccupancyCertificate, PackingBook, PACKING_MERGE,
-    PACKING_MOVE_EPS,
+    OccupancyCertificate, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
+    occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_floor, occupancy_ring_profile,
+    packing_distance, packing_fingerprint, same_packing,
 };
 use ndarray::Array1;
 
@@ -99,7 +99,7 @@ fn decaf_histogram_separates_lj75_marks_from_the_icosahedral_floor() {
 
 #[test]
 fn leftover_first_wave_arrivals_are_not_saturated() {
-    use anneal_core::catalog::{leftover_arrivals_saturated, GoodTuringSample};
+    use anneal_core::catalog::{GoodTuringSample, leftover_arrivals_saturated};
     assert!(!leftover_arrivals_saturated(std::iter::repeat_n(1u64, 48)));
     assert!(leftover_arrivals_saturated(std::iter::repeat_n(2u64, 20)));
     let first = GoodTuringSample::from_counts(std::iter::repeat_n(1u64, 48));
@@ -247,32 +247,8 @@ fn landfold_floor_does_not_split_leftover_ico() {
     );
 }
 
-fn median_nn(x: &Array1<f64>) -> f64 {
-    let n = x.len() / 3;
-    let mut nn = Vec::with_capacity(n);
-    for i in 0..n {
-        let mut best = f64::INFINITY;
-        for j in 0..n {
-            if i == j {
-                continue;
-            }
-            let mut d2 = 0.0;
-            for k in 0..3 {
-                let d = x[3 * i + k] - x[3 * j + k];
-                d2 += d * d;
-            }
-            best = best.min(d2.sqrt());
-        }
-        nn.push(best);
-    }
-    nn.sort_by(|a, b| a.total_cmp(b));
-    nn[n / 2]
-}
-
 fn rings(x: &Array1<f64>) -> (usize, usize, usize) {
-    let n = x.len() / 3;
-    let cutoff = 1.35 * median_nn(x);
-    anneal_core::structure::ring_profile(x.view(), n, cutoff)
+    occupancy_ring_profile(x.as_slice().unwrap()).expect("cluster has three atoms")
 }
 
 #[test]
@@ -302,6 +278,21 @@ fn primitive_rings_separate_packings_and_keep_leftover_ico() {
     assert_eq!(
         r_left, r_ico38,
         "a leftover ico well must keep the ico ring profile"
+    );
+    assert_eq!(
+        occupancy_ring_floor(&[r_ico38, r_left]),
+        1,
+        "leftover ico wells of one packing are one ring community"
+    );
+    assert_eq!(
+        occupancy_ring_floor(&[r_ico38, r_oh38]),
+        2,
+        "LJ38 ico and Oh are two ring communities"
+    );
+    assert_eq!(
+        occupancy_ring_floor(&[r_ico75, r_marks]),
+        2,
+        "LJ75 ico and Marks are two ring communities"
     );
 }
 
