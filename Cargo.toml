@@ -44,10 +44,10 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-# Sibling checkouts, same layout as landfold. Published pins stay on the
-# matching eindir git revision f3c4213.
-eindir-core = { path = "../eindir", version = "0.6.0" }
-xtsci-optimize = { path = "../xtsci-optimize", version = "0.1.0" }
+# Sibling checkouts provide the local development surface; the Git revisions
+# are the reproducible source selected when this crate is consumed elsewhere.
+eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c4213", version = "0.6.0" }
+xtsci-optimize = { git = "https://github.com/HaoZeke/xtsci-optimize.git", rev = "6b4a7fc", version = "0.1.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
@@ -58,7 +58,7 @@ sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
-rgpot-core = { version = "=3.0.2", git = "https://github.com/HaoZeke/potlib.git", rev = "2c4f0cc", optional = true }
+rgpot-core = { version = "=3.0.2", git = "https://github.com/OmniPotentRPC/rgpot.git", rev = "402f53d", optional = true }
 libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 nng = { version = "1.0", optional = true }
@@ -72,6 +72,9 @@ metatensor = { version = "=0.2.3", optional = true }
 # that source to the checked-out contract so the workspace has one ABI crate.
 [patch."https://github.com/HaoZeke/eindir.git"]
 eindir-core = { path = "../eindir" }
+
+[patch."https://github.com/HaoZeke/xtsci-optimize.git"]
+xtsci-optimize = { path = "../xtsci-optimize" }
 
 [dev-dependencies]
 criterion = { version = "0.6", features = ["html_reports"] }
