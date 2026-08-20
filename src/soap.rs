@@ -925,6 +925,77 @@ pub fn pullback_nu3(
     dr
 }
 
+/// Extra ArchiveHole in the DECAF packing feature, not SOAP leftover.
+///
+/// Packing identity is per-center [`local_nu3_z`] (SOAP plus ACE
+/// \(\nu=3\)). Leftover SOAP \(p_i-\mu\) collapses across the paper
+/// funnels. ACE leftover on those rows stays finite on a closed
+/// shell. A packing-mean kick in the stacked map is species-aware
+/// and names no morphology. Universal MLIP features are this ACE
+/// basis plus learned mixing; occupancy Leave uses the invertible
+/// contractions, not an energy model's last layer.
+pub fn kick_packing_nu3<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return x.to_owned();
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let mut mu = vec![0.0; dim];
+    let mut cnt = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        cnt += 1.0;
+        for t in 0..dim {
+            mu[t] += loc[[i, t]];
+        }
+    }
+    if cnt > 0.0 {
+        for item in &mut mu {
+            *item /= cnt;
+        }
+    }
+    let mut u = vec![0.0; dim];
+    for v in &mut u {
+        let a: f64 = rng.random();
+        let b: f64 = rng.random();
+        let r = (-2.0 * a.max(1e-15).ln()).sqrt();
+        *v = r * (2.0 * PI * b).cos();
+    }
+    let proj = u.iter().zip(mu.iter()).map(|(a, c)| a * c).sum::<f64>();
+    let n2 = mu.iter().map(|c| c * c).sum::<f64>();
+    if n2 > 1e-15 {
+        for (v, c) in u.iter_mut().zip(mu.iter()) {
+            *v -= proj * *c / n2;
+        }
+    }
+    let nrm = u.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if nrm < 1e-15 {
+        return x.to_owned();
+    }
+    for v in &mut u {
+        *v /= nrm;
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            target[i * dim + t] = loc[[i, t]] + u[t];
+        }
+    }
+    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    scale_to_cap(x, dr, rmsd)
+}
+
 fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
     let mut s = 0.0;
     for t in 0..a.len() {
