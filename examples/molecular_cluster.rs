@@ -10,7 +10,7 @@ use anneal_core::methods::cluster_hopping::{
 };
 use anneal_core::methods::cluster_search::{search_from_maybe_bank, verify};
 use common::efficiency::{bank_label, report_trace};
-use common::rgpot_eindir::RgpotObjective;
+use common::rgpot_eindir::{RgpotObjective, emit_engine_manifest};
 use ndarray::Array1;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -57,6 +57,7 @@ fn main() {
     let species: Vec<u32> = (0..m).flat_map(|_| [8, 1, 1]).collect();
     let groups: Vec<Vec<usize>> = (0..m).map(|g| (3 * g..3 * g + 3).collect()).collect();
     let pot = RgpotObjective::xtb(&atmnrs, [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0]);
+    emit_engine_manifest("xtb");
     let obj = pot.wrapper();
     let mut cfg = Config::recommended_molecular(species, groups.clone(), 1.0);
     cfg.move_library = MoveLibrary::Molecular {

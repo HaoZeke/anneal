@@ -9,6 +9,7 @@
 use eindir_core::ffi::{
     eindir_core_abi_compatible, EindirObjectiveWrapper, eindir_objective_t,
 };
+use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
@@ -22,6 +23,33 @@ use std::io::Write;
 use std::path::PathBuf;
 
 const GFN2: i32 = 3;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn descriptor_maps_the_eindir_stamp_and_optional_build_identity() {
+        let stamp = eindir_core::ffi::eindir_abi_stamp_t {
+            abi_major: 1,
+            abi_minor: 2,
+            objective_layout: 3,
+            objective_size: 64,
+            objective_align: 8,
+            dlpack_major: 1,
+            dlpack_minor: 4,
+            features: 0b101,
+        };
+        let descriptor = descriptor_from_stamp("xtb", stamp, Some("rgpot@abc123"));
+        assert_eq!(descriptor.engine_id, "rgpot.xtb");
+        assert_eq!(descriptor.protocol_family, "rgpot.potentials");
+        assert_eq!(descriptor.protocol, ProtocolVersion::new(1, 0));
+        assert_eq!(descriptor.abi.layout_revision, 3);
+        assert_eq!(descriptor.abi.dlpack_minor, 4);
+        assert_eq!(descriptor.abi.features, 0b101);
+        assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
+    }
+}
 
 #[repr(C)]
 struct XtbConfig {
@@ -71,6 +99,43 @@ fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
+}
+
+fn descriptor_from_stamp(
+    backend: &str,
+    stamp: eindir_core::ffi::eindir_abi_stamp_t,
+    build_identity: Option<&str>,
+) -> EngineDescriptor {
+    let mut descriptor = EngineDescriptor::with_family(
+        format!("rgpot.{backend}"),
+        "rgpot.potentials",
+        ProtocolVersion::new(1, 0),
+        AbiStamp {
+            layout_revision: stamp.objective_layout,
+            dlpack_major: u16::try_from(stamp.dlpack_major)
+                .expect("eindir DLPack major fits the manifest type"),
+            dlpack_minor: u16::try_from(stamp.dlpack_minor)
+                .expect("eindir DLPack minor fits the manifest type"),
+            features: stamp.features,
+        },
+    );
+    descriptor.build_identity = build_identity
+        .filter(|identity| !identity.is_empty())
+        .map(str::to_owned);
+    descriptor
+}
+
+fn engine_descriptor(backend: &str) -> EngineDescriptor {
+    let build_identity = std::env::var("RGPOT_BUILD_IDENTITY").ok();
+    descriptor_from_stamp(backend, rgpot_eindir_abi_stamp(), build_identity.as_deref())
+}
+
+pub(crate) fn emit_engine_manifest(backend: &str) {
+    let descriptor = engine_descriptor(backend);
+    println!(
+        "engine_manifest={}",
+        serde_json::to_string(&descriptor).expect("engine descriptor must serialize")
+    );
 }
 
 fn first_existing(cands: &[PathBuf]) -> PathBuf {
