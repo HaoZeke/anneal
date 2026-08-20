@@ -214,15 +214,26 @@ pub enum CompatibilityError {
     ObjectiveNull,
     /// The objective dimension does not match the consumer's request.
     #[error("objective dimension mismatch: expected {expected}, received {received}")]
-    ObjectiveDimension { expected: usize, received: usize },
+    ObjectiveDimension {
+        /// Dimension requested by the consumer.
+        expected: usize,
+        /// Dimension reported by the handle.
+        received: usize,
+    },
     /// A required objective bound pointer is null.
     #[error("eindir objective {bound} bounds are NULL")]
-    ObjectiveBoundsNull { bound: &'static str },
+    ObjectiveBoundsNull {
+        /// Bound pointer that is absent.
+        bound: &'static str,
+    },
     /// An objective bound is non-finite or inverted.
     #[error("invalid objective bounds at index {index}: lower={lower}, upper={upper}")]
     ObjectiveBoundsInvalid {
+        /// Coordinate containing the invalid interval.
         index: usize,
+        /// Lower bound rendered for a stable diagnostic.
         lower: String,
+        /// Upper bound rendered for a stable diagnostic.
         upper: String,
     },
     /// The producer belongs to another protocol family.
