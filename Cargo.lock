@@ -470,7 +470,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=513b8b7fdfaf63cca0b94b2f3316cf2c19a8daaa#513b8b7fdfaf63cca0b94b2f3316cf2c19a8daaa"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=091c6f7d6ea70821c3374152481fb9500e799af2#091c6f7d6ea70821c3374152481fb9500e799af2"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
