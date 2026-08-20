@@ -35,7 +35,8 @@ pub use calibration::{
 };
 pub use census::{
     BasinCensus, BasinId, CensusEntry, CensusError, CensusObservation, PRODUCTION_MAX_UNSEEN_MASS,
-    PRODUCTION_MINIMUM_VISITS,
+    PRODUCTION_MINIMUM_VISITS, PRODUCTION_SINGLETON_BUDGET, PRODUCTION_UNSEEN_MASS_DEN,
+    PRODUCTION_UNSEEN_MASS_NUM, gt_min_visits,
 };
 pub use event::{Event, EventCatalog, TopologyRecord};
 pub use hyperband::{
@@ -43,7 +44,8 @@ pub use hyperband::{
     current_rung, keep_ids, prune, rungs, verdict,
 };
 pub use mixing::{
-    AttractorStrength, CERTIFY_MIN_SAMPLES, MIXED_RHAT, MixingEvidence, certified_global_minimum,
+    AttractorStrength, CERTIFY_CHAINS, CERTIFY_DRAWS_PER_HALF, CERTIFY_MIN_SAMPLES,
+    CERTIFY_SPLIT_HALVES, MIXED_RHAT, MixingEvidence, certified_global_minimum,
     explore_collapsed, explore_must_leave, invert_mixing, mixed, occupant_rhat, rhat_series,
     stronger,
 };

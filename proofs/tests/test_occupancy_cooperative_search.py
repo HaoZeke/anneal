@@ -33,6 +33,11 @@ from proofs.occupancy_cooperative_search import (
     identity_gt_stop_needs_two_families,
     identity_default_floor_is_packing_gt_alone,
     identity_new_type_raises_p0,
+    identity_hatch_stable_is_next_below_ceiling,
+    identity_visits_floor_three_fifths,
+    identity_certify_min_is_split_rhat_length,
+    identity_fes_factor_scale_and_tie,
+    identity_cheeger_code_cut,
     identity_mixing_does_not_retire_without_packing,
     identity_keep_count_partitions,
     identity_keep_independent_of_resource,
@@ -166,6 +171,35 @@ def test_default_family_floor_is_packing_gt_alone():
 
 def test_new_type_raises_unseen_mass():
     ok, residual = identity_new_type_raises_p0()
+    assert ok
+    assert residual == 0
+
+
+def test_hatch_stable_is_the_next_estimator():
+    ok, residual = identity_hatch_stable_is_next_below_ceiling()
+    assert ok
+    assert residual == 0
+
+
+def test_visit_floor_is_twenty_for_three_singletons():
+    ok, _payload = identity_visits_floor_three_fifths()
+    assert ok
+
+
+def test_certify_length_is_split_rhat_product():
+    ok, residual = identity_certify_min_is_split_rhat_length()
+    assert ok
+    assert residual == 0
+
+
+def test_fes_boltzmann_factor_identities():
+    ok, residual = identity_fes_factor_scale_and_tie()
+    assert ok
+    assert residual == 0
+
+
+def test_fiedler_cut_implies_cheeger_upper():
+    ok, residual = identity_cheeger_code_cut()
     assert ok
     assert residual == 0
 

@@ -151,14 +151,11 @@ pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
 /// Hatch-stable leftover dwell from the Good--Turing increment.
 ///
 /// A new singleton sends \(n\mapsto n+1\), \(n_1\mapsto n_1+1\) and
-/// \(\hat p_0'=(n_1+1)/(n+1)\). Dwell when the sample is under the
-/// ceiling and that hatch stays under it. No consecutive-record count.
+/// \(\hat p_0'=(n_1+1)/(n+1)\). Under \(n_1\le n\) the hatch is the
+/// larger estimator, so dwell is exactly \(\hat p_0' <\) ceiling
+/// (`Hop.hatch_stable_iff_next`). No consecutive-record count.
 pub fn leftover_hatch_stable(n: u64, n1: u64, ceiling: f64) -> bool {
-    if n == 0 || !ceiling.is_finite() || ceiling <= 0.0 {
-        return false;
-    }
-    let p0 = n1 as f64 / n as f64;
-    if p0 >= ceiling {
+    if n == 0 || n1 > n || !ceiling.is_finite() || ceiling <= 0.0 {
         return false;
     }
     (n1 + 1) as f64 / ((n + 1) as f64) < ceiling
@@ -222,8 +219,9 @@ pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
 /// alone: stop when no new packings appear.
 pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 1;
 
-/// Same seam as `commission_bridge`: conductance below this is two
-/// weakly coupled communities of the explored landscape.
+/// Bridge referee seam, kept as a named report threshold. It is not
+/// a family-floor witness: without \(\lambda_2\) a positive
+/// conductance is one community (`Hop.no_spectrum_is_one_community`).
 pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
 
 /// Family floor from the landscape Fiedler split after DECAF labels
@@ -232,10 +230,12 @@ pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
 /// The hop-graph Fiedler vector names two leftover-SOAP communities.
 /// Two when both live sides are nonempty, DECAF labels them as
 /// distinct packings, and the cut is a bottleneck: conductance is
-/// zero (disconnected) or strictly below algebraic connectivity
-/// (Cheeger: a cut weaker than \(\lambda_2\)). A superbasin, a
-/// one-sided split, or a well-mixed graph is one community.
-/// `CATALOG_MIN_FAMILIES` remains an override.
+/// zero (disconnected) or strictly below algebraic connectivity.
+/// On the normalised Laplacian \(\lambda_2\in[0,2]\), \(c<\lambda_2\)
+/// implies the Cheeger bound \(c^2<2\lambda_2\)
+/// (`Hop.code_cut_is_cheeger`). A missing \(\lambda_2\) is not a
+/// substitute cut. A superbasin, a one-sided split, or a well-mixed
+/// graph is one community. `CATALOG_MIN_FAMILIES` remains an override.
 pub fn occupancy_family_floor(
     conductance: Option<f64>,
     algebraic_connectivity: Option<f64>,
@@ -249,7 +249,6 @@ pub fn occupancy_family_floor(
     match (conductance, algebraic_connectivity) {
         (Some(c), _) if c == 0.0 => 2,
         (Some(c), Some(lambda)) if lambda.is_finite() && c < lambda => 2,
-        (Some(c), None) if c < OCCUPANCY_SEAM_CONDUCTANCE => 2,
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
 }
@@ -1546,12 +1545,34 @@ mod tests {
     }
 
     #[test]
+    fn visit_floor_is_hatch_stable_min_for_three_singletons() {
+        assert_eq!(
+            crate::catalog::gt_min_visits(
+                crate::catalog::PRODUCTION_UNSEEN_MASS_NUM,
+                crate::catalog::PRODUCTION_UNSEEN_MASS_DEN,
+                crate::catalog::PRODUCTION_SINGLETON_BUDGET
+            ),
+            20
+        );
+        assert_eq!(crate::catalog::PRODUCTION_MINIMUM_VISITS, 20);
+        assert_eq!(
+            crate::catalog::CERTIFY_MIN_SAMPLES,
+            crate::catalog::CERTIFY_CHAINS
+                * crate::catalog::CERTIFY_SPLIT_HALVES
+                * crate::catalog::CERTIFY_DRAWS_PER_HALF
+        );
+        assert_eq!(crate::catalog::CERTIFY_MIN_SAMPLES, 16);
+    }
+
+    #[test]
     fn leftover_hatch_stable_is_the_good_turing_increment() {
         assert!(!leftover_hatch_stable(0, 0, 0.2));
         assert!(!leftover_hatch_stable(20, 4, 0.2));
         assert!(leftover_hatch_stable(20, 0, 0.2));
         assert!(leftover_hatch_stable(20, 3, 0.2));
+        assert!(!leftover_hatch_stable(19, 3, 0.2));
         assert!(!leftover_hatch_stable(4, 0, 0.2));
+        assert!(!leftover_hatch_stable(20, 21, 0.2));
     }
 
     #[test]
@@ -1805,10 +1826,12 @@ mod tests {
         );
         assert_eq!(occupancy_family_floor(Some(0.05), Some(0.1), 4, 5, true), 2);
         assert_eq!(occupancy_family_floor(Some(0.0), Some(0.0), 4, 5, true), 2);
+        assert_eq!(occupancy_family_floor(Some(0.0), None, 4, 5, true), 2);
         assert_eq!(
             occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), None, 4, 5, true),
             1
         );
+        assert_eq!(occupancy_family_floor(Some(0.05), None, 4, 5, true), 1);
     }
 
     #[test]

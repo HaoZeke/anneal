@@ -1,11 +1,37 @@
 //! Append-only descriptor-basin census with exact visit accounting.
 
-/// Production Good--Turing visit floor. Leftover-SOAP and DECAF
-/// packing certificates use this same count.
-pub const PRODUCTION_MINIMUM_VISITS: u64 = 20;
-/// Production Good--Turing unseen-mass ceiling. Leftover-SOAP and
-/// DECAF packing certificates use this same fraction.
-pub const PRODUCTION_MAX_UNSEEN_MASS: f64 = 0.20;
+/// Coverage policy: leftover and packing Good--Turing refuse to call
+/// the census complete while unseen mass is at least `num/den`.
+pub const PRODUCTION_UNSEEN_MASS_NUM: u64 = 1;
+/// Denominator of the coverage policy. With the numerator this is
+/// \(\alpha = 1/5\).
+pub const PRODUCTION_UNSEEN_MASS_DEN: u64 = 5;
+/// Largest leftover-singleton count that must stay hatch-stable at
+/// the visit floor. `n_min(α, k) = \lfloor (k+1)/α \rfloor`.
+pub const PRODUCTION_SINGLETON_BUDGET: u64 = 3;
+
+/// Smallest `n` such that `singleton_budget` leftover singletons stay
+/// hatch-stable at ceiling `ceiling_num/ceiling_den`.
+///
+/// `(k+1)/(n+1) < p/q` iff `n ≥ \lfloor (k+1) q / p \rfloor` when
+/// `p` divides `(k+1)q`. For `α = 1/5` and `k = 3` this is 20.
+pub const fn gt_min_visits(
+    ceiling_num: u64,
+    ceiling_den: u64,
+    singleton_budget: u64,
+) -> u64 {
+    (singleton_budget + 1) * ceiling_den / ceiling_num
+}
+
+/// Production Good--Turing visit floor: `gt_min_visits(1, 5, 3) = 20`.
+pub const PRODUCTION_MINIMUM_VISITS: u64 = gt_min_visits(
+    PRODUCTION_UNSEEN_MASS_NUM,
+    PRODUCTION_UNSEEN_MASS_DEN,
+    PRODUCTION_SINGLETON_BUDGET,
+);
+/// Production Good--Turing unseen-mass ceiling `α = 1/5`.
+pub const PRODUCTION_MAX_UNSEEN_MASS: f64 =
+    PRODUCTION_UNSEEN_MASS_NUM as f64 / PRODUCTION_UNSEEN_MASS_DEN as f64;
 
 /// Stable identifier for one immutable census medoid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
