@@ -337,6 +337,26 @@ pub struct OccupancyFes {
     pub delta: Option<f64>,
 }
 
+/// Invalid input to the continuous occupancy free-energy estimator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum OccupancyFesError {
+    /// A landfold coordinate is NaN or infinite.
+    #[error("landfold point {index} is not finite")]
+    NonFinitePoint { index: usize },
+    /// A weight vector must have one entry per landfold point.
+    #[error("weight count {weights} does not match point count {points}")]
+    WeightCountMismatch { points: usize, weights: usize },
+    /// Weights are finite and non-negative.
+    #[error("landfold weight {index} is not finite and non-negative")]
+    InvalidWeight { index: usize },
+    /// A non-empty sample needs positive density mass.
+    #[error("landfold sample has no positive weight")]
+    NoPositiveWeight,
+    /// The histograms do not define a finite Torgerson map.
+    #[error("histograms do not define a finite landfold map")]
+    MapUnavailable,
+}
+
 const FES_MEAN_SHIFT_ITERATIONS: usize = 128;
 const FES_MEAN_SHIFT_TOLERANCE: f64 = 1e-10;
 const FES_MODE_MERGE_TOLERANCE: f64 = 1e-6;
@@ -362,13 +382,39 @@ pub fn occupancy_fes_delta(counts: &[u64]) -> Option<f64> {
 /// Density is a Gaussian KDE. \(F_i/kT = -\ln(\rho_i/\rho_{\max})\).
 /// Minima of \(F\) are maxima of \(\rho\). Bandwidth is
 /// \(\max(\mathrm{median\ NN}, 0.25\times\mathrm{diameter})\).
-pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
+pub fn occupancy_fes(
+    xy: &[[f64; 2]],
+    weights: Option<&[f64]>,
+) -> Result<OccupancyFes, OccupancyFesError> {
     let n = xy.len();
+    if let Some(index) = xy
+        .iter()
+        .position(|point| point.iter().any(|value| !value.is_finite()))
+    {
+        return Err(OccupancyFesError::NonFinitePoint { index });
+    }
+    if let Some(values) = weights {
+        if values.len() != n {
+            return Err(OccupancyFesError::WeightCountMismatch {
+                points: n,
+                weights: values.len(),
+            });
+        }
+        if let Some(index) = values
+            .iter()
+            .position(|&weight| !weight.is_finite() || weight < 0.0)
+        {
+            return Err(OccupancyFesError::InvalidWeight { index });
+        }
+        if n > 0 && values.iter().all(|&weight| weight == 0.0) {
+            return Err(OccupancyFesError::NoPositiveWeight);
+        }
+    }
     if n < 2 {
-        return OccupancyFes {
+        return Ok(OccupancyFes {
             minima: 1,
             delta: None,
-        };
+        });
     }
     let mut nearest = Vec::with_capacity(n);
     let mut diameter = 0.0_f64;
@@ -444,10 +490,7 @@ pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
     let density: Vec<f64> = modes.iter().copied().map(density_at).collect();
     let rho_max = density.iter().copied().fold(0.0_f64, f64::max);
     if rho_max <= 0.0 {
-        return OccupancyFes {
-            minima: 1,
-            delta: None,
-        };
+        return Err(OccupancyFesError::NoPositiveWeight);
     }
     let mut minima_f: Vec<f64> = density
         .into_iter()
@@ -461,18 +504,24 @@ pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
     } else {
         None
     };
-    OccupancyFes { minima, delta }
+    Ok(OccupancyFes { minima, delta })
 }
 
 /// Landfold map of DECAF histograms, then [`occupancy_fes`].
-pub fn occupancy_fes_from_histograms(histograms: &[Vec<f64>]) -> OccupancyFes {
-    match occupancy_map_from_histograms(histograms) {
-        Some(xy) => occupancy_fes(&xy, None),
-        None => OccupancyFes {
+pub fn occupancy_fes_from_histograms(
+    histograms: &[Vec<f64>],
+) -> Result<OccupancyFes, OccupancyFesError> {
+    if histograms.len() < 2 {
+        if histograms.iter().flatten().any(|value| !value.is_finite()) {
+            return Err(OccupancyFesError::MapUnavailable);
+        }
+        return Ok(OccupancyFes {
             minima: 1,
             delta: None,
-        },
+        });
     }
+    let xy = occupancy_map_from_histograms(histograms).ok_or(OccupancyFesError::MapUnavailable)?;
+    occupancy_fes(&xy, None)
 }
 
 fn map_dist(a: [f64; 2], b: [f64; 2]) -> f64 {
@@ -1607,7 +1656,7 @@ mod tests {
     #[test]
     fn fes_map_finds_the_continuous_mode_between_samples() {
         let shoulder = [[0.0, 0.0], [0.2, 0.0], [0.5, 0.0]];
-        let fes = occupancy_fes(&shoulder, None);
+        let fes = occupancy_fes(&shoulder, None).unwrap();
         assert_eq!(
             fes.minima, 1,
             "the Gaussian KDE has one mode between the observed points"
@@ -1626,14 +1675,14 @@ mod tests {
     #[test]
     fn fes_map_is_free_energy_not_a_decaf_split() {
         let chain: Vec<[f64; 2]> = (0..8).map(|i| [i as f64, 0.0]).collect();
-        let chain_fes = occupancy_fes(&chain, None);
+        let chain_fes = occupancy_fes(&chain, None).unwrap();
         assert_eq!(chain_fes.minima, 1);
         assert!(chain_fes.delta.is_none());
         let clumps = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
-        let clump_fes = occupancy_fes(&clumps, None);
+        let clump_fes = occupancy_fes(&clumps, None).unwrap();
         assert_eq!(clump_fes.minima, 2);
         assert!(clump_fes.delta.is_some());
-        let one = occupancy_fes_from_histograms(&[vec![1.0, 0.0]]);
+        let one = occupancy_fes_from_histograms(&[vec![1.0, 0.0]]).unwrap();
         assert_eq!(one.minima, 1);
         assert!(one.delta.is_none());
     }

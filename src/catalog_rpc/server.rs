@@ -2746,7 +2746,10 @@ fn occupancy_fes_from_wells(scientific: &ScientificState) -> crate::catalog::Occ
     for entry in scientific.catalog.entries() {
         consider(entry.coordinates());
     }
-    occupancy_fes_from_histograms(&histograms)
+    occupancy_fes_from_histograms(&histograms).unwrap_or(crate::catalog::OccupancyFes {
+        minima: 1,
+        delta: None,
+    })
 }
 
 fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
