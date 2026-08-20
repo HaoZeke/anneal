@@ -9,7 +9,8 @@
 //! ## Inverted Gelman--Rubin
 //!
 //! On the family-label series of assigned walks,
-//! \(\hat R <\) [`crate::catalog::MIXED_RHAT`] \(= 1.2\) with
+//! \(\hat R <\) [`crate::catalog::MIXED_RHAT`] \(= 1.01\)
+//! (Vehtari et al. 2021) with
 //! \(n_{\mathrm{assigned}} \ge 2\) is collapse: extras Leave. Distinct
 //! packing labels are unmixed and do not force Leave.
 //!
@@ -125,12 +126,13 @@ pub const LEFTOVER_SAT_DWELL: usize = 5;
 /// Bank and CSA turn FunnelModel EI on at three observed morphologies.
 pub const OCCUPANCY_EI_MIN_OBS: usize = 3;
 
-/// Jones remaining improvement on seen packing morphologies.
-///
-/// The FunnelModel is the bank/CSA GP. Exhausted when that model has
-/// the bank observation floor and the largest EI at observed packings
-/// is at most the model's noise. Unseen families are leftover-dwell,
-/// not a far-field GP probe.
+/// Jones, Schonlau & Welch (1998), *J. Global Optim.* 13:455-492:
+/// \(\mathrm{EI}\to\max(f_{\min}-\mu,0)\) as \(\sigma\to 0\), so
+/// \(\sigma=0\) and \(\mu\ge f_{\min}\) give \(\mathrm{EI}=0\) at
+/// *observed* sites. Unseen families are leftover-dwell, not a
+/// far-field GP probe. Exhausted when the FunnelModel has the bank
+/// observation floor and the largest EI at observed packings is at
+/// most the model's noise.
 pub fn occupancy_ei_exhausted(max_ei: f64, n_obs: usize, noise: f64) -> bool {
     n_obs >= OCCUPANCY_EI_MIN_OBS && max_ei.is_finite() && max_ei <= noise
 }
@@ -150,7 +152,8 @@ pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
 
 /// Hatch-stable leftover dwell from the Good--Turing increment.
 ///
-/// A new singleton sends \(n\mapsto n+1\), \(n_1\mapsto n_1+1\) and
+/// Good, I. J. (1953), *Biometrika* 40:237-264. A new singleton sends
+/// \(n\mapsto n+1\), \(n_1\mapsto n_1+1\) and
 /// \(\hat p_0'=(n_1+1)/(n+1)\). Under \(n_1\le n\) the hatch is the
 /// larger estimator, so dwell is exactly \(\hat p_0' <\) ceiling
 /// (`Hop.hatch_stable_iff_next`). No consecutive-record count.
@@ -159,6 +162,36 @@ pub fn leftover_hatch_stable(n: u64, n1: u64, ceiling: f64) -> bool {
         return false;
     }
     (n1 + 1) as f64 / ((n + 1) as f64) < ceiling
+}
+
+/// Esty (1983), *Ann. Statist.* 11:905-912, one-sided 95% normal
+/// quantile \(\Phi^{-1}(0.95)\).
+pub const ESTY_Z95: f64 = 1.6448536269514722;
+
+/// Esty variance of the Good--Turing unseen-mass estimator:
+/// \(n_1/n^2 + 2n_2/n^2 - n_1^2/n^3\).
+pub fn leftover_esty_var(n: u64, n1: u64, n2: u64) -> Option<f64> {
+    if n == 0 {
+        return None;
+    }
+    let nn = n as f64;
+    let n1 = n1 as f64;
+    let n2 = n2 as f64;
+    Some((n1 / nn.powi(2) + 2.0 * n2 / nn.powi(2) - n1 * n1 / nn.powi(3)).max(0.0))
+}
+
+/// One-sided Esty upper bound \(\hat p_0 + z_{0.95}\sqrt{\mathrm{Var}}\).
+pub fn leftover_esty_upper(n: u64, n1: u64, n2: u64) -> Option<f64> {
+    let p0 = (n != 0).then(|| n1 as f64 / n as f64)?;
+    let var = leftover_esty_var(n, n1, n2)?;
+    Some(p0 + ESTY_Z95 * var.sqrt())
+}
+
+/// Leftover dwell: hatch-stable and the Esty upper bound sits under
+/// the ceiling. \(n_1=0\) has variance 0, so the bound is 0.
+pub fn leftover_esty_stable(n: u64, n1: u64, n2: u64, ceiling: f64) -> bool {
+    leftover_hatch_stable(n, n1, ceiling)
+        && leftover_esty_upper(n, n1, n2).is_some_and(|upper| upper < ceiling)
 }
 
 /// Leave destination. After packing saturation OtherFamily only
@@ -172,6 +205,23 @@ pub fn occupancy_leave_target(
     } else {
         OccupancyLeaveTarget::OtherFamily
     }
+}
+
+/// Franzblau (1991), *Phys. Rev. B* 44:4925: a new ring class is a
+/// packing signal SOAP \(L^1\) merge can miss. Icosahedra are
+/// 5-ring rich; octahedra and Marks are not.
+pub fn occupancy_ring_class_changed(origin: &[f64], trial: &[f64]) -> bool {
+    match (occupancy_ring_profile(origin), occupancy_ring_profile(trial)) {
+        (Some(left), Some(right)) => ring_novelty(left, right) > 0,
+        _ => false,
+    }
+}
+
+/// Leave has found a new class: a different DECAF family, or a
+/// different Franzblau ring histogram on the same SOAP merge radius.
+pub fn occupancy_leave_new_class(origin: &[f64], trial: &[f64]) -> bool {
+    crate::catalog::different_decaf_family(origin, trial)
+        || occupancy_ring_class_changed(origin, trial)
 }
 
 /// Occupancy Leave that quenches onto a new DECAF family is taken.
@@ -1430,7 +1480,9 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_shot_accepted, leftover_hatch_stable, leftover_lambda, leftover_sat_dwell,
+        leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
+        leftover_lambda, leftover_sat_dwell, occupancy_leave_new_class,
+        occupancy_ring_class_changed,
         occupancy_compact, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
         occupancy_family_floor, occupancy_is_cluster,
         occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
@@ -1722,11 +1774,14 @@ mod tests {
         assert!(ico_c.rg2 < ico_c.path_rg2);
         assert!(ico_c.rmax_over_cbrt < crate::catalog::COMPACT_RMAX_OVER_CBRT);
         assert!(occupancy_is_cluster(&ico));
+        assert!(!occupancy_ring_class_changed(&ico, &ico));
 
         let mut chain = vec![0.0; 39];
         for i in 0..13 {
             chain[3 * i] = i as f64;
         }
+        assert!(occupancy_ring_class_changed(&ico, &chain));
+        assert!(occupancy_leave_new_class(&ico, &chain));
         let chain_c = occupancy_compact(&chain).unwrap();
         assert_eq!(chain_c.components, 1);
         assert!(chain_c.is_pathlike());
@@ -1756,6 +1811,14 @@ mod tests {
         assert!(!leftover_hatch_stable(19, 3, 0.2));
         assert!(!leftover_hatch_stable(4, 0, 0.2));
         assert!(!leftover_hatch_stable(20, 21, 0.2));
+    }
+
+    #[test]
+    fn leftover_esty_blocks_a_singleton_heavy_hatch() {
+        assert!(leftover_hatch_stable(20, 3, 0.2));
+        assert!(!leftover_esty_stable(20, 3, 0, 0.2));
+        assert!(leftover_esty_stable(20, 0, 0, 0.2));
+        assert!(leftover_esty_var(20, 0, 0).unwrap() < 1e-18);
     }
 
     #[test]

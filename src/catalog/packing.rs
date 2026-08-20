@@ -376,7 +376,8 @@ impl GoodTuringSample {
         (self.n != 0).then(|| self.n1 as f64 / self.n as f64)
     }
 
-    /// Chao1 unseen-family lower bound \(n_1^2/(2n_2)\).
+    /// Chao, A. (1984), *Scand. J. Statist.* 11:265-270: unseen-family
+    /// lower bound \(n_1^2/(2n_2)\).
     ///
     /// Zero when \(n_1=0\). Unbounded when \(n_1>0\) and \(n_2=0\).
     pub fn chao1_unseen(self) -> Option<f64> {

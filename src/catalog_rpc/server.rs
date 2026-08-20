@@ -29,7 +29,7 @@ use crate::catalog::{
     DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
     InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
     REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
-    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_hatch_stable,
+    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_esty_stable,
     leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta,
     occupancy_landfold_split, occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
     occupant_rhat, packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing,
@@ -293,7 +293,7 @@ struct ScientificState {
     )>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
-    last_leftover_dwell_sample: Option<(u64, u64)>,
+    last_leftover_dwell_sample: Option<(u64, u64, u64)>,
     leftover_sat_streak: u32,
     leftover_dwell: bool,
     funnel: crate::funnel_bo::FunnelModel,
@@ -2805,7 +2805,7 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
-    let sample = (leftover.n, leftover.n1);
+    let sample = (leftover.n, leftover.n1, leftover.n2);
     if scientific.last_leftover_dwell_sample != Some(sample) {
         scientific.last_leftover_dwell_sample = Some(sample);
         if leftover.saturated() {
@@ -2815,9 +2815,10 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
         }
     }
     scientific.leftover_dwell = leftover.saturated()
-        && leftover_hatch_stable(
+        && leftover_esty_stable(
             leftover.n,
             leftover.n1,
+            leftover.n2,
             crate::catalog::PRODUCTION_MAX_UNSEEN_MASS,
         );
     scientific.leftover_dwell

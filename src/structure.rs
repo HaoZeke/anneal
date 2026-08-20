@@ -1033,6 +1033,10 @@ pub fn contact_cutoff_from_gr(x: ArrayView1<f64>, n: usize) -> f64 {
 }
 
 /// Connected components and undirected edges of the contact graph.
+///
+/// Fiedler, M. (1973), *Czechoslovak Math. J.* 23:298-305:
+/// \(\lambda_2=0\) iff the graph is disconnected. GMIN `PERCOLATE`
+/// is the same predicate.
 pub fn contact_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize) {
     if n == 0 {
         return (0, 0);

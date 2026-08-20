@@ -41,6 +41,7 @@ from proofs.occupancy_cooperative_search import (
     identity_path_rg2,
     identity_forest_edge_bound,
     identity_chao1_complete_is_n1_zero,
+    identity_esty_variance,
     identity_mixing_does_not_retire_without_packing,
     identity_keep_count_partitions,
     identity_keep_independent_of_resource,
@@ -221,6 +222,12 @@ def test_forest_has_at_most_n_minus_c_edges():
 
 def test_chao1_vanishes_iff_no_singletons():
     ok, residual = identity_chao1_complete_is_n1_zero()
+    assert ok
+    assert residual == 0
+
+
+def test_esty_variance_splits_into_singleton_and_doubleton():
+    ok, residual = identity_esty_variance()
     assert ok
     assert residual == 0
 

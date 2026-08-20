@@ -1197,7 +1197,7 @@ where
                         .as_slice()
                         .zip(proposal_state.as_slice())
                         .is_none_or(|(origin, trial)| {
-                            crate::catalog::different_decaf_family(origin, trial)
+                            crate::catalog::occupancy_leave_new_class(origin, trial)
                         });
                 #[cfg(not(feature = "featomic"))]
                 let family_changed = true;
@@ -1227,7 +1227,9 @@ where
                             rng,
                         );
                         let changed = from_state.as_slice().zip(left.as_slice()).is_none_or(
-                            |(origin, trial)| crate::catalog::different_decaf_family(origin, trial),
+                            |(origin, trial)| {
+                                crate::catalog::occupancy_leave_new_class(origin, trial)
+                            },
                         );
                         changed.then_some(left)
                     };

@@ -900,7 +900,7 @@ where
         let q = quench(y.view());
         let origin = x.as_slice().unwrap_or(&[]);
         let trial = q.as_slice().unwrap_or(&[]);
-        if crate::catalog::different_decaf_family(origin, trial) {
+        if crate::catalog::occupancy_leave_new_class(origin, trial) {
             return q;
         }
         cur = q;
