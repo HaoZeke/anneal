@@ -22,7 +22,7 @@ pub const ENVIRONMENT_RADIUS: f64 = 1.4;
 pub const PACKING_MERGE: f64 = 0.20;
 
 /// DECAF used [`SoapSpec::default`], not the leftover hop spec.
-const PACKING_SPEC: SoapSpec = SoapSpec {
+pub const PACKING_SPEC: SoapSpec = SoapSpec {
     n_max: 3,
     l_max: 3,
     rcut_nn: 3.5,

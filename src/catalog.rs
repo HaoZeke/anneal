@@ -67,7 +67,8 @@ pub use occupancy::{
     ring_novelty, seat_extras,
 };
 pub use packing::{
-    GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
+    GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PACKING_SPEC, PackingBook,
+    different_decaf_family,
     leftover_arrivals_saturated, packing_distance, packing_fingerprint, packing_vector,
     same_packing,
 };

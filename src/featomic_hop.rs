@@ -970,15 +970,15 @@ fn packing_kick<R: Rng + ?Sized>(
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 
-/// Extra ArchiveHole: leftover-orthogonal kick of the occupied packing.
+/// Extra ArchiveHole: packing-mean kick in the DECAF \(\nu=3\) feature.
 ///
 /// Champion leftover walks isomers of that packing (`step_into_hole`
-/// of its wells). Fiedler \(F=1\) means every leftover well rematches
-/// the same packing, so an extra that steps into those wells is the
-/// champion walk. The extra increment is the leftover Jacobian
-/// pullback of a vector orthogonal to the occupied packing mean and
-/// the shared archive. Ring incidence only scales atoms. This is not
-/// a named morphology.
+/// of its wells). Fiedler \(F=1\) means those wells rematch the same
+/// packing. SOAP leftover \(p_i-\mu\) collapses across the paper
+/// funnels. Packing identity is per-center [`local_nu3_z`]; this kick
+/// is a packing-mean increment in that stacked map, pulled back by
+/// the analytic \(\nu=3\) Jacobian. Species-aware. No named
+/// morphology. Not an MLIP last layer: those are ACE plus mixing.
 pub fn leave_archive_hole<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rcut: f64,
@@ -987,8 +987,12 @@ pub fn leave_archive_hole<R: Rng + ?Sized>(
     rmsd: f64,
     rng: &mut R,
 ) -> Array1<f64> {
-    let s = spectrum(x, rcut, species, mobile);
-    packing_kick(x, &s, rmsd, mobile, rng)
+    let _ = rcut;
+    let mut spec = crate::catalog::PACKING_SPEC;
+    if rcut.is_finite() && rcut > 0.0 {
+        spec.rcut_nn = rcut;
+    }
+    crate::soap::kick_packing_nu3(x, spec, rmsd, species, mobile, rng)
 }
 
 /// SOAP hop through featomic `soap_power_spectrum`.

@@ -107,14 +107,15 @@ pub enum OccupancyLeaveAdopt {
 /// OtherFamily is a draw from another Fiedler community (\(F\ge 2\)).
 /// That is how Leave includes a packing once it is on file. Leftover
 /// wells of one packing are \(F=1\) and stay ArchiveHole. ArchiveHole
-/// is leftover-orthogonal to the occupied packing and the shared
-/// archive, not a leftover hole of those wells and not a named
-/// morphology. Serial recommended is a different mode.
+/// is a packing-mean kick in the DECAF \(\nu=3\) feature (the same
+/// `local_nu3_z` rows as packing identity), not SOAP leftover
+/// \(p_i-\mu\) and not a named morphology. Serial recommended is a
+/// different mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// Leftover-orthogonal kick of the occupied packing and archive.
+    /// Packing-mean kick in the DECAF \(\nu=3\) feature.
     ArchiveHole,
 }
 
