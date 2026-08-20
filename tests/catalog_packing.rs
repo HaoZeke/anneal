@@ -1,8 +1,8 @@
 use anneal_core::catalog::{
     OccupancyCertificate, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
-    lens_ring_displacement, occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_census,
-    occupancy_ring_floor, occupancy_ring_profile, packing_distance, packing_fingerprint,
-    ring_leave_weight, same_packing,
+    lens_ring_displacement, occupancy_fes_from_histograms, occupancy_landfold_floor,
+    occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
+    packing_distance, packing_fingerprint, ring_leave_weight, same_packing,
 };
 use ndarray::Array1;
 
@@ -169,6 +169,11 @@ fn landfold_floor_separates_lj75_marks_from_ico() {
         2,
         "book ico and Marks must be two landfold communities"
     );
+    assert_eq!(
+        occupancy_fes_from_histograms(&hists),
+        2,
+        "ico and Marks must be two FES basins"
+    );
 }
 
 #[test]
@@ -202,6 +207,11 @@ fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
         occupancy_landfold_floor(&hists, &fams),
         2,
         "2-means splits a leftover DECAF chain; FES maxima are the landfold figure, not this floor"
+    );
+    let fes = occupancy_fes_from_histograms(&hists);
+    assert!(
+        fes <= 2,
+        "Torgerson of an interpolant chain still two-ended ({fes}); leftover-SOAP FES is the figure path"
     );
 }
 

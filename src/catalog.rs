@@ -54,12 +54,12 @@ pub use occupancy::{
     assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
     leave_shot_accepted, leftover_lambda, leftover_sat_dwell, lens_ring_displacement,
     occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
-    occupancy_landfold_floor, occupancy_landfold_split, occupancy_leave_adopt,
-    occupancy_leave_target, occupancy_map_floor, occupancy_map_from_histograms,
-    occupancy_map_split, occupancy_min_families, occupancy_retire, occupancy_retire_at,
-    occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile, occupancy_ring_split,
-    packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
-    retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
+    occupancy_fes_basins, occupancy_fes_from_histograms, occupancy_landfold_floor,
+    occupancy_landfold_split, occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor,
+    occupancy_map_from_histograms, occupancy_map_split, occupancy_min_families, occupancy_retire,
+    occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
+    occupancy_ring_split, packing_role, promote_one_sided, published_energy_score,
+    retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
 };
 pub use packing::{
     GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
