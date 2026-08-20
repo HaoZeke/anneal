@@ -3860,6 +3860,7 @@ fn run_capnp_catalog(
         campaign,
         ensemble,
         sharing: endpoint.is_some(),
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     if let Ok(path) = std::env::var("CATALOG_TRACE") {
         let mut output = std::fs::OpenOptions::new()

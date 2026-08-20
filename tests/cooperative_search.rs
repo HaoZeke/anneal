@@ -380,6 +380,7 @@ fn catalog_trace_records_admission_eviction_and_incumbent_identity() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"catalog_basin\":1"));
     assert!(trace.contains("\"catalog_mutation\":\"replaced_capacity\""));
@@ -643,6 +644,7 @@ fn cooperative_run_traces_explicit_transition_records() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"transition_action\":\"probe\""));
     assert!(trace.contains("\"transition_resolved\":true"));
@@ -677,6 +679,7 @@ fn cooperative_run_traces_local_execution_without_a_coordinator() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"kind\":\"transition_execution\""));
     assert!(trace.contains("\"transition_hop\":17"));
@@ -732,6 +735,7 @@ fn cooperative_trace_records_policy_diagnostic_evidence() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"policy_local_basin\":0"));
     assert!(trace.contains("\"policy_relation\":\"incumbent\""));
@@ -784,6 +788,7 @@ fn every_slice_has_one_complete_transition_diagnostic() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"kind\":\"slice\""));
     assert!(trace.contains("\"slice\":1"));
@@ -986,6 +991,7 @@ fn cooperative_run_exposes_population_barrier_and_assigned_parent() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(trace.contains("\"population_epoch\":0"));
     assert!(trace.contains("\"population_parent\":0"));
@@ -1237,6 +1243,7 @@ fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
         campaign: "jcc-2026".into(),
         ensemble: "scientific-ensemble".into(),
         sharing: true,
+        engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     assert!(lines.lines().next().unwrap().contains("manifest_header"));
     assert_eq!(lines.lines().count(), run.events().len() + 1);
