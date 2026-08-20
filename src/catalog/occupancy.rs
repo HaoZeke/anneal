@@ -68,12 +68,16 @@
 //! certified and that packing census is saturated and FunnelModel EI
 //! on the seen packings is exhausted and the rematched family floor
 //! is met. Leftover-SOAP hatches of a seen packing do not walk the
-//! remaining force budget. The floor is the Fiedler split of the hop
-//! graph after DECAF labels the sides: two when the seam separates
-//! distinct packing families, one when the seam is leftover wells of
-//! one packing (a superbasin). A landfold (Torgerson MDS of DECAF L1,
-//! then 2-means) floor and a Franzblau primitive-ring floor are
-//! reported beside it and do not retire.
+//! remaining force budget once the landfold-sparsified book has no
+//! holes. After the book exists, a landfold (Torgerson MDS of DECAF
+//! L1, then 2-means) folds leftover wells of one packing into one
+//! community. Leave continues only while that compacted book still
+//! has holes: a second community on the map with no well arrivals, or
+//! Chao1 incomplete on the merged well counts. The floor is the
+//! Fiedler split of the hop graph after DECAF labels the sides, or
+//! the landfold community count when the book already holds a second
+//! packing extras have Left. A Franzblau primitive-ring floor is
+//! reported beside it and does not retire.
 //! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
 //! [`crate::catalog::CERTIFY_MIN_SAMPLES`] traces; two-point quenches
@@ -195,11 +199,11 @@ pub fn leftover_esty_stable(n: u64, n1: u64, n2: u64, ceiling: f64) -> bool {
         && leftover_esty_upper(n, n1, n2).is_some_and(|upper| upper < ceiling)
 }
 
-/// Leave destination. OtherFamily is a draw from another Fiedler
-/// packing community. Leftover wells of one packing (`communities < 2`)
-/// stay ArchiveHole even when DECAF split them. After packing
-/// saturation OtherFamily only rematches communities on file, so
-/// Leave is the archive hole.
+/// Leave destination. OtherFamily is a draw from another packing
+/// community on the sparsified book (`communities >= 2`). Leftover
+/// wells of one packing (`communities < 2`) stay ArchiveHole even
+/// when DECAF split them. After packing saturation OtherFamily only
+/// rematches communities on file, so Leave is the archive hole.
 pub fn occupancy_leave_target(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -319,8 +323,9 @@ pub fn occupancy_family_floor(
 /// Live rematch is the wrong input: fold the packing book so a family
 /// extras have Left still sits on the map. A 2-means split is a
 /// bipartition, not a leftover-cloud count; FES maxima stay the
-/// landfold figure path. This is not the hop-graph Fiedler split and
-/// it does not retire.
+/// landfold figure path. [`occupancy_sparsify_book`] merges leftover
+/// wells on the same side and names holes. The hop-graph Fiedler
+/// split stays the live floor; this count is the book floor.
 pub fn occupancy_map_floor(xy: &[[f64; 2]], family: &[usize]) -> usize {
     occupancy_map_split(xy, family).0
 }
@@ -395,6 +400,162 @@ pub fn occupancy_landfold_split(
     } else {
         (1, left_n, right_n)
     }
+}
+
+/// One occupied book cell on the landfold plane.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OccupancyLandfoldPoint {
+    /// Packing-book family index.
+    pub family: usize,
+    /// Sparsified landfold community (0 or 1).
+    pub community: usize,
+    /// Torgerson coordinates after the Ceriotti switch.
+    pub xy: [f64; 2],
+    /// Leftover-well arrivals credited to this family.
+    pub wells: u64,
+}
+
+/// Landfold-sparsified occupancy book.
+///
+/// Leftover DECAF wells that land on the same side of a floor-1 split
+/// are one packing. Floor-2 keeps two communities. [`Self::holes`] is
+/// whether Leave should continue: a second community on the map with
+/// no well arrivals, or Chao1 incomplete on the merged well counts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OccupancyBookMap {
+    /// Occupied book cells in family-index order.
+    pub points: Vec<OccupancyLandfoldPoint>,
+    /// Landfold floor (1 or 2).
+    pub floor: usize,
+    /// 2-means left count.
+    pub left: usize,
+    /// 2-means right count.
+    pub right: usize,
+    /// Sparsified community count.
+    pub communities: usize,
+    /// Merged leftover-well counts, one entry per community.
+    pub community_wells: Vec<u64>,
+    /// Continue Leave while this is set.
+    pub holes: bool,
+}
+
+impl OccupancyBookMap {
+    /// Good--Turing sample of the sparsified well counts.
+    pub fn sample(&self) -> super::packing::GoodTuringSample {
+        super::packing::GoodTuringSample::from_counts(self.community_wells.iter().copied())
+    }
+
+    /// Chao1 completeness of the sparsified communities.
+    pub fn saturated(&self) -> bool {
+        !self.holes
+    }
+}
+
+/// Whether the sparsified book still has holes extras should Leave into.
+///
+/// A second landfold community with no well arrivals is a hole. Chao1
+/// on the merged well counts is the packing census after leftover
+/// wells of one packing collapse.
+pub fn occupancy_book_holes(communities: usize, community_wells: &[u64]) -> bool {
+    let occupied_sides = community_wells.iter().filter(|&&wells| wells > 0).count();
+    if communities >= 2 && occupied_sides < 2 {
+        return true;
+    }
+    !super::packing::GoodTuringSample::from_counts(community_wells.iter().copied()).chao1_complete()
+}
+
+/// Compact leftover wells of the book by the landfold 2-means split.
+///
+/// Same-side DECAF families with floor 1 are one packing. Floor 2
+/// keeps two communities. Leave continues only while [`OccupancyBookMap::holes`].
+pub fn occupancy_sparsify_book(
+    histograms: &[Vec<f64>],
+    family: &[usize],
+    wells: &[u64],
+) -> OccupancyBookMap {
+    let n = histograms.len();
+    let wells: Vec<u64> = if wells.len() == n {
+        wells.to_vec()
+    } else {
+        vec![0; n]
+    };
+    if n == 0 {
+        return OccupancyBookMap {
+            points: Vec::new(),
+            floor: 1,
+            left: 0,
+            right: 0,
+            communities: 0,
+            community_wells: Vec::new(),
+            holes: occupancy_book_holes(0, &[]),
+        };
+    }
+    if n == 1 {
+        let community_wells = vec![wells[0]];
+        return OccupancyBookMap {
+            points: vec![OccupancyLandfoldPoint {
+                family: family.first().copied().unwrap_or(0),
+                community: 0,
+                xy: [0.0, 0.0],
+                wells: wells[0],
+            }],
+            floor: 1,
+            left: 1,
+            right: 0,
+            communities: 1,
+            holes: occupancy_book_holes(1, &community_wells),
+            community_wells,
+        };
+    }
+    let (floor, left, right) = occupancy_landfold_split(histograms, family);
+    let xy = occupancy_map_from_histograms(histograms).unwrap_or_else(|| vec![[0.0, 0.0]; n]);
+    let mut community = vec![0usize; n];
+    if floor >= 2
+        && let Some((_, right_idx)) = two_means(&xy)
+    {
+        for i in right_idx {
+            if i < n {
+                community[i] = 1;
+            }
+        }
+    }
+    let n_communities = floor.max(1);
+    let mut community_wells = vec![0u64; n_communities];
+    let mut points = Vec::with_capacity(n);
+    for i in 0..n {
+        let c = community[i].min(n_communities.saturating_sub(1));
+        community_wells[c] = community_wells[c].saturating_add(wells[i]);
+        points.push(OccupancyLandfoldPoint {
+            family: family.get(i).copied().unwrap_or(i),
+            community: c,
+            xy: xy[i],
+            wells: wells[i],
+        });
+    }
+    OccupancyBookMap {
+        points,
+        floor,
+        left,
+        right,
+        communities: n_communities,
+        holes: occupancy_book_holes(n_communities, &community_wells),
+        community_wells,
+    }
+}
+
+/// Landfold-sparsify the occupied packing book.
+pub fn occupancy_sparsify_packing(book: &super::packing::PackingBook) -> OccupancyBookMap {
+    let occupied = book.occupied_histograms();
+    let histograms: Vec<Vec<f64>> = occupied
+        .iter()
+        .map(|(_, histogram)| histogram.clone())
+        .collect();
+    let family: Vec<usize> = occupied.iter().map(|(index, _)| *index).collect();
+    let wells: Vec<u64> = family
+        .iter()
+        .map(|&index| book.well_visits_of(index))
+        .collect();
+    occupancy_sparsify_book(&histograms, &family, &wells)
 }
 
 /// Occupancy free energy. \(F/kT = -\ln(\rho/\rho_{\max})\).
@@ -1485,14 +1646,14 @@ mod tests {
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
-        leftover_lambda, leftover_sat_dwell, occupancy_compact, occupancy_complete,
-        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
-        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
+        leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
+        occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
+        occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_new_class,
         occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
-        occupancy_ring_class_changed, occupancy_ring_floor, packing_role, promote_one_sided,
-        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
-        ring_novelty, seat_extras,
+        occupancy_ring_class_changed, occupancy_ring_floor, occupancy_sparsify_book, packing_role,
+        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
+        ring_leave_weight, ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1560,7 +1721,6 @@ mod tests {
         );
     }
 
-    #[test]
     #[test]
     fn catalog_leave_refuses_a_same_family_hole() {
         assert_eq!(
@@ -1959,6 +2119,65 @@ mod tests {
         let ico = vec![1.0, 0.0];
         let oh = vec![0.0, 1.0];
         assert_eq!(occupancy_landfold_floor(&[ico, oh], &[0, 1]), 2);
+    }
+
+    #[test]
+    fn leftover_wells_of_one_packing_sparsify_to_one_community() {
+        let ico = vec![1.0, 0.0];
+        let map = occupancy_sparsify_book(&[ico.clone(), ico], &[0, 0], &[12, 8]);
+        assert_eq!(map.communities, 1);
+        assert_eq!(map.community_wells, vec![20]);
+        assert!(!map.holes);
+        assert!(map.saturated());
+    }
+
+    #[test]
+    fn a_second_book_packing_with_no_wells_is_a_hole() {
+        let ico = vec![1.0, 0.0];
+        let oh = vec![0.0, 1.0];
+        let map = occupancy_sparsify_book(&[ico, oh], &[0, 1], &[20, 0]);
+        assert_eq!(map.communities, 2);
+        assert_eq!(map.floor, 2);
+        assert!(map.holes);
+        assert!(!map.saturated());
+        assert_eq!(
+            occupancy_leave_target(true, map.saturated(), map.communities),
+            OccupancyLeaveTarget::OtherFamily
+        );
+    }
+
+    #[test]
+    fn sparsified_chao1_closes_holes_on_both_book_packings() {
+        let ico = vec![1.0, 0.0];
+        let oh = vec![0.0, 1.0];
+        let map = occupancy_sparsify_book(&[ico, oh], &[0, 1], &[20, 20]);
+        assert_eq!(map.communities, 2);
+        assert!(!map.holes);
+        assert_eq!(
+            occupancy_leave_target(true, map.saturated(), map.communities),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+    }
+
+    #[test]
+    fn sparsified_singleton_packing_keeps_holes() {
+        let ico = vec![1.0, 0.0];
+        let oh = vec![0.0, 1.0];
+        let map = occupancy_sparsify_book(&[ico, oh], &[0, 1], &[20, 1]);
+        assert!(map.holes);
+        assert_eq!(map.sample().n1, 1);
+    }
+
+    #[test]
+    fn empty_book_has_holes_so_leave_continues() {
+        let map = occupancy_sparsify_book(&[], &[], &[]);
+        assert_eq!(map.communities, 0);
+        assert!(map.holes);
+        assert!(occupancy_book_holes(0, &[]));
+        assert!(occupancy_book_holes(1, &[5]));
+        assert!(!occupancy_book_holes(1, &[20]));
+        assert!(occupancy_book_holes(2, &[20, 0]));
+        assert!(!occupancy_book_holes(2, &[20, 20]));
     }
 
     #[test]
