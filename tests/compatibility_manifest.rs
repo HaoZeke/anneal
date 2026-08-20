@@ -83,7 +83,6 @@ fn rejects_malformed_eindir_handles_before_evaluation() {
     assert!(unsafe { validate_eindir_objective(&objective, 2) }.is_ok());
 
     let malformed = test_objective(low.as_mut_ptr(), std::ptr::null_mut());
-    malformed.high = std::ptr::null_mut();
     assert!(matches!(
         unsafe { validate_eindir_objective(&malformed, 2) },
         Err(CompatibilityError::ObjectiveBoundsNull { .. })
