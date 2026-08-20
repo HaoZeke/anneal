@@ -95,7 +95,7 @@ openjdk     = ">=17"
 curl        = "*"
 
 [feature.verify.pypi-dependencies]
-chemparseplot = ">=1.7.0"
+chemparseplot = ">=1.9.17"
 cma = ">=4.4"
 pdfo = ">=2.1"
 pycutest = ">=1.8.1, <2"
