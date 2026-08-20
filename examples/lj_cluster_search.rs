@@ -16,7 +16,8 @@ use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_is_cluster,
-    occupancy_leave_target, occupancy_retire_at, published_energy_score,
+    occupancy_archive_hole_is_fivefold, occupancy_leave_target, occupancy_retire_at,
+    occupancy_ring_profile, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -1848,6 +1849,13 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     species: Option<&[u32]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    let pentagon = x
+        .as_slice()
+        .and_then(occupancy_ring_profile)
+        .is_some_and(occupancy_archive_hole_is_fivefold);
+    if pentagon {
+        return anneal_core::soap::step_away_fivefold(x, rmsd, rng);
+    }
     #[cfg(feature = "featomic")]
     {
         if !wells.is_empty() {
@@ -3652,7 +3660,11 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                match occupancy_leave_target(other_family.is_some(), policy.packing_saturated) {
+                match occupancy_leave_target(
+                    other_family.is_some(),
+                    policy.packing_saturated,
+                    policy.min_families,
+                ) {
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
                         trace.proposal_family = ProposalFamily::CatalogSample;
@@ -3679,16 +3691,8 @@ fn run_capnp_catalog(
                         let live = snapshot.current_state();
                         let live_slice = live.as_slice().unwrap_or(&[]);
                         let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
-                        let shoot_leftover =
-                            leave_path.shoot_leftover().unwrap_or(descriptor.as_slice());
-                        let hole = cooperative
-                            .try_descriptor_hole(
-                                replica,
-                                shoot_leftover.to_vec(),
-                                128,
-                                transport_rng.random(),
-                            )
-                            .expect("catalog hole access must preserve local execution");
+                        let fivefold = occupancy_ring_profile(live_slice)
+                            .is_some_and(occupancy_archive_hole_is_fivefold);
                         let local = leave_packing_state(
                             ArrayView1::from(shoot_coords),
                             0.35,
@@ -3697,16 +3701,34 @@ fn run_capnp_catalog(
                             coop_species.as_deref(),
                             &mut transport_rng,
                         );
-                        let left = match hole {
-                            CatalogHoleOutcome::Proposal(proposal) => step_toward_catalog_hole(
-                                ArrayView1::from(shoot_coords),
-                                &proposal.target,
-                                &descriptor_space,
-                                coop_species.as_deref(),
-                                run_cfg.length_scale,
-                            )
-                            .unwrap_or(local),
-                            _ => local,
+                        // A SOAP hole of a pentagon packing is a leftover
+                        // ico well. Fivefold is the packing exchange.
+                        let left = if fivefold {
+                            local
+                        } else {
+                            let shoot_leftover =
+                                leave_path.shoot_leftover().unwrap_or(descriptor.as_slice());
+                            let hole = cooperative
+                                .try_descriptor_hole(
+                                    replica,
+                                    shoot_leftover.to_vec(),
+                                    128,
+                                    transport_rng.random(),
+                                )
+                                .expect("catalog hole access must preserve local execution");
+                            match hole {
+                                CatalogHoleOutcome::Proposal(proposal) => {
+                                    step_toward_catalog_hole(
+                                        ArrayView1::from(shoot_coords),
+                                        &proposal.target,
+                                        &descriptor_space,
+                                        coop_species.as_deref(),
+                                        run_cfg.length_scale,
+                                    )
+                                    .unwrap_or(local)
+                                }
+                                _ => local,
+                            }
                         };
                         if left
                             .iter()

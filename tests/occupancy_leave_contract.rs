@@ -120,6 +120,14 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         arm.contains("packing_saturated") || arm.contains("policy.packing_saturated"),
         "after packing sat Leave must see packing_saturated and choose ArchiveHole"
     );
+    assert!(
+        arm.contains("policy.min_families"),
+        "OtherFamily is a Fiedler packing community, not leftover-SOAP wells"
+    );
+    assert!(
+        arm.contains("occupancy_archive_hole_is_fivefold"),
+        "ArchiveHole on a pentagon packing is the fivefold residual"
+    );
 }
 
 #[test]

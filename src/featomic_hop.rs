@@ -890,6 +890,12 @@ where
     R: Rng + ?Sized,
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
+    if x.as_slice()
+        .and_then(crate::catalog::occupancy_ring_profile)
+        .is_some_and(crate::catalog::occupancy_archive_hole_is_fivefold)
+    {
+        return crate::soap::step_away_fivefold(x, 0.35, rng);
+    }
     if wells.is_empty() {
         return x.to_owned();
     }
