@@ -35,8 +35,11 @@
 //! exchange). After packing saturation, or if no other family is on
 //! file: record the occupied packing in the shared SOAP archive and
 //! step into a hole of that archive, or amplify the fivefold residual
-//! when the archive is empty. Occupancy extras do not draw a random
-//! cluster.
+//! when the archive is empty. The hole and packing-kick Cartesian
+//! step is ring-lensed: pentagon atoms move when the occupied
+//! profile has pentagons, triangle atoms when it does not. Champion
+//! leftover SOAP is not that lens. Occupancy extras do not draw a
+//! random cluster.
 //! A single hole-and-quench returns to the same family; the hop
 //! then requenches and widens until DECAF says the family changed.
 //!
@@ -346,12 +349,59 @@ pub fn occupancy_ring_split(profiles: &[(usize, usize, usize)]) -> (usize, usize
 /// Franzblau (tri, sq, pent) at [`crate::structure::RING_CUTOFF_SCALE`]
 /// times the structure's median nearest-neighbour distance.
 pub fn occupancy_ring_profile(coordinates: &[f64]) -> Option<(usize, usize, usize)> {
+    occupancy_ring_census(coordinates).map(|census| census.profile)
+}
+
+/// Franzblau census of one structure, or `None` below three atoms.
+pub fn occupancy_ring_census(coordinates: &[f64]) -> Option<crate::structure::RingCensus> {
     let n = coordinates.len() / 3;
     if n < 3 || coordinates.len() != 3 * n {
         return None;
     }
     let x = ndarray::ArrayView1::from(coordinates);
-    Some(crate::structure::ring_profile_nn(x, n))
+    Some(crate::structure::ring_census_nn(x, n))
+}
+
+/// L1 of two Franzblau profiles. Leave prefers a larger value.
+pub fn ring_novelty(origin: (usize, usize, usize), trial: (usize, usize, usize)) -> usize {
+    origin.0.abs_diff(trial.0) + origin.1.abs_diff(trial.1) + origin.2.abs_diff(trial.2)
+}
+
+/// Atom weight when leaving `origin`.
+///
+/// Pentagon-rich occupied packing: break 5-rings (the discrete C5).
+/// No pentagons: disturb remaining triangles, the close-packed
+/// defects. Uniform incidence is a global scale and does not steer.
+pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
+    if origin.2 > 0 {
+        1.0 + f64::from(atom[2])
+    } else {
+        1.0 + f64::from(atom[0])
+    }
+}
+
+/// Scale a Cartesian increment so leave-ring atoms move more.
+///
+/// Champion leftover SOAP does not call this. Occupancy archive
+/// holes and packing kicks do. A uniform ring support is a global
+/// scale; the hop's RMS cap removes it.
+pub fn lens_ring_displacement(coordinates: &[f64], dr: &mut [f64]) {
+    if coordinates.len() != dr.len() {
+        return;
+    }
+    let Some(census) = occupancy_ring_census(coordinates) else {
+        return;
+    };
+    let n = census.atom.len();
+    if dr.len() != 3 * n {
+        return;
+    }
+    for (i, &incidence) in census.atom.iter().enumerate() {
+        let weight = ring_leave_weight(census.profile, incidence);
+        dr[3 * i] *= weight;
+        dr[3 * i + 1] *= weight;
+        dr[3 * i + 2] *= weight;
+    }
 }
 
 fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
@@ -1009,7 +1059,8 @@ mod tests {
         occupancy_ei_exhausted, occupancy_family_floor, occupancy_landfold_floor,
         occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
         occupancy_retire_at, occupancy_ring_floor, packing_role, promote_one_sided,
-        published_energy_score, retis_exchange_adjacent, retis_should_swap, seat_extras,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
+        ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1382,6 +1433,16 @@ mod tests {
     fn ring_floor_on_distinct_profiles_is_two() {
         assert_eq!(occupancy_ring_floor(&[(165, 17, 6), (152, 22, 0)]), 2);
         assert_eq!(occupancy_ring_floor(&[(400, 42, 21), (360, 55, 2)]), 2);
+    }
+
+    #[test]
+    fn ring_leave_weight_breaks_pentagons_on_ico_and_triangles_on_oh() {
+        let ico = (165, 17, 6);
+        let oh = (152, 22, 0);
+        assert!(ring_leave_weight(ico, [0, 0, 3]) > ring_leave_weight(ico, [10, 0, 0]));
+        assert!(ring_leave_weight(oh, [4, 0, 0]) > ring_leave_weight(oh, [0, 2, 0]));
+        assert_eq!(ring_novelty(ico, ico), 0);
+        assert!(ring_novelty(ico, oh) > 0);
     }
 
     #[test]

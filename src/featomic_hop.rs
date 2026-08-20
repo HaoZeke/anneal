@@ -7,7 +7,10 @@
 //! The packing label is the unit species mean `μ` (the bank Dcut).
 //! When leftover is a shell mode the hop is a kick of `μ` along a
 //! random direction orthogonal to the occupied mean, pulled back
-//! through `∂μ/∂x`. No Marks, fcc, or 421 target.
+//! through `∂μ/∂x`. Occupancy archive holes and packing kicks then
+//! ring-lens that Cartesian step: pentagon atoms when the occupied
+//! profile has 5-rings, triangle atoms when it does not. Champion
+//! leftover SOAP is not that lens. No Marks, fcc, or 421 target.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -812,6 +815,11 @@ pub fn step_into_hole_escaping<R: Rng + ?Sized>(
         }
         dp *= step / dn;
         let mut dr = tikhonov(&s.mean_jac, dp.view(), LAMBDA);
+        if let Some(coords) = cur.as_slice()
+            && let Some(delta) = dr.as_slice_mut()
+        {
+            crate::catalog::lens_ring_displacement(coords, delta);
+        }
         let n = (cur.len() / 3).max(1) as f64;
         let cart = (dr.iter().map(|v| v * v).sum::<f64>() / n).sqrt();
         if cart > cart_guard && cart > 1e-15 {
@@ -953,7 +961,12 @@ fn packing_kick<R: Rng + ?Sized>(
         return x.to_owned();
     }
     u /= nrm;
-    let dr = tikhonov(&s.mean_jac, u.view(), LAMBDA);
+    let mut dr = tikhonov(&s.mean_jac, u.view(), LAMBDA);
+    if let Some(coords) = x.as_slice()
+        && let Some(delta) = dr.as_slice_mut()
+    {
+        crate::catalog::lens_ring_displacement(coords, delta);
+    }
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 

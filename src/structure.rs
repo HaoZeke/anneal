@@ -884,6 +884,15 @@ fn median_nearest_neighbour(x: ArrayView1<f64>, n: usize) -> f64 {
     nn[n / 2]
 }
 
+/// Franzblau census: global 3/4/5 counts and per-atom incidence.
+#[derive(Clone, Debug)]
+pub struct RingCensus {
+    /// Primitive (triangles, squares, pentagons).
+    pub profile: (usize, usize, usize),
+    /// How many 3-, 4- and 5-rings contain each atom.
+    pub atom: Vec<[u32; 3]>,
+}
+
 /// Primitive-ring profile of the contact graph: counts of 3-, 4- and 5-rings.
 ///
 /// The shortest-path ring criterion of Franzblau
@@ -893,6 +902,16 @@ fn median_nearest_neighbour(x: ArrayView1<f64>, n: usize) -> f64 {
 /// families by topology rather than by any order parameter, and cost nothing
 /// but graph walks.
 pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize, usize) {
+    ring_census(x, n, cutoff).profile
+}
+
+/// Per-atom primitive-ring incidence at `cutoff`.
+pub fn ring_atom_incidence(x: ArrayView1<f64>, n: usize, cutoff: f64) -> Vec<[u32; 3]> {
+    ring_census(x, n, cutoff).atom
+}
+
+/// Franzblau census of the contact graph.
+pub fn ring_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> RingCensus {
     let adj = adjacency(x, n, cutoff);
     let nb: Vec<Vec<usize>> = (0..n)
         .map(|i| (0..n).filter(|&j| adj[i][j]).collect())
@@ -900,12 +919,19 @@ pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize,
     let mut tri = 0usize;
     let mut sq = 0usize;
     let mut pent = 0usize;
+    let mut atom = vec![[0u32; 3]; n];
+    let bump = |atom: &mut [[u32; 3]], kind: usize, members: &[usize]| {
+        for &i in members {
+            atom[i][kind] = atom[i][kind].saturating_add(1);
+        }
+    };
     for a in 0..n {
         for &b in nb[a].iter().filter(|&&b| b > a) {
             for &c in nb[b].iter().filter(|&&c| c > a && c != a) {
                 if adj[a][c] {
                     if b < c {
                         tri += 1;
+                        bump(&mut atom, 0, &[a, b, c]);
                     }
                     continue;
                 }
@@ -915,6 +941,7 @@ pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize,
                     if adj[a][d] && d > a && !adj[b][d] {
                         if b < d {
                             sq += 1;
+                            bump(&mut atom, 1, &[a, b, c, d]);
                         }
                         continue;
                     }
@@ -932,6 +959,7 @@ pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize,
                             && b < e
                         {
                             pent += 1;
+                            bump(&mut atom, 2, &[a, b, c, d, e]);
                         }
                     }
                 }
@@ -940,13 +968,28 @@ pub fn ring_profile(x: ArrayView1<f64>, n: usize, cutoff: f64) -> (usize, usize,
     }
     // Each square is found once per traversal direction, each pentagon from
     // both end orderings; triangles are already unique by ordering.
-    (tri, sq / 2, pent / 2)
+    // Atom incidence stays the raw walk so a ring found once is not
+    // rounded off the leave lens.
+    RingCensus {
+        profile: (tri, sq / 2, pent / 2),
+        atom,
+    }
 }
 
 /// Primitive-ring profile at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
 pub fn ring_profile_nn(x: ArrayView1<f64>, n: usize) -> (usize, usize, usize) {
+    ring_census_nn(x, n).profile
+}
+
+/// Per-atom incidence at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+pub fn ring_atom_incidence_nn(x: ArrayView1<f64>, n: usize) -> Vec<[u32; 3]> {
+    ring_census_nn(x, n).atom
+}
+
+/// Franzblau census at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+pub fn ring_census_nn(x: ArrayView1<f64>, n: usize) -> RingCensus {
     let cutoff = RING_CUTOFF_SCALE * median_nearest_neighbour(x, n);
-    ring_profile(x, n, cutoff)
+    ring_census(x, n, cutoff)
 }
 
 #[cfg(test)]
@@ -1004,6 +1047,15 @@ mod ring_tests {
     fn rings_separate_packings_and_ignore_labelling() {
         let a = ring_profile(ico13().view(), 13, 1.2);
         let b = ring_profile(fcc13().view(), 13, 1.2);
+        let census = ring_census(ico13().view(), 13, 1.2);
+        assert_eq!(census.profile, a);
+        let tri: u32 = census.atom.iter().map(|w| w[0]).sum();
+        let pent_atoms = census.atom.iter().filter(|w| w[2] > 0).count();
+        assert_eq!(tri as usize, 3 * a.0);
+        assert!(
+            a.2 == 0 || pent_atoms > 0,
+            "a packing with pentagons must name the atoms that sit on them"
+        );
         assert_ne!(a, b, "ico and fcc thirteen-point profiles agree: {a:?}");
         let x = ico13();
         let mut y = Array1::zeros(x.len());
