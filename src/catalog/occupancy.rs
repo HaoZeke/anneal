@@ -323,80 +323,129 @@ pub fn occupancy_landfold_split(
     }
 }
 
-/// Local maxima of a Gaussian KDE on a landfold map.
+/// Occupancy free energy. \(F/kT = -\ln(\rho/\rho_{\max})\).
 ///
-/// \(F = -\ln(\rho/\rho_{\max})\) minima are density maxima. A leftover
-/// DECAF chain is one basin; two well-separated packings are two.
-/// 2-means cannot count leftover-cloud basins; this can. This is not
-/// the hop-graph Fiedler split and it does not retire.
-pub fn occupancy_fes_basins(xy: &[[f64; 2]]) -> usize {
+/// Discrete packing FES uses leftover-well counts per DECAF family.
+/// The landfold-map FES uses a Gaussian KDE on the Torgerson plane.
+/// Equal occupancy is \(\Delta F = 0\), not a DECAF L1 split. This
+/// does not retire.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OccupancyFes {
+    /// Local minima of \(F/kT\).
+    pub minima: usize,
+    /// \(\Delta F/kT\) between the two deepest minima.
+    pub delta: Option<f64>,
+}
+
+/// Discrete packing \(\Delta F/kT = \ln(n_{\max}/n_2)\) from leftover-well
+/// counts. None when fewer than two occupied families have wells.
+pub fn occupancy_fes_delta(counts: &[u64]) -> Option<f64> {
+    let mut occupied: Vec<u64> = counts.iter().copied().filter(|&n| n > 0).collect();
+    if occupied.len() < 2 {
+        return None;
+    }
+    occupied.sort_unstable();
+    let n_max = occupied[occupied.len() - 1] as f64;
+    let n_second = occupied[occupied.len() - 2] as f64;
+    if n_max <= 0.0 || n_second <= 0.0 {
+        return None;
+    }
+    Some((n_max / n_second).ln())
+}
+
+/// Map free energy from landfold points, optional per-point weights.
+///
+/// Density is a Gaussian KDE. \(F_i/kT = -\ln(\rho_i/\rho_{\max})\).
+/// Minima of \(F\) are maxima of \(\rho\). Bandwidth is
+/// \(\max(\mathrm{median\ NN}, 0.25\times\mathrm{diameter})\).
+pub fn occupancy_fes(xy: &[[f64; 2]], weights: Option<&[f64]>) -> OccupancyFes {
     let n = xy.len();
     if n < 2 {
-        return 1;
+        return OccupancyFes {
+            minima: 1,
+            delta: None,
+        };
     }
     let mut nearest = Vec::with_capacity(n);
+    let mut diameter = 0.0_f64;
     for i in 0..n {
         let mut best = f64::INFINITY;
         for j in 0..n {
             if i == j {
                 continue;
             }
-            best = best.min(map_dist(xy[i], xy[j]));
+            let d = map_dist(xy[i], xy[j]);
+            best = best.min(d);
+            if j > i {
+                diameter = diameter.max(d);
+            }
         }
         nearest.push(best);
     }
     nearest.sort_by(|a, b| a.total_cmp(b));
-    let mut diameter = 0.0_f64;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            diameter = diameter.max(map_dist(xy[i], xy[j]));
-        }
-    }
     let sigma = nearest[n / 2].max(0.25 * diameter).max(1e-12);
     let mut density = vec![0.0; n];
     for i in 0..n {
+        let w_i = weights.and_then(|w| w.get(i).copied()).unwrap_or(1.0);
+        if !w_i.is_finite() || w_i <= 0.0 {
+            continue;
+        }
         for j in 0..n {
             let ratio = map_dist(xy[i], xy[j]) / sigma;
-            density[i] += (-0.5 * ratio * ratio).exp();
+            density[j] += w_i * (-0.5 * ratio * ratio).exp();
         }
     }
-    let mut basins = 0usize;
+    let rho_max = density.iter().copied().fold(0.0_f64, f64::max);
+    if rho_max <= 0.0 {
+        return OccupancyFes {
+            minima: 1,
+            delta: None,
+        };
+    }
+    let mut f = vec![0.0; n];
     for i in 0..n {
-        let mut peak = true;
+        if density[i] > 0.0 {
+            f[i] = -(density[i] / rho_max).ln();
+        } else {
+            f[i] = f64::INFINITY;
+        }
+    }
+    let mut minima_f = Vec::new();
+    for i in 0..n {
+        if !f[i].is_finite() {
+            continue;
+        }
+        let mut low = true;
         for j in 0..n {
-            if i == j || map_dist(xy[i], xy[j]) > sigma {
+            if i == j || map_dist(xy[i], xy[j]) > sigma || !f[j].is_finite() {
                 continue;
             }
-            if density[j] > density[i] + 1e-15
-                || ((density[j] - density[i]).abs() <= 1e-15 && j < i)
-            {
-                peak = false;
+            if f[j] < f[i] - 1e-15 || ((f[j] - f[i]).abs() <= 1e-15 && j < i) {
+                low = false;
                 break;
             }
         }
-        if peak {
-            basins += 1;
+        if low {
+            minima_f.push(f[i]);
         }
     }
-    basins.max(1)
+    minima_f.sort_by(|a, b| a.total_cmp(b));
+    let minima = minima_f.len().max(1);
+    let delta = if minima_f.len() >= 2 {
+        Some(minima_f[1] - minima_f[0])
+    } else {
+        None
+    };
+    OccupancyFes { minima, delta }
 }
 
-/// Landfold map of DECAF histograms, then [`occupancy_fes_basins`].
-pub fn occupancy_fes_from_histograms(histograms: &[Vec<f64>]) -> usize {
-    match histograms.len() {
-        0 | 1 => 1,
-        2 => {
-            if super::packing::packing_distance(&histograms[0], &histograms[1])
-                > super::packing::PACKING_MERGE
-            {
-                2
-            } else {
-                1
-            }
-        }
-        _ => match occupancy_map_from_histograms(histograms) {
-            Some(xy) => occupancy_fes_basins(&xy),
-            None => 1,
+/// Landfold map of DECAF histograms, then [`occupancy_fes`].
+pub fn occupancy_fes_from_histograms(histograms: &[Vec<f64>]) -> OccupancyFes {
+    match occupancy_map_from_histograms(histograms) {
+        Some(xy) => occupancy_fes(&xy, None),
+        None => OccupancyFes {
+            minima: 1,
+            delta: None,
         },
     }
 }
@@ -1140,7 +1189,7 @@ mod tests {
         OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
         leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
-        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_basins,
+        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes, occupancy_fes_delta,
         occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_leave_adopt,
         occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
         occupancy_ring_floor, packing_role, promote_one_sided, published_energy_score,
@@ -1520,12 +1569,29 @@ mod tests {
     }
 
     #[test]
-    fn fes_basins_keep_a_leftover_chain_and_split_two_clumps() {
+    fn packing_fes_delta_is_log_occupancy_ratio() {
+        assert_eq!(occupancy_fes_delta(&[]), None);
+        assert_eq!(occupancy_fes_delta(&[20]), None);
+        assert_eq!(occupancy_fes_delta(&[0, 0]), None);
+        let delta = occupancy_fes_delta(&[20, 5]).unwrap();
+        assert!((delta - 4.0_f64.ln()).abs() < 1e-12);
+        let even = occupancy_fes_delta(&[10, 10]).unwrap();
+        assert!(even.abs() < 1e-12);
+    }
+
+    #[test]
+    fn fes_map_is_free_energy_not_a_decaf_split() {
         let chain: Vec<[f64; 2]> = (0..8).map(|i| [i as f64, 0.0]).collect();
-        assert_eq!(occupancy_fes_basins(&chain), 1);
+        let chain_fes = occupancy_fes(&chain, None);
+        assert_eq!(chain_fes.minima, 1);
+        assert!(chain_fes.delta.is_none());
         let clumps = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
-        assert_eq!(occupancy_fes_basins(&clumps), 2);
-        assert_eq!(occupancy_fes_from_histograms(&[vec![1.0, 0.0]]), 1);
+        let clump_fes = occupancy_fes(&clumps, None);
+        assert_eq!(clump_fes.minima, 2);
+        assert!(clump_fes.delta.is_some());
+        let one = occupancy_fes_from_histograms(&[vec![1.0, 0.0]]);
+        assert_eq!(one.minima, 1);
+        assert!(one.delta.is_none());
     }
 
     #[test]

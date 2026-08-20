@@ -196,6 +196,18 @@ impl PackingBook {
         GoodTuringSample::from_counts(self.well_visits.iter().copied())
     }
 
+    /// Leftover-well counts of occupied families, in family-index order.
+    ///
+    /// Discrete packing \(F/kT = -\ln(n/n_{\max})\) uses these, not hop
+    /// re-observes.
+    pub fn occupied_well_counts(&self) -> Vec<u64> {
+        self.well_visits
+            .iter()
+            .copied()
+            .filter(|&visits| visits > 0)
+            .collect()
+    }
+
     /// Distinct rematched packings among live structures.
     pub fn occupied_among<I, C>(&self, structures: I) -> usize
     where
