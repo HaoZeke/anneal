@@ -1729,7 +1729,11 @@ mod tests {
         let clumps = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
         let fes = occupancy_fes(&clumps, Some(&[2.0, 2.0, 1.0, 1.0])).unwrap();
         assert_eq!(fes.minima, 2);
-        assert!((fes.delta.unwrap() - 2.0_f64.ln()).abs() < 1e-6);
+        let delta = fes.delta.unwrap();
+        assert!(
+            (delta - 0.692_586_871_889_264).abs() < 1e-12,
+            "finite Gaussian tails contribute density across both modes: {delta}"
+        );
     }
 
     #[test]
