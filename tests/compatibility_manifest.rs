@@ -13,6 +13,18 @@ unsafe extern "C" fn constant_objective(
     eindir_status_t::EINDIR_SUCCESS
 }
 
+fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
+    eindir_objective_t {
+        dim: 2,
+        low,
+        high,
+        eval_fn: constant_objective as EindirEvalFn,
+        grad_fn: None,
+        user_data: std::ptr::null_mut(),
+        free_fn: None,
+    }
+}
+
 #[test]
 fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let expected = AbiStamp::anneal_default();
@@ -67,26 +79,18 @@ fn manifest_serialization_is_deterministic_and_verifies_artifacts() {
 fn rejects_malformed_eindir_handles_before_evaluation() {
     let mut low = [0.0, -1.0];
     let mut high = [1.0, 1.0];
-    let objective = eindir_objective_t {
-        dim: 2,
-        low: low.as_mut_ptr(),
-        high: high.as_mut_ptr(),
-        eval_fn: constant_objective as EindirEvalFn,
-        grad_fn: None,
-        user_data: std::ptr::null_mut(),
-        free_fn: None,
-    };
+    let objective = test_objective(low.as_mut_ptr(), high.as_mut_ptr());
     assert!(unsafe { validate_eindir_objective(&objective, 2) }.is_ok());
 
-    let mut malformed = objective;
+    let malformed = test_objective(low.as_mut_ptr(), std::ptr::null_mut());
     malformed.high = std::ptr::null_mut();
     assert!(matches!(
         unsafe { validate_eindir_objective(&malformed, 2) },
         Err(CompatibilityError::ObjectiveBoundsNull { .. })
     ));
 
-    let mut inverted = objective;
     high[0] = -2.0;
+    let inverted = test_objective(low.as_mut_ptr(), high.as_mut_ptr());
     assert!(matches!(
         unsafe { validate_eindir_objective(&inverted, 2) },
         Err(CompatibilityError::ObjectiveBoundsInvalid { index: 0, .. })
