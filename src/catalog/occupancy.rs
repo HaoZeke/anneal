@@ -614,12 +614,23 @@ pub struct OccupancyCompact {
     pub rg2: f64,
     /// Straight-path \(R_g^2\) at the structure's median NN.
     pub path_rg2: f64,
+    /// Largest atom–COM distance over \(N^{1/3}\). Published LJ minima
+    /// sit in \(0.46\)–\(0.63\); the hop container is \(0.9\).
+    pub rmax_over_cbrt: f64,
 }
 
+/// Hop `contain` sphere in units of \(\sigma N^{1/3}\). Published
+/// compact minima are \(0.46\)–\(0.63\); a straight chain is \(\sim 2.5\).
+pub const COMPACT_RMAX_OVER_CBRT: f64 = 0.9;
+
 impl OccupancyCompact {
-    /// Connected contact graph with a cycle. Not a chain, not fragments.
+    /// Connected contact graph with a cycle, inside the hop container.
+    /// Not a chain, not fragments, not an unravelled ring.
     pub fn is_cluster(&self) -> bool {
-        self.n >= 3 && self.components == 1 && (self.rings > 0 || self.edges >= self.n)
+        self.n >= 3
+            && self.components == 1
+            && (self.rings > 0 || self.edges >= self.n)
+            && self.rmax_over_cbrt < COMPACT_RMAX_OVER_CBRT
     }
 
     /// One component, a forest, no primitive ring: a path or a tree.
@@ -647,6 +658,7 @@ pub fn occupancy_compact(coordinates: &[f64]) -> Option<OccupancyCompact> {
     };
     let rg2 = crate::structure::radius_of_gyration2(x, n);
     let path_rg2 = crate::structure::path_radius_of_gyration2(n, median_contact_spacing(x, n));
+    let rmax_over_cbrt = max_com_radius(x, n) / (n as f64).cbrt();
     Some(OccupancyCompact {
         n,
         components,
@@ -654,7 +666,31 @@ pub fn occupancy_compact(coordinates: &[f64]) -> Option<OccupancyCompact> {
         rings,
         rg2,
         path_rg2,
+        rmax_over_cbrt,
     })
+}
+
+fn max_com_radius(x: ndarray::ArrayView1<f64>, n: usize) -> f64 {
+    let mut com = [0.0; 3];
+    for i in 0..n {
+        for k in 0..3 {
+            com[k] += x[3 * i + k];
+        }
+    }
+    let inv = 1.0 / n as f64;
+    for k in 0..3 {
+        com[k] *= inv;
+    }
+    let mut rmax = 0.0_f64;
+    for i in 0..n {
+        let mut r2 = 0.0;
+        for k in 0..3 {
+            let d = x[3 * i + k] - com[k];
+            r2 += d * d;
+        }
+        rmax = rmax.max(r2.sqrt());
+    }
+    rmax
 }
 
 fn median_contact_spacing(x: ndarray::ArrayView1<f64>, n: usize) -> f64 {
@@ -1684,6 +1720,7 @@ mod tests {
         assert!(ico_c.is_cluster());
         assert!(!ico_c.is_pathlike());
         assert!(ico_c.rg2 < ico_c.path_rg2);
+        assert!(ico_c.rmax_over_cbrt < crate::catalog::COMPACT_RMAX_OVER_CBRT);
         assert!(occupancy_is_cluster(&ico));
 
         let mut chain = vec![0.0; 39];
@@ -1694,6 +1731,7 @@ mod tests {
         assert_eq!(chain_c.components, 1);
         assert!(chain_c.is_pathlike());
         assert!(!chain_c.is_cluster());
+        assert!(chain_c.rmax_over_cbrt > crate::catalog::COMPACT_RMAX_OVER_CBRT);
         assert!(!occupancy_is_cluster(&chain));
         let expected = crate::structure::path_radius_of_gyration2(13, 1.0);
         assert!((chain_c.rg2 - expected).abs() < 1e-12);
