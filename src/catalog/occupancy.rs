@@ -1274,11 +1274,12 @@ mod tests {
         OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
         in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
         leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
-        occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes, occupancy_fes_delta,
-        occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_leave_adopt,
-        occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
-        occupancy_ring_floor, packing_role, promote_one_sided, published_energy_score,
-        retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
+        OccupancyFesError, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
+        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
+        occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
+        occupancy_retire_at, occupancy_ring_floor, packing_role, promote_one_sided,
+        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
+        ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1662,6 +1663,10 @@ mod tests {
         assert!((delta - 4.0_f64.ln()).abs() < 1e-12);
         let even = occupancy_fes_delta(&[10, 10]).unwrap();
         assert!(even.abs() < 1e-12);
+        assert_eq!(
+            occupancy_fes_delta(&[0, 5, 20]),
+            occupancy_fes_delta(&[100, 0, 25])
+        );
     }
 
     #[test]
@@ -1677,10 +1682,54 @@ mod tests {
 
     #[test]
     fn fes_map_rejects_malformed_samples() {
-        assert!(occupancy_fes(&[[f64::NAN, 0.0]], None).is_err());
-        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0])).is_err());
-        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0, -1.0])).is_err());
-        assert!(occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[0.0, 0.0])).is_err());
+        assert_eq!(
+            occupancy_fes(&[[f64::NAN, 0.0]], None),
+            Err(OccupancyFesError::NonFinitePoint { index: 0 })
+        );
+        assert_eq!(
+            occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0])),
+            Err(OccupancyFesError::WeightCountMismatch {
+                points: 2,
+                weights: 1,
+            })
+        );
+        assert_eq!(
+            occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[1.0, -1.0])),
+            Err(OccupancyFesError::InvalidWeight { index: 1 })
+        );
+        assert_eq!(
+            occupancy_fes(&[[0.0, 0.0], [1.0, 0.0]], Some(&[0.0, 0.0])),
+            Err(OccupancyFesError::NoPositiveWeight)
+        );
+        assert_eq!(
+            occupancy_fes_from_histograms(&[vec![f64::INFINITY]]),
+            Err(OccupancyFesError::MapUnavailable)
+        );
+    }
+
+    #[test]
+    fn fes_map_is_invariant_under_rigid_similarity_and_sample_order() {
+        let points = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
+        let reference = occupancy_fes(&points, None).unwrap();
+        let transformed = points.map(|[x, y]| [3.0 - 2.5 * y, -4.0 + 2.5 * x]);
+        let permuted = [
+            transformed[2],
+            transformed[0],
+            transformed[3],
+            transformed[1],
+        ];
+        let observed = occupancy_fes(&permuted, None).unwrap();
+        assert_eq!(observed.minima, reference.minima);
+        assert!((observed.delta.unwrap() - reference.delta.unwrap()).abs() < 1e-12);
+        assert!(reference.delta.unwrap().abs() < 1e-12);
+    }
+
+    #[test]
+    fn fes_map_weights_set_the_relative_mode_depth() {
+        let clumps = [[0.0, 0.0], [0.1, 0.0], [8.0, 8.0], [8.1, 8.0]];
+        let fes = occupancy_fes(&clumps, Some(&[2.0, 2.0, 1.0, 1.0])).unwrap();
+        assert_eq!(fes.minima, 2);
+        assert!((fes.delta.unwrap() - 2.0_f64.ln()).abs() < 1e-6);
     }
 
     #[test]
