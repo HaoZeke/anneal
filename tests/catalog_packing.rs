@@ -220,10 +220,11 @@ fn landfold_two_means_bipartitions_a_leftover_decaf_chain() {
         "2-means splits a leftover DECAF chain; FES maxima are the landfold figure, not this floor"
     );
     let fes = occupancy_fes_from_histograms(&hists);
-    assert!(
-        fes.minima >= 1,
-        "map F is -ln(rho/rho_max), not a DECAF L1 floor"
+    assert_eq!(
+        fes.minima, 1,
+        "the connected interpolant chain has one landfold KDE mode"
     );
+    assert!(fes.delta.is_none());
 }
 
 #[test]
