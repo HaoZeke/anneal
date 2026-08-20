@@ -1498,6 +1498,8 @@ pub fn occupancy_retire_at(
 #[cfg(test)]
 mod tests {
     use super::{
+        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
+        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
         leftover_lambda, leftover_sat_dwell, occupancy_archive_hole_is_fivefold, occupancy_compact,
@@ -1507,9 +1509,7 @@ mod tests {
         occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
         occupancy_ring_class_changed, occupancy_ring_floor, packing_role, promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
-        ring_novelty, seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate,
-        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, CHAMPION_RANK,
-        OCCUPANCY_SEAM_CONDUCTANCE,
+        ring_novelty, seat_extras,
     };
 
     #[test]
