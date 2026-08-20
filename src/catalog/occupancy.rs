@@ -31,16 +31,16 @@
 //!
 //! ## Leave start
 //!
-//! Another DECAF family already on file and packing not saturated:
-//! take a catalog representative of the least-occupied one (funnel
-//! exchange). After packing saturation, or if no other family is on
-//! file: record the occupied packing in the shared SOAP archive and
-//! step into a hole of that archive, or amplify the fivefold residual
-//! when the archive is empty. The hole and packing-kick Cartesian
-//! step is ring-lensed: pentagon atoms move when the occupied
-//! profile has pentagons, triangle atoms when it does not. Champion
-//! leftover SOAP is not that lens. Occupancy extras do not draw a
-//! random cluster.
+//! Another *packing community* already on file (Fiedler \(F\ge 2\)
+//! after DECAF labels the sides) and packing not saturated: take a
+//! catalog representative of the least-occupied community (funnel
+//! hopping, Pahl et al. 2020). Leftover-SOAP wells of one packing
+//! are a superbasin (\(F=1\)); they are not OtherFamily. After
+//! packing saturation, or if \(F=1\): amplify the fivefold residual
+//! when the occupied Franzblau profile has pentagons (ico), else
+//! step into a hole of the shared occupied-packing archive. A SOAP
+//! hole of an ico archive stays in the ico funnel (Doye, Miller and
+//! Wales 1999). Occupancy extras do not draw a random cluster.
 //! A single hole-and-quench returns to the same family; the hop
 //! then requenches and widens until DECAF says the family changed.
 //!
@@ -104,17 +104,20 @@ pub enum OccupancyLeaveAdopt {
 
 /// Where an occupancy extra goes when it Leaves.
 ///
-/// Funnel exchange first, only while packing is unsaturated: a
-/// catalog representative of a different, under-occupied packing.
-/// That is how Leave includes Oh once Oh is on file. After packing
-/// saturation, or if no other family is on file, a hole of the
-/// shared occupied-packing archive, not a random cluster. Serial
-/// recommended is a different mode.
+/// Funnel exchange first, only while packing is unsaturated *and*
+/// Fiedler \(F\ge 2\): a catalog representative of a different,
+/// under-occupied packing community (Pahl, Neuhaus and de Pablo,
+/// *J. Chem. Phys.* 152:144106, 2020, doi:10.1063/5.0004106). That
+/// is how Leave includes Oh once Oh is on file. Leftover-SOAP wells
+/// of one packing are \(F=1\) and are not a funnel draw. After
+/// packing saturation, or if \(F=1\), a fivefold residual when the
+/// occupied packing is pentagon-rich, else a hole of the shared
+/// archive. Serial recommended is a different mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
-    /// Coordinator has a representative of a different DECAF family.
+    /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// Shared SOAP archive hole, or fivefold residual if the archive is empty.
+    /// Fivefold residual on a pentagon packing, else a SOAP archive hole.
     ArchiveHole,
 }
 
@@ -194,17 +197,32 @@ pub fn leftover_esty_stable(n: u64, n1: u64, n2: u64, ceiling: f64) -> bool {
         && leftover_esty_upper(n, n1, n2).is_some_and(|upper| upper < ceiling)
 }
 
-/// Leave destination. After packing saturation OtherFamily only
-/// rematches families on file, so Leave is the archive hole.
+/// Leave destination. OtherFamily is a draw from another Fiedler
+/// packing community. Leftover wells of one packing (`communities < 2`)
+/// stay ArchiveHole even when DECAF split them. After packing
+/// saturation OtherFamily only rematches communities on file, so
+/// Leave is the archive hole.
 pub fn occupancy_leave_target(
     other_family_in_catalog: bool,
     packing_saturated: bool,
+    packing_communities: usize,
 ) -> OccupancyLeaveTarget {
-    if packing_saturated || !other_family_in_catalog {
+    let other_packing = other_family_in_catalog && packing_communities >= 2;
+    if packing_saturated || !other_packing {
         OccupancyLeaveTarget::ArchiveHole
     } else {
         OccupancyLeaveTarget::OtherFamily
     }
+}
+
+/// ArchiveHole on a pentagon-rich packing is the fivefold residual.
+///
+/// Franzblau (1991), *Phys. Rev. B* 44:4925. Icosahedra are 5-ring
+/// rich; Marks and octahedra are not. A SOAP hole of an occupied
+/// ico archive is a leftover well of that funnel, not a packing
+/// exchange (Doye, Miller and Wales 1999, doi:10.1063/1.478595).
+pub fn occupancy_archive_hole_is_fivefold(profile: (usize, usize, usize)) -> bool {
+    profile.2 > 0
 }
 
 /// Franzblau (1991), *Phys. Rev. B* 44:4925: a new ring class is a
@@ -1480,18 +1498,18 @@ pub fn occupancy_retire_at(
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
-        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
         leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
-        leftover_lambda, leftover_sat_dwell, occupancy_compact, occupancy_complete,
-        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
-        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
+        leftover_lambda, leftover_sat_dwell, occupancy_archive_hole_is_fivefold, occupancy_compact,
+        occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
+        occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
         occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_new_class,
         occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
         occupancy_ring_class_changed, occupancy_ring_floor, packing_role, promote_one_sided,
         published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
-        ring_novelty, seat_extras,
+        ring_novelty, seat_extras, InterfaceSeat, LeavePath, OccupancyCertificate,
+        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, CHAMPION_RANK,
+        OCCUPANCY_SEAM_CONDUCTANCE,
     };
 
     #[test]
@@ -1506,15 +1524,31 @@ mod tests {
     #[test]
     fn occupancy_leave_is_another_family_or_an_archive_hole() {
         assert_eq!(
-            occupancy_leave_target(true, false),
+            occupancy_leave_target(true, false, 2),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
-            occupancy_leave_target(false, false),
+            occupancy_leave_target(false, false, 2),
             OccupancyLeaveTarget::ArchiveHole
         );
         assert_ne!(
-            occupancy_leave_target(false, false),
+            occupancy_leave_target(false, false, 2),
+            OccupancyLeaveTarget::OtherFamily
+        );
+    }
+
+    #[test]
+    fn leftover_wells_of_one_packing_are_archive_hole() {
+        assert_eq!(
+            occupancy_leave_target(true, false, 1),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_ne!(
+            occupancy_leave_target(true, false, 1),
+            OccupancyLeaveTarget::OtherFamily
+        );
+        assert_eq!(
+            occupancy_leave_target(true, false, 2),
             OccupancyLeaveTarget::OtherFamily
         );
     }
@@ -1522,25 +1556,33 @@ mod tests {
     #[test]
     fn packing_sat_leave_is_archive_hole_not_other_family() {
         assert_eq!(
-            occupancy_leave_target(true, true),
+            occupancy_leave_target(true, true, 2),
             OccupancyLeaveTarget::ArchiveHole
         );
         assert_ne!(
-            occupancy_leave_target(true, true),
+            occupancy_leave_target(true, true, 2),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
-            occupancy_leave_target(false, true),
+            occupancy_leave_target(false, true, 1),
             OccupancyLeaveTarget::ArchiveHole
         );
         assert_eq!(
-            occupancy_leave_target(true, false),
+            occupancy_leave_target(true, false, 2),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
-            occupancy_leave_target(false, false),
+            occupancy_leave_target(false, false, 2),
             OccupancyLeaveTarget::ArchiveHole
         );
+    }
+
+    #[test]
+    fn archive_hole_on_pentagon_packing_is_fivefold() {
+        assert!(occupancy_archive_hole_is_fivefold((165, 17, 6)));
+        assert!(occupancy_archive_hole_is_fivefold((400, 42, 21)));
+        assert!(!occupancy_archive_hole_is_fivefold((152, 22, 0)));
+        assert!(!occupancy_archive_hole_is_fivefold((0, 0, 0)));
     }
 
     #[test]
