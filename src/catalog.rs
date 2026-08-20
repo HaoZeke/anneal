@@ -56,7 +56,7 @@ pub use occupancy::{
     assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
     leave_shot_accepted, leftover_esty_stable, leftover_esty_upper, leftover_esty_var,
     leftover_hatch_stable, leftover_lambda, leftover_sat_dwell, lens_ring_displacement,
-    occupancy_archive_hole_is_fivefold, occupancy_compact, occupancy_complete,
+    occupancy_compact, occupancy_complete,
     occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
     occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
     occupancy_landfold_floor, occupancy_landfold_split, occupancy_leave_adopt,

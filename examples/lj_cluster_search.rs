@@ -16,8 +16,7 @@ use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_is_cluster,
-    occupancy_archive_hole_is_fivefold, occupancy_leave_target, occupancy_retire_at,
-    occupancy_ring_profile, published_energy_score,
+    occupancy_leave_target, occupancy_retire_at, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -1849,33 +1848,18 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     species: Option<&[u32]>,
     rng: &mut R,
 ) -> Array1<f64> {
-    let pentagon = x
-        .as_slice()
-        .and_then(occupancy_ring_profile)
-        .is_some_and(occupancy_archive_hole_is_fivefold);
-    if pentagon {
-        return anneal_core::soap::step_away_fivefold(x, rmsd, rng);
-    }
+    let _ = wells;
     #[cfg(feature = "featomic")]
     {
-        if !wells.is_empty() {
-            return anneal_core::featomic_hop::step_into_hole(
-                x,
-                wells,
-                anneal_core::featomic_hop::SOAP_PACK_MERGE,
-                rcut,
-                species,
-                None,
-                rng,
-            );
-        }
-        let _ = (rcut, species);
+        return anneal_core::featomic_hop::leave_archive_hole(
+            x, rcut, species, None, rmsd, rng,
+        );
     }
     #[cfg(not(feature = "featomic"))]
     {
-        let _ = (wells, rcut, species, rng);
+        let _ = (rcut, species, rng, rmsd);
+        x.to_owned()
     }
-    anneal_core::soap::step_away_fivefold_measured(x, rmsd)
 }
 
 /// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
@@ -3628,12 +3612,12 @@ fn run_capnp_catalog(
                         };
                     }
                 }
-                // Funnel exchange first: a representative of the
-                // packing the fewest replicas stand on. That is how
-                // Leave includes Oh once Oh is on file. Otherwise a
-                // hole of the shared occupied-packing archive, or the
-                // fivefold residual if the archive is empty. Occupancy
-                // extras do not draw a random cluster.
+                // Funnel exchange first when Fiedler F>=2: a
+                // representative of another packing community. F=1
+                // leftover wells are the champion walk. Extra
+                // ArchiveHole is leftover-orthogonal to the occupied
+                // packing and archive. Occupancy extras do not draw a
+                // random cluster.
                 let other_family = {
                     if let CatalogSampleOutcome::Candidate(sparse) = cooperative
                         .try_sample_candidate(replica, SPARSE_SAMPLE_DRAW)
@@ -3691,9 +3675,10 @@ fn run_capnp_catalog(
                         let live = snapshot.current_state();
                         let live_slice = live.as_slice().unwrap_or(&[]);
                         let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
-                        let fivefold = occupancy_ring_profile(live_slice)
-                            .is_some_and(occupancy_archive_hole_is_fivefold);
-                        let local = leave_packing_state(
+                        // Leftover holes of the occupied packing are the
+                        // champion walk. Extra ArchiveHole is leftover-
+                        // orthogonal to that packing and the archive.
+                        let left = leave_packing_state(
                             ArrayView1::from(shoot_coords),
                             0.35,
                             &shared_wells,
@@ -3701,35 +3686,6 @@ fn run_capnp_catalog(
                             coop_species.as_deref(),
                             &mut transport_rng,
                         );
-                        // A SOAP hole of a pentagon packing is a leftover
-                        // ico well. Fivefold is the packing exchange.
-                        let left = if fivefold {
-                            local
-                        } else {
-                            let shoot_leftover =
-                                leave_path.shoot_leftover().unwrap_or(descriptor.as_slice());
-                            let hole = cooperative
-                                .try_descriptor_hole(
-                                    replica,
-                                    shoot_leftover.to_vec(),
-                                    128,
-                                    transport_rng.random(),
-                                )
-                                .expect("catalog hole access must preserve local execution");
-                            match hole {
-                                CatalogHoleOutcome::Proposal(proposal) => {
-                                    step_toward_catalog_hole(
-                                        ArrayView1::from(shoot_coords),
-                                        &proposal.target,
-                                        &descriptor_space,
-                                        coop_species.as_deref(),
-                                        run_cfg.length_scale,
-                                    )
-                                    .unwrap_or(local)
-                                }
-                                _ => local,
-                            }
-                        };
                         if left
                             .iter()
                             .zip(snapshot.current_state().iter())
