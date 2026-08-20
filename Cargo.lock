@@ -470,7 +470,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c4213#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1382,7 +1382,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=473033d#473033de21a26dc25adb73df3b3640eed0dc0074"
+source = "git+https://github.com/OmniPotentRPC/rgpot.git?rev=473033de21a26dc25adb73df3b3640eed0dc0074#473033de21a26dc25adb73df3b3640eed0dc0074"
 dependencies = [
  "dlpk",
  "eindir-core",
@@ -2018,7 +2018,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 [[package]]
 name = "xtsci-optimize"
 version = "0.1.0"
-source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=c1caf2a#c1caf2aa31c075b3f248ef95522e9b0da8e01e4a"
+source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=c1caf2aa31c075b3f248ef95522e9b0da8e01e4a#c1caf2aa31c075b3f248ef95522e9b0da8e01e4a"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
