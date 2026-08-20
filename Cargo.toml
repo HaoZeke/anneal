@@ -152,5 +152,9 @@ name = "decaf_local_classes"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "occupancy_landfold_book"
+required-features = ["featomic"]
+
+[[example]]
 name = "lj_census_calibration"
 required-features = ["ira"]
