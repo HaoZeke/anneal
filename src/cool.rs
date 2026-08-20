@@ -98,7 +98,10 @@ impl<T: Float> TsallisCool<T> {
     /// Constructs a `TsallisCool` schedule. Requires t_init > 0.
     pub fn new(t_init: T, q_v: T) -> Self {
         assert!(t_init > T::zero(), "t_init must be positive");
-        assert!(q_v > T::one() && q_v < T::from(3.0).unwrap(), "q_v must lie in (1, 3)");
+        assert!(
+            q_v > T::one() && q_v < T::from(3.0).unwrap(),
+            "q_v must lie in (1, 3)"
+        );
         Self { t_init, q_v }
     }
 }

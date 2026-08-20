@@ -52,11 +52,7 @@ pub struct PtResult {
 /// Samples are reweighted with `exp(-(beta_cold - beta_hot) * F)`. This is
 /// valid for a fixed-rung Boltzmann distribution; swap acceptances are not
 /// importance weights and are intentionally excluded.
-pub fn estimate_log_z_ratio(
-    hot_energies: &[f64],
-    t_cold: f64,
-    t_hot: f64,
-) -> (f64, f64) {
+pub fn estimate_log_z_ratio(hot_energies: &[f64], t_cold: f64, t_hot: f64) -> (f64, f64) {
     if hot_energies.is_empty() || !(t_cold > 0.0 && t_hot > t_cold) {
         return (f64::NAN, f64::NAN);
     }
@@ -69,7 +65,10 @@ pub fn estimate_log_z_ratio(
     if log_weights.is_empty() {
         return (f64::NAN, f64::NAN);
     }
-    let max_log_weight = log_weights.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    let max_log_weight = log_weights
+        .iter()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
     let scaled: Vec<f64> = log_weights
         .iter()
         .map(|weight| (weight - max_log_weight).exp())

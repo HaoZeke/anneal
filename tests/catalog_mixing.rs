@@ -1,6 +1,6 @@
 use anneal_core::catalog::{
-    certified_global_minimum, explore_collapsed, explore_must_leave, invert_mixing, mixed,
-    occupant_rhat, rhat_series, stronger, AttractorStrength, MIXED_RHAT,
+    AttractorStrength, MIXED_RHAT, certified_global_minimum, explore_collapsed, explore_must_leave,
+    invert_mixing, mixed, occupant_rhat, rhat_series, stronger,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {

@@ -8,7 +8,10 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         .split("fn occupancy_floor(")
         .nth(1)
         .expect("occupancy_floor must exist");
-    let body = floor.split("fn leftover_census_dwell(").next().expect("floor ends at leftover dwell");
+    let body = floor
+        .split("fn leftover_census_dwell(")
+        .next()
+        .expect("floor ends at leftover dwell");
     assert!(
         body.contains("parse()"),
         "an empty CATALOG_MIN_FAMILIES must not skip the Fiedler floor"

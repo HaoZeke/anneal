@@ -105,7 +105,11 @@ pub fn trajectory_stationarity_flags(values: &[f64]) -> Vec<bool> {
     for center in window..(n - window) {
         let left = &values[center - window..center];
         let right = &values[center..center + window];
-        if left.iter().chain(right.iter()).any(|value| !value.is_finite()) {
+        if left
+            .iter()
+            .chain(right.iter())
+            .any(|value| !value.is_finite())
+        {
             continue;
         }
         let left_mean = left.iter().sum::<f64>() / window as f64;
@@ -136,15 +140,20 @@ mod tests {
         values.extend(vec![10.0; 20]);
         let flags = trajectory_stationarity_flags(&values);
         assert!(flags[20]);
-        assert!(flags.iter().enumerate().any(|(index, flag)| {
-            *flag && (18..=22).contains(&index)
-        }));
+        assert!(
+            flags
+                .iter()
+                .enumerate()
+                .any(|(index, flag)| { *flag && (18..=22).contains(&index) })
+        );
     }
 
     #[test]
     fn stationary_constant_trajectory_has_no_flags() {
-        assert!(!trajectory_stationarity_flags(&vec![2.0; 40])
-            .into_iter()
-            .any(|flag| flag));
+        assert!(
+            !trajectory_stationarity_flags(&vec![2.0; 40])
+                .into_iter()
+                .any(|flag| flag)
+        );
     }
 }

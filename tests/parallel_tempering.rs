@@ -3,9 +3,9 @@
 //! periodic Metropolis swaps.
 
 use anneal_core::ParallelTemperingSampler;
-use anneal_core::methods::parallel_tempering::estimate_log_z_ratio;
 use anneal_core::exchange::{MetropolisExchange, TsallisExchange};
 use anneal_core::geometric_ladder;
+use anneal_core::methods::parallel_tempering::estimate_log_z_ratio;
 use anneal_core::variant::boltzmann;
 
 use eindir_core::objectives::StybTang2D;
