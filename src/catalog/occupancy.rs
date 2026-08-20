@@ -1580,6 +1580,17 @@ mod tests {
     }
 
     #[test]
+    fn fes_map_finds_the_continuous_mode_between_samples() {
+        let shoulder = [[0.0, 0.0], [0.2, 0.0], [0.5, 0.0]];
+        let fes = occupancy_fes(&shoulder, None);
+        assert_eq!(
+            fes.minima, 1,
+            "the Gaussian KDE has one mode between the observed points"
+        );
+        assert!(fes.delta.is_none());
+    }
+
+    #[test]
     fn fes_map_is_free_energy_not_a_decaf_split() {
         let chain: Vec<[f64; 2]> = (0..8).map(|i| [i as f64, 0.0]).collect();
         let chain_fes = occupancy_fes(&chain, None);
