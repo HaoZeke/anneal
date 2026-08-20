@@ -50,7 +50,8 @@ pub use mixing::{
     stronger,
 };
 pub use occupancy::{
-    CHAMPION_RANK, DEFAULT_MIN_OCCUPIED_FAMILIES, INTERFACE_HORIZON, InterfaceSeat,
+    CHAMPION_RANK, COMPACT_RMAX_OVER_CBRT, DEFAULT_MIN_OCCUPIED_FAMILIES, INTERFACE_HORIZON,
+    InterfaceSeat,
     LEFTOVER_SAT_DWELL, LeaveFrame, LeavePath, OCCUPANCY_EI_MIN_OBS, OCCUPANCY_SEAM_CONDUCTANCE,
     OccupancyCertificate, OccupancyCompact, OccupancyFes, OccupancyFesError, OccupancyLeaveAdopt,
     OccupancyLeaveTarget, PackingRole, assign_interfaces, in_interface_ensemble, interface_ladder,
