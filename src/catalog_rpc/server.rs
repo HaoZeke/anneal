@@ -290,6 +290,9 @@ struct ScientificState {
         Option<u64>,
         bool,
     )>,
+    /// Leftover occupancy sample whose saturation state has been counted
+    /// toward the retirement dwell.
+    last_leftover_dwell_sample: Option<(u64, u64)>,
     leftover_sat_streak: u32,
     leftover_dwell: bool,
     funnel: crate::funnel_bo::FunnelModel,
@@ -384,6 +387,7 @@ impl CoordinatorState {
                     archive: Archive::new(scientific.census_radius.max(1e-6), ARCHIVE_RADIUS_FLOOR),
                     archive_progress: 0.0,
                     last_gt_report: None,
+                    last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
                     leftover_dwell: false,
                     funnel: crate::funnel_bo::FunnelModel::new(0.15, 20.0, 1e-2),
@@ -2799,8 +2803,14 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
-    if !leftover.saturated() {
-        scientific.leftover_sat_streak = 0;
+    let sample = (leftover.n, leftover.n1);
+    if scientific.last_leftover_dwell_sample != Some(sample) {
+        scientific.last_leftover_dwell_sample = Some(sample);
+        if leftover.saturated() {
+            scientific.leftover_sat_streak = scientific.leftover_sat_streak.saturating_add(1);
+        } else {
+            scientific.leftover_sat_streak = 0;
+        }
     }
     scientific.leftover_dwell =
         usize::try_from(scientific.leftover_sat_streak).unwrap_or(0) >= LEFTOVER_SAT_DWELL;
@@ -2841,13 +2851,6 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         return;
     }
     scientific.last_gt_report = Some(key);
-    if leftover_sat {
-        scientific.leftover_sat_streak = scientific.leftover_sat_streak.saturating_add(1);
-    } else {
-        scientific.leftover_sat_streak = 0;
-    }
-    scientific.leftover_dwell =
-        usize::try_from(scientific.leftover_sat_streak).unwrap_or(0) >= LEFTOVER_SAT_DWELL;
     let leftover_p0 = leftover
         .unseen()
         .map(|mass| format!("{mass:.4}"))
