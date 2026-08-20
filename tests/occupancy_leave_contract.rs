@@ -20,6 +20,52 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
 }
 
 #[test]
+fn occupancy_fes_report_uses_independent_well_arrivals_only() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let report = source
+        .split("fn report_occupancy_gt(")
+        .nth(1)
+        .expect("occupancy report must exist")
+        .split("fn record_energy(")
+        .next()
+        .expect("occupancy report must end at energy recording");
+    assert!(
+        report.contains("occupancy_fes_delta(&scientific.packing.occupied_well_counts())"),
+        "packing FES must use independent leftover-well counts"
+    );
+    assert!(
+        !report.contains("occupancy_fes_from_wells"),
+        "last, best, and catalog containers are not occupancy samples"
+    );
+    assert!(report.contains("\\\"fes_delta\\\""));
+    assert!(!report.contains("\\\"fes_minima\\\""));
+    assert!(!report.contains("\\\"fes_map_delta\\\""));
+}
+
+#[test]
+fn occupancy_fes_report_key_tracks_the_discrete_gap() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let report = source
+        .split("fn report_occupancy_gt(")
+        .nth(1)
+        .expect("occupancy report must exist")
+        .split("fn record_energy(")
+        .next()
+        .expect("occupancy report must end at energy recording");
+    let key = report
+        .split("let key = (")
+        .nth(1)
+        .expect("occupancy report suppression key must exist")
+        .split(");")
+        .next()
+        .expect("occupancy report suppression key must close");
+    assert!(
+        key.contains("fes_delta.map(f64::to_bits)"),
+        "a changed FES gap must emit a new occupancy report"
+    );
+}
+
+#[test]
 fn occupancy_leave_refuse_is_not_a_box_start() {
     let source = include_str!("../src/methods/cluster_hopping.rs");
     let after = source
