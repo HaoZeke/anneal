@@ -1,8 +1,8 @@
 use anneal_core::compatibility::{
-    validate_eindir_objective, AbiStamp, CompatibilityError, EngineDescriptor, ProtocolVersion,
+    AbiStamp, CompatibilityError, EngineDescriptor, ProtocolVersion, validate_eindir_objective,
 };
 use anneal_core::run_manifest::{ArtifactDigest, RunManifest};
-use eindir_core::ffi::{eindir_objective_t, eindir_status_t, EindirEvalFn};
+use eindir_core::ffi::{EindirEvalFn, eindir_objective_t, eindir_status_t};
 
 unsafe extern "C" fn constant_objective(
     _user_data: *mut std::ffi::c_void,
@@ -33,9 +33,11 @@ fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     assert_eq!(expected.abi_minor, 1);
     assert_eq!(expected.layout_revision, 3);
     let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 2), expected);
-    assert!(compatible
-        .validate("anneal.objective", ProtocolVersion::new(1, 1), expected)
-        .is_ok());
+    assert!(
+        compatible
+            .validate("anneal.objective", ProtocolVersion::new(1, 1), expected)
+            .is_ok()
+    );
 
     let wrong_major = EngineDescriptor::new("rgpot", ProtocolVersion::new(2, 0), expected);
     assert!(matches!(

@@ -6,11 +6,11 @@
 
 #![allow(dead_code)]
 
+use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use eindir_core::ffi::{
-    eindir_core_abi_compatible, eindir_objective_descriptor, EindirObjectiveWrapper,
+    EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_descriptor,
     eindir_objective_t,
 };
-use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,

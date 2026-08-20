@@ -8,7 +8,6 @@ mod run {
     use std::sync::{Arc, Mutex};
 
     use crate::catalog::MixingEvidence;
-    use crate::compatibility::EngineDescriptor;
     use crate::catalog_policy::{
         ActiveCatalogRelation, AggregateProgress, CatalogPolicy, CatalogPolicyInput,
         CensusEvidence, PolicyAction, PolicyDecision, PolicyInputError, ValidationState,
@@ -21,6 +20,7 @@ mod run {
         PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolRejection,
         TransitionDestination,
     };
+    use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};

@@ -3,9 +3,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use eindir_core::ffi::{
-    eindir_objective_t, EINDIR_ABI_FEATURE_BATCH, EINDIR_ABI_FEATURE_GRADIENT,
-};
+use eindir_core::ffi::{EINDIR_ABI_FEATURE_BATCH, EINDIR_ABI_FEATURE_GRADIENT, eindir_objective_t};
 
 /// Protocol family used by the anneal objective boundary.
 pub const PROTOCOL_FAMILY: &str = "anneal.objective";
