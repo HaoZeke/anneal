@@ -2,7 +2,8 @@ use anneal_core::catalog::{
     OccupancyCertificate, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
     lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
     occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
-    occupancy_ring_profile, packing_distance, packing_fingerprint, ring_leave_weight, same_packing,
+    occupancy_ring_profile, occupancy_sparsify_packing, packing_distance, packing_fingerprint,
+    ring_leave_weight, same_packing,
 };
 use ndarray::Array1;
 
@@ -299,6 +300,50 @@ fn landfold_floor_does_not_split_leftover_ico() {
         1,
         "leftover ico wells of one packing are one landfold community"
     );
+}
+
+#[test]
+fn landfold_sparsify_collapses_leftover_ico_and_keeps_oh_as_a_hole() {
+    use anneal_core::catalog::PRODUCTION_MINIMUM_VISITS;
+    let ico = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let mut leftover = PackingBook::default();
+    leftover.observe(ico.as_slice().unwrap()).unwrap();
+    let ico_family = leftover
+        .family_of(&leftover.histogram(ico.as_slice().unwrap()).unwrap())
+        .unwrap();
+    for _ in 0..PRODUCTION_MINIMUM_VISITS {
+        leftover.credit_well(ico_family);
+    }
+    let leftover_map = occupancy_sparsify_packing(&leftover);
+    assert_eq!(leftover_map.communities, 1);
+    assert!(
+        !leftover_map.holes,
+        "a one-packing book with Chao1 well credits has no holes"
+    );
+
+    let mut book = PackingBook::default();
+    let ico_family = book.observe(ico.as_slice().unwrap()).unwrap();
+    book.observe(oh.as_slice().unwrap()).unwrap();
+    for _ in 0..PRODUCTION_MINIMUM_VISITS {
+        book.credit_well(ico_family);
+    }
+    let open = occupancy_sparsify_packing(&book);
+    assert_eq!(open.floor, 2);
+    assert_eq!(open.communities, 2);
+    assert!(
+        open.holes,
+        "Oh on the book with no well arrivals is a hole extras Leave into"
+    );
+
+    let oh_family = book
+        .family_of(&book.histogram(oh.as_slice().unwrap()).unwrap())
+        .unwrap();
+    for _ in 0..PRODUCTION_MINIMUM_VISITS {
+        book.credit_well(oh_family);
+    }
+    let closed = occupancy_sparsify_packing(&book);
+    assert!(!closed.holes, "both book packings credited closes holes");
 }
 
 fn rings(x: &Array1<f64>) -> (usize, usize, usize) {

@@ -31,8 +31,9 @@ use crate::catalog::{
     SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
     explore_must_leave, invert_mixing, leftover_esty_stable, leftover_lambda,
     occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
-    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split, occupant_rhat,
-    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
+    occupancy_sparsify_packing, occupant_rhat, packing_role, promote_one_sided, prune,
+    retis_exchange_adjacent, same_packing, seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -288,6 +289,8 @@ struct ScientificState {
         usize,
         usize,
         Option<u64>,
+        bool,
+        usize,
         bool,
     )>,
     /// Leftover occupancy sample whose saturation state has been counted
@@ -2621,12 +2624,12 @@ fn highest_ei_family_entry(scientific: &mut ScientificState) -> Option<(usize, u
 }
 
 fn packing_census_saturated(scientific: &ScientificState) -> bool {
-    // Packing Good--Turing is the certificate. Leftover-SOAP arrivals
-    // keep hatching wells if the walk continues; that grain is the
-    // hole generator, not the stop. Coverage is not a stopping
-    // criterion either: its denominator grows as the archive radius
-    // anneals down.
-    scientific.packing.families_saturated()
+    // Packing completeness is Chao1 on the landfold-sparsified book.
+    // Leftover DECAF wells of one packing collapse to one community,
+    // so extras do not walk the force budget after that compacted
+    // census closes. Leftover-SOAP arrivals stay the hole generator
+    // while the sparsified book still has holes.
+    !occupancy_sparsify_packing(&scientific.packing).holes
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
@@ -2799,7 +2802,9 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
     {
         return occupancy_min_families();
     }
-    occupancy_seam_floor(scientific).0
+    let fiedler = occupancy_seam_floor(scientific).0;
+    let landfold = occupancy_landfold_from_book(scientific).0;
+    fiedler.max(landfold)
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
@@ -2835,11 +2840,14 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let (measured_floor, conductance, algebraic, seam_left, seam_right, seam_packings) =
         occupancy_seam_floor(scientific);
     let (landfold_floor, landfold_left, landfold_right) = occupancy_landfold_from_book(scientific);
+    let sparsified = occupancy_sparsify_packing(&scientific.packing);
+    let sparsified_sample = sparsified.sample();
     let (ring_floor, ring_distinct, ring_n) = occupancy_ring_from_book(scientific);
     let fes_delta = occupancy_fes_delta(&scientific.packing.occupied_well_counts());
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.chao1_complete();
+    let sparsified_sat = sparsified.saturated();
     let stop = packing_sat && families >= min_families;
     let key = (
         leftover.n,
@@ -2852,6 +2860,8 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         ring_floor,
         fes_delta.map(f64::to_bits),
         stop,
+        sparsified.communities,
+        sparsified.holes,
     );
     if scientific.last_gt_report == Some(key) {
         return;
@@ -2875,7 +2885,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2902,9 +2912,33 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         ring_distinct,
         ring_n,
         fes_delta_s,
+        sparsified_sample.n,
+        sparsified_sample.n1,
+        sparsified_sat,
+        sparsified.holes,
+        sparsified.communities,
         stop,
     );
+    report_occupancy_landfold(&sparsified);
     let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
+fn report_occupancy_landfold(map: &crate::catalog::OccupancyBookMap) {
+    let mut points = String::new();
+    for (index, point) in map.points.iter().enumerate() {
+        if index > 0 {
+            points.push(',');
+        }
+        points.push_str(&format!(
+            "{{\"family\":{},\"community\":{},\"x\":{:.6},\"y\":{:.6},\"wells\":{}}}",
+            point.family, point.community, point.xy[0], point.xy[1], point.wells
+        ));
+    }
+    let sample = map.sample();
+    println!(
+        "{{\"kind\":\"occupancy_landfold\",\"floor\":{},\"left\":{},\"right\":{},\"communities\":{},\"holes\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"points\":[{}]}}",
+        map.floor, map.left, map.right, map.communities, map.holes, sample.n, sample.n1, points
+    );
 }
 
 fn record_energy(scientific: &mut ScientificState, replica: u32, energy: f64) {

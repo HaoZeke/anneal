@@ -20,6 +20,54 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         !body.contains("is_ok()"),
         "presence of CATALOG_MIN_FAMILIES is not a paper-floor override"
     );
+    assert!(
+        body.contains("occupancy_landfold_from_book"),
+        "the book landfold community count is the secondary family floor"
+    );
+}
+
+#[test]
+fn packing_census_uses_the_sparsified_book() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let body = source
+        .split("fn packing_census_saturated(")
+        .nth(1)
+        .expect("packing_census_saturated must exist")
+        .split("fn occupancy_funnel_ei_exhausted(")
+        .next()
+        .expect("packing census ends at funnel EI");
+    assert!(
+        body.contains("occupancy_sparsify_packing"),
+        "packing saturation is Chao1 on the landfold-sparsified book"
+    );
+    assert!(
+        body.contains(".holes"),
+        "Leave continues only while the sparsified book has holes"
+    );
+}
+
+#[test]
+fn occupancy_report_emits_the_landfold_book_map() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let report = source
+        .split("fn report_occupancy_gt(")
+        .nth(1)
+        .expect("occupancy report must exist")
+        .split("fn record_energy(")
+        .next()
+        .expect("occupancy report must end at energy recording");
+    assert!(
+        report.contains("report_occupancy_landfold"),
+        "the book landfold map must be written for the figure path"
+    );
+    assert!(
+        report.contains("landfold_holes"),
+        "occupancy_gt must report whether the sparsified book still has holes"
+    );
+    assert!(
+        report.contains("\\\"kind\\\":\\\"occupancy_landfold\\\""),
+        "plot records are occupancy_landfold JSONL"
+    );
 }
 
 #[test]

@@ -196,6 +196,11 @@ impl PackingBook {
         GoodTuringSample::from_counts(self.well_visits.iter().copied())
     }
 
+    /// Leftover-well arrivals credited to one packing family.
+    pub fn well_visits_of(&self, family: usize) -> u64 {
+        self.well_visits.get(family).copied().unwrap_or(0)
+    }
+
     /// Leftover-well counts of occupied families, in family-index order.
     ///
     /// Discrete packing \(F/kT = -\ln(n/n_{\max})\) uses these, not hop
