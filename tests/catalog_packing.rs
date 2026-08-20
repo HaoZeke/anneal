@@ -1,7 +1,8 @@
 use anneal_core::catalog::{
     OccupancyCertificate, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
-    occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_floor, occupancy_ring_profile,
-    packing_distance, packing_fingerprint, same_packing,
+    lens_ring_displacement, occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_census,
+    occupancy_ring_floor, occupancy_ring_profile, packing_distance, packing_fingerprint,
+    ring_leave_weight, same_packing,
 };
 use ndarray::Array1;
 
@@ -293,6 +294,58 @@ fn primitive_rings_separate_packings_and_keep_leftover_ico() {
         occupancy_ring_floor(&[r_ico75, r_marks]),
         2,
         "LJ75 ico and Marks are two ring communities"
+    );
+}
+
+#[test]
+fn ring_leave_lens_sees_pentagon_atoms_on_ico_not_oh() {
+    let ico38 = load_xyz(include_str!("fixtures/lj38_ico.xyz"));
+    let oh38 = load_xyz(include_str!("fixtures/lj38_fcc.xyz"));
+    let ico = occupancy_ring_census(ico38.as_slice().unwrap()).unwrap();
+    let oh = occupancy_ring_census(oh38.as_slice().unwrap()).unwrap();
+    let ico_pent: usize = ico.atom.iter().filter(|w| w[2] > 0).count();
+    let oh_pent: usize = oh.atom.iter().filter(|w| w[2] > 0).count();
+    eprintln!(
+        "LJ38 ico pentagon atoms {ico_pent}/{} Oh {oh_pent}/{}",
+        ico.atom.len(),
+        oh.atom.len()
+    );
+    assert!(
+        ico_pent > 0 && ico_pent < ico.atom.len(),
+        "ico pentagon incidence must be a proper subset so the lens can steer"
+    );
+    assert_eq!(oh_pent, 0, "Oh has no 5-rings to concentrate on");
+    let ico_w: Vec<f64> = ico
+        .atom
+        .iter()
+        .map(|&w| ring_leave_weight(ico.profile, w))
+        .collect();
+    assert!(
+        ico_w.iter().copied().fold(f64::NEG_INFINITY, f64::max)
+            > ico_w.iter().copied().fold(f64::INFINITY, f64::min),
+        "ico leave weights must not be uniform"
+    );
+    let mut dr: Vec<f64> = (0..ico38.len())
+        .map(|i| if i % 3 == 0 { 1.0 } else { 0.0 })
+        .collect();
+    lens_ring_displacement(ico38.as_slice().unwrap(), &mut dr);
+    let pent_step: f64 = ico
+        .atom
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w[2] > 0)
+        .map(|(i, _)| dr[3 * i].abs())
+        .sum();
+    let other_step: f64 = ico
+        .atom
+        .iter()
+        .enumerate()
+        .filter(|(_, w)| w[2] == 0)
+        .map(|(i, _)| dr[3 * i].abs())
+        .sum();
+    assert!(
+        pent_step > other_step,
+        "lensed ico step must put more length on pentagon atoms ({pent_step} vs {other_step})"
     );
 }
 
