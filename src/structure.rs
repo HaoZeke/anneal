@@ -976,7 +976,7 @@ pub fn ring_census(x: ArrayView1<f64>, n: usize, cutoff: f64) -> RingCensus {
     }
 }
 
-/// Primitive-ring profile at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+/// Primitive-ring profile at the structure's first g(r) minimum.
 pub fn ring_profile_nn(x: ArrayView1<f64>, n: usize) -> (usize, usize, usize) {
     ring_census_nn(x, n).profile
 }
@@ -986,7 +986,57 @@ pub fn ring_atom_incidence_nn(x: ArrayView1<f64>, n: usize) -> Vec<[u32; 3]> {
     ring_census_nn(x, n).atom
 }
 
+/// First minimum of the pairwise-distance histogram after the first
+/// peak. Franzblau's contact cutoff is that shell, not a fixed
+/// multiple of median nearest neighbour.
+pub fn contact_cutoff_from_gr(x: ArrayView1<f64>, n: usize) -> f64 {
+    if n < 2 {
+        return 1.0;
+    }
+    let mut distances = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d2 = (0..3)
+                .map(|k| {
+                    let d = x[3 * i + k] - x[3 * j + k];
+                    d * d
+                })
+                .sum::<f64>();
+            distances.push(d2.sqrt());
+        }
+    }
+    distances.sort_by(|a, b| a.total_cmp(b));
+    let nn = median_nearest_neighbour(x, n);
+    let span = (3.0 * nn).min(distances.last().copied().unwrap_or(nn));
+    distances.retain(|&d| d <= span);
+    if span <= 0.0 || distances.is_empty() {
+        return RING_CUTOFF_SCALE * nn;
+    }
+    let bins = distances.len().min(48).max(8);
+    let mut hist = vec![0usize; bins];
+    for &d in &distances {
+        let index = ((d / span) * bins as f64).floor() as usize;
+        hist[index.min(bins - 1)] += 1;
+    }
+    let mut peak = 0usize;
+    for i in 1..bins.saturating_sub(1) {
+        if hist[i] >= hist[i - 1] && hist[i] >= hist[i + 1] && hist[i] > hist[peak] {
+            peak = i;
+        }
+    }
+    for i in (peak + 1)..bins.saturating_sub(1) {
+        if hist[i] <= hist[i - 1] && hist[i] <= hist[i + 1] {
+            return span * (i as f64 + 0.5) / bins as f64;
+        }
+    }
+    RING_CUTOFF_SCALE * median_nearest_neighbour(x, n)
+}
+
 /// Franzblau census at [`RING_CUTOFF_SCALE`] times median nearest neighbour.
+///
+/// That scale sits between the first and second neighbour shells of
+/// a simple pair potential. A per-frame g(r) first-minimum jumps
+/// under a leftover displacement and splits one packing.
 pub fn ring_census_nn(x: ArrayView1<f64>, n: usize) -> RingCensus {
     let cutoff = RING_CUTOFF_SCALE * median_nearest_neighbour(x, n);
     ring_census(x, n, cutoff)

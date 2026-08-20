@@ -226,8 +226,8 @@ pub enum CheckpointAction {
     },
     /// Occupancy certificate: stop this replica.
     ///
-    /// Inverted Gelman--Rubin mixing or Good--Turing catalog
-    /// saturation. A published energy is not this action.
+    /// Occupancy MixingCertified conjuncts. CatalogSaturated is
+    /// not this action. A published energy is not this action.
     Retire {
         /// `mixing` or `saturated`.
         reason: String,

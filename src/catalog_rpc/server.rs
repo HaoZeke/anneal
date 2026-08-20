@@ -27,12 +27,13 @@ use crate::catalog::{
     AdmissionOutcome, AdmissionRejection, Archive, AttractorStrength, BasinCatalog, BasinCensus,
     BasinId, CHAMPION_RANK, CandidateRecord, CandidateValidator, Curiosity,
     DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
-    InterfaceSeat, LEFTOVER_SAT_DWELL, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
+    InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus,
     REDUCTION_FACTOR, SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord,
-    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_lambda,
-    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
-    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split, occupant_rhat,
-    packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing, seat_extras,
+    euclidean_gradient_norm, explore_must_leave, invert_mixing, leftover_hatch_stable,
+    leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta,
+    occupancy_landfold_split, occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
+    occupant_rhat, packing_role, promote_one_sided, prune, retis_exchange_adjacent, same_packing,
+    seat_extras,
 };
 use crate::catalog_policy::proposal::farthest_hole;
 use crate::cooperative_search::ledger::{ChargeKind, CooperativeLedger, ReplicaLedgerEvent};
@@ -2719,6 +2720,7 @@ fn occupancy_seam_floor(
             (
                 occupancy_family_floor(
                     Some(split.conductance),
+                    Some(split.algebraic_connectivity),
                     left_live.len(),
                     right_live.len(),
                     families.len() >= 2,
@@ -2812,8 +2814,12 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
             scientific.leftover_sat_streak = 0;
         }
     }
-    scientific.leftover_dwell =
-        usize::try_from(scientific.leftover_sat_streak).unwrap_or(0) >= LEFTOVER_SAT_DWELL;
+    scientific.leftover_dwell = leftover.saturated()
+        && leftover_hatch_stable(
+            leftover.n,
+            leftover.n1,
+            crate::catalog::PRODUCTION_MAX_UNSEEN_MASS,
+        );
     scientific.leftover_dwell
 }
 

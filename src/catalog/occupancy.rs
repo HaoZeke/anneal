@@ -117,9 +117,9 @@ pub enum OccupancyLeaveTarget {
     ArchiveHole,
 }
 
-/// Consecutive independent leftover-SOAP samples under the unseen-mass
-/// ceiling that count as a dwell. One leftover-sat nick is not enough:
-/// a hatch raises \(\hat p_0\) by \((n-n_1)/(n(n+1))\).
+/// Consecutive leftover-sat bits kept for tests of the hatch filter.
+/// Live dwell is [`leftover_hatch_stable`]: one more singleton cannot
+/// lift \(\hat p_0\) through the unseen-mass ceiling.
 pub const LEFTOVER_SAT_DWELL: usize = 5;
 
 /// Bank and CSA turn FunnelModel EI on at three observed morphologies.
@@ -146,6 +146,22 @@ pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
             .rev()
             .take(LEFTOVER_SAT_DWELL)
             .all(|&sat| sat)
+}
+
+/// Hatch-stable leftover dwell from the Good--Turing increment.
+///
+/// A new singleton sends \(n\mapsto n+1\), \(n_1\mapsto n_1+1\) and
+/// \(\hat p_0'=(n_1+1)/(n+1)\). Dwell when the sample is under the
+/// ceiling and that hatch stays under it. No consecutive-record count.
+pub fn leftover_hatch_stable(n: u64, n1: u64, ceiling: f64) -> bool {
+    if n == 0 || !ceiling.is_finite() || ceiling <= 0.0 {
+        return false;
+    }
+    let p0 = n1 as f64 / n as f64;
+    if p0 >= ceiling {
+        return false;
+    }
+    (n1 + 1) as f64 / ((n + 1) as f64) < ceiling
 }
 
 /// Leave destination. After packing saturation OtherFamily only
@@ -213,27 +229,27 @@ pub const OCCUPANCY_SEAM_CONDUCTANCE: f64 = 0.1;
 /// Family floor from the landscape Fiedler split after DECAF labels
 /// the sides.
 ///
-/// The hop-graph Fiedler vector names two weakly coupled leftover-SOAP
-/// communities. Superbasin merge is leftover wells of one packing, so
-/// a seam whose basins are the same DECAF family is one community.
-/// Two is only when the seam separates distinct rematched packings.
-/// A one-sided or well-mixed graph is one community.
+/// The hop-graph Fiedler vector names two leftover-SOAP communities.
+/// Two when both live sides are nonempty, DECAF labels them as
+/// distinct packings, and the cut is a bottleneck: conductance is
+/// zero (disconnected) or strictly below algebraic connectivity
+/// (Cheeger: a cut weaker than \(\lambda_2\)). A superbasin, a
+/// one-sided split, or a well-mixed graph is one community.
 /// `CATALOG_MIN_FAMILIES` remains an override.
 pub fn occupancy_family_floor(
     conductance: Option<f64>,
+    algebraic_connectivity: Option<f64>,
     n_left: usize,
     n_right: usize,
     distinct_packing_sides: bool,
 ) -> usize {
-    match conductance {
-        Some(c)
-            if c < OCCUPANCY_SEAM_CONDUCTANCE
-                && n_left > 0
-                && n_right > 0
-                && distinct_packing_sides =>
-        {
-            2
-        }
+    if n_left == 0 || n_right == 0 || !distinct_packing_sides {
+        return DEFAULT_MIN_OCCUPIED_FAMILIES;
+    }
+    match (conductance, algebraic_connectivity) {
+        (Some(c), _) if c == 0.0 => 2,
+        (Some(c), Some(lambda)) if lambda.is_finite() && c < lambda => 2,
+        (Some(c), None) if c < OCCUPANCY_SEAM_CONDUCTANCE => 2,
         _ => DEFAULT_MIN_OCCUPIED_FAMILIES,
     }
 }
@@ -595,9 +611,9 @@ pub fn ring_novelty(origin: (usize, usize, usize), trial: (usize, usize, usize))
 
 /// Atom weight when leaving `origin`.
 ///
-/// Pentagon-rich occupied packing: break 5-rings (the discrete C5).
-/// No pentagons: disturb remaining triangles, the close-packed
-/// defects. Uniform incidence is a global scale and does not steer.
+/// Five-rings, when the occupied packing has them, are the Franzblau
+/// fivefold signature: extras move those atoms. Otherwise extras move
+/// three-rings. Uniform incidence is a global scale and does not steer.
 pub fn ring_leave_weight(origin: (usize, usize, usize), atom: [u32; 3]) -> f64 {
     if origin.2 > 0 {
         1.0 + f64::from(atom[2])
@@ -1279,15 +1295,15 @@ pub fn occupancy_retire_at(
 mod tests {
     use super::{
         CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
-        OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
-        in_interface_ensemble, interface_ladder, is_occupancy_leave_action, leave_shot_accepted,
-        leftover_lambda, leftover_sat_dwell, occupancy_complete, occupancy_complete_at,
-        OccupancyFesError, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
-        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
-        occupancy_leave_adopt, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
-        occupancy_retire_at, occupancy_ring_floor, packing_role, promote_one_sided,
-        published_energy_score, retis_exchange_adjacent, retis_should_swap, ring_leave_weight,
-        ring_novelty, seat_extras,
+        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
+        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
+        leave_shot_accepted, leftover_hatch_stable, leftover_lambda, leftover_sat_dwell,
+        occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
+        occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_target,
+        occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_floor,
+        packing_role, promote_one_sided, published_energy_score, retis_exchange_adjacent,
+        retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1527,6 +1543,15 @@ mod tests {
             2,
             2
         ));
+    }
+
+    #[test]
+    fn leftover_hatch_stable_is_the_good_turing_increment() {
+        assert!(!leftover_hatch_stable(0, 0, 0.2));
+        assert!(!leftover_hatch_stable(20, 4, 0.2));
+        assert!(leftover_hatch_stable(20, 0, 0.2));
+        assert!(leftover_hatch_stable(20, 3, 0.2));
+        assert!(!leftover_hatch_stable(4, 0, 0.2));
     }
 
     #[test]
@@ -1771,13 +1796,17 @@ mod tests {
 
     #[test]
     fn spectral_seam_is_two_communities_otherwise_one() {
-        assert_eq!(occupancy_family_floor(None, 0, 0, false), 1);
-        assert_eq!(occupancy_family_floor(Some(0.2), 4, 5, true), 1);
-        assert_eq!(occupancy_family_floor(Some(0.05), 4, 0, true), 1);
-        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5, false), 1);
-        assert_eq!(occupancy_family_floor(Some(0.05), 4, 5, true), 2);
+        assert_eq!(occupancy_family_floor(None, None, 0, 0, false), 1);
+        assert_eq!(occupancy_family_floor(Some(0.2), Some(0.05), 4, 5, true), 1);
+        assert_eq!(occupancy_family_floor(Some(0.05), Some(0.1), 4, 0, true), 1);
         assert_eq!(
-            occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), 4, 5, true),
+            occupancy_family_floor(Some(0.05), Some(0.1), 4, 5, false),
+            1
+        );
+        assert_eq!(occupancy_family_floor(Some(0.05), Some(0.1), 4, 5, true), 2);
+        assert_eq!(occupancy_family_floor(Some(0.0), Some(0.0), 4, 5, true), 2);
+        assert_eq!(
+            occupancy_family_floor(Some(OCCUPANCY_SEAM_CONDUCTANCE), None, 4, 5, true),
             1
         );
     }
