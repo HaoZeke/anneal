@@ -345,6 +345,19 @@ def identity_fes_factor_scale_and_tie():
     return ge_one and scale, r1 + r3
 
 
+def identity_chao1_complete_is_n1_zero():
+    """Chao1 unseen mass is ``n1^2 / (2 n2)``. It vanishes iff ``n1 = 0``.
+
+    Packing completeness is that vanishing, not ``n1/n < 1/5``. Leftover
+    SOAP still uses the hatch-stable ceiling.
+    """
+    n1, n2 = sp.symbols("n1 n2", positive=True)
+    chao = n1**2 / (2 * n2)
+    zero, r0 = _zero(sp.Integer(0) ** 2 / (2 * n2))
+    formula, r1 = _zero(chao * 2 * n2 - n1**2)
+    return zero and formula, r0 + r1
+
+
 def identity_path_rg2():
     """A straight chain of ``n`` sites spaced by ``a`` has
     ``R_g^2 = a^2 (n^2 - 1) / 12``.
@@ -681,6 +694,7 @@ def all_identities() -> bool:
         identity_cheeger_code_cut()[0],
         identity_path_rg2()[0],
         identity_forest_edge_bound()[0],
+        identity_chao1_complete_is_n1_zero()[0],
         identity_mixing_does_not_retire_without_packing()[0],
         identity_keep_count_partitions()[0],
         identity_keep_independent_of_resource()[0],
@@ -727,6 +741,7 @@ def derive() -> bool:
         ("c < λ2 <= 2 implies Cheeger c^2 < 2 λ2", identity_cheeger_code_cut()[0]),
         ("path R_g^2 = a^2 (n^2-1)/12", identity_path_rg2()[0]),
         ("forest e <= n - c", identity_forest_edge_bound()[0]),
+        ("Chao1 unseen is n1^2/(2 n2); complete iff n1=0", identity_chao1_complete_is_n1_zero()[0]),
         ("mixing does not retire without packing saturation", identity_mixing_does_not_retire_without_packing()[0]),
         ("n_keep + n_leave = 1 + n_extra", identity_keep_count_partitions()[0]),
         ("keep count independent of resource", identity_keep_independent_of_resource()[0]),

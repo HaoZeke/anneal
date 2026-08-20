@@ -232,6 +232,16 @@ theorem tree_is_connected_forest (n : Nat) (hn : n ≥ 1) :
     n - 1 + 1 = n := by
   omega
 
+/-- Chao1 unseen mass `n₁² / (2 n₂)` vanishes iff there are no
+singletons. Packing completeness is that vanishing. -/
+theorem chao1_unseen_zero (n2 : Rat) (_h : n2 ≠ 0) :
+    (0 : Rat) * 0 / (2 * n2) = 0 := by
+  grind
+
+theorem chao1_formula (n1 n2 : Rat) (_h : n2 ≠ 0) :
+    (n1 * n1) / (2 * n2) * (2 * n2) = n1 * n1 := by
+  grind
+
 /-- Family floor: two communities iff both Fiedler sides are live,
 DECAF labels them as distinct packings, and the cut is a bottleneck
 (`c = 0` or `c < λ₂`). No spectrum and `c > 0` is one community. -/

@@ -2839,7 +2839,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let fes_delta = occupancy_fes_delta(&scientific.packing.occupied_well_counts());
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
-    let packing_sat = packing.saturated();
+    let packing_sat = packing.chao1_complete();
     let stop = packing_sat && families >= min_families;
     let key = (
         leftover.n,
