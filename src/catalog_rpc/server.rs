@@ -232,21 +232,22 @@ pub enum CatalogServerError {
     InvalidJournal(String),
 }
 
-type OccupancyGtKey = (
-    u64,
-    u64,
-    u64,
-    u64,
-    u32,
-    u32,
-    usize,
-    usize,
-    Option<u64>,
-    bool,
-    usize,
-    bool,
-    usize,
-);
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct OccupancyGtKey {
+    leftover_n: u64,
+    leftover_n1: u64,
+    packing_n: u64,
+    packing_n1: u64,
+    families: u32,
+    min_families: u32,
+    landfold_floor: usize,
+    ring_floor: usize,
+    fes_delta_bits: Option<u64>,
+    stop: bool,
+    communities: usize,
+    holes: bool,
+    fes_minima: usize,
+}
 
 #[derive(Clone)]
 struct ScientificState {
@@ -2854,21 +2855,21 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let packing_sat = sparsified.saturated();
     let sparsified_sat = packing_sat;
     let stop = packing_sat && families >= min_families;
-    let key: OccupancyGtKey = (
-        leftover.n,
-        leftover.n1,
-        packing.n,
-        packing.n1,
+    let key = OccupancyGtKey {
+        leftover_n: leftover.n,
+        leftover_n1: leftover.n1,
+        packing_n: packing.n,
+        packing_n1: packing.n1,
         families,
         min_families,
         landfold_floor,
         ring_floor,
-        fes_delta.map(f64::to_bits),
+        fes_delta_bits: fes_delta.map(f64::to_bits),
         stop,
-        sparsified.communities,
-        sparsified.holes,
+        communities: sparsified.communities,
+        holes: sparsified.holes,
         fes_minima,
-    );
+    };
     if scientific.last_gt_report == Some(key) {
         return;
     }
