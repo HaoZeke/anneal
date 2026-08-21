@@ -232,6 +232,22 @@ pub enum CatalogServerError {
     InvalidJournal(String),
 }
 
+type OccupancyGtKey = (
+    u64,
+    u64,
+    u64,
+    u64,
+    u32,
+    u32,
+    usize,
+    usize,
+    Option<u64>,
+    bool,
+    usize,
+    bool,
+    usize,
+);
+
 #[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
@@ -279,21 +295,7 @@ struct ScientificState {
     /// Fraction of the ensemble budget spent, which is what the archive
     /// radius anneals against.
     archive_progress: f64,
-    last_gt_report: Option<(
-        u64,
-        u64,
-        u64,
-        u64,
-        u32,
-        u32,
-        usize,
-        usize,
-        Option<u64>,
-        bool,
-        usize,
-        bool,
-        usize,
-    )>,
+    last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
     last_leftover_dwell_sample: Option<(u64, u64, u64)>,
@@ -2852,7 +2854,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let packing_sat = sparsified.saturated();
     let sparsified_sat = packing_sat;
     let stop = packing_sat && families >= min_families;
-    let key = (
+    let key: OccupancyGtKey = (
         leftover.n,
         leftover.n1,
         packing.n,
