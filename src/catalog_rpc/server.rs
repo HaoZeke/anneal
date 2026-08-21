@@ -292,6 +292,7 @@ struct ScientificState {
         bool,
         usize,
         bool,
+        usize,
     )>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -2804,7 +2805,8 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
     }
     let fiedler = occupancy_seam_floor(scientific).0;
     let landfold = occupancy_landfold_from_book(scientific).0;
-    fiedler.max(landfold)
+    let fes = occupancy_sparsify_packing(&scientific.packing).fes_minima;
+    fiedler.max(landfold).max(fes.max(1))
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
@@ -2844,6 +2846,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let sparsified_sample = sparsified.sample();
     let (ring_floor, ring_distinct, ring_n) = occupancy_ring_from_book(scientific);
     let fes_delta = occupancy_fes_delta(&scientific.packing.occupied_well_counts());
+    let fes_minima = sparsified.fes_minima;
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
     let packing_sat = packing.chao1_complete();
@@ -2862,6 +2865,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         stop,
         sparsified.communities,
         sparsified.holes,
+        fes_minima,
     );
     if scientific.last_gt_report == Some(key) {
         return;
@@ -2885,7 +2889,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2912,6 +2916,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         ring_distinct,
         ring_n,
         fes_delta_s,
+        fes_minima,
         sparsified_sample.n,
         sparsified_sample.n1,
         sparsified_sat,
@@ -2936,8 +2941,16 @@ fn report_occupancy_landfold(map: &crate::catalog::OccupancyBookMap) {
     }
     let sample = map.sample();
     println!(
-        "{{\"kind\":\"occupancy_landfold\",\"floor\":{},\"left\":{},\"right\":{},\"communities\":{},\"holes\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"points\":[{}]}}",
-        map.floor, map.left, map.right, map.communities, map.holes, sample.n, sample.n1, points
+        "{{\"kind\":\"occupancy_landfold\",\"floor\":{},\"left\":{},\"right\":{},\"communities\":{},\"holes\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"points\":[{}]}}",
+        map.floor,
+        map.left,
+        map.right,
+        map.communities,
+        map.holes,
+        map.fes_minima,
+        sample.n,
+        sample.n1,
+        points
     );
 }
 
