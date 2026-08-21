@@ -1015,7 +1015,8 @@ pub fn leave_archive_hole_at<R: Rng + ?Sized>(
     let n_cover = crate::hypersphere::default_cover_size();
     let index = cover_index.unwrap_or_else(|| rng.random_range(0..n_cover.max(1)));
     let direction = crate::hypersphere::cover_direction(n_cover, dim, index);
-    let placed = crate::hypersphere::place_around(x.as_slice().unwrap_or(&[]), &direction, rmsd, mobile);
+    let placed =
+        crate::hypersphere::place_around(x.as_slice().unwrap_or(&[]), &direction, rmsd, mobile);
     if placed.len() != dim {
         return x.to_owned();
     }
