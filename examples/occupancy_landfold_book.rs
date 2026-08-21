@@ -11,6 +11,7 @@
 use anneal_core::catalog::{
     OccupancyFold, PackingBook, occupancy_map_fold, occupancy_sparsify_packing,
 };
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -80,6 +81,7 @@ fn main() {
     let mut book = PackingBook::default();
     let mut n_in = 0u64;
     let mut n_obs = 0u64;
+    let mut best_e: HashMap<usize, f64> = HashMap::new();
     for input in &inputs {
         for (energy, coords) in load(Path::new(input)) {
             n_in += 1;
@@ -88,7 +90,16 @@ fn main() {
             };
             book.credit_well(family);
             n_obs += 1;
-            let _ = energy;
+            if energy.is_finite() {
+                best_e
+                    .entry(family)
+                    .and_modify(|held| {
+                        if energy < *held {
+                            *held = energy;
+                        }
+                    })
+                    .or_insert(energy);
+            }
         }
     }
     let map = occupancy_sparsify_packing(&book);
@@ -100,9 +111,16 @@ fn main() {
         occupancy_map_fold(&hists, OccupancyFold::Asinh).unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
     if let Some(path) = dump_hist {
         let dim = hists.iter().map(Vec::len).max().unwrap_or(0);
-        let mut body = format!("# family wells {}\n", (0..dim).map(|i| format!("h{i}")).collect::<Vec<_>>().join(" "));
+        let mut body = format!(
+            "# family wells min_e {}\n",
+            (0..dim)
+                .map(|i| format!("h{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         for ((family, hist), point) in occupied.iter().zip(map.points.iter()) {
-            body.push_str(&format!("{family} {}", point.wells));
+            let emin = best_e.get(family).copied().unwrap_or(f64::NAN);
+            body.push_str(&format!("{family} {} {:.10e}", point.wells, emin));
             for k in 0..dim {
                 body.push_str(&format!(" {:.8e}", hist.get(k).copied().unwrap_or(0.0)));
             }
