@@ -29,7 +29,7 @@ pub const PACKING_SPEC: SoapSpec = SoapSpec {
 };
 
 /// A closed-shell class histogram needs a real neighbour cloud.
-const MINIMUM_PACKING_ATOMS: usize = 13;
+pub(crate) const MINIMUM_PACKING_ATOMS: usize = 13;
 
 /// Recompute DECAF only when some atom moved more than this.
 /// Sits well below [`ENVIRONMENT_RADIUS`] and the packing-family grain.

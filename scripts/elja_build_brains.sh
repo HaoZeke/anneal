@@ -54,12 +54,15 @@ fi
 "$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_packing leftover_first_wave
 "$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_packing packing_good_turing
 "$PIXI" run -e cluster cargo test --offline --release --features featomic --lib leave_occupied_packing
+"$PIXI" run -e cluster cargo test --offline --release --lib packing_householder_flips
+"$PIXI" run -e cluster cargo test --offline --release --lib xtsci_walks_off_the_known
+"$PIXI" run -e cluster cargo test --offline --release --lib packing_mode_is_nu3_mean
 "$PIXI" run -e cluster cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-for symbol in different_decaf_family "occupancy leave archive hole" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
+for symbol in different_decaf_family "occupancy leave archive hole" "packing invert nu3 pullback" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
   if ! grep -a -F -q "$symbol" "$BIN"; then
     echo "built binary missing $symbol" >&2
     exit 1

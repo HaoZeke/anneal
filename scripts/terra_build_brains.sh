@@ -39,12 +39,15 @@ cargo test --release --features bank-rpc --test catalog_packing leftover_soap_gt
 cargo test --release --features bank-rpc --test catalog_packing leftover_first_wave
 cargo test --release --features bank-rpc --test catalog_packing packing_good_turing
 cargo test --release --features featomic --lib leave_occupied_packing
+cargo test --release --lib packing_householder_flips
+cargo test --release --lib xtsci_walks_off_the_known
+cargo test --release --lib packing_mode_is_nu3_mean
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-for symbol in different_decaf_family "occupancy leave archive hole" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
+for symbol in different_decaf_family "occupancy leave archive hole" "packing invert nu3 pullback" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
   if ! grep -a -F -q "$symbol" "$BIN"; then
     echo "built binary missing $symbol" >&2
     exit 1
