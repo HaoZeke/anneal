@@ -1285,9 +1285,8 @@ fn main() {
                 return (f, cur);
             }
             let (f, xr, _) = if anneal_core::known_basin::is_armed() {
-                let (f, xr) = anneal_core::known_basin::step_xtsci(&mut opt, x, iters, |v| {
-                    charged(led, v)
-                });
+                let (f, xr) =
+                    anneal_core::known_basin::step_xtsci(&mut opt, x, iters, |v| charged(led, v));
                 (f, xr, 0)
             } else if noise_eta > 0.0 && iters <= screen_steps {
                 opt.minimize(x, iters, |v| charged_noisy(led, v, noise_eta, &mut qrng))
