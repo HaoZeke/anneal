@@ -61,6 +61,14 @@ fn occupancy_report_emits_the_landfold_book_map() {
         .next()
         .expect("occupancy report must end at energy recording");
     assert!(
+        report.contains("sparsified.saturated()"),
+        "reported packing_sat is the sparsified book, not leftover n1 Chao1"
+    );
+    assert!(
+        !report.contains("packing.chao1_complete()"),
+        "leftover well singletons are not the packing stop"
+    );
+    assert!(
         report.contains("report_occupancy_landfold"),
         "the book landfold map must be written for the figure path"
     );

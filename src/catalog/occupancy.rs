@@ -72,12 +72,12 @@
 //! holes. After the book exists, a landfold (Torgerson MDS of DECAF
 //! L1, then 2-means) folds leftover wells of one packing into one
 //! community. Leave continues only while that compacted book still
-//! has holes: a second community on the map with no well arrivals,
-//! more FES basins than occupied well-sides, or Chao1 incomplete on
-//! the merged well counts. The floor is the Fiedler split of the hop
-//! graph after DECAF labels the sides, the landfold community count
-//! when the book already holds a second packing extras have Left, or
-//! the book-map FES basin count. A Franzblau primitive-ring floor is
+//! has holes: a second community on the map with no well arrivals, or
+//! Chao1 incomplete on the merged well counts. Leftover FES modes of
+//! one packing are not a packing hole. The floor is the Fiedler split
+//! of the hop graph after DECAF labels the sides, the landfold
+//! community count when the book already holds a second packing extras
+//! have Left, or the book-map FES basin count. A Franzblau primitive-ring floor is
 //! reported beside it and does not retire.
 //! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
@@ -459,11 +459,12 @@ impl OccupancyBookMap {
 
 /// Whether the sparsified book still has holes extras should Leave into.
 ///
-/// A second landfold community with no well arrivals is a hole. More
-/// FES basins than occupied well-sides is a hole: 2-means can merge
-/// leftover wells of one packing while the book map still has empty
-/// basins. Chao1 on the merged well counts is the packing census
-/// after leftover wells of one packing collapse.
+/// A second landfold community with no well arrivals is a hole. FES
+/// basins reopen a hole only while that second community exists:
+/// leftover wells of one packing (floor 1) stay one Chao1 sample even
+/// when the leftover cloud has more than one density mode. Chao1 on
+/// the merged well counts is the packing census after leftover wells
+/// of one packing collapse.
 pub fn occupancy_book_holes(
     communities: usize,
     community_wells: &[u64],
@@ -473,7 +474,7 @@ pub fn occupancy_book_holes(
     if communities >= 2 && occupied_sides < 2 {
         return true;
     }
-    if fes_minima >= 2 && fes_minima > occupied_sides.max(1) {
+    if communities >= 2 && fes_minima > occupied_sides {
         return true;
     }
     !super::packing::GoodTuringSample::from_counts(community_wells.iter().copied()).chao1_complete()
@@ -2205,13 +2206,13 @@ mod tests {
         assert!(occupancy_book_holes(2, &[20, 0], 2));
         assert!(!occupancy_book_holes(2, &[20, 20], 2));
         assert!(
-            occupancy_book_holes(1, &[20], 2),
-            "two FES basins and one occupied well-side is a hole"
+            !occupancy_book_holes(1, &[20], 2),
+            "leftover FES modes of one packing are not a packing hole"
         );
     }
 
     #[test]
-    fn book_map_fes_keeps_holes_when_two_means_merges_two_basins() {
+    fn leftover_fes_modes_do_not_reopen_a_floor_one_packing() {
         let a = vec![1.0, 0.0, 0.0];
         let a2 = vec![1.0, 0.05, 0.0];
         let b = vec![0.0, 0.0, 1.0];
@@ -2223,12 +2224,12 @@ mod tests {
         );
         assert!(
             map.fes_minima >= 2,
-            "separated book cells stay two FES basins: {}",
+            "separated leftover cells can still be two FES basins: {}",
             map.fes_minima
         );
         assert!(
-            map.holes,
-            "Leave continues while the book map still has an empty basin"
+            !map.holes,
+            "Chao1 on the merged leftover community closes the packing census"
         );
     }
 
