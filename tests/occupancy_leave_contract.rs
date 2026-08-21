@@ -25,12 +25,12 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         "the book landfold community count is the secondary family floor"
     );
     assert!(
-        body.contains("fes_minima"),
-        "the book-map FES basin count is a family floor"
+        body.contains("occupancy_sparsify_packing"),
+        "peeled book communities drive Leave F"
     );
     assert!(
-        body.contains("occupancy_ring_from_book"),
-        "Franzblau ring class is a family floor"
+        !body.contains("occupancy_ring_from_book"),
+        "Franzblau ring class is a Leave lens, not a retire floor"
     );
 }
 
