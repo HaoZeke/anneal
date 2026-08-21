@@ -1,15 +1,23 @@
 //! Even covering of the unit hypersphere for saddle-search starts.
 //!
-//! Plasencia Gutiérrez, Argáez and Jónsson, *J. Chem. Theory Comput.*
-//! **13**, 1 (2017), DOI 10.1021/acs.jctc.5b01216 (the Optbench /
-//! SoftSaddle heptamer). Instead of Gaussian displacements, starting
-//! points lie on \(S^{d-1}\) and a Thomson-like repulsion
-//! \(\sum_{i\neq j} 1/\gamma_{ij}^{s}\) with geodesic
+//! Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. Improved Minimum
+//! Mode Following Method for Finding First Order Saddle Points.
+//! *J. Chem. Theory Comput.* **2017**, *13* (1), 125-134.
+//! <https://doi.org/10.1021/acs.jctc.5b01216>
+//! (ookcite: ACS bibliography; IEEE: vol. 13, no. 1, pp. 125-134,
+//! Jan. 2017). Optbench / SoftSaddle heptamer. Instead of Gaussian
+//! displacements, starting points lie on \(S^{d-1}\) and a Thomson-like
+//! repulsion \(\sum_{i\neq j} 1/\gamma_{ij}^{s}\) with geodesic
 //! \(\gamma=\arccos(\mathbf{v}_i\cdot\mathbf{v}_j)\) and \(s=1\)
-//! spaces them. SoftSaddle `triangulation_hight_v2` (Manuel Plasencia
-//! Gutiérrez) is the source of the Gauss–Seidel update. Occupancy
-//! ArchiveHole takes one covering direction per extra, placed at the
-//! existing RMSD cap: the covering is not a larger kick.
+//! spaces them. SoftSaddle `triangulation_hight_v2` is the Gauss-Seidel
+//! update (`a` starts at 1, clamp to 0.2, no grow; close pairs dropped
+//! not aborted; `dE` signed). `sort_initial_disp` orders by Euclidean
+//! diameter then max-sum distance. Occupancy ArchiveHole takes one
+//! covering direction per extra, placed at the existing all-atom RMSD
+//! cap with mobile COM removed: that placement is the occupancy cap,
+//! not SoftSaddle `V*R` on a mobile block. The paper's adaptive radius
+//! (grow \(R\) from the \(\lambda=0\) crossing when the batch success
+//! rate drops) is not used: Leave is kick-then-quench, not MMF.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -57,11 +65,15 @@ pub fn cover_points<R: rand::Rng + ?Sized>(
     if n == 0 || dim == 0 {
         return Vec::new();
     }
+    let n2 = n.checked_mul(n);
+    if n2.is_none() {
+        return Vec::new();
+    }
     let mut points = random_sphere(n, dim, rng);
     if n == 1 {
         return points;
     }
-    relax_cover(&mut points, max_iter);
+    relax_cover(&mut points, max_iter, rng);
     points
 }
 
@@ -90,37 +102,55 @@ pub fn cover_direction(n: usize, dim: usize, index: usize) -> Vec<f64> {
     cover[index % cover.len()].clone()
 }
 
-/// Greedy order: each next point maximises the minimum geodesic to
-/// those already chosen (JCTC 2017 Fig. 4).
+/// SoftSaddle `sort_initial_disp`: start at the Euclidean diameter
+/// pair, then each next point maximises the *sum* of Euclidean
+/// distances to those already chosen.
 pub fn farthest_order(points: &[Vec<f64>]) -> Vec<usize> {
     let n = points.len();
     if n == 0 {
         return Vec::new();
     }
-    let mut remaining: Vec<usize> = (0..n).collect();
-    let mut order = Vec::with_capacity(n);
-    // SoftSaddle starts from the highest-energy (most crowded) point.
-    let start = (0..n)
-        .max_by(|&left, &right| {
-            pair_energy(points, left)
-                .partial_cmp(&pair_energy(points, right))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .unwrap_or(0);
-    remaining.retain(|&i| i != start);
-    order.push(start);
-    while !remaining.is_empty() {
-        let next = remaining
-            .iter()
-            .copied()
-            .max_by(|&left, &right| {
-                min_geodesic_to_set(points, left, &order)
-                    .partial_cmp(&min_geodesic_to_set(points, right, &order))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .expect("remaining is non-empty");
-        remaining.retain(|&i| i != next);
-        order.push(next);
+    if n == 1 {
+        return vec![0];
+    }
+    let Some(n2) = n.checked_mul(n) else {
+        return (0..n).collect();
+    };
+    let mut dist = vec![0.0; n2];
+    let mut best = -1.0;
+    let mut first = 0;
+    let mut second = 1;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = euclid(&points[i], &points[j]);
+            dist[i * n + j] = d;
+            dist[j * n + i] = d;
+            if d > best {
+                best = d;
+                first = i;
+                second = j;
+            }
+        }
+    }
+    let mut order = vec![first, second];
+    let mut taken = vec![false; n];
+    taken[first] = true;
+    taken[second] = true;
+    while order.len() < n {
+        let mut pick = 0;
+        let mut pick_sum = -1.0;
+        for j in 0..n {
+            if taken[j] {
+                continue;
+            }
+            let s: f64 = order.iter().map(|&i| dist[i * n + j]).sum();
+            if s > pick_sum {
+                pick_sum = s;
+                pick = j;
+            }
+        }
+        taken[pick] = true;
+        order.push(pick);
     }
     order
 }
@@ -207,15 +237,24 @@ fn random_sphere<R: rand::Rng + ?Sized>(n: usize, dim: usize, rng: &mut R) -> Ve
     points
 }
 
-fn relax_cover(points: &mut [Vec<f64>], max_iter: usize) {
+fn relax_cover<R: rand::Rng + ?Sized>(
+    points: &mut [Vec<f64>],
+    max_iter: usize,
+    rng: &mut R,
+) {
     let n = points.len();
     let dim = points[0].len();
-    let mut dots = vec![0.0; n * n];
-    let mut geo = vec![0.0; n * n];
-    let mut pair = vec![0.0; n * n];
+    let Some(n2) = n.checked_mul(n) else {
+        return;
+    };
+    let mut dots = vec![0.0; n2];
+    let mut geo = vec![0.0; n2];
+    let mut pair = vec![0.0; n2];
     refresh_pairs(points, &mut dots, &mut geo, &mut pair);
     let mut energy: Vec<f64> = vec![pair.iter().sum()];
-    let mut step = vec![A_MAX; n];
+    // SoftSaddle `a=ones`; first accepted trial uses 1.0, then clamps
+    // to A_MAX. The MATLAB `if m==1, a*2.5` never fires (`m` stays 0).
+    let mut step = vec![1.0; n];
     let mut d_e = f64::INFINITY;
     let mut iter = 0usize;
     while iter < max_iter && d_e > COVER_ETOL {
@@ -232,7 +271,7 @@ fn relax_cover(points: &mut [Vec<f64>], max_iter: usize) {
         });
         for &j in &order {
             let mut grad = vec![0.0; dim];
-            let mut failed = false;
+            let mut kept = 0usize;
             for i in 0..n {
                 if i == j {
                     continue;
@@ -241,21 +280,26 @@ fn relax_cover(points: &mut [Vec<f64>], max_iter: usize) {
                 let g = geo[i * n + j];
                 let tang = (1.0 - dot * dot).sqrt();
                 let w = COVER_S / ((tang + f64::EPSILON) * (g.powf(COVER_S + 1.0) + f64::EPSILON));
+                let mut row = vec![0.0; dim];
                 let mut nrm2 = 0.0;
                 for ax in 0..dim {
-                    let gax = w * points[i][ax];
-                    grad[ax] += gax;
-                    nrm2 += gax * gax;
+                    row[ax] = w * points[i][ax];
+                    nrm2 += row[ax] * row[ax];
                 }
+                // SoftSaddle drops only the huge pair, not the particle.
                 if iter < 5 && nrm2 > 1e8 {
-                    failed = true;
-                    break;
+                    continue;
                 }
+                for ax in 0..dim {
+                    grad[ax] += row[ax];
+                }
+                kept += 1;
             }
-            if failed {
+            if iter < 5 && kept == 0 {
                 for point in points.iter_mut() {
                     for item in point.iter_mut() {
-                        *item += 1e-5 * (hash_unit(*item) - 0.5);
+                        let z: f64 = StandardNormal.sample(rng);
+                        *item += z / 1e5;
                     }
                     normalize(point);
                 }
@@ -304,7 +348,10 @@ fn relax_cover(points: &mut [Vec<f64>], max_iter: usize) {
                         pair[j * n + i] = trial_pair[i];
                         pair[i * n + j] = trial_pair[i];
                     }
-                    step[j] = (step[j] * A_SCALE).min(A_MAX);
+                    // SoftSaddle never grows `a` (`m` stays 0); clamp only.
+                    if step[j] > A_MAX {
+                        step[j] = A_MAX;
+                    }
                     break;
                 }
                 if step[j] > A_MIN {
@@ -317,8 +364,9 @@ fn relax_cover(points: &mut [Vec<f64>], max_iter: usize) {
         let u_now: f64 = pair.iter().sum();
         energy.push(u_now);
         if iter >= 10 {
-            let older = energy[iter.saturating_sub(2)];
-            d_e = (older - u_now).abs() / 10.0;
+            // SoftSaddle: dE = (Ue(i-2) - Ue(i+1)) / 10, 1-based, no abs.
+            let older = energy[iter.saturating_sub(3)];
+            d_e = (older - u_now) / 10.0;
         }
         if iter % 20 == 0 {
             step.fill(A_MAX);
@@ -349,25 +397,12 @@ fn refresh_pairs(points: &[Vec<f64>], dots: &mut [f64], geo: &mut [f64], pair: &
     }
 }
 
-fn pair_energy(points: &[Vec<f64>], index: usize) -> f64 {
-    points
-        .iter()
-        .enumerate()
-        .map(|(j, other)| {
-            if j == index {
-                0.0
-            } else {
-                1.0 / (geodesic(&points[index], other).powf(COVER_S) + f64::EPSILON)
-            }
-        })
-        .sum()
-}
-
-fn min_geodesic_to_set(points: &[Vec<f64>], index: usize, chosen: &[usize]) -> f64 {
-    chosen
-        .iter()
-        .map(|&j| geodesic(&points[index], &points[j]))
-        .fold(f64::INFINITY, f64::min)
+fn euclid(left: &[f64], right: &[f64]) -> f64 {
+    left.iter()
+        .zip(right.iter())
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt()
 }
 
 fn geodesic(left: &[f64], right: &[f64]) -> f64 {
@@ -435,11 +470,6 @@ fn strip_com(dr: &mut [f64], keep: &[bool]) {
     }
 }
 
-fn hash_unit(x: f64) -> f64 {
-    let bits = x.to_bits().wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    (bits >> 11) as f64 / ((1u64 << 53) as f64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +521,25 @@ mod tests {
         let mut sorted = order.clone();
         sorted.sort_unstable();
         assert_eq!(sorted, (0..7).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn farthest_order_starts_at_the_euclidean_diameter() {
+        let points = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![-1.0, 0.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+        ];
+        let order = farthest_order(&points);
+        let d01 = euclid(&points[order[0]], &points[order[1]]);
+        let mut best: f64 = 0.0;
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                best = best.max(euclid(&points[i], &points[j]));
+            }
+        }
+        assert!((d01 - best).abs() < 1e-12, "diameter {d01} vs {best}");
     }
 
     #[test]

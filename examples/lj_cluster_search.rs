@@ -1869,6 +1869,10 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     }
 }
 
+/// Covering index for ArchiveHole: replica, then later Leaves of the
+/// same extra. Plasencia Gutiérrez, Argáez, Jónsson, *J. Chem. Theory
+/// Comput.* **2017**, *13* (1), 125-134.
+/// <https://doi.org/10.1021/acs.jctc.5b01216>
 fn archive_cover_index(replica: u32, leave: usize) -> usize {
     let wave = std::env::var("CATALOG_WAVE")
         .ok()
