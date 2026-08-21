@@ -2849,8 +2849,8 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let fes_minima = sparsified.fes_minima;
     let min_families = occupancy_floor(scientific) as u32;
     let leftover_sat = leftover.saturated();
-    let packing_sat = packing.chao1_complete();
-    let sparsified_sat = sparsified.saturated();
+    let packing_sat = sparsified.saturated();
+    let sparsified_sat = packing_sat;
     let stop = packing_sat && families >= min_families;
     let key = (
         leftover.n,
