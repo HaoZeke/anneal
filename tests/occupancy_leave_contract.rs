@@ -120,14 +120,14 @@ fn occupancy_fes_report_key_tracks_the_discrete_gap() {
         .next()
         .expect("occupancy report must end at energy recording");
     let key = report
-        .split("let key: OccupancyGtKey = (")
+        .split("let key = OccupancyGtKey {")
         .nth(1)
         .expect("occupancy report suppression key must exist")
-        .split(");")
+        .split("};")
         .next()
         .expect("occupancy report suppression key must close");
     assert!(
-        key.contains("fes_delta.map(f64::to_bits)"),
+        key.contains("fes_delta_bits: fes_delta.map(f64::to_bits)"),
         "a changed FES gap must emit a new occupancy report"
     );
 }
