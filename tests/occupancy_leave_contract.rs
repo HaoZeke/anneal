@@ -28,6 +28,10 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         body.contains("fes_minima"),
         "the book-map FES basin count is a family floor"
     );
+    assert!(
+        body.contains("occupancy_ring_from_book"),
+        "Franzblau ring class is a family floor"
+    );
 }
 
 #[test]

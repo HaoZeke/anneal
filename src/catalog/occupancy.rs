@@ -204,17 +204,19 @@ pub fn leftover_esty_stable(n: u64, n1: u64, n2: u64, ceiling: f64) -> bool {
 /// community on the sparsified book (`communities >= 2`). Leftover
 /// wells of one packing (`communities < 2`) stay ArchiveHole even
 /// when DECAF split them. After packing saturation OtherFamily only
-/// rematches communities on file, so Leave is the archive hole.
+/// rematches communities on file. Packing saturation does not
+/// disable that draw: ArchiveHole is only for a one-community book.
 pub fn occupancy_leave_target(
     other_family_in_catalog: bool,
     packing_saturated: bool,
     packing_communities: usize,
 ) -> OccupancyLeaveTarget {
+    let _ = packing_saturated;
     let other_packing = other_family_in_catalog && packing_communities >= 2;
-    if packing_saturated || !other_packing {
-        OccupancyLeaveTarget::ArchiveHole
-    } else {
+    if other_packing {
         OccupancyLeaveTarget::OtherFamily
+    } else {
+        OccupancyLeaveTarget::ArchiveHole
     }
 }
 
@@ -539,7 +541,7 @@ pub fn occupancy_sparsify_book(
             }
         }
     }
-    let n_communities = floor.max(1);
+    let n_communities = peel_far_packings(histograms, &mut community, &wells, floor.max(1));
     let mut community_wells = vec![0u64; n_communities];
     let mut points = Vec::with_capacity(n);
     for i in 0..n {
@@ -568,6 +570,51 @@ pub fn occupancy_sparsify_book(
         fes_minima: fes.minima,
         fes_delta: fes.delta,
     }
+}
+
+/// Peel histograms that sit farther than [`super::packing::PACKING_MERGE`]
+/// from their community medoid *and* outside the leftover cloud
+/// (farther than twice the median in-community distance). 2-means of a
+/// leftover-ico majority otherwise absorbs Oh or Marks.
+fn peel_far_packings(
+    histograms: &[Vec<f64>],
+    community: &mut [usize],
+    wells: &[u64],
+    n_communities: usize,
+) -> usize {
+    let merge = super::packing::PACKING_MERGE;
+    let mut n = n_communities.max(1);
+    for c in 0..n {
+        let members: Vec<usize> = (0..community.len())
+            .filter(|&i| community[i] == c)
+            .collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let medoid = members
+            .iter()
+            .copied()
+            .max_by_key(|&i| wells.get(i).copied().unwrap_or(0))
+            .unwrap_or(members[0]);
+        let mut distances: Vec<f64> = members
+            .iter()
+            .map(|&i| super::packing::packing_distance(&histograms[i], &histograms[medoid]))
+            .collect();
+        distances.sort_by(|a, b| a.total_cmp(b));
+        let median = distances[distances.len() / 2];
+        let tail = merge.max(2.0 * median);
+        for &i in &members {
+            if i == medoid {
+                continue;
+            }
+            let d = super::packing::packing_distance(&histograms[i], &histograms[medoid]);
+            if d > tail {
+                community[i] = n;
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 /// Landfold-sparsify the occupied packing book.
@@ -1725,14 +1772,14 @@ mod tests {
     }
 
     #[test]
-    fn packing_sat_leave_is_archive_hole_not_other_family() {
+    fn packing_sat_leave_still_draws_other_family() {
         assert_eq!(
             occupancy_leave_target(true, true, 2),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::OtherFamily
         );
         assert_ne!(
             occupancy_leave_target(true, true, 2),
-            OccupancyLeaveTarget::OtherFamily
+            OccupancyLeaveTarget::ArchiveHole
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
@@ -2230,6 +2277,31 @@ mod tests {
         assert!(
             !map.holes,
             "Chao1 on the merged leftover community closes the packing census"
+        );
+    }
+
+    #[test]
+    fn an_ico_majority_does_not_absorb_oh_on_the_book() {
+        let ico = vec![1.0, 0.0];
+        let oh = vec![0.0, 1.0];
+        let mut histograms = vec![ico.clone(); 16];
+        histograms.push(oh);
+        let family: Vec<usize> = (0..17).collect();
+        let mut wells = vec![20u64; 16];
+        wells.push(0);
+        let map = occupancy_sparsify_book(&histograms, &family, &wells);
+        assert!(
+            map.communities >= 2,
+            "Oh must peel off a leftover-ico majority: communities={}",
+            map.communities
+        );
+        assert!(
+            map.holes,
+            "Oh on the book with no wells is a hole extras Leave into"
+        );
+        assert_eq!(
+            occupancy_leave_target(true, map.saturated(), map.communities),
+            OccupancyLeaveTarget::OtherFamily
         );
     }
 

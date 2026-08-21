@@ -2808,8 +2808,9 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
     }
     let fiedler = occupancy_seam_floor(scientific).0;
     let landfold = occupancy_landfold_from_book(scientific).0;
+    let ring = occupancy_ring_from_book(scientific).0;
     let fes = occupancy_sparsify_packing(&scientific.packing).fes_minima;
-    fiedler.max(landfold).max(fes.max(1))
+    fiedler.max(landfold).max(ring).max(fes.max(1))
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
