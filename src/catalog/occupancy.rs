@@ -1086,12 +1086,35 @@ fn side_spread(histograms: &[Vec<f64>], members: &[usize]) -> f64 {
     widest
 }
 
+/// How DECAF L1 becomes the Torgerson metric.
+///
+/// [`OccupancyFold::Switch`] is the production floor. Far L1 pairs
+/// share one value (Lean `sat_far_cannot_tell`), so a packing fork
+/// collapses to a line. [`OccupancyFold::Asinh`] keeps far L1 ordered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OccupancyFold {
+    /// \(F(d)=1-1/(1+(d/\sigma)^2)\). Intra-funnel short; far pairs saturate.
+    Switch,
+    /// \(F(d)=\mathrm{asinh}(d/\sigma)/(2\,\mathrm{asinh}\,1)\). Unbounded.
+    Asinh,
+    /// Raw L1. No transfer.
+    Identity,
+}
+
 /// Torgerson (1952) classical MDS of DECAF L1 after a Ceriotti switch.
 ///
 /// Raw L1 stretches a leftover-family chain so 2-means splits the
 /// ends. The switch \(F(d)=1-1/(1+(d/\sigma)^2)\) with \(\sigma\) the
 /// median pairwise L1 keeps intra-funnel distances short.
 pub fn occupancy_map_from_histograms(histograms: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
+    occupancy_map_fold(histograms, OccupancyFold::Switch).map(|(xy, _)| xy)
+}
+
+/// Torgerson map and the two leading eigenvalues of the Gram matrix.
+pub fn occupancy_map_fold(
+    histograms: &[Vec<f64>],
+    fold: OccupancyFold,
+) -> Option<(Vec<[f64; 2]>, [f64; 2])> {
     let n = histograms.len();
     if n < 2 {
         return None;
@@ -1117,7 +1140,11 @@ pub fn occupancy_map_from_histograms(histograms: &[Vec<f64>]) -> Option<Vec<[f64
             if i == j {
                 continue;
             }
-            dist[i][j] = ceriotti_switch(dist[i][j], sigma);
+            dist[i][j] = match fold {
+                OccupancyFold::Switch => ceriotti_switch(dist[i][j], sigma),
+                OccupancyFold::Asinh => asinh_switch(dist[i][j], sigma),
+                OccupancyFold::Identity => dist[i][j],
+            };
         }
     }
     torgerson_2d(&dist)
@@ -1128,6 +1155,14 @@ fn ceriotti_switch(distance: f64, sigma: f64) -> f64 {
         return 0.0;
     }
     1.0 - 1.0 / (1.0 + (distance / sigma).powi(2))
+}
+
+fn asinh_switch(distance: f64, sigma: f64) -> f64 {
+    if !(distance.is_finite() && sigma.is_finite()) || sigma <= 0.0 {
+        return 0.0;
+    }
+    let u = distance / sigma;
+    u.asinh() / (2.0 * 1.0_f64.asinh())
 }
 
 fn median(values: &mut [f64]) -> Option<f64> {
@@ -1235,7 +1270,7 @@ fn dist2(a: [f64; 2], b: [f64; 2]) -> f64 {
     dx * dx + dy * dy
 }
 
-fn torgerson_2d(dist: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
+fn torgerson_2d(dist: &[Vec<f64>]) -> Option<(Vec<[f64; 2]>, [f64; 2])> {
     let n = dist.len();
     if n < 2 {
         return None;
@@ -1269,6 +1304,7 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
         }
     }
     let mut y = vec![[0.0; 2]; n];
+    let mut spectrum = [0.0; 2];
     for k in 0..2 {
         let mut v: Vec<f64> = (0..n)
             .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
@@ -1308,11 +1344,12 @@ fn torgerson_2d(dist: &[Vec<f64>]) -> Option<Vec<[f64; 2]>> {
             }
         }
         let scale = lambda.max(0.0).sqrt();
+        spectrum[k] = lambda.max(0.0);
         for i in 0..n {
             y[i][k] = scale * v[i];
         }
     }
-    Some(y)
+    Some((y, spectrum))
 }
 
 /// Occupied-family floor. Spectral split unless `CATALOG_MIN_FAMILIES`
