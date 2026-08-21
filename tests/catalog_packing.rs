@@ -1,9 +1,10 @@
 use anneal_core::catalog::{
-    OccupancyCertificate, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook, different_decaf_family,
-    lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
-    occupancy_landfold_floor, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
-    occupancy_ring_profile, occupancy_sparsify_packing, packing_distance, packing_fingerprint,
-    ring_leave_weight, same_packing,
+    OccupancyCertificate, OccupancyFold, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook,
+    different_decaf_family, lens_ring_displacement, occupancy_fes_delta,
+    occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_map_fold,
+    occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
+    occupancy_sparsify_packing, packing_distance, packing_fingerprint, ring_leave_weight,
+    same_packing,
 };
 use ndarray::Array1;
 
@@ -543,4 +544,24 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
     );
     assert_eq!(queried.visits(direct_family), direct.visits(direct_family));
     assert_eq!(queried.occupied_family_count(), 2);
+}
+
+#[test]
+fn asinh_fold_opens_a_packing_fork_the_switch_flattens() {
+    // Root plus two L1 branches. Distinct far pairs saturate under
+    // the Ceriotti switch (Lean sat_far_cannot_tell).
+    let mut hists = vec![vec![1.0, 0.0, 0.0]];
+    for k in 1..=8 {
+        let t = k as f64 / 8.0;
+        hists.push(vec![1.0 - t, t, 0.0]);
+        hists.push(vec![1.0 - t, 0.0, t]);
+    }
+    let (_, switch_l) = occupancy_map_fold(&hists, OccupancyFold::Switch).unwrap();
+    let (_, asinh_l) = occupancy_map_fold(&hists, OccupancyFold::Asinh).unwrap();
+    let switch_ratio = switch_l[1] / switch_l[0].max(1e-15);
+    let asinh_ratio = asinh_l[1] / asinh_l[0].max(1e-15);
+    assert!(
+        asinh_ratio > switch_ratio + 0.05,
+        "asinh λ2/λ1 {asinh_ratio} must exceed switch {switch_ratio}"
+    );
 }
