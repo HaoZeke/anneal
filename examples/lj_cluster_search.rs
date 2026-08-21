@@ -522,7 +522,8 @@ fn charged(led: &mut Ledger, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
     if !led.charge() {
         return None;
     }
-    Some(lj(x))
+    let (energy, grad) = lj(x);
+    Some(anneal_core::known_basin::effective(x, energy, grad))
 }
 
 /// The objective with isotropic noise on the gradient, for the screening pass.
@@ -1283,7 +1284,12 @@ fn main() {
                 led.record_quench_boundary(charged_before, f, cur.clone(), None);
                 return (f, cur);
             }
-            let (f, xr, _) = if noise_eta > 0.0 && iters <= screen_steps {
+            let (f, xr, _) = if anneal_core::known_basin::is_armed() {
+                let (f, xr) = anneal_core::known_basin::step_xtsci(&mut opt, x, iters, |v| {
+                    charged(led, v)
+                });
+                (f, xr, 0)
+            } else if noise_eta > 0.0 && iters <= screen_steps {
                 opt.minimize(x, iters, |v| charged_noisy(led, v, noise_eta, &mut qrng))
             } else {
                 opt.minimize(x, iters, |v| charged(led, v))

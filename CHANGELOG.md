@@ -16,6 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Argáez, C.; Jónsson, H. Improved Minimum Mode Following Method for
   Finding First Order Saddle Points. *J. Chem. Theory Comput.* **2017**,
   *13* (1), 125-134. <https://doi.org/10.1021/acs.jctc.5b01216>
+- Occupancy Leave quenches through xtsci L-BFGS on a PES whose known
+  wells (this chain's origin and previous chains in the packing
+  archive) are inverted, the dimer Householder of Henkelman and
+  Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
+  <https://doi.org/10.1063/1.480097> applied to those radial
+  directions instead of the lowest mode. A raw-\(E\) polish follows
+  only when DECAF reports a new family.
 
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 

@@ -107,6 +107,16 @@ impl WarmLbfgs {
         self.inner.is_empty()
     }
 
+    /// Two-loop direction \(d=-Hg\) on the stored pairs.
+    pub fn two_loop(&self, g: ArrayView1<f64>) -> Array1<f64> {
+        self.inner.two_loop(g)
+    }
+
+    /// Store one accepted curvature pair.
+    pub fn record_pair(&mut self, s: Array1<f64>, y: Array1<f64>) {
+        self.inner.record(s, y);
+    }
+
     /// Relaxes `x0`, calling `fg` for value and gradient.
     ///
     /// `fg` returns `None` when the caller's budget is spent, which ends the

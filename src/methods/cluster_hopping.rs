@@ -1189,7 +1189,25 @@ where
                         })
                     });
                 }
+                let leave_action = crate::catalog::is_occupancy_leave_action(&action);
+                if leave_action {
+                    crate::known_basin::arm_leave(from_state.view(), 0.35);
+                }
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                if leave_action {
+                    crate::known_basin::disarm();
+                }
+                #[cfg(feature = "featomic")]
+                let quenched = if leave_action
+                    && from_state.as_slice().zip(quenched.1.as_slice()).is_none_or(
+                        |(origin, trial)| crate::catalog::occupancy_leave_new_class(origin, trial),
+                    ) {
+                    // New packing: polish on the raw PES so the
+                    // chain sits on a true minimum of that well.
+                    relax(ledger, quenched.1.view(), cfg.relax_steps)
+                } else {
+                    quenched
+                };
                 let (proposal_energy, proposal_state) = quenched;
                 #[cfg(feature = "featomic")]
                 let family_changed = crate::catalog::is_occupancy_leave_action(&action)
