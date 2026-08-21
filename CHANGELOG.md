@@ -17,12 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   Finding First Order Saddle Points. *J. Chem. Theory Comput.* **2017**,
   *13* (1), 125-134. <https://doi.org/10.1021/acs.jctc.5b01216>
 - Occupancy Leave quenches through xtsci L-BFGS on a PES whose known
-  wells (this chain's origin and previous chains in the packing
-  archive) are inverted, the dimer Householder of Henkelman and
-  Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
-  <https://doi.org/10.1063/1.480097> applied to those radial
-  directions instead of the lowest mode. A raw-\(E\) polish follows
-  only when DECAF reports a new family.
+  packings (this chain's origin and previous chains in the packing
+  archive) are inverted in the DECAF map: \(\mu\) is the mean of
+  per-center SOAP+ACE \(\nu=3\), \(P=J_\mu^{\mathsf T}\hat u_\varphi\)
+  is the Cartesian pullback, and the dimer Householder of Henkelman
+  and Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
+  <https://doi.org/10.1063/1.480097> is applied to \(P\) instead of
+  the lowest mode or a Cartesian radius. Leftover SOAP \(p_i-\mu\)
+  is not this map. A raw-\(E\) polish follows only when DECAF
+  reports a new family.
 
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 

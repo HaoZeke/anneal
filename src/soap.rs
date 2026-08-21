@@ -933,7 +933,10 @@ pub fn pullback_nu3(
 /// shell. A packing-mean kick in the stacked map is species-aware
 /// and names no morphology. Universal MLIP features are this ACE
 /// basis plus learned mixing; occupancy Leave uses the invertible
-/// contractions, not an energy model's last layer.
+/// contractions, not an energy model's last layer. The Leave quench
+/// invert ([`crate::known_basin`]) applies the dimer Householder to
+/// the same increment-on-every-center pullback \(J_\mu^{\mathsf T}
+/// \hat u_\varphi\).
 pub fn kick_packing_nu3<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     spec: SoapSpec,
