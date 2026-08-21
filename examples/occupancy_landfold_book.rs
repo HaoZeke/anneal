@@ -61,18 +61,21 @@ fn load(path: &Path) -> Vec<(f64, Vec<f64>)> {
 
 fn main() {
     let mut label = String::from("book");
+    let mut dump_hist = None;
     let mut inputs = Vec::new();
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--label" {
             label = args.next().expect("--label needs a name");
+        } else if arg == "--dump-hist" {
+            dump_hist = Some(args.next().expect("--dump-hist needs a path"));
         } else {
             inputs.push(arg);
         }
     }
     assert!(
         !inputs.is_empty(),
-        "usage: occupancy_landfold_book [--label NAME] INPUT..."
+        "usage: occupancy_landfold_book [--label NAME] [--dump-hist FILE] INPUT..."
     );
     let mut book = PackingBook::default();
     let mut n_in = 0u64;
@@ -95,6 +98,19 @@ fn main() {
         occupancy_map_fold(&hists, OccupancyFold::Switch).unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
     let (asinh_xy, asinh_l) =
         occupancy_map_fold(&hists, OccupancyFold::Asinh).unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
+    if let Some(path) = dump_hist {
+        let dim = hists.iter().map(Vec::len).max().unwrap_or(0);
+        let mut body = format!("# family wells {}\n", (0..dim).map(|i| format!("h{i}")).collect::<Vec<_>>().join(" "));
+        for ((family, hist), point) in occupied.iter().zip(map.points.iter()) {
+            body.push_str(&format!("{family} {}", point.wells));
+            for k in 0..dim {
+                body.push_str(&format!(" {:.8e}", hist.get(k).copied().unwrap_or(0.0)));
+            }
+            body.push('\n');
+        }
+        fs::write(&path, body).unwrap_or_else(|err| panic!("{path}: {err}"));
+        eprintln!("dump-hist {path} dim {dim} n {}", hists.len());
+    }
     let sample = map.sample();
     let mut points = String::new();
     for (index, point) in map.points.iter().enumerate() {

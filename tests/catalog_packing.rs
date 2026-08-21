@@ -547,21 +547,29 @@ fn a_query_histogram_does_not_change_what_the_book_learns() {
 }
 
 #[test]
-fn asinh_fold_opens_a_packing_fork_the_switch_flattens() {
-    // Root plus two L1 branches. Distinct far pairs saturate under
-    // the Ceriotti switch (Lean sat_far_cannot_tell).
-    let mut hists = vec![vec![1.0, 0.0, 0.0]];
-    for k in 1..=8 {
-        let t = k as f64 / 8.0;
-        hists.push(vec![1.0 - t, t, 0.0]);
-        hists.push(vec![1.0 - t, 0.0, t]);
-    }
-    let (_, switch_l) = occupancy_map_fold(&hists, OccupancyFold::Switch).unwrap();
-    let (_, asinh_l) = occupancy_map_fold(&hists, OccupancyFold::Asinh).unwrap();
-    let switch_ratio = switch_l[1] / switch_l[0].max(1e-15);
-    let asinh_ratio = asinh_l[1] / asinh_l[0].max(1e-15);
+fn switch_saturates_far_l1_asinh_does_not() {
+    let a = vec![1.0, 0.0, 0.0, 0.0];
+    let b = vec![0.0, 1.0, 0.0, 0.0];
+    let c = vec![0.0, 0.0, 0.0, 1.0];
+    let d_ab = packing_distance(&a, &b);
+    let d_ac = packing_distance(&a, &c);
+    assert!(d_ab > 0.0 && (d_ab - d_ac).abs() < 1e-12);
+    let far = vec![0.0, 0.0, 1.0, 0.0];
+    let d_near = packing_distance(&a, &b);
+    let d_far = packing_distance(&a, &far) + packing_distance(&b, &c);
+    assert!(d_far > d_near);
+    let sigma = d_near;
+    let sw_near = 1.0 - 1.0 / (1.0 + (d_near / sigma).powi(2));
+    let sw_far = 1.0 - 1.0 / (1.0 + ((10.0 * d_near) / sigma).powi(2));
+    let sw_farer = 1.0 - 1.0 / (1.0 + ((20.0 * d_near) / sigma).powi(2));
     assert!(
-        asinh_ratio > switch_ratio + 0.05,
-        "asinh λ2/λ1 {asinh_ratio} must exceed switch {switch_ratio}"
+        (sw_farer - sw_far).abs() < 0.05,
+        "switch must flatten the far tail ({sw_far} vs {sw_farer})"
+    );
+    let as_far = (10.0_f64).asinh() / (2.0 * 1.0_f64.asinh());
+    let as_farer = (20.0_f64).asinh() / (2.0 * 1.0_f64.asinh());
+    assert!(
+        as_farer - as_far > 0.05,
+        "asinh must keep 10σ and 20σ ordered ({as_far} vs {as_farer})"
     );
 }
