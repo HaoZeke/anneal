@@ -72,11 +72,12 @@
 //! holes. After the book exists, a landfold (Torgerson MDS of DECAF
 //! L1, then 2-means) folds leftover wells of one packing into one
 //! community. Leave continues only while that compacted book still
-//! has holes: a second community on the map with no well arrivals, or
-//! Chao1 incomplete on the merged well counts. The floor is the
-//! Fiedler split of the hop graph after DECAF labels the sides, or
-//! the landfold community count when the book already holds a second
-//! packing extras have Left. A Franzblau primitive-ring floor is
+//! has holes: a second community on the map with no well arrivals,
+//! more FES basins than occupied well-sides, or Chao1 incomplete on
+//! the merged well counts. The floor is the Fiedler split of the hop
+//! graph after DECAF labels the sides, the landfold community count
+//! when the book already holds a second packing extras have Left, or
+//! the book-map FES basin count. A Franzblau primitive-ring floor is
 //! reported beside it and does not retire.
 //! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
@@ -420,7 +421,8 @@ pub struct OccupancyLandfoldPoint {
 /// Leftover DECAF wells that land on the same side of a floor-1 split
 /// are one packing. Floor-2 keeps two communities. [`Self::holes`] is
 /// whether Leave should continue: a second community on the map with
-/// no well arrivals, or Chao1 incomplete on the merged well counts.
+/// no well arrivals, more FES basins than occupied well-sides, or
+/// Chao1 incomplete on the merged well counts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OccupancyBookMap {
     /// Occupied book cells in family-index order.
@@ -435,6 +437,10 @@ pub struct OccupancyBookMap {
     pub communities: usize,
     /// Merged leftover-well counts, one entry per community.
     pub community_wells: Vec<u64>,
+    /// Book-map FES basin count ([`occupancy_fes`] on the Torgerson plane).
+    pub fes_minima: usize,
+    /// \(\Delta F/kT\) between the two deepest book-map FES basins.
+    pub fes_delta: Option<f64>,
     /// Continue Leave while this is set.
     pub holes: bool,
 }
@@ -453,12 +459,21 @@ impl OccupancyBookMap {
 
 /// Whether the sparsified book still has holes extras should Leave into.
 ///
-/// A second landfold community with no well arrivals is a hole. Chao1
-/// on the merged well counts is the packing census after leftover
-/// wells of one packing collapse.
-pub fn occupancy_book_holes(communities: usize, community_wells: &[u64]) -> bool {
+/// A second landfold community with no well arrivals is a hole. More
+/// FES basins than occupied well-sides is a hole: 2-means can merge
+/// leftover wells of one packing while the book map still has empty
+/// basins. Chao1 on the merged well counts is the packing census
+/// after leftover wells of one packing collapse.
+pub fn occupancy_book_holes(
+    communities: usize,
+    community_wells: &[u64],
+    fes_minima: usize,
+) -> bool {
     let occupied_sides = community_wells.iter().filter(|&&wells| wells > 0).count();
     if communities >= 2 && occupied_sides < 2 {
+        return true;
+    }
+    if fes_minima >= 2 && fes_minima > occupied_sides.max(1) {
         return true;
     }
     !super::packing::GoodTuringSample::from_counts(community_wells.iter().copied()).chao1_complete()
@@ -487,7 +502,9 @@ pub fn occupancy_sparsify_book(
             right: 0,
             communities: 0,
             community_wells: Vec::new(),
-            holes: occupancy_book_holes(0, &[]),
+            fes_minima: 0,
+            fes_delta: None,
+            holes: occupancy_book_holes(0, &[], 0),
         };
     }
     if n == 1 {
@@ -503,8 +520,10 @@ pub fn occupancy_sparsify_book(
             left: 1,
             right: 0,
             communities: 1,
-            holes: occupancy_book_holes(1, &community_wells),
+            holes: occupancy_book_holes(1, &community_wells, 1),
             community_wells,
+            fes_minima: 1,
+            fes_delta: None,
         };
     }
     let (floor, left, right) = occupancy_landfold_split(histograms, family);
@@ -532,14 +551,21 @@ pub fn occupancy_sparsify_book(
             wells: wells[i],
         });
     }
+    let weights: Vec<f64> = wells.iter().map(|&count| count.max(1) as f64).collect();
+    let fes = occupancy_fes(&xy, Some(&weights)).unwrap_or(OccupancyFes {
+        minima: 1,
+        delta: None,
+    });
     OccupancyBookMap {
         points,
         floor,
         left,
         right,
         communities: n_communities,
-        holes: occupancy_book_holes(n_communities, &community_wells),
+        holes: occupancy_book_holes(n_communities, &community_wells, fes.minima),
         community_wells,
+        fes_minima: fes.minima,
+        fes_delta: fes.delta,
     }
 }
 
@@ -2173,11 +2199,37 @@ mod tests {
         let map = occupancy_sparsify_book(&[], &[], &[]);
         assert_eq!(map.communities, 0);
         assert!(map.holes);
-        assert!(occupancy_book_holes(0, &[]));
-        assert!(occupancy_book_holes(1, &[5]));
-        assert!(!occupancy_book_holes(1, &[20]));
-        assert!(occupancy_book_holes(2, &[20, 0]));
-        assert!(!occupancy_book_holes(2, &[20, 20]));
+        assert!(occupancy_book_holes(0, &[], 0));
+        assert!(occupancy_book_holes(1, &[5], 1));
+        assert!(!occupancy_book_holes(1, &[20], 1));
+        assert!(occupancy_book_holes(2, &[20, 0], 2));
+        assert!(!occupancy_book_holes(2, &[20, 20], 2));
+        assert!(
+            occupancy_book_holes(1, &[20], 2),
+            "two FES basins and one occupied well-side is a hole"
+        );
+    }
+
+    #[test]
+    fn book_map_fes_keeps_holes_when_two_means_merges_two_basins() {
+        let a = vec![1.0, 0.0, 0.0];
+        let a2 = vec![1.0, 0.05, 0.0];
+        let b = vec![0.0, 0.0, 1.0];
+        let b2 = vec![0.0, 0.05, 1.0];
+        let map = occupancy_sparsify_book(&[a, a2, b, b2], &[0, 0, 0, 0], &[20, 20, 20, 20]);
+        assert_eq!(
+            map.communities, 1,
+            "same packing label is one 2-means community"
+        );
+        assert!(
+            map.fes_minima >= 2,
+            "separated book cells stay two FES basins: {}",
+            map.fes_minima
+        );
+        assert!(
+            map.holes,
+            "Leave continues while the book map still has an empty basin"
+        );
     }
 
     #[test]

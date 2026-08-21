@@ -24,6 +24,10 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         body.contains("occupancy_landfold_from_book"),
         "the book landfold community count is the secondary family floor"
     );
+    assert!(
+        body.contains("fes_minima"),
+        "the book-map FES basin count is a family floor"
+    );
 }
 
 #[test]
@@ -89,7 +93,11 @@ fn occupancy_fes_report_uses_independent_well_arrivals_only() {
         "last, best, and catalog containers are not occupancy samples"
     );
     assert!(report.contains("\\\"fes_delta\\\""));
-    assert!(!report.contains("\\\"fes_minima\\\""));
+    assert!(
+        report.contains("sparsified.fes_minima"),
+        "fes_minima is the book-map FES, not last/best containers"
+    );
+    assert!(report.contains("\\\"fes_minima\\\""));
     assert!(!report.contains("\\\"fes_map_delta\\\""));
 }
 
