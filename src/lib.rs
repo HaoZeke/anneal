@@ -111,6 +111,8 @@ pub mod graphkey;
 pub mod history;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
+/// Thomson covering of \(S^{d-1}\) (Plasencia–Argáez–Jónsson JCTC 2017).
+pub mod hypersphere;
 pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
 pub mod laws;

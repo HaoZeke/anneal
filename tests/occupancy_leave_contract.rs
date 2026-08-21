@@ -189,12 +189,16 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         "after packing sat Leave must see packing_saturated and choose ArchiveHole"
     );
     assert!(
-        arm.contains("policy.min_families"),
-        "OtherFamily is a Fiedler packing community, not leftover wells"
+        arm.contains("occupied_family_count"),
+        "OtherFamily is occupied DECAF families on the book, not Fiedler F"
     );
     assert!(
         arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
         "ArchiveHole is leftover-orthogonal, not a leftover hole"
+    );
+    assert!(
+        arm.contains("archive_cover_index") || arm.contains("cover_index"),
+        "ArchiveHole is a SoftSaddle covering direction, not a random nu3 kick"
     );
     assert!(
         !arm.contains("step_away_fivefold"),

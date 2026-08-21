@@ -970,15 +970,17 @@ fn packing_kick<R: Rng + ?Sized>(
     pin_frozen(x, scale_to_cap(x, dr, rmsd), mobile)
 }
 
-/// Extra ArchiveHole: packing-mean kick in the DECAF \(\nu=3\) feature.
+/// Extra ArchiveHole: one SoftSaddle covering direction around the
+/// occupied minimum, then the existing RMSD cap.
 ///
-/// Champion leftover walks isomers of that packing (`step_into_hole`
-/// of its wells). Fiedler \(F=1\) means those wells rematch the same
-/// packing. SOAP leftover \(p_i-\mu\) collapses across the paper
-/// funnels. Packing identity is per-center [`local_nu3_z`]; this kick
-/// is a packing-mean increment in that stacked map, pulled back by
-/// the analytic \(\nu=3\) Jacobian. Species-aware. No named
-/// morphology. Not an MLIP last layer: those are ACE plus mixing.
+/// Plasencia Gutiérrez, Argáez and Jónsson, *J. Chem. Theory Comput.*
+/// **13**, 1 (2017), DOI 10.1021/acs.jctc.5b01216. Gaussian kicks
+/// reconverge on the same exit; an even covering of \(S^{3N-1}\)
+/// does not. Champion leftover walks isomers of the occupied packing
+/// (`step_into_hole` of its wells). This start is leftover-orthogonal
+/// to that walk: a Cartesian direction from the covering, not a
+/// packing-mean \(\nu=3\) increment. Species unused. No named
+/// morphology.
 pub fn leave_archive_hole<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rcut: f64,
@@ -987,12 +989,37 @@ pub fn leave_archive_hole<R: Rng + ?Sized>(
     rmsd: f64,
     rng: &mut R,
 ) -> Array1<f64> {
-    let _ = rcut;
-    let mut spec = crate::catalog::PACKING_SPEC;
-    if rcut.is_finite() && rcut > 0.0 {
-        spec.rcut_nn = rcut;
+    leave_archive_hole_at(x, rcut, species, mobile, rmsd, None, rng)
+}
+
+/// [`leave_archive_hole`] on covering direction `cover_index`.
+///
+/// `None` draws an index from `rng` so a lone call is still a
+/// covering point, not a Gaussian. Occupancy extras pass
+/// `replica + leave_count * wave` so the wave does not share one
+/// direction.
+pub fn leave_archive_hole_at<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rmsd: f64,
+    cover_index: Option<usize>,
+    rng: &mut R,
+) -> Array1<f64> {
+    let _ = (rcut, species);
+    let dim = x.len();
+    if dim < 3 {
+        return x.to_owned();
     }
-    crate::soap::kick_packing_nu3(x, spec, rmsd, species, mobile, rng)
+    let n_cover = crate::hypersphere::default_cover_size();
+    let index = cover_index.unwrap_or_else(|| rng.random_range(0..n_cover.max(1)));
+    let direction = crate::hypersphere::cover_direction(n_cover, dim, index);
+    let placed = crate::hypersphere::place_around(x.as_slice().unwrap_or(&[]), &direction, rmsd, mobile);
+    if placed.len() != dim {
+        return x.to_owned();
+    }
+    Array1::from(placed)
 }
 
 /// SOAP hop through featomic `soap_power_spectrum`.
@@ -1498,28 +1525,27 @@ mod tests {
     }
 
     #[test]
-    fn leave_archive_hole_is_the_packing_null_kick() {
-        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+    fn leave_archive_hole_is_a_covering_start() {
+        let x = Array1::from(vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.5, 0.866, 0.0, 0.5, 0.289, 0.816,
+        ]);
         let mut rng = StdRng::seed_from_u64(7);
-        let y = leave_archive_hole(ico75.view(), 3.5, None, None, 0.35, &mut rng);
-        let d = soap_bank_distance(ico75.view(), y.view(), 3.5, None, None);
-        assert!(
-            d > SOAP_DCUT_FALLBACK,
-            "archive hole must leave occupied packing mean, d={d}"
+        let y = leave_archive_hole_at(x.view(), 3.5, None, None, 0.35, Some(0), &mut rng);
+        let z = leave_archive_hole_at(x.view(), 3.5, None, None, 0.35, Some(1), &mut rng);
+        let r = crate::hypersphere::all_atom_rmsd(
+            x.as_slice().expect("coords"),
+            y.as_slice().expect("placed"),
         );
-        let hole = step_into_hole(
-            ico75.view(),
-            std::slice::from_ref(&soap_cloud_mean(ico75.view(), 3.5, None, None)),
-            SOAP_PACK_MERGE,
-            3.5,
-            None,
-            None,
-            &mut StdRng::seed_from_u64(7),
-        );
-        let hole_d = soap_bank_distance(ico75.view(), hole.view(), 3.5, None, None);
+        assert!((r - 0.35).abs() < 1e-9, "covering start rmsd {r}");
+        let split: f64 = y
+            .iter()
+            .zip(z.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
         assert!(
-            d > hole_d,
-            "archive hole {d} must move packing mean farther than a leftover well {hole_d}"
+            split > 0.1,
+            "two covering indices must not share a start, split={split}"
         );
     }
 

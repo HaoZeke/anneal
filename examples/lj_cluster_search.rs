@@ -1846,18 +1846,36 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     wells: &[Array1<f64>],
     rcut: f64,
     species: Option<&[u32]>,
+    cover_index: usize,
     rng: &mut R,
 ) -> Array1<f64> {
     let _ = wells;
     #[cfg(feature = "featomic")]
     {
-        return anneal_core::featomic_hop::leave_archive_hole(x, rcut, species, None, rmsd, rng);
+        return anneal_core::featomic_hop::leave_archive_hole_at(
+            x,
+            rcut,
+            species,
+            None,
+            rmsd,
+            Some(cover_index),
+            rng,
+        );
     }
     #[cfg(not(feature = "featomic"))]
     {
-        let _ = (rcut, species, rng, rmsd);
+        let _ = (rcut, species, rng, rmsd, cover_index);
         x.to_owned()
     }
+}
+
+fn archive_cover_index(replica: u32, leave: usize) -> usize {
+    let wave = std::env::var("CATALOG_WAVE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|&n| n >= 1)
+        .unwrap_or(48);
+    replica as usize + leave * wave
 }
 
 /// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
@@ -2685,6 +2703,7 @@ fn run_capnp_catalog(
     let mut stall = 0u32;
     #[cfg(feature = "bank-rpc")]
     let mut leave_path = LeavePath::default();
+    let mut archive_hole_count = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
@@ -3121,24 +3140,30 @@ fn run_capnp_catalog(
                             &mut transport_rng,
                         )
                         .unwrap_or_else(|| {
+                            let index = archive_cover_index(replica, archive_hole_count);
+                            archive_hole_count += 1;
                             leave_packing_state(
                                 live,
                                 0.35,
                                 &shared_wells,
                                 coop_rcut,
                                 coop_species.as_deref(),
+                                index,
                                 &mut transport_rng,
                             )
                         })
                     }
                     #[cfg(not(feature = "featomic"))]
                     {
+                        let index = archive_cover_index(replica, archive_hole_count);
+                        archive_hole_count += 1;
                         leave_packing_state(
                             live,
                             0.35,
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),
+                            index,
                             &mut transport_rng,
                         )
                     }
@@ -3645,7 +3670,7 @@ fn run_capnp_catalog(
                 match occupancy_leave_target(
                     other_family.is_some(),
                     policy.packing_saturated,
-                    policy.min_families,
+                    policy.occupied_family_count as usize,
                 ) {
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
@@ -3676,12 +3701,15 @@ fn run_capnp_catalog(
                         // Leftover holes of the occupied packing are the
                         // champion walk. Extra ArchiveHole is leftover-
                         // orthogonal to that packing and the archive.
+                        let index = archive_cover_index(replica, archive_hole_count);
+                        archive_hole_count += 1;
                         let left = leave_packing_state(
                             ArrayView1::from(shoot_coords),
                             0.35,
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),
+                            index,
                             &mut transport_rng,
                         );
                         if left
