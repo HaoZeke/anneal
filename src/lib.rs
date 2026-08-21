@@ -111,6 +111,8 @@ pub mod graphkey;
 pub mod history;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
+/// Invert known wells so xtsci does not walk a Leave back into them.
+pub mod known_basin;
 /// Thomson covering of \(S^{d-1}\).
 ///
 /// Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. Improved Minimum
