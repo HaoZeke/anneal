@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## Unreleased
+
+### Added
+
+- Occupancy ArchiveHole starts from an even covering of \(S^{3N-1}\)
+  around the occupied minimum (SoftSaddle `triangulation_hight_v2`),
+  not a random packing-mean \(\nu=3\) kick. Plasencia Gutiérrez, M.;
+  Argáez, C.; Jónsson, H. Improved Minimum Mode Following Method for
+  Finding First Order Saddle Points. *J. Chem. Theory Comput.* **2017**,
+  *13* (1), 125-134. <https://doi.org/10.1021/acs.jctc.5b01216>
+
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 
 ### Added

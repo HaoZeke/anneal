@@ -973,14 +973,16 @@ fn packing_kick<R: Rng + ?Sized>(
 /// Extra ArchiveHole: one SoftSaddle covering direction around the
 /// occupied minimum, then the existing RMSD cap.
 ///
-/// Plasencia Gutiérrez, Argáez and Jónsson, *J. Chem. Theory Comput.*
-/// **13**, 1 (2017), DOI 10.1021/acs.jctc.5b01216. Gaussian kicks
-/// reconverge on the same exit; an even covering of \(S^{3N-1}\)
-/// does not. Champion leftover walks isomers of the occupied packing
-/// (`step_into_hole` of its wells). This start is leftover-orthogonal
-/// to that walk: a Cartesian direction from the covering, not a
-/// packing-mean \(\nu=3\) increment. Species unused. No named
-/// morphology.
+/// Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. Improved Minimum
+/// Mode Following Method for Finding First Order Saddle Points.
+/// *J. Chem. Theory Comput.* **2017**, *13* (1), 125-134.
+/// <https://doi.org/10.1021/acs.jctc.5b01216>
+/// (ookcite ACS bibliography). Gaussian kicks reconverge on the same
+/// exit; an even covering of \(S^{3N-1}\) does not. Champion leftover
+/// walks isomers of the occupied packing (`step_into_hole` of its
+/// wells). This start is leftover-orthogonal to that walk: a Cartesian
+/// direction from the covering, not a packing-mean \(\nu=3\) increment.
+/// Species unused. No named morphology.
 pub fn leave_archive_hole<R: Rng + ?Sized>(
     x: ArrayView1<f64>,
     rcut: f64,

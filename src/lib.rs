@@ -111,7 +111,12 @@ pub mod graphkey;
 pub mod history;
 /// Hamiltonian Monte Carlo inside SA (Method B Phase 1).
 pub mod hmc;
-/// Thomson covering of \(S^{d-1}\) (Plasencia–Argáez–Jónsson JCTC 2017).
+/// Thomson covering of \(S^{d-1}\).
+///
+/// Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. Improved Minimum
+/// Mode Following Method for Finding First Order Saddle Points.
+/// *J. Chem. Theory Comput.* **2017**, *13* (1), 125-134.
+/// <https://doi.org/10.1021/acs.jctc.5b01216>
 pub mod hypersphere;
 pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.
