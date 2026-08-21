@@ -120,7 +120,7 @@ fn occupancy_fes_report_key_tracks_the_discrete_gap() {
         .next()
         .expect("occupancy report must end at energy recording");
     let key = report
-        .split("let key = (")
+        .split("let key: OccupancyGtKey = (")
         .nth(1)
         .expect("occupancy report suppression key must exist")
         .split(");")
