@@ -237,11 +237,7 @@ fn random_sphere<R: rand::Rng + ?Sized>(n: usize, dim: usize, rng: &mut R) -> Ve
     points
 }
 
-fn relax_cover<R: rand::Rng + ?Sized>(
-    points: &mut [Vec<f64>],
-    max_iter: usize,
-    rng: &mut R,
-) {
+fn relax_cover<R: rand::Rng + ?Sized>(points: &mut [Vec<f64>], max_iter: usize, rng: &mut R) {
     let n = points.len();
     let dim = points[0].len();
     let Some(n2) = n.checked_mul(n) else {
