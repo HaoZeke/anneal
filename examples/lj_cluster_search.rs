@@ -15,7 +15,8 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LeavePath, OccupancyLeaveTarget, credit_action,
+    ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
+    OccupancyLeaveTarget, credit_action,
     leftover_birth_probability, occupancy_complete_at, occupancy_is_cluster,
     occupancy_leave_by_birth, occupancy_retire_at,
     published_energy_score,
@@ -2747,6 +2748,20 @@ fn run_capnp_catalog(
     let mut leave_best = f64::INFINITY;
     let mut leave_quiet = 0usize;
     let mut leave_patience = 0usize;
+    // The packing this replica stood on when it last decided to Leave,
+    // and how many consecutive Leaves have failed to move it off one.
+    //
+    // Extras keep drawing holes while the book shows fewer than two
+    // communities, and on LJ75 the book shows one for the whole run, so
+    // every checkpoint spends its budget covering and quenching the same
+    // packing. Measured on the sealed icosahedral minimum, no walk of any
+    // kind leaves it: twenty-four raw quenches dropped along a
+    // transformed trajectory reaching four times the distance to Marks
+    // all return to the floor. A mechanism that never installs a packing
+    // should not keep being asked, so a run of refusals hands the
+    // checkpoint back to plain hopping, which is what finds Marks.
+    let mut leave_anchor: Option<Vec<f64>> = None;
+    let mut leave_refused = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
@@ -3661,6 +3676,33 @@ fn run_capnp_catalog(
                 if leave_quiet <= leave_patience {
                     // Still inside the quiet stretch this replica has
                     // recovered from before. Keep walking.
+                    trace.adoption = SliceAdoption::Rejected;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("checkpoint trace must remain complete");
+                    return CheckpointAction::Continue;
+                }
+                // Did the last Leave install anything? The anchor is the
+                // packing this replica stood on when it last decided to
+                // Leave, so standing in the same one now is a refusal
+                // whatever the Leave reported at the time.
+                if let Some(here) = snapshot.current_state().as_slice() {
+                    match leave_anchor.as_deref() {
+                        Some(anchor)
+                            if !anneal_core::catalog::different_packing_family(anchor, here) =>
+                        {
+                            leave_refused += 1;
+                        }
+                        _ => leave_refused = 0,
+                    }
+                    leave_anchor = Some(here.to_vec());
+                }
+                if leave_refused >= LEAVE_REFUSAL_DWELL {
+                    // This replica has asked for a packing it did not get,
+                    // this many times running. Plain hopping is what found
+                    // Marks in the serial runs, and it is what the
+                    // checkpoint spends its budget on instead of drawing
+                    // another hole in the packing it is already in.
                     trace.adoption = SliceAdoption::Rejected;
                     cooperative
                         .record_slice(replica, trace)

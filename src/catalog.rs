@@ -56,7 +56,8 @@ pub use mixing::{
 };
 pub use occupancy::{
     CHAMPION_RANK, COMPACT_RMAX_OVER_CBRT, DEFAULT_MIN_OCCUPIED_FAMILIES, ESTY_Z95,
-    INTERFACE_HORIZON, InterfaceSeat, LEFTOVER_SAT_DWELL, LeaveFrame, LeavePath,
+    INTERFACE_HORIZON, InterfaceSeat, LEAVE_REFUSAL_DWELL, LEFTOVER_SAT_DWELL, LeaveFrame,
+    LeavePath,
     OCCUPANCY_EI_MIN_OBS, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyBookMap, OccupancyCertificate,
     OccupancyCompact, OccupancyFes, OccupancyFesError, OccupancyFold, OccupancyLandfoldPoint,
     OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole, assign_interfaces,
