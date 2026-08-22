@@ -134,8 +134,13 @@ fn main() {
     let marks_energy = potential.value_and_gradient(marks.view()).0;
     let ico_slice = ico.as_slice().expect("state is contiguous").to_vec();
     let marks_slice = marks.as_slice().expect("state is contiguous").to_vec();
+    // The road the walk has to travel, measured rather than quoted. Every
+    // judgement about whether a hill is wide enough or a rung long enough
+    // is a comparison against this number, so it is reported beside the
+    // grain it is compared with instead of being carried in from notes.
+    let marks_gap = packing_gap(&ico_slice, &marks_slice);
     println!(
-        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK}}}"
+        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4}}}"
     );
 
     // The ladder is walked in barrier, so it needs the curvature of the
