@@ -27,7 +27,8 @@ echo "gcc=$(gcc --version | head -1)"
 echo "cmake=$(cmake --version | head -1)"
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
-  --example catalog_server
+  --example catalog_server \
+  --example leave_packing_probe
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
 if ! grep -a -F -q different_decaf_family "$BIN"; then
