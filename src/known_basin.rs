@@ -1667,11 +1667,18 @@ mod tests {
     #[test]
     fn a_standing_deposit_shortens_the_next_hill() {
         // Well-tempered scaling. A well already carrying dT of bias takes
-        // its next hill at 1/e of full height, so the pile converges
-        // instead of growing without bound.
-        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        // a shorter hill than a fresh one, so the pile converges instead
+        // of growing without bound.
+        //
+        // On a real cluster, because the free-energy deposit lives on the
+        // packing path: a structure with no nu=3 mean falls through to
+        // the Cartesian transform, which carries no entropy and no
+        // tempering, and a two-atom toy reports the same hill either way
+        // whatever is standing on it.
+        let origin = ico13();
+        let mut x = origin.clone();
+        x[3] += 0.25;
+        let g = Array1::from(vec![0.05; origin.len()]);
         let fresh = vec![crate::catalog::PackingReference {
             coordinates: origin.to_vec(),
             visits: 1,
@@ -1692,6 +1699,12 @@ mod tests {
         assert!(
             tempered < full,
             "a well already carrying bias takes a shorter hill, full={full} tempered={tempered}"
+        );
+        // e is the scale, not an arbitrary shrink: the deposit equals dT.
+        let want = full / std::f64::consts::E;
+        assert!(
+            (tempered - want).abs() < 1e-9 * full.max(1.0),
+            "a deposit of dT must cost exactly one e-fold, want {want} got {tempered}"
         );
     }
 
