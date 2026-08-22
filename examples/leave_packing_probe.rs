@@ -110,6 +110,7 @@ fn main() {
         .nth(2)
         .and_then(|value| value.parse().ok())
         .unwrap_or(600);
+    let only_ridge = std::env::args().nth(3).as_deref() == Some("ridge");
     let ico_fixture = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
     let marks_fixture = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
     let potential = PairPotential::new(75, PairKind::LennardJones, 40.0);
@@ -215,6 +216,10 @@ fn main() {
             .unwrap_or_else(|| start.clone());
         let trial = quench(&potential, ridge_start.view(), steps);
         classify("ridge", index, &mut ridge, &trial, None);
+        if only_ridge {
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            continue;
+        }
 
         // Same start, packing invert armed.
         known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
@@ -250,6 +255,9 @@ fn main() {
     }
     report("cartesian", &cartesian, leaves);
     report("ridge", &ridge, leaves);
+    if only_ridge {
+        return;
+    }
     report("armed", &armed, leaves);
     report("ladder", &ladder, leaves);
 
