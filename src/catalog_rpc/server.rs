@@ -308,6 +308,12 @@ struct ScientificState {
     /// number; perf on a live 48-replica coordinator put
     /// FunnelModel::predict at 74 percent of its cycles.
     ei_verdict: Option<(u64, bool)>,
+    /// Worthwhile-community count beside the book and funnel versions it
+    /// was computed from. The count clones the folded map and every
+    /// occupied histogram and runs an EI predict per community; perf put
+    /// that at a fifth of the coordinator's cycles once the EI sweep
+    /// itself was cached.
+    worthwhile: Option<(u64, u64, usize)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -407,6 +413,7 @@ impl CoordinatorState {
                     archive_progress: 0.0,
                     sparsified: None,
                     ei_verdict: None,
+                    worthwhile: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -2694,6 +2701,14 @@ fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
 /// does not. When fewer than two qualify there is nothing to divide and the
 /// extra walks.
 fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
+    let book = scientific.packing.version();
+    let funnel = scientific.funnel.version();
+    if let Some((held_book, held_funnel, count)) = scientific.worthwhile
+        && held_book == book
+        && held_funnel == funnel
+    {
+        return count;
+    }
     let map = sparsified_book(scientific).clone();
     let noise = scientific.funnel.noise;
     let histograms: BTreeMap<usize, Vec<f64>> = scientific
@@ -2716,7 +2731,9 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
             open.insert(point.community);
         }
     }
-    open.len()
+    let count = open.len();
+    scientific.worthwhile = Some((book, funnel, count));
+    count
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
