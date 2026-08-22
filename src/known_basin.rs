@@ -940,15 +940,20 @@ where
     // below where it belonged, and every quench returned to the floor.
     // Bracket first, then bisect.
     let guess = rung_rmsd(1.0, atoms, barrier).unwrap_or(LEAVE_RUNG_RMSD);
-    let (mut lo, mut hi) = (0.0_f64, guess);
+    // Bracket so that `lo` is the largest length known to fit under the
+    // barrier and `hi` the smallest known to exceed it, then bisect. The two
+    // bounds have to stay distinct: collapsing them onto the same value
+    // leaves the step wherever the bracketing stride happened to stop, which
+    // is what left a rung aiming at 42.3 eps spending 12.7.
+    let mut lo = 0.0_f64;
+    let mut hi = guess;
     let mut best: Option<Array1<f64>> = None;
     match rise(hi, &mut energy) {
         Some((value, trial)) if value <= barrier => {
-            // The guess already fits, so grow until it does not.
             best = Some(trial);
             lo = hi;
             for _ in 0..LEAVE_RUNG_BACKTRACKS {
-                hi *= 2.0;
+                hi = lo * 2.0;
                 match rise(hi, &mut energy) {
                     Some((value, trial)) if value <= barrier => {
                         best = Some(trial);
@@ -959,23 +964,23 @@ where
             }
         }
         _ => {
+            let mut probe = hi;
             for _ in 0..LEAVE_RUNG_BACKTRACKS {
-                hi *= 0.5;
-                match rise(hi, &mut energy) {
+                probe *= 0.5;
+                match rise(probe, &mut energy) {
                     Some((value, trial)) if value <= barrier => {
                         best = Some(trial);
-                        lo = hi;
+                        lo = probe;
                         break;
                     }
-                    _ => {}
+                    _ => hi = probe,
                 }
             }
         }
     }
-    if best.is_none() {
-        return x.to_owned();
+    if best.is_none() || !(hi > lo) {
+        return best.unwrap_or_else(|| x.to_owned());
     }
-    // Bisect the bracket so the step spends the barrier it was given.
     for _ in 0..LEAVE_RUNG_BACKTRACKS {
         let mid = 0.5 * (lo + hi);
         if !(mid > lo) || !(mid < hi) {
