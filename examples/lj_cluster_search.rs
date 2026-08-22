@@ -2893,9 +2893,15 @@ fn run_capnp_catalog(
                 announced_personal.is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
             if jump {
                 println!(
-                    "  personal best {:.6}  hops {}",
+                    "  personal best {:.6}  hops {}  refs {}",
                     snapshot.best_energy(),
-                    snapshot.hops()
+                    snapshot.hops(),
+                    // Packings this chain's quench is repelled from. Own
+                    // history plus every structure the coordinator has
+                    // handed over, which is the interaction at the
+                    // minimisation level and the thing chain count is
+                    // supposed to scale.
+                    anneal_core::catalog::packing_references().len()
                 );
                 let _ = std::io::stdout().flush();
                 announced_personal = Some(snapshot.best_energy());
