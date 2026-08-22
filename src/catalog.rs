@@ -60,7 +60,8 @@ pub use occupancy::{
     occupancy_compact, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
     occupancy_family_floor, occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
     occupancy_is_cluster, occupancy_landfold_floor, occupancy_landfold_split,
-    occupancy_leave_adopt, occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor,
+    occupancy_leave_adopt, occupancy_leave_new_class, occupancy_leave_new_packing,
+    occupancy_leave_target, occupancy_map_floor,
     occupancy_map_fold, occupancy_map_from_histograms, occupancy_map_split, occupancy_min_families,
     occupancy_retire, occupancy_retire_at, occupancy_ring_census, occupancy_ring_class_changed,
     occupancy_ring_floor, occupancy_ring_profile, occupancy_ring_split, occupancy_sparsify_book,
@@ -68,9 +69,11 @@ pub use occupancy::{
     retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
 };
 pub use packing::{
-    GoodTuringSample, PACKING_MERGE, PACKING_MOVE_EPS, PACKING_SPEC, PackingBook,
-    different_decaf_family, leftover_arrivals_saturated, packing_distance, packing_fingerprint,
-    packing_vector, same_packing,
+    ENVIRONMENT_RADIUS, GoodTuringSample, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
+    PACKING_SPEC, PackingBook, different_decaf_family, different_packing_family, leaves_packing,
+    leftover_arrivals_saturated, packing_communities, packing_community_count, packing_distance,
+    packing_fingerprint, packing_link_labels, packing_references, packing_vector,
+    remember_packing_reference, same_packing, set_packing_references,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{
