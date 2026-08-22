@@ -37,7 +37,7 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
-use crate::methods::activation::{Activation, activate, activate_from_origin};
+use crate::methods::activation::{Activation, activate};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 use crate::path::{StallDetector, interpolate_path};
@@ -1232,56 +1232,29 @@ where
                 if leave_action {
                     crate::known_basin::arm_leave(from_state.view(), leave_sigma, &references);
                 }
-                // Covering / packing-ladder start is still inside the
-                // occupied well. Quapp / ART / SoftSaddle MMF climb that
-                // start up the local ridge to the saddle, then the quench
-                // is taken from the overshoot on the other side.
-                let leave_start = if leave_action {
-                    if let Some(g) = grad.as_deref_mut() {
-                        let act = Activation {
-                            step: cfg.escape_amplitude,
-                            overshoot: cfg.escape_overshoot,
-                            max_steps: cfg.escape_max_climb,
-                            lanczos_steps: cfg.escape_lanczos_steps,
-                            epsilon: cfg.escape_epsilon,
-                            ..Activation::default()
-                        };
-                        match activate_from_origin(
-                            state.view(),
-                            from_state.view(),
-                            |y| g(ledger, y),
-                            &act,
-                        ) {
-                            Some(o) if o.crossed => o.state,
-                            _ => state.clone(),
-                        }
+                // Follow the packing-map covering direction in barrier-sized
+                // steps from the current point, quench after each, and keep
+                // a landing that is a different packing. The Hessian min
+                // mode of a closed shell is a surface rumple: climbing it
+                // and quenching returns to the same packing.
+                let quenched = if leave_action {
+                    if let Some((energy, landed, _)) = crate::known_basin::leave_packing_ridge(
+                        from_state.view(),
+                        hops,
+                        &references,
+                        cfg.species.as_deref(),
+                        None,
+                        leave_depth,
+                        cfg.relax_steps,
+                        |trial, steps| relax(ledger, trial, steps),
+                    ) {
+                        (energy, landed)
                     } else {
-                        state.clone()
+                        relax(ledger, state.view(), cfg.relax_steps)
                     }
                 } else {
-                    state.clone()
+                    relax(ledger, state.view(), cfg.relax_steps)
                 };
-                // A crossing has to be a saddle between two minima, so it
-                // sits within a bounded climb of the well it left. A
-                // structure whose atoms have been driven into each other
-                // also reports negative curvature and a flipped force, and
-                // it reports them on the first step: transverse curvature
-                // is -r^-1 dV/dr, which is enormous and negative deep in the
-                // repulsive wall. Measured on LJ75 ico, twelve of twelve
-                // covering starts declared a crossing at curvatures between
-                // -7e5 and -1e13. The energy is what tells the two apart.
-                let leave_start = if leave_action {
-                    let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * leave_depth;
-                    let climbed = relax(ledger, leave_start.view(), 0).0;
-                    if climbed.is_finite() && climbed <= ceiling {
-                        leave_start
-                    } else {
-                        state.clone()
-                    }
-                } else {
-                    leave_start
-                };
-                let quenched = relax(ledger, leave_start.view(), cfg.relax_steps);
                 // The armed walk ends on a ridge, not in a well. What names
                 // the packing, and what the chain may move onto, is the raw
                 // minimum below it: a minimum of \(E+V\) is not a minimum

@@ -890,8 +890,8 @@ where
     curvature.is_finite().then_some(curvature)
 }
 
-/// Halvings the rung line search may take before it gives up.
-pub const LEAVE_RUNG_BACKTRACKS: usize = 16;
+/// Bracketing and bisection steps the rung line search may take.
+pub const LEAVE_RUNG_BACKTRACKS: usize = 12;
 
 /// Rung sized so the measured energy rise is at most `barrier`.
 ///
@@ -928,17 +928,144 @@ where
         return x.to_owned();
     };
     let atoms = x.len() / 3;
-    let mut rmsd = rung_rmsd(1.0, atoms, barrier).unwrap_or(LEAVE_RUNG_RMSD);
-    // The harmonic guess uses unit curvature, which is soft for any cluster
-    // potential, so the first trial is long and the search shortens it.
-    for _ in 0..LEAVE_RUNG_BACKTRACKS {
+    let mut rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
         let trial = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
-        match energy(trial.view()) {
-            Some(value) if value.is_finite() && value - base <= barrier => return trial,
-            _ => rmsd *= 0.5,
+        let value = energy(trial.view())?;
+        value.is_finite().then_some((value - base, trial))
+    };
+    // The step wanted is the *largest* one whose rise is still under the
+    // barrier. Taking the first length that fits undershoots by whatever the
+    // bracketing stride was: measured from the LJ75 icosahedral minimum, a
+    // rung aiming at 42.3 eps delivered 12.7 at RMSD 0.066, four halvings
+    // below where it belonged, and every quench returned to the floor.
+    // Bracket first, then bisect.
+    let guess = rung_rmsd(1.0, atoms, barrier).unwrap_or(LEAVE_RUNG_RMSD);
+    let (mut lo, mut hi) = (0.0_f64, guess);
+    let mut best: Option<Array1<f64>> = None;
+    match rise(hi, &mut energy) {
+        Some((value, trial)) if value <= barrier => {
+            // The guess already fits, so grow until it does not.
+            best = Some(trial);
+            lo = hi;
+            for _ in 0..LEAVE_RUNG_BACKTRACKS {
+                hi *= 2.0;
+                match rise(hi, &mut energy) {
+                    Some((value, trial)) if value <= barrier => {
+                        best = Some(trial);
+                        lo = hi;
+                    }
+                    _ => break,
+                }
+            }
+        }
+        _ => {
+            for _ in 0..LEAVE_RUNG_BACKTRACKS {
+                hi *= 0.5;
+                match rise(hi, &mut energy) {
+                    Some((value, trial)) if value <= barrier => {
+                        best = Some(trial);
+                        lo = hi;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
         }
     }
-    x.to_owned()
+    if best.is_none() {
+        return x.to_owned();
+    }
+    // Bisect the bracket so the step spends the barrier it was given.
+    for _ in 0..LEAVE_RUNG_BACKTRACKS {
+        let mid = 0.5 * (lo + hi);
+        if !(mid > lo) || !(mid < hi) {
+            break;
+        }
+        match rise(mid, &mut energy) {
+            Some((value, trial)) if value <= barrier => {
+                best = Some(trial);
+                lo = mid;
+            }
+            _ => hi = mid,
+        }
+    }
+    best.unwrap_or_else(|| x.to_owned())
+}
+
+/// Follow one packing-map covering direction in barrier-sized steps.
+///
+/// Each step is [`leave_packing_rung_to`] from the *current* point, not
+/// from the well: independent rungs from the minimum all land in its
+/// basin, and the Hessian min mode of a closed shell is a surface
+/// rumple whose quench returns to the same packing. Accumulating the
+/// packing increment is the walk off \(\mu_k\). The walk stops when a
+/// quench leaves every packing on file, when a step cannot be taken
+/// without crossing the energy ceiling, or when [`LEAVE_RUNGS`] steps
+/// are spent.
+pub fn leave_packing_ridge<R>(
+    origin: ArrayView1<f64>,
+    cover_index: usize,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    depth_per_atom: f64,
+    relax_steps: usize,
+    mut eval: R,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+{
+    let Some(origin_slice) = origin.as_slice() else {
+        return None;
+    };
+    let (base, _) = eval(origin, 0);
+    if !base.is_finite() {
+        return None;
+    }
+    let ceiling = base + LEAVE_WALK_CLIMB * depth_per_atom.abs();
+    let step_barrier = rung_barrier(depth_per_atom, 0);
+    let mut x = origin.to_owned();
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    for rung in 0..LEAVE_RUNGS.max(1) {
+        let next = leave_packing_rung_to(
+            x.view(),
+            cover_index,
+            step_barrier,
+            references,
+            species,
+            mobile,
+            |trial| {
+                let (energy, _) = eval(trial, 0);
+                energy.is_finite().then_some(energy)
+            },
+        );
+        let moved = next
+            .iter()
+            .zip(x.iter())
+            .map(|(a, b)| {
+                let d = a - b;
+                d * d
+            })
+            .sum::<f64>()
+            .sqrt();
+        if moved < 1e-8 {
+            break;
+        }
+        let (value, _) = eval(next.view(), 0);
+        if !(value.is_finite() && value <= ceiling) {
+            break;
+        }
+        x = next;
+        let (q_energy, quenched) = eval(x.view(), relax_steps.max(1));
+        if q_energy.is_finite()
+            && let Some(trial) = quenched.as_slice()
+            && crate::catalog::leaves_packing(origin_slice, trial, references)
+            && best.as_ref().is_none_or(|(held, _, _)| q_energy < *held)
+        {
+            best = Some((q_energy, quenched, rung));
+        }
+    }
+    best
 }
 
 /// Walk the Leave ladder until the quench installs a packing.
