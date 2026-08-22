@@ -6,7 +6,7 @@
 //! structure, and the landfold-sparsified map is printed as
 //! `occupancy_landfold` JSON.
 //!
-//!     occupancy_landfold_book [--label NAME] INPUT [INPUT ...]
+//!     occupancy_landfold_book [--label NAME] [--dump-hist FILE] [--dump-oos FILE] INPUT...
 
 use anneal_core::catalog::{
     OccupancyFold, PackingBook, occupancy_map_fold, occupancy_sparsify_packing,
