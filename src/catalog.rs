@@ -84,7 +84,8 @@ pub use packing::{
     different_decaf_family, different_packing_family, leaves_packing, leftover_arrivals_saturated,
     packing_communities, packing_community_count, packing_distance, packing_fingerprint,
     packing_link_labels, packing_reference_book, packing_references, packing_vector,
-    SEAM_BIN_WIDTH, SEAM_BINS, SEAM_WINDOW, SeamBank, packing_seam_gap,
+    SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP, SEAM_DOORWAY_WINDOW,
+    SEAM_WINDOW, SeamBank, packing_seam_gap,
     remember_packing_reference, same_packing, set_packing_references,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};

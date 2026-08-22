@@ -997,6 +997,29 @@ pub struct SeamBank {
     bins: Vec<Option<(f64, Vec<f64>)>>,
 }
 
+/// Gap past which an accepted structure is doorway-shaped.
+///
+/// Measured on the traced winning seed: the crossing was one 0.7467
+/// fluctuation, past the grain and past the Marks separation, while
+/// ordinary shelf wandering stays under about 0.3. The threshold sits
+/// above the wandering and below the measured doorway.
+pub const SEAM_DOORWAY_GAP: f64 = 0.45;
+
+/// Energy above the floor past which a far structure is a melt, not a
+/// doorway. The traced doorway sat 1.86 eps above the floor of its
+/// moment; the median structure past the doorway gap sat twelve above.
+/// Six keeps every doorway-like record seen and rejects the melts.
+pub const SEAM_DOORWAY_WINDOW: f64 = 6.0;
+
+/// Attempts spent from a doorway while the fluctuation is hot.
+///
+/// The burst is `Hop.sharedRound` with `n` attempts against one live
+/// structure: the traced conversion took one hop, so the round
+/// probability is large exactly here, and the burst multiplies attempts
+/// at the only moment that is true. A stale restart measured 0 of 16;
+/// the difference between the two is the whole finding.
+pub const SEAM_BURST_SHOTS: usize = 24;
+
 /// Width of one seam band, in the DECAF L1 the grain is quoted in.
 pub const SEAM_BIN_WIDTH: f64 = 0.05;
 
