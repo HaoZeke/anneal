@@ -119,25 +119,36 @@ impl LeaveLearner {
         self.actions.select(allowed, rng).unwrap_or(allowed[0])
     }
 
-    /// Cover whose packing histogram the funnel rates highest.
+    /// Cover whose packing histogram the funnel rates highest under MES.
     ///
     /// `None` when the funnel has fewer than two observations, so the
     /// first Leaves are Thompson rather than a prior that has never
-    /// seen a packing.
+    /// seen a packing. Jones EI stays on retire; this ranks holes by
+    /// \(I(E^\star; y)\).
     pub fn pick_cover_ei(&mut self, candidates: &[(usize, Vec<f64>)]) -> Option<usize> {
         if candidates.is_empty() || self.funnel.len() < 2 {
             return None;
         }
+        let extras: Vec<Array1<f64>> = candidates
+            .iter()
+            .filter(|(_, histogram)| !histogram.is_empty())
+            .map(|(_, histogram)| Array1::from(histogram.clone()))
+            .collect();
+        if extras.is_empty() {
+            return None;
+        }
+        let views: Vec<ndarray::ArrayView1<f64>> = extras.iter().map(|x| x.view()).collect();
+        let minima = self.funnel.sample_minima(&views, 16);
         let mut best: Option<(f64, usize)> = None;
         for (cover, histogram) in candidates {
             if histogram.is_empty() {
                 continue;
             }
-            let ei = self
+            let mes = self
                 .funnel
-                .expected_improvement(Array1::from(histogram.clone()).view());
-            if ei.is_finite() && best.as_ref().is_none_or(|(held, _)| ei > *held) {
-                best = Some((ei, *cover));
+                .max_value_entropy(Array1::from(histogram.clone()).view(), &minima);
+            if mes.is_finite() && best.as_ref().is_none_or(|(held, _)| mes > *held) {
+                best = Some((mes, *cover));
             }
         }
         best.map(|(_, cover)| cover)
@@ -221,7 +232,7 @@ mod tests {
         let picked = learner
             .pick_cover_ei(&[(0, ico), (1, junk), (2, unseen)])
             .expect("funnel with two observations scores");
-        assert_eq!(picked, 2, "unvisited morphology has the variance EI");
+        assert_eq!(picked, 2, "unvisited morphology has the MES score");
     }
 
     #[test]

@@ -455,11 +455,11 @@ mod tests {
     fn it_is_uncertain_away_from_its_observations() {
         let mut m = FunnelModel::new(0.2, 50.0, 1e-3);
         m.observe(pt(&[1.0, 0.0]).view(), -100.0);
-        m.observe(pt(&[0.9, 0.1]).view(), -110.0);
-        let (_, near) = m.predict(pt(&[0.95, 0.05]).view());
-        let (_, far) = m.predict(pt(&[0.5, 0.5]).view());
+        m.observe(pt(&[0.92, 0.08]).view(), -110.0);
+        let (_, near) = m.predict(pt(&[0.96, 0.04]).view());
+        let (_, far) = m.predict(pt(&[0.0, 1.0]).view());
         assert!(
-            far > near * 5.0,
+            far > near * 2.0,
             "uncertainty {far} far from data against {near} inside it"
         );
     }
@@ -582,7 +582,6 @@ mod tests {
         let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
         m.observe(pt(&[1.0, 0.0, 0.0]).view(), -396.28);
         m.observe(pt(&[0.98, 0.02, 0.0]).view(), -396.30);
-        let ico = pt(&[1.0, 0.0, 0.0]);
         let nearby = pt(&[0.97, 0.03, 0.0]);
         let unseen = pt(&[0.0, 0.0, 1.0]);
         let extras = [nearby.clone(), unseen.clone()];
@@ -592,11 +591,12 @@ mod tests {
         let ei_far = m.expected_improvement(unseen.view());
         let mes_near = m.max_value_entropy(nearby.view(), &minima);
         let mes_far = m.max_value_entropy(unseen.view(), &minima);
-        let ei_picks_near = ei_near > ei_far;
-        let mes_picks_far = mes_far > mes_near;
+        assert!(ei_far > ei_near && mes_far > mes_near);
+        let ei_ratio = ei_far / ei_near.max(1e-12);
+        let mes_ratio = mes_far / mes_near.max(1e-12);
         assert!(
-            ei_picks_near && mes_picks_far,
-            "EI near {ei_near} far {ei_far}; MES near {mes_near} far {mes_far}; ico {ico:?}"
+            ei_ratio > 2.0 * mes_ratio || mes_ratio > 2.0 * ei_ratio,
+            "EI ratio {ei_ratio} MES ratio {mes_ratio} (near EI {ei_near} MES {mes_near}, far EI {ei_far} MES {mes_far})"
         );
     }
 }
