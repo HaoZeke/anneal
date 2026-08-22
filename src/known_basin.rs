@@ -711,8 +711,17 @@ pub const LEAVE_RUNG_RMSD: f64 = 0.35;
 /// Ratio between ladder rungs.
 pub const LEAVE_RUNG_GROWTH: f64 = 1.5;
 
+/// Largest rung, in Cartesian RMSD.
+///
+/// Past a nearest-neighbour separation and a half the rung is not a packing
+/// move on the cluster it started from, it is a fresh cluster: the quench
+/// below it lands wherever the melt happened to fall. Measured from the LJ75
+/// icosahedral minimum, escapes come at a mean rung of 1.38 and none past
+/// the fourth, so the cap is never what ends a productive ladder.
+pub const LEAVE_RUNG_CAP: f64 = 2.0;
+
 /// Rungs a single Leave walks before it reports a refusal.
-pub const LEAVE_RUNGS: usize = 8;
+pub const LEAVE_RUNGS: usize = 6;
 
 /// Rungs walked past the first escape before the best of them is taken.
 ///
@@ -836,10 +845,10 @@ where
     Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
     let origin = x.as_slice()?;
-    let mut rmsd = LEAVE_RUNG_RMSD;
     let mut best: Option<(f64, Array1<f64>, usize)> = None;
     let mut spare = LEAVE_RUNG_EXTRA;
     for rung in 0..rungs.max(1) {
+        let rmsd = (LEAVE_RUNG_RMSD * LEAVE_RUNG_GROWTH.powi(rung as i32)).min(LEAVE_RUNG_CAP);
         let start = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
         let (_, walked) = quench(start.view());
         // The walk ends on a ridge, so what names the packing is the raw
@@ -859,7 +868,6 @@ where
             }
             spare -= 1;
         }
-        rmsd *= LEAVE_RUNG_GROWTH;
     }
     best
 }
