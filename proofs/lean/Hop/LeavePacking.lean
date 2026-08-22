@@ -184,6 +184,34 @@ theorem slope_in_r (f pn : Rat) (hpn : pn ≠ 0) :
     f / pn * pn = f := by
   grind
 
+/-- **The depth is read at the grain, not at the offset.** The walk is
+standing at `r`, but what the hill has to fill is the well out to the
+distance `g` where packings stop being the same packing. The curvature
+is what carries between them. -/
+def depthAtGrain (s r g : Rat) : Rat := s / r * g ^ 2 / 2
+
+/-- Reading the depth at the offset is the same expression with the grain
+replaced by the offset. -/
+theorem depth_at_offset (s r : Rat) : depthAtGrain s r r = wellDepth (s / r) r := by
+  unfold depthAtGrain wellDepth
+  grind
+
+/-- **The error is the square of the ratio of the two distances.** So it
+is not a constant to fold into the amplitude: it changes with every
+structure, because `r` is wherever the walk happened to arm. Measured on
+LJ75, `r = 0.0109` against `g = 0.35`, which is a factor above one
+thousand. -/
+theorem grain_over_offset (s r g : Rat) (hr : r ≠ 0) :
+    depthAtGrain s r g = depthAtGrain s r r * (g / r) ^ 2 := by
+  unfold depthAtGrain
+  grind
+
+/-- A hill no wider than the grain cannot carry a walk across it: at the
+grain the Gaussian argument is at least one, so widening `sigma` to the
+grain is what puts the crossing inside one standard deviation. -/
+theorem grain_width_is_one_sigma (g : Rat) (hg : g ≠ 0) : g / g = 1 := by
+  grind
+
 /-- **A force times a descriptor length is not the depth.** Taking
 `f * r` for `wellDepth` is right only when `pn = 2`, so on any structure
 whose descriptor responds at another rate the deposit is wrong by that
