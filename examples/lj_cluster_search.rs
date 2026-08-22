@@ -3617,6 +3617,14 @@ fn run_capnp_catalog(
                     .try_sample_candidate(replica, INCUMBENT_SAMPLE_DRAW)
                     .expect("incumbent sample must preserve local execution")
                 {
+                    // Every structure the catalog hands over is another
+                    // chain's packing. The invert repels this chain's quench
+                    // from the packings it holds, so a sample is worth
+                    // keeping whether or not this arm adopts it: that is the
+                    // interaction at the minimisation level, and without it
+                    // the reference cloud is only ever this chain's own
+                    // history and the chains do not talk during the quench.
+                    anneal_core::catalog::remember_packing_reference(&candidate.coordinates);
                     let improves = candidate.energy < snapshot.current_energy() - 1e-10;
                     if candidate.coordinates.len() == snapshot.current_state().len()
                         && (!win_only || improves)
@@ -3718,6 +3726,7 @@ fn run_capnp_catalog(
                         // Another packing, not another book cell: a draw
                         // that only clears the cell grain hands the extra
                         // an isomer of the packing it is trying to leave.
+                        anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
                         let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
                             anneal_core::catalog::different_packing_family(
                                 here,
@@ -3817,6 +3826,9 @@ fn run_capnp_catalog(
                     .try_boundary_crossing(replica, descriptor.clone(), transport_rng.random())
                     .expect("boundary-crossing access must preserve local execution")
                 {
+                    // A boundary crossing carries another chain's structure
+                    // too, so the invert learns the packing it sits in.
+                    anneal_core::catalog::remember_packing_reference(&crossing.to);
                     if shared_bias_enabled {
                         pending_deposits.push(Array1::from(crossing.to.clone()));
                     }
