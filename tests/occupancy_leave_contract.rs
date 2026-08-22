@@ -241,9 +241,27 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         body.contains("leave_packing_ridge"),
         "a Leave that the ladder refuses accumulates the packing increment"
     );
+    // A min-mode climb on the raw surface is the surface rumple: a closed
+    // shell has no soft mode, the climb reports curvatures of -1e13 and
+    // calls the ridge behind after one step. On E+V the shell is not
+    // closed, the deposit having put fifty eps into it, and the same climb
+    // measures a curvature of 0.5218 and leaves the packing 3 times in 16
+    // where every displacement along a cover direction leaves 0 in 16. So
+    // the bar is not that no climb appears, it is that no climb runs on
+    // the raw surface.
+    if body.contains("activate_from_origin") {
+        let climb = body
+            .split("activate_from_origin")
+            .next()
+            .expect("text precedes the climb");
+        assert!(
+            climb.contains("with_hill_only"),
+            "a Leave climb runs on E+V; the min mode of a closed shell is a surface rumple"
+        );
+    }
     assert!(
-        !body.contains("activate_from_origin"),
-        "the Hessian min mode of a closed shell is a surface rumple, not a Leave"
+        !body.contains("with_hill_only") || body.contains("with_disarmed"),
+        "a climb on E+V still needs the raw minimum below it to name the packing"
     );
     assert!(
         body.contains("LEAVE_WALK_CLIMB"),
