@@ -3054,7 +3054,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"funnel_obs\":{},\"ei_exhausted\":{},\"occupied_communities\":{},\"worthwhile_communities\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"funnel_obs\":{},\"ei_exhausted\":{},\"occupied_communities\":{},\"worthwhile_communities\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"shannon\":{:.4},\"shannon_ceiling\":{:.4},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -3094,6 +3094,13 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         worthwhile,
         sparsified.holes,
         sparsified.communities,
+        // How the arrivals are spread, not only how many communities were
+        // reached. A run can hold every community on the book and still
+        // put all but a handful of its arrivals in one of them, which is
+        // what a double funnel looks like from inside. The ceiling is the
+        // even spread.
+        sparsified.entropy(),
+        sparsified.entropy_ceiling(),
         stop,
     );
     report_occupancy_landfold(&sparsified);

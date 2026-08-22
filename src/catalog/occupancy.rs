@@ -550,6 +550,88 @@ impl OccupancyBookMap {
     pub fn saturated(&self) -> bool {
         !self.holes
     }
+
+    /// Shannon entropy \(H=-\sum p_k\ln p_k\) of the arrivals across
+    /// packing communities, in nats.
+    ///
+    /// Hole counting says how many communities have never been reached.
+    /// It says nothing about how the arrivals are spread over the ones
+    /// that have, and that spread is what a double funnel is: a run can
+    /// hold every community on the book and still put all but a handful
+    /// of its arrivals in one of them. `H` measures that directly, and
+    /// [`Self::entropy_ceiling`] is what it would be if the arrivals were
+    /// even.
+    pub fn entropy(&self) -> f64 {
+        let total: u64 = self.community_wells.iter().sum();
+        if total == 0 {
+            return 0.0;
+        }
+        let total = total as f64;
+        -self
+            .community_wells
+            .iter()
+            .filter(|count| **count > 0)
+            .map(|count| {
+                let p = *count as f64 / total;
+                p * p.ln()
+            })
+            .sum::<f64>()
+    }
+
+    /// \(\ln F\) over occupied communities: the entropy an even spread
+    /// would have, and the ceiling [`Self::entropy`] is measured against.
+    pub fn entropy_ceiling(&self) -> f64 {
+        let occupied = self
+            .community_wells
+            .iter()
+            .filter(|count| **count > 0)
+            .count();
+        if occupied == 0 {
+            0.0
+        } else {
+            (occupied as f64).ln()
+        }
+    }
+
+    /// Surprisal \(-\ln p_k\) of each community, in nats, in
+    /// [`Self::community_wells`] order.
+    ///
+    /// This is what ranks a Leave target. A community holding three wells
+    /// and one holding three thousand are equally *present* on the book
+    /// and are not equally worth leaving for; the surprisal separates
+    /// them, and a community with no arrivals is infinitely surprising,
+    /// which is the hole the count already finds.
+    pub fn surprisal(&self) -> Vec<f64> {
+        let total: u64 = self.community_wells.iter().sum();
+        if total == 0 {
+            return vec![f64::INFINITY; self.community_wells.len()];
+        }
+        let total = total as f64;
+        self.community_wells
+            .iter()
+            .map(|count| {
+                if *count == 0 {
+                    f64::INFINITY
+                } else {
+                    -(*count as f64 / total).ln()
+                }
+            })
+            .collect()
+    }
+
+    /// The community an extra should Leave for: the most surprising one.
+    ///
+    /// Ties go to the earlier community, which is the one discovered
+    /// first, so a run does not oscillate between two equally rare
+    /// packings while neither gets sampled.
+    pub fn most_surprising(&self) -> Option<usize> {
+        self.surprisal()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, s)| s.is_finite())
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(index, _)| index)
+    }
 }
 
 /// Whether the sparsified book still has holes extras should Leave into.
@@ -1827,6 +1909,75 @@ mod tests {
         occupancy_sparsify_book, packing_role, promote_one_sided, published_energy_score,
         retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
+    use super::OccupancyBookMap;
+
+    fn book_of(counts: &[u64]) -> OccupancyBookMap {
+        OccupancyBookMap {
+            points: Vec::new(),
+            floor: 0,
+            left: 0,
+            right: 0,
+            communities: counts.len(),
+            community_wells: counts.to_vec(),
+            occupied_communities: counts.iter().filter(|count| **count > 0).count(),
+            cells: crate::catalog::GoodTuringSample::from_counts(counts.iter().copied()),
+            fes_minima: 0,
+            fes_delta: None,
+            holes: counts.iter().any(|count| *count == 0),
+        }
+    }
+
+    #[test]
+    fn a_lopsided_book_reads_as_low_entropy_at_full_coverage() {
+        // The double funnel from inside. Both books hold two communities
+        // and neither has a hole, so hole counting calls them the same.
+        // One puts 999 of its 1000 arrivals in a single community.
+        let even = book_of(&[500, 500]);
+        let funnel = book_of(&[999, 1]);
+        let ceiling = 2.0_f64.ln();
+        assert!(
+            (even.entropy() - ceiling).abs() < 1e-12,
+            "an even split saturates the ceiling, got {}",
+            even.entropy()
+        );
+        assert_eq!(even.entropy_ceiling(), ceiling);
+        assert_eq!(funnel.entropy_ceiling(), ceiling);
+        assert!(
+            funnel.entropy() < 0.1 * ceiling,
+            "999 to 1 must read as nearly no diversity, got {}",
+            funnel.entropy()
+        );
+    }
+
+    #[test]
+    fn the_rarest_occupied_community_is_the_leave_target() {
+        let book = book_of(&[900, 90, 10]);
+        let surprisal = book.surprisal();
+        assert!(
+            surprisal[2] > surprisal[1] && surprisal[1] > surprisal[0],
+            "surprisal must rank rare above common, got {surprisal:?}"
+        );
+        assert_eq!(book.most_surprising(), Some(2));
+    }
+
+    #[test]
+    fn an_unreached_community_is_infinitely_surprising_and_not_a_target() {
+        // A hole is already found by the hole count. Surprisal ranks the
+        // communities a walk has actually arrived in, so an empty one is
+        // skipped rather than picked as the rarest.
+        let book = book_of(&[900, 0, 10]);
+        let surprisal = book.surprisal();
+        assert!(surprisal[1].is_infinite());
+        assert_eq!(book.most_surprising(), Some(2));
+    }
+
+    #[test]
+    fn an_empty_book_has_no_entropy_and_no_target() {
+        let book = book_of(&[]);
+        assert_eq!(book.entropy(), 0.0);
+        assert_eq!(book.entropy_ceiling(), 0.0);
+        assert_eq!(book.most_surprising(), None);
+    }
 
     #[test]
     fn feynman_kac_extras_use_the_same_leave_as_occupancy() {
