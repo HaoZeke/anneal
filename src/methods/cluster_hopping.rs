@@ -2391,8 +2391,19 @@ where
                 )
             {
                 let gap = crate::catalog::packing_seam_gap(&floor, trial);
+                // The two template shares that separate the funnels on the
+                // sealed pair: FCC 0.013 against 0.120 and icosahedral
+                // 0.307 against 0.120. Whether the isomers smear across
+                // that separation the way they smeared across the DECAF
+                // gap is what the trace is for.
+                let ptm = crate::structure::ptm_fractions(
+                    x_new.view(),
+                    x_new.len() / 3,
+                    cfg.neighbour_cutoff,
+                );
                 println!(
-                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6}}}"
+                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"fcc\":{:.3},\"ico5\":{:.3}}}",
+                    ptm[0], ptm[2]
                 );
             }
             if seam_burst
