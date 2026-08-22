@@ -65,7 +65,7 @@ fi
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-for symbol in leaves_packing "occupancy leave archive hole" "packing invert nu3 pullback" "leave ridge climb" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
+for symbol in different_packing_family "occupancy leave archive hole" "packing invert nu3 pullback" "leave ridge climb" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
   if ! grep -a -F -q "$symbol" "$BIN"; then
     echo "built binary missing $symbol" >&2
     exit 1
