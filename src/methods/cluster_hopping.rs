@@ -1025,6 +1025,15 @@ where
         std::env::var("CATALOG_PACKING_PAVE")
             .is_ok_and(|value| value == "1")
             .then(crate::catalog::PackingPave::new);
+    // The seam bank. Shares partial progress along the road out of the
+    // occupied packing: every accepted quench is offered by its DECAF
+    // distance from the run's floor, and a stuck chain restarts from the
+    // furthest banked structure instead of from the floor. Nothing here
+    // touches the acceptance rule -- that is what Hop.road_priced
+    // requires and what the community pile violated.
+    let mut seam: Option<crate::catalog::SeamBank> = std::env::var("CATALOG_SEAM_LADDER")
+        .is_ok_and(|value| value == "1")
+        .then(crate::catalog::SeamBank::new);
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2338,6 +2347,21 @@ where
         // driver.
         if accept {
             accepted += 1;
+            // Every accepted quench within the window is a candidate stage
+            // of the road out of the floor. Offered before the floor can
+            // move: a new incumbent redraws every gap, and the bank tolerates
+            // stale bands because only the frontier is ever read.
+            if let Some(seam) = seam.as_mut()
+                && recordable
+                && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
+                && let (Some(floor), Some(trial)) = (
+                    ledger.best_state.as_ref().and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
+                    x_new.as_slice(),
+                )
+            {
+                let gap = crate::catalog::packing_seam_gap(&floor, trial);
+                seam.offer(gap, e_new, trial);
+            }
             // One arrival on the packing the chain has just moved onto.
             // The pile is what makes returning to the icosahedral shelf
             // expensive, and it only means anything if it counts arrivals
@@ -2696,6 +2720,28 @@ where
             if funnels.pending() >= cfg.funnel_period && funnels.len() >= 8 {
                 funnel_split = funnels.split().ok();
             }
+        }
+        // A stuck chain restarts from the shared frontier rather than
+        // symmetrising or escaping in place. This is the cloning step of
+        // the seam ladder: the stage the ensemble has already reached is
+        // restored to full population before the next attempt, so the
+        // frontier arrival rate stays constant in the depth of the road
+        // instead of decaying by one factor per stage
+        // (Hop.cloning_dominates). The jump replaces the state and its
+        // energy and nothing else; Metropolis continues raw.
+        if stuck
+            && let Some(bank) = seam.as_ref()
+            && let Some((_, frontier_energy, frontier_state)) = bank.frontier()
+            && frontier_state.len() == x.len()
+        {
+            x = Array1::from(frontier_state.to_vec());
+            e = frontier_energy;
+            here = None;
+            current_validation_gradient = None;
+            quiet = 0;
+            longest_quiet = 0;
+            restarts += 1;
+            continue;
         }
         if cfg.symmetrise_on_stall && stuck {
             let soap_spec = crate::soap::SoapSpec {

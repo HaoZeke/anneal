@@ -967,3 +967,111 @@ impl PackingPave {
         &self.pile
     }
 }
+
+/// Shared frontier along the seam out of the occupied packing.
+///
+/// The crossing to another packing is a staged rare event: measured on
+/// LJ75, no single move leaves the icosahedral community, and the chains
+/// that reach the Marks decahedron pass it as a sequence of about ten
+/// thousand ordinary accepted hops. A chain that reaches a partly
+/// converted intermediate and falls back has learned where the seam is,
+/// and throwing that structure away makes every other chain start the
+/// climb from the floor again: n chains that do not share partial
+/// progress deliver expected frontier mass \\(n\\,p^k\\) over a
+/// \\(k\\)-stage road, exponentially small in the depth.
+///
+/// The bank keeps the lowest-energy representative in each band of DECAF
+/// distance from the run's own floor. A stuck chain restarts from the
+/// furthest banked structure instead of from the floor, which restores
+/// each occupied stage to full population before the next attempt and
+/// holds the frontier arrival rate at \\(n\\,p\\) per stage, constant in
+/// the depth (`Hop.cloning_dominates` in
+/// `proofs/lean/Hop/SeamLadder.lean`). Nothing here touches the
+/// acceptance rule: geometry, quench and Metropolis stay raw, which is
+/// what `Hop.road_priced` requires -- a penalty standing on the road
+/// multiplies every stage and can only lose, and 0 of 16 against 2 of 16
+/// on paired seeds is that theorem measured.
+#[derive(Debug, Default, Clone)]
+pub struct SeamBank {
+    /// Lowest-energy representative per band, `(energy, structure)`.
+    bins: Vec<Option<(f64, Vec<f64>)>>,
+}
+
+/// Width of one seam band, in the DECAF L1 the grain is quoted in.
+pub const SEAM_BIN_WIDTH: f64 = 0.05;
+
+/// Bands kept: up to 0.60, past the 0.35 grain and the measured 0.4267
+/// icosahedral-to-Marks separation.
+pub const SEAM_BINS: usize = 12;
+
+/// Energy above the incumbent floor past which a structure is a melt
+/// rather than a stage of the road. The ico-Marks saddles sit 8.69 and
+/// 7.48 eps above the shelf; a 12 eps window keeps every on-road
+/// intermediate and rejects the crushed geometries the old 0.35
+/// Cartesian kick produced at +30 and worse.
+pub const SEAM_WINDOW: f64 = 12.0;
+
+impl SeamBank {
+    /// An empty bank.
+    pub fn new() -> Self {
+        Self {
+            bins: vec![None; SEAM_BINS],
+        }
+    }
+
+    /// The band a gap falls in, `None` below the first rung.
+    pub fn bin_of(gap: f64) -> Option<usize> {
+        if !gap.is_finite() || gap < SEAM_BIN_WIDTH {
+            return None;
+        }
+        Some((((gap / SEAM_BIN_WIDTH) as usize).saturating_sub(1)).min(SEAM_BINS - 1))
+    }
+
+    /// Offer one accepted, quenched structure at `gap` from the floor.
+    /// Returns whether it advanced or improved the frontier.
+    pub fn offer(&mut self, gap: f64, energy: f64, coordinates: &[f64]) -> bool {
+        if !energy.is_finite() || coordinates.is_empty() {
+            return false;
+        }
+        let Some(bin) = Self::bin_of(gap) else {
+            return false;
+        };
+        match &self.bins[bin] {
+            Some((held, _)) if *held <= energy => false,
+            _ => {
+                self.bins[bin] = Some((energy, coordinates.to_vec()));
+                true
+            }
+        }
+    }
+
+    /// The furthest banked structure, with its band index.
+    pub fn frontier(&self) -> Option<(usize, f64, &[f64])> {
+        self.bins
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(bin, held)| {
+                held.as_ref()
+                    .map(|(energy, coords)| (bin, *energy, coords.as_slice()))
+            })
+    }
+
+    /// Bands currently holding a representative.
+    pub fn occupied(&self) -> usize {
+        self.bins.iter().filter(|held| held.is_some()).count()
+    }
+}
+
+/// DECAF distance from the run's floor to a trial, in the L1 the grain
+/// and the seam bands are quoted in. `NaN` when either histogram cannot
+/// be built, which no band accepts.
+pub fn packing_seam_gap(floor: &[f64], trial: &[f64]) -> f64 {
+    let mut book = PackingBook::default();
+    book.observe(floor);
+    book.observe(trial);
+    match (book.histogram(floor), book.histogram(trial)) {
+        (Some(a), Some(b)) => packing_distance(&a, &b),
+        _ => f64::NAN,
+    }
+}
