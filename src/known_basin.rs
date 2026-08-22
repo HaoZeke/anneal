@@ -51,24 +51,30 @@ thread_local! {
 
 /// Arm the transformed quench for one occupancy Leave.
 ///
-/// `origin` is the live well this extra is leaving. Previous chains
-/// enter through the packing archive when featomic is on.
-pub fn arm_leave(origin: ArrayView1<f64>, sigma_rmsd: f64) {
-    #[allow(unused_mut)]
+/// `origin` is the live well this extra is leaving, and `references` are the
+/// packings already on file, as coordinates. Every one of them contributes a
+/// mode the Householder inverts, so the walk is pushed away from all of them
+/// and not only out of the well it starts in. The leftover-SOAP archive is a
+/// list of cloud means, not structures, so it cannot supply these: a Leave
+/// that reads it sees vectors of the wrong length and inverts nothing but its
+/// own well.
+pub fn arm_leave(origin: ArrayView1<f64>, sigma_rmsd: f64, references: &[Vec<f64>]) {
     let mut wells = vec![Well {
         packing_mean: packing_mean(origin),
         coords: origin.to_owned(),
     }];
-    #[cfg(feature = "featomic")]
-    {
-        for well in crate::featomic_hop::packing_archive() {
-            if well.len() == origin.len() && !same_point(well.view(), origin) {
-                wells.push(Well {
-                    packing_mean: packing_mean(well.view()),
-                    coords: well,
-                });
-            }
+    for reference in references {
+        if reference.len() != origin.len() {
+            continue;
         }
+        let coords = Array1::from(reference.clone());
+        if same_point(coords.view(), origin) {
+            continue;
+        }
+        wells.push(Well {
+            packing_mean: packing_mean(coords.view()),
+            coords,
+        });
     }
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
@@ -513,7 +519,6 @@ fn com_free_delta(x: ArrayView1<f64>, well: ArrayView1<f64>) -> (Array1<f64>, f6
     (delta, rmsd)
 }
 
-#[cfg(feature = "featomic")]
 fn same_point(left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool {
     if left.len() != right.len() {
         return false;
@@ -705,4 +710,149 @@ mod tests {
             "xtsci must walk off the known packing, start={start_span} end={end_span}"
         );
     }
+}
+
+/// First rung of the Leave ladder, in Cartesian RMSD.
+///
+/// The old fixed Leave size. It is where the ladder starts, not where it
+/// stops: a 0.35 cap holds \(\mu\) inside one packing, and Wales and Doye put
+/// the LJ75 ico-Marks barriers at 8.69 and 7.48 \(\varepsilon\), so a quench
+/// from 0.35 is a projector back onto the packing it left.
+///
+/// Wales, D. J.; Doye, J. P. K. *J. Phys. Chem. A* **1997**, *101*, 5111.
+/// <https://doi.org/10.1021/jp970984n>
+pub const LEAVE_RUNG_RMSD: f64 = 0.35;
+
+/// Ratio between ladder rungs.
+pub const LEAVE_RUNG_GROWTH: f64 = 1.5;
+
+/// Rungs a single Leave walks before it reports a refusal.
+pub const LEAVE_RUNGS: usize = 8;
+
+/// One rung of the Leave ladder: a packing-map step of Cartesian size
+/// `rmsd` along the covering direction `cover_index`, pointed away from the
+/// packings on file.
+///
+/// The direction is a covering point of \(S^{d-1}\) in the DECAF feature,
+/// not in Cartesian space: an even covering of the packing map is what a
+/// Gaussian kick cannot give, and the pullback through \(J_\mu\) is what
+/// makes the increment a packing move rather than a rattle. The component
+/// along \(\mu\) is removed, since scaling the mean is a breath of the same
+/// packing.
+///
+/// Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. *J. Chem. Theory
+/// Comput.* **2017**, *13* (1), 125-134.
+/// <https://doi.org/10.1021/acs.jctc.5b01216>
+pub fn leave_packing_rung(
+    x: ArrayView1<f64>,
+    cover_index: usize,
+    rmsd: f64,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let Some(mu) = packing_mean(x) else {
+        return x.to_owned();
+    };
+    let dim = mu.len();
+    if dim == 0 {
+        return x.to_owned();
+    }
+    let n_cover = crate::hypersphere::default_cover_size();
+    let mut direction = crate::hypersphere::cover_direction(n_cover, dim, cover_index);
+    if direction.len() != dim {
+        return x.to_owned();
+    }
+    let mu_norm2 = mu.iter().map(|v| v * v).sum::<f64>();
+    if mu_norm2 > 1e-15 {
+        let projection = direction
+            .iter()
+            .zip(mu.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        for (value, mean) in direction.iter_mut().zip(mu.iter()) {
+            *value -= projection * *mean / mu_norm2;
+        }
+    }
+    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm < 1e-15 {
+        return x.to_owned();
+    }
+    for value in &mut direction {
+        *value /= norm;
+    }
+    // Away from the nearest packing on file: the sign of a covering point is
+    // arbitrary, and half of them point back at a well the run already holds.
+    let mut nearest: Option<(f64, Array1<f64>)> = None;
+    for reference in references {
+        if reference.len() != x.len() {
+            continue;
+        }
+        let Some(mu_k) = packing_mean(ArrayView1::from(reference.as_slice())) else {
+            continue;
+        };
+        if mu_k.len() != dim {
+            continue;
+        }
+        let distance = mu
+            .iter()
+            .zip(mu_k.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            .sqrt();
+        if nearest.as_ref().is_none_or(|(held, _)| distance < *held) {
+            nearest = Some((distance, mu_k));
+        }
+    }
+    if let Some((distance, mu_k)) = nearest
+        && distance > 1e-12
+    {
+        let away = direction
+            .iter()
+            .zip(mu.iter().zip(mu_k.iter()))
+            .map(|(d, (a, b))| d * (a - b))
+            .sum::<f64>();
+        if away < 0.0 {
+            for value in &mut direction {
+                *value = -*value;
+            }
+        }
+    }
+    crate::soap::packing_step_nu3(x, PACKING_SPEC, &direction, rmsd, species, mobile)
+}
+
+/// Walk the Leave ladder until the quench installs a packing.
+///
+/// Each rung takes a packing-map step of growing Cartesian size and quenches
+/// it; `quench` is the caller's relaxation, and the caller arms
+/// [`arm_leave`] around it so the walk is not pulled back into the wells on
+/// file. The rung that lands outside every packing on file is the Leave.
+/// `None` means the ladder is spent, which is a refusal to report, not a
+/// reason to fall back on a leftover-SOAP hole: a hole of the occupied
+/// packing quenches into the occupied packing.
+pub fn leave_packing_ladder<Q>(
+    x: ArrayView1<f64>,
+    cover_index: usize,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    rungs: usize,
+    mut quench: Q,
+) -> Option<(Array1<f64>, usize)>
+where
+    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+{
+    let origin = x.as_slice()?;
+    let mut rmsd = LEAVE_RUNG_RMSD;
+    for rung in 0..rungs.max(1) {
+        let start = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
+        let quenched = quench(start.view());
+        if let Some(trial) = quenched.as_slice()
+            && crate::catalog::leaves_packing(origin, trial, references)
+        {
+            return Some((quenched, rung));
+        }
+        rmsd *= LEAVE_RUNG_GROWTH;
+    }
+    None
 }

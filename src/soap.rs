@@ -999,6 +999,70 @@ pub fn kick_packing_nu3<R: Rng + ?Sized>(
     scale_to_cap(x, dr, rmsd)
 }
 
+/// One packing-map increment: add `direction` to every centre's \(\nu=3\)
+/// row, pull the result back through the analytic Jacobian, and cap the
+/// Cartesian size at `rmsd`.
+///
+/// [`kick_packing_nu3`] draws the direction from a Gaussian orthogonal to
+/// \(\mu\). A Leave has a direction already: the covering point it was
+/// handed, flipped to point away from the packings on file. The cap here is
+/// the size of one rung of a ladder, not a grain: what ends the ladder is the
+/// DECAF L1 the step reaches.
+pub fn packing_step_nu3(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    direction: &[f64],
+    rmsd: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 || direction.len() != dim {
+        return x.to_owned();
+    }
+    let mut target = Array1::zeros(n_at * dim);
+    for i in 0..n_at {
+        for t in 0..dim {
+            target[i * dim + t] = loc[[i, t]] + direction[t];
+        }
+    }
+    let dr = pullback_nu3(x, target.view(), spec, species, mobile);
+    scale_to_cap(x, dr, rmsd)
+}
+
+/// Mean per-centre \(\nu=3\) row: the DECAF packing mean \(\mu\).
+pub fn packing_mean_nu3(
+    x: ArrayView1<f64>,
+    spec: SoapSpec,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let loc = local_nu3_z(x, spec, species);
+    let n_at = loc.nrows();
+    let dim = loc.ncols();
+    if n_at == 0 || dim == 0 {
+        return Array1::zeros(0);
+    }
+    let keep = mobile_mask(n_at, mobile);
+    let mut mu = Array1::<f64>::zeros(dim);
+    let mut count = 0.0;
+    for i in 0..n_at {
+        if !keep[i] {
+            continue;
+        }
+        count += 1.0;
+        for t in 0..dim {
+            mu[t] += loc[[i, t]];
+        }
+    }
+    if count > 0.0 {
+        mu /= count;
+    }
+    mu
+}
+
 fn soap_dist2(a: ArrayView1<f64>, b: &[f64]) -> f64 {
     let mut s = 0.0;
     for t in 0..a.len() {
