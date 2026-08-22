@@ -607,9 +607,14 @@ fn main() {
             // One walk instrumented outside the ladder's accept. The
             // ladder answers None when no rung leaves, which is the case
             // under study, so anything measured inside its Some arm is
-            // silent exactly when it is needed. Rung 2 is the one whose
-            // barrier brackets the measured icosahedral-to-Marks saddles
-            // of 8.69 and 7.48 eps.
+            // silent exactly when it is needed.
+            //
+            // Rung 3 is the first that clears the icosahedral-to-Marks
+            // saddles: the rungs aim at a quarter of the depth per atom
+            // doubling each time, so on LJ75 they are 1.32, 2.64, 5.28,
+            // 10.57, and the measured saddles are 8.69 and 7.48. Rung 2
+            // stops short of both, which would measure a walk that was
+            // never given enough to cross with.
             known_basin::arm_leave_free(
                 ico.view(),
                 known_basin::LEAVE_RUNG_RMSD,
@@ -620,7 +625,7 @@ fn main() {
             let start = known_basin::leave_packing_rung_to(
                 ico.view(),
                 index,
-                known_basin::rung_barrier(depth, 2),
+                known_basin::rung_barrier(depth, 3),
                 &cloud,
                 None,
                 None,
