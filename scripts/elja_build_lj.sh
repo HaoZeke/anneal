@@ -72,7 +72,8 @@ cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example lj_census_calibration \
   --example catalog_server \
-  --example bank_server
+  --example bank_server \
+  --example leave_packing_probe
 ldd "$BIN"
 echo "SMOKE"
 "$BIN" 13 200 1 rec
