@@ -106,6 +106,24 @@ pub fn is_armed() -> bool {
     ARMED.with(|slot| slot.borrow().is_some())
 }
 
+/// Hill amplitude \(A\) and width \(\sigma_\varphi\) of the armed
+/// transform, once the first transformed evaluation has set them.
+///
+/// The deposited potential is \(A\sum_k e^{-r_k^2/2\sigma_\varphi^2}\),
+/// so what decides whether a wider ensemble can lift a chain out of its
+/// funnel is \(A\) against the barrier it has to clear: on LJ75 the
+/// icosahedral--Marks saddles sit 8.69 and 7.48 \(\varepsilon\) above the
+/// shelf (Doye, Wales, Berry, *J. Chem. Phys.* **1995**, *103*, 4234).
+/// Reported so a run can be read against that number rather than against
+/// whether it happened to escape.
+pub fn lift() -> Option<(f64, f64)> {
+    ARMED.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|armed| Some((armed.lift?, armed.sigma_phi?)))
+    })
+}
+
 /// Run `body` on the raw surface, then restore the armed transform.
 ///
 /// The polish that decides where a walk landed has to run on \(E\), not on
