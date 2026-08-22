@@ -638,17 +638,89 @@ pub const PACKING_REFERENCE_MERGE: f64 = 1e-9;
 /// while staying well under the round trips a checkpoint can afford.
 pub const PACKING_REFERENCE_DRAWS: usize = 12;
 
+/// One well the Leave repels a quench from.
+///
+/// The coordinates are what the invert needs. The other two fields are
+/// what tells a run how *expensive* the well is rather than how deep it
+/// is: a packing the ensemble keeps arriving on is entropically
+/// stabilised, and its free-energy depth exceeds its potential depth by
+/// the temperature times the log of its arrivals.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PackingReference {
+    /// Quenched structure.
+    pub coordinates: Vec<f64>,
+    /// Arrivals on this well, never zero once it is on file. The
+    /// configurational entropy of the packing is the log of this.
+    pub visits: u32,
+    /// Bias already deposited here, so a later hill can be scaled down by
+    /// what is already standing.
+    pub deposit: f64,
+}
+
 thread_local! {
-    static PACKING_REFERENCES: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
+    static PACKING_REFERENCES: RefCell<Vec<PackingReference>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Publish the packings on file. Keeps the newest [`PACKING_REFERENCE_CAP`].
+///
+/// Arrival counts start at one: a well on file has been arrived on once
+/// by construction, and a zero count would read as an impossible packing
+/// rather than as a rare one.
 pub fn set_packing_references(references: Vec<Vec<f64>>) {
     PACKING_REFERENCES.with(|slot| {
         let mut held = slot.borrow_mut();
-        *held = references;
+        *held = references
+            .into_iter()
+            .map(|coordinates| PackingReference {
+                coordinates,
+                visits: 1,
+                deposit: 0.0,
+            })
+            .collect();
         let excess = held.len().saturating_sub(PACKING_REFERENCE_CAP);
         held.drain(0..excess);
+    });
+}
+
+/// The cloud with its arrival counts and standing bias.
+pub fn packing_reference_book() -> Vec<PackingReference> {
+    PACKING_REFERENCES.with(|slot| slot.borrow().clone())
+}
+
+/// Record that `amount` of bias now stands on the well nearest
+/// `coordinates`, so the next hill there can be scaled by what is
+/// already deposited.
+pub fn credit_packing_deposit(coordinates: &[f64], amount: f64) {
+    if !amount.is_finite() || amount <= 0.0 {
+        return;
+    }
+    let held = packing_references();
+    let mut book = PackingBook::default();
+    for reference in &held {
+        book.observe(reference);
+    }
+    let Some(trial) = book.histogram(coordinates) else {
+        return;
+    };
+    let mut nearest = None;
+    let mut best = f64::INFINITY;
+    for (index, reference) in held.iter().enumerate() {
+        let Some(histogram) = book.histogram(reference) else {
+            continue;
+        };
+        let distance = packing_distance(&histogram, &trial);
+        if distance < best {
+            best = distance;
+            nearest = Some(index);
+        }
+    }
+    let Some(index) = nearest else {
+        return;
+    };
+    PACKING_REFERENCES.with(|slot| {
+        if let Some(reference) = slot.borrow_mut().get_mut(index) {
+            reference.deposit += amount;
+        }
     });
 }
 
@@ -665,10 +737,10 @@ pub fn set_packing_references(references: Vec<Vec<f64>>) {
 /// community with one member survives: it is the only record that packing
 /// exists, and dropping it would let the run rediscover it as new.
 pub fn remember_packing_reference(coordinates: &[f64]) {
-    let held = packing_references();
+    let held = packing_reference_book();
     let mut book = PackingBook::default();
     for reference in &held {
-        book.observe(reference);
+        book.observe(&reference.coordinates);
     }
     if book.observe(coordinates).is_none() {
         return;
@@ -677,18 +749,34 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
         return;
     };
     let mut histograms: Vec<Vec<f64>> = Vec::with_capacity(held.len() + 1);
-    for reference in &held {
-        let Some(histogram) = book.histogram(reference) else {
+    for (index, reference) in held.iter().enumerate() {
+        let Some(histogram) = book.histogram(&reference.coordinates) else {
             return;
         };
         if packing_distance(&histogram, &trial) <= PACKING_REFERENCE_MERGE {
+            // Arriving again on a well already on file is the entropy
+            // measurement, not a duplicate to discard. A packing the run
+            // keeps landing in is one with many ways to be reached, and
+            // the count of those arrivals is the configurational entropy
+            // the free-energy deposit needs. Discarding it left the cloud
+            // honest about where the ensemble is and silent about how
+            // much of it is there.
+            PACKING_REFERENCES.with(|slot| {
+                if let Some(reference) = slot.borrow_mut().get_mut(index) {
+                    reference.visits = reference.visits.saturating_add(1);
+                }
+            });
             return;
         }
         histograms.push(histogram);
     }
     histograms.push(trial);
     let mut next = held;
-    next.push(coordinates.to_vec());
+    next.push(PackingReference {
+        coordinates: coordinates.to_vec(),
+        visits: 1,
+        deposit: 0.0,
+    });
     while next.len() > PACKING_REFERENCE_CAP {
         let labels = packing_communities(&histograms);
         let mut sizes: BTreeMap<usize, usize> = BTreeMap::new();
@@ -704,12 +792,17 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
         next.remove(evict);
         histograms.remove(evict);
     }
-    set_packing_references(next);
+    PACKING_REFERENCES.with(|slot| *slot.borrow_mut() = next);
 }
 
-/// Packings on file for this replica.
+/// Packings on file for this replica, as structures.
 pub fn packing_references() -> Vec<Vec<f64>> {
-    PACKING_REFERENCES.with(|slot| slot.borrow().clone())
+    PACKING_REFERENCES.with(|slot| {
+        slot.borrow()
+            .iter()
+            .map(|reference| reference.coordinates.clone())
+            .collect()
+    })
 }
 
 /// Whether `trial` sits in a packing that `origin` and `references` do not.

@@ -481,7 +481,17 @@ fn main() {
     // ensemble: seed the cloud with K distinct quenched icosahedral wells
     // and walk the same ladder against it.
     for k in [1usize, 4, 12, 24, 48] {
-        let mut cloud: Vec<Vec<f64>> = vec![ico_slice.clone()];
+        // The book, not just the cloud. A quench that lands on a well
+        // already held is the entropy measurement rather than a duplicate,
+        // so the repeats are counted instead of thrown away: the log of
+        // the count is the configurational entropy of that packing, and
+        // the free-energy deposit needs it.
+        let mut book: Vec<anneal_core::catalog::PackingReference> =
+            vec![anneal_core::catalog::PackingReference {
+                coordinates: ico_slice.clone(),
+                visits: 1,
+                deposit: 0.0,
+            }];
         let mut seeded = 0usize;
         let mut step = 0usize;
         while seeded + 1 < k && step < 400 {
@@ -499,15 +509,37 @@ fn main() {
             let Some(slice) = relaxed.as_slice() else {
                 continue;
             };
-            if cloud
-                .iter()
-                .any(|held| anneal_core::catalog::packing_distance(held, slice) <= 1e-9)
-            {
+            if let Some(held) = book.iter_mut().find(|held| {
+                anneal_core::catalog::packing_distance(&held.coordinates, slice) <= 1e-9
+            }) {
+                held.visits = held.visits.saturating_add(1);
                 continue;
             }
-            cloud.push(slice.to_vec());
+            book.push(anneal_core::catalog::PackingReference {
+                coordinates: slice.to_vec(),
+                visits: 1,
+                deposit: 0.0,
+            });
             seeded += 1;
         }
+        let cloud: Vec<Vec<f64>> = book
+            .iter()
+            .map(|held| held.coordinates.clone())
+            .collect();
+        // Total arrivals and the Shannon entropy of the packing histogram,
+        // which is what an ensemble buys that a single chain does not.
+        let arrivals: u32 = book.iter().map(|held| held.visits).sum();
+        let shannon = if arrivals > 0 {
+            -book
+                .iter()
+                .map(|held| {
+                    let p = f64::from(held.visits) / f64::from(arrivals);
+                    if p > 0.0 { p * p.ln() } else { 0.0 }
+                })
+                .sum::<f64>()
+        } else {
+            0.0
+        };
         let mut left = 0usize;
         let mut best = ico_energy;
         // The hill the cloud deposits, so the run reads against the
@@ -518,7 +550,16 @@ fn main() {
         let mut sigma = 0.0_f64;
         let trials = leaves.min(16);
         for index in 0..trials {
-            known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &cloud);
+            // T = 0.8 is the run temperature in the resolved config, and
+            // the tempering scale is the same, so the converged pile is
+            // half the free energy.
+            known_basin::arm_leave_free(
+                ico.view(),
+                known_basin::LEAVE_RUNG_RMSD,
+                &book,
+                0.8,
+                0.8,
+            );
             let walked = known_basin::leave_packing_ladder(
                 ico.view(),
                 index,
@@ -553,7 +594,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());

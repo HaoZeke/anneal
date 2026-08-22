@@ -36,6 +36,11 @@ use crate::soap::{jacobian_nu3, local_nu3_z};
 struct Well {
     coords: Array1<f64>,
     packing_mean: Option<Array1<f64>>,
+    /// \(T\ln n_k\): the entropic part of this packing's free-energy
+    /// depth, from the arrivals the run has recorded on it.
+    entropy: f64,
+    /// Bias already standing here, for the well-tempered scaling.
+    deposit: f64,
 }
 
 struct Armed {
@@ -50,6 +55,9 @@ struct Armed {
     mode_x: Option<Array1<f64>>,
     /// Cached \((\hat P, \|P\|)\) per well, in `wells` order.
     modes: Vec<(usize, Array1<f64>, f64)>,
+    /// \(\Delta T\) of the well-tempered scaling. Zero disables it and
+    /// leaves every hill at full height.
+    delta_t: f64,
 }
 
 thread_local! {
@@ -66,22 +74,97 @@ thread_local! {
 /// that reads it sees vectors of the wrong length and inverts nothing but its
 /// own well.
 pub fn arm_leave(origin: ArrayView1<f64>, sigma_rmsd: f64, references: &[Vec<f64>]) {
+    let book: Vec<crate::catalog::PackingReference> = references
+        .iter()
+        .map(|coordinates| crate::catalog::PackingReference {
+            coordinates: coordinates.clone(),
+            visits: 1,
+            deposit: 0.0,
+        })
+        .collect();
+    arm_leave_free(origin, sigma_rmsd, &book, 0.0, 0.0);
+}
+
+/// Arm the Leave against the free-energy depth of the known packings.
+///
+/// The hill on well \(k\) is its depth along the packing coordinate, and
+/// a depth in potential energy is the wrong quantity to fill. What holds
+/// a chain is \(F_k=E_k-TS_k\), and on a cluster the configurational
+/// entropy of a packing is the log of how many ways the run reaches it,
+/// which is the arrival count the reference cloud now carries. On LJ75
+/// that difference decides the answer: the Marks decahedron is
+/// 1.210082 \(\varepsilon\) below the icosahedral floor, but the
+/// icosahedral shelf carries hundreds of minima against one narrow
+/// decahedral well, so at the run temperature \(0.8\) an entropy ratio
+/// of a thousand is already \(5.5\,\varepsilon\) in the other
+/// direction. A chain that stays icosahedral is at the free-energy
+/// minimum, and no deposit shaped like a potential energy can say
+/// otherwise (Mandelshtam, Frantsuzov, Calvo, *J. Phys. Chem. A* **2006**,
+/// *110*, 5326).
+///
+/// `delta_t` is the well-tempered scale of Barducci, Bussi and Parrinello
+/// (*Phys. Rev. Lett.* **2008**, *100*, 020603): a hill on a well that
+/// already carries \(V_k\) is scaled by \(e^{-V_k/\Delta T}\), so the
+/// pile converges to \(-\Delta T/(T+\Delta T)\) times the free energy
+/// instead of growing without bound. Zero leaves every hill at full
+/// height, which is the non-tempered case of Laio and Parrinello
+/// (*Proc. Natl. Acad. Sci.* **2002**, *99*, 12562).
+pub fn arm_leave_free(
+    origin: ArrayView1<f64>,
+    sigma_rmsd: f64,
+    references: &[crate::catalog::PackingReference],
+    temperature: f64,
+    delta_t: f64,
+) {
     let mut wells = vec![Well {
         packing_mean: packing_mean(origin),
         coords: origin.to_owned(),
+        entropy: 0.0,
+        deposit: 0.0,
     }];
     for reference in references {
-        if reference.len() != origin.len() {
+        if reference.coordinates.len() != origin.len() {
             continue;
         }
-        let coords = Array1::from(reference.clone());
+        let coords = Array1::from(reference.coordinates.clone());
         if same_point(coords.view(), origin) {
             continue;
         }
         wells.push(Well {
             packing_mean: packing_mean(coords.view()),
             coords,
+            entropy: temperature.max(0.0) * f64::from(reference.visits.max(1)).ln(),
+            deposit: reference.deposit.max(0.0),
         });
+    }
+    // The well the chain is standing on carries the entropy of the
+    // packing it is leaving, which is the term that has to be paid to
+    // leave it. Its own entry in the cloud holds the count; when the
+    // origin is not on file yet the run has still arrived there at least
+    // as often as anywhere else it has been, so the largest count stands
+    // in rather than zero, which would price the funnel it is stuck in at
+    // nothing.
+    let origin_visits = references
+        .iter()
+        .find(|reference| {
+            if reference.coordinates.len() != origin.len() {
+                return false;
+            }
+            let held = Array1::from(reference.coordinates.clone());
+            same_point(held.view(), origin)
+        })
+        .map(|reference| reference.visits)
+        .or_else(|| {
+            references
+                .iter()
+                .filter(|reference| reference.coordinates.len() == origin.len())
+                .map(|reference| reference.visits)
+                .max()
+        });
+    if let Some(origin_visits) = origin_visits
+        && let Some(first) = wells.first_mut()
+    {
+        first.entropy = temperature.max(0.0) * f64::from(origin_visits.max(1)).ln();
     }
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
@@ -92,6 +175,7 @@ pub fn arm_leave(origin: ArrayView1<f64>, sigma_rmsd: f64, references: &[Vec<f64
             sigma_phi: None,
             mode_x: None,
             modes: Vec::new(),
+            delta_t: delta_t.max(0.0),
         });
     });
 }
@@ -366,7 +450,7 @@ fn transform_packing(
         // *103*, 4234).
         let mut amplitude = 0.0;
         let mut sigma_phi = 0.0;
-        for (p, r_phi, p_norm) in &modes {
+        for (_, p, r_phi, p_norm) in &modes {
             if *r_phi < 1e-12 || *p_norm < 1e-15 {
                 continue;
             }
@@ -384,19 +468,40 @@ fn transform_packing(
     }
     let amplitude = armed.lift.unwrap_or(0.0);
     let sigma_phi = armed.sigma_phi.unwrap_or(0.0);
+    let delta_t = armed.delta_t;
     let mut grad = householder_packing(&modes, sigma_phi, grad);
-    if amplitude <= 0.0 || sigma_phi <= 1e-12 {
+    if sigma_phi <= 1e-12 {
         return (energy, grad);
     }
     let mut potential = 0.0;
-    for (p, r_phi, p_norm) in &modes {
+    for (well, p, r_phi, p_norm) in &modes {
         if *r_phi < 1e-12 {
             continue;
         }
+        // \(F_k=E_k-TS_k\). The depth `amplitude` is the potential half,
+        // shared by every well because it is the curvature of the surface
+        // the walk is on. The entropic half is per well: a packing the run
+        // keeps arriving on costs \(T\ln n_k\) more to leave than its
+        // depth alone says, and on LJ75 that term is what decides the
+        // answer.
+        let entropy = armed.wells.get(*well).map_or(0.0, |held| held.entropy);
+        let free = amplitude + entropy;
+        if free <= 0.0 {
+            continue;
+        }
+        // Well-tempered scaling: a hill on a well that already carries
+        // \(V_k\) is worth \(e^{-V_k/\Delta T}\) of a fresh one, so the
+        // pile converges instead of growing without bound.
+        let standing = armed.wells.get(*well).map_or(0.0, |held| held.deposit);
+        let tempered = if delta_t > 1e-12 {
+            free * (-standing / delta_t).exp()
+        } else {
+            free
+        };
         let gauss = (-0.5 * (r_phi / sigma_phi) * (r_phi / sigma_phi)).exp();
-        potential += amplitude * gauss;
+        potential += tempered * gauss;
         // ∇_x r_φ = P_unnorm = ||P|| P̂. dV/dr_φ = −A gauss r_φ / σ².
-        let scale = -amplitude * gauss * r_phi / (sigma_phi * sigma_phi) * p_norm;
+        let scale = -tempered * gauss * r_phi / (sigma_phi * sigma_phi) * p_norm;
         for (g, pk) in grad.iter_mut().zip(p.iter()) {
             *g += scale * *pk;
         }
@@ -418,7 +523,7 @@ fn packing_modes(
     armed: &mut Armed,
     x: ArrayView1<f64>,
     mu: ArrayView1<f64>,
-) -> Vec<(Array1<f64>, f64, f64)> {
+) -> Vec<(usize, Array1<f64>, f64, f64)> {
     let stale = armed
         .mode_x
         .as_ref()
@@ -451,7 +556,7 @@ fn packing_modes(
                 .map(|(a, b)| (a - b) * (a - b))
                 .sum::<f64>()
                 .sqrt();
-            Some((p.clone(), r_phi, *p_norm))
+            Some((*index, p.clone(), r_phi, *p_norm))
         })
         .collect()
 }
@@ -530,7 +635,7 @@ fn transform_cartesian(
 /// g-2(g\cdot\hat P)\hat P\) when \(g\cdot\hat P>0\) (descent
 /// \(-\nabla E\) points at \(\mu_k\)).
 fn householder_packing(
-    modes: &[(Array1<f64>, f64, f64)],
+    modes: &[(usize, Array1<f64>, f64, f64)],
     sigma_phi: f64,
     mut grad: Array1<f64>,
 ) -> Array1<f64> {
@@ -552,7 +657,7 @@ fn householder_packing(
     // them dominates.
     let dim = grad.len();
     let mut aggregate = Array1::<f64>::zeros(dim);
-    for (p, r_phi, _) in modes {
+    for (_, p, r_phi, _) in modes {
         if *r_phi < 1e-12 || p.len() != dim {
             continue;
         }
@@ -1494,6 +1599,73 @@ mod tests {
         assert!(
             end_rmsd > start_rmsd,
             "xtsci must walk away from the known well, start={start_rmsd} end={end_rmsd}"
+        );
+    }
+
+    #[test]
+    fn arrivals_raise_the_cost_of_leaving_a_packing() {
+        // Two clouds holding the same well. The second has been arrived
+        // on a hundred times, so its free-energy depth exceeds the first
+        // by T ln 100, and a Leave from it has that much more to pay.
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let once = vec![crate::catalog::PackingReference {
+            coordinates: origin.to_vec(),
+            visits: 1,
+            deposit: 0.0,
+        }];
+        let often = vec![crate::catalog::PackingReference {
+            coordinates: origin.to_vec(),
+            visits: 100,
+            deposit: 0.0,
+        }];
+        let rare = {
+            arm_leave_free(origin.view(), 0.35, &once, 0.8, 0.0);
+            let entropy = ARMED.with(|slot| slot.borrow().as_ref().map(|a| a.wells[0].entropy));
+            disarm();
+            entropy.expect("armed")
+        };
+        let common = {
+            arm_leave_free(origin.view(), 0.35, &often, 0.8, 0.0);
+            let entropy = ARMED.with(|slot| slot.borrow().as_ref().map(|a| a.wells[0].entropy));
+            disarm();
+            entropy.expect("armed")
+        };
+        assert_eq!(rare, 0.0, "one arrival is zero entropy, got {rare}");
+        let want = 0.8 * 100.0_f64.ln();
+        assert!(
+            (common - want).abs() < 1e-12,
+            "T ln n must price the packing, want {want} got {common}"
+        );
+    }
+
+    #[test]
+    fn a_standing_deposit_shortens_the_next_hill() {
+        // Well-tempered scaling. A well already carrying dT of bias takes
+        // its next hill at 1/e of full height, so the pile converges
+        // instead of growing without bound.
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let fresh = vec![crate::catalog::PackingReference {
+            coordinates: origin.to_vec(),
+            visits: 1,
+            deposit: 0.0,
+        }];
+        let standing = vec![crate::catalog::PackingReference {
+            coordinates: origin.to_vec(),
+            visits: 1,
+            deposit: 0.8,
+        }];
+        arm_leave_free(origin.view(), 0.35, &fresh, 0.8, 0.8);
+        let (full, _) = effective(x.view(), 0.0, g.clone());
+        disarm();
+        arm_leave_free(origin.view(), 0.35, &standing, 0.8, 0.8);
+        let (tempered, _) = effective(x.view(), 0.0, g);
+        disarm();
+        assert!(full > 0.0, "a fresh well takes a full hill, got {full}");
+        assert!(
+            tempered < full,
+            "a well already carrying bias takes a shorter hill, full={full} tempered={tempered}"
         );
     }
 
