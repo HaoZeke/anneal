@@ -47,6 +47,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   <https://doi.org/10.1021/jp970984n> put the LJ75 ico-Marks barriers at
   8.69 and 7.48 \(\varepsilon\), which a Cartesian 0.35 cap cannot reach
   in any direction.
+- Occupancy Leave climbs the covering or ladder start up the local
+  ridge (Quapp gradient extremal / Barkema--Mousseau ART / SoftSaddle
+  MMF via [`activation`]) until the force along the mode flips, then
+  quenches from the overshoot. A packing-map kick plus a quench is
+  still inside the occupied well; the ridge walk is the crossing.
 
 ### Fixed
 
