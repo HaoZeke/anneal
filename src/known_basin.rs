@@ -351,7 +351,7 @@ fn transform_packing(
     }
     let amplitude = armed.lift.unwrap_or(0.0);
     let sigma_phi = armed.sigma_phi.unwrap_or(0.0);
-    let mut grad = householder_packing(&modes, grad);
+    let mut grad = householder_packing(&modes, sigma_phi, grad);
     if amplitude <= 0.0 || sigma_phi <= 1e-12 {
         return (energy, grad);
     }
@@ -496,19 +496,52 @@ fn transform_cartesian(
 /// Henkelman–Jónsson on the pulled-back packing mode: \(g \leftarrow
 /// g-2(g\cdot\hat P)\hat P\) when \(g\cdot\hat P>0\) (descent
 /// \(-\nabla E\) points at \(\mu_k\)).
-fn householder_packing(modes: &[(Array1<f64>, f64, f64)], mut grad: Array1<f64>) -> Array1<f64> {
+fn householder_packing(
+    modes: &[(Array1<f64>, f64, f64)],
+    sigma_phi: f64,
+    mut grad: Array1<f64>,
+) -> Array1<f64> {
+    // One reflection, along the direction that points at the known wells
+    // together.
+    //
+    // Reflecting once per well, in place, is a product of reflections. The
+    // pulled-back modes of different wells are not orthogonal, so reflecting
+    // off the second restores part of the component toward the first, and
+    // the result depends on the order the wells sit in the list: a product
+    // of k reflections is an orthogonal transform of determinant
+    // \((-1)^k\), which rotates the force rather than inverting its
+    // approach. With one well on file that never showed, and one well is
+    // what the cloud held until the chains began to interact.
+    //
+    // The wells are combined the way the hill combines them, by the same
+    // Gaussian weight, so the reflection is dominated by the wells the
+    // quench is actually near and reduces to Henkelman-Jonsson when one of
+    // them dominates.
+    let dim = grad.len();
+    let mut aggregate = Array1::<f64>::zeros(dim);
     for (p, r_phi, _) in modes {
-        if *r_phi < 1e-12 {
+        if *r_phi < 1e-12 || p.len() != dim {
             continue;
         }
-        let proj = dot(&grad, p);
-        if proj <= 0.0 {
-            continue;
-        }
-        let two = 2.0 * proj;
-        for (g, pk) in grad.iter_mut().zip(p.iter()) {
-            *g -= two * *pk;
-        }
+        let weight = if sigma_phi > 1e-12 {
+            (-0.5 * (r_phi / sigma_phi) * (r_phi / sigma_phi)).exp()
+        } else {
+            1.0
+        };
+        aggregate.scaled_add(weight, p);
+    }
+    let norm = aggregate.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm < 1e-15 {
+        return grad;
+    }
+    aggregate /= norm;
+    let proj = dot(&grad, &aggregate);
+    if proj <= 0.0 {
+        return grad;
+    }
+    let two = 2.0 * proj;
+    for (g, pk) in grad.iter_mut().zip(aggregate.iter()) {
+        *g -= two * *pk;
     }
     grad
 }
