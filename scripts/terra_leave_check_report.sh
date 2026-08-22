@@ -52,19 +52,22 @@ print("records claiming saturation with singleton cells:", len(lying))
 communities = sorted({record.get("landfold_communities") for record in gt})
 print("landfold_communities seen:", communities)
 
-energies = []
-for trace in sorted(root.glob("workers/replica-*.jsonl")):
-    for line in trace.read_text().splitlines():
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
+# Each replica reports its own floor on the last line of its worker log.
+bests = []
+for worker in sorted(root.glob("workers/replica-*.out")):
+    for line in worker.read_text().splitlines():
+        if "personal best" not in line:
             continue
-        energy = record.get("energy")
-        if isinstance(energy, (int, float)):
-            energies.append(energy)
-if energies:
-    energies.sort()
-    print("best energy", f"{energies[0]:.6f}")
-    print("distinct energies", len({round(value, 6) for value in energies}))
-    print("below the ico floor -396.282249:", sum(1 for value in energies if value < -396.282249))
+        for field in line.split():
+            try:
+                bests.append(float(field))
+            except ValueError:
+                continue
+            break
+if bests:
+    bests.sort()
+    print("replicas reporting", len(bests))
+    print("best energy", f"{bests[0]:.6f}")
+    print("distinct replica floors", len({round(value, 6) for value in bests}))
+    print("below the LJ75 ico floor -396.282249:", sum(1 for value in bests if value < -396.282249))
 PY
