@@ -1818,6 +1818,12 @@ fn remember_packing_well(
     species: Option<&[u32]>,
     wells: &mut Vec<Array1<f64>>,
 ) {
+    // The leftover archive holds cloud means, which are the wrong length to
+    // be structures. The packing invert and the Leave accept both need the
+    // structure, so it is remembered beside the mean.
+    if let Some(coordinates) = x.as_slice() {
+        anneal_core::catalog::remember_packing_reference(coordinates);
+    }
     #[cfg(feature = "featomic")]
     {
         let well = anneal_core::featomic_hop::soap_cloud_mean(x, rcut, species, None);
@@ -1845,6 +1851,14 @@ fn remember_packing_well(
     }
 }
 
+/// First rung of the Leave ladder: a packing-map step along one covering
+/// direction, pointed away from the packings on file.
+///
+/// A Cartesian covering point at this size is a rattle of the occupied
+/// packing, and the quench that follows is a projector back onto it. The
+/// step is taken in the DECAF mean instead, and when the quench still lands
+/// in the same packing the hop loop walks the rest of the ladder rather than
+/// drawing another hole of the same size.
 fn leave_packing_state<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
     rmsd: f64,
@@ -1854,24 +1868,15 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     cover_index: usize,
     rng: &mut R,
 ) -> Array1<f64> {
-    let _ = wells;
-    #[cfg(feature = "featomic")]
-    {
-        return anneal_core::featomic_hop::leave_archive_hole_at(
-            x,
-            rcut,
-            species,
-            None,
-            rmsd,
-            Some(cover_index),
-            rng,
-        );
-    }
-    #[cfg(not(feature = "featomic"))]
-    {
-        let _ = (rcut, species, rng, rmsd, cover_index);
-        x.to_owned()
-    }
+    let _ = (wells, rcut, rng);
+    anneal_core::known_basin::leave_packing_rung(
+        x,
+        cover_index,
+        rmsd,
+        &anneal_core::catalog::packing_references(),
+        species,
+        None,
+    )
 }
 
 /// Covering index for ArchiveHole: replica, then later Leaves of the
@@ -3154,7 +3159,7 @@ fn run_capnp_catalog(
                             archive_hole_count += 1;
                             leave_packing_state(
                                 live,
-                                0.35,
+                                anneal_core::known_basin::LEAVE_RUNG_RMSD,
                                 &shared_wells,
                                 coop_rcut,
                                 coop_species.as_deref(),
@@ -3169,7 +3174,7 @@ fn run_capnp_catalog(
                         archive_hole_count += 1;
                         leave_packing_state(
                             live,
-                            0.35,
+                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),
@@ -3657,21 +3662,15 @@ fn run_capnp_catalog(
                         .expect("catalog sample access must preserve local execution")
                         && sparse.coordinates.len() == snapshot.current_state().len()
                     {
-                        let elsewhere = {
-                            #[cfg(feature = "featomic")]
-                            {
-                                snapshot.current_state().as_slice().is_none_or(|here| {
-                                    anneal_core::catalog::different_decaf_family(
-                                        here,
-                                        &sparse.coordinates,
-                                    )
-                                })
-                            }
-                            #[cfg(not(feature = "featomic"))]
-                            {
-                                true
-                            }
-                        };
+                        // Another packing, not another book cell: a draw
+                        // that only clears the cell grain hands the extra
+                        // an isomer of the packing it is trying to leave.
+                        let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
+                            anneal_core::catalog::different_packing_family(
+                                here,
+                                &sparse.coordinates,
+                            )
+                        });
                         elsewhere.then_some(sparse)
                     } else {
                         None
@@ -3684,6 +3683,7 @@ fn run_capnp_catalog(
                 ) {
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
+                        anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
                         trace.proposal_family = ProposalFamily::CatalogSample;
                         trace.adoption = SliceAdoption::Adopted;
                         leave_path.clear();
@@ -3715,7 +3715,7 @@ fn run_capnp_catalog(
                         archive_hole_count += 1;
                         let left = leave_packing_state(
                             ArrayView1::from(shoot_coords),
-                            0.35,
+                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),
