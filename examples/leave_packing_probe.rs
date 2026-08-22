@@ -569,8 +569,10 @@ fn main() {
         // either the transformed surface never moved the quench, or it
         // moved it and the minimum below the ridge was the one it
         // started from.
+        let mut start_r = 0.0_f64;
         let mut walk_r = 0.0_f64;
         let mut land_r = 0.0_f64;
+        let mut land_e = f64::INFINITY;
         let trials = leaves.min(16);
         for index in 0..trials {
             // T = 0.8 is the run temperature in the resolved config, and
@@ -602,14 +604,46 @@ fn main() {
                 sigma = width;
             }
             known_basin::disarm();
+            // One walk instrumented outside the ladder's accept. The
+            // ladder answers None when no rung leaves, which is the case
+            // under study, so anything measured inside its Some arm is
+            // silent exactly when it is needed. Rung 2 is the one whose
+            // barrier brackets the measured icosahedral-to-Marks saddles
+            // of 8.69 and 7.48 eps.
+            known_basin::arm_leave_free(
+                ico.view(),
+                known_basin::LEAVE_RUNG_RMSD,
+                &book,
+                0.8,
+                0.8,
+            );
+            let start = known_basin::leave_packing_rung_to(
+                ico.view(),
+                index,
+                known_basin::rung_barrier(depth, 2),
+                &cloud,
+                None,
+                None,
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+            );
+            if let Some(slice) = start.as_slice() {
+                start_r = start_r.max(packing_gap(&ico_slice, slice));
+            }
+            let rode = quench(&potential, start.view(), steps);
+            if let Some(slice) = rode.as_slice() {
+                walk_r = walk_r.max(packing_gap(&ico_slice, slice));
+            }
+            known_basin::disarm();
+            let fell = quench(&potential, rode.view(), steps);
+            if let Some(slice) = fell.as_slice() {
+                land_r = land_r.max(packing_gap(&ico_slice, slice));
+            }
+            let fell_e = potential.value_and_gradient(fell.view()).0;
+            if fell_e.is_finite() && fell_e < land_e {
+                land_e = fell_e;
+            }
             if let Some((energy, trial, _)) = walked {
-                if let Some(slice) = trial.as_slice() {
-                    walk_r = walk_r.max(packing_gap(&ico_slice, slice));
-                }
                 let polished = quench(&potential, trial.view(), steps);
-                if let Some(slice) = polished.as_slice() {
-                    land_r = land_r.max(packing_gap(&ico_slice, slice));
-                }
                 let energy = potential.value_and_gradient(polished.view()).0.min(energy);
                 if polished
                     .as_slice()
@@ -623,7 +657,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
