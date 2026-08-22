@@ -24,10 +24,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   and Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
   <https://doi.org/10.1063/1.480097> is applied to \(P\) instead of
   the lowest mode or a Cartesian radius. Leftover SOAP \(p_i-\mu\)
-  is not this map. Leave keeps that invert walk when packing L2 to
-  \(\mu_k\) rises. A raw-\(E\) polish and leftover-SOAP requench are
+  is not this map. A raw-\(E\) polish and leftover-SOAP requench are
   projectors onto the occupied packing and do not run on that walk.
-  OtherFamily is a landfold community, not a DECAF isomer bin.
+- A packing is a single-linkage community of DECAF book cells at
+  ``PACKING_LINK`` \(=0.30\), and the cell grain ``PACKING_MERGE``
+  \(=0.20\) names a cell rather than a packing. Measured on 69 quenched
+  LJ75 icosahedral isomers within \(8\varepsilon\) of the ico floor
+  (``examples/decaf_packing_separator``): the shelf reaches L1 \(0.56\)
+  from the ico reference while ico-Marks is \(0.4267\), so no radius
+  around one reference separates them, while under single linkage the
+  shelf chains into one community and Marks stands alone from \(0.10\)
+  to \(0.40\). Leave adopts on that community, OtherFamily draws on it,
+  and the certificate counts live packings rather than cells.
+- The Leave start is a rung of a ladder in the packing map
+  (``known_basin::leave_packing_rung``): a covering direction of the
+  DECAF feature with the \(\mu\) component stripped, pointed away from
+  the packings on file and pulled back through \(J_\mu\). A rung whose
+  quench lands back in the same packing walks the next rung
+  (``known_basin::leave_packing_ladder``) with the invert armed, instead
+  of drawing another hole of the same size. Wales, D. J.; Doye, J. P. K.
+  *J. Phys. Chem. A* **1997**, *101*, 5111
+  <https://doi.org/10.1021/jp970984n> put the LJ75 ico-Marks barriers at
+  8.69 and 7.48 \(\varepsilon\), which a Cartesian 0.35 cap cannot reach
+  in any direction.
+
+### Fixed
+
+- The packing census certified completeness from a single merged bin,
+  where Chao1 has \(n_1=0\) by construction: a run reported
+  ``packing_sat`` and ``stop`` while the raw book carried \(n_1=99\) and
+  \(\hat p_0=0.54\). Communities now come from single linkage rather than
+  a forced 2-means bipartition, and a one-community book is answered by
+  the Good--Turing sample of the cells it folds.
+- ``arm_leave`` read its references from the leftover-SOAP archive, which
+  holds cloud means rather than structures, so the length check dropped
+  every one and the Householder inverted nothing but the well it started
+  in. References cross as structures.
 
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 
