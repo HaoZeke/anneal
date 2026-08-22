@@ -229,12 +229,20 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "leftover-SOAP requench is a projector onto the occupied packing"
     );
     assert!(
-        body.contains("leave_packing_ladder"),
+        body.contains("leave_packing_starts") || body.contains("leave_packing_ladder"),
         "a Leave that quenched back into its packing widens the ladder"
+    );
+    assert!(
+        body.contains("leave_packing_rung_to"),
+        "a rung is sized by the barrier it must clear, measured on the potential"
     );
     assert!(
         body.contains("activate_from_origin"),
         "Leave climbs the local ridge (ART / MMF) before the quench"
+    );
+    assert!(
+        body.contains("LEAVE_WALK_CLIMB"),
+        "a crossing above the climb ceiling is a crushed cluster, not a saddle"
     );
     assert!(
         body.contains("with_disarmed"),
