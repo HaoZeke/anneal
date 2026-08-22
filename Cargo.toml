@@ -144,6 +144,10 @@ name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "catalog_leave_audit"
+required-features = ["bank-rpc"]
+
+[[example]]
 name = "catalog_journal_minima"
 required-features = ["bank-rpc"]
 
