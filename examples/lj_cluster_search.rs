@@ -2729,10 +2729,33 @@ fn run_capnp_catalog(
     #[cfg(feature = "bank-rpc")]
     let mut leave_path = LeavePath::default();
     let mut archive_hole_count = 0usize;
+    // A Leave restarts the walk, and the walk is what crosses. Measured on
+    // LJ75 with this binary in serial recommended mode: of 39 independent
+    // seeds at 400k evaluations, the three that reached the Marks minimum
+    // -397.492331 crossed at hops 4160, 6226 and 4411 of about 11000, while
+    // a checkpoint slice is 500 hops. A replica whose own floor is still
+    // falling is on that trajectory.
+    //
+    // The dwell is not a constant. It is the longest run of quiet
+    // checkpoints this replica has itself come back from: while it has
+    // improved after n quiet slices before, n quiet slices are not evidence
+    // that it is done.
+    let mut leave_best = f64::INFINITY;
+    let mut leave_quiet = 0usize;
+    let mut leave_patience = 0usize;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
             .expect("checkpoint sequence must fit u64");
+        // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
+        // the stretch and records how long the replica took to come back.
+        if snapshot.best_energy() < leave_best - 1e-10 {
+            leave_best = snapshot.best_energy();
+            leave_patience = leave_patience.max(leave_quiet);
+            leave_quiet = 0;
+        } else {
+            leave_quiet += 1;
+        }
         let boundary_charged = snapshot
             .quench_boundaries()
             .iter()
@@ -3609,6 +3632,15 @@ fn run_capnp_catalog(
             }
             PolicyAction::Leave => {
                 trace.policy_role = PolicyRole::Leave;
+                if leave_quiet <= leave_patience {
+                    // Still inside the quiet stretch this replica has
+                    // recovered from before. Keep walking.
+                    trace.adoption = SliceAdoption::Rejected;
+                    cooperative
+                        .record_slice(replica, trace)
+                        .expect("checkpoint trace must remain complete");
+                    return CheckpointAction::Continue;
+                }
                 // Energy landscape paving, with occupancy for the
                 // histogram. Standing on a packing another replica owns
                 // deposits under the replica's own feet, so the funnel
