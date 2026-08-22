@@ -201,20 +201,25 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
 
+    /// Loopback endpoints no other process on the host is holding.
+    ///
+    /// The fixed 473xx ports collide the moment two test runs share a
+    /// node, which a Slurm box guarantees eventually: measured, one
+    /// suite run failed on "Address in use" at 47332 while an unrelated
+    /// job held it. Each test takes a block keyed by its own PID
+    /// instead, so concurrent suites bind disjoint ports and a rerun of
+    /// a crashed suite does not trip over its own corpse either.
+    fn endpoints<const N: usize>(block: u16) -> [String; N] {
+        let base = 20000 + (std::process::id() % 20000) as u16 + block * 8;
+        std::array::from_fn(|slot| format!("tcp://127.0.0.1:{}", base + slot as u16))
+    }
+
+
     #[test]
     fn two_brains_exchange_addressed_envelopes_over_loopback() {
-        let a = DecreeBus::new(
-            0,
-            "tcp://127.0.0.1:47331",
-            &[(1, "tcp://127.0.0.1:47332".into())],
-        )
-        .unwrap();
-        let b = DecreeBus::new(
-            1,
-            "tcp://127.0.0.1:47332",
-            &[(0, "tcp://127.0.0.1:47331".into())],
-        )
-        .unwrap();
+        let [ea, eb] = endpoints::<2>(0);
+        let a = DecreeBus::new(0, &ea, &[(1, eb.clone())]).unwrap();
+        let b = DecreeBus::new(1, &eb, &[(0, ea.clone())]).unwrap();
         settle();
 
         a.send(
@@ -239,15 +244,12 @@ mod tests {
 
     #[test]
     fn an_observer_reads_traffic_addressed_to_someone_else() {
-        let brain = DecreeBus::new(
-            4,
-            "tcp://127.0.0.1:47341",
-            &[(5, "tcp://127.0.0.1:47342".into())],
-        )
-        .unwrap()
-        .publishing("tcp://127.0.0.1:47343")
-        .unwrap();
-        let watcher = DecreeObserver::new(&["tcp://127.0.0.1:47343".into()], "raft/004/").unwrap();
+        let [eb, epeer, epub] = endpoints::<3>(1);
+        let brain = DecreeBus::new(4, &eb, &[(5, epeer)])
+            .unwrap()
+            .publishing(&epub)
+            .unwrap();
+        let watcher = DecreeObserver::new(&[epub.clone()], "raft/004/").unwrap();
         settle();
 
         brain
@@ -269,16 +271,12 @@ mod tests {
 
     #[test]
     fn a_subscription_prefix_selects_one_sender() {
-        let brain = DecreeBus::new(
-            6,
-            "tcp://127.0.0.1:47351",
-            &[(7, "tcp://127.0.0.1:47352".into())],
-        )
-        .unwrap()
-        .publishing("tcp://127.0.0.1:47353")
-        .unwrap();
-        let elsewhere =
-            DecreeObserver::new(&["tcp://127.0.0.1:47353".into()], "raft/009/").unwrap();
+        let [eb, epeer, epub] = endpoints::<3>(2);
+        let brain = DecreeBus::new(6, &eb, &[(7, epeer)])
+            .unwrap()
+            .publishing(&epub)
+            .unwrap();
+        let elsewhere = DecreeObserver::new(&[epub.clone()], "raft/009/").unwrap();
         settle();
 
         brain
