@@ -226,6 +226,34 @@ pub fn with_disarmed<T>(body: impl FnOnce() -> T) -> T {
     out
 }
 
+/// Suppress only the Householder while `body` runs, keeping the hill.
+///
+/// The reflection is a poor-man's min-mode: it inverts the force along one
+/// direction chosen in advance, which is a guess about where the exit is.
+/// A min-mode search does not need that guess, but it does need a force
+/// that is the gradient of something, and a reflected force is not.
+///
+/// The hill is a different object and is wanted: filling the occupied well
+/// by \(A\) lowers the saddle out of it by the same amount, so a dimer on
+/// \(E+V\) looks for a barrier the deposit has already paid down. That is
+/// the pairing metadynamics and saddle search are usually put in, and it
+/// is not available while the two are welded together.
+pub fn with_hill_only<T>(body: impl FnOnce() -> T) -> T {
+    let held = FLAT.with(|slot| slot.replace(true));
+    let out = body();
+    FLAT.with(|slot| slot.set(held));
+    out
+}
+
+thread_local! {
+    /// Whether the Householder is suppressed for the current call.
+    static FLAT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn householder_suppressed() -> bool {
+    FLAT.with(std::cell::Cell::get)
+}
+
 /// Largest Cartesian RMSD one armed step may take.
 ///
 /// The hill width is the size of the well being left; the walk across it is
@@ -495,7 +523,11 @@ fn transform_packing(
     let amplitude = armed.lift.unwrap_or(0.0);
     let sigma_phi = armed.sigma_phi.unwrap_or(0.0);
     let delta_t = armed.delta_t;
-    let mut grad = householder_packing(&modes, sigma_phi, grad);
+    let mut grad = if householder_suppressed() {
+        grad
+    } else {
+        householder_packing(&modes, sigma_phi, grad)
+    };
     if sigma_phi <= 1e-12 {
         return (energy, grad);
     }
@@ -633,7 +665,11 @@ fn transform_cartesian(
         armed.lift = Some(amplitude);
     }
     let amplitude = armed.lift.unwrap_or(0.0);
-    let mut grad = householder_cartesian(&armed.wells, x, grad);
+    let mut grad = if householder_suppressed() {
+        grad
+    } else {
+        householder_cartesian(&armed.wells, x, grad)
+    };
     if amplitude <= 0.0 {
         return (energy, grad);
     }
