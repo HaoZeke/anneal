@@ -116,19 +116,21 @@ pub fn is_occupancy_leave_action(action: &str) -> bool {
 pub enum OccupancyLeaveAdopt {
     /// Take the quenched trial as the live minimum.
     Quench,
-    /// The quench sat in the occupied family. Keep the unquenched hole step.
+    /// The quench sat in the occupied packing. Keep the unquenched hole step.
     HoleStep,
-    /// Same-family leftover hole. Do not adopt; the extra stays put
-    /// and the hop loop draws another Leave.
+    /// Same-packing hole with the ladder spent. Do not adopt; the extra
+    /// stays put and the hop loop draws another Leave.
     Refuse,
 }
 
 /// Where an occupancy extra goes when it Leaves.
 ///
-/// OtherFamily is a draw from another Fiedler community (\(F\ge 2\)).
-/// That is how Leave includes a packing once it is on file. Leftover
-/// wells of one packing are \(F=1\) and stay ArchiveHole. ArchiveHole
-/// is a packing-mean kick in the DECAF \(\nu=3\) feature (the same
+/// OtherFamily is a draw from another packing community on the sparsified
+/// book. That is how Leave includes a packing once it is on file, and the
+/// draw has to clear the packing grain: a candidate that only clears the
+/// cell grain is an isomer of the packing the extra is leaving. Cells of one
+/// packing are one community and stay ArchiveHole. ArchiveHole is a rung of
+/// the packing ladder in the DECAF \(\nu=3\) feature (the same
 /// `local_nu3_z` rows as packing identity), not SOAP leftover
 /// \(p_i-\mu\) and not a named morphology. Serial recommended is a
 /// different mode.
@@ -136,7 +138,7 @@ pub enum OccupancyLeaveAdopt {
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
-    /// Packing-mean kick in the DECAF \(\nu=3\) feature.
+    /// First rung of the packing ladder in the DECAF \(\nu=3\) feature.
     ArchiveHole,
 }
 
