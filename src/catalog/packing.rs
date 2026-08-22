@@ -64,6 +64,14 @@ pub struct PackingBook {
     env_leaders: Vec<Vec<f64>>,
     families: Vec<Vec<f64>>,
     visits: Vec<u64>,
+    /// Bumped whenever a cell or a well arrival changes the book.
+    ///
+    /// Folding the book is single linkage over its cells, quadratic in
+    /// their number, and the policy response asks for the fold several
+    /// times per request. A coordinator serving 48 replicas spends its
+    /// core there rather than on the replicas. The version lets a caller
+    /// keep the fold it already computed while the book is unchanged.
+    version: u64,
     /// Leftover-well arrivals per family. Hop re-observes of the same
     /// well do not increment this; that sample is 48 autocorrelated
     /// copies of the first quench and is not a packing Good--Turing
@@ -85,6 +93,11 @@ struct CachedHistogram {
 }
 
 impl PackingBook {
+    /// Changes to the book since it was created.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     /// Grow the environment codebook from this structure, then count it
     /// toward a packing family.
     pub fn observe(&mut self, coordinates: &[f64]) -> Option<usize> {
@@ -92,17 +105,20 @@ impl PackingBook {
             && let Some(index) = self.family_of(&histogram)
         {
             self.visits[index] = self.visits[index].saturating_add(1);
+            self.version = self.version.wrapping_add(1);
             return Some(index);
         }
         let histogram = self.assign_growing(coordinates)?;
         self.remember(coordinates, &histogram, true);
         if let Some(index) = self.family_of(&histogram) {
             self.visits[index] = self.visits[index].saturating_add(1);
+            self.version = self.version.wrapping_add(1);
             return Some(index);
         }
         self.families.push(histogram);
         self.visits.push(1);
         self.well_visits.push(0);
+        self.version = self.version.wrapping_add(1);
         Some(self.families.len() - 1)
     }
 
@@ -115,6 +131,7 @@ impl PackingBook {
             self.well_visits.resize(self.families.len(), 0);
         }
         self.well_visits[family] = self.well_visits[family].saturating_add(1);
+        self.version = self.version.wrapping_add(1);
     }
 
     /// Normalized class histogram against the current codebook.
