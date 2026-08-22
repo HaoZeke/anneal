@@ -3777,9 +3777,15 @@ fn run_capnp_catalog(
                     policy.census.singleton_basins().max(1),
                 );
                 let birth_draw = {
+                    // leave_quiet stands where the cloud-feed loop's step
+                    // index cannot reach: it counts checkpoints this
+                    // replica has spent without improving, so it advances
+                    // once per Leave decision and gives the draw a stream
+                    // that varies between consecutive Leaves from one
+                    // replica rather than only between replicas.
                     let bits = (u64::from(replica) << 17)
                         ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
-                        ^ (step as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+                        ^ (leave_quiet as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
                     (bits as f64) / (u64::MAX as f64)
                 };
                 match occupancy_leave_by_birth(
