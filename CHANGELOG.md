@@ -27,15 +27,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   is not this map. A raw-\(E\) polish and leftover-SOAP requench are
   projectors onto the occupied packing and do not run on that walk.
 - A packing is a single-linkage community of DECAF book cells at
-  ``PACKING_LINK`` \(=0.30\), and the cell grain ``PACKING_MERGE``
-  \(=0.20\) names a cell rather than a packing. Measured on 69 quenched
-  LJ75 icosahedral isomers within \(8\varepsilon\) of the ico floor
-  (``examples/decaf_packing_separator``): the shelf reaches L1 \(0.56\)
-  from the ico reference while ico-Marks is \(0.4267\), so no radius
-  around one reference separates them, while under single linkage the
-  shelf chains into one community and Marks stands alone from \(0.10\)
-  to \(0.40\). Leave adopts on that community, OtherFamily draws on it,
-  and the certificate counts live packings rather than cells.
+  ``PACKING_LINK`` \(=0.35\), and the cell grain ``PACKING_MERGE``
+  \(=0.20\) names a cell rather than a packing. Measured on quenched
+  isomers within \(8\varepsilon\) of each icosahedral floor
+  (``examples/decaf_packing_separator``): the LJ75 shelf reaches L1
+  \(0.56\) from the ico reference while ico-Marks is \(0.4267\), so no
+  radius around one reference separates them, while under single linkage
+  the shelf chains into one community and Marks stands alone from
+  \(0.10\) through \(0.40\). One atom carries \(2/N\) of the
+  histogram, so the same L1 is a tighter grain on a smaller cluster: the
+  LJ38 shelf chains 148 of 154 at \(0.30\), 153 at \(0.35\) and 155 at
+  \(0.40\), with Oh alone throughout at an ico-Oh L1 of \(1.1579\).
+  \(0.35\) is the middle of what both sizes allow. Leave adopts on that
+  community, OtherFamily draws on it, and the certificate counts live
+  packings rather than cells.
 - The Leave start is a rung of a ladder in the packing map
   (``known_basin::leave_packing_rung``): a covering direction of the
   DECAF feature with the \(\mu\) component stripped, pointed away from
