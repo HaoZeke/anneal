@@ -24,8 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
   and Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
   <https://doi.org/10.1063/1.480097> is applied to \(P\) instead of
   the lowest mode or a Cartesian radius. Leftover SOAP \(p_i-\mu\)
-  is not this map. A raw-\(E\) polish follows only when DECAF
-  reports a new family.
+  is not this map. Leave keeps that invert walk when packing L2 to
+  \(\mu_k\) rises. A raw-\(E\) polish and leftover-SOAP requench are
+  projectors onto the occupied packing and do not run on that walk.
+  OtherFamily is a landfold community, not a DECAF isomer bin.
 
 ## [0.9.0](https://github.com/HaoZeke/anneal/tree/v0.9.0) - 2026-08-13
 

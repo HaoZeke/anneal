@@ -240,15 +240,17 @@ pub fn occupancy_leave_new_class(origin: &[f64], trial: &[f64]) -> bool {
         || occupancy_ring_class_changed(origin, trial)
 }
 
-/// Occupancy Leave that quenches onto a new DECAF family is taken.
-/// A leftover-SOAP hole that stays in the occupied family is refused:
-/// off-well ico is still ico. Reseeds take the new start even when
-/// DECAF still names the old family.
-pub fn occupancy_leave_adopt(action: &str, family_changed: bool) -> Option<OccupancyLeaveAdopt> {
+/// Occupancy Leave that walked away from the known packing mean
+/// \(\mu_k\) is taken. A catalog_leave that sits at \(\mu_k\) is
+/// refused. DECAF isomer grain is not this bit: ico isomers already
+/// split at [`super::packing::PACKING_MERGE`] and a raw polish of
+/// those walks back onto the occupied packing. Reseeds take the new
+/// start even when the invert span did not rise.
+pub fn occupancy_leave_adopt(action: &str, walked_off: bool) -> Option<OccupancyLeaveAdopt> {
     if !is_occupancy_leave_action(action) {
         return None;
     }
-    if action == "catalog_leave" && !family_changed {
+    if action == "catalog_leave" && !walked_off {
         Some(OccupancyLeaveAdopt::Refuse)
     } else {
         Some(OccupancyLeaveAdopt::Quench)

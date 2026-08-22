@@ -30,6 +30,7 @@ cargo test --release --lib packing_role_is_per_family
 cargo test --release --lib a_user_family_floor_of_one
 cargo test --release --lib catalog_leave_refuses_a_same_family
 cargo test --release --lib occupancy_leave_is_another_family_or_an_archive
+cargo test --release --test occupancy_leave_contract leave_quench_keeps_the_walk
 cargo test --release --lib interface_ranks_follow
 cargo test --release --features bank-rpc --test catalog_policy extras_on_a_published
 cargo test --release --features bank-rpc --test catalog_policy tis_extras_walk
@@ -42,6 +43,7 @@ cargo test --release --features featomic --lib leave_occupied_packing
 cargo test --release --lib packing_householder_flips
 cargo test --release --lib xtsci_walks_off_the_known
 cargo test --release --lib packing_mode_is_nu3_mean
+cargo test --release --lib span_rises_when_the_packing
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server

@@ -148,6 +148,15 @@ where
     (energy, x)
 }
 
+/// Distance from `x` to the nearest armed well.
+///
+/// Packing L2 \(\min_k\|\mu-\mu_k\|\) when the wells carry a
+/// \(\nu=3\) mean, otherwise COM-free RMSD. Zero when unarmed.
+/// Occupancy Leave keeps the invert walk when this rises.
+pub fn span(x: ArrayView1<f64>) -> f64 {
+    span_from_wells(x)
+}
+
 fn span_from_wells(x: ArrayView1<f64>) -> f64 {
     ARMED.with(|slot| {
         let held = slot.borrow();
@@ -622,6 +631,21 @@ mod tests {
             }
         }
         x
+    }
+
+    #[test]
+    fn span_rises_when_the_packing_mean_leaves_mu_k() {
+        let origin = ico13();
+        arm_leave(origin.view(), 0.35);
+        let at_well = span(origin.view());
+        let mut away = origin.clone();
+        away[3] += 0.25;
+        let off = span(away.view());
+        disarm();
+        assert!(
+            off > at_well,
+            "span must rise away from mu_k, well={at_well} off={off}"
+        );
     }
 
     #[test]

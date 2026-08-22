@@ -1082,7 +1082,8 @@ fn apply_request(
                     .values()
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
-                occupied_family_count: scientific.packing.occupied_family_count() as u32,
+                occupied_family_count: occupancy_sparsify_packing(&scientific.packing).communities
+                    as u32,
                 packing_saturated: packing_census_saturated(scientific),
                 leftover_dwell: leftover_census_dwell(scientific),
                 ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
