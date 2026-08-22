@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=terra-lj75-leave-check
+#SBATCH --job-name=terra-leave-check
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -7,7 +7,8 @@
 #SBATCH --mem=24G
 #SBATCH --time=08:00:00
 #SBATCH --output=slurm-leave-check.%j.out
-# Short LJ75 occupancy run that reads the Leave contract off a live book.
+# Short occupancy run that reads the Leave contract off a live book.
+# LEAVE_CHECK_N picks the cluster size; 75 is the Marks case, 38 the Oh one.
 #
 # Not the paper budget. What it answers: does a Leave install a packing, does
 # the sparsified book count packings rather than cells, and does packing_sat
@@ -18,7 +19,8 @@ export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 export LJ_ROOT=${LJ_ROOT:-$HOME/anneal-occ-brains}
 export LJ_BIN=$LJ_ROOT/target/release/examples/lj_cluster_search
 export CATALOG_SERVER_BIN=$LJ_ROOT/target/release/examples/catalog_server
-export CATALOG_CAMPAIGN=${CATALOG_CAMPAIGN:-lj75-leave-check}
+N=${LEAVE_CHECK_N:-75}
+export CATALOG_CAMPAIGN=${CATALOG_CAMPAIGN:-lj${N}-leave-check}
 export JCC_SOURCE_COMMIT_FILE=$LJ_ROOT/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
@@ -38,5 +40,5 @@ git rev-parse HEAD >SOURCE_COMMIT
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
-RADIUS=$(python3 -c "import json; print(json.load(open('$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj75.json'))['census_radius'])")
-scripts/elja_jcc_lj_many_chains.sh 75 "$BUDGET" "$INDEX" "$RADIUS"
+RADIUS=$(python3 -c "import json; print(json.load(open('$ANNEAL_REPRO_ROOT/results_jcc/calibration/lj$N.json'))['census_radius'])")
+scripts/elja_jcc_lj_many_chains.sh "$N" "$BUDGET" "$INDEX" "$RADIUS"
