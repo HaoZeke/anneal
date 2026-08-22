@@ -26,16 +26,23 @@ pub const PACKING_MERGE: f64 = 0.20;
 
 /// Single-linkage radius that separates packings on a shared codebook.
 ///
-/// A radius from one reference cannot do this. Measured on 69 quenched LJ75
-/// icosahedral isomers within \(8\varepsilon\) of the ico floor, against
-/// `tests/fixtures/lj75_ico.xyz` and `tests/fixtures/lj75_marks.xyz`
-/// (`examples/decaf_packing_separator`): shelf isomers reach L1 \(0.56\)
-/// from the ico reference while ico-Marks is \(0.4267\), so the shelf
-/// spread straddles the gap. Single linkage separates them instead. Marks is
-/// its own component from radius \(0.10\) to \(0.40\) while the shelf
-/// chains into one component of 64 to 70 members; at \(0.45\) the two
-/// merge. This is the middle of that range.
-pub const PACKING_LINK: f64 = 0.30;
+/// A radius from one reference cannot do this. Measured on quenched isomers
+/// within \(8\varepsilon\) of each icosahedral floor, against the sealed
+/// fixtures (`examples/decaf_packing_separator`): the LJ75 shelf reaches L1
+/// \(0.56\) from the ico reference while ico-Marks is \(0.4267\), so the
+/// shelf spread straddles the gap and no ball around ico holds one and not
+/// the other. Single linkage separates them instead.
+///
+/// The radius is the same measurement on both sizes. LJ75, 69 shelf isomers
+/// plus both fixtures: Marks stands alone from \(0.10\) through
+/// \(0.40\) while the shelf chains into one component of 64 to 70, and at
+/// \(0.45\) the shelf reaches Marks. LJ38, 154 shelf isomers, where ico-Oh
+/// is \(1.1579\): Oh stands alone throughout, and the shelf chains 58 of
+/// 154 at \(0.20\), 148 at \(0.30\), 153 at \(0.35\), 155 at
+/// \(0.40\). Below \(0.30\) a smaller cluster over-splits, because one
+/// atom carries \(2/N\) of the histogram; above \(0.40\) the LJ75 shelf
+/// swallows Marks. This is the middle of what both sizes allow.
+pub const PACKING_LINK: f64 = 0.35;
 
 /// DECAF used [`SoapSpec::default`], not the leftover hop spec.
 pub const PACKING_SPEC: SoapSpec = SoapSpec {
