@@ -217,19 +217,23 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         .next()
         .expect("Leave quench arm ends at HoleStep");
     assert!(
-        body.contains("known_basin::span"),
-        "Leave adopt is packing-mean span from mu_k, not DECAF isomer grain"
+        body.contains("leaves_packing"),
+        "Leave adopt is the packing community, not a rise in packing-mean span"
     );
     assert!(
         !body.contains("occupancy_leave_new_class"),
-        "DECAF isomer grain is not the Leave polish or adopt bit"
+        "the cell grain is not the Leave polish or adopt bit"
     );
     assert!(
         !body.contains("leave_occupied_packing"),
         "leftover-SOAP requench is a projector onto the occupied packing"
     );
     assert!(
-        body.contains("relax(ledger, quenched.1.view(), 0)"),
+        body.contains("leave_packing_ladder"),
+        "a Leave that quenched back into its packing widens the ladder"
+    );
+    assert!(
+        body.contains("relax(ledger, candidate.view(), 0)"),
         "the invert geometry is rescored on raw E with no descent"
     );
 }

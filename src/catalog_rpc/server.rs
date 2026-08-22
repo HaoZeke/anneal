@@ -2837,7 +2837,7 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
 fn report_occupancy_gt(scientific: &mut ScientificState) {
     let leftover = GoodTuringSample::from_counts(scientific.leftover_arrivals.values().copied());
     let packing = scientific.packing.well_sample();
-    let families = scientific.packing.occupied_among(
+    let families = scientific.packing.occupied_packings_among(
         scientific
             .last_candidate_by_replica
             .values()
@@ -2855,6 +2855,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let leftover_sat = leftover.saturated();
     let packing_sat = sparsified.saturated();
     let sparsified_sat = packing_sat;
+    let cells = sparsified.cells;
     let stop = packing_sat && families >= min_families;
     let key = OccupancyGtKey {
         leftover_n: leftover.n,
@@ -2883,6 +2884,10 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .unseen()
         .map(|mass| format!("{mass:.4}"))
         .unwrap_or_else(|| "null".to_owned());
+    let cell_p0 = cells
+        .unseen()
+        .map(|mass| format!("{mass:.4}"))
+        .unwrap_or_else(|| "null".to_owned());
     let conductance_s = conductance
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
@@ -2893,7 +2898,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2924,6 +2929,9 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         sparsified_sample.n,
         sparsified_sample.n1,
         sparsified_sat,
+        cells.n,
+        cells.n1,
+        cell_p0,
         sparsified.holes,
         sparsified.communities,
         stop,

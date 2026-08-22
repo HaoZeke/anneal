@@ -1190,37 +1190,78 @@ where
                     });
                 }
                 let leave_action = crate::catalog::is_occupancy_leave_action(&action);
+                let references = if leave_action {
+                    crate::catalog::packing_references()
+                } else {
+                    Vec::new()
+                };
                 if leave_action {
-                    crate::known_basin::arm_leave(from_state.view(), 0.35);
+                    crate::known_basin::arm_leave(
+                        from_state.view(),
+                        crate::known_basin::LEAVE_RUNG_RMSD,
+                        &references,
+                    );
                 }
-                let span0 = crate::known_basin::span(from_state.view());
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
-                let span1 = crate::known_basin::span(quenched.1.view());
+                let mut candidate = quenched.1;
+                let left_packing = |trial: &Array1<f64>| {
+                    from_state
+                        .as_slice()
+                        .zip(trial.as_slice())
+                        .is_some_and(|(origin, trial)| {
+                            crate::catalog::leaves_packing(origin, trial, &references)
+                        })
+                };
+                let mut walked_off = leave_action && left_packing(&candidate);
+                // A Leave that quenched back into the packing it left widens
+                // in the packing map. Refusing it here and drawing another
+                // hole of the same size repeats the same quench: the ladder
+                // is what makes the step big enough to need the invert.
+                if leave_action
+                    && !walked_off
+                    && action == "catalog_leave"
+                    && ledger.remaining() > cfg.relax_steps
+                {
+                    let ladder = {
+                        let mut quench =
+                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps).1;
+                        crate::known_basin::leave_packing_ladder(
+                            from_state.view(),
+                            hops,
+                            &references,
+                            cfg.species.as_deref(),
+                            None,
+                            crate::known_basin::LEAVE_RUNGS,
+                            &mut quench,
+                        )
+                    };
+                    if let Some((left, _rung)) = ladder {
+                        candidate = left;
+                        walked_off = true;
+                    }
+                }
                 if leave_action {
                     crate::known_basin::disarm();
                 }
-                // The invert walk is the Leave. A raw-\(E\) polish is
-                // a projector onto the occupied packing: DECAF isomer
-                // grain already fires on ico, and leftover-SOAP holes
-                // quench back to the same \(\mu_k\).
-                let quenched = if leave_action {
-                    let (raw_e, _) = relax(ledger, quenched.1.view(), 0);
-                    (raw_e, quenched.1)
+                // The invert walk is the Leave. The energy it carries has to
+                // be the raw one: the transformed surface is \(E+V\), and a
+                // hill amplitude carried onto the chain biases every later
+                // Metropolis test.
+                let (proposal_energy, proposal_state) = if leave_action {
+                    let (raw_e, _) = relax(ledger, candidate.view(), 0);
+                    (raw_e, candidate)
                 } else {
-                    quenched
+                    (quenched.0, candidate)
                 };
-                let (proposal_energy, proposal_state) = quenched;
-                let walked_off = leave_action
-                    && span1.is_finite()
-                    && span0.is_finite()
-                    && span1 > span0
-                    && span1 > 1e-12;
                 #[cfg(not(feature = "featomic"))]
                 let walked_off = walked_off || leave_action;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, walked_off);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
                     hops += 1;
                     continue;
+                }
+                if leave_action && walked_off && let Some(installed) = proposal_state.as_slice() {
+                    crate::catalog::remember_packing_reference(installed);
                 }
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {
                     // Zero descent steps: the chain takes the hole geometry
