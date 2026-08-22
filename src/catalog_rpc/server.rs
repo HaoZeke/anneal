@@ -2889,6 +2889,11 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let packing_sat = sparsified.saturated();
     let sparsified_sat = packing_sat;
     let cells = sparsified.cells;
+    // Whether a one-packing book is allowed to Walk. Without this on the
+    // record there is no way to tell a run where the gate fired from one
+    // where it never did, and the two look identical from outside.
+    let funnel_obs = scientific.funnel.len();
+    let ei_exhausted = occupancy_funnel_ei_exhausted(scientific);
     let stop = packing_sat && families >= min_families;
     let key = OccupancyGtKey {
         leftover_n: leftover.n,
@@ -2931,7 +2936,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"funnel_obs\":{},\"ei_exhausted\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2965,6 +2970,8 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         cells.n,
         cells.n1,
         cell_p0,
+        funnel_obs,
+        ei_exhausted,
         sparsified.holes,
         sparsified.communities,
         stop,
