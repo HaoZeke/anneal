@@ -149,6 +149,8 @@ fn main() {
         )
         .unwrap_or(f64::NAN)
     );
+    // `scale` as the third argument runs only the chain-scaling block.
+    let scale_only = std::env::args().nth(3).is_some_and(|mode| mode == "scale");
     let references = vec![ico_slice.clone()];
     let mut cartesian = Tally {
         best: ico_energy,
@@ -297,6 +299,9 @@ fn main() {
     }
 
     for index in 0..leaves {
+        if scale_only {
+            break;
+        }
         // Old Leave: Cartesian covering point at 0.35, raw quench.
         let direction = anneal_core::hypersphere::cover_direction(
             anneal_core::hypersphere::default_cover_size(),
@@ -388,6 +393,9 @@ fn main() {
         ..Tally::default()
     };
     for index in 0..leaves {
+        if scale_only {
+            break;
+        }
         known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
         let walked = known_basin::leave_packing_ridge(
             ico.view(),
@@ -423,6 +431,9 @@ fn main() {
     // accept refused a genuine packing, and only the energies tell them
     // apart.
     for index in 0..leaves {
+        if scale_only {
+            break;
+        }
         for rung in 0..known_basin::LEAVE_RUNGS {
             let barrier = known_basin::rung_barrier(depth, rung);
             let start = known_basin::leave_packing_rung_to(
@@ -461,6 +472,83 @@ fn main() {
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
 
+    // Does repulsion from more chains help the quench leave?
+    //
+    // The ensemble claim is that chains interact at the minimisation level:
+    // each chain's quench is pushed away from the wells the others occupy,
+    // so more chains means a larger repulsion set and a better chance of
+    // leaving the packing they share. That is testable here without an
+    // ensemble: seed the cloud with K distinct quenched icosahedral wells
+    // and walk the same ladder against it.
+    for k in [1usize, 4, 12, 24, 48] {
+        let mut cloud: Vec<Vec<f64>> = vec![ico_slice.clone()];
+        let mut seeded = 0usize;
+        let mut step = 0usize;
+        while seeded + 1 < k && step < 400 {
+            step += 1;
+            let sigma = 0.08 + 0.02 * ((step % 15) as f64);
+            let mut start = ico.clone();
+            for (index, value) in start.iter_mut().enumerate() {
+                *value += sigma * (((index * 13 + step * 7) % 5) as f64 - 2.0) / 2.0;
+            }
+            let relaxed = quench(&potential, start.view(), steps);
+            let energy = potential.value_and_gradient(relaxed.view()).0;
+            if !energy.is_finite() || energy > ico_energy + 8.0 {
+                continue;
+            }
+            let Some(slice) = relaxed.as_slice() else {
+                continue;
+            };
+            if cloud
+                .iter()
+                .any(|held| anneal_core::catalog::packing_distance(held, slice) <= 1e-9)
+            {
+                continue;
+            }
+            cloud.push(slice.to_vec());
+            seeded += 1;
+        }
+        let mut left = 0usize;
+        let mut best = ico_energy;
+        let trials = leaves.min(16);
+        for index in 0..trials {
+            known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &cloud);
+            let walked = known_basin::leave_packing_ladder(
+                ico.view(),
+                index,
+                &cloud,
+                None,
+                None,
+                depth,
+                known_basin::LEAVE_RUNGS,
+                |trial| {
+                    let relaxed = quench(&potential, trial, steps);
+                    (potential.value_and_gradient(relaxed.view()).0, relaxed)
+                },
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+            );
+            known_basin::disarm();
+            if let Some((energy, trial, _)) = walked {
+                let polished = quench(&potential, trial.view(), steps);
+                let energy = potential.value_and_gradient(polished.view()).0.min(energy);
+                if polished
+                    .as_slice()
+                    .is_some_and(|t| leaves_packing(&ico_slice, t, &[]))
+                {
+                    left += 1;
+                }
+                if energy < best {
+                    best = energy;
+                }
+            }
+        }
+        println!(
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6}}}",
+            cloud.len()
+        );
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
     report("cartesian", &cartesian, leaves);
     report("ridge", &ridge, leaves);
     if only_ridge {
@@ -478,6 +566,9 @@ fn main() {
     let mut origin = ico.clone();
     anneal_core::catalog::set_packing_references(vec![ico_slice.clone()]);
     for index in 0..leaves {
+        if scale_only {
+            break;
+        }
         let references = anneal_core::catalog::packing_references();
         let sigma = known_basin::rung_rmsd(
             curvature,
