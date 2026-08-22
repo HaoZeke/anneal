@@ -599,6 +599,7 @@ fn main() {
         let mut stop_r = 0.0_f64;
         let mut stop_land_r = 0.0_f64;
         let mut stop_e = f64::INFINITY;
+        let mut scan_left = 0usize;
         let trials = leaves.min(16);
         for index in 0..trials {
             // T = 0.8 is the run temperature in the resolved config, and
@@ -675,27 +676,46 @@ fn main() {
             // dividing surface. Stopping just past the grain is the
             // nearest thing to stopping on the ridge that costs no extra
             // gradient.
-            let chunk = (steps / 12).max(4);
+            // Scan the transformed trajectory, polishing off it at every
+            // sample.
+            //
+            // A threshold on the gap is too coarse to catch anything: the
+            // walk clears 1.2 grains inside a single chunk of 33 steps,
+            // reaching 1.79 before settling back to 1.12 as E+V
+            // converges. Whatever crossing exists is passed early and
+            // fast. So the trajectory is stepped three at a time and a
+            // raw quench is dropped from each sample, which answers the
+            // question the escape count cannot: whether any point along
+            // this walk lies in a basin other than the one it started in.
             let mut ridge = start.clone();
-            let mut ridge_r = 0.0_f64;
-            for _ in 0..12 {
-                ridge = quench(&potential, ridge.view(), chunk);
+            for _ in 0..24 {
+                ridge = quench(&potential, ridge.view(), 3);
                 let Some(slice) = ridge.as_slice() else { break };
-                ridge_r = packing_gap(&ico_slice, slice);
-                if ridge_r > 1.2 * PACKING_LINK {
-                    break;
+                let gap = packing_gap(&ico_slice, slice);
+                stop_r = stop_r.max(gap);
+                let sample = ridge.clone();
+                let fallen = known_basin::with_disarmed(|| {
+                    let mut opt = WarmLbfgs::default();
+                    opt.minimize(
+                        sample.view(),
+                        steps,
+                        |v: ArrayView1<f64>| Some(potential.value_and_gradient(v)),
+                    )
+                    .1
+                });
+                if let Some(landed) = fallen.as_slice() {
+                    let reach = packing_gap(&ico_slice, landed);
+                    stop_land_r = stop_land_r.max(reach);
+                    if leaves_packing(&ico_slice, landed, &[]) {
+                        scan_left += 1;
+                    }
+                }
+                let fallen_e = potential.value_and_gradient(fallen.view()).0;
+                if fallen_e.is_finite() && fallen_e < stop_e {
+                    stop_e = fallen_e;
                 }
             }
-            stop_r = stop_r.max(ridge_r);
             known_basin::disarm();
-            let held = quench(&potential, ridge.view(), steps);
-            if let Some(slice) = held.as_slice() {
-                stop_land_r = stop_land_r.max(packing_gap(&ico_slice, slice));
-            }
-            let held_e = potential.value_and_gradient(held.view()).0;
-            if held_e.is_finite() && held_e < stop_e {
-                stop_e = held_e;
-            }
             let fell = quench(&potential, rode.view(), steps);
             if let Some(slice) = fell.as_slice() {
                 land_r = land_r.max(packing_gap(&ico_slice, slice));
@@ -719,7 +739,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"grain\":{PACKING_LINK},\"marks_r\":{marks_gap:.4},\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"scan_left\":{scan_left},\"grain\":{PACKING_LINK},\"marks_r\":{marks_gap:.4},\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
