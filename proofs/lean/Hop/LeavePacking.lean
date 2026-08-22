@@ -155,4 +155,42 @@ theorem flip_reverses_projection (gp : Rat) :
   unfold flipped
   grind
 
+/-! ## The hill
+
+The deposit is `A` per known well, and `A` has to be an energy or it
+cannot be set against the barrier it exists to fill. Along the packing
+coordinate `r` the well is harmonic, `q r = κ r² / 2`.
+-/
+
+/-- The well along the packing coordinate. -/
+def wellDepth (kappa r : Rat) : Rat := kappa * r ^ 2 / 2
+
+/-- The slope of that well at `r`. -/
+def wellSlope (kappa r : Rat) : Rat := kappa * r
+
+/-- **The depth is half the slope times the distance.** `κ` is never
+measured, only the slope is, so this is the form the deposit takes.
+Every factor is an energy per length times a length. -/
+theorem depth_from_slope (kappa r : Rat) :
+    wellDepth kappa r = wellSlope kappa r * r / 2 := by
+  unfold wellDepth wellSlope
+  grind
+
+/-- The measured quantity is a Cartesian force `f = ∇E·P̂`, and `P̂` is
+a unit direction while `r` is a descriptor distance, so `f` is a slope
+per unit length and not per unit `r`. With `∇r = pn · P̂` the conversion
+is a division by `pn`. Stated as the identity the amplitude uses. -/
+theorem slope_in_r (f pn : Rat) (hpn : pn ≠ 0) :
+    f / pn * pn = f := by
+  grind
+
+/-- **A force times a descriptor length is not the depth.** Taking
+`f * r` for `wellDepth` is right only when `pn = 2`, so on any structure
+whose descriptor responds at another rate the deposit is wrong by that
+rate. -/
+theorem force_times_r_is_not_depth (f r pn : Rat) (hf : f ≠ 0) (hr : r ≠ 0)
+    (hpn : pn ≠ 0) :
+    f / pn * r / 2 = f * r ↔ pn = 1 / 2 := by
+  grind
+
 end Hop
