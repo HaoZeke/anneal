@@ -2743,7 +2743,8 @@ where
         // energy and nothing else; Metropolis continues raw.
         if quiet >= seam_patience
             && let Some(bank) = seam.as_ref()
-            && let Some((_, frontier_energy, frontier_state)) = bank.frontier()
+            && let Some((_, frontier_energy, frontier_state)) =
+                bank.restart(0.25, rng.random::<f64>())
             && frontier_state.len() == x.len()
         {
             x = Array1::from(frontier_state.to_vec());

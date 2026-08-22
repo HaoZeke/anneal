@@ -1061,6 +1061,39 @@ impl SeamBank {
     pub fn occupied(&self) -> usize {
         self.bins.iter().filter(|held| held.is_some()).count()
     }
+
+    /// A restart point: the frontier with weight `1 - epsilon`, otherwise
+    /// one of the other occupied bands, chosen by the unit draw `u`.
+    ///
+    /// Restarting only from the top band trusts one structure, and a
+    /// single poisoned representative -- a banked geometry whose forward
+    /// probability is zero -- stalls the ladder with any number of
+    /// episodes left. Splitting the restart keeps the advance probability
+    /// positive whenever any banked band can still move, which is
+    /// `Hop.eps_greedy_positive`: the frontier term may contribute
+    /// nothing and the mix still advances.
+    pub fn restart(&self, epsilon: f64, u: f64) -> Option<(usize, f64, &[f64])> {
+        let occupied: Vec<usize> = self
+            .bins
+            .iter()
+            .enumerate()
+            .filter_map(|(bin, held)| held.as_ref().map(|_| bin))
+            .collect();
+        let top = *occupied.last()?;
+        let pick = if occupied.len() > 1 && u < epsilon.clamp(0.0, 1.0) {
+            // The draw is reused inside the epsilon slice, so the band
+            // choice is uniform over the non-frontier bands without a
+            // second random number.
+            let others = occupied.len() - 1;
+            let slot = ((u / epsilon.clamp(f64::MIN_POSITIVE, 1.0)) * others as f64) as usize;
+            occupied[slot.min(others - 1)]
+        } else {
+            top
+        };
+        self.bins[pick]
+            .as_ref()
+            .map(|(energy, coords)| (pick, *energy, coords.as_slice()))
+    }
 }
 
 /// DECAF distance from the run's floor to a trial, in the L1 the grain
