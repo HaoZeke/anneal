@@ -221,4 +221,43 @@ fn main() {
     report("cartesian", &cartesian, leaves);
     report("armed", &armed, leaves);
     report("ladder", &ladder, leaves);
+
+    // A run does not Leave the same minimum every time. It adopts what the
+    // Leave installed and leaves that, with the cells it has walked on file.
+    let mut chain = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
+    let mut origin = ico.clone();
+    anneal_core::catalog::set_packing_references(vec![ico_slice.clone()]);
+    for index in 0..leaves {
+        let references = anneal_core::catalog::packing_references();
+        known_basin::arm_leave(origin.view(), known_basin::LEAVE_RUNG_RMSD, &references);
+        let walked = known_basin::leave_packing_ladder(
+            origin.view(),
+            index,
+            &references,
+            None,
+            None,
+            known_basin::LEAVE_RUNGS,
+            |trial| {
+                let relaxed = quench(&potential, trial, steps);
+                (potential.value_and_gradient(relaxed.view()).0, relaxed)
+            },
+        );
+        known_basin::disarm();
+        let Some((_, trial, rung)) = walked else {
+            println!(
+                "{{\"kind\":\"leave\",\"generator\":\"chain\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+            );
+            continue;
+        };
+        classify("chain", index, &mut chain, &trial, Some(rung));
+        if let Some(installed) = trial.as_slice() {
+            anneal_core::catalog::remember_packing_reference(installed);
+        }
+        origin = trial;
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+    report("chain", &chain, leaves);
 }
