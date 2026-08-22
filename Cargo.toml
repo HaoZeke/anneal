@@ -144,6 +144,14 @@ name = "catalog_journal_scan"
 required-features = ["bank-rpc"]
 
 [[example]]
+name = "decaf_packing_separator"
+required-features = []
+
+[[example]]
+name = "decaf_packing_grain"
+required-features = []
+
+[[example]]
 name = "catalog_leave_audit"
 required-features = ["bank-rpc"]
 
