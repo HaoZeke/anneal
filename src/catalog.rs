@@ -17,6 +17,7 @@ pub mod calibration;
 pub mod census;
 pub mod event;
 pub mod hyperband;
+pub mod leave_learn;
 pub mod lj;
 pub mod mixing;
 pub mod molecular;
@@ -43,6 +44,11 @@ pub use hyperband::{
     DEFAULT_MAX_RESOURCE, EnsembleVerdict, MIN_RESOURCE, REDUCTION_FACTOR, WalkRecord,
     current_rung, keep_ids, prune, rungs, verdict,
 };
+pub use leave_learn::{
+    ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_EI_PROBES, LeaveLearner, cover_arm_count,
+    credit_action, fivefold_arm, leave_best, leave_ei_open, observe_leave, pick_leave_action,
+    pick_leave_cover, pick_leave_cover_ei,
+};
 pub use mixing::{
     AttractorStrength, CERTIFY_CHAINS, CERTIFY_DRAWS_PER_HALF, CERTIFY_MIN_SAMPLES,
     CERTIFY_SPLIT_HALVES, MIXED_RHAT, MixingEvidence, certified_global_minimum, explore_collapsed,
@@ -60,10 +66,10 @@ pub use occupancy::{
     occupancy_compact, occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted,
     occupancy_family_floor, occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms,
     occupancy_is_cluster, occupancy_landfold_floor, occupancy_landfold_split,
-    occupancy_leave_adopt, occupancy_leave_new_class, occupancy_leave_new_packing,
-    occupancy_leave_target, occupancy_map_floor, occupancy_map_fold, occupancy_map_from_histograms,
-    occupancy_map_split, occupancy_min_families, occupancy_retire, occupancy_retire_at,
-    occupancy_ring_census, occupancy_ring_class_changed, occupancy_ring_floor,
+    occupancy_leave_adopt, occupancy_leave_by_ei, occupancy_leave_new_class,
+    occupancy_leave_new_packing, occupancy_leave_target, occupancy_map_floor, occupancy_map_fold,
+    occupancy_map_from_histograms, occupancy_map_split, occupancy_min_families, occupancy_retire,
+    occupancy_retire_at, occupancy_ring_census, occupancy_ring_class_changed, occupancy_ring_floor,
     occupancy_ring_profile, occupancy_ring_split, occupancy_sparsify_book,
     occupancy_sparsify_packing, packing_role, promote_one_sided, published_energy_score,
     retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,

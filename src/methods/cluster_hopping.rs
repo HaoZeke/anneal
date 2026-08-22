@@ -1232,6 +1232,24 @@ where
                 if leave_action {
                     crate::known_basin::arm_leave(from_state.view(), leave_sigma, &references);
                 }
+                // Cover by FunnelModel EI of unquenched packing
+                // histograms, Thompson until the funnel has two
+                // landings. The fivefold residual is the last arm.
+                let leave_cover = if leave_action {
+                    let n = crate::catalog::cover_arm_count();
+                    let probes = crate::known_basin::propose_leave_covers(
+                        from_state.view(),
+                        &references,
+                        leave_depth,
+                        cfg.species.as_deref(),
+                        crate::catalog::LEAVE_EI_PROBES,
+                        rng,
+                        |trial| Some(relax(ledger, trial, 0).0),
+                    );
+                    crate::catalog::pick_leave_cover_ei(&probes, n, rng)
+                } else {
+                    hops
+                };
                 // The barrier ladder is the Leave that leaves. Measured
                 // from the sealed LJ75 icosahedral minimum: 32 of 32
                 // covering starts quenched to novel packings between
@@ -1240,13 +1258,17 @@ where
                 // accumulated ridge is the second try when the ladder
                 // refuses; its ceiling is LEAVE_WALK_CLIMB times the
                 // depth per atom.
-                let quenched = if leave_action {
+                let quenched = if leave_action && leave_cover == crate::catalog::fivefold_arm() {
+                    let start =
+                        crate::soap::step_away_fivefold_measured(from_state.view(), leave_sigma);
+                    relax(ledger, start.view(), cfg.relax_steps)
+                } else if leave_action {
                     let ladder = {
                         let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
                         for rung in 0..crate::known_basin::LEAVE_RUNGS {
                             starts.push(crate::known_basin::leave_packing_rung_to(
                                 from_state.view(),
-                                hops,
+                                leave_cover,
                                 crate::known_basin::rung_barrier(leave_depth, rung),
                                 &references,
                                 cfg.species.as_deref(),
@@ -1268,7 +1290,7 @@ where
                     } else if let Some((energy, landed, _)) =
                         crate::known_basin::leave_packing_ridge(
                             from_state.view(),
-                            hops,
+                            leave_cover,
                             &references,
                             cfg.species.as_deref(),
                             None,
@@ -1306,6 +1328,23 @@ where
                 };
                 let walked_off = leave_action && left_packing(&candidate);
                 if leave_action {
+                    if let Some(trial) = candidate.as_slice() {
+                        let mut book = crate::catalog::PackingBook::default();
+                        if let Some(origin) = from_state.as_slice() {
+                            book.observe(origin);
+                        }
+                        if let Some(histogram) = book.histogram(trial) {
+                            crate::catalog::observe_leave(
+                                &histogram,
+                                candidate_energy,
+                                Some(leave_cover),
+                            );
+                        }
+                    }
+                    crate::catalog::credit_action(
+                        crate::catalog::ACTION_LEAVE,
+                        candidate_energy < from_energy - 1e-6,
+                    );
                     crate::known_basin::disarm();
                 }
                 let (proposal_energy, proposal_state) = (candidate_energy, candidate);

@@ -15,8 +15,9 @@ use anneal_core::bias::BasinBias;
 use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
-    LeavePath, OccupancyLeaveTarget, occupancy_complete_at, occupancy_is_cluster,
-    occupancy_leave_target, occupancy_retire_at, published_energy_score,
+    ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LeavePath, OccupancyLeaveTarget, credit_action,
+    occupancy_complete_at, occupancy_is_cluster, occupancy_leave_by_ei, occupancy_leave_target,
+    occupancy_retire_at, published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -1893,12 +1894,14 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
 /// Comput.* **2017**, *13* (1), 125-134.
 /// <https://doi.org/10.1021/acs.jctc.5b01216>
 fn archive_cover_index(replica: u32, leave: usize) -> usize {
-    let wave = std::env::var("CATALOG_WAVE")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .filter(|&n| n >= 1)
-        .unwrap_or(48);
-    replica as usize + leave * wave
+    use anneal_core::catalog::{cover_arm_count, pick_leave_cover};
+    use rand::SeedableRng;
+    use rand::rngs::StdRng;
+    let n = cover_arm_count();
+    let mut rng = StdRng::seed_from_u64(
+        (u64::from(replica).wrapping_mul(0x9E37_79B9_7F4A_7C15)) ^ leave as u64,
+    );
+    pick_leave_cover(n, &mut rng)
 }
 
 /// Walk coordinates so leftover-SOAP / ACE follows the coordinator hole
@@ -2743,6 +2746,7 @@ fn run_capnp_catalog(
     let mut leave_best = f64::INFINITY;
     let mut leave_quiet = 0usize;
     let mut leave_patience = 0usize;
+    let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
             .checked_add(1)
@@ -2750,10 +2754,12 @@ fn run_capnp_catalog(
         // Quiet-stretch bookkeeping for the Leave gate: an improvement ends
         // the stretch and records how long the replica took to come back.
         if snapshot.best_energy() < leave_best - 1e-10 {
+            credit_action(last_policy_action, true);
             leave_best = snapshot.best_energy();
             leave_patience = leave_patience.max(leave_quiet);
             leave_quiet = 0;
         } else {
+            credit_action(last_policy_action, false);
             leave_quiet += 1;
         }
         let boundary_charged = snapshot
@@ -3431,6 +3437,11 @@ fn run_capnp_catalog(
         let decision = cooperative
             .decide(replica, policy)
             .expect("policy decision must name the configured replica");
+        last_policy_action = match decision.action {
+            PolicyAction::ContinueLocal | PolicyAction::Exploit { .. } => ACTION_LOCAL,
+            PolicyAction::Explore => ACTION_EXPLORE,
+            PolicyAction::Leave => ACTION_LEAVE,
+        };
         slice_sequence = slice_sequence
             .checked_add(1)
             .expect("slice sequence must fit u64");
@@ -3718,10 +3729,11 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                match occupancy_leave_target(
+                match occupancy_leave_by_ei(
                     other_family.is_some(),
                     policy.packing_saturated,
                     policy.occupied_family_count as usize,
+                    policy.ei_exhausted,
                 ) {
                     OccupancyLeaveTarget::Walk => {
                         // Nothing on the book to divide. The extra keeps

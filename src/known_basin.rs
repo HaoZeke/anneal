@@ -1144,6 +1144,59 @@ where
     )
 }
 
+/// Unquenched Leave starts scored by packing histogram, for FunnelModel EI.
+///
+/// Each probe is one first-rung step or the fivefold residual. The
+/// quench is paid only for the cover EI (or Thompson) then selects.
+pub fn propose_leave_covers<E, R>(
+    origin: ArrayView1<f64>,
+    references: &[Vec<f64>],
+    depth_per_atom: f64,
+    species: Option<&[u32]>,
+    n_try: usize,
+    rng: &mut R,
+    mut energy: E,
+) -> Vec<(usize, Vec<f64>)>
+where
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+    R: rand::Rng + ?Sized,
+{
+    let Some(origin_slice) = origin.as_slice() else {
+        return Vec::new();
+    };
+    let n = crate::catalog::cover_arm_count();
+    let fivefold = crate::catalog::fivefold_arm();
+    let mut book = crate::catalog::PackingBook::default();
+    book.observe(origin_slice);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for _ in 0..n_try.max(1) {
+        let cover = crate::catalog::pick_leave_cover(n, rng);
+        if !seen.insert(cover) {
+            continue;
+        }
+        let start = if cover == fivefold {
+            crate::soap::step_away_fivefold_measured(origin, LEAVE_RUNG_RMSD)
+        } else {
+            leave_packing_rung_to(
+                origin,
+                cover,
+                rung_barrier(depth_per_atom, 0),
+                references,
+                species,
+                None,
+                &mut energy,
+            )
+        };
+        if let Some(slice) = start.as_slice()
+            && let Some(histogram) = book.histogram(slice)
+        {
+            out.push((cover, histogram));
+        }
+    }
+    out
+}
+
 fn leave_packing_walk<R, S>(
     origin: ArrayView1<f64>,
     references: &[Vec<f64>],
