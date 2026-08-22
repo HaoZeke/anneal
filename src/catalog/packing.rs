@@ -611,7 +611,19 @@ pub fn packing_community_count(histograms: &[Vec<f64>]) -> usize {
 /// reference: against that reference alone it reads as a packing of its own,
 /// and against the shelf it chains straight back. So the references are a
 /// cloud of cells, deduplicated at the cell grain.
-const PACKING_REFERENCE_CAP: usize = 32;
+const PACKING_REFERENCE_CAP: usize = 64;
+
+/// Histogram L1 below which two references are the same well.
+///
+/// The cloud is what the Leave invert repels a quench from, so what it
+/// must hold is where the other chains *are*, not how many packings they
+/// amount to. Deduplicating at the cell grain collapses an ensemble
+/// sitting in one funnel to a single entry: measured on LJ75 with the
+/// cross-chain feed live, the cloud held exactly one reference at 12, 24
+/// and 48 chains alike, so the chains could not push each other apart
+/// during minimisation however many of them there were. Only a structure
+/// that is numerically the same well is dropped.
+pub const PACKING_REFERENCE_MERGE: f64 = 1e-9;
 
 thread_local! {
     static PACKING_REFERENCES: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
@@ -627,14 +639,18 @@ pub fn set_packing_references(references: Vec<Vec<f64>>) {
     });
 }
 
-/// Add one cell to the reference cloud, and evict from the packing that can
+/// Add one well to the reference cloud, and evict from the packing that can
 /// spare it.
 ///
-/// Duplicates merge at the cell grain, so a replica sitting in one well does
-/// not fill the cloud with copies of it. Over the cap, the oldest member of
-/// the largest community goes: a community with one member is the only
-/// record that packing exists, and dropping it would let the run rediscover
-/// it as new.
+/// The cloud is what the Leave invert repels a quench from, so it holds
+/// wells rather than packings: an ensemble of 48 chains in one funnel has
+/// to push against 48 positions, not against the single packing they
+/// collectively occupy. Only a numerically identical well is dropped, at
+/// [`PACKING_REFERENCE_MERGE`].
+///
+/// Over the cap the oldest member of the largest community goes, so a
+/// community with one member survives: it is the only record that packing
+/// exists, and dropping it would let the run rediscover it as new.
 pub fn remember_packing_reference(coordinates: &[f64]) {
     let held = packing_references();
     let mut book = PackingBook::default();
@@ -652,7 +668,7 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
         let Some(histogram) = book.histogram(reference) else {
             return;
         };
-        if same_packing(&histogram, &trial) {
+        if packing_distance(&histogram, &trial) <= PACKING_REFERENCE_MERGE {
             return;
         }
         histograms.push(histogram);
