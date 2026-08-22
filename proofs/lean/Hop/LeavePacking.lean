@@ -51,16 +51,16 @@ that give one particular partition form an interval. -/
 theorem chain_mono (d : Nat → Nat → Rat) {r r' : Rat} (hr : r ≤ r')
     {i j : Nat} (h : Chain d r i j) : Chain d r' i j := by
   induction h with
-  | refl i => exact Chain.refl i
-  | link _ hjk ih => exact Chain.link ih (le_trans hjk hr)
+  | refl => exact Chain.refl _
+  | link _ hjk ih => exact Chain.link ih (by grind)
 
 /-- A property closed under one hop is closed along a whole walk. -/
 theorem chain_closed (d : Nat → Nat → Rat) (r : Rat) (P : Nat → Prop)
     (step : ∀ i j, P i → d i j ≤ r → P j)
     {i j : Nat} (h : Chain d r i j) (hi : P i) : P j := by
   induction h with
-  | refl _ => exact hi
-  | link _ hjk ih => exact step _ _ (ih hi) hjk
+  | refl => exact hi
+  | link _ hjk ih => exact step _ _ ih hjk
 
 /-- **The separation the grain buys.** If every cell the component of `a`
 reaches sits further than `r` from every cell of `B`, then the component
@@ -76,10 +76,11 @@ theorem component_avoids (d : Nat → Nat → Rat) (r : Rat) (a : Nat)
     (gap : ∀ i j, Chain d r a i → B j → r < d i j)
     (ha : ¬ B a) {j : Nat} (h : Chain d r a j) : ¬ B j := by
   induction h with
-  | refl _ => exact ha
-  | link hij hjk ih =>
+  | refl => exact ha
+  | link hij hjk _ =>
     intro hB
-    exact absurd hjk (not_le_of_gt (gap _ _ hij hB))
+    have hgap := gap _ _ hij hB
+    grind
 
 /-! ## The escape step
 
@@ -141,11 +142,11 @@ theorem flip_preserves_norm (gp grest : Rat) :
 /-- **The invert moves no critical point and invents none.** The
 transformed force vanishes exactly where the raw force does, so the
 minima and saddles of the landscape are the same before and after
-arming a Leave. -/
-theorem flip_same_zeros (gp grest : Rat) (hrest : 0 ≤ grest) :
+arming a Leave. Immediate from [`flip_preserves_norm`]: the two
+expressions are equal, not merely zero together. -/
+theorem flip_same_zeros (gp grest : Rat) :
     (flipped gp ^ 2 + grest = 0) ↔ (gp ^ 2 + grest = 0) := by
-  unfold flipped
-  constructor <;> intro h <;> grind
+  rw [flip_preserves_norm]
 
 /-- The reflection reverses the sign of the projection, which is what
 makes the walk climb: descent on `g'` is ascent along `P̂`. -/

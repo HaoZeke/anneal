@@ -287,6 +287,62 @@ fn main() {
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
+    // The driver's own path: a barrier-targeted rung, the min-mode climb
+    // that follows it, the energy gate on the crossing, then the quench.
+    // Reported per leave with the curvature the climb ended on, because a
+    // crossing at 1e13 is a crushed cluster and not a saddle.
+    let mut ridge = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
+    let mut melts = 0usize;
+    for index in 0..leaves {
+        let start = known_basin::leave_packing_rung_to(
+            ico.view(),
+            index,
+            known_basin::rung_barrier(depth, 0),
+            &references,
+            None,
+            None,
+            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+        );
+        let act = anneal_core::methods::activation::Activation::default();
+        let outcome = anneal_core::methods::activation::activate_from_origin(
+            start.view(),
+            ico.view(),
+            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+            &act,
+        );
+        let ceiling = ico_energy + known_basin::LEAVE_WALK_CLIMB * depth;
+        let (climbed, lambda, crossed) = match outcome {
+            Some(o) => {
+                let energy = potential.value_and_gradient(o.state.view()).0;
+                (
+                    if o.crossed && energy.is_finite() && energy <= ceiling {
+                        o.state
+                    } else {
+                        if o.crossed {
+                            melts += 1;
+                        }
+                        start.clone()
+                    },
+                    o.lambda,
+                    o.crossed,
+                )
+            }
+            None => (start.clone(), f64::NAN, false),
+        };
+        let trial = quench(&potential, climbed.view(), steps);
+        println!(
+            "{{\"kind\":\"leave\",\"generator\":\"ridge\",\"index\":{index},\"lambda\":{lambda:.3e},\"crossed\":{crossed},\"gated\":{}}}",
+            melts
+        );
+        classify("ridge", index, &mut ridge, &trial, None);
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+    println!("{{\"kind\":\"leave_probe_melts\",\"gated_crossings\":{melts},\"leaves\":{leaves}}}");
+    report("ridge", &ridge, leaves);
+
     report("cartesian", &cartesian, leaves);
     report("ridge", &ridge, leaves);
     if only_ridge {
