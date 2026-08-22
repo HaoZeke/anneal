@@ -1230,7 +1230,26 @@ where
                     crate::known_basin::LEAVE_RUNG_RMSD
                 };
                 if leave_action {
-                    crate::known_basin::arm_leave(from_state.view(), leave_sigma, &references);
+                    // Free energy, not depth. The cloud carries how often
+                    // this run has arrived on each packing, and the log of
+                    // that count times the temperature is the entropic half
+                    // of what holds a chain in a funnel. On LJ75 it is the
+                    // half that decides: the icosahedral shelf outnumbers
+                    // the decahedral well by orders of magnitude, so the
+                    // 1.21 eps the Marks structure wins on potential energy
+                    // is already lost at T = 0.8.
+                    //
+                    // The tempering scale is the temperature itself, which
+                    // makes the converged pile half the free energy and
+                    // leaves no knob that is not a temperature.
+                    let book = crate::catalog::packing_reference_book();
+                    crate::known_basin::arm_leave_free(
+                        from_state.view(),
+                        leave_sigma,
+                        &book,
+                        cfg.temperature,
+                        cfg.temperature,
+                    );
                 }
                 // Cover by FunnelModel EI of unquenched packing
                 // histograms, Thompson until the funnel has two
@@ -1345,6 +1364,16 @@ where
                         crate::catalog::ACTION_LEAVE,
                         candidate_energy < from_energy - 1e-6,
                     );
+                    // What this Leave actually left standing on the packing
+                    // it started from. The amplitude is set on the first
+                    // transformed evaluation, not at arm time, so it can
+                    // only be read once the walk has happened. The next
+                    // Leave from the same well scales its hill by it.
+                    if let Some((amplitude, _)) = crate::known_basin::lift()
+                        && let Some(here) = from_state.as_slice()
+                    {
+                        crate::catalog::credit_packing_deposit(here, amplitude);
+                    }
                     crate::known_basin::disarm();
                 }
                 let (proposal_energy, proposal_state) = (candidate_energy, candidate);
