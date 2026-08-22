@@ -757,58 +757,28 @@ pub const LEAVE_RUNGS: usize = 6;
 /// neighbouring rungs of one direction is most of that range.
 pub const LEAVE_RUNG_EXTRA: usize = 2;
 
-/// One rung of the Leave ladder: a packing-map step of Cartesian size
-/// `rmsd` along the covering direction `cover_index`, pointed away from the
-/// packings on file.
-///
-/// The direction is a covering point of \(S^{d-1}\) in the DECAF feature,
-/// not in Cartesian space: an even covering of the packing map is what a
-/// Gaussian kick cannot give, and the pullback through \(J_\mu\) is what
-/// makes the increment a packing move rather than a rattle. The component
-/// along \(\mu\) is removed, since scaling the mean is a breath of the same
-/// packing.
+/// Unit packing-map direction: covering point `cover_index`, orthogonal
+/// to \(\mu\), signed away from the nearest packing on file.
 ///
 /// Plasencia Gutiérrez, M.; Argáez, C.; Jónsson, H. *J. Chem. Theory
 /// Comput.* **2017**, *13* (1), 125-134.
 /// <https://doi.org/10.1021/acs.jctc.5b01216>
-pub fn leave_packing_rung(
+pub fn packing_cover_direction(
     x: ArrayView1<f64>,
     cover_index: usize,
-    rmsd: f64,
     references: &[Vec<f64>],
-    species: Option<&[u32]>,
-    mobile: Option<&[usize]>,
-) -> Array1<f64> {
-    let Some(mu) = packing_mean(x) else {
-        return x.to_owned();
-    };
+) -> Option<Vec<f64>> {
+    let mu = packing_mean(x)?;
     let dim = mu.len();
     if dim == 0 {
-        return x.to_owned();
+        return None;
     }
     let n_cover = crate::hypersphere::default_cover_size();
     let mut direction = crate::hypersphere::cover_direction(n_cover, dim, cover_index);
     if direction.len() != dim {
-        return x.to_owned();
+        return None;
     }
-    let mu_norm2 = mu.iter().map(|v| v * v).sum::<f64>();
-    if mu_norm2 > 1e-15 {
-        let projection = direction
-            .iter()
-            .zip(mu.iter())
-            .map(|(a, b)| a * b)
-            .sum::<f64>();
-        for (value, mean) in direction.iter_mut().zip(mu.iter()) {
-            *value -= projection * *mean / mu_norm2;
-        }
-    }
-    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm < 1e-15 {
-        return x.to_owned();
-    }
-    for value in &mut direction {
-        *value /= norm;
-    }
+    orthonormalize_against_mean(&mut direction, mu.view())?;
     // Away from the nearest packing on file: the sign of a covering point is
     // arbitrary, and half of them point back at a well the run already holds.
     let mut nearest: Option<(f64, Array1<f64>)> = None;
@@ -846,6 +816,69 @@ pub fn leave_packing_rung(
             }
         }
     }
+    Some(direction)
+}
+
+/// Unit packing-map direction from `from` toward `toward`.
+///
+/// \(\widehat{\mu_{\mathrm{to}}-\mu_{\mathrm{from}}}\) with the breath
+/// along \(\mu_{\mathrm{from}}\) removed. This is the increment that
+/// walks one known packing onto another in the same map the covering
+/// Leave uses; a covering of \(S^{d-1}\) at \(d\sim 10^{2}\) does not
+/// hit it by chance.
+pub fn packing_direction_between(
+    from: ArrayView1<f64>,
+    toward: ArrayView1<f64>,
+) -> Option<Vec<f64>> {
+    let mu = packing_mean(from)?;
+    let mu_t = packing_mean(toward)?;
+    if mu.len() != mu_t.len() || mu.is_empty() {
+        return None;
+    }
+    let mut direction: Vec<f64> = mu.iter().zip(mu_t.iter()).map(|(a, b)| b - a).collect();
+    orthonormalize_against_mean(&mut direction, mu.view())?;
+    Some(direction)
+}
+
+fn orthonormalize_against_mean(direction: &mut [f64], mu: ArrayView1<f64>) -> Option<()> {
+    if direction.len() != mu.len() {
+        return None;
+    }
+    let mu_norm2 = mu.iter().map(|v| v * v).sum::<f64>();
+    if mu_norm2 > 1e-15 {
+        let projection = direction
+            .iter()
+            .zip(mu.iter())
+            .map(|(a, b)| a * b)
+            .sum::<f64>();
+        for (value, mean) in direction.iter_mut().zip(mu.iter()) {
+            *value -= projection * *mean / mu_norm2;
+        }
+    }
+    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if norm < 1e-15 {
+        return None;
+    }
+    for value in direction.iter_mut() {
+        *value /= norm;
+    }
+    Some(())
+}
+
+/// One rung of the Leave ladder: a packing-map step of Cartesian size
+/// `rmsd` along the covering direction `cover_index`, pointed away from the
+/// packings on file.
+pub fn leave_packing_rung(
+    x: ArrayView1<f64>,
+    cover_index: usize,
+    rmsd: f64,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+) -> Array1<f64> {
+    let Some(direction) = packing_cover_direction(x, cover_index, references) else {
+        return x.to_owned();
+    };
     crate::soap::packing_step_nu3(x, PACKING_SPEC, &direction, rmsd, species, mobile)
 }
 
@@ -919,6 +952,24 @@ pub fn leave_packing_rung_to<E>(
     references: &[Vec<f64>],
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
+    energy: E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let Some(direction) = packing_cover_direction(x, cover_index, references) else {
+        return x.to_owned();
+    };
+    leave_packing_rung_to_dir(x, &direction, barrier, species, mobile, energy)
+}
+
+/// [`leave_packing_rung_to`] along a packed feature direction already in hand.
+pub fn leave_packing_rung_to_dir<E>(
+    x: ArrayView1<f64>,
+    direction: &[f64],
+    barrier: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
     mut energy: E,
 ) -> Array1<f64>
 where
@@ -929,7 +980,8 @@ where
     };
     let atoms = x.len() / 3;
     let mut rise = |rmsd: f64, energy: &mut E| -> Option<(f64, Array1<f64>)> {
-        let trial = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
+        let trial =
+            crate::soap::packing_step_nu3(x, PACKING_SPEC, direction, rmsd, species, mobile);
         let value = energy(trial.view())?;
         value.is_finite().then_some((value - base, trial))
     };
@@ -997,16 +1049,23 @@ where
     best.unwrap_or_else(|| x.to_owned())
 }
 
+/// Packing-map steps one Leave may accumulate along one direction.
+///
+/// The ceiling at [`LEAVE_WALK_CLIMB`] times the depth per atom is what
+/// ends the walk. This count lets that ceiling fire first at the first
+/// rung's barrier.
+pub const LEAVE_RIDGE_RUNGS: usize = 24;
+
 /// Follow one packing-map covering direction in barrier-sized steps.
 ///
 /// Each step is [`leave_packing_rung_to`] from the *current* point, not
-/// from the well: independent rungs from the minimum all land in its
-/// basin, and the Hessian min mode of a closed shell is a surface
-/// rumple whose quench returns to the same packing. Accumulating the
-/// packing increment is the walk off \(\mu_k\). The walk stops when a
-/// quench leaves every packing on file, when a step cannot be taken
-/// without crossing the energy ceiling, or when [`LEAVE_RUNGS`] steps
-/// are spent.
+/// from the well. The accept quench is raw \(E\): an invert-armed
+/// landing is not a packing. Quench starts only after the unquenched
+/// rise has reached [`rung_barrier`] at rung 2, which on LJ75 is past
+/// the Wales–Doye ico–Marks barrier scale. Measured covering ladders
+/// from the sealed icosahedral minimum leave to novel packings at
+/// \(-371\) to \(-391\); this walk is the same increment, accumulated
+/// far enough that a quench can sit on the far side.
 pub fn leave_packing_ridge<R>(
     origin: ArrayView1<f64>,
     cover_index: usize,
@@ -1015,10 +1074,89 @@ pub fn leave_packing_ridge<R>(
     mobile: Option<&[usize]>,
     depth_per_atom: f64,
     relax_steps: usize,
-    mut eval: R,
+    eval: R,
 ) -> Option<(f64, Array1<f64>, usize)>
 where
     R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+{
+    leave_packing_walk(
+        origin,
+        references,
+        species,
+        mobile,
+        depth_per_atom,
+        relax_steps,
+        eval,
+        |here, energy| {
+            leave_packing_rung_to(
+                here,
+                cover_index,
+                rung_barrier(depth_per_atom, 0),
+                references,
+                species,
+                mobile,
+                energy,
+            )
+        },
+    )
+}
+
+/// Walk the packing map from `origin` toward `target`'s packing mean.
+///
+/// Same energy-capped steps as [`leave_packing_ridge`], but the
+/// direction is \(\widehat{\mu_{\mathrm{target}}-\mu}\) recomputed at
+/// the current point rather than a covering index. A covering of the
+/// high-dimensional packing sphere does not hit this vector.
+pub fn leave_packing_toward<R>(
+    origin: ArrayView1<f64>,
+    target: ArrayView1<f64>,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    depth_per_atom: f64,
+    relax_steps: usize,
+    eval: R,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+{
+    leave_packing_walk(
+        origin,
+        references,
+        species,
+        mobile,
+        depth_per_atom,
+        relax_steps,
+        eval,
+        |here, energy| {
+            let Some(direction) = packing_direction_between(here, target) else {
+                return here.to_owned();
+            };
+            leave_packing_rung_to_dir(
+                here,
+                &direction,
+                rung_barrier(depth_per_atom, 0),
+                species,
+                mobile,
+                energy,
+            )
+        },
+    )
+}
+
+fn leave_packing_walk<R, S>(
+    origin: ArrayView1<f64>,
+    references: &[Vec<f64>],
+    _species: Option<&[u32]>,
+    _mobile: Option<&[usize]>,
+    depth_per_atom: f64,
+    relax_steps: usize,
+    mut eval: R,
+    mut step: S,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    R: FnMut(ArrayView1<f64>, usize) -> (f64, Array1<f64>),
+    S: FnMut(ArrayView1<f64>, &mut dyn FnMut(ArrayView1<f64>) -> Option<f64>) -> Array1<f64>,
 {
     let Some(origin_slice) = origin.as_slice() else {
         return None;
@@ -1028,22 +1166,14 @@ where
         return None;
     }
     let ceiling = base + LEAVE_WALK_CLIMB * depth_per_atom.abs();
-    let step_barrier = rung_barrier(depth_per_atom, 0);
+    let quench_after = rung_barrier(depth_per_atom, 2);
     let mut x = origin.to_owned();
-    let mut best: Option<(f64, Array1<f64>, usize)> = None;
-    for rung in 0..LEAVE_RUNGS.max(1) {
-        let next = leave_packing_rung_to(
-            x.view(),
-            cover_index,
-            step_barrier,
-            references,
-            species,
-            mobile,
-            |trial| {
-                let (energy, _) = eval(trial, 0);
-                energy.is_finite().then_some(energy)
-            },
-        );
+    let mut above: Vec<(usize, Array1<f64>)> = Vec::new();
+    for rung in 0..LEAVE_RIDGE_RUNGS.max(1) {
+        let next = step(x.view(), &mut |trial| {
+            let (energy, _) = eval(trial, 0);
+            energy.is_finite().then_some(energy)
+        });
         let moved = next
             .iter()
             .zip(x.iter())
@@ -1061,13 +1191,31 @@ where
             break;
         }
         x = next;
-        let (q_energy, quenched) = eval(x.view(), relax_steps.max(1));
+        if value - base >= quench_after {
+            above.push((rung, x.clone()));
+        }
+    }
+    if above.is_empty() {
+        return None;
+    }
+    let last = above.len() - 1;
+    let mid = last / 2;
+    let mut picks = vec![0, last];
+    if mid != 0 && mid != last {
+        picks.push(mid);
+    }
+    picks.sort_unstable();
+    picks.dedup();
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    for index in picks {
+        let (rung, point) = &above[index];
+        let (q_energy, quenched) = with_disarmed(|| eval(point.view(), relax_steps.max(1)));
         if q_energy.is_finite()
             && let Some(trial) = quenched.as_slice()
             && crate::catalog::leaves_packing(origin_slice, trial, references)
             && best.as_ref().is_none_or(|(held, _, _)| q_energy < *held)
         {
-            best = Some((q_energy, quenched, rung));
+            best = Some((q_energy, quenched, *rung));
         }
     }
     best

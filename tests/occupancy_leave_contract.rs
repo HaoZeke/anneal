@@ -237,8 +237,12 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "a rung is sized by the barrier it must clear, measured on the potential"
     );
     assert!(
-        body.contains("activate_from_origin"),
-        "Leave climbs the local ridge (ART / MMF) before the quench"
+        body.contains("leave_packing_ridge"),
+        "a Leave that the ladder refuses accumulates the packing increment"
+    );
+    assert!(
+        !body.contains("activate_from_origin"),
+        "the Hessian min mode of a closed shell is a surface rumple, not a Leave"
     );
     assert!(
         body.contains("LEAVE_WALK_CLIMB"),

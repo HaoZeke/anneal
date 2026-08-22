@@ -204,6 +204,98 @@ fn main() {
         );
     };
 
+    if only_ridge {
+        // Directed packing-map walk: 96 covering points on the packing
+        // sphere miss Marks. This arm aims at Marks' mu, then at the
+        // fivefold residual that opened LJ38, then at a covering ridge.
+        let mut toward = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut fivefold = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        let mut cover = Tally {
+            best: ico_energy,
+            ..Tally::default()
+        };
+        if let Some(direction) = known_basin::packing_direction_between(ico.view(), marks.view()) {
+            println!("{{\"kind\":\"marks_dir\",\"dim\":{}}}", direction.len());
+            for rung in 0..known_basin::LEAVE_RUNGS {
+                let barrier = known_basin::rung_barrier(depth, rung);
+                let start = known_basin::leave_packing_rung_to_dir(
+                    ico.view(),
+                    &direction,
+                    barrier,
+                    None,
+                    None,
+                    |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+                );
+                let rise = potential.value_and_gradient(start.view()).0 - ico_energy;
+                let trial = quench(&potential, start.view(), steps);
+                classify("toward_rung", rung, &mut toward, &trial, Some(rung));
+                println!(
+                    "{{\"kind\":\"toward_rung\",\"rung\":{rung},\"barrier\":{barrier:.3},\"rise\":{rise:.3}}}"
+                );
+            }
+        } else {
+            println!("{{\"kind\":\"toward_rung\",\"failed\":\"no_direction\"}}");
+        }
+        let walked = known_basin::leave_packing_toward(
+            ico.view(),
+            marks.view(),
+            &references,
+            None,
+            None,
+            depth,
+            steps,
+            |trial, n| {
+                let relaxed = quench(&potential, trial, n);
+                (potential.value_and_gradient(relaxed.view()).0, relaxed)
+            },
+        );
+        match walked {
+            Some((_, trial, rung)) => classify("toward", 0, &mut toward, &trial, Some(rung)),
+            None => println!(
+                "{{\"kind\":\"leave\",\"generator\":\"toward\",\"index\":0,\"rung\":null,\"refused\":true}}"
+            ),
+        }
+        for (index, rmsd) in [0.12_f64, 0.35, 0.50].into_iter().enumerate() {
+            let start = anneal_core::soap::step_away_fivefold_measured(ico.view(), rmsd);
+            let trial = quench(&potential, start.view(), steps);
+            classify("fivefold", index, &mut fivefold, &trial, None);
+        }
+        for index in 0..leaves {
+            let walked = known_basin::leave_packing_ridge(
+                ico.view(),
+                index,
+                &references,
+                None,
+                None,
+                depth,
+                steps,
+                |trial, n| {
+                    let relaxed = quench(&potential, trial, n);
+                    (potential.value_and_gradient(relaxed.view()).0, relaxed)
+                },
+            );
+            match walked {
+                Some((_, trial, rung)) => {
+                    classify("ridge", index, &mut cover, &trial, Some(rung));
+                }
+                None => println!(
+                    "{{\"kind\":\"leave\",\"generator\":\"ridge\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+                ),
+            }
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+        report("toward", &toward, known_basin::LEAVE_RUNGS + 1);
+        report("fivefold", &fivefold, 3);
+        report("ridge", &cover, leaves);
+        return;
+    }
+
     for index in 0..leaves {
         // Old Leave: Cartesian covering point at 0.35, raw quench.
         let direction = anneal_core::hypersphere::cover_direction(
@@ -287,63 +379,87 @@ fn main() {
         }
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
-    // The driver's own path: a barrier-targeted rung, the min-mode climb
-    // that follows it, the energy gate on the crossing, then the quench.
-    // Reported per leave with the curvature the climb ended on, because a
-    // crossing at 1e13 is a crushed cluster and not a saddle.
-    let mut gated = Tally {
+    // Accumulated packing-map walk: each step is a barrier-sized
+    // pullback from the *current* point, then a quench. Independent
+    // rungs from the well all fall back into ico; the Hessian min mode
+    // does the same.
+    let mut ridge = Tally {
         best: ico_energy,
         ..Tally::default()
     };
-    let mut melts = 0usize;
     for index in 0..leaves {
-        let start = known_basin::leave_packing_rung_to(
+        known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
+        let walked = known_basin::leave_packing_ridge(
             ico.view(),
             index,
-            known_basin::rung_barrier(depth, 0),
             &references,
             None,
             None,
-            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+            depth,
+            steps,
+            |trial, n| {
+                let relaxed = quench(&potential, trial, n);
+                (potential.value_and_gradient(relaxed.view()).0, relaxed)
+            },
         );
-        let act = anneal_core::methods::activation::Activation::default();
-        let outcome = anneal_core::methods::activation::activate_from_origin(
-            start.view(),
-            ico.view(),
-            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
-            &act,
-        );
-        let ceiling = ico_energy + known_basin::LEAVE_WALK_CLIMB * depth;
-        let (climbed, lambda, crossed) = match outcome {
-            Some(o) => {
-                let energy = potential.value_and_gradient(o.state.view()).0;
-                (
-                    if o.crossed && energy.is_finite() && energy <= ceiling {
-                        o.state
-                    } else {
-                        if o.crossed {
-                            melts += 1;
-                        }
-                        start.clone()
-                    },
-                    o.lambda,
-                    o.crossed,
-                )
+        known_basin::disarm();
+        match walked {
+            Some((_, trial, rung)) => {
+                classify("ridge", index, &mut ridge, &trial, Some(rung));
             }
-            None => (start.clone(), f64::NAN, false),
-        };
-        let trial = quench(&potential, climbed.view(), steps);
-        println!(
-            "{{\"kind\":\"leave\",\"generator\":\"gated\",\"index\":{index},\"lambda\":{lambda:.3e},\"crossed\":{crossed},\"melts\":{}}}",
-            melts
-        );
-        classify("gated", index, &mut gated, &trial, None);
+            None => println!(
+                "{{\"kind\":\"leave\",\"generator\":\"ridge\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+            ),
+        }
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
-    println!(
-        "{{\"kind\":\"leave_probe_melts\",\"refused_crossings\":{melts},\"leaves\":{leaves}}}"
-    );
-    report("gated", &gated, leaves);
+    report("ridge", &ridge, leaves);
+    if only_ridge {
+        return;
+    }
+
+    // Rung by rung, with the cost the step actually paid and where the
+    // quench below it landed. A refusal can mean the step never left or the
+    // accept refused a genuine packing, and only the energies tell them
+    // apart.
+    for index in 0..leaves {
+        for rung in 0..known_basin::LEAVE_RUNGS {
+            let barrier = known_basin::rung_barrier(depth, rung);
+            let start = known_basin::leave_packing_rung_to(
+                ico.view(),
+                index,
+                barrier,
+                &references,
+                None,
+                None,
+                |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
+            );
+            let rise = potential.value_and_gradient(start.view()).0 - ico_energy;
+            let moved = start
+                .iter()
+                .zip(ico.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>();
+            let rmsd = (moved / (ico.len() / 3) as f64).sqrt();
+            let far = start
+                .iter()
+                .zip(ico.iter())
+                .map(|(a, b)| (a - b).abs())
+                .fold(0.0_f64, f64::max);
+            let trial = quench(&potential, start.view(), steps);
+            let energy = potential.value_and_gradient(trial.view()).0;
+            let left = trial
+                .as_slice()
+                .is_some_and(|slice| leaves_packing(&ico_slice, slice, &references));
+            let community = trial
+                .as_slice()
+                .map_or(2, |slice| community_of(&ico_slice, &marks_slice, slice));
+            println!(
+                "{{\"kind\":\"rung\",\"index\":{index},\"rung\":{rung},\"barrier\":{barrier:.3},\"rmsd\":{rmsd:.4},\"max_atom\":{far:.4},\"rise\":{rise:.3},\"quench\":{energy:.6},\"left\":{left},\"community\":{community}}}"
+            );
+        }
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
 
     report("cartesian", &cartesian, leaves);
     report("ridge", &ridge, leaves);
