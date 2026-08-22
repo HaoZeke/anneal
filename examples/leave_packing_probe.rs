@@ -147,9 +147,32 @@ fn main() {
     // the two packings into one community and a genuine Marks arrival
     // would not read as leaving.
     let marks_gap = packing_gap(&ico_slice, &marks_slice);
+    // The DECAF gap cannot tell the two funnels apart: icosahedral
+    // isomers reach 0.56 from the floor while Marks sits at 0.4267, and
+    // measured across sixteen traced seeds nothing in (gap, energy)
+    // separates the staging structures that convert from the hundreds
+    // that do not. The polyhedral-template shares are the candidate that
+    // can: a decahedron is close-packed with one fivefold line where an
+    // icosahedron is fivefold through the volume. Printed for the sealed
+    // pair so the separation is a number, not a belief.
+    let atoms = ico.len() / 3;
+    let ptm_cut = 1.6;
+    let ico_ptm = anneal_core::structure::ptm_fractions(ico.view(), atoms, ptm_cut);
+    let marks_ptm = anneal_core::structure::ptm_fractions(marks.view(), atoms, ptm_cut);
+    let show = |v: &ndarray::Array1<f64>| {
+        v.iter()
+            .map(|f| format!("{f:.3}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
     println!(
-        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4}}}"
+        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4},\"ico_ptm\":[{}],\"marks_ptm\":[{}]}}",
+        show(&ico_ptm),
+        show(&marks_ptm)
     );
+    if std::env::args().nth(3).is_some_and(|mode| mode == "floors") {
+        return;
+    }
 
     // The ladder is walked in barrier, so it needs the curvature of the
     // well it leaves and the depth that scales the barrier. Both measured.
