@@ -408,6 +408,21 @@ pub fn published_energy_score(best: f64, published: Option<f64>) -> bool {
     published.is_some_and(|target| best < target + 1e-4)
 }
 
+/// Consecutive refused Leaves after which an extra goes back to hopping.
+///
+/// A Leave that returns the replica to the packing it started in has
+/// installed nothing, and the checkpoint it spent is a checkpoint plain
+/// hopping did not get. On LJ75 that is every Leave: the book shows one
+/// community for the whole run, so extras keep drawing holes, and no walk
+/// out of the sealed icosahedral minimum leaves it at all -- twenty-four
+/// raw quenches dropped along a transformed trajectory reaching four
+/// times the DECAF distance to Marks every one returned to the floor.
+///
+/// Three rather than one, because a Leave may legitimately need a second
+/// arm at a wider rung, and because the packing test is a threshold on a
+/// histogram distance and one reading either side of it is not evidence.
+pub const LEAVE_REFUSAL_DWELL: usize = 3;
+
 /// Default floor on rematched occupied families. `1` is Good--Turing
 /// alone: stop when no new packings appear.
 pub const DEFAULT_MIN_OCCUPIED_FAMILIES: usize = 1;
