@@ -2,9 +2,19 @@
 //!
 //! ## Packing identity (DECAF)
 //!
-//! Per-center SOAP class histograms. Same family iff
-//! \(\|h-h'\|_1 \le\) [`crate::catalog::PACKING_MERGE`] \(= 0.20\).
-//! Sealed LJ75 icosahedral-versus-Marks L1 is \(0.69\).
+//! Per-center SOAP class histograms. Two structures share a book *cell* iff
+//! \(\|h-h'\|_1 \le\) [`crate::catalog::PACKING_MERGE`] \(= 0.20\). A
+//! cell is not a packing: a live LJ75 book holds tens of icosahedral cells.
+//!
+//! A packing is a single-linkage community of cells at
+//! [`crate::catalog::PACKING_LINK`] \(= 0.30\), and a structure belongs to
+//! the community it chains to. No radius around one reference can do this
+//! job. Measured on 69 quenched LJ75 icosahedral isomers within
+//! \(8\varepsilon\) of the ico floor (`examples/decaf_packing_separator`):
+//! the shelf reaches L1 \(0.56\) from its own reference while ico-Marks is
+//! \(0.4267\), so the shelf spread straddles the gap. Under single linkage
+//! at \(0.30\) the shelf chains into one community of 69 and Marks stands
+//! alone; the two merge only at \(0.45\).
 //!
 //! ## Inverted Gelman--Rubin
 //!
@@ -31,18 +41,24 @@
 //!
 //! ## Leave start
 //!
-//! Another *packing community* already on file (Fiedler \(F\ge 2\)
-//! after DECAF labels the sides) and packing not saturated: take a
-//! catalog representative of the least-occupied community. Leftover
-//! wells of one packing are a superbasin (\(F=1\)); they are not
-//! OtherFamily. Champion leftover walks isomers of the occupied
-//! packing. Extra ArchiveHole is the leftover-Jacobian pullback of a
-//! vector orthogonal to that packing mean and the shared archive
-//! (`packing_kick`). A leftover hole of the occupied wells is the
-//! champion walk, not Leave. Occupancy extras do not draw a random
-//! cluster.
-//! A single hole-and-quench returns to the same family; the hop
-//! then requenches and widens until DECAF says the family changed.
+//! Another *packing community* already on file and packing not saturated:
+//! take a catalog representative of the least-occupied community. Cells of
+//! one packing are a superbasin; they are not OtherFamily, and a draw that
+//! only clears the cell grain hands the extra an isomer of the packing it is
+//! leaving. Champion leftover walks those isomers.
+//!
+//! Extra ArchiveHole is a rung of the Leave ladder
+//! ([`crate::known_basin::leave_packing_rung`]): a covering direction of the
+//! DECAF feature, pointed away from the packings on file, pulled back
+//! through \(J_\mu\). Its size is one rung, not a grain. Wales and Doye
+//! put the LJ75 ico-Marks barriers at 8.69 and 7.48 \(\varepsilon\), so a
+//! quench from a Cartesian 0.35 cap is a projector onto the packing it
+//! started in, whatever direction it took. A rung whose quench lands back in
+//! the same packing is not refused into another hole of the same size: the
+//! hop loop walks the rest of the ladder
+//! ([`crate::known_basin::leave_packing_ladder`]) with the invert armed and
+//! reports a refusal only when the ladder is spent. Occupancy extras do not
+//! draw a random cluster.
 //!
 //! ## Modes
 //!
@@ -68,16 +84,16 @@
 //! certified and that packing census is saturated and FunnelModel EI
 //! on the seen packings is exhausted and the rematched family floor
 //! is met. Leftover-SOAP hatches of a seen packing do not walk the
-//! remaining force budget once the landfold-sparsified book has no
-//! holes. After the book exists, a landfold (Torgerson MDS of DECAF
-//! L1, then 2-means) folds leftover wells of one packing into one
-//! community. Leave continues only while that compacted book still
-//! has holes: a second community on the map with no well arrivals, or
-//! Chao1 incomplete on the merged well counts. Leftover FES modes of
-//! one packing are not a packing hole. The floor is the Fiedler split
-//! of the hop graph after DECAF labels the sides, the landfold
-//! community count when the book already holds a second packing extras
-//! have Left, or the book-map FES basin count. A Franzblau primitive-ring floor is
+//! remaining force budget once the sparsified book has no holes. After the
+//! book exists, single linkage at [`crate::catalog::PACKING_LINK`] folds
+//! cells of one packing into one community. Leave continues only while that
+//! compacted book still has holes: a community with no well arrivals, or
+//! Chao1 incomplete on the merged well counts. A one-community book is
+//! answered by the cells it folds, since Good--Turing on a single type has
+//! \(n_1=0\) whatever the sample is and certifies nothing. Leftover FES
+//! modes of one packing are not a packing hole. The floor is the Fiedler
+//! split of the hop graph after DECAF labels the sides, the packing
+//! community count of the book, or the book-map FES basin count. A Franzblau primitive-ring floor is
 //! reported beside it and does not retire.
 //! `CATALOG_MIN_FAMILIES` is an override.
 //! Occupant \(\hat R\) uses
@@ -235,9 +251,27 @@ pub fn occupancy_ring_class_changed(origin: &[f64], trial: &[f64]) -> bool {
 
 /// Leave has found a new class: a different DECAF family, or a
 /// different Franzblau ring histogram on the same SOAP merge radius.
+///
+/// The cell grain. Isomers of one packing clear it, so it names a book cell
+/// and is not the Leave accept. [`occupancy_leave_new_packing`] is.
 pub fn occupancy_leave_new_class(origin: &[f64], trial: &[f64]) -> bool {
     crate::catalog::different_decaf_family(origin, trial)
         || occupancy_ring_class_changed(origin, trial)
+}
+
+/// Leave has installed a packing: the quenched trial chains to no packing on
+/// file, the origin included.
+///
+/// Single linkage at [`crate::catalog::PACKING_LINK`] over a throwaway book
+/// of the origin, the published references and the trial. Measured on 69
+/// quenched LJ75 icosahedral isomers, [`occupancy_leave_new_class`] adopts 6
+/// of them on a ring-count change alone and adopts every one whose cell L1
+/// clears the merge grain, which is how a run counts 47 distinct energies and
+/// no Marks. Ring counts stay out of the accept: the shelf reaches ring-share
+/// L1 0.0789 from its own reference while ico-Marks is 0.0824, and a 0.0035
+/// margin does not decide a packing.
+pub fn occupancy_leave_new_packing(origin: &[f64], trial: &[f64]) -> bool {
+    crate::catalog::different_packing_family(origin, trial)
 }
 
 /// Occupancy Leave that walked away from the known packing mean
@@ -441,6 +475,10 @@ pub struct OccupancyBookMap {
     pub communities: usize,
     /// Merged leftover-well counts, one entry per community.
     pub community_wells: Vec<u64>,
+    /// Good--Turing sample of the raw DECAF cells the communities fold.
+    /// A one-community book is certified against this, not against its own
+    /// single merged bin.
+    pub cells: super::packing::GoodTuringSample,
     /// Book-map FES basin count ([`occupancy_fes`] on the Torgerson plane).
     pub fes_minima: usize,
     /// \(\Delta F/kT\) between the two deepest book-map FES basins.
@@ -463,16 +501,23 @@ impl OccupancyBookMap {
 
 /// Whether the sparsified book still has holes extras should Leave into.
 ///
-/// A second landfold community with no well arrivals is a hole. FES
-/// basins reopen a hole only while that second community exists:
-/// leftover wells of one packing (floor 1) stay one Chao1 sample even
-/// when the leftover cloud has more than one density mode. Chao1 on
-/// the merged well counts is the packing census after leftover wells
-/// of one packing collapse.
+/// A packing community with no well arrivals is a hole. FES basins reopen a
+/// hole only while a second community exists: leftover wells of one packing
+/// stay one Chao1 sample even when the leftover cloud has more than one
+/// density mode.
+///
+/// One community is the case that lied. A single merged bin has
+/// \(n_1=0\) by construction, so Chao1 called it complete while the raw
+/// DECAF cells underneath still carried half their mass in singletons.
+/// Good--Turing on one type carries no information about unseen types, so a
+/// one-community book falls back to the completeness of the finer codebook
+/// it was folded from: while new cells keep arriving, packings may still be
+/// arriving too.
 pub fn occupancy_book_holes(
     communities: usize,
     community_wells: &[u64],
     fes_minima: usize,
+    cells: super::packing::GoodTuringSample,
 ) -> bool {
     let occupied_sides = community_wells.iter().filter(|&&wells| wells > 0).count();
     if communities >= 2 && occupied_sides < 2 {
@@ -481,13 +526,20 @@ pub fn occupancy_book_holes(
     if communities >= 2 && fes_minima > occupied_sides {
         return true;
     }
+    if communities < 2 {
+        return !cells.chao1_complete();
+    }
     !super::packing::GoodTuringSample::from_counts(community_wells.iter().copied()).chao1_complete()
 }
 
-/// Compact leftover wells of the book by the landfold 2-means split.
+/// Compact the book into packing communities.
 ///
-/// Same-side DECAF families with floor 1 are one packing. Floor 2
-/// keeps two communities. Leave continues only while [`OccupancyBookMap::holes`].
+/// Single linkage at [`super::packing::PACKING_LINK`] over the DECAF cells,
+/// so isomers of one packing chain together and a packing that chains to
+/// nothing on file stands alone. The landfold Torgerson plane stays the
+/// figure and the reported floor; it is no longer what counts packings, since
+/// a forced 2-means bipartition of an isomer cloud has only ever one answer.
+/// Leave continues while [`OccupancyBookMap::holes`].
 pub fn occupancy_sparsify_book(
     histograms: &[Vec<f64>],
     family: &[usize],
@@ -499,6 +551,7 @@ pub fn occupancy_sparsify_book(
     } else {
         vec![0; n]
     };
+    let cells = super::packing::GoodTuringSample::from_counts(wells.iter().copied());
     if n == 0 {
         return OccupancyBookMap {
             points: Vec::new(),
@@ -507,9 +560,10 @@ pub fn occupancy_sparsify_book(
             right: 0,
             communities: 0,
             community_wells: Vec::new(),
+            cells,
             fes_minima: 0,
             fes_delta: None,
-            holes: occupancy_book_holes(0, &[], 0),
+            holes: occupancy_book_holes(0, &[], 0, cells),
         };
     }
     if n == 1 {
@@ -525,25 +579,17 @@ pub fn occupancy_sparsify_book(
             left: 1,
             right: 0,
             communities: 1,
-            holes: occupancy_book_holes(1, &community_wells, 1),
+            holes: occupancy_book_holes(1, &community_wells, 1, cells),
             community_wells,
+            cells,
             fes_minima: 1,
             fes_delta: None,
         };
     }
     let (floor, left, right) = occupancy_landfold_split(histograms, family);
     let xy = occupancy_map_from_histograms(histograms).unwrap_or_else(|| vec![[0.0, 0.0]; n]);
-    let mut community = vec![0usize; n];
-    if floor >= 2
-        && let Some((_, right_idx)) = two_means(&xy)
-    {
-        for i in right_idx {
-            if i < n {
-                community[i] = 1;
-            }
-        }
-    }
-    let n_communities = peel_far_packings(histograms, &mut community, &wells, floor.max(1));
+    let community = super::packing::packing_communities(histograms);
+    let n_communities = community.iter().copied().max().map_or(0, |last| last + 1);
     let mut community_wells = vec![0u64; n_communities];
     let mut points = Vec::with_capacity(n);
     for i in 0..n {
@@ -567,56 +613,12 @@ pub fn occupancy_sparsify_book(
         left,
         right,
         communities: n_communities,
-        holes: occupancy_book_holes(n_communities, &community_wells, fes.minima),
+        holes: occupancy_book_holes(n_communities, &community_wells, fes.minima, cells),
         community_wells,
+        cells,
         fes_minima: fes.minima,
         fes_delta: fes.delta,
     }
-}
-
-/// Peel histograms that sit farther than [`super::packing::PACKING_MERGE`]
-/// from their community medoid *and* outside the leftover cloud
-/// (farther than twice the median in-community distance). 2-means of a
-/// leftover-ico majority otherwise absorbs Oh or Marks.
-fn peel_far_packings(
-    histograms: &[Vec<f64>],
-    community: &mut [usize],
-    wells: &[u64],
-    n_communities: usize,
-) -> usize {
-    let merge = super::packing::PACKING_MERGE;
-    let mut n = n_communities.max(1);
-    for c in 0..n {
-        let members: Vec<usize> = (0..community.len())
-            .filter(|&i| community[i] == c)
-            .collect();
-        if members.len() < 2 {
-            continue;
-        }
-        let medoid = members
-            .iter()
-            .copied()
-            .max_by_key(|&i| wells.get(i).copied().unwrap_or(0))
-            .unwrap_or(members[0]);
-        let mut distances: Vec<f64> = members
-            .iter()
-            .map(|&i| super::packing::packing_distance(&histograms[i], &histograms[medoid]))
-            .collect();
-        distances.sort_by(|a, b| a.total_cmp(b));
-        let median = distances[distances.len() / 2];
-        let tail = merge.max(2.0 * median);
-        for &i in &members {
-            if i == medoid {
-                continue;
-            }
-            let d = super::packing::packing_distance(&histograms[i], &histograms[medoid]);
-            if d > tail {
-                community[i] = n;
-                n += 1;
-            }
-        }
-    }
-    n
 }
 
 /// Landfold-sparsify the occupied packing book.
@@ -2286,27 +2288,39 @@ mod tests {
         let map = occupancy_sparsify_book(&[], &[], &[]);
         assert_eq!(map.communities, 0);
         assert!(map.holes);
-        assert!(occupancy_book_holes(0, &[], 0));
-        assert!(occupancy_book_holes(1, &[5], 1));
-        assert!(!occupancy_book_holes(1, &[20], 1));
-        assert!(occupancy_book_holes(2, &[20, 0], 2));
-        assert!(!occupancy_book_holes(2, &[20, 20], 2));
+        let closed = super::super::packing::GoodTuringSample::from_counts([20u64, 20]);
+        let open = super::super::packing::GoodTuringSample::from_counts([20u64, 1]);
+        assert!(occupancy_book_holes(0, &[], 0, open));
+        assert!(occupancy_book_holes(1, &[5], 1, open));
+        assert!(!occupancy_book_holes(1, &[20], 1, closed));
         assert!(
-            !occupancy_book_holes(1, &[20], 2),
+            occupancy_book_holes(1, &[20], 1, open),
+            "one community is certified by the cells it folds, not by its own bin"
+        );
+        assert!(occupancy_book_holes(2, &[20, 0], 2, closed));
+        assert!(!occupancy_book_holes(2, &[20, 20], 2, closed));
+        assert!(
+            !occupancy_book_holes(1, &[20], 2, closed),
             "leftover FES modes of one packing are not a packing hole"
         );
     }
 
     #[test]
     fn leftover_fes_modes_do_not_reopen_a_floor_one_packing() {
-        let a = vec![1.0, 0.0, 0.0];
-        let a2 = vec![1.0, 0.05, 0.0];
-        let b = vec![0.0, 0.0, 1.0];
-        let b2 = vec![0.0, 0.05, 1.0];
-        let map = occupancy_sparsify_book(&[a, a2, b, b2], &[0, 0, 0, 0], &[20, 20, 20, 20]);
+        // Cells of one packing: consecutive gaps at or under the link
+        // radius, so the whole run chains, with the sample piled at the two
+        // ends so the plane still carries two density modes.
+        let cells = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![1.0, 0.1, 0.0],
+            vec![1.0, 0.4, 0.0],
+            vec![1.0, 0.7, 0.0],
+            vec![1.0, 0.8, 0.0],
+        ];
+        let map = occupancy_sparsify_book(&cells, &[0, 1, 2, 3, 4], &[20, 20, 20, 20, 20]);
         assert_eq!(
             map.communities, 1,
-            "same packing label is one 2-means community"
+            "cells that chain at the link radius are one packing"
         );
         assert!(
             map.fes_minima >= 2,
