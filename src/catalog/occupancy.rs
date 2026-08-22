@@ -519,6 +519,15 @@ pub struct OccupancyBookMap {
     pub communities: usize,
     /// Merged leftover-well counts, one entry per community.
     pub community_wells: Vec<u64>,
+    /// Communities that have had a well arrival.
+    ///
+    /// [`Self::communities`] counts cells that have not chained, and with a
+    /// handful of cells that is almost always more than one: two icosahedral
+    /// cells count as two packings until an intermediate cell arrives to
+    /// join them. Single linkage separates a cloud, not a pair, which is
+    /// what `Hop.component_avoids` says. A packing an extra can be sent to
+    /// is one a walk has actually arrived in.
+    pub occupied_communities: usize,
     /// Good--Turing sample of the raw DECAF cells the communities fold.
     /// A one-community book is certified against this, not against its own
     /// single merged bin.
@@ -604,6 +613,7 @@ pub fn occupancy_sparsify_book(
             right: 0,
             communities: 0,
             community_wells: Vec::new(),
+            occupied_communities: 0,
             cells,
             fes_minima: 0,
             fes_delta: None,
@@ -624,6 +634,7 @@ pub fn occupancy_sparsify_book(
             right: 0,
             communities: 1,
             holes: occupancy_book_holes(1, &community_wells, 1, cells),
+            occupied_communities: usize::from(community_wells[0] > 0),
             community_wells,
             cells,
             fes_minima: 1,
@@ -651,6 +662,7 @@ pub fn occupancy_sparsify_book(
         minima: 1,
         delta: None,
     });
+    let occupied_communities = community_wells.iter().filter(|&&wells| wells > 0).count();
     OccupancyBookMap {
         points,
         floor,
@@ -658,6 +670,7 @@ pub fn occupancy_sparsify_book(
         right,
         communities: n_communities,
         holes: occupancy_book_holes(n_communities, &community_wells, fes.minima, cells),
+        occupied_communities,
         community_wells,
         cells,
         fes_minima: fes.minima,
