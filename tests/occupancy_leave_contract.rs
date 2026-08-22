@@ -255,6 +255,38 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
 }
 
 #[test]
+fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let leave = source
+        .split("PolicyAction::Leave =>")
+        .nth(1)
+        .expect("Leave arm must exist");
+    let arm = leave
+        .split("PolicyAction::Explore =>")
+        .next()
+        .expect("Leave arm must end at Explore");
+    assert!(
+        arm.contains("OccupancyLeaveTarget::Walk"),
+        "a book with one packing has nothing to divide, so the extra keeps walking"
+    );
+    let walk = arm
+        .split("OccupancyLeaveTarget::Walk =>")
+        .nth(1)
+        .expect("Walk arm must exist")
+        .split("OccupancyLeaveTarget::OtherFamily =>")
+        .next()
+        .expect("Walk arm ends at OtherFamily");
+    assert!(
+        walk.contains("CheckpointAction::Continue"),
+        "Walk keeps the replica on its own trajectory"
+    );
+    assert!(
+        !walk.contains("leave_packing_state"),
+        "Walk does not draw a hole: measured on LJ75, no rung from 1.32 to 42.3 eps leaves the packing"
+    );
+}
+
+#[test]
 fn occupied_packing_extras_do_not_reseed_a_random_cluster() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let extra = source
