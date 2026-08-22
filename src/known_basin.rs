@@ -349,15 +349,30 @@ fn transform_packing(
     };
     let modes = packing_modes(armed, x, mu.view());
     if armed.lift.is_none() {
+        // Depth of the well along the packing coordinate itself.
+        //
+        // \(r_\varphi=\|\mu-\mu_k\|\) is a descriptor distance and
+        // \(\hat P\) is a unit Cartesian direction, so
+        // \(\nabla E\cdot\hat P\) is a force and is not a slope in
+        // \(r_\varphi\). The chain rule supplies the conversion:
+        // \(\nabla_x r_\varphi=\|P\|\hat P\), so
+        // \(\mathrm dE/\mathrm dr_\varphi=(\nabla E\cdot\hat P)/\|P\|\)
+        // and a harmonic well of that slope at distance \(r_\varphi\)
+        // is \(\tfrac12(\nabla E\cdot\hat P)r_\varphi/\|P\|\) deep.
+        // Dropping \(\|P\|\) leaves a force times a descriptor length,
+        // which is not an energy and cannot be compared with the barrier
+        // the hill has to fill: on LJ75 that is 8.69 or 7.48
+        // \(\varepsilon\) (Doye, Wales, Berry, *J. Chem. Phys.* **1995**,
+        // *103*, 4234).
         let mut amplitude = 0.0;
         let mut sigma_phi = 0.0;
-        for (p, r_phi, _) in &modes {
-            if *r_phi < 1e-12 {
+        for (p, r_phi, p_norm) in &modes {
+            if *r_phi < 1e-12 || *p_norm < 1e-15 {
                 continue;
             }
-            let lambda = dot(&grad, p) / r_phi;
-            if lambda > 0.0 {
-                let trial = lambda * r_phi * r_phi;
+            let slope = dot(&grad, p) / p_norm;
+            if slope > 0.0 {
+                let trial = 0.5 * slope * r_phi;
                 if trial > amplitude {
                     amplitude = trial;
                     sigma_phi = *r_phi;
