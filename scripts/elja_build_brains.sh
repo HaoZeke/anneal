@@ -45,6 +45,7 @@ fi
 "$PIXI" run -e cluster cargo test --offline --release --lib a_user_family_floor_of_one
 "$PIXI" run -e cluster cargo test --offline --release --lib catalog_leave_refuses_a_same_family
 "$PIXI" run -e cluster cargo test --offline --release --lib occupancy_leave_is_another_family_or_an_archive
+"$PIXI" run -e cluster cargo test --offline --release --test occupancy_leave_contract leave_quench_keeps_the_walk
 "$PIXI" run -e cluster cargo test --offline --release --lib interface_ranks_follow
 "$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_policy extras_on_a_published
 "$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_policy tis_extras_walk
@@ -57,6 +58,7 @@ fi
 "$PIXI" run -e cluster cargo test --offline --release --lib packing_householder_flips
 "$PIXI" run -e cluster cargo test --offline --release --lib xtsci_walks_off_the_known
 "$PIXI" run -e cluster cargo test --offline --release --lib packing_mode_is_nu3_mean
+"$PIXI" run -e cluster cargo test --offline --release --lib span_rises_when_the_packing
 "$PIXI" run -e cluster cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server

@@ -180,7 +180,8 @@ pub struct CatalogPolicyInput {
     pub interface_rank: u32,
     /// Threshold \(\lambda_i\) this extra must reach on Leave.
     pub interface_threshold: f64,
-    /// Occupied DECAF families on the book. Not leftover-SOAP basins.
+    /// Landfold communities on the sparsified book. OtherFamily
+    /// requires two; DECAF isomer bins of one packing are ArchiveHole.
     pub occupied_family_count: usize,
     /// DECAF-family Good--Turing: unseen packing mass is small.
     pub packing_saturated: bool,

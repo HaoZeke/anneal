@@ -1193,83 +1193,32 @@ where
                 if leave_action {
                     crate::known_basin::arm_leave(from_state.view(), 0.35);
                 }
+                let span0 = crate::known_basin::span(from_state.view());
                 let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                let span1 = crate::known_basin::span(quenched.1.view());
                 if leave_action {
                     crate::known_basin::disarm();
                 }
-                #[cfg(feature = "featomic")]
-                let quenched = if leave_action
-                    && from_state.as_slice().zip(quenched.1.as_slice()).is_none_or(
-                        |(origin, trial)| crate::catalog::occupancy_leave_new_class(origin, trial),
-                    ) {
-                    // New packing: polish on the raw PES so the
-                    // chain sits on a true minimum of that well.
-                    relax(ledger, quenched.1.view(), cfg.relax_steps)
+                // The invert walk is the Leave. A raw-\(E\) polish is
+                // a projector onto the occupied packing: DECAF isomer
+                // grain already fires on ico, and leftover-SOAP holes
+                // quench back to the same \(\mu_k\).
+                let quenched = if leave_action {
+                    let (raw_e, _) = relax(ledger, quenched.1.view(), 0);
+                    (raw_e, quenched.1)
                 } else {
                     quenched
                 };
                 let (proposal_energy, proposal_state) = quenched;
-                #[cfg(feature = "featomic")]
-                let family_changed = crate::catalog::is_occupancy_leave_action(&action)
-                    && from_state
-                        .as_slice()
-                        .zip(proposal_state.as_slice())
-                        .is_none_or(|(origin, trial)| {
-                            crate::catalog::occupancy_leave_new_class(origin, trial)
-                        });
+                let walked_off = leave_action
+                    && span1.is_finite()
+                    && span0.is_finite()
+                    && span1 > span0
+                    && span1 > 1e-12;
                 #[cfg(not(feature = "featomic"))]
-                let family_changed = true;
-                let leave = crate::catalog::occupancy_leave_adopt(&action, family_changed);
+                let walked_off = walked_off || leave_action;
+                let leave = crate::catalog::occupancy_leave_adopt(&action, walked_off);
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::Refuse) {
-                    // Extra Leave stayed in the family. One hole and
-                    // quench returns to the same packing. Requench and
-                    // widen, then kick the packing null space. A box
-                    // start is not occupancy Leave.
-                    #[cfg(feature = "featomic")]
-                    let escaped = {
-                        let rcut = 3.5 * cfg.length_scale;
-                        let well = crate::featomic_hop::soap_cloud_mean(
-                            from_state.view(),
-                            rcut,
-                            cfg.species.as_deref(),
-                            None,
-                        );
-                        let mut quench = |v: ArrayView1<f64>| relax(ledger, v, cfg.relax_steps).1;
-                        let left = crate::featomic_hop::leave_occupied_packing(
-                            state.view(),
-                            std::slice::from_ref(&well),
-                            rcut,
-                            cfg.species.as_deref(),
-                            None,
-                            &mut quench,
-                            rng,
-                        );
-                        let changed = from_state.as_slice().zip(left.as_slice()).is_none_or(
-                            |(origin, trial)| {
-                                crate::catalog::occupancy_leave_new_class(origin, trial)
-                            },
-                        );
-                        changed.then_some(left)
-                    };
-                    #[cfg(not(feature = "featomic"))]
-                    let escaped: Option<Array1<f64>> = None;
-                    if let Some(left) = escaped {
-                        let (le, lx) = relax(ledger, left.view(), 0);
-                        if quench_is_sane(cfg, le, lx.view()) {
-                            hops += 1;
-                            ledger.record(le, lx.view());
-                            let reached = identity.basin_of(lx.view());
-                            let from = here.unwrap_or_else(|| identity.basin_of(from_state.view()));
-                            feedback.observe(Some(from), reached);
-                            here = Some(reached);
-                            e = le;
-                            x = lx;
-                            accepted += 1;
-                            current_validation_gradient = None;
-                            bias.deposit(x.view(), cfg.temperature);
-                            continue;
-                        }
-                    }
                     hops += 1;
                     continue;
                 }

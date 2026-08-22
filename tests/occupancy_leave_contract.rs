@@ -190,7 +190,7 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     );
     assert!(
         arm.contains("occupied_family_count"),
-        "OtherFamily is occupied DECAF families on the book, not Fiedler F"
+        "OtherFamily is landfold communities on the sparsified book, not DECAF isomer bins"
     );
     assert!(
         arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
@@ -203,6 +203,34 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     assert!(
         !arm.contains("step_away_fivefold"),
         "ArchiveHole is not the serial fivefold morphology hop"
+    );
+}
+
+#[test]
+fn leave_quench_keeps_the_walk_off_mu_k() {
+    let source = include_str!("../src/methods/cluster_hopping.rs");
+    let body = source
+        .split("let leave_action = crate::catalog::is_occupancy_leave_action")
+        .nth(1)
+        .expect("Leave quench arm must exist")
+        .split("if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep)")
+        .next()
+        .expect("Leave quench arm ends at HoleStep");
+    assert!(
+        body.contains("known_basin::span"),
+        "Leave adopt is packing-mean span from mu_k, not DECAF isomer grain"
+    );
+    assert!(
+        !body.contains("occupancy_leave_new_class"),
+        "DECAF isomer grain is not the Leave polish or adopt bit"
+    );
+    assert!(
+        !body.contains("leave_occupied_packing"),
+        "leftover-SOAP requench is a projector onto the occupied packing"
+    );
+    assert!(
+        body.contains("relax(ledger, quenched.1.view(), 0)"),
+        "the invert geometry is rescored on raw E with no descent"
     );
 }
 
