@@ -291,7 +291,7 @@ fn main() {
     // that follows it, the energy gate on the crossing, then the quench.
     // Reported per leave with the curvature the climb ended on, because a
     // crossing at 1e13 is a crushed cluster and not a saddle.
-    let mut ridge = Tally {
+    let mut gated = Tally {
         best: ico_energy,
         ..Tally::default()
     };
@@ -334,14 +334,16 @@ fn main() {
         };
         let trial = quench(&potential, climbed.view(), steps);
         println!(
-            "{{\"kind\":\"leave\",\"generator\":\"ridge\",\"index\":{index},\"lambda\":{lambda:.3e},\"crossed\":{crossed},\"gated\":{}}}",
+            "{{\"kind\":\"leave\",\"generator\":\"gated\",\"index\":{index},\"lambda\":{lambda:.3e},\"crossed\":{crossed},\"melts\":{}}}",
             melts
         );
-        classify("ridge", index, &mut ridge, &trial, None);
+        classify("gated", index, &mut gated, &trial, None);
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
-    println!("{{\"kind\":\"leave_probe_melts\",\"gated_crossings\":{melts},\"leaves\":{leaves}}}");
-    report("ridge", &ridge, leaves);
+    println!(
+        "{{\"kind\":\"leave_probe_melts\",\"refused_crossings\":{melts},\"leaves\":{leaves}}}"
+    );
+    report("gated", &gated, leaves);
 
     report("cartesian", &cartesian, leaves);
     report("ridge", &ridge, leaves);
