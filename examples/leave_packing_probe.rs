@@ -56,6 +56,20 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, steps: usize) -> Array1
     }
 }
 
+/// DECAF distance between two structures, in the same L1 the packing
+/// grain is quoted in. `PACKING_LINK` is 0.35 and icosahedral-to-Marks
+/// is 0.69, so this says how far along that road a walk actually got.
+fn packing_gap(origin: &[f64], trial: &[f64]) -> f64 {
+    let mut book = PackingBook::default();
+    for state in [origin, trial] {
+        book.observe(state);
+    }
+    match (book.histogram(origin), book.histogram(trial)) {
+        (Some(a), Some(b)) => anneal_core::catalog::packing_distance(&a, &b),
+        _ => f64::NAN,
+    }
+}
+
 /// Which sealed community a structure lands in: 0 ico, 1 Marks, 2 neither.
 fn community_of(ico: &[f64], marks: &[f64], trial: &[f64]) -> usize {
     let mut book = PackingBook::default();
@@ -548,6 +562,15 @@ fn main() {
         // are 8.69 and 7.48 eps above the icosahedral shelf.
         let mut lift = 0.0_f64;
         let mut sigma = 0.0_f64;
+        // How far the walk got, and how much of it the raw polish gave
+        // back. A deposit tall enough to clear the barrier and a walk
+        // that still lands on the same minimum are two different
+        // failures, and the escape count alone cannot tell them apart:
+        // either the transformed surface never moved the quench, or it
+        // moved it and the minimum below the ridge was the one it
+        // started from.
+        let mut walk_r = 0.0_f64;
+        let mut land_r = 0.0_f64;
         let trials = leaves.min(16);
         for index in 0..trials {
             // T = 0.8 is the run temperature in the resolved config, and
@@ -580,7 +603,13 @@ fn main() {
             }
             known_basin::disarm();
             if let Some((energy, trial, _)) = walked {
+                if let Some(slice) = trial.as_slice() {
+                    walk_r = walk_r.max(packing_gap(&ico_slice, slice));
+                }
                 let polished = quench(&potential, trial.view(), steps);
+                if let Some(slice) = polished.as_slice() {
+                    land_r = land_r.max(packing_gap(&ico_slice, slice));
+                }
                 let energy = potential.value_and_gradient(polished.view()).0.min(energy);
                 if polished
                     .as_slice()
@@ -594,7 +623,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
