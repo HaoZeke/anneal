@@ -1,6 +1,8 @@
 //! Which observable separates the LJ75 Marks packing from the ico shelf.
 //!
-//!     decaf_packing_separator [ISOMERS]
+//!     decaf_packing_separator [ISOMERS] [N]
+//!
+//! `N` picks the sealed pair: 75 is ico versus Marks, 38 is ico versus Oh.
 //!
 //! A scalar L1 radius on DECAF histograms does not: quenched icosahedral
 //! isomers reach further from the ico reference than Marks does. This tool
@@ -93,9 +95,22 @@ fn main() {
         .nth(1)
         .and_then(|value| value.parse().ok())
         .unwrap_or(200);
-    let lj75_ico = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
-    let lj75_marks = load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz"));
-    let potential = PairPotential::new(75, PairKind::LennardJones, 40.0);
+    let n: usize = std::env::args()
+        .nth(2)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(75);
+    let (lj75_ico, lj75_marks) = if n == 38 {
+        (
+            load_xyz(include_str!("../tests/fixtures/lj38_ico.xyz")),
+            load_xyz(include_str!("../tests/fixtures/lj38_fcc.xyz")),
+        )
+    } else {
+        (
+            load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz")),
+            load_xyz(include_str!("../tests/fixtures/lj75_marks.xyz")),
+        )
+    };
+    let potential = PairPotential::new(n, PairKind::LennardJones, 40.0);
     let (ico_energy, ico_state) = quench(&potential, lj75_ico.view(), 600);
     let (marks_energy, marks_state) = quench(&potential, lj75_marks.view(), 600);
 
@@ -115,10 +130,11 @@ fn main() {
         states.push(relaxed);
         energies.push(energy);
     }
-    let n = states.len();
+    let points = states.len();
     println!(
-        "{{\"kind\":\"separator_sample\",\"n\":{n},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
+        "{{\"kind\":\"separator_sample\",\"atoms\":{n},\"points\":{points},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
     );
+    let n = points;
 
     // One shared codebook over every structure, the live PackingBook form.
     let mut book = PackingBook::default();
