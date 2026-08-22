@@ -16,7 +16,8 @@ use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LeavePath, OccupancyLeaveTarget, credit_action,
-    occupancy_complete_at, occupancy_is_cluster, occupancy_leave_by_ei, occupancy_retire_at,
+    leftover_birth_probability, occupancy_complete_at, occupancy_is_cluster,
+    occupancy_leave_by_birth, occupancy_retire_at,
     published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
@@ -3771,11 +3772,23 @@ fn run_capnp_catalog(
                         None
                     }
                 };
-                match occupancy_leave_by_ei(
+                let p_new = leftover_birth_probability(
+                    policy.census.total_visits(),
+                    policy.census.singleton_basins().max(1),
+                );
+                let birth_draw = {
+                    let bits = (u64::from(replica) << 17)
+                        ^ (checkpoint_sequence as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+                        ^ (step as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+                    (bits as f64) / (u64::MAX as f64)
+                };
+                match occupancy_leave_by_birth(
                     other_family.is_some(),
                     policy.packing_saturated,
                     policy.occupied_family_count as usize,
                     policy.ei_exhausted,
+                    p_new,
+                    birth_draw,
                 ) {
                     OccupancyLeaveTarget::Walk => {
                         // Nothing on the book to divide. The extra keeps

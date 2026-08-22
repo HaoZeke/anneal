@@ -25,7 +25,7 @@ fn catalog_min_families_override_requires_a_parsed_floor() {
         "the book landfold community count is the secondary family floor"
     );
     assert!(
-        body.contains("occupancy_sparsify_packing"),
+        body.contains("sparsified_book"),
         "peeled book communities drive Leave F"
     );
     assert!(
@@ -45,7 +45,7 @@ fn packing_census_uses_the_sparsified_book() {
         .next()
         .expect("packing census ends at funnel EI");
     assert!(
-        body.contains("occupancy_sparsify_packing"),
+        body.contains("sparsified_book"),
         "packing saturation is Chao1 on the landfold-sparsified book"
     );
     assert!(
@@ -174,8 +174,9 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let leave = source
         .split("PolicyAction::Leave =>")
-        .nth(1)
-        .expect("Leave arm must exist");
+        .skip(1)
+        .find(|chunk| chunk.contains("occupancy_leave_by_birth"))
+        .expect("occupancy extras Leave arm must exist");
     let arm = leave
         .split("PolicyAction::Explore =>")
         .next()
@@ -259,15 +260,16 @@ fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let leave = source
         .split("PolicyAction::Leave =>")
-        .nth(1)
-        .expect("Leave arm must exist");
+        .skip(1)
+        .find(|chunk| chunk.contains("occupancy_leave_by_birth"))
+        .expect("occupancy extras Leave arm must exist");
     let arm = leave
         .split("PolicyAction::Explore =>")
         .next()
         .expect("Leave arm must end at Explore");
     assert!(
-        arm.contains("occupancy_leave_by_ei"),
-        "Walk vs ArchiveHole follows FunnelModel EI, not only the community count"
+        arm.contains("occupancy_leave_by_birth"),
+        "Walk vs ArchiveHole follows FunnelModel EI plus leftover birth, not only the community count"
     );
     assert!(
         arm.contains("OccupancyLeaveTarget::Walk"),

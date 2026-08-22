@@ -234,6 +234,28 @@ pub fn leftover_esty_stable(n: u64, n1: u64, n2: u64, ceiling: f64) -> bool {
         && leftover_esty_upper(n, n1, n2).is_some_and(|upper| upper < ceiling)
 }
 
+/// Default Pitman--Yor concentration. Not a retire knob.
+pub const PITMAN_YOR_THETA: f64 = 1.0;
+/// Default Pitman--Yor discount. \(d=0\) is the Dirichlet process.
+pub const PITMAN_YOR_DISCOUNT: f64 = 0.5;
+
+/// Lijoi--Mena--Prunster / Pitman--Yor discovery probability
+/// \((\theta + d K)/(n + \theta)\).
+///
+/// Leave birth on leftover arrivals. Packing Good--Turing stays the
+/// census. Not an estimator of \(F\).
+pub fn pitman_yor_p_new(n: u64, k: u64, theta: f64, discount: f64) -> f64 {
+    if n == 0 {
+        return 1.0;
+    }
+    ((theta + discount * k as f64) / (theta + n as f64)).clamp(0.0, 1.0)
+}
+
+/// [`pitman_yor_p_new`] at the default \((\theta, d)\).
+pub fn leftover_birth_probability(n: u64, k: u64) -> f64 {
+    pitman_yor_p_new(n, k, PITMAN_YOR_THETA, PITMAN_YOR_DISCOUNT)
+}
+
 /// Leave destination. OtherFamily is a draw from another packing
 /// community on the sparsified book (`communities >= 2`). Leftover
 /// wells of one packing (`communities < 2`) stay ArchiveHole even
@@ -277,6 +299,31 @@ pub fn occupancy_leave_by_ei(
         OccupancyLeaveTarget::OtherFamily
     } else {
         OccupancyLeaveTarget::ArchiveHole
+    }
+}
+
+/// [`occupancy_leave_by_ei`] with a leftover birth draw.
+///
+/// When EI is exhausted the extra Walks. A leftover sample can still
+/// mint a family: reopen ArchiveHole when `draw < p_new`.
+pub fn occupancy_leave_by_birth(
+    other_family_in_catalog: bool,
+    packing_saturated: bool,
+    packing_communities: usize,
+    ei_exhausted: bool,
+    p_new: f64,
+    draw: f64,
+) -> OccupancyLeaveTarget {
+    let target = occupancy_leave_by_ei(
+        other_family_in_catalog,
+        packing_saturated,
+        packing_communities,
+        ei_exhausted,
+    );
+    if target == OccupancyLeaveTarget::Walk && draw < p_new.clamp(0.0, 1.0) {
+        OccupancyLeaveTarget::ArchiveHole
+    } else {
+        target
     }
 }
 
@@ -1899,11 +1946,13 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_shot_accepted, leftover_esty_stable, leftover_esty_var, leftover_hatch_stable,
+        leave_shot_accepted, leftover_birth_probability, leftover_esty_stable, leftover_esty_var,
+        leftover_hatch_stable,
         leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
         occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
         occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_ei,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
+        occupancy_leave_by_ei, pitman_yor_p_new,
         occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
         occupancy_retire_at, occupancy_ring_class_changed, occupancy_ring_floor,
         occupancy_sparsify_book, packing_role, promote_one_sided, published_energy_score,
@@ -2016,6 +2065,31 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_by_ei(true, false, 2, false),
+            OccupancyLeaveTarget::OtherFamily
+        );
+    }
+
+    #[test]
+    fn pitman_yor_birth_is_one_on_an_empty_book_and_rises_with_k() {
+        assert_eq!(pitman_yor_p_new(0, 0, 1.0, 0.5), 1.0);
+        let thin = leftover_birth_probability(20, 1);
+        let hatched = leftover_birth_probability(20, 16);
+        assert!(hatched > thin, "hatched {hatched} thin {thin}");
+        assert!(hatched <= 1.0 && thin > 0.0);
+    }
+
+    #[test]
+    fn leftover_birth_reopens_a_walk_when_the_draw_hits() {
+        assert_eq!(
+            occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.1),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_eq!(
+            occupancy_leave_by_birth(false, true, 1, true, 0.8, 0.9),
+            OccupancyLeaveTarget::Walk
+        );
+        assert_eq!(
+            occupancy_leave_by_birth(true, false, 2, false, 0.9, 0.0),
             OccupancyLeaveTarget::OtherFamily
         );
     }
