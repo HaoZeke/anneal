@@ -1017,6 +1017,14 @@ where
         } else {
             None
         };
+    // The packing pile. Off unless asked for, because it costs a single
+    // linkage test the first time each basin is seen, and on unless the
+    // caller has a reason: the cell-grain pile alone has never taken an
+    // LJ75 chain out of the icosahedral funnel.
+    let mut pave: Option<crate::catalog::PackingPave> =
+        std::env::var("CATALOG_PACKING_PAVE")
+            .is_ok_and(|value| value == "1")
+            .then(crate::catalog::PackingPave::new);
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2125,6 +2133,41 @@ where
         } else {
             None
         };
+        // Paving at the packing grain, beside the paving at the cell grain.
+        //
+        // BasinBias opens an account per cluster fingerprint, so every
+        // icosahedral isomer gets its own, and the icosahedral shelf of
+        // LJ75 holds hundreds of minima that the book splits into about
+        // thirty-two families. A quarter of an eps a visit, fragmented
+        // that far, never approaches the 8.69 eps between the funnels.
+        // The packing pile holds one account for the whole shelf, so
+        // arriving anywhere on it is expensive to the acceptance test.
+        //
+        // No walk out of the icosahedral minimum leaves it, measured; what
+        // reaches Marks is plain hopping, over a sequence of ordinary
+        // moves. Tilting that sequence is the lever the measurements leave
+        // standing.
+        let (pave_old, pave_new) = if let Some(pave) = pave.as_mut() {
+            let from = *here.get_or_insert_with(|| identity.basin_of(x.view()));
+            let reached = identity.basin_of(x_new.view());
+            let old = x
+                .as_slice()
+                .map(|slice| {
+                    pave.community(from as u64, slice);
+                    pave.potential(from as u64)
+                })
+                .unwrap_or(0.0);
+            let new = x_new
+                .as_slice()
+                .map(|slice| {
+                    pave.community(reached as u64, slice);
+                    pave.potential(reached as u64)
+                })
+                .unwrap_or(0.0);
+            (old, new)
+        } else {
+            (0.0, 0.0)
+        };
         let s_old = bias.cv(x.view());
         let s_new = bias.cv(x_new.view());
         // Biased rise. The bias is part of the landscape the chain walks; a
@@ -2146,7 +2189,7 @@ where
                 .as_ref()
                 .map(|sp| sp.potential(sp.cv(x_new.view()).view()))
                 .unwrap_or(0.0);
-        let delta = (e_new + v_new) - (e + v_old);
+        let delta = (e_new + v_new + pave_new) - (e + v_old + pave_old);
         // Unquenched trials are not answers. They still face Metropolis,
         // which is how the measured LJ38 run discovers basins from a
         // 25-step screen. Gating accept on recordable froze that path
@@ -2241,6 +2284,22 @@ where
         // driver.
         if accept {
             accepted += 1;
+            // One arrival on the packing the chain has just moved onto.
+            // The pile is what makes returning to the icosahedral shelf
+            // expensive, and it only means anything if it counts arrivals
+            // the chain actually made.
+            if let Some(pave) = pave.as_mut()
+                && let Some(slice) = x_new.as_slice()
+            {
+                let reached = identity.basin_of(x_new.view());
+                pave.deposit(
+                    reached as u64,
+                    slice,
+                    cfg.bias_height,
+                    cfg.bias_gamma,
+                    cfg.temperature,
+                );
+            }
         }
         // A quarantined funnel is refused whatever the energy. Checked after
         // the acceptance test rather than instead of it, so the veto is

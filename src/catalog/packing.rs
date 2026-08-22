@@ -842,3 +842,128 @@ pub fn leaves_packing(origin: &[f64], trial: &[f64], references: &[Vec<f64>]) ->
 pub fn different_packing_family(origin: &[f64], trial: &[f64]) -> bool {
     leaves_packing(origin, trial, &packing_references())
 }
+
+/// Paving pile kept per packing community rather than per basin.
+///
+/// The hop acceptance already walks a biased landscape, but the pile it
+/// reads is [`crate::bias::BasinBias`], keyed on the cluster fingerprint.
+/// Every icosahedral isomer therefore opens its own account, and the
+/// icosahedral shelf of LJ75 carries hundreds of minima that the live
+/// book splits into about thirty-two DECAF families. A deposit of 0.25
+/// eps a visit, fragmented that far, never approaches the 8.69 eps
+/// between the funnels: the mechanism that could make the funnel
+/// expensive never sees it as one place.
+///
+/// Nor can a single walk leave it. Measured from the sealed icosahedral
+/// minimum, twenty-four raw quenches dropped along a transformed
+/// trajectory reaching 1.87 in DECAF distance, against a Marks
+/// separation of 0.4267, every one returned to the floor. What does
+/// reach Marks is plain hopping, over a sequence of ordinary moves. So
+/// the pile has to tilt the hopping, and to do that it has to be keyed
+/// at the grain where icosahedral is one packing.
+///
+/// The cost is a map lookup per hop. A basin's community is decided once,
+/// the first time that basin is seen, by the same single linkage the book
+/// uses; afterwards the hop reads the pile by basin id.
+#[derive(Debug, Default, Clone)]
+pub struct PackingPave {
+    community_of: BTreeMap<u64, usize>,
+    representatives: Vec<Vec<f64>>,
+    pile: Vec<f64>,
+    visits: Vec<u64>,
+}
+
+impl PackingPave {
+    /// An empty pile.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Communities opened so far.
+    pub fn communities(&self) -> usize {
+        self.pile.len()
+    }
+
+    /// The community `basin` belongs to, deciding it if this is the first
+    /// time that basin has been seen.
+    ///
+    /// A structure joins the first community whose representative it does
+    /// not leave, which is single linkage at [`PACKING_LINK`] against one
+    /// member. That is the same rule [`leaves_packing`] applies and the
+    /// same one the book folds with.
+    pub fn community(&mut self, basin: u64, coordinates: &[f64]) -> usize {
+        if let Some(found) = self.community_of.get(&basin) {
+            return *found;
+        }
+        let mut joined = None;
+        for (index, representative) in self.representatives.iter().enumerate() {
+            if representative.len() == coordinates.len()
+                && !leaves_packing(representative, coordinates, &[])
+            {
+                joined = Some(index);
+                break;
+            }
+        }
+        let index = joined.unwrap_or_else(|| {
+            self.representatives.push(coordinates.to_vec());
+            self.pile.push(0.0);
+            self.visits.push(0);
+            self.pile.len() - 1
+        });
+        self.community_of.insert(basin, index);
+        index
+    }
+
+    /// Standing bias on the community holding `basin`, or zero for a
+    /// basin never seen.
+    pub fn potential(&self, basin: u64) -> f64 {
+        self.community_of
+            .get(&basin)
+            .and_then(|index| self.pile.get(*index))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Add one arrival on the community holding `basin`.
+    ///
+    /// The increment is \\(w_0+T\\ln n\\), the fixed height plus the
+    /// configurational entropy of a packing reached \\(n\\) ways, scaled
+    /// by \\(e^{-V/((\\gamma-1)T)}\\) so the pile converges on
+    /// \\(-\\frac{\\gamma-1}{\\gamma}F\\) rather than growing without
+    /// bound. That is the rule [`crate::bias::WellTemperedBias`] already
+    /// deposits by, with the entropic term the fixed height leaves out.
+    pub fn deposit(&mut self, basin: u64, coordinates: &[f64], w0: f64, gamma: f64, temp: f64) {
+        let index = self.community(basin, coordinates);
+        let Some(standing) = self.pile.get(index).copied() else {
+            return;
+        };
+        let arrivals = self.visits.get(index).copied().unwrap_or(0);
+        let entropy = if temp > 0.0 && arrivals > 0 {
+            temp * (arrivals as f64).ln()
+        } else {
+            0.0
+        };
+        let taper = if gamma > 1.0 && temp > 0.0 {
+            (-standing / ((gamma - 1.0) * temp)).exp()
+        } else {
+            1.0
+        };
+        let increment = (w0.max(0.0) + entropy) * taper;
+        if increment.is_finite() {
+            self.pile[index] = standing + increment;
+        }
+        if let Some(count) = self.visits.get_mut(index) {
+            *count = count.saturating_add(1);
+        }
+    }
+
+    /// Arrivals recorded per community, for the census and the report.
+    pub fn arrivals(&self) -> &[u64] {
+        &self.visits
+    }
+
+    /// Standing pile per community.
+    pub fn piles(&self) -> &[f64] {
+        &self.pile
+    }
+}
