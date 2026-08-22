@@ -1046,6 +1046,13 @@ where
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(800);
+    // Print the seam coordinate of every accepted hop, so whether the
+    // gap from the floor orders progress toward the other funnel is a
+    // measurement rather than an assumption: icosahedral isomers reach
+    // L1 0.56 from the floor while Marks sits at 0.4267, so a bank keyed
+    // on this coordinate may be holding sideways isomers as its
+    // frontier. Tracing a winning plain seed answers it.
+    let seam_trace = std::env::var("CATALOG_SEAM_TRACE").is_ok_and(|value| value == "1");
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2363,6 +2370,21 @@ where
             // of the road out of the floor. Offered before the floor can
             // move: a new incumbent redraws every gap, and the bank tolerates
             // stale bands because only the frontier is ever read.
+            if seam_trace
+                && recordable
+                && let (Some(floor), Some(trial)) = (
+                    ledger
+                        .best_state
+                        .as_ref()
+                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
+                    x_new.as_slice(),
+                )
+            {
+                let gap = crate::catalog::packing_seam_gap(&floor, trial);
+                println!(
+                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6}}}"
+                );
+            }
             if let Some(seam) = seam.as_mut()
                 && recordable
                 && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
