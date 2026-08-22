@@ -508,12 +508,19 @@ fn main() {
             }];
         let mut seeded = 0usize;
         let mut step = 0usize;
-        while seeded + 1 < k && step < 400 {
+        // The seeding budget is what the top of this curve measures, and
+        // 400 steps of a sigma that cycles through fifteen values found
+        // fifteen distinct wells and then repeated itself: cloud sizes 24
+        // and 48 both came back as 15 wells and 375 arrivals, the same
+        // experiment run twice. The budget is raised and the cycle
+        // lengthened to a coprime stride so the two points differ.
+        while seeded + 1 < k && step < 6000 {
             step += 1;
-            let sigma = 0.08 + 0.02 * ((step % 15) as f64);
+            let sigma = 0.08 + 0.02 * ((step % 37) as f64);
             let mut start = ico.clone();
             for (index, value) in start.iter_mut().enumerate() {
-                *value += sigma * (((index * 13 + step * 7) % 5) as f64 - 2.0) / 2.0;
+                let mix = (index * 31 + step * 17 + (step / 37) * 11) % 7;
+                *value += sigma * (mix as f64 - 3.0) / 3.0;
             }
             let relaxed = quench(&potential, start.view(), steps);
             let energy = potential.value_and_gradient(relaxed.view()).0;
