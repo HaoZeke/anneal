@@ -1232,22 +1232,51 @@ where
                 if leave_action {
                     crate::known_basin::arm_leave(from_state.view(), leave_sigma, &references);
                 }
-                // Follow the packing-map covering direction in barrier-sized
-                // steps from the current point, quench after each, and keep
-                // a landing that is a different packing. The Hessian min
-                // mode of a closed shell is a surface rumple: climbing it
-                // and quenching returns to the same packing.
+                // The barrier ladder is the Leave that leaves. Measured
+                // from the sealed LJ75 icosahedral minimum: 32 of 32
+                // covering starts quenched to novel packings between
+                // -371 and -391. A Hessian min-mode climb from the same
+                // well is a surface rumple and returns to ico. The
+                // accumulated ridge is the second try when the ladder
+                // refuses; its ceiling is LEAVE_WALK_CLIMB times the
+                // depth per atom.
                 let quenched = if leave_action {
-                    if let Some((energy, landed, _)) = crate::known_basin::leave_packing_ridge(
-                        from_state.view(),
-                        hops,
-                        &references,
-                        cfg.species.as_deref(),
-                        None,
-                        leave_depth,
-                        cfg.relax_steps,
-                        |trial, steps| relax(ledger, trial, steps),
-                    ) {
+                    let ladder = {
+                        let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
+                        for rung in 0..crate::known_basin::LEAVE_RUNGS {
+                            starts.push(crate::known_basin::leave_packing_rung_to(
+                                from_state.view(),
+                                hops,
+                                crate::known_basin::rung_barrier(leave_depth, rung),
+                                &references,
+                                cfg.species.as_deref(),
+                                None,
+                                |trial| Some(relax(ledger, trial, 0).0),
+                            ));
+                        }
+                        let mut quench =
+                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
+                        crate::known_basin::leave_packing_starts(
+                            from_state.view(),
+                            &starts,
+                            &references,
+                            &mut quench,
+                        )
+                    };
+                    if let Some((energy, landed, _)) = ladder {
+                        (energy, landed)
+                    } else if let Some((energy, landed, _)) =
+                        crate::known_basin::leave_packing_ridge(
+                            from_state.view(),
+                            hops,
+                            &references,
+                            cfg.species.as_deref(),
+                            None,
+                            leave_depth,
+                            cfg.relax_steps,
+                            |trial, steps| relax(ledger, trial, steps),
+                        )
+                    {
                         (energy, landed)
                     } else {
                         relax(ledger, state.view(), cfg.relax_steps)
@@ -1275,48 +1304,7 @@ where
                             crate::catalog::leaves_packing(origin, trial, &references)
                         })
                 };
-                let mut walked_off = leave_action && left_packing(&candidate);
-                // A Leave that quenched back into the packing it left widens
-                // in the packing map. Refusing it here and drawing another
-                // hole of the same size repeats the same quench: the ladder
-                // is what makes the step big enough to need the invert.
-                if leave_action
-                    && !walked_off
-                    && action == "catalog_leave"
-                    && ledger.remaining() > cfg.relax_steps
-                {
-                    let ladder = {
-                        // Two closures, two borrows of the ledger, so the
-                        // rung search and the quench cannot be held at once.
-                        // The search runs first; its energy calls are
-                        // charged like any other.
-                        let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
-                        for rung in 0..crate::known_basin::LEAVE_RUNGS {
-                            starts.push(crate::known_basin::leave_packing_rung_to(
-                                from_state.view(),
-                                hops,
-                                crate::known_basin::rung_barrier(leave_depth, rung),
-                                &references,
-                                cfg.species.as_deref(),
-                                None,
-                                |trial| Some(relax(ledger, trial, 0).0),
-                            ));
-                        }
-                        let mut quench =
-                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
-                        crate::known_basin::leave_packing_starts(
-                            from_state.view(),
-                            &starts,
-                            &references,
-                            &mut quench,
-                        )
-                    };
-                    if let Some((energy, left, _rung)) = ladder {
-                        candidate_energy = energy;
-                        candidate = left;
-                        walked_off = true;
-                    }
-                }
+                let walked_off = leave_action && left_packing(&candidate);
                 if leave_action {
                     crate::known_basin::disarm();
                 }
