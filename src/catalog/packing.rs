@@ -1,10 +1,13 @@
 //! Packing-family identity from per-center SOAP class histograms.
 //!
-//! The exact census radius is quench reproducibility. A packing family is
-//! the DECAF histogram of per-atom environments, leader-clustered at a
-//! fixed radius. Sealed LJ75 measurement: icosahedral reference versus
-//! Marks has L1 0.69; versus the sealed ico floor the L1 is 0. No named
-//! morphology enters the comparison.
+//! The exact census radius is quench reproducibility. A book cell is the
+//! DECAF histogram of per-atom environments, leader-clustered at a fixed
+//! radius, merged at [`PACKING_MERGE`]. A packing is a single-linkage
+//! community of cells at [`PACKING_LINK`], because isomers of one packing
+//! spread further from their own reference than a competing packing sits
+//! from it: measured on LJ75, the icosahedral shelf reaches L1 0.56 from the
+//! ico reference while ico-Marks is 0.4267. No named morphology enters
+//! either comparison.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -17,9 +20,22 @@ use crate::soap::{SoapSpec, local_nu3_z};
 /// as `examples/decaf_local_classes.rs` and `rewrite_2026/data/decaf/decaf_r14.txt`.
 pub const ENVIRONMENT_RADIUS: f64 = 1.4;
 
-/// Histogram L1 at or below this is one packing family. Sits between the
-/// sealed ico-floor L1 of 0 and the ico–Marks L1 of 0.69.
+/// Histogram L1 at or below this is one book cell. The cell grain, not the
+/// packing grain: a live LJ75 book puts tens of icosahedral cells above it.
 pub const PACKING_MERGE: f64 = 0.20;
+
+/// Single-linkage radius that separates packings on a shared codebook.
+///
+/// A radius from one reference cannot do this. Measured on 69 quenched LJ75
+/// icosahedral isomers within \(8\varepsilon\) of the ico floor, against
+/// `tests/fixtures/lj75_ico.xyz` and `tests/fixtures/lj75_marks.xyz`
+/// (`examples/decaf_packing_separator`): shelf isomers reach L1 \(0.56\)
+/// from the ico reference while ico-Marks is \(0.4267\), so the shelf
+/// spread straddles the gap. Single linkage separates them instead. Marks is
+/// its own component from radius \(0.10\) to \(0.40\) while the shelf
+/// chains into one component of 64 to 70 members; at \(0.45\) the two
+/// merge. This is the middle of that range.
+pub const PACKING_LINK: f64 = 0.30;
 
 /// DECAF used [`SoapSpec::default`], not the leftover hop spec.
 pub const PACKING_SPEC: SoapSpec = SoapSpec {
@@ -238,6 +254,29 @@ impl PackingBook {
         representatives.len()
     }
 
+    /// Distinct packings among live structures, at [`PACKING_LINK`].
+    ///
+    /// [`Self::occupied_among`] counts book cells, and isomers of one packing
+    /// hold tens of them, so counting cells against a packing floor certifies
+    /// a second funnel that is not there.
+    pub fn occupied_packings_among<I, C>(&self, structures: I) -> usize
+    where
+        I: IntoIterator<Item = C>,
+        C: AsRef<[f64]>,
+    {
+        let mut histograms: Vec<Vec<f64>> = Vec::new();
+        for coordinates in structures {
+            let Some(histogram) = self.histogram(coordinates.as_ref()) else {
+                continue;
+            };
+            if self.family_of(&histogram).is_none() {
+                continue;
+            }
+            histograms.push(histogram);
+        }
+        packing_community_count(&histograms)
+    }
+
     /// Family count occupancy may retire on. Leftover-SOAP Good--Turing
     /// plus two singleton DECAF slots is not two occupied funnels.
     pub fn certificate_family_count<I, C>(&self, structures: I) -> usize
@@ -245,7 +284,7 @@ impl PackingBook {
         I: IntoIterator<Item = C>,
         C: AsRef<[f64]>,
     {
-        let rematched = self.occupied_among(structures);
+        let rematched = self.occupied_packings_among(structures);
         if self.families_saturated() {
             rematched
         } else {
@@ -483,4 +522,144 @@ fn dense_normalized(counts: &BTreeMap<usize, usize>, dim: usize) -> Vec<f64> {
         }
     }
     out
+}
+
+/// Single-linkage community labels at `radius`, in first-appearance order.
+///
+/// Packing identity is a community of book cells, not a ball around one
+/// reference: quenched isomers of one packing spread further from their own
+/// reference than a competing packing sits from it. Chaining through the
+/// cells the book already holds is what keeps the isomer shelf together and
+/// still leaves a genuinely different packing on its own.
+pub fn packing_link_labels(histograms: &[Vec<f64>], radius: f64) -> Vec<usize> {
+    let n = histograms.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut node: usize) -> usize {
+        while parent[node] != node {
+            parent[node] = parent[parent[node]];
+            node = parent[node];
+        }
+        node
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if packing_distance(&histograms[i], &histograms[j]) <= radius {
+                let a = find(&mut parent, i);
+                let b = find(&mut parent, j);
+                if a != b {
+                    parent[a] = b;
+                }
+            }
+        }
+    }
+    let mut seen: BTreeMap<usize, usize> = BTreeMap::new();
+    (0..n)
+        .map(|i| {
+            let root = find(&mut parent, i);
+            let next = seen.len();
+            *seen.entry(root).or_insert(next)
+        })
+        .collect()
+}
+
+/// [`packing_link_labels`] at [`PACKING_LINK`].
+pub fn packing_communities(histograms: &[Vec<f64>]) -> Vec<usize> {
+    packing_link_labels(histograms, PACKING_LINK)
+}
+
+/// Distinct packings among `histograms`.
+pub fn packing_community_count(histograms: &[Vec<f64>]) -> usize {
+    packing_communities(histograms)
+        .into_iter()
+        .max()
+        .map_or(0, |last| last + 1)
+}
+
+/// Packings on file, as coordinates, for a replica with no codebook.
+///
+/// Histograms are only comparable inside one codebook, so what crosses to a
+/// replica is structures. The replica grows a throwaway book over the
+/// references plus its own pair and reads the communities off that.
+const PACKING_REFERENCE_CAP: usize = 24;
+
+thread_local! {
+    static PACKING_REFERENCES: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Publish the packings on file. Keeps the newest [`PACKING_REFERENCE_CAP`].
+pub fn set_packing_references(references: Vec<Vec<f64>>) {
+    PACKING_REFERENCES.with(|slot| {
+        let mut held = slot.borrow_mut();
+        *held = references;
+        let excess = held.len().saturating_sub(PACKING_REFERENCE_CAP);
+        held.drain(0..excess);
+    });
+}
+
+/// Add one packing reference if no reference already chains to it.
+pub fn remember_packing_reference(coordinates: &[f64]) {
+    let mut book = PackingBook::default();
+    let held = packing_references();
+    for reference in &held {
+        book.observe(reference);
+    }
+    if book.observe(coordinates).is_none() {
+        return;
+    }
+    let Some(trial) = book.histogram(coordinates) else {
+        return;
+    };
+    let known = held.iter().any(|reference| {
+        book.histogram(reference)
+            .is_some_and(|kept| packing_distance(&kept, &trial) <= PACKING_LINK)
+    });
+    if known {
+        return;
+    }
+    let mut next = held;
+    next.push(coordinates.to_vec());
+    set_packing_references(next);
+}
+
+/// Packings on file for this replica.
+pub fn packing_references() -> Vec<Vec<f64>> {
+    PACKING_REFERENCES.with(|slot| slot.borrow().clone())
+}
+
+/// Whether `trial` sits in a packing that `origin` and `references` do not.
+///
+/// One throwaway book over every structure, single linkage at
+/// [`PACKING_LINK`], then the community of the trial against the community of
+/// the origin. With no references this is the pairwise form: the trial does
+/// not chain to the origin.
+pub fn leaves_packing(origin: &[f64], trial: &[f64], references: &[Vec<f64>]) -> bool {
+    let mut book = PackingBook::default();
+    if book.observe(origin).is_none() {
+        return false;
+    }
+    for reference in references {
+        book.observe(reference);
+    }
+    if book.observe(trial).is_none() {
+        return false;
+    }
+    let Some(home) = book.histogram(origin) else {
+        return false;
+    };
+    let Some(away) = book.histogram(trial) else {
+        return true;
+    };
+    let mut histograms = vec![home, away];
+    for reference in references {
+        if let Some(histogram) = book.histogram(reference) {
+            histograms.push(histogram);
+        }
+    }
+    let labels = packing_communities(&histograms);
+    labels[1] != labels[0]
+}
+
+/// [`leaves_packing`] against the packings this replica holds on file.
+pub fn different_packing_family(origin: &[f64], trial: &[f64]) -> bool {
+    leaves_packing(origin, trial, &packing_references())
 }
