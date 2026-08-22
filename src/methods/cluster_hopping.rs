@@ -1290,6 +1290,59 @@ where
                         crate::soap::step_away_fivefold_measured(from_state.view(), leave_sigma);
                     relax(ledger, start.view(), cfg.relax_steps)
                 } else if leave_action {
+                    // The climb on E+V is the Leave that leaves.
+                    //
+                    // Measured from the sealed LJ75 icosahedral minimum,
+                    // sixteen trials each: displacement along a packing
+                    // cover direction leaves 0 of 16 at any deposit from
+                    // 0.029 to 50.35 eps and any width up to the grain,
+                    // and twenty-four raw quenches dropped along one such
+                    // trajectory, which reaches 1.87 in DECAF distance
+                    // against a Marks separation of 0.4267, all returned
+                    // to the floor. The min-mode climb on the same biased
+                    // surface leaves 3 of 16, reaching 0.5333, past both
+                    // the grain and the road to Marks.
+                    //
+                    // A climb on the *raw* surface is the surface rumple:
+                    // it reports curvatures of -1e13 and calls the ridge
+                    // behind after one step, because a closed shell has no
+                    // soft mode to follow. On E+V the shell is not closed,
+                    // the deposit having put fifty eps into it, and the
+                    // curvature at the end of the climb measures 0.5218.
+                    // The Householder is suppressed for the duration: it
+                    // inverts the force along a direction guessed before
+                    // the climb starts, and a min-mode search finds its
+                    // own.
+                    let climbed = crate::known_basin::with_hill_only(|| {
+                        let mut activation = crate::methods::activation::Activation::default();
+                        activation.step = crate::known_basin::LEAVE_WALK_STEP;
+                        grad.as_deref_mut().and_then(|g| {
+                            crate::methods::activation::activate_from_origin(
+                                from_state.view(),
+                                from_state.view(),
+                                |v| {
+                                    let raw = g(ledger, v)?;
+                                    let energy = relax(ledger, v, 0).0;
+                                    Some(crate::known_basin::effective(v, energy, raw).1)
+                                },
+                                &activation,
+                            )
+                        })
+                    });
+                    let climbed = climbed.and_then(|outcome| {
+                        let (energy, landed) = crate::known_basin::with_disarmed(|| {
+                            relax(ledger, outcome.state.view(), cfg.relax_steps)
+                        });
+                        let left = from_state.as_slice().zip(landed.as_slice()).is_some_and(
+                            |(origin, trial)| {
+                                crate::catalog::leaves_packing(origin, trial, &references)
+                            },
+                        );
+                        left.then_some((energy, landed))
+                    });
+                    if let Some(found) = climbed {
+                        found
+                    } else {
                     let ladder = {
                         let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
                         for rung in 0..crate::known_basin::LEAVE_RUNGS {
@@ -1329,6 +1382,7 @@ where
                         (energy, landed)
                     } else {
                         relax(ledger, state.view(), cfg.relax_steps)
+                    }
                     }
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
