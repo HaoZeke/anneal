@@ -41,8 +41,15 @@ struct Well {
 struct Armed {
     wells: Vec<Well>,
     sigma_rmsd: f64,
+    /// Raw \(E\) at the last point the transform was asked about, so the
+    /// walk can see the ridge it is crossing rather than the hill it is on.
+    raw_energy: Option<f64>,
     lift: Option<f64>,
     sigma_phi: Option<f64>,
+    /// Geometry the cached packing modes were lifted at.
+    mode_x: Option<Array1<f64>>,
+    /// Cached \((\hat P, \|P\|)\) per well, in `wells` order.
+    modes: Vec<(usize, Array1<f64>, f64)>,
 }
 
 thread_local! {
@@ -79,9 +86,12 @@ pub fn arm_leave(origin: ArrayView1<f64>, sigma_rmsd: f64, references: &[Vec<f64
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
             wells,
+            raw_energy: None,
             sigma_rmsd: sigma_rmsd.max(1e-6),
             lift: None,
             sigma_phi: None,
+            mode_x: None,
+            modes: Vec::new(),
         });
     });
 }
@@ -96,11 +106,46 @@ pub fn is_armed() -> bool {
     ARMED.with(|slot| slot.borrow().is_some())
 }
 
-/// xtsci step on the transformed surface: two-loop direction, accept a
-/// step that increases the span from the known wells. Span is packing
-/// L2 \(\min_k\|\mu-\mu_k\|\) when the wells carry a \(\nu=3\) mean,
-/// otherwise COM-free RMSD. Raw \(E\) may rise; that is the dimer
-/// walk away from an occupied packing.
+/// Largest Cartesian RMSD one armed step may take.
+///
+/// The hill width is the size of the well being left; the walk across it is
+/// not one step of that size. A trust radius equal to the width lets an
+/// accepted uphill step carry atoms through each other, and the walk then
+/// climbs for the whole iteration budget and reports a structure at
+/// \(10^{11}\varepsilon\) that no quench recovers.
+pub const LEAVE_WALK_STEP: f64 = 0.10;
+
+/// Largest Cartesian RMSD one armed walk may cover in total.
+///
+/// A cooperative rearrangement moves atoms by about a nearest-neighbour
+/// separation. Past that the walk is not crossing a ridge between packings,
+/// it is pulling the cluster apart, and the ridge rule cannot end a climb
+/// that never turns over.
+pub const LEAVE_WALK_SPAN: f64 = 0.8;
+
+/// Consecutive falls in raw \(E\) that name the far side of a ridge.
+pub const LEAVE_WALK_DESCENTS: usize = 3;
+
+/// xtsci step on the transformed surface: two-loop direction, accept a step
+/// that increases the span from the known wells. Span is packing L2
+/// \(\min_k\|\mu-\mu_k\|\) when the wells carry a \(\nu=3\) mean,
+/// otherwise COM-free RMSD. Raw \(E\) may rise; that is the dimer walk away
+/// from an occupied packing.
+///
+/// The walk ends at the ridge, the way an activation-relaxation walk does:
+/// raw \(E\) climbs while the invert holds the descent component that
+/// points back at the wells on file, and the first steps where it falls
+/// again are the far side. Quenching from there is what decides which
+/// packing the walk landed in.
+///
+/// Two stopping rules that do not work, both measured from the LJ75
+/// icosahedral minimum. Crossing the DECAF grain stops the walk on a
+/// distorted geometry that has not crossed anything: the quench that follows
+/// returns to \(-396.282249\), the floor it started on, every time. Having
+/// no rule at all lets the walk climb for the whole iteration budget and
+/// report structures between \(10^4\) and \(10^{11}\varepsilon\), which
+/// is atoms sitting on each other. [`LEAVE_WALK_SPAN`] bounds the second
+/// case, since a raw energy that rises monotonically never turns over.
 pub fn step_xtsci<F>(
     opt: &mut crate::methods::warm_lbfgs::WarmLbfgs,
     x0: ArrayView1<f64>,
@@ -110,17 +155,24 @@ pub fn step_xtsci<F>(
 where
     F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
 {
-    let sigma = ARMED.with(|slot| slot.borrow().as_ref().map(|a| a.sigma_rmsd).unwrap_or(0.35));
+    let sigma = ARMED.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|a| a.sigma_rmsd.min(LEAVE_WALK_STEP))
+            .unwrap_or(LEAVE_WALK_STEP)
+    });
     let mut x = x0.to_owned();
     let Some((mut energy, mut grad)) = fg(x.view()) else {
         return (f64::INFINITY, x);
     };
+    let n_at = (x.len() / 3).max(1) as f64;
+    let mut peak = raw_energy().unwrap_or(f64::NEG_INFINITY);
+    let mut descents = 0usize;
     for _ in 0..max_iter {
         let mut direction = opt.two_loop(grad.view());
         if direction.dot(&grad) >= 0.0 {
             direction = grad.mapv(|v| -v);
         }
-        let n_at = (x.len() / 3).max(1) as f64;
         let step_rmsd = (direction.iter().map(|v| v * v).sum::<f64>() / n_at).sqrt();
         if step_rmsd < 1e-15 {
             break;
@@ -148,6 +200,27 @@ where
             alpha *= 0.5;
         }
         if !accepted {
+            break;
+        }
+        match raw_energy() {
+            Some(raw) if raw > peak => {
+                peak = raw;
+                descents = 0;
+            }
+            Some(_) => descents += 1,
+            None => {}
+        }
+        if descents >= LEAVE_WALK_DESCENTS {
+            break;
+        }
+        let travelled = (x
+            .iter()
+            .zip(x0.iter())
+            .map(|(a, b)| (a - b) * (a - b))
+            .sum::<f64>()
+            / n_at)
+            .sqrt();
+        if travelled >= LEAVE_WALK_SPAN {
             break;
         }
     }
@@ -197,8 +270,14 @@ pub fn effective(x: ArrayView1<f64>, energy: f64, grad: Array1<f64>) -> (f64, Ar
         let Some(armed) = held.as_mut() else {
             return (energy, grad);
         };
+        armed.raw_energy = Some(energy);
         transform(armed, x, energy, grad)
     })
+}
+
+/// Raw \(E\) at the last point the armed transform saw.
+fn raw_energy() -> Option<f64> {
+    ARMED.with(|slot| slot.borrow().as_ref().and_then(|armed| armed.raw_energy))
 }
 
 fn transform(
@@ -222,15 +301,7 @@ fn transform_packing(
     let Some(mu) = packing_mean(x) else {
         return (energy, grad);
     };
-    let j = jacobian_nu3(x, PACKING_SPEC, None);
-    let modes: Vec<(Array1<f64>, f64, f64)> = armed
-        .wells
-        .iter()
-        .filter_map(|well| {
-            let mu_k = well.packing_mean.as_ref()?;
-            lift_packing_mode(x, mu.view(), mu_k.view(), &j)
-        })
-        .collect();
+    let modes = packing_modes(armed, x, mu.view());
     if armed.lift.is_none() {
         let mut amplitude = 0.0;
         let mut sigma_phi = 0.0;
@@ -270,6 +341,72 @@ fn transform_packing(
         }
     }
     (energy + potential, grad)
+}
+
+/// Packing modes at `x`, one per well that carries a \(\nu=3\) mean.
+///
+/// \(\hat P\) and \(\|P\|\) come from the stacked Jacobian, which is
+/// \((N d)\times 3N\) and is the whole cost of a transformed step, so they
+/// are lifted again only once the geometry has moved by
+/// [`crate::catalog::PACKING_MOVE_EPS`] -- the same staleness the packing
+/// book uses on its histograms, and below the grain either can resolve.
+/// \(r_\varphi\) is the distance in the map and is read fresh from
+/// \(\mu\) on every call, so the hill and its gradient still track the
+/// walk.
+fn packing_modes(
+    armed: &mut Armed,
+    x: ArrayView1<f64>,
+    mu: ArrayView1<f64>,
+) -> Vec<(Array1<f64>, f64, f64)> {
+    let stale = armed
+        .mode_x
+        .as_ref()
+        .is_none_or(|held| moved(held.view(), x, crate::catalog::PACKING_MOVE_EPS));
+    if stale {
+        let j = jacobian_nu3(x, PACKING_SPEC, None);
+        armed.modes = armed
+            .wells
+            .iter()
+            .enumerate()
+            .filter_map(|(index, well)| {
+                let mu_k = well.packing_mean.as_ref()?;
+                let (p, _, p_norm) = lift_packing_mode(x, mu, mu_k.view(), &j)?;
+                Some((index, p, p_norm))
+            })
+            .collect();
+        armed.mode_x = Some(x.to_owned());
+    }
+    armed
+        .modes
+        .iter()
+        .filter_map(|(index, p, p_norm)| {
+            let mu_k = armed.wells.get(*index)?.packing_mean.as_ref()?;
+            if mu_k.len() != mu.len() {
+                return None;
+            }
+            let r_phi = mu
+                .iter()
+                .zip(mu_k.iter())
+                .map(|(a, b)| (a - b) * (a - b))
+                .sum::<f64>()
+                .sqrt();
+            Some((p.clone(), r_phi, *p_norm))
+        })
+        .collect()
+}
+
+/// Whether any atom moved by more than `eps`.
+fn moved(left: ArrayView1<f64>, right: ArrayView1<f64>, eps: f64) -> bool {
+    if left.len() != right.len() {
+        return true;
+    }
+    let limit = eps * eps;
+    (0..left.len() / 3).any(|atom| {
+        let d0 = left[3 * atom] - right[3 * atom];
+        let d1 = left[3 * atom + 1] - right[3 * atom + 1];
+        let d2 = left[3 * atom + 2] - right[3 * atom + 2];
+        d0 * d0 + d1 * d1 + d2 * d2 > limit
+    })
 }
 
 fn transform_cartesian(
@@ -532,186 +669,6 @@ fn dot(left: &Array1<f64>, right: &Array1<f64>) -> f64 {
     left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use ndarray::Array1;
-
-    #[test]
-    fn unarmed_effective_is_the_raw_surface() {
-        let x = Array1::from(vec![1.0, 0.0, 0.0]);
-        let g = Array1::from(vec![2.0, 0.0, 0.0]);
-        let (e, gt) = effective(x.view(), 3.0, g.clone());
-        assert_eq!(e, 3.0);
-        assert_eq!(gt, g);
-    }
-
-    #[test]
-    fn householder_flips_a_gradient_that_points_at_the_well() {
-        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        arm_leave(origin.view(), 0.35);
-        // x is to the +x of the well; g points +x, so descent (-g) walks
-        // toward the well.
-        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        let (_, gt) = effective(x.view(), 1.0, g);
-        assert!(
-            gt[0] < 0.0,
-            "transformed gradient must point away from the well, g0={}",
-            gt[0]
-        );
-        disarm();
-    }
-
-    #[test]
-    fn hill_raises_energy_near_a_known_well() {
-        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        arm_leave(origin.view(), 0.35);
-        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
-        let (e, _) = effective(x.view(), 0.0, g);
-        assert!(e > 0.0, "Gaussian hill must raise E, got {e}");
-        disarm();
-    }
-
-    #[test]
-    fn xtsci_on_the_transformed_surface_walks_away_from_the_well() {
-        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        arm_leave(origin.view(), 0.35);
-        let start = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
-        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (_, x) = step_xtsci(&mut opt, start.view(), 40, |v| {
-            // Harmonic well at `origin`. Raw descent walks back.
-            let mut g = Array1::zeros(v.len());
-            let mut e = 0.0;
-            for i in 0..v.len() {
-                let d = v[i] - origin[i];
-                e += 0.5 * d * d;
-                g[i] = d;
-            }
-            Some(effective(v, e, g))
-        });
-        let (_, start_rmsd) = com_free_delta(start.view(), origin.view());
-        let (_, end_rmsd) = com_free_delta(x.view(), origin.view());
-        disarm();
-        assert!(
-            end_rmsd > start_rmsd,
-            "xtsci must walk away from the known well, start={start_rmsd} end={end_rmsd}"
-        );
-    }
-
-    #[test]
-    fn disarm_restores_the_raw_surface() {
-        let origin = Array1::from(vec![0.0, 0.0, 0.0]);
-        arm_leave(origin.view(), 0.35);
-        disarm();
-        let x = Array1::from(vec![0.2, 0.0, 0.0]);
-        let g = Array1::from(vec![1.0, 0.0, 0.0]);
-        let (e, gt) = effective(x.view(), 4.0, g.clone());
-        assert_eq!(e, 4.0);
-        assert_eq!(gt, g);
-    }
-
-    fn ico13() -> Array1<f64> {
-        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
-        let verts: [[f64; 3]; 12] = [
-            [0.0, 1.0, p],
-            [0.0, 1.0, -p],
-            [0.0, -1.0, p],
-            [0.0, -1.0, -p],
-            [1.0, p, 0.0],
-            [1.0, -p, 0.0],
-            [-1.0, p, 0.0],
-            [-1.0, -p, 0.0],
-            [p, 0.0, 1.0],
-            [-p, 0.0, 1.0],
-            [p, 0.0, -1.0],
-            [-p, 0.0, -1.0],
-        ];
-        let s = 1.0 / (1.0 + p * p).sqrt();
-        let mut x = Array1::<f64>::zeros(3 * 13);
-        for (i, v) in verts.iter().enumerate() {
-            for k in 0..3 {
-                x[3 * (i + 1) + k] = s * v[k];
-            }
-        }
-        x
-    }
-
-    #[test]
-    fn span_rises_when_the_packing_mean_leaves_mu_k() {
-        let origin = ico13();
-        arm_leave(origin.view(), 0.35);
-        let at_well = span(origin.view());
-        let mut away = origin.clone();
-        away[3] += 0.25;
-        let off = span(away.view());
-        disarm();
-        assert!(
-            off > at_well,
-            "span must rise away from mu_k, well={at_well} off={off}"
-        );
-    }
-
-    #[test]
-    fn packing_mode_is_nu3_mean_not_leftover_soap() {
-        let origin = ico13();
-        let mu = packing_mean(origin.view()).expect("ico13 packing mean");
-        let want = PACKING_SPEC.feat_dim(None) + PACKING_SPEC.nu3_feat_dim(None);
-        assert_eq!(
-            mu.len(),
-            want,
-            "packing invert must live in stacked SOAP+ν=3, not leftover SOAP"
-        );
-    }
-
-    #[test]
-    fn packing_householder_flips_force_along_the_nu3_pullback() {
-        let origin = ico13();
-        arm_leave(origin.view(), 0.35);
-        let mut x = origin.clone();
-        x[3] += 0.25;
-        let mu0 = packing_mean(origin.view()).expect("origin packing mean");
-        let (p, r_phi, _) = packing_pullback(x.view(), mu0.view()).expect("packing mode");
-        assert!(r_phi > 0.0, "displaced ico13 must leave the origin μ");
-        let (_, gt) = effective(x.view(), 1.0, p.clone());
-        let proj = gt.iter().zip(p.iter()).map(|(a, b)| a * b).sum::<f64>();
-        disarm();
-        assert!(proj < 0.0, "packing Householder must flip g·P, got {proj}");
-    }
-
-    #[test]
-    fn xtsci_walks_off_the_known_packing() {
-        let origin = ico13();
-        arm_leave(origin.view(), 0.35);
-        let mut start = origin.clone();
-        start[3] += 0.20;
-        let mu0 = packing_mean(origin.view()).expect("origin packing mean");
-        let start_span = packing_mean(start.view())
-            .map(|mu| packing_l2(mu.view(), mu0.view()))
-            .expect("start packing mean");
-        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (_, x) = step_xtsci(&mut opt, start.view(), 16, |v| {
-            let mut g = Array1::zeros(v.len());
-            let mut e = 0.0;
-            for i in 0..v.len() {
-                let d = v[i] - origin[i];
-                e += 0.5 * d * d;
-                g[i] = d;
-            }
-            Some(effective(v, e, g))
-        });
-        let end_span = packing_mean(x.view())
-            .map(|mu| packing_l2(mu.view(), mu0.view()))
-            .unwrap_or(0.0);
-        disarm();
-        assert!(
-            end_span > start_span,
-            "xtsci must walk off the known packing, start={start_span} end={end_span}"
-        );
-    }
-}
-
 /// First rung of the Leave ladder, in Cartesian RMSD.
 ///
 /// The old fixed Leave size. It is where the ladder starts, not where it
@@ -855,4 +812,184 @@ where
         rmsd *= LEAVE_RUNG_GROWTH;
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::Array1;
+
+    #[test]
+    fn unarmed_effective_is_the_raw_surface() {
+        let x = Array1::from(vec![1.0, 0.0, 0.0]);
+        let g = Array1::from(vec![2.0, 0.0, 0.0]);
+        let (e, gt) = effective(x.view(), 3.0, g.clone());
+        assert_eq!(e, 3.0);
+        assert_eq!(gt, g);
+    }
+
+    #[test]
+    fn householder_flips_a_gradient_that_points_at_the_well() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        arm_leave(origin.view(), 0.35, &[]);
+        // x is to the +x of the well; g points +x, so descent (-g) walks
+        // toward the well.
+        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let (_, gt) = effective(x.view(), 1.0, g);
+        assert!(
+            gt[0] < 0.0,
+            "transformed gradient must point away from the well, g0={}",
+            gt[0]
+        );
+        disarm();
+    }
+
+    #[test]
+    fn hill_raises_energy_near_a_known_well() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        arm_leave(origin.view(), 0.35, &[]);
+        let x = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let g = Array1::from(vec![1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let (e, _) = effective(x.view(), 0.0, g);
+        assert!(e > 0.0, "Gaussian hill must raise E, got {e}");
+        disarm();
+    }
+
+    #[test]
+    fn xtsci_on_the_transformed_surface_walks_away_from_the_well() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        arm_leave(origin.view(), 0.35, &[]);
+        let start = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (_, x) = step_xtsci(&mut opt, start.view(), 40, |v| {
+            // Harmonic well at `origin`. Raw descent walks back.
+            let mut g = Array1::zeros(v.len());
+            let mut e = 0.0;
+            for i in 0..v.len() {
+                let d = v[i] - origin[i];
+                e += 0.5 * d * d;
+                g[i] = d;
+            }
+            Some(effective(v, e, g))
+        });
+        let (_, start_rmsd) = com_free_delta(start.view(), origin.view());
+        let (_, end_rmsd) = com_free_delta(x.view(), origin.view());
+        disarm();
+        assert!(
+            end_rmsd > start_rmsd,
+            "xtsci must walk away from the known well, start={start_rmsd} end={end_rmsd}"
+        );
+    }
+
+    #[test]
+    fn disarm_restores_the_raw_surface() {
+        let origin = Array1::from(vec![0.0, 0.0, 0.0]);
+        arm_leave(origin.view(), 0.35, &[]);
+        disarm();
+        let x = Array1::from(vec![0.2, 0.0, 0.0]);
+        let g = Array1::from(vec![1.0, 0.0, 0.0]);
+        let (e, gt) = effective(x.view(), 4.0, g.clone());
+        assert_eq!(e, 4.0);
+        assert_eq!(gt, g);
+    }
+
+    fn ico13() -> Array1<f64> {
+        let p = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let verts: [[f64; 3]; 12] = [
+            [0.0, 1.0, p],
+            [0.0, 1.0, -p],
+            [0.0, -1.0, p],
+            [0.0, -1.0, -p],
+            [1.0, p, 0.0],
+            [1.0, -p, 0.0],
+            [-1.0, p, 0.0],
+            [-1.0, -p, 0.0],
+            [p, 0.0, 1.0],
+            [-p, 0.0, 1.0],
+            [p, 0.0, -1.0],
+            [-p, 0.0, -1.0],
+        ];
+        let s = 1.0 / (1.0 + p * p).sqrt();
+        let mut x = Array1::<f64>::zeros(3 * 13);
+        for (i, v) in verts.iter().enumerate() {
+            for k in 0..3 {
+                x[3 * (i + 1) + k] = s * v[k];
+            }
+        }
+        x
+    }
+
+    #[test]
+    fn span_rises_when_the_packing_mean_leaves_mu_k() {
+        let origin = ico13();
+        arm_leave(origin.view(), 0.35, &[]);
+        let at_well = span(origin.view());
+        let mut away = origin.clone();
+        away[3] += 0.25;
+        let off = span(away.view());
+        disarm();
+        assert!(
+            off > at_well,
+            "span must rise away from mu_k, well={at_well} off={off}"
+        );
+    }
+
+    #[test]
+    fn packing_mode_is_nu3_mean_not_leftover_soap() {
+        let origin = ico13();
+        let mu = packing_mean(origin.view()).expect("ico13 packing mean");
+        let want = PACKING_SPEC.feat_dim(None) + PACKING_SPEC.nu3_feat_dim(None);
+        assert_eq!(
+            mu.len(),
+            want,
+            "packing invert must live in stacked SOAP+ν=3, not leftover SOAP"
+        );
+    }
+
+    #[test]
+    fn packing_householder_flips_force_along_the_nu3_pullback() {
+        let origin = ico13();
+        arm_leave(origin.view(), 0.35, &[]);
+        let mut x = origin.clone();
+        x[3] += 0.25;
+        let mu0 = packing_mean(origin.view()).expect("origin packing mean");
+        let (p, r_phi, _) = packing_pullback(x.view(), mu0.view()).expect("packing mode");
+        assert!(r_phi > 0.0, "displaced ico13 must leave the origin μ");
+        let (_, gt) = effective(x.view(), 1.0, p.clone());
+        let proj = gt.iter().zip(p.iter()).map(|(a, b)| a * b).sum::<f64>();
+        disarm();
+        assert!(proj < 0.0, "packing Householder must flip g·P, got {proj}");
+    }
+
+    #[test]
+    fn xtsci_walks_off_the_known_packing() {
+        let origin = ico13();
+        arm_leave(origin.view(), 0.35, &[]);
+        let mut start = origin.clone();
+        start[3] += 0.20;
+        let mu0 = packing_mean(origin.view()).expect("origin packing mean");
+        let start_span = packing_mean(start.view())
+            .map(|mu| packing_l2(mu.view(), mu0.view()))
+            .expect("start packing mean");
+        let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
+        let (_, x) = step_xtsci(&mut opt, start.view(), 16, |v| {
+            let mut g = Array1::zeros(v.len());
+            let mut e = 0.0;
+            for i in 0..v.len() {
+                let d = v[i] - origin[i];
+                e += 0.5 * d * d;
+                g[i] = d;
+            }
+            Some(effective(v, e, g))
+        });
+        let end_span = packing_mean(x.view())
+            .map(|mu| packing_l2(mu.view(), mu0.view()))
+            .unwrap_or(0.0);
+        disarm();
+        assert!(
+            end_span > start_span,
+            "xtsci must walk off the known packing, start={start_span} end={end_span}"
+        );
+    }
 }

@@ -102,7 +102,10 @@ fn report(label: &str, rows: &[Sample]) {
     let (_, ico_s_med, ico_s_max) = stat(rows.iter().map(|r| r.ico_shared).collect());
     let (marks_s_min, marks_s_med, _) = stat(rows.iter().map(|r| r.marks_shared).collect());
     // A usable grain needs every shelf isomer nearer ico than Marks is.
-    let nearer_marks = rows.iter().filter(|r| r.marks_shared < r.ico_shared).count();
+    let nearer_marks = rows
+        .iter()
+        .filter(|r| r.marks_shared < r.ico_shared)
+        .count();
     println!(
         "{{\"kind\":\"decaf_grain_bucket\",\"bucket\":\"{label}\",\"n\":{},\"ico_throwaway_median\":{ico_t_med:.4},\"ico_throwaway_max\":{ico_t_max:.4},\"ico_shared_median\":{ico_s_med:.4},\"ico_shared_max\":{ico_s_max:.4},\"marks_shared_min\":{marks_s_min:.4},\"marks_shared_median\":{marks_s_med:.4},\"nearer_marks\":{nearer_marks}}}",
         rows.len()

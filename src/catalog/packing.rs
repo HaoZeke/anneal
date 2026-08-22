@@ -580,7 +580,14 @@ pub fn packing_community_count(histograms: &[Vec<f64>]) -> usize {
 /// Histograms are only comparable inside one codebook, so what crosses to a
 /// replica is structures. The replica grows a throwaway book over the
 /// references plus its own pair and reads the communities off that.
-const PACKING_REFERENCE_CAP: usize = 24;
+///
+/// One structure per packing is not enough. A packing is what its cells
+/// chain into, and a quenched LJ75 icosahedral isomer four to eight
+/// \(\varepsilon\) above the shelf floor sits up to L1 0.56 from the ico
+/// reference: against that reference alone it reads as a packing of its own,
+/// and against the shelf it chains straight back. So the references are a
+/// cloud of cells, deduplicated at the cell grain.
+const PACKING_REFERENCE_CAP: usize = 32;
 
 thread_local! {
     static PACKING_REFERENCES: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
@@ -596,10 +603,17 @@ pub fn set_packing_references(references: Vec<Vec<f64>>) {
     });
 }
 
-/// Add one packing reference if no reference already chains to it.
+/// Add one cell to the reference cloud, and evict from the packing that can
+/// spare it.
+///
+/// Duplicates merge at the cell grain, so a replica sitting in one well does
+/// not fill the cloud with copies of it. Over the cap, the oldest member of
+/// the largest community goes: a community with one member is the only
+/// record that packing exists, and dropping it would let the run rediscover
+/// it as new.
 pub fn remember_packing_reference(coordinates: &[f64]) {
-    let mut book = PackingBook::default();
     let held = packing_references();
+    let mut book = PackingBook::default();
     for reference in &held {
         book.observe(reference);
     }
@@ -609,15 +623,34 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
     let Some(trial) = book.histogram(coordinates) else {
         return;
     };
-    let known = held.iter().any(|reference| {
-        book.histogram(reference)
-            .is_some_and(|kept| packing_distance(&kept, &trial) <= PACKING_LINK)
-    });
-    if known {
-        return;
+    let mut histograms: Vec<Vec<f64>> = Vec::with_capacity(held.len() + 1);
+    for reference in &held {
+        let Some(histogram) = book.histogram(reference) else {
+            return;
+        };
+        if same_packing(&histogram, &trial) {
+            return;
+        }
+        histograms.push(histogram);
     }
+    histograms.push(trial);
     let mut next = held;
     next.push(coordinates.to_vec());
+    while next.len() > PACKING_REFERENCE_CAP {
+        let labels = packing_communities(&histograms);
+        let mut sizes: BTreeMap<usize, usize> = BTreeMap::new();
+        for &label in &labels {
+            *sizes.entry(label).or_insert(0) += 1;
+        }
+        let Some((&largest, _)) = sizes.iter().max_by_key(|(_, size)| **size) else {
+            break;
+        };
+        let Some(evict) = labels.iter().position(|&label| label == largest) else {
+            break;
+        };
+        next.remove(evict);
+        histograms.remove(evict);
+    }
     set_packing_references(next);
 }
 

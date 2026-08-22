@@ -37,7 +37,7 @@ use crate::calibrate::StepCalibrator;
 use crate::contextual::ContextualAllocator;
 use crate::diversity::DiversityAnnealer;
 use crate::exchange::MetropolisExchange;
-use crate::methods::activation::{Activation, activate};
+use crate::methods::activation::{Activation, activate, activate_from_origin};
 use crate::methods::minima_hopping::EscapeFeedback;
 use crate::movekernel::{MoveKernel, ShellRotate, SurfaceRelocate, Symmetrise};
 use crate::path::{StallDetector, interpolate_path};
@@ -1191,6 +1191,12 @@ where
                 }
                 let leave_action = crate::catalog::is_occupancy_leave_action(&action);
                 let references = if leave_action {
+                    // The well being left is a cell of the packing being
+                    // left, and the accept needs the cloud those cells chain
+                    // into, not one representative of it.
+                    if let Some(here) = from_state.as_slice() {
+                        crate::catalog::remember_packing_reference(here);
+                    }
                     crate::catalog::packing_references()
                 } else {
                     Vec::new()
@@ -1202,7 +1208,36 @@ where
                         &references,
                     );
                 }
-                let quenched = relax(ledger, state.view(), cfg.relax_steps);
+                // Covering / packing-ladder start is still inside the
+                // occupied well. Quapp / ART / SoftSaddle MMF climb that
+                // start up the local ridge to the saddle, then the quench
+                // is taken from the overshoot on the other side.
+                let leave_start = if leave_action {
+                    if let Some(g) = grad.as_deref_mut() {
+                        let act = Activation {
+                            step: cfg.escape_amplitude,
+                            overshoot: cfg.escape_overshoot,
+                            max_steps: cfg.escape_max_climb,
+                            lanczos_steps: cfg.escape_lanczos_steps,
+                            epsilon: cfg.escape_epsilon,
+                            ..Activation::default()
+                        };
+                        match activate_from_origin(
+                            state.view(),
+                            from_state.view(),
+                            |y| g(ledger, y),
+                            &act,
+                        ) {
+                            Some(o) if o.crossed => o.state,
+                            _ => state.clone(),
+                        }
+                    } else {
+                        state.clone()
+                    }
+                } else {
+                    state.clone()
+                };
+                let quenched = relax(ledger, leave_start.view(), cfg.relax_steps);
                 let mut candidate = quenched.1;
                 let left_packing = |trial: &Array1<f64>| {
                     from_state
@@ -1260,7 +1295,10 @@ where
                     hops += 1;
                     continue;
                 }
-                if leave_action && walked_off && let Some(installed) = proposal_state.as_slice() {
+                if leave_action
+                    && walked_off
+                    && let Some(installed) = proposal_state.as_slice()
+                {
                     crate::catalog::remember_packing_reference(installed);
                 }
                 if leave == Some(crate::catalog::OccupancyLeaveAdopt::HoleStep) {

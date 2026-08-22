@@ -1,7 +1,27 @@
-//! Activation: climbing out of a basin along its softest direction.
+//! Activation: climb the ridge out of a basin, then quench the other side.
 //!
-//! Barkema and Mousseau, Phys. Rev. Lett. 77, 4358 (1996), and Malek and
-//! Mousseau, Phys. Rev. E 62, 7723 (2000).
+//! This is valley-floor / ridge following, not a quench. Quapp's gradient
+//! extremal of the smallest Hessian eigenvalue is the valley floor or the
+//! ridge (Quapp, *Chem. Phys. Lett.* **1996**, *253*, 286,
+//! <https://doi.org/10.1016/0009-2614(96)00255-2>). Reduced-gradient
+//! following traces the same curves (Quapp, Hirsch, Imig, Heidrich, *J.
+//! Comput. Chem.* **1998**, *19*, 1087). Barkema and Mousseau's ART
+//! (*Phys. Rev. Lett.* **1996**, *77*, 4358,
+//! <https://doi.org/10.1103/PhysRevLett.77.4358>; Malek and Mousseau,
+//! *Phys. Rev. E* **2000**, *62*, 7723,
+//! <https://doi.org/10.1103/PhysRevE.62.7723>) climbs that direction
+//! until the curvature turns over. Henkelman and Jónsson's dimer
+//! (*J. Chem. Phys.* **1999**, *111*, 7010,
+//! <https://doi.org/10.1063/1.480097>) and Plasencia's SoftSaddle MMF
+//! (*J. Chem. Theory Comput.* **2017**, *13*, 125,
+//! <https://doi.org/10.1021/acs.jctc.5b01216>) invert the force along
+//! the minimum mode and minimise the rest: that is the same ridge walk
+//! to a first-order saddle. Xiao, Wu and Henkelman (*J. Chem. Phys.*
+//! **2014**, *141*, 164111, <https://doi.org/10.1063/1.4898664>)
+//! distinguish that *local* ridge (force perpendicular to the negative
+//! mode) from the true basin-boundary ridge; a quench is taken only
+//! after the force along the mode has changed sign, so the landing is
+//! past the saddle and not back down the local ridge into the well.
 //!
 //! A single displacement along the softest mode does not leave a basin. It is
 //! the right direction and the wrong distance: the mode points at the low
@@ -13,9 +33,9 @@
 //! Goedecker's answer is molecular dynamics, which carries kinetic energy over
 //! the saddle. The answer that needs only gradients is to climb: push along the
 //! mode, relax the components perpendicular to it so the structure stays on the
-//! valley floor, and repeat until the curvature along the mode turns negative.
-//! Negative curvature means the ridge is behind, and a quench from there falls
-//! into a different basin.
+//! valley floor, and repeat until the curvature along the mode turns negative
+//! *and* the force along the climb has flipped. That is the ridge, and a
+//! quench from the overshoot falls into a different basin.
 //!
 //! What this costs is honest and worth stating. Each climbing step is a
 //! curvature pass and a few perpendicular relaxation steps, so an activation is
@@ -120,6 +140,33 @@ pub fn activate<G>(
 where
     G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
 {
+    activate_aligned(x, None, &mut grad, cfg, sign)
+}
+
+/// Climb away from `origin`: the first mode is aligned with \(x-x_0\)
+/// so the walk goes up the covering half-space, not back into the well.
+pub fn activate_from_origin<G>(
+    x: ArrayView1<f64>,
+    origin: ArrayView1<f64>,
+    mut grad: G,
+    cfg: &Activation,
+) -> Option<ActivationOutcome>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    activate_aligned(x, Some(origin), &mut grad, cfg, 1.0)
+}
+
+fn activate_aligned<G>(
+    x: ArrayView1<f64>,
+    origin: Option<ArrayView1<f64>>,
+    grad: &mut G,
+    cfg: &Activation,
+    sign0: f64,
+) -> Option<ActivationOutcome>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
     let dim = x.len();
     let mut cur = x.to_owned();
     let mut evaluations = 0usize;
@@ -135,6 +182,16 @@ where
     )?;
     let mut mode = first.mode.clone();
     let mut lambda = first.lambda_min;
+    let sign = if let Some(origin) = origin {
+        let align: f64 = mode
+            .iter()
+            .zip(x.iter().zip(origin.iter()))
+            .map(|(m, (xi, oi))| m * (xi - oi))
+            .sum();
+        if align >= 0.0 { 1.0 } else { -1.0 }
+    } else {
+        sign0
+    };
     let mut steps = 0usize;
     let mut crossed = false;
 
@@ -360,6 +417,28 @@ mod tests {
 
     /// The climb must not run forever on a direction that never turns over.
     #[test]
+    #[test]
+    fn from_origin_climbs_the_covering_half_space() {
+        let dim = 36;
+        let w = direction(dim);
+        let k = perp_stiffness(dim);
+        let g = double_well(&w, &k);
+        let origin = w.clone();
+        let mut start = w.clone();
+        for i in 0..dim {
+            start[i] -= 0.15 * w[i];
+        }
+        let out =
+            activate_from_origin(start.view(), origin.view(), &g, &Activation::default()).unwrap();
+        assert!(
+            out.crossed,
+            "the ridge must be crossed, lambda={}",
+            out.lambda
+        );
+        let u: f64 = out.state.iter().zip(w.iter()).map(|(a, b)| a * b).sum();
+        assert!(u < 0.0, "quench side must be the other well, u={u:.3}");
+    }
+
     fn a_direction_that_never_softens_stops_at_the_cap() {
         let dim = 36;
         let w = direction(dim);

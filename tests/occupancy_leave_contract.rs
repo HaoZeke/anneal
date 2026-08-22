@@ -233,6 +233,10 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "a Leave that quenched back into its packing widens the ladder"
     );
     assert!(
+        body.contains("activate_from_origin"),
+        "Leave climbs the local ridge (ART / MMF) before the quench"
+    );
+    assert!(
         body.contains("relax(ledger, candidate.view(), 0)"),
         "the invert geometry is rescored on raw E with no descent"
     );

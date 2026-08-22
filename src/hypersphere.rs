@@ -17,7 +17,9 @@
 //! cap with mobile COM removed: that placement is the occupancy cap,
 //! not SoftSaddle `V*R` on a mobile block. The paper's adaptive radius
 //! (grow \(R\) from the \(\lambda=0\) crossing when the batch success
-//! rate drops) is not used: Leave is kick-then-quench, not MMF.
+//! rate drops) is not used on the covering itself. Occupancy Leave
+//! then climbs that start with ART / SoftSaddle MMF
+//! ([`crate::methods::activation`]) and quenches past the saddle.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
