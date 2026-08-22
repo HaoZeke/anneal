@@ -3709,8 +3709,11 @@ fn run_capnp_catalog(
                         let live_slice = live.as_slice().unwrap_or(&[]);
                         let shoot_coords = leave_path.shoot_coordinates().unwrap_or(live_slice);
                         // Leftover holes of the occupied packing are the
-                        // champion walk. Extra ArchiveHole is leftover-
-                        // orthogonal to that packing and the archive.
+                        // champion walk. Extra ArchiveHole is the first rung
+                        // of the packing ladder: a covering direction of the
+                        // DECAF feature pointed away from the packings on
+                        // file. The hop loop walks the rest of the ladder
+                        // when the quench lands back in the same packing.
                         let index = archive_cover_index(replica, archive_hole_count);
                         archive_hole_count += 1;
                         let left = leave_packing_state(
