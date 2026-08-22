@@ -16,8 +16,8 @@ use anneal_core::catalog::euclidean_gradient_norm;
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LeavePath, OccupancyLeaveTarget, credit_action,
-    occupancy_complete_at, occupancy_is_cluster, occupancy_leave_by_ei, occupancy_leave_target,
-    occupancy_retire_at, published_energy_score,
+    occupancy_complete_at, occupancy_is_cluster, occupancy_leave_by_ei, occupancy_retire_at,
+    published_energy_score,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
