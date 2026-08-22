@@ -625,6 +625,19 @@ const PACKING_REFERENCE_CAP: usize = 64;
 /// that is numerically the same well is dropped.
 pub const PACKING_REFERENCE_MERGE: f64 = 1e-9;
 
+/// Wells a chain draws from the shared catalog each time it arms a Leave.
+///
+/// The cloud is the only place chains meet during a quench, and it was fed
+/// one structure per checkpoint. That rate does not depend on how many
+/// chains are running, so the bias a chain feels is the same on
+/// forty-eight chains as on one and the ensemble buys nothing at the
+/// minimisation level. The catalog already holds what the others are
+/// standing on, and its size does grow with the ensemble, so an arm takes
+/// several entries at once and the repulsion scales with chain count.
+/// Twelve fills the [`PACKING_REFERENCE_CAP`] within a handful of Leaves
+/// while staying well under the round trips a checkpoint can afford.
+pub const PACKING_REFERENCE_DRAWS: usize = 12;
+
 thread_local! {
     static PACKING_REFERENCES: RefCell<Vec<Vec<f64>>> = const { RefCell::new(Vec::new()) };
 }

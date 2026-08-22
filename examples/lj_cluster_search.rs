@@ -3666,6 +3666,33 @@ fn run_capnp_catalog(
                         .expect("checkpoint trace must remain complete");
                     return CheckpointAction::Continue;
                 }
+                // Chains interact during minimisation only through the
+                // reference cloud the packing invert repels the quench
+                // from, and the cloud was fed one catalog structure per
+                // checkpoint. That rate is the same whatever the ensemble
+                // size, so forty-eight chains pushed on each other exactly
+                // as hard as one did and "more chains reach Marks sooner"
+                // had no mechanism under it. What the others are standing
+                // on is already in the shared catalog, whose size does
+                // grow with the ensemble, so the arm reads several entries
+                // at once.
+                for step in 0..anneal_core::catalog::PACKING_REFERENCE_DRAWS {
+                    // Any draw that is neither sentinel indexes an entry
+                    // modulo the catalog length; masking the top bits
+                    // keeps it off INCUMBENT_SAMPLE_DRAW and
+                    // SPARSE_SAMPLE_DRAW, which mean a policy rather than
+                    // a slot.
+                    let draw = ((u64::from(replica) << 40)
+                        ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                        ^ (step as u64).wrapping_mul(0x85EB_CA6B))
+                        & (u64::MAX >> 2);
+                    if let Ok(CatalogSampleOutcome::Candidate(held)) =
+                        cooperative.try_sample_candidate(replica, draw)
+                        && held.coordinates.len() == snapshot.current_state().len()
+                    {
+                        anneal_core::catalog::remember_packing_reference(&held.coordinates);
+                    }
+                }
                 // Energy landscape paving, with occupancy for the
                 // histogram. Standing on a packing another replica owns
                 // deposits under the replica's own feet, so the funnel

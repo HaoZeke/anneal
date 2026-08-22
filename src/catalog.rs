@@ -76,7 +76,7 @@ pub use occupancy::{
 };
 pub use packing::{
     ENVIRONMENT_RADIUS, GoodTuringSample, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
-    PACKING_SPEC, PackingBook, different_decaf_family, different_packing_family, leaves_packing,
+    PACKING_REFERENCE_DRAWS, PACKING_SPEC, PackingBook, different_decaf_family, different_packing_family, leaves_packing,
     leftover_arrivals_saturated, packing_communities, packing_community_count, packing_distance,
     packing_fingerprint, packing_link_labels, packing_references, packing_vector,
     remember_packing_reference, same_packing, set_packing_references,
