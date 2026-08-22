@@ -321,6 +321,10 @@ struct ScientificState {
     /// allocator behind it at two fifths. The observations are idempotent,
     /// so while the stores have not grown there is nothing to feed.
     fed_from: Option<(usize, usize, usize)>,
+    /// Landfold split beside the book version it was folded from. The
+    /// split clones every occupied histogram and runs a Torgerson MDS,
+    /// and occupancy_floor asks for it once per policy request.
+    landfold: Option<(u64, (usize, usize, usize))>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -422,6 +426,7 @@ impl CoordinatorState {
                     ei_verdict: None,
                     worthwhile: None,
                     fed_from: None,
+                    landfold: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -2870,7 +2875,19 @@ fn occupancy_seam_floor(
     }
 }
 
-fn occupancy_landfold_from_book(scientific: &ScientificState) -> (usize, usize, usize) {
+fn occupancy_landfold_from_book(scientific: &mut ScientificState) -> (usize, usize, usize) {
+    let version = scientific.packing.version();
+    if let Some((held, split)) = scientific.landfold
+        && held == version
+    {
+        return split;
+    }
+    let split = occupancy_landfold_uncached(scientific);
+    scientific.landfold = Some((version, split));
+    split
+}
+
+fn occupancy_landfold_uncached(scientific: &ScientificState) -> (usize, usize, usize) {
     let occupied = scientific.packing.occupied_histograms();
     let histograms: Vec<Vec<f64>> = occupied
         .iter()
