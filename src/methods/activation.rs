@@ -417,7 +417,6 @@ mod tests {
 
     /// The climb must not run forever on a direction that never turns over.
     #[test]
-    #[test]
     fn from_origin_climbs_the_covering_half_space() {
         let dim = 36;
         let w = direction(dim);
@@ -439,6 +438,7 @@ mod tests {
         assert!(u < 0.0, "quench side must be the other well, u={u:.3}");
     }
 
+    #[test]
     fn a_direction_that_never_softens_stops_at_the_cap() {
         let dim = 36;
         let w = direction(dim);

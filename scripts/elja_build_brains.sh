@@ -59,6 +59,7 @@ fi
 "$PIXI" run -e cluster cargo test --offline --release --lib xtsci_walks_off_the_known
 "$PIXI" run -e cluster cargo test --offline --release --lib packing_mode_is_nu3_mean
 "$PIXI" run -e cluster cargo test --offline --release --lib span_rises_when_the_packing
+"$PIXI" run -e cluster cargo test --offline --release --lib from_origin_climbs_the_covering
 "$PIXI" run -e cluster cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
