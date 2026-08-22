@@ -144,27 +144,33 @@ pub fn arm_leave_free(
     // as often as anywhere else it has been, so the largest count stands
     // in rather than zero, which would price the funnel it is stuck in at
     // nothing.
-    let origin_visits = references
-        .iter()
-        .find(|reference| {
-            if reference.coordinates.len() != origin.len() {
-                return false;
-            }
-            let held = Array1::from(reference.coordinates.clone());
-            same_point(held.view(), origin)
-        })
-        .map(|reference| reference.visits)
-        .or_else(|| {
-            references
-                .iter()
-                .filter(|reference| reference.coordinates.len() == origin.len())
-                .map(|reference| reference.visits)
-                .max()
-        });
-    if let Some(origin_visits) = origin_visits
-        && let Some(first) = wells.first_mut()
-    {
-        first.entropy = temperature.max(0.0) * f64::from(origin_visits.max(1)).ln();
+    //
+    // Its standing deposit comes from the same entry, and has to: the
+    // origin is the well a chain Leaves from over and over, so it is the
+    // one that accumulates bias fastest, and it is skipped by the loop
+    // above as the well being left. Leaving its deposit at zero exempted
+    // the only well well-tempering was there to converge.
+    let own = references.iter().find(|reference| {
+        if reference.coordinates.len() != origin.len() {
+            return false;
+        }
+        let held = Array1::from(reference.coordinates.clone());
+        same_point(held.view(), origin)
+    });
+    let origin_visits = own.map(|reference| reference.visits).or_else(|| {
+        references
+            .iter()
+            .filter(|reference| reference.coordinates.len() == origin.len())
+            .map(|reference| reference.visits)
+            .max()
+    });
+    if let Some(first) = wells.first_mut() {
+        if let Some(origin_visits) = origin_visits {
+            first.entropy = temperature.max(0.0) * f64::from(origin_visits.max(1)).ln();
+        }
+        if let Some(own) = own {
+            first.deposit = own.deposit.max(0.0);
+        }
     }
     ARMED.with(|slot| {
         *slot.borrow_mut() = Some(Armed {
