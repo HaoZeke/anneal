@@ -7,14 +7,14 @@
 //! cell is not a packing: a live LJ75 book holds tens of icosahedral cells.
 //!
 //! A packing is a single-linkage community of cells at
-//! [`crate::catalog::PACKING_LINK`] \(= 0.30\), and a structure belongs to
+//! [`crate::catalog::PACKING_LINK`] \(= 0.35\), and a structure belongs to
 //! the community it chains to. No radius around one reference can do this
 //! job. Measured on 69 quenched LJ75 icosahedral isomers within
 //! \(8\varepsilon\) of the ico floor (`examples/decaf_packing_separator`):
 //! the shelf reaches L1 \(0.56\) from its own reference while ico-Marks is
 //! \(0.4267\), so the shelf spread straddles the gap. Under single linkage
-//! at \(0.30\) the shelf chains into one community of 69 and Marks stands
-//! alone; the two merge only at \(0.45\).
+//! the shelf chains into one community and Marks stands alone, and the same
+//! radius keeps 153 of 154 LJ38 shelf isomers with ico and Oh on its own.
 //!
 //! ## Inverted Gelman--Rubin
 //!
