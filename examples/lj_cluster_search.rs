@@ -2507,6 +2507,7 @@ fn run_capnp_catalog(
         println!("  occupancy min families spectral");
         println!("  occupancy leave archive hole");
         println!("  packing invert nu3 pullback");
+        println!("  leave ridge climb");
         println!(
             "  gt stop packing  n>={}  p0<{}  families>=spectral  (coordinator occupancy_gt)",
             anneal_core::catalog::PRODUCTION_MINIMUM_VISITS,

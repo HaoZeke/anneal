@@ -8,6 +8,9 @@
 //!
 //! * `cartesian`, the old Leave: a SoftSaddle covering direction placed at
 //!   Cartesian RMSD 0.35, quenched raw.
+//! * `ridge`, that start climbed with ART / SoftSaddle MMF
+//!   ([`anneal_core::methods::activation::activate_from_origin`]) until
+//!   the force along the mode flips, then quenched raw from the overshoot.
 //! * `armed`, that same start under the packing invert.
 //! * `ladder`, the packing-map ladder under the invert.
 //!
@@ -19,6 +22,7 @@
 
 use anneal_core::catalog::{PACKING_LINK, PackingBook, leaves_packing, packing_link_labels};
 use anneal_core::known_basin;
+use anneal_core::methods::activation::{Activation, activate_from_origin};
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
 use ndarray::{Array1, ArrayView1};
@@ -124,6 +128,10 @@ fn main() {
         best: ico_energy,
         ..Tally::default()
     };
+    let mut ridge = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
     let mut armed = Tally {
         best: ico_energy,
         ..Tally::default()
@@ -186,6 +194,28 @@ fn main() {
         let trial = quench(&potential, start.view(), steps);
         classify("cartesian", index, &mut cartesian, &trial, None);
 
+        // Same start, climb the local ridge, quench from the overshoot.
+        let climbed = activate_from_origin(
+            start.view(),
+            ico.view(),
+            |v| Some(potential.value_and_gradient(v).1),
+            &Activation::default(),
+        );
+        match &climbed {
+            Some(outcome) => println!(
+                "{{\"kind\":\"ridge_climb\",\"index\":{index},\"crossed\":{},\"lambda\":{:.6},\"steps\":{},\"evaluations\":{}}}",
+                outcome.crossed, outcome.lambda, outcome.steps, outcome.evaluations
+            ),
+            None => println!(
+                "{{\"kind\":\"ridge_climb\",\"index\":{index},\"crossed\":false,\"failed\":true}}"
+            ),
+        }
+        let ridge_start = climbed
+            .and_then(|outcome| outcome.crossed.then_some(outcome.state))
+            .unwrap_or_else(|| start.clone());
+        let trial = quench(&potential, ridge_start.view(), steps);
+        classify("ridge", index, &mut ridge, &trial, None);
+
         // Same start, packing invert armed.
         known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
         let trial = quench(&potential, start.view(), steps);
@@ -219,6 +249,7 @@ fn main() {
         let _ = std::io::Write::flush(&mut std::io::stdout());
     }
     report("cartesian", &cartesian, leaves);
+    report("ridge", &ridge, leaves);
     report("armed", &armed, leaves);
     report("ladder", &ladder, leaves);
 
