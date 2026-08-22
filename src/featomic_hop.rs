@@ -871,12 +871,17 @@ pub fn in_stored_well(
             .any(|w| w.len() == mu.len() && soap_l2_pack(mu.view(), w.view()) <= SOAP_PACK_MERGE)
 }
 
-/// Leave an occupied packing: hole, quench, keep the quench only when
-/// DECAF says it is a different family. Leftover-SOAP off-well is not
-/// a family change. Failed family attempts kick mean SOAP off the
+/// Leave an occupied packing: hole, quench, keep the quench only when the
+/// trial chains to no packing on file. Off-well is not a packing change and
+/// neither is another isomer. Failed attempts kick mean SOAP off the
 /// occupied packing. A dead kick stays at the origin so
 /// [`crate::catalog::occupancy_leave_adopt`] Refuse does not install a
-/// same-family hole.
+/// same-packing hole.
+///
+/// This is the leftover-SOAP hole generator, and the hop loop no longer
+/// reaches for it on a refused Leave: a hole of the occupied packing
+/// quenches into the occupied packing.
+/// [`crate::known_basin::leave_packing_ladder`] is the escalation.
 pub fn leave_occupied_packing<R, Q>(
     x: ArrayView1<f64>,
     wells: &[Array1<f64>],
@@ -900,7 +905,7 @@ where
         let q = quench(y.view());
         let origin = x.as_slice().unwrap_or(&[]);
         let trial = q.as_slice().unwrap_or(&[]);
-        if crate::catalog::occupancy_leave_new_class(origin, trial) {
+        if crate::catalog::occupancy_leave_new_packing(origin, trial) {
             return q;
         }
         cur = q;
