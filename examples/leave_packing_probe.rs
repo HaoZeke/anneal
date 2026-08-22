@@ -585,6 +585,12 @@ fn main() {
         let mut walk_r = 0.0_f64;
         let mut land_r = 0.0_f64;
         let mut land_e = f64::INFINITY;
+        // The same walk stopped at the grain rather than run to the
+        // minimum of E+V, which is the comparison that says whether the
+        // projector is the barrier or the over-travel is.
+        let mut stop_r = 0.0_f64;
+        let mut stop_land_r = 0.0_f64;
+        let mut stop_e = f64::INFINITY;
         let trials = leaves.min(16);
         for index in 0..trials {
             // T = 0.8 is the run temperature in the resolved config, and
@@ -650,7 +656,38 @@ fn main() {
             if let Some(slice) = rode.as_slice() {
                 walk_r = walk_r.max(packing_gap(&ico_slice, slice));
             }
+            // The same walk, stopped as soon as it clears the grain.
+            //
+            // Run to convergence the transformed quench minimises E+V,
+            // which under a hill this tall is a distorted structure far
+            // from any minimum of E: measured, it reaches 1.12 in DECAF
+            // distance, past the 0.69 that separates the two packings,
+            // and the raw quench below it returns to the icosahedral
+            // floor exactly. Distance in the map is not a crossing of the
+            // dividing surface. Stopping just past the grain is the
+            // nearest thing to stopping on the ridge that costs no extra
+            // gradient.
+            let chunk = (steps / 12).max(4);
+            let mut ridge = start.clone();
+            let mut ridge_r = 0.0_f64;
+            for _ in 0..12 {
+                ridge = quench(&potential, ridge.view(), chunk);
+                let Some(slice) = ridge.as_slice() else { break };
+                ridge_r = packing_gap(&ico_slice, slice);
+                if ridge_r > 1.2 * PACKING_LINK {
+                    break;
+                }
+            }
+            stop_r = stop_r.max(ridge_r);
             known_basin::disarm();
+            let held = quench(&potential, ridge.view(), steps);
+            if let Some(slice) = held.as_slice() {
+                stop_land_r = stop_land_r.max(packing_gap(&ico_slice, slice));
+            }
+            let held_e = potential.value_and_gradient(held.view()).0;
+            if held_e.is_finite() && held_e < stop_e {
+                stop_e = held_e;
+            }
             let fell = quench(&potential, rode.view(), steps);
             if let Some(slice) = fell.as_slice() {
                 land_r = land_r.max(packing_gap(&ico_slice, slice));
@@ -674,7 +711,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
