@@ -448,23 +448,43 @@ fn transform_packing(
         // the hill has to fill: on LJ75 that is 8.69 or 7.48
         // \(\varepsilon\) (Doye, Wales, Berry, *J. Chem. Phys.* **1995**,
         // *103*, 4234).
+        // The length scale is the packing grain, not the current offset.
+        //
+        // Measuring the depth *at* \(r_\varphi\) prices the well at
+        // whatever distance the walk happens to be standing, and the walk
+        // arms one rung out: measured on LJ75 that is
+        // \(r_\varphi=0.0109\), giving a hill of 0.029 \(\varepsilon\)
+        // against a barrier of 8.69, and a width 63 times narrower than
+        // the 0.69 that separates icosahedral from Marks. Neither number
+        // can be fixed by running more chains.
+        //
+        // What the well has to be priced at is the distance where
+        // packings stop being the same packing, which is
+        // [`crate::catalog::PACKING_LINK`]. The harmonic form supplies
+        // the extrapolation: the curvature is the measured slope over the
+        // measured offset, \(\kappa=s/r_\varphi\), and the depth at the
+        // grain is \(\tfrac12\kappa\sigma_g^2\). Reading it at the offset
+        // instead is the same expression with \(\sigma_g\) replaced by
+        // \(r_\varphi\), so it is short by \((\sigma_g/r_\varphi)^2\) --
+        // a thousandfold here, and a different factor on every structure,
+        // which is why it never looked like a constant to correct.
+        let grain = crate::catalog::PACKING_LINK;
         let mut amplitude = 0.0;
-        let mut sigma_phi = 0.0;
         for (_, p, r_phi, p_norm) in &modes {
             if *r_phi < 1e-12 || *p_norm < 1e-15 {
                 continue;
             }
             let slope = dot(&grad, p) / p_norm;
             if slope > 0.0 {
-                let trial = 0.5 * slope * r_phi;
+                let curvature = slope / r_phi;
+                let trial = 0.5 * curvature * grain * grain;
                 if trial > amplitude {
                     amplitude = trial;
-                    sigma_phi = *r_phi;
                 }
             }
         }
         armed.lift = Some(amplitude);
-        armed.sigma_phi = Some(sigma_phi);
+        armed.sigma_phi = Some(grain);
     }
     let amplitude = armed.lift.unwrap_or(0.0);
     let sigma_phi = armed.sigma_phi.unwrap_or(0.0);

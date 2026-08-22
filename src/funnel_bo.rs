@@ -109,17 +109,17 @@ impl FunnelModel {
     }
 
     fn kernel(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
-        let d2: f64 = a.iter().zip(b.iter()).map(|(p, q)| (p - q) * (p - q)).sum();
-        self.amplitude
-            * self.amplitude
-            * (-0.5 * d2 / (self.length_scale * self.length_scale)).exp()
+        let amp2 = self.amplitude * self.amplitude;
+        let ell2 = self.length_scale * self.length_scale;
+        match (simplex_weights(a), simplex_weights(b)) {
+            (Some(p), Some(q)) => amp2 * (-hellinger2(&p, &q) / ell2).exp(),
+            _ => {
+                let d2: f64 = a.iter().zip(b.iter()).map(|(u, v)| (u - v) * (u - v)).sum();
+                amp2 * (-0.5 * d2 / ell2).exp()
+            }
+        }
     }
 
-    /// Records the lowest energy found at a morphology.
-    ///
-    /// A morphology already present is updated to the lower of the two rather
-    /// than added again: the quantity modelled is how low a region goes, not
-    /// how often it was sampled.
     /// Changes to the observed data since this model was created.
     ///
     /// [`Self::max_expected_improvement_at_data`] predicts at every observed
@@ -133,8 +133,13 @@ impl FunnelModel {
         self.version
     }
 
-    /// Record a landing at `x` scoring `y`, and bump [`Self::version`] when
-    /// that changes the data a prediction would be built from.
+    /// Records the lowest energy found at a morphology, bumping
+    /// [`Self::version`] when that changes the data a prediction is built
+    /// from.
+    ///
+    /// A morphology already present is updated to the lower of the two rather
+    /// than added again: the quantity modelled is how low a region goes, not
+    /// how often it was sampled.
     ///
     /// Non-finite coordinates or scores are dropped rather than stored: a
     /// NaN in the design matrix poisons every later prediction, and the
@@ -287,6 +292,111 @@ impl FunnelModel {
             held.max(self.expected_improvement(x.view()))
         })
     }
+
+    /// Wang and Jegelka MES for a minimizer, given samples of the min value.
+    ///
+    /// \(I(E^\star; y) = H[y] - \mathbb{E}_{E^\star}[H[y \mid E^\star]]\).
+    /// Jones EI is kept for retire ([`Self::max_expected_improvement_at_data`]).
+    /// Occupancy Leave ranks holes with this, not with EI. Independent
+    /// marginal draws, not the GIBBON determinant bound.
+    pub fn max_value_entropy(&mut self, x: ArrayView1<f64>, minima: &[f64]) -> f64 {
+        if minima.is_empty() {
+            return 0.0;
+        }
+        let (mean, sd) = self.predict(x);
+        if !mean.is_finite() || !sd.is_finite() || sd < 1e-12 {
+            return 0.0;
+        }
+        let mut acc = 0.0;
+        let mut n = 0usize;
+        for &eta in minima {
+            if !eta.is_finite() {
+                continue;
+            }
+            acc += mes_given_min(mean, sd, eta);
+            n += 1;
+        }
+        if n == 0 { 0.0 } else { acc / n as f64 }
+    }
+
+    /// Independent-marginal samples of the posterior minimum at the
+    /// observed sites plus `extras`. Seeded from the book version so a
+    /// ranking is reproducible without a caller rng.
+    pub fn sample_minima(&mut self, extras: &[ArrayView1<f64>], n_samples: usize) -> Vec<f64> {
+        let xs = self.xs.clone();
+        let mut sites: Vec<(f64, f64)> = Vec::with_capacity(xs.len() + extras.len());
+        for x in &xs {
+            sites.push(self.predict(x.view()));
+        }
+        for extra in extras {
+            sites.push(self.predict(*extra));
+        }
+        if sites.is_empty() || n_samples == 0 {
+            return Vec::new();
+        }
+        let mut state = 0x9E37_79B9_7F4A_7C15u64
+            ^ self.version.wrapping_mul(0xBF58_476D_1CE4_E5B9)
+            ^ (sites.len() as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
+        if state == 0 {
+            state = 1;
+        }
+        let incumbent = self.incumbent();
+        let mut out = Vec::with_capacity(n_samples);
+        for _ in 0..n_samples {
+            let mut eta = f64::INFINITY;
+            for &(mean, sd) in &sites {
+                eta = eta.min(mean + sd.max(0.0) * unit_normal(&mut state));
+            }
+            if let Some(best) = incumbent {
+                eta = eta.min(best);
+            }
+            out.push(eta);
+        }
+        out
+    }
+}
+
+fn simplex_weights(x: ArrayView1<f64>) -> Option<Vec<f64>> {
+    let sum: f64 = x.iter().copied().sum();
+    if !sum.is_finite() || sum <= 0.0 || x.iter().any(|v| !v.is_finite() || *v < -1e-15) {
+        return None;
+    }
+    Some(x.iter().map(|v| v.max(0.0) / sum).collect())
+}
+
+fn hellinger2(p: &[f64], q: &[f64]) -> f64 {
+    let n = p.len().max(q.len());
+    let mut acc = 0.0;
+    for i in 0..n {
+        let u = p.get(i).copied().unwrap_or(0.0).sqrt();
+        let v = q.get(i).copied().unwrap_or(0.0).sqrt();
+        let d = u - v;
+        acc += d * d;
+    }
+    0.5 * acc
+}
+
+/// Minimization MES term: \(\gamma\varphi(\gamma)/(2\Phi(\gamma)) - \log\Phi(\gamma)\),
+/// \(\gamma = (\mu - \eta)/\sigma\).
+fn mes_given_min(mean: f64, sd: f64, eta: f64) -> f64 {
+    let gamma = (mean - eta) / sd;
+    let cdf = normal_cdf(gamma).clamp(1e-15, 1.0 - 1e-15);
+    (gamma * normal_pdf(gamma)) / (2.0 * cdf) - cdf.ln()
+}
+
+fn xorshift64(state: &mut u64) -> u64 {
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
+fn unit_normal(state: &mut u64) -> f64 {
+    let u1 = ((xorshift64(state) as f64) / (u64::MAX as f64)).clamp(1e-12, 1.0);
+    let u2 = (xorshift64(state) as f64) / (u64::MAX as f64);
+    (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
 }
 
 fn normal_pdf(z: f64) -> f64 {
@@ -313,7 +423,7 @@ fn erf(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndarray::Array1;
+    use ndarray::{Array1, ArrayView1};
 
     fn pt(v: &[f64]) -> Array1<f64> {
         Array1::from(v.to_vec())
@@ -344,10 +454,10 @@ mod tests {
     #[test]
     fn it_is_uncertain_away_from_its_observations() {
         let mut m = FunnelModel::new(0.2, 50.0, 1e-3);
-        m.observe(pt(&[0.0, 0.0]).view(), -100.0);
-        m.observe(pt(&[0.1, 0.0]).view(), -110.0);
-        let (_, near) = m.predict(pt(&[0.05, 0.0]).view());
-        let (_, far) = m.predict(pt(&[0.9, 0.9]).view());
+        m.observe(pt(&[1.0, 0.0]).view(), -100.0);
+        m.observe(pt(&[0.9, 0.1]).view(), -110.0);
+        let (_, near) = m.predict(pt(&[0.95, 0.05]).view());
+        let (_, far) = m.predict(pt(&[0.5, 0.5]).view());
         assert!(
             far > near * 5.0,
             "uncertainty {far} far from data against {near} inside it"
@@ -363,13 +473,13 @@ mod tests {
         // A region sampled repeatedly and found mediocre.
         for k in 0..6 {
             let d = 0.02 * k as f64;
-            m.observe(pt(&[0.1 + d, 0.1]).view(), -390.0 + d);
+            m.observe(pt(&[0.85 + d, 0.15 - d]).view(), -390.0 + d);
         }
         // One good point, so the incumbent is not the mediocre region.
-        m.observe(pt(&[0.15, 0.12]).view(), -396.0);
+        m.observe(pt(&[0.88, 0.12]).view(), -396.0);
 
-        let sampled = m.expected_improvement(pt(&[0.12, 0.1]).view());
-        let unexplored = m.expected_improvement(pt(&[0.8, 0.05]).view());
+        let sampled = m.expected_improvement(pt(&[0.87, 0.13]).view());
+        let unexplored = m.expected_improvement(pt(&[0.1, 0.9]).view());
         assert!(
             unexplored > sampled,
             "unexplored scored {unexplored}, sampled mediocre scored {sampled}"
@@ -438,5 +548,55 @@ mod tests {
         assert_eq!(mean, 0.0);
         assert_eq!(sd, 10.0);
         assert!(m.expected_improvement(pt(&[0.5, 0.5]).view()).is_infinite());
+    }
+
+    #[test]
+    fn hellinger_kernel_is_one_on_the_same_composition() {
+        let m = FunnelModel::new(0.15, 20.0, 1e-2);
+        let a = pt(&[2.0, 0.0, 0.0]);
+        let b = pt(&[1.0, 0.0, 0.0]);
+        let k = m.kernel(a.view(), b.view());
+        assert!(
+            (k - 400.0).abs() < 1e-9,
+            "identical compositions after normalize: {k}"
+        );
+    }
+
+    #[test]
+    fn mes_is_non_negative_and_finite() {
+        let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
+        m.observe(pt(&[1.0, 0.0, 0.0]).view(), -396.28);
+        m.observe(pt(&[0.0, 1.0, 0.0]).view(), -380.0);
+        let extras = [pt(&[0.0, 0.0, 1.0])];
+        let views: Vec<ArrayView1<f64>> = extras.iter().map(|x| x.view()).collect();
+        let minima = m.sample_minima(&views, 16);
+        for hist in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] {
+            let mes = m.max_value_entropy(pt(&hist).view(), &minima);
+            assert!(mes.is_finite(), "MES {mes} at {hist:?}");
+            assert!(mes >= 0.0, "MES {mes} at {hist:?}");
+        }
+    }
+
+    #[test]
+    fn mes_and_ei_disagree_on_an_ico_shelf() {
+        let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
+        m.observe(pt(&[1.0, 0.0, 0.0]).view(), -396.28);
+        m.observe(pt(&[0.98, 0.02, 0.0]).view(), -396.30);
+        let ico = pt(&[1.0, 0.0, 0.0]);
+        let nearby = pt(&[0.97, 0.03, 0.0]);
+        let unseen = pt(&[0.0, 0.0, 1.0]);
+        let extras = [nearby.clone(), unseen.clone()];
+        let views: Vec<ArrayView1<f64>> = extras.iter().map(|x| x.view()).collect();
+        let minima = m.sample_minima(&views, 16);
+        let ei_near = m.expected_improvement(nearby.view());
+        let ei_far = m.expected_improvement(unseen.view());
+        let mes_near = m.max_value_entropy(nearby.view(), &minima);
+        let mes_far = m.max_value_entropy(unseen.view(), &minima);
+        let ei_picks_near = ei_near > ei_far;
+        let mes_picks_far = mes_far > mes_near;
+        assert!(
+            ei_picks_near && mes_picks_far,
+            "EI near {ei_near} far {ei_far}; MES near {mes_near} far {mes_far}; ico {ico:?}"
+        );
     }
 }
