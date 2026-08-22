@@ -126,20 +126,36 @@ pub enum OccupancyLeaveAdopt {
 /// Where an occupancy extra goes when it Leaves.
 ///
 /// OtherFamily is a draw from another packing community on the sparsified
-/// book. That is how Leave includes a packing once it is on file, and the
-/// draw has to clear the packing grain: a candidate that only clears the
-/// cell grain is an isomer of the packing the extra is leaving. Cells of one
-/// packing are one community and stay ArchiveHole. ArchiveHole is a rung of
-/// the packing ladder in the DECAF \(\nu=3\) feature (the same
-/// `local_nu3_z` rows as packing identity), not SOAP leftover
-/// \(p_i-\mu\) and not a named morphology. Serial recommended is a
-/// different mode.
+/// book. That is how Leave divides the surface once there is something to
+/// divide, and the draw has to clear the packing grain: a candidate that
+/// only clears the cell grain is an isomer of the packing the extra is
+/// leaving. ArchiveHole is a rung of the packing ladder in the DECAF
+/// \(\nu=3\) feature (the same `local_nu3_z` rows as packing identity),
+/// not SOAP leftover \(p_i-\mu\) and not a named morphology.
+///
+/// Walk is what a one-packing book asks for. An extra Leaves so the
+/// ensemble stops spending two replicas on one funnel, and that trade is
+/// only worth making when the Leave has somewhere to go. Measured on the
+/// sealed LJ75 icosahedral minimum: a packing-ladder rung, sized by
+/// bisection to spend exactly its barrier, quenches back to the floor it
+/// started on at every rung from 1.32 to 42.3 \(\varepsilon\), which is
+/// five times the ico-Marks barrier in one displacement. So with one
+/// community on the book an ArchiveHole is a move with no measured yield,
+/// and the replica taking it is not exploring, it is idling. Meanwhile the
+/// walk does cross: 3 of 64 independent LJ75 walks at 400k evaluations
+/// reached the Marks minimum, each at hop 4160, 6226 and 4411 of about
+/// 11000. Coordination earns its keep by keeping walks off each other's
+/// basins through the shared bias and the catalog, not by standing 47 of
+/// 48 replicas still against a single funnel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OccupancyLeaveTarget {
     /// Coordinator has a representative of a different packing community.
     OtherFamily,
     /// First rung of the packing ladder in the DECAF \(\nu=3\) feature.
     ArchiveHole,
+    /// Nothing to divide yet: keep walking, and let the shared bias hold
+    /// this replica off the basins the others are on.
+    Walk,
 }
 
 /// Consecutive leftover-sat bits kept for tests of the hatch filter.
@@ -230,8 +246,12 @@ pub fn occupancy_leave_target(
     packing_communities: usize,
 ) -> OccupancyLeaveTarget {
     let _ = packing_saturated;
-    let other_packing = other_family_in_catalog && packing_communities >= 2;
-    if other_packing {
+    if packing_communities < 2 {
+        // One packing on the book is nothing to divide, and the hole that
+        // would be drawn here has no measured yield. Walk.
+        return OccupancyLeaveTarget::Walk;
+    }
+    if other_family_in_catalog {
         OccupancyLeaveTarget::OtherFamily
     } else {
         OccupancyLeaveTarget::ArchiveHole
@@ -1799,14 +1819,21 @@ mod tests {
     }
 
     #[test]
-    fn leftover_wells_of_one_packing_are_archive_hole() {
+    fn one_packing_on_the_book_is_nothing_to_divide() {
+        // A Leave trades a replica's walk for coverage. With one community
+        // there is no second packing to cover, and the hole that would be
+        // drawn has no measured yield on LJ75, so the trade is a loss.
         assert_eq!(
             occupancy_leave_target(true, false, 1),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Walk
         );
-        assert_ne!(
-            occupancy_leave_target(true, false, 1),
-            OccupancyLeaveTarget::OtherFamily
+        assert_eq!(
+            occupancy_leave_target(false, false, 1),
+            OccupancyLeaveTarget::Walk
+        );
+        assert_eq!(
+            occupancy_leave_target(true, false, 0),
+            OccupancyLeaveTarget::Walk
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
@@ -1826,7 +1853,7 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Walk
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
@@ -2273,7 +2300,7 @@ mod tests {
         assert_eq!(
             occupancy_leave_target(true, map.saturated(), map.communities),
             OccupancyLeaveTarget::OtherFamily,
-            "saturation does not disable the draw; ArchiveHole is the one-community book"
+            "saturation does not disable the draw once a second packing is on the book"
         );
     }
 
