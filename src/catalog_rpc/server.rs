@@ -314,6 +314,13 @@ struct ScientificState {
     /// that at a fifth of the coordinator's cycles once the EI sweep
     /// itself was cached.
     worthwhile: Option<(u64, u64, usize)>,
+    /// Sizes of the candidate and catalog stores the funnel was last fed
+    /// from. Feeding it walks every candidate and every catalog entry and
+    /// clones a histogram per family into a map; perf put that map's clone
+    /// and drop at a quarter of the coordinator's cycles, with the
+    /// allocator behind it at two fifths. The observations are idempotent,
+    /// so while the stores have not grown there is nothing to feed.
+    fed_from: Option<(usize, usize, usize)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -414,6 +421,7 @@ impl CoordinatorState {
                     sparsified: None,
                     ei_verdict: None,
                     worthwhile: None,
+                    fed_from: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -2737,6 +2745,18 @@ fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
+    let sizes = (
+        scientific.last_candidate_by_replica.len(),
+        scientific.best_candidate_by_replica.len(),
+        scientific.catalog.entries().len(),
+    );
+    if scientific.fed_from == Some(sizes)
+        && let Some((held, verdict)) = scientific.ei_verdict
+        && held == scientific.funnel.version()
+    {
+        return verdict;
+    }
+    scientific.fed_from = Some(sizes);
     let mut best: BTreeMap<usize, (Vec<f64>, f64)> = BTreeMap::new();
     {
         let packing = &scientific.packing;
