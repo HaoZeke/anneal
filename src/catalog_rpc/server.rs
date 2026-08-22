@@ -2809,8 +2809,15 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
     }
     let fiedler = occupancy_seam_floor(scientific).0;
     let landfold = occupancy_landfold_from_book(scientific).0;
-    let peeled = occupancy_sparsify_packing(&scientific.packing).communities;
-    fiedler.max(landfold).max(peeled.max(1))
+    // The book's community count is a hurdle, not a quota. Every other
+    // measured floor here is one or two, and single linkage can name many
+    // more packings than an ensemble has replicas to sit in: asking the live
+    // ensemble to occupy every packing the book has ever recorded is a floor
+    // no run can meet.
+    let peeled = occupancy_sparsify_packing(&scientific.packing)
+        .communities
+        .clamp(1, 2);
+    fiedler.max(landfold).max(peeled)
 }
 
 fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
