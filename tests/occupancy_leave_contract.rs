@@ -237,8 +237,8 @@ fn leave_quench_keeps_the_walk_off_mu_k() {
         "Leave climbs the local ridge (ART / MMF) before the quench"
     );
     assert!(
-        body.contains("relax(ledger, candidate.view(), 0)"),
-        "the invert geometry is rescored on raw E with no descent"
+        body.contains("with_disarmed"),
+        "the walk stops on a ridge, so the chain takes the raw minimum below it"
     );
 }
 

@@ -1238,7 +1238,18 @@ where
                     state.clone()
                 };
                 let quenched = relax(ledger, leave_start.view(), cfg.relax_steps);
-                let mut candidate = quenched.1;
+                // The armed walk ends on a ridge, not in a well. What names
+                // the packing, and what the chain may move onto, is the raw
+                // minimum below it: a minimum of \(E+V\) is not a minimum
+                // of the potential, and a hill this Leave put there is not
+                // part of the landscape.
+                let (mut candidate_energy, mut candidate) = if leave_action {
+                    crate::known_basin::with_disarmed(|| {
+                        relax(ledger, quenched.1.view(), cfg.relax_steps)
+                    })
+                } else {
+                    quenched
+                };
                 let left_packing = |trial: &Array1<f64>| {
                     from_state
                         .as_slice()
@@ -1259,7 +1270,7 @@ where
                 {
                     let ladder = {
                         let mut quench =
-                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps).1;
+                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
                         crate::known_basin::leave_packing_ladder(
                             from_state.view(),
                             hops,
@@ -1270,7 +1281,8 @@ where
                             &mut quench,
                         )
                     };
-                    if let Some((left, _rung)) = ladder {
+                    if let Some((energy, left, _rung)) = ladder {
+                        candidate_energy = energy;
                         candidate = left;
                         walked_off = true;
                     }
@@ -1278,16 +1290,7 @@ where
                 if leave_action {
                     crate::known_basin::disarm();
                 }
-                // The invert walk is the Leave. The energy it carries has to
-                // be the raw one: the transformed surface is \(E+V\), and a
-                // hill amplitude carried onto the chain biases every later
-                // Metropolis test.
-                let (proposal_energy, proposal_state) = if leave_action {
-                    let (raw_e, _) = relax(ledger, candidate.view(), 0);
-                    (raw_e, candidate)
-                } else {
-                    (quenched.0, candidate)
-                };
+                let (proposal_energy, proposal_state) = (candidate_energy, candidate);
                 #[cfg(not(feature = "featomic"))]
                 let walked_off = walked_off || leave_action;
                 let leave = crate::catalog::occupancy_leave_adopt(&action, walked_off);

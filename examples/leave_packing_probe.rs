@@ -201,10 +201,13 @@ fn main() {
             None,
             None,
             known_basin::LEAVE_RUNGS,
-            |trial| quench(&potential, trial, steps),
+            |trial| {
+                let relaxed = quench(&potential, trial, steps);
+                (potential.value_and_gradient(relaxed.view()).0, relaxed)
+            },
         );
         known_basin::disarm();
-        if let Some((trial, rung)) = walked {
+        if let Some((_, trial, rung)) = walked {
             // Raw polish: the ladder walked on E+V.
             let polished = quench(&potential, trial.view(), steps);
             classify("ladder", index, &mut ladder, &polished, Some(rung));
