@@ -1061,7 +1061,7 @@ fn apply_request(
             // second cell, which is single linkage on a pair rather than on
             // a cloud, and it sends extras between icosahedral cells that
             // have simply not chained yet.
-            let occupied_packing_communities = sparsified_book(scientific).occupied_communities;
+            let occupied_packing_communities = worthwhile_communities(scientific);
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
@@ -2670,6 +2670,49 @@ fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
     !sparsified_book(scientific).holes
 }
 
+/// Occupied packings the ensemble still has reason to station a replica in.
+///
+/// `packing_communities >= 2` was the test for "the surface is divided, so
+/// send the extra to the other half". Measured on LJ75 it is true from the
+/// second cell of every run and stays true: the walks quench into genuinely
+/// distinct amorphous minima and each is its own community at the packing
+/// grain, 10 and 11 of them by a few hundred funnel observations. Dividing
+/// an ensemble between an icosahedral funnel and ten amorphous minima 5 to
+/// 25 eps above its floor is dilution, not division of labour.
+///
+/// A community worth occupying is one the FunnelModel still expects
+/// improvement from. Jones, Schonlau and Welch (*J. Global Optim.* **1998**,
+/// *13*, 455) give \(\mathrm{EI}\to\max(f_{\min}-\mu,0)\) as
+/// \(\sigma\to0\), so a packing that has been observed and mined out
+/// scores at or below the model noise and drops out, while an unexplored one
+/// does not. When fewer than two qualify there is nothing to divide and the
+/// extra walks.
+fn worthwhile_communities(scientific: &mut ScientificState) -> usize {
+    let map = sparsified_book(scientific).clone();
+    let noise = scientific.funnel.noise;
+    let histograms: BTreeMap<usize, Vec<f64>> = scientific
+        .packing
+        .occupied_histograms()
+        .into_iter()
+        .collect();
+    let mut open: BTreeSet<usize> = BTreeSet::new();
+    for point in &map.points {
+        if point.wells == 0 || open.contains(&point.community) {
+            continue;
+        }
+        let Some(histogram) = histograms.get(&point.family) else {
+            continue;
+        };
+        let ei = scientific
+            .funnel
+            .expected_improvement(ndarray::Array1::from(histogram.clone()).view());
+        if ei.is_finite() && ei > noise {
+            open.insert(point.community);
+        }
+    }
+    open.len()
+}
+
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
     let mut best: BTreeMap<usize, (Vec<f64>, f64)> = BTreeMap::new();
     {
@@ -2899,6 +2942,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     // where it never did, and the two look identical from outside.
     let funnel_obs = scientific.funnel.len();
     let occupied_communities = sparsified.occupied_communities;
+    let worthwhile = worthwhile_communities(scientific);
     let ei_exhausted = occupancy_funnel_ei_exhausted(scientific);
     let stop = packing_sat && families >= min_families;
     let key = OccupancyGtKey {
@@ -2942,7 +2986,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         .map(|value| format!("{value:.4}"))
         .unwrap_or_else(|| "null".to_owned());
     println!(
-        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"funnel_obs\":{},\"ei_exhausted\":{},\"occupied_communities\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
+        "{{\"kind\":\"occupancy_gt\",\"leftover_n\":{},\"leftover_n1\":{},\"leftover_p0\":{},\"leftover_sat\":{},\"leftover_dwell\":{},\"packing_n\":{},\"packing_n1\":{},\"packing_p0\":{},\"packing_sat\":{},\"families\":{},\"min_families\":{},\"n_floor\":{},\"p0_ceiling\":{},\"conductance\":{},\"algebraic_connectivity\":{},\"seam_left\":{},\"seam_right\":{},\"seam_packings\":{},\"measured_floor\":{},\"landfold_floor\":{},\"landfold_left\":{},\"landfold_right\":{},\"ring_floor\":{},\"ring_distinct\":{},\"ring_n\":{},\"fes_delta\":{},\"fes_minima\":{},\"sparsified_n\":{},\"sparsified_n1\":{},\"sparsified_sat\":{},\"cell_n\":{},\"cell_n1\":{},\"cell_p0\":{},\"funnel_obs\":{},\"ei_exhausted\":{},\"occupied_communities\":{},\"worthwhile_communities\":{},\"landfold_holes\":{},\"landfold_communities\":{},\"stop\":{}}}",
         leftover.n,
         leftover.n1,
         leftover_p0,
@@ -2979,6 +3023,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
         funnel_obs,
         ei_exhausted,
         occupied_communities,
+        worthwhile,
         sparsified.holes,
         sparsified.communities,
         stop,
