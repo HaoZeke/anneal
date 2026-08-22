@@ -61,6 +61,8 @@ pub struct FunnelModel {
     prior_mean: f64,
     xs: Vec<Array1<f64>>,
     ys: Vec<f64>,
+    /// Bumped whenever an observation changes the data.
+    version: u64,
     /// Cholesky factor of the kernel matrix plus noise, lower triangular.
     chol: Option<Array2<f64>>,
     /// `K^-1 (y - prior)`, precomputed for the mean.
@@ -83,6 +85,7 @@ impl FunnelModel {
             prior_mean: 0.0,
             xs: Vec::new(),
             ys: Vec::new(),
+            version: 0,
             chol: None,
             alpha: None,
         }
@@ -117,6 +120,19 @@ impl FunnelModel {
     /// A morphology already present is updated to the lower of the two rather
     /// than added again: the quantity modelled is how low a region goes, not
     /// how often it was sampled.
+    /// Changes to the observed data since this model was created.
+    ///
+    /// [`Self::max_expected_improvement_at_data`] predicts at every observed
+    /// site and each prediction is quadratic in their number, so the sweep is
+    /// cubic: at 497 observations that is of order 1e8 operations, and the
+    /// occupancy coordinator asked for it once per policy request per
+    /// replica per slice. Measured with perf on a live 48-replica run,
+    /// FunnelModel::predict was 74 percent of the coordinator's cycles. The
+    /// version lets a caller keep the verdict while the data has not moved.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     pub fn observe(&mut self, x: ArrayView1<f64>, y: f64) {
         if !y.is_finite() || x.iter().any(|v| !v.is_finite()) {
             return;
@@ -131,6 +147,7 @@ impl FunnelModel {
                 if y < self.ys[i] {
                     self.ys[i] = y;
                     self.chol = None;
+                    self.version = self.version.wrapping_add(1);
                 }
                 return;
             }
@@ -138,6 +155,7 @@ impl FunnelModel {
         self.xs.push(x.to_owned());
         self.ys.push(y);
         self.chol = None;
+        self.version = self.version.wrapping_add(1);
     }
 
     /// Refits the factorisation. Called automatically when needed.

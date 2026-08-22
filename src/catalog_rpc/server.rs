@@ -303,6 +303,11 @@ struct ScientificState {
     /// serving 48 replicas spends its core folding a book that has not
     /// changed. Recomputed only when the book moves.
     sparsified: Option<(u64, crate::catalog::OccupancyBookMap)>,
+    /// EI verdict kept beside the FunnelModel version it was read from.
+    /// The sweep predicts at every observed site and is cubic in their
+    /// number; perf on a live 48-replica coordinator put
+    /// FunnelModel::predict at 74 percent of its cycles.
+    ei_verdict: Option<(u64, bool)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -401,6 +406,7 @@ impl CoordinatorState {
                     archive: Archive::new(scientific.census_radius.max(1e-6), ARCHIVE_RADIUS_FLOOR),
                     archive_progress: 0.0,
                     sparsified: None,
+                    ei_verdict: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -2749,8 +2755,16 @@ fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
             .funnel
             .observe(ndarray::Array1::from(histogram.clone()).view(), *energy);
     }
+    let version = scientific.funnel.version();
+    if let Some((held, verdict)) = scientific.ei_verdict
+        && held == version
+    {
+        return verdict;
+    }
     let max_ei = scientific.funnel.max_expected_improvement_at_data();
-    occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise)
+    let verdict = occupancy_ei_exhausted(max_ei, scientific.funnel.len(), scientific.funnel.noise);
+    scientific.ei_verdict = Some((version, verdict));
+    verdict
 }
 
 fn basin_packing_family(scientific: &ScientificState, basin: u64) -> Option<usize> {
