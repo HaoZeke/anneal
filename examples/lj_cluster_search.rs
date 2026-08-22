@@ -3723,6 +3723,18 @@ fn run_capnp_catalog(
                     policy.packing_saturated,
                     policy.occupied_family_count as usize,
                 ) {
+                    OccupancyLeaveTarget::Walk => {
+                        // Nothing on the book to divide. The extra keeps
+                        // walking and the shared bias, deposited above,
+                        // holds it off the basins the others are on. That
+                        // is what coordination buys here; standing still
+                        // against one funnel is not.
+                        trace.adoption = SliceAdoption::Rejected;
+                        cooperative
+                            .record_slice(replica, trace)
+                            .expect("checkpoint trace must remain complete");
+                        return CheckpointAction::Continue;
+                    }
                     OccupancyLeaveTarget::OtherFamily => {
                         let sparse = other_family.expect("other family is on file");
                         anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
