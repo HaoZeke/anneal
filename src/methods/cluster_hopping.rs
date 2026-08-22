@@ -1034,6 +1034,18 @@ where
     let mut seam: Option<crate::catalog::SeamBank> = std::env::var("CATALOG_SEAM_LADDER")
         .is_ok_and(|value| value == "1")
         .then(crate::catalog::SeamBank::new);
+    // How long a chain walks without improvement before it reseeds from
+    // the frontier. The splitting gain is per round: n p arrivals per
+    // stage only accumulates over repeated episodes, and a patience tied
+    // to the escape machinery's 5000 gives one or two episodes in a
+    // twelve-thousand-hop run, which is no ensemble at all. Basins here
+    // are about 8.5 accepted hops apart, so 800 quiet hops is roughly a
+    // hundred basins without improvement: locally exhausted, cheap to
+    // abandon for the frontier.
+    let seam_patience: usize = std::env::var("CATALOG_SEAM_PATIENCE")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(800);
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2729,7 +2741,7 @@ where
         // instead of decaying by one factor per stage
         // (Hop.cloning_dominates). The jump replaces the state and its
         // energy and nothing else; Metropolis continues raw.
-        if stuck
+        if quiet >= seam_patience
             && let Some(bank) = seam.as_ref()
             && let Some((_, frontier_energy, frontier_state)) = bank.frontier()
             && frontier_state.len() == x.len()
