@@ -108,10 +108,10 @@ fn main() {
     let map = occupancy_sparsify_packing(&book);
     let occupied = book.occupied_histograms();
     let hists: Vec<Vec<f64>> = occupied.iter().map(|(_, h)| h.clone()).collect();
-    let (switch_xy, switch_l) =
-        occupancy_map_fold(&hists, OccupancyFold::Switch).unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
-    let (asinh_xy, asinh_l) =
-        occupancy_map_fold(&hists, OccupancyFold::Asinh).unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
+    let (switch_xy, switch_l) = occupancy_map_fold(&hists, OccupancyFold::Switch)
+        .unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
+    let (asinh_xy, asinh_l) = occupancy_map_fold(&hists, OccupancyFold::Asinh)
+        .unwrap_or_else(|| (Vec::new(), [0.0, 0.0]));
     if let Some(path) = dump_hist {
         let dim = hists.iter().map(Vec::len).max().unwrap_or(0);
         let mut body = format!(
