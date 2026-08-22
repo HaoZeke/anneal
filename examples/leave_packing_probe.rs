@@ -600,6 +600,12 @@ fn main() {
         let mut stop_land_r = 0.0_f64;
         let mut stop_e = f64::INFINITY;
         let mut scan_left = 0usize;
+        // Min-mode saddle search on the biased surface.
+        let mut dimer_left = 0usize;
+        let mut dimer_crossed = 0usize;
+        let mut dimer_r = 0.0_f64;
+        let mut dimer_e = f64::INFINITY;
+        let mut dimer_lambda = 0.0_f64;
         let trials = leaves.min(16);
         for index in 0..trials {
             // T = 0.8 is the run temperature in the resolved config, and
@@ -715,7 +721,51 @@ fn main() {
                     stop_e = fallen_e;
                 }
             }
+            // Min-mode on E+V, with the reflection out of the way.
+            //
+            // Every one of the twenty-four samples above quenches back to
+            // the icosahedral floor exactly, over a trajectory reaching
+            // 1.87 in DECAF distance against a Marks separation of
+            // 0.4267. Four times the road, and never once outside the
+            // catchment: the packing cover direction does not point at an
+            // adjacent basin, so no deposit along it can work at any
+            // strength.
+            //
+            // The deposit is still worth having, for the other thing it
+            // does. Filling the occupied well by A lowers every saddle
+            // out of it by A, so a saddle search on E+V is hunting a
+            // barrier already paid down. The Householder has to go for
+            // that: it inverts the force along a guessed direction, and a
+            // min-mode search finds its own.
+            let climbed = known_basin::with_hill_only(|| {
+                anneal_core::methods::activation::activate_from_origin(
+                    start.view(),
+                    ico.view(),
+                    |v: ArrayView1<f64>| {
+                        let (energy, gradient) = potential.value_and_gradient(v);
+                        Some(known_basin::effective(v, energy, gradient).1)
+                    },
+                    &anneal_core::methods::activation::Activation::default(),
+                )
+            });
             known_basin::disarm();
+            if let Some(outcome) = climbed {
+                dimer_lambda = outcome.lambda;
+                if outcome.crossed {
+                    dimer_crossed += 1;
+                }
+                let settled = quench(&potential, outcome.state.view(), steps);
+                if let Some(landed) = settled.as_slice() {
+                    dimer_r = dimer_r.max(packing_gap(&ico_slice, landed));
+                    if leaves_packing(&ico_slice, landed, &[]) {
+                        dimer_left += 1;
+                    }
+                }
+                let settled_e = potential.value_and_gradient(settled.view()).0;
+                if settled_e.is_finite() && settled_e < dimer_e {
+                    dimer_e = settled_e;
+                }
+            }
             let fell = quench(&potential, rode.view(), steps);
             if let Some(slice) = fell.as_slice() {
                 land_r = land_r.max(packing_gap(&ico_slice, slice));
@@ -739,7 +789,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"scan_left\":{scan_left},\"grain\":{PACKING_LINK},\"marks_r\":{marks_gap:.4},\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"scan_left\":{scan_left},\"dimer_left\":{dimer_left},\"dimer_crossed\":{dimer_crossed},\"dimer_r\":{dimer_r:.4},\"dimer_e\":{dimer_e:.6},\"dimer_lambda\":{dimer_lambda:.4},\"grain\":{PACKING_LINK},\"marks_r\":{marks_gap:.4},\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
