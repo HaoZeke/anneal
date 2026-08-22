@@ -106,6 +106,18 @@ pub fn is_armed() -> bool {
     ARMED.with(|slot| slot.borrow().is_some())
 }
 
+/// Run `body` on the raw surface, then restore the armed transform.
+///
+/// The polish that decides where a walk landed has to run on \(E\), not on
+/// \(E+V\): a hill the Leave put there is not part of the landscape, and a
+/// minimum of the sum is not a minimum of the potential.
+pub fn with_disarmed<T>(body: impl FnOnce() -> T) -> T {
+    let held = ARMED.with(|slot| slot.borrow_mut().take());
+    let out = body();
+    ARMED.with(|slot| *slot.borrow_mut() = held);
+    out
+}
+
 /// Largest Cartesian RMSD one armed step may take.
 ///
 /// The hill width is the size of the well being left; the walk across it is
@@ -125,6 +137,16 @@ pub const LEAVE_WALK_SPAN: f64 = 0.8;
 
 /// Consecutive falls in raw \(E\) that name the far side of a ridge.
 pub const LEAVE_WALK_DESCENTS: usize = 3;
+
+/// Largest climb in raw \(E\), in units of the well depth per atom.
+///
+/// The span rule alone accepts a step that puts two atoms on top of each
+/// other, because overlapping atoms move \(\mu\) further than any
+/// rearrangement does. Wales and Doye put the LJ75 ico-Marks barriers at
+/// 8.69 and 7.48 \(\varepsilon\) against a well depth of 5.28
+/// \(\varepsilon\) per atom, so four times the depth per atom clears the
+/// ridge the walk is meant to cross and refuses the ones it is not.
+pub const LEAVE_WALK_CLIMB: f64 = 4.0;
 
 /// xtsci step on the transformed surface: two-loop direction, accept a step
 /// that increases the span from the known wells. Span is packing L2
@@ -166,7 +188,9 @@ where
         return (f64::INFINITY, x);
     };
     let n_at = (x.len() / 3).max(1) as f64;
-    let mut peak = raw_energy().unwrap_or(f64::NEG_INFINITY);
+    let start_raw = raw_energy();
+    let ceiling = start_raw.map(|raw| raw + LEAVE_WALK_CLIMB * raw.abs() / n_at);
+    let mut peak = start_raw.unwrap_or(f64::NEG_INFINITY);
     let mut descents = 0usize;
     for _ in 0..max_iter {
         let mut direction = opt.two_loop(grad.view());
@@ -187,7 +211,11 @@ where
                 return (energy, x);
             };
             let trial_span = span_from_wells(trial.view());
-            if trial_span > start_span || te < energy {
+            let climbed = match (raw_energy(), ceiling) {
+                (Some(raw), Some(ceiling)) => raw > ceiling,
+                _ => false,
+            };
+            if !climbed && (trial_span > start_span || te < energy) {
                 let s = &trial - &x;
                 let y = &tg - &grad;
                 opt.record_pair(s, y);
@@ -686,6 +714,14 @@ pub const LEAVE_RUNG_GROWTH: f64 = 1.5;
 /// Rungs a single Leave walks before it reports a refusal.
 pub const LEAVE_RUNGS: usize = 8;
 
+/// Rungs walked past the first escape before the best of them is taken.
+///
+/// The first rung that leaves is not the best one to leave by. Measured from
+/// the LJ75 icosahedral minimum, the first escape lands anywhere between 5
+/// and 25 \(\varepsilon\) above the floor, and the spread across
+/// neighbouring rungs of one direction is most of that range.
+pub const LEAVE_RUNG_EXTRA: usize = 2;
+
 /// One rung of the Leave ladder: a packing-map step of Cartesian size
 /// `rmsd` along the covering direction `cover_index`, pointed away from the
 /// packings on file.
@@ -795,23 +831,37 @@ pub fn leave_packing_ladder<Q>(
     mobile: Option<&[usize]>,
     rungs: usize,
     mut quench: Q,
-) -> Option<(Array1<f64>, usize)>
+) -> Option<(f64, Array1<f64>, usize)>
 where
-    Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
+    Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
 {
     let origin = x.as_slice()?;
     let mut rmsd = LEAVE_RUNG_RMSD;
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    let mut spare = LEAVE_RUNG_EXTRA;
     for rung in 0..rungs.max(1) {
         let start = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
-        let quenched = quench(start.view());
-        if let Some(trial) = quenched.as_slice()
+        let (_, walked) = quench(start.view());
+        // The walk ends on a ridge, so what names the packing is the raw
+        // minimum below it, not the geometry the walk stopped at. Measured
+        // from LJ75 ico: the walk crosses the grain on every rung and the
+        // polish returns to the floor it started on.
+        let (energy, quenched) = with_disarmed(|| quench(walked.view()));
+        if energy.is_finite()
+            && let Some(trial) = quenched.as_slice()
             && crate::catalog::leaves_packing(origin, trial, references)
         {
-            return Some((quenched, rung));
+            if best.as_ref().is_none_or(|(held, _, _)| energy < *held) {
+                best = Some((energy, quenched, rung));
+            }
+            if spare == 0 {
+                break;
+            }
+            spare -= 1;
         }
         rmsd *= LEAVE_RUNG_GROWTH;
     }
-    None
+    best
 }
 
 #[cfg(test)]

@@ -2270,7 +2270,8 @@ mod tests {
         assert!(!map.holes);
         assert_eq!(
             occupancy_leave_target(true, map.saturated(), map.communities),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::OtherFamily,
+            "saturation does not disable the draw; ArchiveHole is the one-community book"
         );
     }
 
@@ -2313,9 +2314,9 @@ mod tests {
         let cells = vec![
             vec![1.0, 0.0, 0.0],
             vec![1.0, 0.1, 0.0],
-            vec![1.0, 0.4, 0.0],
+            vec![1.0, 0.35, 0.0],
+            vec![1.0, 0.6, 0.0],
             vec![1.0, 0.7, 0.0],
-            vec![1.0, 0.8, 0.0],
         ];
         let map = occupancy_sparsify_book(&cells, &[0, 1, 2, 3, 4], &[20, 20, 20, 20, 20]);
         assert_eq!(
