@@ -124,6 +124,31 @@ fn main() {
         "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK}}}"
     );
 
+    // The ladder is walked in barrier, so it needs the curvature of the
+    // well it leaves and the depth that scales the barrier. Both measured.
+    let curvature = anneal_core::curvature::curvature_features(
+        ico.view(),
+        |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).1),
+        64,
+        1e-4,
+    )
+    .map_or(0.0, |features| features.lambda_min);
+    let depth = ico_energy.abs() / (ico.len() / 3).max(1) as f64;
+    println!(
+        "{{\"kind\":\"leave_probe_rung\",\"lambda_min\":{curvature:.4},\"depth_per_atom\":{depth:.4},\"rung0\":{:.4},\"rung_top\":{:.4}}}",
+        known_basin::rung_rmsd(
+            curvature,
+            ico.len() / 3,
+            known_basin::rung_barrier(depth, 0)
+        )
+        .unwrap_or(f64::NAN),
+        known_basin::rung_rmsd(
+            curvature,
+            ico.len() / 3,
+            known_basin::rung_barrier(depth, known_basin::LEAVE_RUNGS - 1)
+        )
+        .unwrap_or(f64::NAN)
+    );
     let references = vec![ico_slice.clone()];
     let mut cartesian = Tally {
         best: ico_energy,
@@ -227,19 +252,28 @@ fn main() {
         known_basin::disarm();
         classify("armed", index, &mut armed, &trial, None);
 
-        // Packing-map ladder under the invert.
-        known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
+        // Packing-map ladder under the invert, hill width set by the
+        // curvature rather than by the old constant.
+        let sigma = known_basin::rung_rmsd(
+            curvature,
+            ico.len() / 3,
+            known_basin::rung_barrier(depth, 0),
+        )
+        .unwrap_or(known_basin::LEAVE_RUNG_RMSD);
+        known_basin::arm_leave(ico.view(), sigma, &references);
         let walked = known_basin::leave_packing_ladder(
             ico.view(),
             index,
             &references,
             None,
             None,
+            depth,
             known_basin::LEAVE_RUNGS,
             |trial| {
                 let relaxed = quench(&potential, trial, steps);
                 (potential.value_and_gradient(relaxed.view()).0, relaxed)
             },
+            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
         );
         known_basin::disarm();
         if let Some((_, trial, rung)) = walked {
@@ -271,18 +305,26 @@ fn main() {
     anneal_core::catalog::set_packing_references(vec![ico_slice.clone()]);
     for index in 0..leaves {
         let references = anneal_core::catalog::packing_references();
-        known_basin::arm_leave(origin.view(), known_basin::LEAVE_RUNG_RMSD, &references);
+        let sigma = known_basin::rung_rmsd(
+            curvature,
+            origin.len() / 3,
+            known_basin::rung_barrier(depth, 0),
+        )
+        .unwrap_or(known_basin::LEAVE_RUNG_RMSD);
+        known_basin::arm_leave(origin.view(), sigma, &references);
         let walked = known_basin::leave_packing_ladder(
             origin.view(),
             index,
             &references,
             None,
             None,
+            depth,
             known_basin::LEAVE_RUNGS,
             |trial| {
                 let relaxed = quench(&potential, trial, steps);
                 (potential.value_and_gradient(relaxed.view()).0, relaxed)
             },
+            |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
         );
         known_basin::disarm();
         let Some((_, trial, rung)) = walked else {

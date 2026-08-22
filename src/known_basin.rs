@@ -697,28 +697,54 @@ fn dot(left: &Array1<f64>, right: &Array1<f64>) -> f64 {
     left.iter().zip(right.iter()).map(|(a, b)| a * b).sum()
 }
 
-/// First rung of the Leave ladder, in Cartesian RMSD.
+/// Fallback Leave size when no curvature is available, in Cartesian RMSD.
 ///
-/// The old fixed Leave size. It is where the ladder starts, not where it
-/// stops: a 0.35 cap holds \(\mu\) inside one packing, and Wales and Doye put
-/// the LJ75 ico-Marks barriers at 8.69 and 7.48 \(\varepsilon\), so a quench
-/// from 0.35 is a projector back onto the packing it left.
+/// A length is the wrong thing to fix. At a minimum the gradient vanishes,
+/// so a displacement of root-mean-square size \(\delta\) over \(N\) atoms
+/// reaches \(\lambda N\delta^2/2\) under curvature \(\lambda\), and the
+/// step that reaches a barrier \(\Delta\) is [`rung_rmsd`]. Measured by
+/// Lanczos on the sealed LJ75 icosahedral minimum, \(\lambda_{\min}=12.83\),
+/// so the 7.48 \(\varepsilon\) ico-Marks barrier of Wales and Doye is a
+/// step of \(0.125\) and the energy it actually costs is \(7.11\). This
+/// constant is nearly three times that step, and reach grows as
+/// \(\delta^2\), so along the same mode it spends 58.9 \(\varepsilon\):
+/// eight times the barrier, which is a melt and not a crossing. It survives
+/// only for callers that cannot afford a curvature pass.
 ///
 /// Wales, D. J.; Doye, J. P. K. *J. Phys. Chem. A* **1997**, *101*, 5111.
 /// <https://doi.org/10.1021/jp970984n>
 pub const LEAVE_RUNG_RMSD: f64 = 0.35;
 
-/// Ratio between ladder rungs.
-pub const LEAVE_RUNG_GROWTH: f64 = 1.5;
-
-/// Largest rung, in Cartesian RMSD.
+/// Barrier the first rung aims at, in units of the well depth per atom.
 ///
-/// Past a nearest-neighbour separation and a half the rung is not a packing
-/// move on the cluster it started from, it is a fresh cluster: the quench
-/// below it lands wherever the melt happened to fall. Measured from the LJ75
-/// icosahedral minimum, escapes come at a mean rung of 1.38 and none past
-/// the fourth, so the cap is never what ends a productive ladder.
-pub const LEAVE_RUNG_CAP: f64 = 2.0;
+/// The ladder is walked in energy, not in length, because a barrier is what
+/// a Leave has to clear and the step that clears it depends on the curvature
+/// of the structure it starts from. The unit is the depth per atom of the
+/// minimum being left, which every cluster potential supplies and into which
+/// no morphology enters.
+pub const LEAVE_BARRIER_FLOOR: f64 = 0.25;
+
+/// Ratio between the barriers successive rungs aim at.
+pub const LEAVE_BARRIER_GROWTH: f64 = 2.0;
+
+/// Root-mean-square step whose harmonic reach is `barrier`.
+///
+/// \(\delta=\sqrt{2\Delta/(\lambda N)}\), which is
+/// `Hop.rung_reaches_barrier` in `proofs/lean/Hop/LeavePacking.lean`. `None`
+/// when the curvature, the count or the barrier is not positive, so a caller
+/// with no measurement falls back rather than inventing a length.
+pub fn rung_rmsd(curvature: f64, atoms: usize, barrier: f64) -> Option<f64> {
+    if !(curvature > 0.0) || atoms == 0 || !(barrier > 0.0) {
+        return None;
+    }
+    let delta = (2.0 * barrier / (curvature * atoms as f64)).sqrt();
+    delta.is_finite().then_some(delta)
+}
+
+/// Barrier the rung at index `rung` aims at, from the well depth per atom.
+pub fn rung_barrier(depth_per_atom: f64, rung: usize) -> f64 {
+    depth_per_atom.abs() * LEAVE_BARRIER_FLOOR * LEAVE_BARRIER_GROWTH.powi(rung as i32)
+}
 
 /// Rungs a single Leave walks before it reports a refusal.
 pub const LEAVE_RUNGS: usize = 6;
@@ -823,22 +849,156 @@ pub fn leave_packing_rung(
     crate::soap::packing_step_nu3(x, PACKING_SPEC, &direction, rmsd, species, mobile)
 }
 
+/// Curvature of the potential along a unit Cartesian direction.
+///
+/// \(\lambda_u = \hat u^{\mathsf T} H \hat u\) by central difference of
+/// the gradient, two evaluations. Reported for the record; the rung is sized
+/// by [`leave_packing_rung_to`], which measures the energy instead of
+/// trusting this.
+pub fn direction_curvature<G>(
+    x: ArrayView1<f64>,
+    direction: ArrayView1<f64>,
+    epsilon: f64,
+    mut grad: G,
+) -> Option<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let norm = direction.iter().map(|v| v * v).sum::<f64>().sqrt();
+    if !(norm > 1e-15) || !(epsilon > 0.0) {
+        return None;
+    }
+    let mut plus = x.to_owned();
+    let mut minus = x.to_owned();
+    for ((p, m), d) in plus.iter_mut().zip(minus.iter_mut()).zip(direction.iter()) {
+        let step = epsilon * *d / norm;
+        *p += step;
+        *m -= step;
+    }
+    let gp = grad(plus.view())?;
+    let gm = grad(minus.view())?;
+    if gp.len() != direction.len() || gm.len() != direction.len() {
+        return None;
+    }
+    let curvature = gp
+        .iter()
+        .zip(gm.iter())
+        .zip(direction.iter())
+        .map(|((a, b), d)| (a - b) * *d / norm)
+        .sum::<f64>()
+        / (2.0 * epsilon);
+    curvature.is_finite().then_some(curvature)
+}
+
+/// Halvings the rung line search may take before it gives up.
+pub const LEAVE_RUNG_BACKTRACKS: usize = 16;
+
+/// Rung sized so the measured energy rise is at most `barrier`.
+///
+/// A root-mean-square cap is the wrong bound for this direction. The packing
+/// pullback is not spread over the cluster: it concentrates on the few
+/// centres whose environment the increment changes, so an RMSD of 0.35 over
+/// 75 atoms can be one atom moving 1.7 sigma, straight through its
+/// neighbours. A crushed cluster has enormous *negative* transverse
+/// curvature, \(-r^{-1}\,\mathrm{d}V/\mathrm{d}r\) with the pair force
+/// deep in the repulsive wall, so a min-mode climb started there reports
+/// \(\lambda<0\) and a flipped force on its first step and calls the ridge
+/// crossed. Measured on the sealed LJ75 icosahedral minimum: every one of
+/// twelve covering starts declared a crossing after one step at curvatures
+/// between \(-7\times10^5\) and \(-10^{13}\), and the quench from there
+/// returned to the floor it started on.
+///
+/// [`rung_rmsd`] supplies the first trial length from the harmonic identity,
+/// and the length is then halved until the potential itself agrees that the
+/// step costs no more than the barrier. That bound cannot be met by a
+/// crushed structure, so the climb always starts on the landscape.
+pub fn leave_packing_rung_to<E>(
+    x: ArrayView1<f64>,
+    cover_index: usize,
+    barrier: f64,
+    references: &[Vec<f64>],
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    mut energy: E,
+) -> Array1<f64>
+where
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let Some(base) = energy(x).filter(|value| value.is_finite()) else {
+        return x.to_owned();
+    };
+    let atoms = x.len() / 3;
+    let mut rmsd = rung_rmsd(1.0, atoms, barrier).unwrap_or(LEAVE_RUNG_RMSD);
+    // The harmonic guess uses unit curvature, which is soft for any cluster
+    // potential, so the first trial is long and the search shortens it.
+    for _ in 0..LEAVE_RUNG_BACKTRACKS {
+        let trial = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
+        match energy(trial.view()) {
+            Some(value) if value.is_finite() && value - base <= barrier => return trial,
+            _ => rmsd *= 0.5,
+        }
+    }
+    x.to_owned()
+}
+
 /// Walk the Leave ladder until the quench installs a packing.
 ///
-/// Each rung takes a packing-map step of growing Cartesian size and quenches
-/// it; `quench` is the caller's relaxation, and the caller arms
-/// [`arm_leave`] around it so the walk is not pulled back into the wells on
-/// file. The rung that lands outside every packing on file is the Leave.
-/// `None` means the ladder is spent, which is a refusal to report, not a
-/// reason to fall back on a leftover-SOAP hole: a hole of the occupied
-/// packing quenches into the occupied packing.
-pub fn leave_packing_ladder<Q>(
+/// The ladder is walked in barrier, not in length. Rung `k` aims at
+/// [`rung_barrier`] and takes the step [`rung_rmsd`] that reaches it at the
+/// measured `curvature` of the structure being left, so the same ladder is
+/// the right size on a stiff cluster and on a soft one and needs no length
+/// constant. `curvature` is the softest non-rigid eigenvalue from a Lanczos
+/// pass ([`crate::curvature::curvature_features`]) and `depth_per_atom` is
+/// the well depth the ladder is scaled in; a caller with neither falls back
+/// to [`LEAVE_RUNG_RMSD`].
+///
+/// `quench` is the caller's relaxation, and the caller arms [`arm_leave`]
+/// around it so the walk is not pulled back into the wells on file. The rung
+/// that lands outside every packing on file is the Leave. `None` means the
+/// ladder is spent, which is a refusal to report, not a reason to fall back
+/// on a leftover-SOAP hole: a hole of the occupied packing quenches into the
+/// occupied packing.
+pub fn leave_packing_ladder<Q, E>(
     x: ArrayView1<f64>,
     cover_index: usize,
     references: &[Vec<f64>],
     species: Option<&[u32]>,
     mobile: Option<&[usize]>,
+    depth_per_atom: f64,
     rungs: usize,
+    quench: Q,
+    mut energy: E,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    Q: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
+    E: FnMut(ArrayView1<f64>) -> Option<f64>,
+{
+    let starts: Vec<Array1<f64>> = (0..rungs.max(1))
+        .map(|rung| {
+            leave_packing_rung_to(
+                x,
+                cover_index,
+                rung_barrier(depth_per_atom, rung),
+                references,
+                species,
+                mobile,
+                &mut energy,
+            )
+        })
+        .collect();
+    leave_packing_starts(x, &starts, references, quench)
+}
+
+/// Walk a prepared ladder of starts until one quenches outside every
+/// packing on file, and keep the lowest-energy escape.
+///
+/// Split from [`leave_packing_ladder`] because building the rungs needs a
+/// gradient and walking them needs a quench, and a caller whose budget
+/// ledger backs both cannot hold the two closures at once.
+pub fn leave_packing_starts<Q>(
+    x: ArrayView1<f64>,
+    starts: &[Array1<f64>],
+    references: &[Vec<f64>],
     mut quench: Q,
 ) -> Option<(f64, Array1<f64>, usize)>
 where
@@ -847,9 +1007,7 @@ where
     let origin = x.as_slice()?;
     let mut best: Option<(f64, Array1<f64>, usize)> = None;
     let mut spare = LEAVE_RUNG_EXTRA;
-    for rung in 0..rungs.max(1) {
-        let rmsd = (LEAVE_RUNG_RMSD * LEAVE_RUNG_GROWTH.powi(rung as i32)).min(LEAVE_RUNG_CAP);
-        let start = leave_packing_rung(x, cover_index, rmsd, references, species, mobile);
+    for (rung, start) in starts.iter().enumerate() {
         let (_, walked) = quench(start.view());
         // The walk ends on a ridge, so what names the packing is the raw
         // minimum below it, not the geometry the walk stopped at. Measured

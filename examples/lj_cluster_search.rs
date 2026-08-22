@@ -1854,14 +1854,16 @@ fn remember_packing_well(
 /// First rung of the Leave ladder: a packing-map step along one covering
 /// direction, pointed away from the packings on file.
 ///
-/// A Cartesian covering point at this size is a rattle of the occupied
+/// A Cartesian covering point at a fixed size is a rattle of the occupied
 /// packing, and the quench that follows is a projector back onto it. The
-/// step is taken in the DECAF mean instead, and when the quench still lands
-/// in the same packing the hop loop walks the rest of the ladder rather than
-/// drawing another hole of the same size.
+/// step is taken in the DECAF mean instead, and its size is the one that
+/// reaches the first rung's barrier at the measured curvature of this
+/// structure, not a length. When the quench still lands in the same packing
+/// the hop loop walks the rest of the ladder rather than drawing another
+/// hole of the same size.
 fn leave_packing_state<R: rand::Rng + ?Sized>(
     x: ArrayView1<f64>,
-    rmsd: f64,
+    energy: f64,
     wells: &[Array1<f64>],
     rcut: f64,
     species: Option<&[u32]>,
@@ -1869,13 +1871,20 @@ fn leave_packing_state<R: rand::Rng + ?Sized>(
     rng: &mut R,
 ) -> Array1<f64> {
     let _ = (wells, rcut, rng);
-    anneal_core::known_basin::leave_packing_rung(
+    let atoms = x.len() / 3;
+    let depth = energy.abs() / atoms.max(1) as f64;
+    // Two gradients: the curvature of the step this rung is about to take.
+    // They are not charged, because the checkpoint path holds no ledger, and
+    // they are the price of a step sized by the structure instead of by a
+    // length that suits one cluster and melts another.
+    anneal_core::known_basin::leave_packing_rung_to(
         x,
         cover_index,
-        rmsd,
+        anneal_core::known_basin::rung_barrier(depth, 0),
         &anneal_core::catalog::packing_references(),
         species,
         None,
+        |v: ArrayView1<f64>| Some(lj(v).0),
     )
 }
 
@@ -3160,7 +3169,7 @@ fn run_capnp_catalog(
                             archive_hole_count += 1;
                             leave_packing_state(
                                 live,
-                                anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                                snapshot.current_energy(),
                                 &shared_wells,
                                 coop_rcut,
                                 coop_species.as_deref(),
@@ -3175,7 +3184,7 @@ fn run_capnp_catalog(
                         archive_hole_count += 1;
                         leave_packing_state(
                             live,
-                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                            snapshot.current_energy(),
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),
@@ -3719,7 +3728,7 @@ fn run_capnp_catalog(
                         archive_hole_count += 1;
                         let left = leave_packing_state(
                             ArrayView1::from(shoot_coords),
-                            anneal_core::known_basin::LEAVE_RUNG_RMSD,
+                            snapshot.current_energy(),
                             &shared_wells,
                             coop_rcut,
                             coop_species.as_deref(),

@@ -1201,12 +1201,36 @@ where
                 } else {
                     Vec::new()
                 };
+                // The hill the invert raises has the width of the step the
+                // first rung takes, which is the step that reaches the first
+                // barrier at the softest curvature of this well. Goedecker's
+                // argument is the same one: an isotropic displacement has no
+                // preference for low barriers, and a length that suits one
+                // structure melts another.
+                let leave_depth = from_energy.abs() / (x.len() / 3).max(1) as f64;
+                let leave_sigma = if leave_action {
+                    grad.as_deref_mut()
+                        .and_then(|g| {
+                            crate::curvature::curvature_features(
+                                from_state.view(),
+                                |y| g(ledger, y),
+                                cfg.escape_lanczos_steps,
+                                cfg.escape_epsilon,
+                            )
+                        })
+                        .and_then(|features| {
+                            crate::known_basin::rung_rmsd(
+                                features.lambda_min,
+                                x.len() / 3,
+                                crate::known_basin::rung_barrier(leave_depth, 0),
+                            )
+                        })
+                        .unwrap_or(crate::known_basin::LEAVE_RUNG_RMSD)
+                } else {
+                    crate::known_basin::LEAVE_RUNG_RMSD
+                };
                 if leave_action {
-                    crate::known_basin::arm_leave(
-                        from_state.view(),
-                        crate::known_basin::LEAVE_RUNG_RMSD,
-                        &references,
-                    );
+                    crate::known_basin::arm_leave(from_state.view(), leave_sigma, &references);
                 }
                 // Covering / packing-ladder start is still inside the
                 // occupied well. Quapp / ART / SoftSaddle MMF climb that
@@ -1236,6 +1260,26 @@ where
                     }
                 } else {
                     state.clone()
+                };
+                // A crossing has to be a saddle between two minima, so it
+                // sits within a bounded climb of the well it left. A
+                // structure whose atoms have been driven into each other
+                // also reports negative curvature and a flipped force, and
+                // it reports them on the first step: transverse curvature
+                // is -r^-1 dV/dr, which is enormous and negative deep in the
+                // repulsive wall. Measured on LJ75 ico, twelve of twelve
+                // covering starts declared a crossing at curvatures between
+                // -7e5 and -1e13. The energy is what tells the two apart.
+                let leave_start = if leave_action {
+                    let ceiling = from_energy + crate::known_basin::LEAVE_WALK_CLIMB * leave_depth;
+                    let climbed = relax(ledger, leave_start.view(), 0).0;
+                    if climbed.is_finite() && climbed <= ceiling {
+                        leave_start
+                    } else {
+                        state.clone()
+                    }
+                } else {
+                    leave_start
                 };
                 let quenched = relax(ledger, leave_start.view(), cfg.relax_steps);
                 // The armed walk ends on a ridge, not in a well. What names
@@ -1269,15 +1313,28 @@ where
                     && ledger.remaining() > cfg.relax_steps
                 {
                     let ladder = {
+                        // Two closures, two borrows of the ledger, so the
+                        // rung search and the quench cannot be held at once.
+                        // The search runs first; its energy calls are
+                        // charged like any other.
+                        let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
+                        for rung in 0..crate::known_basin::LEAVE_RUNGS {
+                            starts.push(crate::known_basin::leave_packing_rung_to(
+                                from_state.view(),
+                                hops,
+                                crate::known_basin::rung_barrier(leave_depth, rung),
+                                &references,
+                                cfg.species.as_deref(),
+                                None,
+                                |trial| Some(relax(ledger, trial, 0).0),
+                            ));
+                        }
                         let mut quench =
                             |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
-                        crate::known_basin::leave_packing_ladder(
+                        crate::known_basin::leave_packing_starts(
                             from_state.view(),
-                            hops,
+                            &starts,
                             &references,
-                            cfg.species.as_deref(),
-                            None,
-                            crate::known_basin::LEAVE_RUNGS,
                             &mut quench,
                         )
                     };
