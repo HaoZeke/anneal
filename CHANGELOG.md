@@ -60,6 +60,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Occupancy extras idled against a one-packing book. A Leave trades a
+  replica's walk for coverage, and that trade is only worth making when
+  the Leave has somewhere to go: with one community on the book the
+  ArchiveHole it draws has no measured yield, since a packing-ladder rung
+  sized by bisection to spend exactly its barrier quenches back to the
+  floor it started on at every rung from \(1.32\) to \(42.3\)
+  \(\varepsilon\), five times the LJ75 ico-Marks barrier in one
+  displacement. ``OccupancyLeaveTarget::Walk`` is what a one-packing book
+  returns, and the extra keeps walking with the shared bias holding it off
+  the basins the others are on. The walk is what crosses: 3 of 64
+  independent LJ75 walks at 400k evaluations reached \(-397.492331\), at
+  hops 4160, 6226 and 4411 of about 11000.
+- A Leave fired on the checkpoint slice, which is 500 hops against a
+  crossing that costs of order four thousand. It now waits out the longest
+  run of quiet checkpoints the replica has itself come back from, which is
+  that replica's own history rather than a constant.
 - The packing census certified completeness from a single merged bin,
   where Chao1 has \(n_1=0\) by construction: a run reported
   ``packing_sat`` and ``stop`` while the raw book carried \(n_1=99\) and
