@@ -296,6 +296,13 @@ struct ScientificState {
     /// Fraction of the ensemble budget spent, which is what the archive
     /// radius anneals against.
     archive_progress: f64,
+    /// Folded book kept beside the version it was folded from.
+    ///
+    /// Single linkage over the cells is quadratic in their number and the
+    /// policy response asks for the fold four times, so a coordinator
+    /// serving 48 replicas spends its core folding a book that has not
+    /// changed. Recomputed only when the book moves.
+    sparsified: Option<(u64, crate::catalog::OccupancyBookMap)>,
     last_gt_report: Option<OccupancyGtKey>,
     /// Leftover occupancy sample whose saturation state has been counted
     /// toward the retirement dwell.
@@ -393,6 +400,7 @@ impl CoordinatorState {
                     drawn_from_by_replica: BTreeMap::new(),
                     archive: Archive::new(scientific.census_radius.max(1e-6), ARCHIVE_RADIUS_FLOOR),
                     archive_progress: 0.0,
+                    sparsified: None,
                     last_gt_report: None,
                     last_leftover_dwell_sample: None,
                     leftover_sat_streak: 0,
@@ -1046,6 +1054,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             }
+            // Fold the book once for this response; the four consumers
+            // below would otherwise each pay for it.
+            let occupied_packing_communities = sparsified_book(scientific).communities;
             let (seat, frame_lambda) = assign_leftover_interfaces(
                 scientific,
                 request.identity.replica,
@@ -1082,8 +1093,7 @@ fn apply_request(
                     .values()
                     .filter(|seat| seat.rank != CHAMPION_RANK)
                     .count() as u32,
-                occupied_family_count: occupancy_sparsify_packing(&scientific.packing).communities
-                    as u32,
+                occupied_family_count: occupied_packing_communities as u32,
                 packing_saturated: packing_census_saturated(scientific),
                 leftover_dwell: leftover_census_dwell(scientific),
                 ei_exhausted: occupancy_funnel_ei_exhausted(scientific),
@@ -2628,13 +2638,31 @@ fn highest_ei_family_entry(scientific: &mut ScientificState) -> Option<(usize, u
     best.map(|(_, family, slot)| (family, slot))
 }
 
-fn packing_census_saturated(scientific: &ScientificState) -> bool {
+/// The folded book, recomputed only when the book has changed.
+fn sparsified_book(scientific: &mut ScientificState) -> &crate::catalog::OccupancyBookMap {
+    let version = scientific.packing.version();
+    let stale = scientific
+        .sparsified
+        .as_ref()
+        .is_none_or(|(held, _)| *held != version);
+    if stale {
+        let folded = occupancy_sparsify_packing(&scientific.packing);
+        scientific.sparsified = Some((version, folded));
+    }
+    &scientific
+        .sparsified
+        .as_ref()
+        .expect("the fold was just stored")
+        .1
+}
+
+fn packing_census_saturated(scientific: &mut ScientificState) -> bool {
     // Packing completeness is Chao1 on the landfold-sparsified book.
     // Leftover DECAF wells of one packing collapse to one community,
     // so extras do not walk the force budget after that compacted
     // census closes. Leftover-SOAP arrivals stay the hole generator
     // while the sparsified book still has holes.
-    !occupancy_sparsify_packing(&scientific.packing).holes
+    !sparsified_book(scientific).holes
 }
 
 fn occupancy_funnel_ei_exhausted(scientific: &mut ScientificState) -> bool {
@@ -2799,7 +2827,7 @@ fn occupancy_ring_from_book(scientific: &ScientificState) -> (usize, usize, usiz
     occupancy_ring_split(&profiles)
 }
 
-fn occupancy_floor(scientific: &ScientificState) -> usize {
+fn occupancy_floor(scientific: &mut ScientificState) -> usize {
     if std::env::var("CATALOG_MIN_FAMILIES")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -2814,9 +2842,7 @@ fn occupancy_floor(scientific: &ScientificState) -> usize {
     // more packings than an ensemble has replicas to sit in: asking the live
     // ensemble to occupy every packing the book has ever recorded is a floor
     // no run can meet.
-    let peeled = occupancy_sparsify_packing(&scientific.packing)
-        .communities
-        .clamp(1, 2);
+    let peeled = sparsified_book(scientific).communities.clamp(1, 2);
     fiedler.max(landfold).max(peeled)
 }
 
@@ -2853,7 +2879,7 @@ fn report_occupancy_gt(scientific: &mut ScientificState) {
     let (measured_floor, conductance, algebraic, seam_left, seam_right, seam_packings) =
         occupancy_seam_floor(scientific);
     let (landfold_floor, landfold_left, landfold_right) = occupancy_landfold_from_book(scientific);
-    let sparsified = occupancy_sparsify_packing(&scientific.packing);
+    let sparsified = sparsified_book(scientific).clone();
     let sparsified_sample = sparsified.sample();
     let (ring_floor, ring_distinct, ring_n) = occupancy_ring_from_book(scientific);
     let fes_delta = occupancy_fes_delta(&scientific.packing.occupied_well_counts());
