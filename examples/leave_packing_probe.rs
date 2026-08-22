@@ -138,6 +138,14 @@ fn main() {
     // judgement about whether a hill is wide enough or a rung long enough
     // is a comparison against this number, so it is reported beside the
     // grain it is compared with instead of being carried in from notes.
+    //
+    // It measures 0.4267 on the sealed pair, not the 0.69 the notes
+    // carried, and the grain is 0.35: the two packings are 1.22 grains
+    // apart. Single linkage has almost no margin there, and the book's
+    // own note has icosahedral isomers reaching L1 0.56 from the
+    // icosahedral reference, so a cloud spread across that road can chain
+    // the two packings into one community and a genuine Marks arrival
+    // would not read as leaving.
     let marks_gap = packing_gap(&ico_slice, &marks_slice);
     println!(
         "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4}}}"
@@ -711,7 +719,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"grain\":0.35,\"marks_r\":0.69,\"barrier\":8.69}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"arrivals\":{arrivals},\"shannon\":{shannon:.4},\"start_r\":{start_r:.4},\"walk_r\":{walk_r:.4},\"land_r\":{land_r:.4},\"land_e\":{land_e:.6},\"stop_r\":{stop_r:.4},\"stop_land_r\":{stop_land_r:.4},\"stop_e\":{stop_e:.6},\"grain\":{PACKING_LINK},\"marks_r\":{marks_gap:.4},\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
