@@ -133,6 +133,13 @@ impl FunnelModel {
         self.version
     }
 
+    /// Record a landing at `x` scoring `y`, and bump [`Self::version`] when
+    /// that changes the data a prediction would be built from.
+    ///
+    /// Non-finite coordinates or scores are dropped rather than stored: a
+    /// NaN in the design matrix poisons every later prediction, and the
+    /// caller that produced it is an exhausted budget answering with an
+    /// infinity, not a landing worth keeping.
     pub fn observe(&mut self, x: ArrayView1<f64>, y: f64) {
         if !y.is_finite() || x.iter().any(|v| !v.is_finite()) {
             return;
