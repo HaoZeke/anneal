@@ -1,12 +1,15 @@
 use anneal_core::catalog::{
-    OccupancyCertificate, OccupancyFold, PACKING_MERGE, PACKING_MOVE_EPS, PackingBook,
-    different_decaf_family, lens_ring_displacement, occupancy_fes_delta,
-    occupancy_fes_from_histograms, occupancy_landfold_floor, occupancy_map_fold,
+    OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
+    PackingBook, different_decaf_family, leaves_packing, lens_ring_displacement,
+    occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
+    occupancy_leave_new_class, occupancy_leave_new_packing, occupancy_map_fold,
     occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
-    occupancy_sparsify_packing, packing_distance, packing_fingerprint, ring_leave_weight,
-    same_packing,
+    occupancy_sparsify_packing, packing_community_count, packing_distance, packing_fingerprint,
+    packing_link_labels, ring_leave_weight, same_packing,
 };
-use ndarray::Array1;
+use anneal_core::methods::warm_lbfgs::WarmLbfgs;
+use anneal_core::potentials::{PairKind, PairPotential};
+use ndarray::{Array1, ArrayView1};
 
 fn load_xyz(text: &str) -> Array1<f64> {
     let coordinates = text
@@ -571,5 +574,123 @@ fn switch_saturates_far_l1_asinh_does_not() {
     assert!(
         as_farer - as_far > 0.05,
         "asinh must keep 10σ and 20σ ordered ({as_far} vs {as_farer})"
+    );
+}
+
+/// A quenched icosahedral isomer: a distinct minimum on the ico shelf.
+///
+/// One surface atom is moved and the structure relaxed, which is the move
+/// that isomerises a shell without unbuilding it. The search over sites and
+/// amplitudes is deterministic, and the result is checked to be a different
+/// minimum from the sealed floor and still on the shelf, so a test using this
+/// is never quietly comparing the floor with itself.
+fn lj75_ico_isomer() -> Array1<f64> {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let potential = PairPotential::new(75, PairKind::LennardJones, 40.0);
+    let floor = potential.value_and_gradient(ico.view()).0;
+    let atoms = ico.len() / 3;
+    let mut centre = [0.0; 3];
+    for atom in 0..atoms {
+        for axis in 0..3 {
+            centre[axis] += ico[3 * atom + axis] / atoms as f64;
+        }
+    }
+    let mut surface: Vec<(usize, f64)> = (0..atoms)
+        .map(|atom| {
+            let radius = (0..3)
+                .map(|axis| (ico[3 * atom + axis] - centre[axis]).powi(2))
+                .sum::<f64>();
+            (atom, radius)
+        })
+        .collect();
+    surface.sort_by(|left, right| right.1.total_cmp(&left.1));
+    for &(atom, _) in surface.iter().take(8) {
+        for axis in 0..3 {
+            for step in 1..=6 {
+                let shift = 0.4 * f64::from(step);
+                for sign in [1.0, -1.0] {
+                    let mut start = ico.clone();
+                    start[3 * atom + axis] += sign * shift;
+                    let mut opt = WarmLbfgs::default();
+                    let (energy, relaxed, _) =
+                        opt.minimize(start.view(), 2000, |v: ArrayView1<f64>| {
+                            Some(potential.value_and_gradient(v))
+                        });
+                    if energy > floor + 1e-6 && energy < floor + 8.0 {
+                        return relaxed;
+                    }
+                }
+            }
+        }
+    }
+    panic!("no icosahedral isomer on the shelf under the surface-atom search");
+}
+
+#[test]
+fn a_packing_is_what_its_cells_chain_into_not_a_radius() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let isomer = lj75_ico_isomer();
+    let mut book = PackingBook::default();
+    for state in [&ico, &marks, &isomer] {
+        book.observe(state.as_slice().unwrap());
+    }
+    let histograms: Vec<Vec<f64>> = [&ico, &marks, &isomer]
+        .into_iter()
+        .map(|state| book.histogram(state.as_slice().unwrap()).unwrap())
+        .collect();
+    let to_marks = packing_distance(&histograms[0], &histograms[1]);
+    let to_isomer = packing_distance(&histograms[0], &histograms[2]);
+    assert!(
+        to_marks > PACKING_MERGE,
+        "ico-Marks {to_marks} must clear the cell grain"
+    );
+    let labels = packing_link_labels(&histograms, PACKING_LINK);
+    assert_eq!(
+        labels[0], labels[2],
+        "a quenched ico isomer chains to ico: cell L1 {to_isomer}, ico-Marks {to_marks}"
+    );
+    assert_ne!(labels[0], labels[1], "Marks chains to neither");
+    assert_eq!(packing_community_count(&histograms), 2);
+}
+
+#[test]
+fn leave_accepts_marks_and_refuses_an_ico_isomer() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let marks = load_xyz(include_str!("fixtures/lj75_marks.xyz"));
+    let isomer = lj75_ico_isomer();
+    let ico = ico.as_slice().unwrap();
+    let references = vec![ico.to_vec()];
+    assert!(
+        leaves_packing(ico, marks.as_slice().unwrap(), &references),
+        "Marks is a packing the book does not hold"
+    );
+    assert!(
+        !leaves_packing(ico, isomer.as_slice().unwrap(), &references),
+        "an isomer of the occupied packing is not a Leave"
+    );
+    assert!(
+        occupancy_leave_new_packing(ico, marks.as_slice().unwrap()),
+        "the Leave accept fires on Marks"
+    );
+    assert!(
+        !occupancy_leave_new_packing(ico, isomer.as_slice().unwrap()),
+        "the Leave accept does not fire on an ico isomer"
+    );
+}
+
+#[test]
+fn the_cell_grain_adopts_the_isomer_the_packing_grain_refuses() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let isomer = lj75_ico_isomer();
+    let ico = ico.as_slice().unwrap();
+    let isomer = isomer.as_slice().unwrap();
+    assert!(
+        occupancy_leave_new_class(ico, isomer),
+        "the cell grain calls an ico isomer a new class, which is the leak"
+    );
+    assert!(
+        !occupancy_leave_new_packing(ico, isomer),
+        "the packing grain does not"
     );
 }
