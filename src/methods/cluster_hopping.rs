@@ -1053,6 +1053,16 @@ where
     // on this coordinate may be holding sideways isomers as its
     // frontier. Tracing a winning plain seed answers it.
     let seam_trace = std::env::var("CATALOG_SEAM_TRACE").is_ok_and(|value| value == "1");
+    // Clone at the crossing, not at the clock. The traced winning seed
+    // shows the crossing as one hot fluctuation: a doorway-shaped
+    // structure -- past SEAM_DOORWAY_GAP, within SEAM_DOORWAY_WINDOW of
+    // the floor -- converted to the other funnel on the very next hop,
+    // while restarting later from a banked copy of anything converted
+    // never. The burst holds the walk at a live doorway for a bounded
+    // number of attempts, and a new floor ends it early: it converted.
+    let seam_burst = std::env::var("CATALOG_SEAM_BURST").is_ok_and(|value| value == "1");
+    let mut burst_anchor: Option<(f64, Array1<f64>)> = None;
+    let mut burst_left = 0usize;
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2385,6 +2395,22 @@ where
                     "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6}}}"
                 );
             }
+            if seam_burst
+                && recordable
+                && e_new <= ledger.best + crate::catalog::SEAM_DOORWAY_WINDOW
+                && let (Some(floor), Some(trial)) = (
+                    ledger
+                        .best_state
+                        .as_ref()
+                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
+                    x_new.as_slice(),
+                )
+                && crate::catalog::packing_seam_gap(&floor, trial)
+                    >= crate::catalog::SEAM_DOORWAY_GAP
+            {
+                burst_anchor = Some((e_new, x_new.clone()));
+                burst_left = crate::catalog::SEAM_BURST_SHOTS;
+            }
             if let Some(seam) = seam.as_mut()
                 && recordable
                 && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
@@ -2714,6 +2740,27 @@ where
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
+        if burst_left > 0 {
+            burst_left -= 1;
+            // A floor below the anchor ends the burst: the doorway
+            // converted, and the chain is refining the new funnel.
+            let converted = burst_anchor
+                .as_ref()
+                .is_some_and(|(held, _)| ledger.best < *held - 1e-9);
+            if converted || burst_left == 0 {
+                burst_anchor = None;
+                burst_left = 0;
+            } else if let Some((held, anchor)) = burst_anchor.as_ref()
+                && e > *held + 1e-9
+            {
+                // Drifted above the doorway: the attempt failed, take the
+                // next one from the doorway itself while it is still hot.
+                x = anchor.clone();
+                e = *held;
+                here = None;
+                current_validation_gradient = None;
+            }
+        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).
