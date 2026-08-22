@@ -294,6 +294,9 @@ pub struct BasinBias<F: Fingerprint> {
     w0: f64,
     gamma: f64,
     v: Vec<f64>,
+    /// Whether each deposit carries the configurational entropy of the
+    /// basin it lands on, \(T\ln n\) for a basin reached \(n\) ways.
+    pub entropic: bool,
 }
 
 /// Which basin a state is in, with no potential attached.
@@ -612,6 +615,10 @@ impl<F: Fingerprint> BasinBias<F> {
             w0,
             gamma,
             v: Vec::new(),
+            // Off by default: a fixed height is what every measurement in
+            // this crate was taken against, and the entropic term changes
+            // the deposit on every basin.
+            entropic: std::env::var("CATALOG_ENTROPIC_BIAS").is_ok_and(|value| value == "1"),
         }
     }
 
@@ -745,7 +752,27 @@ impl<F: Fingerprint> Bias for BasinBias<F> {
             Some(i) => {
                 // Barducci well-tempered weight: deposition slows where the
                 // bias is already deep, so a basin fills to a finite depth.
-                let w = self.w0 * (-self.v[i] / denom).exp();
+                //
+                // The entropic term prices the basin by how many ways the
+                // run has reached it. A fixed height treats a cell arrived
+                // at once and a cell arrived at a thousand times as equally
+                // expensive to sit in, and what holds a chain on the LJ75
+                // icosahedral shelf is that there are so many ways to be
+                // there: F = E - TS, and only E is in a fixed height.
+                //
+                // It is added here, at the cell grain, rather than on the
+                // packing community. Paving the whole community is measured
+                // to lose Marks that plain hopping finds, because the
+                // icosahedral funnel is the ground the search crosses to
+                // reach the decahedron rather than only a trap to be made
+                // expensive.
+                let arrivals = self.index.visits(i).max(1);
+                let entropy = if self.entropic && temp > 0.0 {
+                    temp * (arrivals as f64).ln()
+                } else {
+                    0.0
+                };
+                let w = (self.w0 + entropy) * (-self.v[i] / denom).exp();
                 self.v[i] += w;
                 self.index.bump(i);
             }
