@@ -31,10 +31,25 @@ cargo build --release --features featomic,ira,bank-rpc \
   --example leave_packing_probe
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
-if ! grep -a -F -q different_decaf_family "$BIN"; then
-  echo "built binary missing different_decaf_family" >&2
-  exit 1
-fi
+# The Leave accept is the packing community, not the cell grain, so the
+# binary must carry leaves_packing and must not carry the two cell-grain
+# entry points it replaced: a DECAF L1 of 0.20 is passed by icosahedral
+# isomers of the packing being left, which is what made isomer motion
+# read as a new packing. The deposit is a free energy, so the arrivals
+# and the standing bias have to reach it.
+for symbol in leaves_packing different_packing_family arm_leave_free \
+  packing_reference_book credit_packing_deposit; do
+  if ! grep -a -F -q "$symbol" "$BIN"; then
+    echo "built binary missing $symbol" >&2
+    exit 1
+  fi
+done
+for symbol in different_decaf_family occupancy_leave_new_class; do
+  if grep -a -F -q "$symbol" "$BIN"; then
+    echo "built binary still reaches the cell grain through $symbol" >&2
+    exit 1
+  fi
+done
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
