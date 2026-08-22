@@ -245,11 +245,33 @@ pub fn occupancy_leave_target(
     packing_saturated: bool,
     packing_communities: usize,
 ) -> OccupancyLeaveTarget {
+    occupancy_leave_by_ei(
+        other_family_in_catalog,
+        packing_saturated,
+        packing_communities,
+        true,
+    )
+}
+
+/// [`occupancy_leave_target`] with the FunnelModel EI bit.
+///
+/// A one-community book is Walk only once EI on the seen packings is
+/// exhausted: the hole then has no remaining improvement to chase.
+/// While EI is open the extra still ArchiveHoles, because that is how
+/// a second community appears. OtherFamily stays the draw when the
+/// book already has two communities and a representative.
+pub fn occupancy_leave_by_ei(
+    other_family_in_catalog: bool,
+    packing_saturated: bool,
+    packing_communities: usize,
+    ei_exhausted: bool,
+) -> OccupancyLeaveTarget {
     let _ = packing_saturated;
     if packing_communities < 2 {
-        // One packing on the book is nothing to divide, and the hole that
-        // would be drawn here has no measured yield. Walk.
-        return OccupancyLeaveTarget::Walk;
+        if ei_exhausted {
+            return OccupancyLeaveTarget::Walk;
+        }
+        return OccupancyLeaveTarget::ArchiveHole;
     }
     if other_family_in_catalog {
         OccupancyLeaveTarget::OtherFamily
@@ -1786,11 +1808,11 @@ mod tests {
         leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
         occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
         occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_new_class,
-        occupancy_leave_target, occupancy_map_floor, occupancy_retire, occupancy_retire_at,
-        occupancy_ring_class_changed, occupancy_ring_floor, occupancy_sparsify_book, packing_role,
-        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
-        ring_leave_weight, ring_novelty, seat_extras,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_ei,
+        occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
+        occupancy_retire_at, occupancy_ring_class_changed, occupancy_ring_floor,
+        occupancy_sparsify_book, packing_role, promote_one_sided, published_energy_score,
+        retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
     };
 
     #[test]
@@ -1819,6 +1841,21 @@ mod tests {
     }
 
     #[test]
+    fn open_ei_on_one_packing_still_archive_holes() {
+        assert_eq!(
+            occupancy_leave_by_ei(false, false, 1, false),
+            OccupancyLeaveTarget::ArchiveHole
+        );
+        assert_eq!(
+            occupancy_leave_by_ei(true, false, 1, true),
+            OccupancyLeaveTarget::Walk
+        );
+        assert_eq!(
+            occupancy_leave_by_ei(true, false, 2, false),
+            OccupancyLeaveTarget::OtherFamily
+        );
+    }
+
     fn one_packing_on_the_book_is_nothing_to_divide() {
         // A Leave trades a replica's walk for coverage. With one community
         // there is no second packing to cover, and the hole that would be

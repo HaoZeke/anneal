@@ -266,6 +266,10 @@ fn a_one_packing_book_walks_rather_than_drawing_a_hole() {
         .next()
         .expect("Leave arm must end at Explore");
     assert!(
+        arm.contains("occupancy_leave_by_ei"),
+        "Walk vs ArchiveHole follows FunnelModel EI, not only the community count"
+    );
+    assert!(
         arm.contains("OccupancyLeaveTarget::Walk"),
         "a book with one packing has nothing to divide, so the extra keeps walking"
     );
