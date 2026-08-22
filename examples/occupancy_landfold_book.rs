@@ -63,6 +63,7 @@ fn load(path: &Path) -> Vec<(f64, Vec<f64>)> {
 fn main() {
     let mut label = String::from("book");
     let mut dump_hist = None;
+    let mut dump_oos = None;
     let mut inputs = Vec::new();
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -70,13 +71,15 @@ fn main() {
             label = args.next().expect("--label needs a name");
         } else if arg == "--dump-hist" {
             dump_hist = Some(args.next().expect("--dump-hist needs a path"));
+        } else if arg == "--dump-oos" {
+            dump_oos = Some(args.next().expect("--dump-oos needs a path"));
         } else {
             inputs.push(arg);
         }
     }
     assert!(
         !inputs.is_empty(),
-        "usage: occupancy_landfold_book [--label NAME] [--dump-hist FILE] INPUT..."
+        "usage: occupancy_landfold_book [--label NAME] [--dump-hist FILE] [--dump-oos FILE] INPUT..."
     );
     let mut book = PackingBook::default();
     let mut n_in = 0u64;
@@ -128,6 +131,33 @@ fn main() {
         }
         fs::write(&path, body).unwrap_or_else(|err| panic!("{path}: {err}"));
         eprintln!("dump-hist {path} dim {dim} n {}", hists.len());
+    }
+    if let Some(path) = dump_oos {
+        let dim = hists.iter().map(Vec::len).max().unwrap_or(0);
+        let mut body = format!(
+            "# energy family {}\n",
+            (0..dim)
+                .map(|i| format!("h{i}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let mut n_oos = 0u64;
+        for input in &inputs {
+            for (energy, coords) in load(Path::new(input)) {
+                let Some(hist) = book.histogram(&coords) else {
+                    continue;
+                };
+                let family = book.family_of(&hist).unwrap_or(usize::MAX);
+                body.push_str(&format!("{energy:.10e} {family}"));
+                for k in 0..dim {
+                    body.push_str(&format!(" {:.8e}", hist.get(k).copied().unwrap_or(0.0)));
+                }
+                body.push('\n');
+                n_oos += 1;
+            }
+        }
+        fs::write(&path, body).unwrap_or_else(|err| panic!("{path}: {err}"));
+        eprintln!("dump-oos {path} dim {dim} n {n_oos}");
     }
     let sample = map.sample();
     let mut points = String::new();
