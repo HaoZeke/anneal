@@ -510,6 +510,12 @@ fn main() {
         }
         let mut left = 0usize;
         let mut best = ico_energy;
+        // The hill the cloud deposits, so the run reads against the
+        // barrier it has to clear rather than against whether it escaped.
+        // K wells at amplitude A give at most K A; the ico-Marks saddles
+        // are 8.69 and 7.48 eps above the icosahedral shelf.
+        let mut lift = 0.0_f64;
+        let mut sigma = 0.0_f64;
         let trials = leaves.min(16);
         for index in 0..trials {
             known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &cloud);
@@ -527,6 +533,10 @@ fn main() {
                 },
                 |v: ArrayView1<f64>| Some(potential.value_and_gradient(v).0),
             );
+            if let Some((amplitude, width)) = known_basin::lift() {
+                lift = lift.max(amplitude);
+                sigma = width;
+            }
             known_basin::disarm();
             if let Some((energy, trial, _)) = walked {
                 let polished = quench(&potential, trial.view(), steps);
@@ -543,7 +553,7 @@ fn main() {
             }
         }
         println!(
-            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6}}}",
+            "{{\"kind\":\"chain_scaling\",\"chains\":{k},\"cloud\":{},\"trials\":{trials},\"left\":{left},\"best\":{best:.6},\"lift\":{lift:.4},\"sigma_phi\":{sigma:.4},\"barrier\":8.69}}",
             cloud.len()
         );
         let _ = std::io::Write::flush(&mut std::io::stdout());
