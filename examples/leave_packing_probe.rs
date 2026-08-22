@@ -120,11 +120,24 @@ fn main() {
     );
 
     let references = vec![ico_slice.clone()];
-    let mut cartesian = Tally { best: ico_energy, ..Tally::default() };
-    let mut armed = Tally { best: ico_energy, ..Tally::default() };
-    let mut ladder = Tally { best: ico_energy, ..Tally::default() };
+    let mut cartesian = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
+    let mut armed = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
+    let mut ladder = Tally {
+        best: ico_energy,
+        ..Tally::default()
+    };
 
-    let mut classify = |tally: &mut Tally, trial: &Array1<f64>, rung: Option<usize>| {
+    let mut classify = |label: &str,
+                        index: usize,
+                        tally: &mut Tally,
+                        trial: &Array1<f64>,
+                        rung: Option<usize>| {
         let Some(slice) = trial.as_slice() else {
             return;
         };
@@ -132,7 +145,8 @@ fn main() {
         if !energy.is_finite() {
             return;
         }
-        if leaves_packing(&ico_slice, slice, &[]) {
+        let left = leaves_packing(&ico_slice, slice, &[]);
+        if left {
             tally.left += 1;
             if let Some(rung) = rung {
                 tally.rungs.push(rung);
@@ -141,7 +155,8 @@ fn main() {
         if energy < ico_energy - 1e-6 {
             tally.below_ico += 1;
         }
-        match community_of(&ico_slice, &marks_slice, slice) {
+        let community = community_of(&ico_slice, &marks_slice, slice);
+        match community {
             1 => tally.marks += 1,
             2 => tally.novel += 1,
             _ => {}
@@ -149,6 +164,10 @@ fn main() {
         if energy < tally.best {
             tally.best = energy;
         }
+        println!(
+            "{{\"kind\":\"leave\",\"generator\":\"{label}\",\"index\":{index},\"rung\":{},\"energy\":{energy:.6},\"left\":{left},\"community\":{community}}}",
+            rung.map_or_else(|| "null".to_owned(), |value| value.to_string())
+        );
     };
 
     for index in 0..leaves {
@@ -165,13 +184,13 @@ fn main() {
             None,
         ));
         let trial = quench(&potential, start.view(), steps);
-        classify(&mut cartesian, &trial, None);
+        classify("cartesian", index, &mut cartesian, &trial, None);
 
         // Same start, packing invert armed.
         known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
         let trial = quench(&potential, start.view(), steps);
         known_basin::disarm();
-        classify(&mut armed, &trial, None);
+        classify("armed", index, &mut armed, &trial, None);
 
         // Packing-map ladder under the invert.
         known_basin::arm_leave(ico.view(), known_basin::LEAVE_RUNG_RMSD, &references);
@@ -188,8 +207,13 @@ fn main() {
         if let Some((trial, rung)) = walked {
             // Raw polish: the ladder walked on E+V.
             let polished = quench(&potential, trial.view(), steps);
-            classify(&mut ladder, &polished, Some(rung));
+            classify("ladder", index, &mut ladder, &polished, Some(rung));
+        } else {
+            println!(
+                "{{\"kind\":\"leave\",\"generator\":\"ladder\",\"index\":{index},\"rung\":null,\"refused\":true}}"
+            );
         }
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
     report("cartesian", &cartesian, leaves);
     report("armed", &armed, leaves);

@@ -30,7 +30,11 @@ fn main() {
         let request = decode_request(&bytes).expect("journal frame must decode");
         let replica = request.identity.replica as usize;
         match &request.operation {
-            CatalogOperation::PolicyState { energy, leftover_lambda, .. } => {
+            CatalogOperation::PolicyState {
+                energy,
+                leftover_lambda,
+                ..
+            } => {
                 n_policy += 1;
                 if replica < last_policy_e.len() {
                     last_policy_e[replica] = Some(*energy);

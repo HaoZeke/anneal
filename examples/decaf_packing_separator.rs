@@ -116,7 +116,9 @@ fn main() {
         energies.push(energy);
     }
     let n = states.len();
-    println!("{{\"kind\":\"separator_sample\",\"n\":{n},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}");
+    println!(
+        "{{\"kind\":\"separator_sample\",\"n\":{n},\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6}}}"
+    );
 
     // One shared codebook over every structure, the live PackingBook form.
     let mut book = PackingBook::default();
@@ -178,10 +180,18 @@ fn main() {
     let marks_share = ring_share(marks_profile);
     println!(
         "{{\"kind\":\"separator_rings_reference\",\"ico\":[{},{},{}],\"marks\":[{},{},{}],\"ico_share\":[{:.4},{:.4},{:.4}],\"marks_share\":[{:.4},{:.4},{:.4}],\"share_l1\":{:.4}}}",
-        ico_profile.0, ico_profile.1, ico_profile.2,
-        marks_profile.0, marks_profile.1, marks_profile.2,
-        ico_share[0], ico_share[1], ico_share[2],
-        marks_share[0], marks_share[1], marks_share[2],
+        ico_profile.0,
+        ico_profile.1,
+        ico_profile.2,
+        marks_profile.0,
+        marks_profile.1,
+        marks_profile.2,
+        ico_share[0],
+        ico_share[1],
+        ico_share[2],
+        marks_share[0],
+        marks_share[1],
+        marks_share[2],
         share_l1(ico_share, marks_share)
     );
     let mut to_ico: Vec<f64> = Vec::new();
