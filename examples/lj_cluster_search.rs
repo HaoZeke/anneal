@@ -1116,6 +1116,21 @@ fn main() {
         // against a single chain at the same total cost.
         cfg.replicas = 4;
         cfg.bias_by_rung = opts.contains(&"rungbias");
+        // The top is a knob with a ceiling, not a free win: the ladder
+        // pays exactly while the hot rung still crosses more often than
+        // the cold one, and past the melt it stops being a solid at all.
+        // Measured on LJ75, the crossing is an accepted excursion three
+        // to four eps above the floor, so the useful top sits where that
+        // acceptance has grown tenfold and the rung still freezes back;
+        // at the default 4.0 the two upper rungs of a 0.8 chain run at
+        // 2.0 and 3.2, which is liquid.
+        if let Some(top) = std::env::var("PT_LADDER_TOP")
+            .ok()
+            .and_then(|value| value.parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value > 1.0)
+        {
+            cfg.ladder_top = top;
+        }
         println!(
             "  replica exchange: {} chains, swap every {} hops, top x{}",
             cfg.replicas, cfg.swap_period, cfg.ladder_top
