@@ -58,6 +58,8 @@ pub mod adapter;
 /// Proposal allocation and the budget-window temperature law.
 pub mod allocate;
 pub mod bias;
+/// Bond-orientational order: the continuous fivefold coordinate.
+pub mod boo;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
 /// Spectral statistics of the curvature, without forming a Hessian.

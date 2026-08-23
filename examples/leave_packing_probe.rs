@@ -159,6 +159,8 @@ fn main() {
     let ptm_cut = 1.6;
     let ico_ptm = anneal_core::structure::ptm_fractions(ico.view(), atoms, ptm_cut);
     let marks_ptm = anneal_core::structure::ptm_fractions(marks.view(), atoms, ptm_cut);
+    let ico_q6 = anneal_core::boo::mean_q6(ico.view(), ptm_cut).unwrap_or(f64::NAN);
+    let marks_q6 = anneal_core::boo::mean_q6(marks.view(), ptm_cut).unwrap_or(f64::NAN);
     let show = |v: &ndarray::Array1<f64>| {
         v.iter()
             .map(|f| format!("{f:.3}"))
@@ -166,7 +168,7 @@ fn main() {
             .join(",")
     };
     println!(
-        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4},\"ico_ptm\":[{}],\"marks_ptm\":[{}]}}",
+        "{{\"kind\":\"leave_probe_floors\",\"ico\":{ico_energy:.6},\"marks\":{marks_energy:.6},\"link\":{PACKING_LINK},\"marks_gap\":{marks_gap:.4},\"ico_ptm\":[{}],\"marks_ptm\":[{}],\"ico_q6\":{ico_q6:.4},\"marks_q6\":{marks_q6:.4}}}",
         show(&ico_ptm),
         show(&marks_ptm)
     );
