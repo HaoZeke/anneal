@@ -146,6 +146,30 @@ impl WarmLbfgs {
     /// so what it sees is always an accepted point with its value and gradient
     /// consistent. Stopping mid-search would return a trial step the optimizer
     /// had not adopted.
+    /// Relaxes `x0`, consulting `recognise` at each accepted iterate.
+    ///
+    /// The warm layer's face of [`xtsci_optimize::Lbfgs::minimize_recognized`]:
+    /// a recogniser that certifies where this descent ends -- a minimum
+    /// already on file whose catchment the iterate has entered -- ends the
+    /// relaxation with the stand-in and refunds the rest of the descent.
+    /// The flag separates refunded descents from completed ones, which is
+    /// what an auditing caller needs to estimate its recogniser's error
+    /// rate against the budget `Hop.refund_with_errors` prices.
+    pub fn minimize_recognized<F, R>(
+        &mut self,
+        x0: ArrayView1<f64>,
+        max_iter: usize,
+        fg: F,
+        recognise: R,
+    ) -> (f64, Array1<f64>, usize, bool)
+    where
+        F: FnMut(ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+        R: FnMut(usize, f64, ArrayView1<f64>) -> Option<(f64, Array1<f64>)>,
+    {
+        self.sync();
+        self.inner.minimize_recognized(x0, max_iter, fg, recognise)
+    }
+
     pub fn minimize_watched<F, W>(
         &mut self,
         x0: ArrayView1<f64>,
