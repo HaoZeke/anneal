@@ -4084,6 +4084,13 @@ fn run_capnp_catalog(
         checkpoint_interval,
         &mut checkpoint,
     );
+    // The policy layer's own tally, printed where the run ends rather
+    // than only on improvement lines: Leaves fire mostly in the quiet
+    // stretches after the last improvement, so a count carried on the
+    // personal-best line systematically misses the tail.
+    println!(
+        "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} refused {leave_refused}"
+    );
     let open_epoch = population_progress.epoch();
     let _ = population_call(cooperative.abstain_population(replica, open_epoch));
     if open_epoch != 0 {
