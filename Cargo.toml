@@ -47,7 +47,7 @@ dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
 # Sibling checkouts provide the local development surface; the Git revisions
 # are the reproducible source selected when this crate is consumed elsewhere.
 eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9", version = "0.6.0", features = ["capi"] }
-rgmin = { git = "https://github.com/OmniPotentRPC/rgmin.git", rev = "a8c2793f8e9be7ef556dca22d00445d1b2fbe8c6", version = "0.2.0" }
+rgmin = { git = "https://github.com/OmniPotentRPC/rgmin.git", rev = "5be2e963d2239fd2bf6f7f2ae3b9a4e54f2a3aaf", version = "0.2.0" }
 num-traits  = "0.2"
 rand        = "0.9"
 rand_distr  = "0.5"
