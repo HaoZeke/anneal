@@ -21,6 +21,9 @@ use anneal_core::transition_graph::AttractionRegionConfig;
 use std::io::Write;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(cfg) = anneal_core::campaign::CampaignConfig::bootstrap()? {
+        print!("{}", cfg.banner());
+    }
     match catalog_system()?.as_str() {
         "lj" => run_lj_coordinator(),
         "gfn2-water" => run_gfn2_water_coordinator(),

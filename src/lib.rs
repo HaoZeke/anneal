@@ -60,6 +60,8 @@ pub mod allocate;
 pub mod bias;
 /// Transport proposals from observed attraction-region crossings.
 pub mod boundary_transport;
+/// Declarative campaign configuration: TOML in, channels explicit.
+pub mod campaign;
 /// Spectral statistics of the curvature, without forming a Hessian.
 pub mod calibrate;
 /// Event catalogue keyed by local topology.
