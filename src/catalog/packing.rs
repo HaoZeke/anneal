@@ -1030,6 +1030,21 @@ pub const FIVEFOLD_COLLAPSE_CEILING: f64 = 0.16;
 /// sit six and more above.
 pub const FIVEFOLD_COLLAPSE_WINDOW: f64 = 2.0;
 
+/// Fivefold share the incumbent floor must carry before the collapse
+/// detector means anything.
+///
+/// The detector reads "this structure has left the fivefold funnel",
+/// which is defined only once the run is in one: during the growth
+/// stage the best structure is itself a melt with a low fivefold share,
+/// and the measured cost of firing there is a hold anchored to a melt.
+/// Sixteen seeds with the ungated detector scored 0 of 16 against the
+/// plain 2 of 16, losing both winners to holds spent in the growth
+/// stage; the six seeds where it never fired tracked plain exactly. The
+/// icosahedral floor carries 0.307; a floor below this gate is not a
+/// fivefold funnel and arms nothing, which also switches the detector
+/// off on close-packed systems where it has nothing to say.
+pub const FIVEFOLD_FUNNEL_FLOOR: f64 = 0.25;
+
 /// Hops the chain is held at a detected crossing.
 ///
 /// The two measured conversions took about 20 and about 500 hops from
