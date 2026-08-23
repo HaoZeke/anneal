@@ -2406,21 +2406,29 @@ where
                     ptm[0], ptm[2]
                 );
             }
+            // The crossing detector: a deep structure whose fivefold
+            // template share has collapsed is not icosahedral any more.
+            // Measured over sixteen traced seeds, the rule fires on both
+            // decahedral entries and three times in 3252 records of the
+            // fourteen failing seeds -- and those three are one seed
+            // standing on its own best, a stalled crossing the energy
+            // and the DECAF gap both missed. The doorway-gap trigger it
+            // replaces was refuted by the same trace: deep-far is
+            // dominated by icosahedral isomers, and nothing in gap and
+            // energy separates the staging structures that convert.
             if seam_burst
                 && recordable
-                && e_new <= ledger.best + crate::catalog::SEAM_DOORWAY_WINDOW
-                && let (Some(floor), Some(trial)) = (
-                    ledger
-                        .best_state
-                        .as_ref()
-                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
-                    x_new.as_slice(),
-                )
-                && crate::catalog::packing_seam_gap(&floor, trial)
-                    >= crate::catalog::SEAM_DOORWAY_GAP
+                && e_new <= ledger.best + crate::catalog::FIVEFOLD_COLLAPSE_WINDOW
             {
-                burst_anchor = Some((e_new, x_new.clone()));
-                burst_left = crate::catalog::SEAM_BURST_SHOTS;
+                let ptm = crate::structure::ptm_fractions(
+                    x_new.view(),
+                    x_new.len() / 3,
+                    cfg.neighbour_cutoff,
+                );
+                if ptm[2] <= crate::catalog::FIVEFOLD_COLLAPSE_CEILING {
+                    burst_anchor = Some((e_new, x_new.clone()));
+                    burst_left = crate::catalog::FIVEFOLD_HOLD;
+                }
             }
             if let Some(seam) = seam.as_mut()
                 && recordable
