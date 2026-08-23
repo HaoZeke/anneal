@@ -2777,6 +2777,13 @@ fn run_capnp_catalog(
     // checkpoint back to plain hopping, which is what finds Marks.
     let mut leave_anchor: Option<Vec<f64>> = None;
     let mut leave_refused = 0usize;
+    // Selection-level talking, counted so the coordinated layer is
+    // measurable from a worker log instead of inferred from silence:
+    // Leaves decided, exchanges adopted, walks kept, holes drawn.
+    let mut count_leave = 0usize;
+    let mut count_other_family = 0usize;
+    let mut count_walk = 0usize;
+    let mut count_hole = 0usize;
     let mut last_policy_action = ACTION_LOCAL;
     let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {
         checkpoint_sequence = checkpoint_sequence
@@ -2924,7 +2931,7 @@ fn run_capnp_catalog(
                 announced_personal.is_none_or(|previous| snapshot.best_energy() < previous - 1e-3);
             if jump {
                 println!(
-                    "  personal best {:.6}  hops {}  refs {}",
+                    "  personal best {:.6}  hops {}  refs {}  leaves {} other {} walk {} hole {}",
                     snapshot.best_energy(),
                     snapshot.hops(),
                     // Packings this chain's quench is repelled from. Own
@@ -2932,7 +2939,11 @@ fn run_capnp_catalog(
                     // handed over, which is the interaction at the
                     // minimisation level and the thing chain count is
                     // supposed to scale.
-                    anneal_core::catalog::packing_references().len()
+                    anneal_core::catalog::packing_references().len(),
+                    count_leave,
+                    count_other_family,
+                    count_walk,
+                    count_hole
                 );
                 let _ = std::io::stdout().flush();
                 announced_personal = Some(snapshot.best_energy());
@@ -3861,6 +3872,7 @@ fn run_capnp_catalog(
                         ^ (leave_quiet as u64).wrapping_mul(0x94D0_49BB_1331_11EB);
                     (bits as f64) / (u64::MAX as f64)
                 };
+                count_leave += 1;
                 match occupancy_leave_by_birth(
                     other_family.is_some(),
                     policy.packing_saturated,
@@ -3870,6 +3882,7 @@ fn run_capnp_catalog(
                     birth_draw,
                 ) {
                     OccupancyLeaveTarget::Walk => {
+                        count_walk += 1;
                         // Nothing on the book to divide. The extra keeps
                         // walking and the shared bias, deposited above,
                         // holds it off the basins the others are on. That
@@ -3882,6 +3895,7 @@ fn run_capnp_catalog(
                         return CheckpointAction::Continue;
                     }
                     OccupancyLeaveTarget::OtherFamily => {
+                        count_other_family += 1;
                         let sparse = other_family.expect("other family is on file");
                         anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
                         trace.proposal_family = ProposalFamily::CatalogSample;
@@ -3896,6 +3910,7 @@ fn run_capnp_catalog(
                         };
                     }
                     OccupancyLeaveTarget::ArchiveHole => {
+                        count_hole += 1;
                         trace.proposal_family = ProposalFamily::DescriptorHole;
                         if coop_wells_enabled {
                             remember_packing_well(
