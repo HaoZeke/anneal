@@ -2405,8 +2405,10 @@ where
                     x_new.len() / 3,
                     cfg.neighbour_cutoff,
                 );
+                let q6 = crate::boo::mean_q6(x_new.view(), cfg.neighbour_cutoff)
+                    .unwrap_or(f64::NAN);
                 println!(
-                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"fcc\":{:.3},\"ico5\":{:.3}}}",
+                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"fcc\":{:.3},\"ico5\":{:.3},\"q6\":{q6:.4}}}",
                     ptm[0], ptm[2]
                 );
             }
