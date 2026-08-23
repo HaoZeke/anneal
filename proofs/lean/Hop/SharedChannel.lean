@@ -142,4 +142,38 @@ theorem shared_recognition_cheapens (c s h h' : Rat) (hs : 0 ≤ s)
   have := Rat.mul_le_mul_of_nonneg_right hh hs
   grind
 
+/-! ## The refund with its error budget
+
+Recognition is a classifier, and descriptor proximity does not certify
+the catchment: a false hit stands the wrong minimum in for the descent
+and perturbs the acceptance the refund theorems assumed untouched. The
+sound derivation carries the error explicitly. With attempts `a` at
+true rate `p` refunded up to `a'` attempts at rate `p - d`, where `d`
+is whatever rate the misrecognitions cost, the trade is favourable
+exactly while the rate loss stays under the rate times the relative
+cost saving -- a budget for the false-hit rate, priced in the same
+units as the refund. The radius stops being a belief: it is chosen so
+the audited misrecognition stays inside `d`.
+
+The estimator is part of the derivation. Auditing a share `t` of hits
+-- completing those descents at full cost anyway and comparing basins
+-- measures the false-hit rate unbiasedly while keeping `1 - t` of the
+refund, so the bound is checkable by the run that relies on it. -/
+
+/-- **The tolerance.** The refunded search wins exactly while the rate
+it gives up stays under the rate times the attempt headroom, stated
+cross-multiplied: `a' * (p - d) ≥ a * p` iff `a' * d ≤ (a' - a) * p`. -/
+theorem refund_with_errors (a a' p d : Rat) :
+    a' * (p - d) - a * p = (a' - a) * p - a' * d := by
+  grind
+
+/-- Auditing a share `t` of hits keeps `1 - t` of the refund: the cost
+of knowing the error rate is linear and chosen, never hidden. -/
+theorem audit_keeps_refund (g t : Rat) (hg : 0 ≤ g) (ht0 : 0 ≤ t)
+    (ht1 : t ≤ 1) : 0 ≤ g * (1 - t) ∧ g * (1 - t) ≤ g := by
+  constructor
+  · exact Rat.mul_nonneg hg (by grind)
+  · have := Rat.mul_nonneg hg ht0
+    grind
+
 end Hop
