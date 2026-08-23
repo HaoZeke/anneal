@@ -1,13 +1,13 @@
-//! Does a different xtsci-optimize method change an LJ75 Leave landing?
+//! Does a different rgmin method change an LJ75 Leave landing?
 //!
-//! Hopping already quenches with [`xtsci_optimize::Lbfgs`] through
+//! Hopping already quenches with [`rgmin::Lbfgs`] through
 //! [`anneal_core::methods::warm_lbfgs::WarmLbfgs`]. This binary asks
 //! whether FIRE 2.0 (Bitzek 2006 / Guénolé 2020; the method current
-//! xtsci-optimize ships and the pin does not) lands a different
+//! rgmin ships and the pin does not) lands a different
 //! packing from the same start, or only spends a different number of
 //! evaluations.
 //!
-//!     xtsci_quench_compare [RELAX_STEPS]
+//!     rgmin_quench_compare [RELAX_STEPS]
 //!
 //! Starts: sealed ico, sealed Marks, fivefold residual 0.35 from ico,
 //! and three first-rung packing-map covers. Each start is quenched
@@ -63,7 +63,7 @@ fn community_of(ico: &[f64], marks: &[f64], trial: &[f64]) -> usize {
 
 /// FIRE 2.0 (Guénolé 2020): mix, then semi-implicit Euler.
 ///
-/// Same integrator current xtsci-optimize runs as `Method::Fire`.
+/// Same integrator current rgmin runs as `Method::Fire`.
 /// The anneal pin is older and does not export it, so the loop lives
 /// here until that pin moves. Bitzek et al., Phys. Rev. Lett. 97, 170201.
 fn fire2(
