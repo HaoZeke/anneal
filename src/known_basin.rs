@@ -1,4 +1,4 @@
-//! Invert basins already occupied so xtsci will not walk back into them.
+//! Invert basins already occupied so rgmin will not walk back into them.
 //!
 //! Henkelman and Jónsson, *J. Chem. Phys.* **1999**, *111*, 7010
 //! <https://doi.org/10.1063/1.480097>: the dimer replaces \(F\) by
@@ -186,7 +186,7 @@ pub fn arm_leave_free(
     });
 }
 
-/// Drop the transform. Later xtsci calls see the raw PES.
+/// Drop the transform. Later rgmin calls see the raw PES.
 pub fn disarm() {
     ARMED.with(|slot| *slot.borrow_mut() = None);
 }
@@ -284,7 +284,7 @@ pub const LEAVE_WALK_DESCENTS: usize = 3;
 /// ridge the walk is meant to cross and refuses the ones it is not.
 pub const LEAVE_WALK_CLIMB: f64 = 4.0;
 
-/// xtsci step on the transformed surface: two-loop direction, accept a step
+/// rgmin step on the transformed surface: two-loop direction, accept a step
 /// that increases the span from the known wells. Span is packing L2
 /// \(\min_k\|\mu-\mu_k\|\) when the wells carry a \(\nu=3\) mean,
 /// otherwise COM-free RMSD. Raw \(E\) may rise; that is the dimer walk away
@@ -304,7 +304,7 @@ pub const LEAVE_WALK_CLIMB: f64 = 4.0;
 /// report structures between \(10^4\) and \(10^{11}\varepsilon\), which
 /// is atoms sitting on each other. [`LEAVE_WALK_SPAN`] bounds the second
 /// case, since a raw energy that rises monotonically never turns over.
-pub fn step_xtsci<F>(
+pub fn step_rgmin<F>(
     opt: &mut crate::methods::warm_lbfgs::WarmLbfgs,
     x0: ArrayView1<f64>,
     max_iter: usize,
@@ -426,7 +426,7 @@ fn span_from_wells(x: ArrayView1<f64>) -> f64 {
     })
 }
 
-/// \((E,g)\) seen by xtsci: identity when unarmed, \(E+V\) and
+/// \((E,g)\) seen by rgmin: identity when unarmed, \(E+V\) and
 /// Householder-\(g+\nabla V\) when a Leave is in flight.
 pub fn effective(x: ArrayView1<f64>, energy: f64, grad: Array1<f64>) -> (f64, Array1<f64>) {
     ARMED.with(|slot| {
@@ -1639,12 +1639,12 @@ mod tests {
     }
 
     #[test]
-    fn xtsci_on_the_transformed_surface_walks_away_from_the_well() {
+    fn rgmin_on_the_transformed_surface_walks_away_from_the_well() {
         let origin = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
         arm_leave(origin.view(), 0.35, &[]);
         let start = Array1::from(vec![0.3, 0.0, 0.0, 1.0, 0.0, 0.0]);
         let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (_, x) = step_xtsci(&mut opt, start.view(), 40, |v| {
+        let (_, x) = step_rgmin(&mut opt, start.view(), 40, |v| {
             // Harmonic well at `origin`. Raw descent walks back.
             let mut g = Array1::zeros(v.len());
             let mut e = 0.0;
@@ -1660,7 +1660,7 @@ mod tests {
         disarm();
         assert!(
             end_rmsd > start_rmsd,
-            "xtsci must walk away from the known well, start={start_rmsd} end={end_rmsd}"
+            "rgmin must walk away from the known well, start={start_rmsd} end={end_rmsd}"
         );
     }
 
@@ -1825,7 +1825,7 @@ mod tests {
     }
 
     #[test]
-    fn xtsci_walks_off_the_known_packing() {
+    fn rgmin_walks_off_the_known_packing() {
         let origin = ico13();
         arm_leave(origin.view(), 0.35, &[]);
         let mut start = origin.clone();
@@ -1835,7 +1835,7 @@ mod tests {
             .map(|mu| packing_l2(mu.view(), mu0.view()))
             .expect("start packing mean");
         let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
-        let (_, x) = step_xtsci(&mut opt, start.view(), 16, |v| {
+        let (_, x) = step_rgmin(&mut opt, start.view(), 16, |v| {
             let mut g = Array1::zeros(v.len());
             let mut e = 0.0;
             for i in 0..v.len() {
@@ -1851,7 +1851,7 @@ mod tests {
         disarm();
         assert!(
             end_span > start_span,
-            "xtsci must walk off the known packing, start={start_span} end={end_span}"
+            "rgmin must walk off the known packing, start={start_span} end={end_span}"
         );
     }
 }

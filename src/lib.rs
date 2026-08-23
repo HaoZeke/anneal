@@ -118,7 +118,7 @@ pub mod hmc;
 /// *J. Chem. Theory Comput.* **2017**, *13* (1), 125-134.
 /// <https://doi.org/10.1021/acs.jctc.5b01216>
 pub mod hypersphere;
-/// Invert known wells so xtsci does not walk a Leave back into them.
+/// Invert known wells so rgmin does not walk a Leave back into them.
 pub mod known_basin;
 pub mod lattice;
 /// Law-witness helpers and the `LawViolation` diagnostic type.

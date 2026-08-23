@@ -50,7 +50,7 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, steps: usize) -> Array1
         Some(known_basin::effective(v, energy, gradient))
     };
     if known_basin::is_armed() {
-        known_basin::step_xtsci(&mut opt, x, steps, fg).1
+        known_basin::step_rgmin(&mut opt, x, steps, fg).1
     } else {
         opt.minimize(x, steps, fg).1
     }

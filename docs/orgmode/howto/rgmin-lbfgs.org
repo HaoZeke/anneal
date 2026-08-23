@@ -1,16 +1,16 @@
-#+TITLE: Local polish through xtsci-optimize
+#+TITLE: Local polish through rgmin
 #+OPTIONS: toc:nil todo:nil num:nil author:nil title:nil
 #+STARTUP: content
 
-* Local polish through xtsci-optimize
+* Local polish through rgmin
 
 Hopping relaxations use
 =anneal_core::methods::warm_lbfgs::WarmLbfgs=, which is a handle around
-=xtsci_optimize::Lbfgs=. The two-loop recursion, the 7.20 scale, and the
-strong Wolfe search live in xtsci-optimize. This crate keeps the
+=rgmin::Lbfgs=. The two-loop recursion, the 7.20 scale, and the
+strong Wolfe search live in rgmin. This crate keeps the
 forget / watch / budget surface the chain needs.
 
 The production choice is L-BFGS with strong Wolfe (Liu and Nocedal
 1989; Nocedal and Wright 7.4 and algorithms 3.5--3.6). SciPy L-BFGS-B
 is the bound-constrained reference this handle was measured against.
-See the xtsci-optimize SOTA page in that crate's =docs/orgmode/reference/sota.org=.
+See the rgmin SOTA page in that crate's =docs/orgmode/reference/sota.org=.

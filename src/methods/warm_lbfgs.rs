@@ -1,6 +1,6 @@
 //! Limited-memory quasi-Newton relaxation whose curvature survives between calls.
 //!
-//! The solver is [`xtsci_optimize::Lbfgs`]: L-BFGS two-loop recursion
+//! The solver is [`rgmin::Lbfgs`]: L-BFGS two-loop recursion
 //! (Nocedal-Wright 7.4, scaling 7.20) with the strong Wolfe conditions
 //! (algorithms 3.5 and 3.6). This type is the hopping-chain handle: it
 //! keeps the pair history across relaxations, exposes `forget` when the
@@ -44,12 +44,12 @@
 //! recovers from, making a cost comparison count failures instead of work.
 
 use ndarray::{Array1, ArrayView1};
-use xtsci_optimize::{GradNorm, Lbfgs};
+use rgmin::{GradNorm, Lbfgs};
 
 /// L-BFGS with memory that persists across relaxations.
 ///
 /// Delegates the two-loop map and strong Wolfe search to
-/// [`xtsci_optimize::Lbfgs`]. Public fields are copied onto the inner
+/// [`rgmin::Lbfgs`]. Public fields are copied onto the inner
 /// solver at the start of each [`WarmLbfgs::minimize`] call.
 pub struct WarmLbfgs {
     inner: Lbfgs,
@@ -148,7 +148,7 @@ impl WarmLbfgs {
     /// had not adopted.
     /// Relaxes `x0`, consulting `recognise` at each accepted iterate.
     ///
-    /// The warm layer's face of [`xtsci_optimize::Lbfgs::minimize_recognized`]:
+    /// The warm layer's face of [`rgmin::Lbfgs::minimize_recognized`]:
     /// a recogniser that certifies where this descent ends -- a minimum
     /// already on file whose catchment the iterate has entered -- ends the
     /// relaxation with the stand-in and refunds the rest of the descent.
