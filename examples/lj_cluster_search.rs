@@ -2498,7 +2498,21 @@ fn run_capnp_catalog(
     };
 
     let mut run_cfg = cfg.clone();
-    run_cfg.budget_window = true;
+    // The checkpoint path forced budget_window on, so every coordinated
+    // chain ran an adaptive-temperature acceptance the serial baseline
+    // runs without. The measured crossing is an excursion of about
+    // thirty-five accepted steps, and Hop.shave_convicts puts the cost
+    // of any per-step acceptance shave at its k-th power: six percent a
+    // step is an order of magnitude at that length, which is the
+    // suppression the coordinated runs show against the serial rate --
+    // zero crossings in seven hundred thousand hops where the serial
+    // rate predicts nine. Hop.alone_mul_split exonerates checkpoint
+    // interruptions at the same stroke: one reset per five hundred hops
+    // costs seven percent of the crossings, not ninety.
+    //
+    // The acceptance law of a coordinated chain is now byte-identical
+    // to the serial baseline unless the caller's config says otherwise.
+    run_cfg.budget_window = cfg.budget_window;
     // An ensemble at one temperature is one search repeated. Spreading
     // replicas across a geometric ladder is the reference answer to the
     // funnel problem, so it is available here, opt-in: the recommended
