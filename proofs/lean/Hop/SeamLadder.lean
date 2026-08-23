@@ -270,7 +270,7 @@ theorem alone_mono (a b : Rat) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : a ≤ b) :
 /-- **A per-step shave exponentiates.** Any mechanism that leaves the
 walker only `c q` of its per-step acceptance loses `alone 1 c k` of the
 crossing rate -- the whole factor, at every excursion length. -/
-theorem per_step_amplifies (q c : Rat) (hq : 0 ≤ q) (hc : 0 ≤ c) (k : Nat) :
+theorem per_step_amplifies (q c : Rat) (k : Nat) :
     alone 1 (c * q) k = alone 1 c k * alone 1 q k :=
   alone_mul_split c q k
 
