@@ -61,13 +61,13 @@ dependencies = [
  "rand_distr",
  "rayon",
  "readcon-core",
+ "rgmin",
  "rgpot-core",
  "serde",
  "serde_json",
  "sha2",
  "thiserror",
  "trybuild",
- "xtsci-optimize",
 ]
 
 [[package]]
@@ -1380,6 +1380,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rgmin"
+version = "0.2.0"
+source = "git+https://github.com/OmniPotentRPC/rgmin.git?rev=a8c2793f8e9be7ef556dca22d00445d1b2fbe8c6#a8c2793f8e9be7ef556dca22d00445d1b2fbe8c6"
+dependencies = [
+ "cbindgen 0.29.4",
+ "dlpk",
+ "eindir-core",
+ "ndarray 0.17.2",
+ "rand",
+ "thiserror",
+]
+
+[[package]]
 name = "rgpot-core"
 version = "3.0.2"
 source = "git+https://github.com/HaoZeke/potlib.git?rev=b1baa1b68a46143ad49bf4860728d779b76a647c#b1baa1b68a46143ad49bf4860728d779b76a647c"
@@ -2014,19 +2027,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "xtsci-optimize"
-version = "0.2.0"
-source = "git+https://github.com/HaoZeke/xtsci-optimize.git?rev=07f96d46393eaadc0e1fa2cbe60ad87ecb433e5c#07f96d46393eaadc0e1fa2cbe60ad87ecb433e5c"
-dependencies = [
- "cbindgen 0.29.4",
- "dlpk",
- "eindir-core",
- "ndarray 0.17.2",
- "rand",
- "thiserror",
-]
 
 [[package]]
 name = "zerocopy"
