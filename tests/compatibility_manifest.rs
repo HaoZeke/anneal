@@ -22,7 +22,6 @@ fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
         grad_fn: None,
         user_data: std::ptr::null_mut(),
         free_fn: None,
-        descriptor: std::ptr::null(),
     }
 }
 
@@ -30,8 +29,8 @@ fn test_objective(low: *mut f64, high: *mut f64) -> eindir_objective_t {
 fn accepts_additive_protocols_and_rejects_incompatible_bridges() {
     let expected = AbiStamp::anneal_default();
     assert_eq!(expected.abi_major, 1);
-    assert_eq!(expected.abi_minor, 1);
-    assert_eq!(expected.layout_revision, 3);
+    assert_eq!(expected.abi_minor, 0);
+    assert_eq!(expected.layout_revision, 1);
     let compatible = EngineDescriptor::new("rgpot", ProtocolVersion::new(1, 0), expected);
     assert!(
         compatible

@@ -46,8 +46,8 @@ impl AbiStamp {
     pub const fn anneal_default() -> Self {
         Self {
             abi_major: 1,
-            abi_minor: 1,
-            layout_revision: 3,
+            abi_minor: 0,
+            layout_revision: 1,
             dlpack_major: 1,
             dlpack_minor: 0,
             features: EINDIR_ABI_FEATURE_GRADIENT | EINDIR_ABI_FEATURE_BATCH,
