@@ -1011,6 +1011,33 @@ pub const SEAM_DOORWAY_GAP: f64 = 0.45;
 /// Six keeps every doorway-like record seen and rejects the melts.
 pub const SEAM_DOORWAY_WINDOW: f64 = 6.0;
 
+/// Fivefold template share below which a deep structure is not
+/// icosahedral any more.
+///
+/// Measured over sixteen traced seeds: the icosahedral floor carries a
+/// fivefold share of 0.307 and every deep icosahedral isomer stays at
+/// 0.133 or above with a median of 0.307, while both decahedral entries
+/// sit at 0.107 to 0.147 and the Marks decahedron itself at 0.120. Of
+/// 3252 records across the fourteen seeds that never solved, three pass
+/// this ceiling together with the depth window, and those three are one
+/// seed standing on its own personal best at -394.5602 -- a crossing
+/// the energy and the DECAF gap both missed.
+pub const FIVEFOLD_COLLAPSE_CEILING: f64 = 0.16;
+
+/// Energy above the floor within which a fivefold collapse is a
+/// crossing rather than a melt. The measured entries sit 0.53 and 1.72
+/// above the icosahedral floor; the melts that also read fivefold-poor
+/// sit six and more above.
+pub const FIVEFOLD_COLLAPSE_WINDOW: f64 = 2.0;
+
+/// Hops the chain is held at a detected crossing.
+///
+/// The two measured conversions took about 20 and about 500 hops from
+/// entry to Marks, so a hold sized to the slow one keeps the chain on
+/// the decahedral side through either, and with three false fires in
+/// 3252 records the hold is almost never spent on the wrong funnel.
+pub const FIVEFOLD_HOLD: usize = 600;
+
 /// Attempts spent from a doorway while the fluctuation is hot.
 ///
 /// The burst is `Hop.sharedRound` with `n` attempts against one live
