@@ -1,0 +1,26 @@
+# The 48-chain LJ75 occupancy campaign. Every coordination channel is
+# stated; a missing channel line is a parse error at launch, never a
+# silent default at hour three.
+
+campaign = "lj75-occ-c48"
+
+[channels]
+# The recognition refund: a trial descending into any chain's known
+# basin takes the stored minimum instead of finishing the descent.
+shared_screen = true
+# Continuous shared bias stays off until the paired smoke measures it.
+shared_bias = false
+# Entropic deposit term: off, refuted by the pave/ent A/Bs.
+entropic_bias = false
+# Histogram screen: off until the paired smoke measures it.
+histo_screen = false
+
+[ensemble]
+replicas = 48
+wave = 48
+slice = 500
+max_hops = 60000
+population_interval = 50000
+
+[extra]
+SEED_OFFSET_BASE = "9900000"

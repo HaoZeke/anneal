@@ -32,6 +32,10 @@ export CATALOG_REPLICAS=$CHAINS
 export CATALOG_WAVE=$CHAINS
 export CATALOG_SLICE=500
 export CATALOG_SHARED_SCREEN=1
+# The campaign contract: the binary validates this file against the
+# exports above and refuses to start on any disagreement, so a drifted
+# or missing export dies at launch instead of running dark.
+export CATALOG_CONFIG=$LJ_ROOT/scripts/campaigns/lj75-occ-c48.toml
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
 export SEED_OFFSET_BASE=$((3900000 + CHAINS * 1000))

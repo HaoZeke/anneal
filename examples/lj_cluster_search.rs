@@ -618,6 +618,17 @@ fn reference(n: usize) -> Option<f64> {
 }
 
 fn main() {
+    // Campaign file first, before any thread exists: the TOML is the
+    // single written source of the CATALOG_* environment, and a dark
+    // channel is a parse error there, not a silent default here.
+    match anneal_core::campaign::CampaignConfig::bootstrap() {
+        Ok(Some(cfg)) => print!("{}", cfg.banner()),
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(2);
+        }
+    }
     let args: Vec<String> = std::env::args().collect();
     let n: usize = args.get(1).and_then(|v| v.parse().ok()).unwrap_or(38);
     let budget: usize = args.get(2).and_then(|v| v.parse().ok()).unwrap_or(400_000);
