@@ -1063,6 +1063,10 @@ where
     let seam_burst = std::env::var("CATALOG_SEAM_BURST").is_ok_and(|value| value == "1");
     let mut burst_anchor: Option<(f64, Array1<f64>)> = None;
     let mut burst_left = 0usize;
+    // Fivefold share of the incumbent floor, recomputed only when the
+    // floor moves. The collapse detector is armed only while this says
+    // the run is actually in a fivefold funnel.
+    let mut floor_five: Option<(f64, f64)> = None;
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2420,14 +2424,37 @@ where
                 && recordable
                 && e_new <= ledger.best + crate::catalog::FIVEFOLD_COLLAPSE_WINDOW
             {
-                let ptm = crate::structure::ptm_fractions(
-                    x_new.view(),
-                    x_new.len() / 3,
-                    cfg.neighbour_cutoff,
-                );
-                if ptm[2] <= crate::catalog::FIVEFOLD_COLLAPSE_CEILING {
-                    burst_anchor = Some((e_new, x_new.clone()));
-                    burst_left = crate::catalog::FIVEFOLD_HOLD;
+                // The window above is relative to the running best, and
+                // during the growth stage the running best is itself a
+                // fivefold-poor melt: validated against the final floor
+                // the detector fired three times in 3252 failing-seed
+                // records, implemented against the running best it fired
+                // through the growth stage of ten seeds and anchored
+                // their holds to melts. The gate arms it only once the
+                // floor itself is fivefold-rich, which is when leaving
+                // the fivefold funnel is a defined event.
+                if floor_five.is_none_or(|(held, _)| (held - ledger.best).abs() > 1e-12)
+                    && let Some(best_state) = ledger.best_state.as_ref()
+                {
+                    let f = crate::structure::ptm_fractions(
+                        best_state.view(),
+                        best_state.len() / 3,
+                        cfg.neighbour_cutoff,
+                    );
+                    floor_five = Some((ledger.best, f[2]));
+                }
+                if floor_five
+                    .is_some_and(|(_, share)| share >= crate::catalog::FIVEFOLD_FUNNEL_FLOOR)
+                {
+                    let ptm = crate::structure::ptm_fractions(
+                        x_new.view(),
+                        x_new.len() / 3,
+                        cfg.neighbour_cutoff,
+                    );
+                    if ptm[2] <= crate::catalog::FIVEFOLD_COLLAPSE_CEILING {
+                        burst_anchor = Some((e_new, x_new.clone()));
+                        burst_left = crate::catalog::FIVEFOLD_HOLD;
+                    }
                 }
             }
             if let Some(seam) = seam.as_mut()
