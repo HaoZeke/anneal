@@ -1057,20 +1057,6 @@ where
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
     let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
-    // Clone at the crossing, not at the clock. The traced winning seed
-    // shows the crossing as one hot fluctuation: a doorway-shaped
-    // structure -- past SEAM_DOORWAY_GAP, within SEAM_DOORWAY_WINDOW of
-    // the floor -- converted to the other funnel on the very next hop,
-    // while restarting later from a banked copy of anything converted
-    // never. The burst holds the walk at a live doorway for a bounded
-    // number of attempts, and a new floor ends it early: it converted.
-    let seam_burst = std::env::var("CATALOG_SEAM_BURST").is_ok_and(|value| value == "1");
-    let mut burst_anchor: Option<(f64, Array1<f64>)> = None;
-    let mut burst_left = 0usize;
-    // Fivefold share of the incumbent floor, recomputed only when the
-    // floor moves. The collapse detector is armed only while this says
-    // the run is actually in a fivefold funnel.
-    let mut floor_five: Option<(f64, f64)> = None;
     let mut restarts = 0usize;
     let mut symmetrised = 0usize;
     let mut symmetry_gain = 0.0_f64;
@@ -2416,53 +2402,6 @@ where
                     "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"novel\":{novel:.4}}}"
                 );
             }
-            // The crossing detector: a deep structure whose fivefold
-            // template share has collapsed is not icosahedral any more.
-            // Measured over sixteen traced seeds, the rule fires on both
-            // decahedral entries and three times in 3252 records of the
-            // fourteen failing seeds -- and those three are one seed
-            // standing on its own best, a stalled crossing the energy
-            // and the DECAF gap both missed. The doorway-gap trigger it
-            // replaces was refuted by the same trace: deep-far is
-            // dominated by icosahedral isomers, and nothing in gap and
-            // energy separates the staging structures that convert.
-            if seam_burst
-                && recordable
-                && e_new <= ledger.best + crate::catalog::FIVEFOLD_COLLAPSE_WINDOW
-            {
-                // The window above is relative to the running best, and
-                // during the growth stage the running best is itself a
-                // fivefold-poor melt: validated against the final floor
-                // the detector fired three times in 3252 failing-seed
-                // records, implemented against the running best it fired
-                // through the growth stage of ten seeds and anchored
-                // their holds to melts. The gate arms it only once the
-                // floor itself is fivefold-rich, which is when leaving
-                // the fivefold funnel is a defined event.
-                if floor_five.is_none_or(|(held, _)| (held - ledger.best).abs() > 1e-12)
-                    && let Some(best_state) = ledger.best_state.as_ref()
-                {
-                    let f = crate::structure::ptm_fractions(
-                        best_state.view(),
-                        best_state.len() / 3,
-                        cfg.neighbour_cutoff,
-                    );
-                    floor_five = Some((ledger.best, f[2]));
-                }
-                if floor_five
-                    .is_some_and(|(_, share)| share >= crate::catalog::FIVEFOLD_FUNNEL_FLOOR)
-                {
-                    let ptm = crate::structure::ptm_fractions(
-                        x_new.view(),
-                        x_new.len() / 3,
-                        cfg.neighbour_cutoff,
-                    );
-                    if ptm[2] <= crate::catalog::FIVEFOLD_COLLAPSE_CEILING {
-                        burst_anchor = Some((e_new, x_new.clone()));
-                        burst_left = crate::catalog::FIVEFOLD_HOLD;
-                    }
-                }
-            }
             if let Some(seam) = seam.as_mut()
                 && recordable
                 && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
@@ -2792,27 +2731,6 @@ where
             law.observe_rejection(delta);
         }
         bias.deposit(bias.cv(x.view()).view(), temperature);
-        if burst_left > 0 {
-            burst_left -= 1;
-            // A floor below the anchor ends the burst: the doorway
-            // converted, and the chain is refining the new funnel.
-            let converted = burst_anchor
-                .as_ref()
-                .is_some_and(|(held, _)| ledger.best < *held - 1e-9);
-            if converted || burst_left == 0 {
-                burst_anchor = None;
-                burst_left = 0;
-            } else if let Some((held, anchor)) = burst_anchor.as_ref()
-                && e > *held + 1e-9
-            {
-                // Drifted above the doorway: the attempt failed, take the
-                // next one from the doorway itself while it is still hot.
-                x = anchor.clone();
-                e = *held;
-                here = None;
-                current_validation_gradient = None;
-            }
-        }
         // Graph edge + Fiedler deposit at the chain's current basin. Called
         // every hop (accepted or not) so the coordinate tracks occupation;
         // only accepted moves grow the graph (visit records last→current).

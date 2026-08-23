@@ -1029,48 +1029,6 @@ pub const SEAM_DOORWAY_GAP: f64 = 0.45;
 /// Six keeps every doorway-like record seen and rejects the melts.
 pub const SEAM_DOORWAY_WINDOW: f64 = 6.0;
 
-/// Fivefold template share below which a deep structure is not
-/// icosahedral any more.
-///
-/// Measured over sixteen traced seeds: the icosahedral floor carries a
-/// fivefold share of 0.307 and every deep icosahedral isomer stays at
-/// 0.133 or above with a median of 0.307, while both decahedral entries
-/// sit at 0.107 to 0.147 and the Marks decahedron itself at 0.120. Of
-/// 3252 records across the fourteen seeds that never solved, three pass
-/// this ceiling together with the depth window, and those three are one
-/// seed standing on its own personal best at -394.5602 -- a crossing
-/// the energy and the DECAF gap both missed.
-pub const FIVEFOLD_COLLAPSE_CEILING: f64 = 0.16;
-
-/// Energy above the floor within which a fivefold collapse is a
-/// crossing rather than a melt. The measured entries sit 0.53 and 1.72
-/// above the icosahedral floor; the melts that also read fivefold-poor
-/// sit six and more above.
-pub const FIVEFOLD_COLLAPSE_WINDOW: f64 = 2.0;
-
-/// Fivefold share the incumbent floor must carry before the collapse
-/// detector means anything.
-///
-/// The detector reads "this structure has left the fivefold funnel",
-/// which is defined only once the run is in one: during the growth
-/// stage the best structure is itself a melt with a low fivefold share,
-/// and the measured cost of firing there is a hold anchored to a melt.
-/// Sixteen seeds with the ungated detector scored 0 of 16 against the
-/// plain 2 of 16, losing both winners to holds spent in the growth
-/// stage; the six seeds where it never fired tracked plain exactly. The
-/// icosahedral floor carries 0.307; a floor below this gate is not a
-/// fivefold funnel and arms nothing, which also switches the detector
-/// off on close-packed systems where it has nothing to say.
-pub const FIVEFOLD_FUNNEL_FLOOR: f64 = 0.25;
-
-/// Hops the chain is held at a detected crossing.
-///
-/// The two measured conversions took about 20 and about 500 hops from
-/// entry to Marks, so a hold sized to the slow one keeps the chain on
-/// the decahedral side through either, and with three false fires in
-/// 3252 records the hold is almost never spent on the wrong funnel.
-pub const FIVEFOLD_HOLD: usize = 600;
-
 /// Attempts spent from a doorway while the fluctuation is hot.
 ///
 /// The burst is `Hop.sharedRound` with `n` attempts against one live
@@ -1190,26 +1148,4 @@ pub fn packing_seam_gap(floor: &[f64], trial: &[f64]) -> f64 {
         (Some(a), Some(b)) => packing_distance(&a, &b),
         _ => f64::NAN,
     }
-}
-
-/// Whether two structures sit on opposite sides of the fivefold
-/// separation: one in a fivefold-rich funnel, the other past the
-/// collapse.
-///
-/// This is the measured discriminator the DECAF grain could not supply.
-/// On sixteen traced LJ75 seeds the icosahedral floor carries a fivefold
-/// template share of 0.307, every deep icosahedral isomer stays at 0.133
-/// and above, and the decahedral entries sit at 0.107 to 0.147 with
-/// Marks itself at 0.120; the same trace shows the DECAF gap smearing
-/// isomers past the icosahedral-to-Marks separation in both directions.
-/// Symmetric, so an exchange can test it from either side.
-pub fn fivefold_apart(here: &[f64], there: &[f64], cutoff: f64) -> bool {
-    if here.len() != there.len() || here.is_empty() || !here.len().is_multiple_of(3) {
-        return false;
-    }
-    let atoms = here.len() / 3;
-    let a = crate::structure::ptm_fractions(ndarray::ArrayView1::from(here), atoms, cutoff);
-    let b = crate::structure::ptm_fractions(ndarray::ArrayView1::from(there), atoms, cutoff);
-    (a[2] >= FIVEFOLD_FUNNEL_FLOOR && b[2] <= FIVEFOLD_COLLAPSE_CEILING)
-        || (b[2] >= FIVEFOLD_FUNNEL_FLOOR && a[2] <= FIVEFOLD_COLLAPSE_CEILING)
 }
