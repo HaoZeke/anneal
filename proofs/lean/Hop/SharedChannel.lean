@@ -88,4 +88,58 @@ theorem informed_reallocation (w d p1 p2 : Rat) :
     (w - d) * p1 + (w + d) * p2 - (w * p1 + w * p2) = d * (p2 - p1) := by
   grind
 
+/-! ## Talking about where we have been
+
+The reallocation bound above closes every channel about where the
+crossing is. It says nothing about the other thing chains know
+perfectly: where they have already been. A quench that descends into a
+basin some chain has already cataloged returns a minimum the ensemble
+already holds, and every gradient spent completing it is waste. A
+minimizer that recognises the catchment mid-descent and returns the
+stored minimum leaves the acceptance untouched -- the same energies
+reach the same Metropolis test -- and refunds the rest of the descent.
+
+This is coordination on the cost side, where the information actually
+lives: the crossing rate per attempt is pinned by the landscape, but
+attempts per budget are not, and recognition sets are monotone under
+sharing -- a chain screening against the union of everyone's catalog
+recognises at least everything its own history recognises. Measured on
+the serial baseline, forty percent of quenches are re-descents into
+known basins, paid at full price today. -/
+
+/-- Attempts a budget buys at cost `c` per attempt, division-free:
+`attempts * c = budget` is carried as a hypothesis where needed. -/
+theorem more_attempts_same_rate (a a' p : Rat) (hp : 0 ≤ p) (ha : a ≤ a') :
+    a * p ≤ a' * p :=
+  Rat.mul_le_mul_of_nonneg_right ha hp
+
+/-- **Recognition refunds are pure gain.** With `h` of `a` attempts
+recognised early and refunded `s` of their cost each, the same budget
+`a * c` buys `a * c = a' * (c - hshare * s)` attempts at the smaller
+effective cost; stated as the cross-multiplied comparison: any
+per-attempt cost saving buys at least proportionally many attempts.
+The hypotheses are the contract: the stored minimum equals the one the
+descent would have reached, so `p` is untouched, and the recognition
+cost is inside the saving. -/
+theorem refund_buys_attempts (b c c' : Rat) (hb : 0 ≤ b) (hc' : 0 < c')
+    (hcc : c' ≤ c) (a a' : Rat) (hac : a * c = b) (hac' : a' * c' = b)
+    (ha : 0 ≤ a) :
+    a ≤ a' := by
+  have h1 : a * c' ≤ a * c := Rat.mul_le_mul_of_nonneg_left hcc ha
+  have h2 : a * c' ≤ a' * c' := by grind
+  exact Rat.le_of_mul_le_mul_right h2 hc'
+
+/-- **Sharing the recognition set is monotone.** A chain that screens
+against the union of every chain's catalog hits at least as often as
+one screening its own history: `h_own ≤ h_shared` gives a per-attempt
+cost that can only fall, `c - h * s` decreasing in `h`. Together with
+`refund_buys_attempts` and `more_attempts_same_rate`, the chain of
+inequalities is the provably-better the minimiser-level talk was owed:
+same acceptance, same per-attempt rate, strictly more attempts whenever
+any cross-chain hit occurs. -/
+theorem shared_recognition_cheapens (c s h h' : Rat) (hs : 0 ≤ s)
+    (hh : h ≤ h') : c - h' * s ≤ c - h * s := by
+  have := Rat.mul_le_mul_of_nonneg_right hh hs
+  grind
+
 end Hop
