@@ -1053,6 +1053,13 @@ where
     // on this coordinate may be holding sideways isomers as its
     // frontier. Tracing a winning plain seed answers it.
     let seam_trace = std::env::var("CATALOG_SEAM_TRACE").is_ok_and(|value| value == "1");
+    // Minima other chains have validated, held as (descriptor, energy,
+    // structure) so the return screen can recognise a descent into any of
+    // them. Recognition is monotone in this set and the acceptance still
+    // sees a real quenched energy, so widening it can only refund cost.
+    let shared_screen = std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
+    let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
+    let mut known_hits = 0usize;
     // The run's own environment codebook, grown from every accepted
     // recordable structure, so the trace can report each arrival's
     // unseen-environment share before the arrival is added.
@@ -1984,6 +1991,44 @@ where
         // icosahedral shelf and cut LJ75 Marks from 10/48 to 4/48.
         // The ordinary screens stay on. Molecule and slab leftover
         // never hit this packing path.
+        if shared_screen {
+            for (energy, coordinates) in crate::catalog::take_known_minima() {
+                if coordinates.len() == x.len() {
+                    let held = Array1::from(coordinates);
+                    screen_bank.push((bias.cv(held.view()), energy, held));
+                }
+            }
+        }
+        // A trial descending into a basin any chain has already validated
+        // is recognised here the same way a return to the incumbent is,
+        // and the stored minimum stands in for the rest of the descent:
+        // the Metropolis test still sees a real quenched energy for that
+        // basin, so the per-attempt rate is untouched and the remaining
+        // force calls are refunded.
+        let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen
+            && !screen_bank.is_empty()
+        {
+            let ds = bias.cv(x_screen.view());
+            screen_bank
+                .iter()
+                .map(|(cv, energy, coords)| {
+                    let d: f64 = ds
+                        .iter()
+                        .zip(cv.iter())
+                        .map(|(p, q)| (p - q) * (p - q))
+                        .sum::<f64>()
+                        .sqrt();
+                    (d, energy, coords)
+                })
+                .filter(|(d, _, _)| *d < cfg.merge_radius)
+                .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(_, energy, coords)| (*energy, coords.clone()))
+        } else {
+            None
+        };
+        if known_stand_in.is_some() {
+            known_hits += 1;
+        }
         let returning = cfg.return_screen && {
             let ds = bias.cv(x_screen.view());
             let dc = bias.cv(x.view());
@@ -2036,7 +2081,12 @@ where
         } else {
             e_screen > ledger.best + cfg.screen_margin
         };
-        let (e_new, x_new) = if returning
+        let (e_new, x_new) = if let Some((known_e, known_x)) = known_stand_in {
+            // The refund: the basin is on file, its minimum stands in for
+            // the descent, and the force calls the relaxation would have
+            // spent go to the next attempt instead.
+            (known_e, known_x)
+        } else if returning
             && cfg.return_polish > 0
             && (cfg.return_polish_after == 0 || ledger.spent() >= cfg.return_polish_after)
         {

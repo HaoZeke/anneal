@@ -3687,6 +3687,10 @@ fn run_capnp_catalog(
                     // the reference cloud is only ever this chain's own
                     // history and the chains do not talk during the quench.
                     anneal_core::catalog::remember_packing_reference(&candidate.coordinates);
+                    anneal_core::catalog::offer_known_minimum(
+                        candidate.energy,
+                        &candidate.coordinates,
+                    );
                     let improves = candidate.energy < snapshot.current_energy() - 1e-10;
                     if candidate.coordinates.len() == snapshot.current_state().len()
                         && (!win_only || improves)
@@ -3774,6 +3778,10 @@ fn run_capnp_catalog(
                         && held.coordinates.len() == snapshot.current_state().len()
                     {
                         anneal_core::catalog::remember_packing_reference(&held.coordinates);
+                        anneal_core::catalog::offer_known_minimum(
+                            held.energy,
+                            &held.coordinates,
+                        );
                     }
                 }
                 // Energy landscape paving, with occupancy for the
@@ -3843,6 +3851,10 @@ fn run_capnp_catalog(
                         // that only clears the cell grain hands the extra
                         // an isomer of the packing it is trying to leave.
                         anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
+                        anneal_core::catalog::offer_known_minimum(
+                            sparse.energy,
+                            &sparse.coordinates,
+                        );
                         let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
                             anneal_core::catalog::different_packing_family(
                                 here,
