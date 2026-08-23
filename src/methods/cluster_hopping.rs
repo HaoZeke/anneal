@@ -1053,6 +1053,10 @@ where
     // on this coordinate may be holding sideways isomers as its
     // frontier. Tracing a winning plain seed answers it.
     let seam_trace = std::env::var("CATALOG_SEAM_TRACE").is_ok_and(|value| value == "1");
+    // The run's own environment codebook, grown from every accepted
+    // recordable structure, so the trace can report each arrival's
+    // unseen-environment share before the arrival is added.
+    let mut trace_book = seam_trace.then(crate::catalog::PackingBook::default);
     // Clone at the crossing, not at the clock. The traced winning seed
     // shows the crossing as one hot fluctuation: a doorway-shaped
     // structure -- past SEAM_DOORWAY_GAP, within SEAM_DOORWAY_WINDOW of
@@ -2400,14 +2404,16 @@ where
                 // 0.307 against 0.120. Whether the isomers smear across
                 // that separation the way they smeared across the DECAF
                 // gap is what the trace is for.
-                let ptm = crate::structure::ptm_fractions(
-                    x_new.view(),
-                    x_new.len() / 3,
-                    cfg.neighbour_cutoff,
-                );
+                let novel = trace_book
+                    .as_mut()
+                    .and_then(|book| {
+                        let share = book.unseen_share(trial);
+                        book.observe(trial);
+                        share
+                    })
+                    .unwrap_or(f64::NAN);
                 println!(
-                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"fcc\":{:.3},\"ico5\":{:.3}}}",
-                    ptm[0], ptm[2]
+                    "{{\"kind\":\"seam_trace\",\"hop\":{hops},\"gap\":{gap:.4},\"e\":{e_new:.6},\"novel\":{novel:.4}}}"
                 );
             }
             // The crossing detector: a deep structure whose fivefold

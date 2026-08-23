@@ -330,6 +330,24 @@ impl PackingBook {
             .unwrap_or(0.0)
     }
 
+    /// Share of this structure's atoms whose local environment matches
+    /// no cell the book has grown: census surprisal at the cell grain,
+    /// straight from the descriptor.
+    ///
+    /// The packing gap sums how many atoms changed class and discards
+    /// which classes, so a crossing into genuinely new environments and
+    /// a shuffle among the shelf's old ones read alike. This is the
+    /// half the gap discards, computed by the machinery the book
+    /// already runs: the query histogram folds unseen environments into
+    /// one bin, and the bin's mass is the answer. No template, no
+    /// prototype, no reference structure -- the codebook is the run's
+    /// own history, which is what makes it a coordinate any system
+    /// carries.
+    pub fn unseen_share(&self, coordinates: &[f64]) -> Option<f64> {
+        let histogram = self.assign_histogram(coordinates)?;
+        histogram.last().copied()
+    }
+
     fn assign_histogram(&self, coordinates: &[f64]) -> Option<Vec<f64>> {
         if !coordinates.len().is_multiple_of(3) {
             return None;
