@@ -23,6 +23,20 @@ export PATH="${SYS}/bin:${GCC}/bin:${HOME}/.cargo/bin:${PATH}"
 export CC="${GCC}/bin/gcc"
 export CXX="${GCC}/bin/g++"
 export FC="${GCC}/bin/gfortran"
+# Compute nodes carry no glibc development headers: /usr/include holds
+# seventy entries and no stdint.h (measured on compute-20 and
+# compute-32), while the login node has the full set for the same glibc
+# 2.28. The login node's headers are staged into the sysroot once
+# (rsync -a /usr/include/ $SYS/usr-include/) and every C and C++
+# compile is pointed at them, which is what lets nng-sys build its C
+# library under cmake on a compute node.
+if [[ ! -e "$SYS/usr-include/stdint.h" ]]; then
+  echo "missing $SYS/usr-include; on the login node run:" >&2
+  echo "  rsync -a /usr/include/ $SYS/usr-include/" >&2
+  exit 1
+fi
+export CFLAGS="${CFLAGS:-} -isystem $SYS/usr-include"
+export CXXFLAGS="${CXXFLAGS:-} -isystem $SYS/usr-include"
 export LIBRARY_PATH="${SYS}:${GCC}/lib64:/usr/lib64:${LIBRARY_PATH:-}"
 # Do not pass -fuse-ld=/path: OHPC gcc 12 rejects it. collect2 finds
 # ld via -B. rust-lld is avoided by pointing gcc at SYS/bin/ld.
