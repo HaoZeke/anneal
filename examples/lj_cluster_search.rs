@@ -3803,10 +3803,26 @@ fn run_capnp_catalog(
                         // that only clears the cell grain hands the extra
                         // an isomer of the packing it is trying to leave.
                         anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
+                        // Two lenses, either suffices. The DECAF community
+                        // test has no margin on LJ75: icosahedral isomers
+                        // reach 0.56 from the floor while Marks sits at
+                        // 0.4267, so single linkage can chain the two
+                        // funnels together and a genuine crossing on file
+                        // reads as home. The fivefold separation is the
+                        // measured discriminator the trace left standing --
+                        // fires on both decahedral entries, three times in
+                        // 3252 icosahedral records -- and a catalog
+                        // structure past the collapse while this replica
+                        // sits fivefold-rich is exactly the exchange the
+                        // extra exists to take.
                         let elsewhere = snapshot.current_state().as_slice().is_none_or(|here| {
                             anneal_core::catalog::different_packing_family(
                                 here,
                                 &sparse.coordinates,
+                            ) || anneal_core::catalog::fivefold_apart(
+                                here,
+                                &sparse.coordinates,
+                                run_cfg.neighbour_cutoff,
                             )
                         });
                         elsewhere.then_some(sparse)

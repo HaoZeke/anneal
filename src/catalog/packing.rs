@@ -1173,3 +1173,25 @@ pub fn packing_seam_gap(floor: &[f64], trial: &[f64]) -> f64 {
         _ => f64::NAN,
     }
 }
+
+/// Whether two structures sit on opposite sides of the fivefold
+/// separation: one in a fivefold-rich funnel, the other past the
+/// collapse.
+///
+/// This is the measured discriminator the DECAF grain could not supply.
+/// On sixteen traced LJ75 seeds the icosahedral floor carries a fivefold
+/// template share of 0.307, every deep icosahedral isomer stays at 0.133
+/// and above, and the decahedral entries sit at 0.107 to 0.147 with
+/// Marks itself at 0.120; the same trace shows the DECAF gap smearing
+/// isomers past the icosahedral-to-Marks separation in both directions.
+/// Symmetric, so an exchange can test it from either side.
+pub fn fivefold_apart(here: &[f64], there: &[f64], cutoff: f64) -> bool {
+    if here.len() != there.len() || here.is_empty() || !here.len().is_multiple_of(3) {
+        return false;
+    }
+    let atoms = here.len() / 3;
+    let a = crate::structure::ptm_fractions(ndarray::ArrayView1::from(here), atoms, cutoff);
+    let b = crate::structure::ptm_fractions(ndarray::ArrayView1::from(there), atoms, cutoff);
+    (a[2] >= FIVEFOLD_FUNNEL_FLOOR && b[2] <= FIVEFOLD_COLLAPSE_CEILING)
+        || (b[2] >= FIVEFOLD_FUNNEL_FLOOR && a[2] <= FIVEFOLD_COLLAPSE_CEILING)
+}
