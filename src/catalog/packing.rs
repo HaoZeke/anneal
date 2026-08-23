@@ -1149,3 +1149,37 @@ pub fn packing_seam_gap(floor: &[f64], trial: &[f64]) -> f64 {
         _ => f64::NAN,
     }
 }
+
+thread_local! {
+    static SCREEN_KNOWN: RefCell<Vec<(f64, Vec<f64>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Hand the hop loop a minimum some chain has already validated, so its
+/// return screen can recognise a descent into that basin and refund the
+/// rest of the relaxation.
+///
+/// The reallocation bound closes every channel about where the crossing
+/// is; this is the channel about where the chains have been, which they
+/// know perfectly. The screen already stops trials returning to the
+/// chain's own position at a measured 37 force calls per hop against
+/// 228 unscreened; sharing widens the recognised set, and recognition
+/// is monotone in it -- `Hop.shared_recognition_cheapens` -- while the
+/// acceptance still sees a real quenched energy for the basin, so the
+/// per-attempt rate is untouched.
+pub fn offer_known_minimum(energy: f64, coordinates: &[f64]) {
+    if !energy.is_finite() || coordinates.is_empty() {
+        return;
+    }
+    SCREEN_KNOWN.with(|slot| {
+        let mut held = slot.borrow_mut();
+        if held.len() < 512 {
+            held.push((energy, coordinates.to_vec()));
+        }
+    });
+}
+
+/// Drain the minima offered since the last call, for the run loop to
+/// fold into its screen bank at its own cadence.
+pub fn take_known_minima() -> Vec<(f64, Vec<f64>)> {
+    SCREEN_KNOWN.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
