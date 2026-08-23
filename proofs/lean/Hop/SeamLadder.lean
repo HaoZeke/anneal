@@ -226,4 +226,62 @@ theorem sharing_at_least_one (q : Rat) (hq0 : 0 ≤ q) (hq1 : q ≤ 1) :
     have := Rat.mul_nonneg hq0 hgap
     grind [sharedRound]
 
+/-! ## The excursion exponent
+
+The measured crossing is an uninterrupted excursion of about
+thirty-five accepted steps, so its rate is a product of per-step
+acceptances: `alone 1 q k`. Products split, and the split settles two
+questions this campaign was about to spend runs on.
+
+Interruptions multiply each step's survival by `1 - r`, so a
+checkpoint reset rate `r` suppresses the crossing by
+`alone 1 (1 - r) k` exactly: at one reset per five hundred hops and a
+thirty-five step excursion that factor is about 0.93, and no
+interruption at that slice can produce the tenfold suppression the
+coordinated runs show.
+
+A per-step shave of the acceptance itself is another matter: `q' ≤ c q`
+loses `c^k` of the crossing rate, and six percent per step at
+thirty-five steps is an order of magnitude. The crossing rate is
+hypersensitive to the acceptance law and insensitive to interruptions,
+so the only coordination that is safe by construction is one that
+leaves the acceptance law of the serial baseline byte-identical -- and
+the ensemble path forces `budget_window`, an adaptive temperature the
+serial baseline runs without. -/
+
+/-- Products of rates split across an excursion. -/
+theorem alone_mul_split (q s : Rat) : ∀ k, alone 1 (q * s) k = alone 1 q k * alone 1 s k
+  | 0 => by grind [alone]
+  | k + 1 => by
+    have ih := alone_mul_split q s k
+    grind [alone]
+
+/-- The crossing rate is monotone in the per-step acceptance. -/
+theorem alone_mono (a b : Rat) (ha : 0 ≤ a) (hb : 0 ≤ b) (hab : a ≤ b) :
+    ∀ k, alone 1 a k ≤ alone 1 b k
+  | 0 => by grind [alone]
+  | k + 1 => by
+    have ih := alone_mono a b ha hb hab k
+    have hbn := alone_nonneg 1 b (by grind) hb k
+    have h1 := Rat.mul_le_mul_of_nonneg_right ih ha
+    have h2 := Rat.mul_le_mul_of_nonneg_left hab hbn
+    grind [alone]
+
+/-- **A per-step shave exponentiates.** Any mechanism that leaves the
+walker only `c q` of its per-step acceptance loses `alone 1 c k` of the
+crossing rate -- the whole factor, at every excursion length. -/
+theorem per_step_amplifies (q c : Rat) (hq : 0 ≤ q) (hc : 0 ≤ c) (k : Nat) :
+    alone 1 (c * q) k = alone 1 c k * alone 1 q k :=
+  alone_mul_split c q k
+
+/-- The suppressed rate never exceeds the shaved bound: the conviction
+direction, for a mechanism only known to satisfy `q' ≤ c q`. -/
+theorem shave_convicts (q q' c : Rat) (hq : 0 ≤ q) (hq' : 0 ≤ q') (hc : 0 ≤ c)
+    (hle : q' ≤ c * q) (k : Nat) :
+    alone 1 q' k ≤ alone 1 c k * alone 1 q k := by
+  have hcq : 0 ≤ c * q := Rat.mul_nonneg hc hq
+  have hmono := alone_mono q' (c * q) hq' hcq hle k
+  have hsplit := alone_mul_split c q k
+  grind
+
 end Hop
