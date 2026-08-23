@@ -56,4 +56,36 @@ theorem broadcast_scales (n post post' : Rat) (hn : 0 ≤ n)
     (hpost : post' ≤ post) : n * post' ≤ n * post :=
   Rat.mul_le_mul_of_nonneg_left hpost hn
 
+/-! ## The boundary of coordination
+
+The trichotomy the campaign closes on. A coordination policy can only
+reallocate hops between chains on the strength of what has been
+observed. If no shareable observable shifts the conditional crossing
+probability -- and on LJ75 none measured does before the first
+crossing: gap, energy and the template shares all carry likelihood
+ratio one on the staging structures -- then every reallocation spends
+the same rate it started with, and the ensemble can neither beat nor
+trail independent chains. Coordination that touches the acceptance law
+loses by `shave_convicts`; coordination that only reallocates is
+invariant by the lemma below; coordination wins only through a channel
+with likelihood ratio above one, and the only such channel measured
+fires after the crossing. What raises the rate itself is the move
+kernel, which is physics, not coordination. -/
+
+/-- Reallocating a fixed number of hops across chains whose per-hop
+crossing rate is the same `p` -- the case when no observation
+discriminates -- yields the independent rate, whatever the weights. -/
+theorem uninformative_reallocation (w1 w2 p : Rat) :
+    w1 * p + w2 * p = (w1 + w2) * p := by
+  grind
+
+/-- With an informative observation the weights buy something: moving
+mass onto the chain whose conditional rate is higher is worth exactly
+the rate gap times the mass moved, and nothing more. The gain exists
+precisely when `p2 > p1`, which by `sharper` requires a channel whose
+likelihood ratio exceeds one. -/
+theorem informed_reallocation (w d p1 p2 : Rat) :
+    (w - d) * p1 + (w + d) * p2 - (w * p1 + w * p2) = d * (p2 - p1) := by
+  grind
+
 end Hop
