@@ -535,7 +535,7 @@ fn replay_journal(
         let request = decode_request(&bytes)
             .map_err(|error| CatalogServerError::InvalidJournal(error.to_string()))?;
         if !matches!(
-            apply_request(config, state, request),
+            apply_request(config, state, request, None),
             CatalogReply::Accepted(AcceptedReply {
                 duplicate: false,
                 ..
@@ -674,15 +674,72 @@ fn handle_connection(
                 continue;
             }
         };
-        let reply = process_request(config, &state, request)?;
+        // The expensive part of validation -- re-deriving the engine's own
+        // energy and descriptor for the posted coordinates -- has no
+        // dependency on anything CoordinatorState holds mutably: it is a
+        // pure function of the candidate and the run's fixed validator and
+        // evaluate closure. Cloning those two out under a lock this thread
+        // holds only for the clone, then calling the closure with no lock
+        // held at all, is what turns 48 chains serialized behind one core
+        // back into 48 chains actually running concurrently. The commit
+        // that follows still locks and still sees the live, current state;
+        // only the CPU-bound recompute moves off the lock.
+        let precomputed = candidate_needing_validation(&request.operation)
+            .map(|candidate| precompute_validation(&state, &request.identity, candidate));
+        let reply = process_request(config, &state, request, precomputed)?;
         write_reply(&mut stream, reply)?;
     }
+}
+
+/// The candidate one request's operation will send through
+/// [`validate_candidate`], if any -- the set of operations whose
+/// expensive descriptor recomputation this thread can do before ever
+/// taking the coordinator's lock for the request itself.
+fn candidate_needing_validation(operation: &CatalogOperation) -> Option<&CatalogCandidate> {
+    match operation {
+        CatalogOperation::PopulationSubmit { candidate, .. }
+        | CatalogOperation::RecordVisit { candidate }
+        | CatalogOperation::OfferCandidate { candidate } => Some(candidate),
+        CatalogOperation::RecordTransition {
+            destination: TransitionDestination::Resolved(candidate),
+            ..
+        } => Some(candidate),
+        _ => None,
+    }
+}
+
+/// Clone what validation needs under a brief lock, then run the
+/// expensive evaluation and the admission math with the lock released.
+/// `CandidateValidator`, the system signature, and the evaluate closure
+/// are all fixed for the run's lifetime, so nothing here can observe a
+/// state change another replica makes while this thread holds no lock,
+/// and the caller's later commit step still reads and writes the
+/// current shared state, not a stale copy of it.
+fn precompute_validation(
+    state: &Arc<Mutex<CoordinatorState>>,
+    identity: &CatalogIdentity,
+    candidate: &CatalogCandidate,
+) -> Result<ValidatedCandidate, ()> {
+    let (signature, validator, evaluate) = {
+        let locked = match state.lock() {
+            Ok(state) => state,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let scientific = locked.scientific.as_ref().ok_or(())?;
+        (
+            scientific.signature.clone(),
+            scientific.validator.clone(),
+            Arc::clone(&scientific.evaluate),
+        )
+    };
+    validate_candidate(&signature, &validator, evaluate.as_ref(), identity, candidate)
 }
 
 fn process_request(
     config: &ServerConfig,
     state: &Arc<Mutex<CoordinatorState>>,
     request: CatalogRequest,
+    mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> Result<CatalogReply, String> {
     let mut state = match state.lock() {
         Ok(state) => state,
@@ -739,7 +796,7 @@ fn process_request(
         // price is that a failed append cannot be rolled back, so the
         // coordinator stops serving instead of answering from a state
         // its own log cannot reproduce.
-        let reply = apply_request(config, &mut state, request.clone());
+        let reply = apply_request(config, &mut state, request.clone(), precomputed);
         if matches!(
             reply,
             CatalogReply::Accepted(AcceptedReply {
@@ -754,7 +811,7 @@ fn process_request(
         return Ok(reply);
     }
     let mut next = state.snapshot_for_apply();
-    let reply = apply_request(config, &mut next, request.clone());
+    let reply = apply_request(config, &mut next, request.clone(), precomputed);
     if matches!(
         reply,
         CatalogReply::Accepted(AcceptedReply {
@@ -776,6 +833,7 @@ fn apply_request(
     config: &ServerConfig,
     state: &mut CoordinatorState,
     request: CatalogRequest,
+    mut precomputed: Option<Result<ValidatedCandidate, ()>>,
 ) -> CatalogReply {
     let rejection = identity_rejection(config, &request.identity).or_else(|| {
         (request.snapshot_version > state.snapshot_version)
@@ -1170,7 +1228,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let Ok(validated) = validate_candidate(scientific, &request.identity, candidate) else {
+            let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate) else {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -1505,7 +1563,7 @@ fn apply_request(
         }
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
-                let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
+                let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
                     return rejected(
                         state,
@@ -1603,7 +1661,7 @@ fn apply_request(
             let (census_visits, active_entries, mutation) = if let Some(scientific) =
                 state.scientific.as_mut()
             {
-                let Ok(validated) = validate_candidate(scientific, &request.identity, candidate)
+                let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
                     return rejected(
                         state,
@@ -1772,7 +1830,7 @@ fn apply_request(
                 TransitionDestination::Unresolved => TransitionOutcome::Unresolved,
                 TransitionDestination::Resolved(candidate) => {
                     let Ok(validated) =
-                        validate_candidate(scientific, &request.identity, candidate)
+                        resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                     else {
                         return rejected(
                             state,
@@ -1934,23 +1992,48 @@ fn rejection_for_protocol_error(error: &ProtocolError) -> ProtocolRejection {
     }
 }
 
-fn validate_candidate(
+/// The precomputed evaluation if this request had one queued before the
+/// lock was taken, otherwise the original synchronous path: journal
+/// replay at startup calls `apply_request` directly with no separate
+/// precompute step, single-threaded, so recomputing here costs nothing
+/// it does not already pay and stays correct without one.
+fn resolve_validation(
+    precomputed: &mut Option<Result<ValidatedCandidate, ()>>,
     scientific: &ScientificState,
     identity: &CatalogIdentity,
     candidate: &CatalogCandidate,
 ) -> Result<ValidatedCandidate, ()> {
+    precomputed.take().unwrap_or_else(|| {
+        validate_candidate(
+            &scientific.signature,
+            &scientific.validator,
+            scientific.evaluate.as_ref(),
+            identity,
+            candidate,
+        )
+    })
+}
+
+fn validate_candidate(
+    signature: &SystemSignature,
+    validator: &CandidateValidator,
+    evaluate: &FreshEvaluator,
+    identity: &CatalogIdentity,
+    candidate: &CatalogCandidate,
+) -> Result<ValidatedCandidate, ()> {
     if candidate.producer_replica != identity.replica
-        || candidate.descriptor_schema_version != scientific.signature.descriptor.version
+        || candidate.descriptor_schema_version != signature.descriptor.version
         || candidate.census_basin.is_some()
     {
         return Err(());
     }
     // The worker already evaluated leftover SOAP. The book merges the
     // posted vector; the validator still checks length and finite
-    // values. Recomputing SOAP here serializes every replica behind
-    // one descriptor call.
+    // values. What follows used to recompute SOAP under the
+    // coordinator's lock, serializing every replica behind one
+    // descriptor call; the caller now runs this with no lock held.
     let record = CandidateRecord {
-        signature: scientific.signature.clone(),
+        signature: signature.clone(),
         producer_replica: candidate.producer_replica,
         coordinates: candidate.coordinates.clone(),
         cell: candidate.cell,
@@ -1968,9 +2051,8 @@ fn validate_candidate(
         event_sequence: candidate.event_sequence,
         seed: candidate.seed,
     };
-    scientific
-        .validator
-        .validate(&record, |coordinates| (scientific.evaluate)(coordinates))
+    validator
+        .validate(&record, |coordinates| evaluate(coordinates))
         .map_err(|_| ())
 }
 
