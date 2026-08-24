@@ -3087,7 +3087,7 @@ fn run_capnp_catalog(
                     && same_packing_coordinates(live, &candidate.coordinates)
             });
             if parent.producer_replica == replica && extra_of_occupied_packing {
-                let left = {
+                let left: Option<Array1<f64>> = {
                     #[cfg(feature = "featomic")]
                     {
                         anneal_core::featomic_hop::surplus_reseed(
