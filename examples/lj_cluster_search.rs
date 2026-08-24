@@ -2579,6 +2579,11 @@ fn run_capnp_catalog(
     // feels what the ensemble has visited continuously rather than only
     // at steering decisions. Gated until the paired smoke measures it.
     let shared_bias_enabled = std::env::var("CATALOG_SHARED_BIAS").is_ok_and(|v| v == "1");
+    // The ensemble frontier ladder ships raw doorway states through the
+    // coordinator at checkpoint cadence; the hop loop queues and folds,
+    // this layer only moves the mail.
+    let frontier_exchange_enabled =
+        std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|v| v == "1");
     // Bridge segments: when the coordinator has commissioned a bridge
     // across the referee's seam, this replica takes a region assignment,
     // jumps to a stored entry state when one exists, and reports every
@@ -3663,6 +3668,32 @@ fn run_capnp_catalog(
                     state: Array1::from(state),
                     action: "bridge".to_owned(),
                 };
+            }
+        }
+        if frontier_exchange_enabled {
+            for (gap, energy, coordinates) in anneal_core::catalog::take_frontier_posts() {
+                let post = anneal_core::catalog_rpc::CatalogFrontierPost {
+                    gap,
+                    energy,
+                    coordinates,
+                    producer_replica: replica,
+                    posted_sequence: checkpoint_sequence,
+                };
+                let _ = cooperative.offer_frontier(replica, post);
+            }
+            // A deterministic draw untangled from every sampling stream:
+            // the checkpoint index hashed with the replica identity.
+            let draw = checkpoint_sequence
+                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                ^ u64::from(replica);
+            if let Ok(Some(post)) = cooperative.draw_frontier(replica, draw)
+                && post.producer_replica != replica
+            {
+                anneal_core::catalog::deliver_frontier_post(
+                    post.gap,
+                    post.energy,
+                    post.coordinates,
+                );
             }
         }
         if checkpoint_sequence.is_multiple_of(probe_interval)

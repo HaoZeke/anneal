@@ -250,6 +250,10 @@ struct OccupancyGtKey {
 }
 
 #[derive(Clone)]
+/// Shared frontier ladder capacity. A ring: newest posts displace the
+/// oldest, so staleness is bounded by churn without wall clocks.
+const FRONTIER_POOL_CAP: usize = 256;
+
 struct ScientificState {
     signature: SystemSignature,
     validator: CandidateValidator,
@@ -344,6 +348,8 @@ struct CoordinatorState {
     maximum_sequence: BTreeMap<u32, u64>,
     ledger: Option<CooperativeLedger>,
     scientific: Option<ScientificState>,
+    /// Raw frontier excursion posts, shared across every replica.
+    frontier: std::collections::VecDeque<crate::catalog_rpc::CatalogFrontierPost>,
     /// A journal append failed after the live state had already moved,
     /// so a replay of the log no longer reproduces this coordinator.
     journal_broken: bool,
@@ -359,6 +365,7 @@ impl CoordinatorState {
             maximum_sequence: self.maximum_sequence.clone(),
             ledger: self.ledger.clone(),
             scientific: self.scientific.clone(),
+            frontier: self.frontier.clone(),
             journal_broken: self.journal_broken,
         }
     }
@@ -449,6 +456,7 @@ impl CoordinatorState {
             maximum_sequence: BTreeMap::new(),
             ledger,
             scientific,
+            frontier: std::collections::VecDeque::new(),
             journal_broken: false,
         })
     }
@@ -939,6 +947,28 @@ fn apply_request(
                     entry.validated(),
                     Some(entry.census_id()),
                 ));
+            }
+        }
+        CatalogOperation::PostFrontier { post } => {
+            // A post is banked, never validated as a minimum: it is a
+            // live excursion state and the census must not see it. The
+            // ring bounds staleness by churn.
+            if post.energy.is_finite()
+                && post.gap.is_finite()
+                && post.gap > 0.0
+                && !post.coordinates.is_empty()
+            {
+                if state.frontier.len() >= FRONTIER_POOL_CAP {
+                    state.frontier.pop_front();
+                }
+                state.frontier.push_back(post.clone());
+            }
+        }
+        CatalogOperation::DrawFrontier { draw } => {
+            if !state.frontier.is_empty() {
+                let index = usize::try_from(*draw % state.frontier.len() as u64)
+                    .expect("frontier index is bounded by pool length");
+                payload = AcceptedPayload::FrontierPost(state.frontier[index].clone());
             }
         }
         CatalogOperation::DescriptorHole {

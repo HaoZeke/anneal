@@ -1058,6 +1058,12 @@ where
     // them. Recognition is monotone in this set and the acceptance still
     // sees a real quenched energy, so widening it can only refund cost.
     let shared_screen = std::env::var("CATALOG_SHARED_SCREEN").is_ok_and(|value| value == "1");
+    // The ensemble frontier ladder: raw doorway states ship out to the
+    // coordinator, and other chains' posts fold into this chain's seam
+    // bank, so the ladder holds population at every occupied stage of
+    // the road instead of one chain's private progress.
+    let frontier_exchange =
+        std::env::var("CATALOG_FRONTIER_EXCHANGE").is_ok_and(|value| value == "1");
     let mut screen_bank: Vec<(Array1<f64>, f64, Array1<f64>)> = Vec::new();
     let mut known_hits = 0usize;
     // The run's own environment codebook, grown from every accepted
@@ -1991,6 +1997,13 @@ where
         // icosahedral shelf and cut LJ75 Marks from 10/48 to 4/48.
         // The ordinary screens stay on. Molecule and slab leftover
         // never hit this packing path.
+        if frontier_exchange
+            && let Some(seam) = seam.as_mut()
+        {
+            for (gap, energy, coordinates) in crate::catalog::drain_frontier_arrivals() {
+                seam.offer(gap, energy, &coordinates);
+            }
+        }
         if shared_screen {
             for (energy, coordinates) in crate::catalog::take_known_minima() {
                 if coordinates.len() == x.len() {
@@ -2461,7 +2474,9 @@ where
                 )
             {
                 let gap = crate::catalog::packing_seam_gap(&floor, trial);
-                seam.offer(gap, e_new, trial);
+                if seam.offer(gap, e_new, trial) && frontier_exchange {
+                    crate::catalog::offer_frontier_post(gap, e_new, trial);
+                }
             }
             // One arrival on the packing the chain has just moved onto.
             // The pile is what makes returning to the icosahedral shelf

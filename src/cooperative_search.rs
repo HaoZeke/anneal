@@ -15,6 +15,7 @@ mod run {
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError, PolicyStateReceipt};
     use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
+        CatalogFrontierPost,
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
         CatalogMutation, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
         PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolRejection,
@@ -1142,6 +1143,48 @@ mod run {
         }
 
         /// Post a sample request and return the last candidate. Hop never waits.
+        /// Post one raw frontier excursion state to the shared ladder.
+        /// Returns whether a coordinator accepted the post.
+        pub fn offer_frontier(
+            &mut self,
+            replica: u32,
+            post: CatalogFrontierPost,
+        ) -> Result<bool, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    let post = post.clone();
+                    mailbox.exec(move |client| client.post_frontier(rpc_sequence, post))
+                })
+            };
+            match result {
+                None => Ok(false),
+                Some(Ok(())) => Ok(true),
+                Some(Err(_)) => Ok(false),
+            }
+        }
+
+        /// Draw one shared frontier post, if the ladder holds any.
+        pub fn draw_frontier(
+            &mut self,
+            replica: u32,
+            draw: u64,
+        ) -> Result<Option<CatalogFrontierPost>, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.draw_frontier(rpc_sequence, draw))
+                })
+            };
+            match result {
+                None => Ok(None),
+                Some(Ok(post)) => Ok(post),
+                Some(Err(_)) => Ok(None),
+            }
+        }
+
         pub fn try_sample_candidate(
             &mut self,
             replica: u32,
