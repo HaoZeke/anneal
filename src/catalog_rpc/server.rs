@@ -249,11 +249,11 @@ struct OccupancyGtKey {
     fes_minima: usize,
 }
 
-#[derive(Clone)]
 /// Shared frontier ladder capacity. A ring: newest posts displace the
 /// oldest, so staleness is bounded by churn without wall clocks.
 const FRONTIER_POOL_CAP: usize = 256;
 
+#[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
     validator: CandidateValidator,
