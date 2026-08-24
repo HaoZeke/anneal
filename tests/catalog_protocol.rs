@@ -1,9 +1,9 @@
 #![cfg(feature = "bank-rpc")]
 
 use anneal_core::catalog_rpc::{
-    BridgeCrossingRecord, CatalogCandidate, CatalogIdentity, CatalogOperation, CatalogRequest,
-    PROTOCOL_VERSION, ProtocolError, TransitionDestination, decode_request, encode_request,
-    validate_identity,
+    BridgeCrossingRecord, CatalogCandidate, CatalogFrontierPost, CatalogIdentity,
+    CatalogOperation, CatalogRequest, PROTOCOL_VERSION, ProtocolError, TransitionDestination,
+    decode_request, encode_request, validate_identity,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -92,6 +92,16 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
                 energy: -391.5,
             },
         },
+        CatalogOperation::PostFrontier {
+            post: CatalogFrontierPost {
+                gap: 0.47,
+                energy: -392.7,
+                coordinates: vec![0.0, 0.1, 0.2, 1.1, 0.0, 0.0],
+                producer_replica: 2,
+                posted_sequence: 913,
+            },
+        },
+        CatalogOperation::DrawFrontier { draw: 77 },
     ];
     for operation in operations {
         let request = CatalogRequest {
