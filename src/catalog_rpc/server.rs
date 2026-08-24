@@ -356,20 +356,6 @@ struct CoordinatorState {
 }
 
 impl CoordinatorState {
-    fn snapshot_for_apply(&self) -> Self {
-        Self {
-            snapshot_version: self.snapshot_version,
-            census_visits: self.census_visits,
-            active_entries: self.active_entries,
-            requests: BTreeMap::new(),
-            maximum_sequence: self.maximum_sequence.clone(),
-            ledger: self.ledger.clone(),
-            scientific: self.scientific.clone(),
-            frontier: self.frontier.clone(),
-            journal_broken: self.journal_broken,
-        }
-    }
-
     fn new(config: &ServerConfig) -> Result<Self, CatalogServerError> {
         let scientific = config
             .scientific
@@ -789,42 +775,29 @@ fn process_request(
             )
         });
     }
-    if matches!(request.operation, CatalogOperation::PolicyState { .. }) {
-        // Policy evidence applies to the live state: the snapshot the
-        // general path takes clones the whole scientific state, and this
-        // is the request every replica sends on every checkpoint. The
-        // price is that a failed append cannot be rolled back, so the
-        // coordinator stops serving instead of answering from a state
-        // its own log cannot reproduce.
-        let reply = apply_request(config, &mut state, request.clone(), precomputed);
-        if matches!(
-            reply,
-            CatalogReply::Accepted(AcceptedReply {
-                duplicate: false,
-                ..
-            })
-        ) && let Err(error) = append_journal(config, &request)
-        {
-            state.journal_broken = true;
-            return Err(error.to_string());
-        }
-        return Ok(reply);
-    }
-    let mut next = state.snapshot_for_apply();
-    let reply = apply_request(config, &mut next, request.clone(), precomputed);
+    // Every operation applies straight to the live state now, not to a
+    // clone taken up front and conditionally swapped in. That clone used
+    // to deep-copy the whole scientific state -- catalog, census,
+    // packing book, archive, every per-replica history -- on every
+    // single accepted request, paid once per request and growing with
+    // the run, for a guarantee only the disk-failure case ever used: if
+    // the journal append below fails, there is no live state to roll
+    // back to, so the coordinator marks itself broken and stops serving
+    // instead of answering from a state its own log cannot reproduce.
+    // PolicyState took exactly this trade first, because it is the
+    // request every replica sends on every checkpoint; every other
+    // operation now takes the same trade for the same reason.
+    let reply = apply_request(config, &mut state, request.clone(), precomputed);
     if matches!(
         reply,
         CatalogReply::Accepted(AcceptedReply {
             duplicate: false,
             ..
         })
-    ) {
-        append_journal(config, &request).map_err(|error| error.to_string())?;
-        if let Some(entry) = next.requests.remove(&key) {
-            state.requests.insert(key, entry);
-        }
-        next.requests = std::mem::take(&mut state.requests);
-        *state = next;
+    ) && let Err(error) = append_journal(config, &request)
+    {
+        state.journal_broken = true;
+        return Err(error.to_string());
     }
     Ok(reply)
 }
