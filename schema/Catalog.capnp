@@ -295,7 +295,21 @@ struct CatalogRequest {
     observerStatus @17 :Void;
     bridgeAssignment @18 :UInt64;
     bridgeCrossing @19 :BridgeCrossingRequest;
+    postFrontier @20 :FrontierPost;
+    drawFrontier @21 :UInt64;
   }
+}
+
+# A raw, unquenched excursion state on the road out of the occupied
+# floor: the ensemble's forward-flux ladder shares these so a stuck
+# chain can restart from live progress instead of walking the whole
+# road alone. Never a minimum; never enters the census.
+struct FrontierPost {
+  gap @0 :Float64;
+  energy @1 :Float64;
+  coordinates @2 :List(Float64);
+  producerReplica @3 :UInt32;
+  postedSequence @4 :UInt64;
 }
 
 enum RejectionKind {
@@ -336,6 +350,7 @@ struct AcceptedReply {
     boundaryCrossing @11 :BoundaryCrossingReply;
     coordinatorStatus @12 :CoordinatorStatus;
     bridgeAssignment @13 :BridgeAssignment;
+    frontierPost @14 :FrontierPost;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;

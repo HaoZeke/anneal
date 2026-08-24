@@ -1154,6 +1154,52 @@ thread_local! {
     static SCREEN_KNOWN: RefCell<Vec<(f64, Vec<f64>)>> = const { RefCell::new(Vec::new()) };
 }
 
+thread_local! {
+    static FRONTIER_OUT: RefCell<Vec<(f64, f64, Vec<f64>)>> = const { RefCell::new(Vec::new()) };
+    static FRONTIER_IN: RefCell<Vec<(f64, f64, Vec<f64>)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Queue one raw excursion state for the shared frontier ladder. The
+/// hop loop calls this at the moment a doorway-shaped structure is
+/// accepted; the exchange layer drains and ships at wave cadence.
+pub fn offer_frontier_post(gap: f64, energy: f64, coordinates: &[f64]) {
+    if !gap.is_finite() || !energy.is_finite() || coordinates.is_empty() {
+        return;
+    }
+    FRONTIER_OUT.with(|slot| {
+        let mut held = slot.borrow_mut();
+        if held.len() < 64 {
+            held.push((gap, energy, coordinates.to_vec()));
+        }
+    });
+}
+
+/// Drain the queued outgoing frontier posts for shipping.
+pub fn take_frontier_posts() -> Vec<(f64, f64, Vec<f64>)> {
+    FRONTIER_OUT.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
+/// Hand the hop loop one frontier post another chain walked to. The
+/// exchange layer calls this on arrivals; the run loop folds them into
+/// its seam ladder, which is how the ensemble's population reaches
+/// every stage of the road (`Hop.cloning_dominates`).
+pub fn deliver_frontier_post(gap: f64, energy: f64, coordinates: Vec<f64>) {
+    if !gap.is_finite() || !energy.is_finite() || coordinates.is_empty() {
+        return;
+    }
+    FRONTIER_IN.with(|slot| {
+        let mut held = slot.borrow_mut();
+        if held.len() < 64 {
+            held.push((gap, energy, coordinates));
+        }
+    });
+}
+
+/// Drain the arrived frontier posts since the last call.
+pub fn drain_frontier_arrivals() -> Vec<(f64, f64, Vec<f64>)> {
+    FRONTIER_IN.with(|slot| std::mem::take(&mut *slot.borrow_mut()))
+}
+
 /// Hand the hop loop a minimum some chain has already validated, so its
 /// return screen can recognise a descent into that basin and refund the
 /// rest of the relaxation.

@@ -1,0 +1,26 @@
+# The 48-chain LJ75 campaign with the full ladder: recognition refund
+# plus the ensemble frontier exchange. Raw doorway states (accepted
+# excursions past the seam bands, inside the energy window) ship
+# through the coordinator, and every chain's epsilon-greedy seam
+# restarts draw from the union -- Hop.cloning_dominates measured, with
+# the population at each stage coming from 48 chains instead of one.
+
+campaign = "lj75-occ-c48f"
+
+[channels]
+shared_screen = true
+shared_bias = false
+entropic_bias = false
+histo_screen = false
+seam_ladder = true
+frontier_exchange = true
+
+[ensemble]
+replicas = 48
+wave = 48
+slice = 500
+max_hops = 60000
+population_interval = 50000
+
+[extra]
+SEED_OFFSET_BASE = "9950000"

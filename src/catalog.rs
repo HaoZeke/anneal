@@ -83,6 +83,7 @@ pub use packing::{
     credit_packing_deposit,
     different_decaf_family, different_packing_family, leaves_packing, leftover_arrivals_saturated,
     packing_communities, packing_community_count, packing_distance, packing_fingerprint,
+    deliver_frontier_post, drain_frontier_arrivals, offer_frontier_post, take_frontier_posts,
     offer_known_minimum, packing_link_labels, packing_reference_book, packing_references,
     packing_vector, take_known_minima,
     SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP, SEAM_DOORWAY_WINDOW,

@@ -17,7 +17,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 11;
+pub const PROTOCOL_VERSION: u16 = 12;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -73,6 +73,25 @@ pub struct CatalogCandidate {
     pub seed: u64,
     /// Coordinator-assigned fixed-census basin for returned representatives.
     pub census_basin: Option<u64>,
+}
+
+/// A raw, unquenched excursion state on the road out of the occupied
+/// floor. The ensemble's forward-flux ladder shares these so a stuck
+/// chain restarts from live progress instead of walking the whole road
+/// alone (`Hop.cloning_dominates`); a post is never a minimum and
+/// never enters the census.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogFrontierPost {
+    /// DECAF L1 gap from the producer's floor at capture.
+    pub gap: f64,
+    /// Raw energy at capture, unquenched by construction.
+    pub energy: f64,
+    /// Cartesian coordinates of the live excursion state.
+    pub coordinates: Vec<f64>,
+    /// Replica that walked there.
+    pub producer_replica: u32,
+    /// Producer event sequence at the post, for freshness accounting.
+    pub posted_sequence: u64,
 }
 
 /// Resolved or unresolved result of one action-labelled perturb--quench step.
@@ -231,6 +250,16 @@ pub enum CatalogOperation {
     BridgeCrossing {
         /// Crossing record: bridge, regions, descriptor, state, energy.
         crossing: BridgeCrossingRecord,
+    },
+    /// Post one raw frontier excursion state to the shared ladder.
+    PostFrontier {
+        /// The live excursion state and its gap.
+        post: CatalogFrontierPost,
+    },
+    /// Draw one shared frontier post, if any is banked.
+    DrawFrontier {
+        /// Explicit deterministic random draw.
+        draw: u64,
     },
     /// Record one action-conditioned transition from the replica's live basin.
     RecordTransition {
@@ -579,6 +608,8 @@ pub enum AcceptedPayload {
     CoordinatorStatus(CoordinatorStatus),
     /// A bridge segment assignment for the requesting replica.
     BridgeAssignment(BridgeAssignmentRecord),
+    /// One shared frontier excursion state from the ladder.
+    FrontierPost(CatalogFrontierPost),
 }
 
 /// Accepted coordinator response.
@@ -750,6 +781,21 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
         CatalogOperation::BridgeAssignment { draw } => {
             operation.set_bridge_assignment(*draw);
         }
+        CatalogOperation::PostFrontier { post } => {
+            let mut wire = operation.init_post_frontier();
+            wire.set_gap(post.gap);
+            wire.set_energy(post.energy);
+            fill_f64(
+                wire.reborrow()
+                    .init_coordinates(post.coordinates.len() as u32),
+                &post.coordinates,
+            );
+            wire.set_producer_replica(post.producer_replica);
+            wire.set_posted_sequence(post.posted_sequence);
+        }
+        CatalogOperation::DrawFrontier { draw } => {
+            operation.set_draw_frontier(*draw);
+        }
         CatalogOperation::BridgeCrossing { crossing } => {
             let mut wire = operation.init_bridge_crossing();
             wire.set_bridge(crossing.bridge);
@@ -826,6 +872,21 @@ pub(crate) fn decode_request_reader(
             candidate: read_candidate(candidate.map_err(wire_error)?)?,
         },
         catalog_request::operation::Sample(draw) => CatalogOperation::Sample { draw },
+        catalog_request::operation::PostFrontier(post) => {
+            let post = post.map_err(wire_error)?;
+            CatalogOperation::PostFrontier {
+                post: CatalogFrontierPost {
+                    gap: post.get_gap(),
+                    energy: post.get_energy(),
+                    coordinates: list_f64(post.get_coordinates().map_err(wire_error)?),
+                    producer_replica: post.get_producer_replica(),
+                    posted_sequence: post.get_posted_sequence(),
+                },
+            }
+        }
+        catalog_request::operation::DrawFrontier(draw) => {
+            CatalogOperation::DrawFrontier { draw }
+        }
         catalog_request::operation::DescriptorHole(hole) => {
             let hole = hole.map_err(wire_error)?;
             CatalogOperation::DescriptorHole {
@@ -1020,6 +1081,19 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                         None => entry.set_none(()),
                     }
                 }
+                AcceptedPayload::FrontierPost(post) => {
+                    let mut output = payload.init_frontier_post();
+                    output.set_gap(post.gap);
+                    output.set_energy(post.energy);
+                    fill_f64(
+                        output
+                            .reborrow()
+                            .init_coordinates(post.coordinates.len() as u32),
+                        &post.coordinates,
+                    );
+                    output.set_producer_replica(post.producer_replica);
+                    output.set_posted_sequence(post.posted_sequence);
+                }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
                     output.set_total_visits(state.total_visits);
@@ -1196,6 +1270,16 @@ pub(crate) fn decode_reply_reader(
                         replicas,
                         landscape_basins: status.get_landscape_basins(),
                         seam,
+                    })
+                }
+                accepted_reply::payload::FrontierPost(post) => {
+                    let post = post.map_err(wire_error)?;
+                    AcceptedPayload::FrontierPost(CatalogFrontierPost {
+                        gap: post.get_gap(),
+                        energy: post.get_energy(),
+                        coordinates: list_f64(post.get_coordinates().map_err(wire_error)?),
+                        producer_replica: post.get_producer_replica(),
+                        posted_sequence: post.get_posted_sequence(),
                     })
                 }
                 accepted_reply::payload::BridgeAssignment(assignment) => {

@@ -47,6 +47,14 @@ pub struct Channels {
     pub entropic_bias: bool,
     /// Histogram screen on arrivals (`CATALOG_HISTO_SCREEN`).
     pub histo_screen: bool,
+    /// The per-chain seam ladder: banked doorway states with
+    /// epsilon-greedy restarts after stagnation (`CATALOG_SEAM_LADDER`).
+    pub seam_ladder: bool,
+    /// The ensemble frontier exchange: raw doorway states shared
+    /// through the coordinator so every chain's ladder holds the
+    /// union's progress (`CATALOG_FRONTIER_EXCHANGE`). Requires the
+    /// seam ladder, which is where arrivals land.
+    pub frontier_exchange: bool,
 }
 
 /// The ensemble shape. Required: a campaign that does not say how many
@@ -116,6 +124,13 @@ impl CampaignConfig {
         if cfg.campaign.is_empty() {
             return Err(CampaignError("campaign name is empty".into()));
         }
+        if cfg.channels.frontier_exchange && !cfg.channels.seam_ladder {
+            return Err(CampaignError(
+                "frontier_exchange requires seam_ladder: arrivals land in \
+                 the seam bank, and without it the channel is dead mail"
+                    .into(),
+            ));
+        }
         Ok(cfg)
     }
 
@@ -146,12 +161,14 @@ impl CampaignConfig {
     }
 
     /// Channel names and their explicit states.
-    pub fn channel_states(&self) -> [(&'static str, bool); 4] {
+    pub fn channel_states(&self) -> [(&'static str, bool); 6] {
         [
             ("CATALOG_SHARED_SCREEN", self.channels.shared_screen),
             ("CATALOG_SHARED_BIAS", self.channels.shared_bias),
             ("CATALOG_ENTROPIC_BIAS", self.channels.entropic_bias),
             ("CATALOG_HISTO_SCREEN", self.channels.histo_screen),
+            ("CATALOG_SEAM_LADDER", self.channels.seam_ladder),
+            ("CATALOG_FRONTIER_EXCHANGE", self.channels.frontier_exchange),
         ]
     }
 
@@ -253,6 +270,8 @@ shared_screen = true
 shared_bias = true
 entropic_bias = false
 histo_screen = false
+seam_ladder = true
+frontier_exchange = true
 
 [ensemble]
 replicas = 48

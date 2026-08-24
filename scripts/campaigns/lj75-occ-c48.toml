@@ -14,6 +14,10 @@ shared_bias = false
 entropic_bias = false
 # Histogram screen: off until the paired smoke measures it.
 histo_screen = false
+# The chain-local seam ladder and the ensemble frontier exchange are
+# off in this arm; the c48f campaign runs them.
+seam_ladder = false
+frontier_exchange = false
 
 [ensemble]
 replicas = 48
