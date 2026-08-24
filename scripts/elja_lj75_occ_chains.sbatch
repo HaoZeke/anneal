@@ -28,17 +28,17 @@ export JCC_SOURCE_COMMIT_FILE=$LJ_ROOT/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export LD_LIBRARY_PATH=$HOME/ira/lib:${LD_LIBRARY_PATH:-}
-export CATALOG_REPLICAS=$CHAINS
-export CATALOG_WAVE=$CHAINS
-export CATALOG_SLICE=500
-export CATALOG_SHARED_SCREEN=1
-# The campaign contract: the binary validates this file against the
-# exports above and refuses to start on any disagreement, so a drifted
-# or missing export dies at launch instead of running dark.
+# The campaign contract: everything the run's physics needs --
+# replicas, wave, slice, hop cap, census interval, every coordination
+# channel, the seed base -- lives in the TOML below and nowhere else.
+# This script used to also export CATALOG_REPLICAS/WAVE/SLICE/
+# SHARED_SCREEN/POPULATION_INTERVAL/MAX_HOPS/SEED_OFFSET_BASE itself,
+# duplicating the file; one of those duplicates silently drifted
+# (a hardcoded seed-base formula here, a different value in the file)
+# and only the campaign's own collision guard catching the mismatch
+# stopped it from running dark a second time. The guard should not
+# need to fire because a second source of truth should not exist.
 export CATALOG_CONFIG=$LJ_ROOT/scripts/campaigns/lj75-occ-c48.toml
-export CATALOG_POPULATION_INTERVAL=50000
-export CATALOG_MAX_HOPS=60000
-export SEED_OFFSET_BASE=$((3900000 + CHAINS * 1000))
 export LJ_OUT=$HOME/ljwork/c$CHAINS
 mkdir -p "$LJ_OUT/$CATALOG_CAMPAIGN"
 cd "$LJ_ROOT"
