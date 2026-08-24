@@ -22,16 +22,10 @@ export JCC_SOURCE_COMMIT_FILE=$LJ_ROOT/SOURCE_COMMIT
 export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export LD_LIBRARY_PATH=$HOME/ira/lib:${LD_LIBRARY_PATH:-}
-export CATALOG_REPLICAS=48
-export CATALOG_WAVE=48
-export CATALOG_SLICE=500
-export CATALOG_SHARED_SCREEN=1
-export CATALOG_SEAM_LADDER=1
-export CATALOG_FRONTIER_EXCHANGE=1
+# The campaign TOML is the only source for replicas/wave/slice/hop
+# cap/census interval/channels/seed base -- see the sibling c48
+# script's comment for why this script no longer duplicates them.
 export CATALOG_CONFIG=$LJ_ROOT/scripts/campaigns/lj75-occ-c48f.toml
-export CATALOG_POPULATION_INTERVAL=50000
-export CATALOG_MAX_HOPS=60000
-export SEED_OFFSET_BASE=9950000
 export LJ_OUT=$HOME/ljwork/c48f
 mkdir -p "$LJ_OUT/$CATALOG_CAMPAIGN"
 cd "$LJ_ROOT"
