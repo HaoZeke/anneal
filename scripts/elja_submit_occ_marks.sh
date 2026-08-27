@@ -11,12 +11,22 @@ SRC_FILE=$ROOT/SOURCE_COMMIT
 
 test -s "$SRC_FILE"
 IFS= read -r SRC <"$SRC_FILE"
+HEAD=$(git -C "$ROOT" rev-parse HEAD)
+if [[ $SRC != "$HEAD" ]]; then
+  echo "refusing submit: SOURCE_COMMIT=$SRC does not match HEAD=$HEAD" >&2
+  exit 2
+fi
 if ! git -C "$ROOT" merge-base --is-ancestor "$NEED" "$SRC"; then
   echo "refusing submit: SOURCE_COMMIT=$SRC is not a descendant of $NEED" >&2
   exit 2
 fi
 test -x "$BIN"
 test -x "$SERVER"
+if [[ ! -s $ROOT/BUILD_SHA256SUMS ]]; then
+  echo "refusing submit: missing $ROOT/BUILD_SHA256SUMS" >&2
+  exit 2
+fi
+(cd "$ROOT" && sha256sum -c BUILD_SHA256SUMS)
 OUT75=$HOME/ljwork/jcc/lj75-occ-dwell/lj75/shared/lj75-shared-0021
 if [[ -e $OUT75 ]]; then
   echo "refusing submit: $OUT75 already exists" >&2
