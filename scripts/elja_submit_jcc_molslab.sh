@@ -31,6 +31,23 @@ if [[ ! -x $RUNNER ]]; then
   echo "missing molecule/slab ensemble runner: $RUNNER" >&2
   exit 1
 fi
+SOURCE_COMMIT_FILE=$ROOT/SOURCE_COMMIT
+if [[ ! -s $SOURCE_COMMIT_FILE || ! -s $ROOT/MOLSLAB_BUILD_SHA256SUMS ]]; then
+  echo "missing source record or molecular build artifact seal below $ROOT" >&2
+  exit 1
+fi
+IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
+HEAD=$(git -C "$ROOT" rev-parse HEAD)
+if [[ $SOURCE_COMMIT != "$HEAD" ]]; then
+  echo "SOURCE_COMMIT=$SOURCE_COMMIT does not match HEAD=$HEAD" >&2
+  exit 2
+fi
+if ! git -C "$ROOT" diff --quiet HEAD --; then
+  echo "tracked source differs from HEAD=$HEAD" >&2
+  git -C "$ROOT" status --short >&2
+  exit 2
+fi
+(cd "$ROOT" && sha256sum -c MOLSLAB_BUILD_SHA256SUMS)
 mkdir -p "$OUT_ROOT/submissions"
 last=$((ENSEMBLES - 1))
 systems=(h2o2:2500 h2o4:2500 h2o6:4000 cuh2:2500)

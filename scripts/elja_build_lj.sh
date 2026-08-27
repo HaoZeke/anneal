@@ -87,7 +87,7 @@ if ! git diff --quiet HEAD --; then
   git status --short >&2
   exit 2
 fi
-cargo build --offline --release --features featomic,ira,bank-rpc \
+cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example lj_census_calibration \
   --example catalog_server \
