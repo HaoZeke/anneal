@@ -80,7 +80,11 @@ fn causal_smoke_campaign_names_every_channel_and_one_paired_ensemble() {
 fn causal_runner_pairs_shared_and_private_catalog_topologies() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let runner = repository.join("scripts/elja_jcc_lj_causal_pair.sh");
-    assert!(runner.is_file(), "missing causal runner {}", runner.display());
+    assert!(
+        runner.is_file(),
+        "missing causal runner {}",
+        runner.display()
+    );
 
     let temp = TempTree::new();
     let root = temp.path().join("root");
@@ -192,10 +196,7 @@ printf '1/1 solved\n'
             );
             assert!(!value(&worker0, "brain_peers").is_empty());
             assert!(!value(&worker1, "brain_peers").is_empty());
-            assert_eq!(
-                value(&worker0, "ensemble"),
-                value(&worker1, "ensemble")
-            );
+            assert_eq!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
         } else {
             assert_eq!(value(&manifest, "catalog_topology"), "private_per_replica");
             assert_eq!(server_lines.len(), 2, "{servers}");
@@ -207,10 +208,7 @@ printf '1/1 solved\n'
             );
             assert_eq!(value(&worker0, "brain_peers"), "");
             assert_eq!(value(&worker1, "brain_peers"), "");
-            assert_ne!(
-                value(&worker0, "ensemble"),
-                value(&worker1, "ensemble")
-            );
+            assert_ne!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
         }
     }
 
