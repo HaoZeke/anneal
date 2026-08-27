@@ -37,8 +37,7 @@ require_protocol_value() {
     echo "$name=${!name} conflicts with the JCC LJ protocol value $expected" >&2
     exit 2
   fi
-  printf -v "$name" '%s' "$expected"
-  export "$name"
+  declare -gx "$name=$expected"
 }
 
 reject_protocol_variable() {
