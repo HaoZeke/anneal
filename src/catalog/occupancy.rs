@@ -2582,6 +2582,7 @@ mod tests {
         assert!(!leftover_dwell_from_census(false, true, 5));
     }
 
+    #[test]
     fn leftover_nick_is_not_a_retire_dwell() {
         assert!(!leftover_sat_dwell(&[true, false]));
         assert!(!leftover_sat_dwell(&[false, true]));
