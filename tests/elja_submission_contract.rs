@@ -250,6 +250,67 @@ fn occupancy_many_chains_starts_one_brain_per_replica() {
 }
 
 #[test]
+fn occupancy_many_chains_has_a_private_catalog_control() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_lj_many_chains.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for required in [
+        r#"ARM=${5:-shared}"#,
+        r#"shared|private"#,
+        "private_endpoints",
+        r#"CATALOG_RPC=${private_endpoints[$replica]}"#,
+        "catalog_topology=private_per_replica",
+    ] {
+        assert!(
+            source.contains(required),
+            "many-chains occupancy is missing private-control contract {required}"
+        );
+    }
+}
+
+#[test]
+fn occupancy_many_chains_pins_nested_worker_threads() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_lj_many_chains.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for variable in [
+        "RAYON_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+    ] {
+        assert!(
+            source.contains(&format!("export {variable}=1")),
+            "each occupancy worker must pin {variable}=1"
+        );
+    }
+}
+
+#[test]
+fn shared_population_requires_the_complete_replica_wave() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_jcc_lj_many_chains.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    assert!(
+        source.contains(r#"$ARM == shared && $WAVE -ne $REPLICAS"#),
+        "a shared synchronous population must reject partial sequential waves"
+    );
+    assert!(
+        source.contains("shared population requires CATALOG_WAVE=CATALOG_REPLICAS"),
+        "the refusal must explain the concurrent-roster invariant"
+    );
+}
+
+#[test]
 fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
@@ -308,8 +369,8 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
             "{name} must not override the Fiedler-and-DECAF family floor"
         );
         assert!(
-            source.contains("export CATALOG_WAVE=24"),
-            "{name} must set CATALOG_WAVE=24"
+            source.contains("export CATALOG_WAVE=48"),
+            "{name} must launch the complete 48-replica population concurrently"
         );
         assert!(
             source.contains(&format!("elja_jcc_lj_many_chains.sh {launch}")),
@@ -369,8 +430,8 @@ fn marks_submit_pins_the_crossing_floor_commit() {
         "Marks hops must use the paper 4e6 budget"
     );
     assert!(
-        hops.contains("CATALOG_WAVE=24"),
-        "Marks hops must use WAVE 24"
+        hops.contains("CATALOG_WAVE=48"),
+        "Marks hops must launch the complete 48-replica population concurrently"
     );
 }
 
