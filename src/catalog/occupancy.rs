@@ -316,8 +316,9 @@ pub fn occupancy_leave_by_ei(
 
 /// [`occupancy_leave_by_ei`] with a leftover birth draw.
 ///
-/// When EI is exhausted the extra Walks. A leftover sample can still
-/// mint a family: reopen ArchiveHole when `draw < p_new`.
+/// Birth reopens ArchiveHole only after leftover SOAP has hatched.
+/// While leftover is unsaturated the extra Walks: a Pitman--Yor
+/// draw must not interrupt the long chain that finds Marks.
 pub fn occupancy_leave_by_birth(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -334,7 +335,10 @@ pub fn occupancy_leave_by_birth(
         ei_exhausted,
         leftover_dwell,
     );
-    if target == OccupancyLeaveTarget::Walk && draw < p_new.clamp(0.0, 1.0) {
+    if leftover_dwell
+        && target == OccupancyLeaveTarget::Walk
+        && draw < p_new.clamp(0.0, 1.0)
+    {
         OccupancyLeaveTarget::ArchiveHole
     } else {
         target
