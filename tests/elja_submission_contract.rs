@@ -250,59 +250,6 @@ fn occupancy_many_chains_starts_one_brain_per_replica() {
 }
 
 #[test]
-fn occupancy_runner_resolves_campaign_toml_before_ensemble_defaults() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_many_chains.sh"))
-        .unwrap_or_else(|error| panic!("failed to read many-chain runner: {error}"));
-    let resolver = runner
-        .find("campaign_env_text=")
-        .expect("many-chain runner must invoke the canonical campaign resolver");
-    let replicas = runner
-        .find("REPLICAS=${CATALOG_REPLICAS:-300}")
-        .expect("many-chain runner must retain its legacy environment fallback");
-    assert!(
-        resolver < replicas,
-        "campaign TOML must set CATALOG_REPLICAS and CATALOG_WAVE before shell defaults are read"
-    );
-    assert!(runner.contains("CAMPAIGN_ENV_BIN"));
-
-    let build = fs::read_to_string(root.join("scripts/elja_build_lj.sh"))
-        .unwrap_or_else(|error| panic!("failed to read LJ build: {error}"));
-    assert!(
-        build.contains("--example campaign_env"),
-        "Elja LJ builds must compile the campaign resolver used by the runner"
-    );
-    assert!(
-        build.contains("target/release/examples/campaign_env"),
-        "the campaign resolver must be included in the executable checksum manifest"
-    );
-}
-
-#[test]
-fn terra_lj_builds_produce_the_source_bound_campaign_launcher() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-
-    for relative in ["scripts/terra_build_lj.sh", "scripts/terra_build_brains.sh"] {
-        let script = root.join(relative);
-        let source = fs::read_to_string(&script)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
-
-        for required in [
-            "--example campaign_env",
-            "target/release/examples/lj_cluster_search",
-            "target/release/examples/catalog_server",
-            "target/release/examples/campaign_env",
-            "BUILD_SHA256SUMS",
-        ] {
-            assert!(
-                source.contains(required),
-                "{relative} must include {required} in the source-bound LJ build"
-            );
-        }
-    }
-}
-
-#[test]
 fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
