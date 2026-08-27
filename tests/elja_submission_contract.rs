@@ -133,6 +133,57 @@ fn molecular_build_produces_every_paired_campaign_executable() {
 }
 
 #[test]
+fn causal_campaigns_bind_source_to_built_artifacts() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lj_submit = fs::read_to_string(root.join("scripts/elja_submit_jcc_lj.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ submitter: {error}"));
+    let lj_runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_causal_pair.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ runner: {error}"));
+    for (name, source) in [("LJ submitter", lj_submit), ("LJ runner", lj_runner)] {
+        assert!(
+            source.contains("SOURCE_COMMIT=$SOURCE_COMMIT does not match HEAD=$HEAD"),
+            "{name} must compare the recorded source with Git HEAD"
+        );
+        assert!(
+            source.contains("sha256sum -c BUILD_SHA256SUMS"),
+            "{name} must verify the LJ build artifact seal"
+        );
+        assert!(
+            source.contains("git diff --quiet HEAD --"),
+            "{name} must reject tracked source changes"
+        );
+    }
+
+    let molecular_build = fs::read_to_string(root.join("scripts/elja_build_rgpot_ex.sh"))
+        .unwrap_or_else(|error| panic!("failed to read molecular build: {error}"));
+    assert!(
+        molecular_build.contains("git diff --quiet HEAD --")
+            && molecular_build.contains("git rev-parse HEAD >SOURCE_COMMIT"),
+        "the molecular build must bind its artifacts to a clean source commit"
+    );
+    assert!(
+        molecular_build.contains("MOLSLAB_BUILD_SHA256SUMS"),
+        "the molecular build must seal engines, drivers, bank, and inspector"
+    );
+    for script in ["elja_submit_jcc_molslab.sh", "elja_jcc_molslab_ensemble.sh"] {
+        let source = fs::read_to_string(root.join("scripts").join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        assert!(
+            source.contains("SOURCE_COMMIT=$SOURCE_COMMIT does not match HEAD=$HEAD"),
+            "{script} must compare the recorded source with Git HEAD"
+        );
+        assert!(
+            source.contains("sha256sum -c MOLSLAB_BUILD_SHA256SUMS"),
+            "{script} must verify the molecular build artifact seal"
+        );
+        assert!(
+            source.contains("git diff --quiet HEAD --"),
+            "{script} must reject tracked source changes"
+        );
+    }
+}
+
+#[test]
 fn molecular_ensembles_are_isolated_paired_slurm_runs() {
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
