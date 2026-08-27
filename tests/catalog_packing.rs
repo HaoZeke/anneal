@@ -1,12 +1,12 @@
 use anneal_core::catalog::{
     OccupancyCertificate, OccupancyFold, PACKING_LINK, PACKING_MERGE, PACKING_MOVE_EPS,
-    PackingBook, different_decaf_family, leaves_packing, lens_ring_displacement,
-    occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_landfold_floor,
-    occupancy_leave_new_class, occupancy_leave_new_packing, occupancy_map_fold,
-    occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
-    occupancy_sparsify_packing, packing_community_count, packing_distance, packing_fingerprint,
-    packing_link_labels, packing_reference_book, remember_packing_reference, ring_leave_weight,
-    same_packing, set_packing_references, include_packing_reference,
+    PackingBook, different_decaf_family, include_packing_reference, leaves_packing,
+    lens_ring_displacement, occupancy_fes_delta, occupancy_fes_from_histograms,
+    occupancy_landfold_floor, occupancy_leave_new_class, occupancy_leave_new_packing,
+    occupancy_map_fold, occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor,
+    occupancy_ring_profile, occupancy_sparsify_packing, packing_community_count, packing_distance,
+    packing_fingerprint, packing_link_labels, packing_reference_book, remember_packing_reference,
+    ring_leave_weight, same_packing, set_packing_references,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
