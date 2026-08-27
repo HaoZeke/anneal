@@ -137,6 +137,47 @@ fn occupancy_fes_report_key_tracks_the_discrete_gap() {
 }
 
 #[test]
+fn live_leave_gate_does_not_name_the_expired_4000_floor() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let gate = source
+        .split("if leave_defers(leave_quiet, leave_patience, leave_crossing)")
+        .nth(1)
+        .expect("live leave_defers gate must exist")
+        .split("return CheckpointAction::Continue;")
+        .next()
+        .expect("leave_defers continue must exist");
+    assert!(
+        !gate.contains("4000"),
+        "live Leave comment must not name the expired 4000-hop floor"
+    );
+    assert!(
+        gate.contains("crossing floor"),
+        "live Leave comment must name the measured crossing floor"
+    );
+}
+
+#[test]
+fn leftover_sat_dwell_docs_name_live_census_dwell() {
+    let source = include_str!("../src/catalog/occupancy.rs");
+    let const_at = source
+        .find("pub const LEFTOVER_SAT_DWELL")
+        .expect("LEFTOVER_SAT_DWELL must exist");
+    let before = &source[..const_at];
+    let docs_start = before
+        .rfind("/// Consecutive leftover-sat")
+        .expect("LEFTOVER_SAT_DWELL must have docs");
+    let docs = &before[docs_start..];
+    assert!(
+        docs.contains("leftover_dwell_from_census"),
+        "LEFTOVER_SAT_DWELL must document leftover_dwell_from_census as live dwell"
+    );
+    assert!(
+        !docs.contains("leftover_hatch_stable"),
+        "hatch-stable is the Esty increment, not the live leftover dwell"
+    );
+}
+
+#[test]
 fn leftover_census_dwell_requires_the_sat_streak() {
     let source = include_str!("../src/catalog_rpc/server.rs");
     let dwell = source
