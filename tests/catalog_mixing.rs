@@ -1,6 +1,7 @@
 use anneal_core::catalog::{
-    AttractorStrength, MIXED_RHAT, certified_global_minimum, explore_collapsed, explore_must_leave,
-    invert_mixing, mixed, occupant_rhat, rhat_series, stronger,
+    AttractorStrength, MIXED_RHAT, OccupancyCertificate, certified_global_minimum,
+    explore_collapsed, explore_must_leave, invert_mixing, mixed, occupant_rhat,
+    occupancy_complete_at, rhat_series, stronger,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {
@@ -163,6 +164,37 @@ fn two_point_traces_are_not_a_mixing_certificate() {
     };
     let verdict = invert_mixing(&[left, right], &[]);
     assert!(!verdict.certified_attractor);
+}
+
+#[test]
+fn leftover_unsaturated_does_not_retire() {
+    let ico = ico_floor();
+    let shallower = AttractorStrength {
+        energy: -170.0,
+        occupancy: 2,
+        occupant_rhat: 0.0,
+    };
+    let verdict = invert_mixing(&[ico, shallower], &[]);
+    assert!(verdict.certified_attractor);
+    assert_ne!(
+        occupancy_complete_at(verdict.certified_attractor, true, false, 2, 2),
+        Some(OccupancyCertificate::MixingCertified)
+    );
+    assert_eq!(
+        occupancy_complete_at(verdict.certified_attractor, true, true, 2, 2),
+        Some(OccupancyCertificate::MixingCertified)
+    );
+    let ico_minority = AttractorStrength {
+        energy: -173.252378,
+        occupancy: 2,
+        occupant_rhat: 0.0,
+    };
+    let deep = invert_mixing(&[oh_majority(), ico_minority], &[]);
+    assert!(deep.certified_attractor);
+    assert_eq!(
+        occupancy_complete_at(deep.certified_attractor, true, false, 1, 1),
+        Some(OccupancyCertificate::MixingCertified)
+    );
 }
 
 #[test]
