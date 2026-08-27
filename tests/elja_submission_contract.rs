@@ -430,8 +430,8 @@ fn terra_audit_build_binds_the_census_calibrator_to_source() {
 #[cfg(unix)]
 #[test]
 fn census_calibration_runner_is_executable() {
-    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("scripts/elja_jcc_lj_calibration.sh");
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/elja_jcc_lj_calibration.sh");
     let mode = fs::metadata(&script)
         .unwrap_or_else(|error| panic!("failed to stat {}: {error}", script.display()))
         .permissions()
