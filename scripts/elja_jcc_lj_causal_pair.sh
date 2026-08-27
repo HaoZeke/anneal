@@ -288,8 +288,10 @@ best_all=
 for replica in $(seq 0 $((REPLICAS - 1))); do
   output="$OUT/workers/replica-${replica}.out"
   trace="$OUT/traces/replica-${replica}.jsonl"
+  resolved_config="$OUT/workers/replica-${replica}/resolved-config.json"
   test -s "$output"
   test -s "$trace"
+  test -s "$resolved_config"
   if ! head -n 1 "$trace" \
     | grep -F -q "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING"; then
     echo "trace manifest does not match $ENSEMBLE sharing=$TRACE_SHARING: $trace" >&2
@@ -311,7 +313,13 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
     solved=$((solved + 1))
   fi
 done
+for replica in $(seq 1 $((REPLICAS - 1))); do
+  cmp -s "$OUT/workers/replica-0/resolved-config.json" \
+    "$OUT/workers/replica-${replica}/resolved-config.json"
+done
 
+cp "$OUT/workers/replica-0/resolved-config.json" "$OUT/resolved-config.json"
+resolved_config_sha256=$(sha256sum "$OUT/resolved-config.json" | awk '{print $1}')
 binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
 server_sha256=$(sha256sum "$SERVER" | awk '{print $1}')
 runner_sha256=$(sha256sum "$0" | awk '{print $1}')
@@ -336,6 +344,7 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
   printf 'census_radius=%s\n' "$CENSUS_RADIUS"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+  printf 'resolved_config_sha256=%s\n' "$resolved_config_sha256"
   printf 'binary_sha256=%s\n' "$binary_sha256"
   printf 'server_sha256=%s\n' "$server_sha256"
   printf 'runner_sha256=%s\n' "$runner_sha256"
