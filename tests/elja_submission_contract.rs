@@ -108,6 +108,52 @@ fn hard_lj_manifests_pin_every_scientific_input() {
 }
 
 #[test]
+fn hard_lj_campaigns_bind_every_coordination_channel() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let submitter = fs::read_to_string(root.join("scripts/elja_submit_jcc_lj.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ submitter: {error}"));
+    let runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_causal_pair.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ runner: {error}"));
+
+    for (name, value) in [
+        ("CATALOG_SHARED_SCREEN", "1"),
+        ("CATALOG_SHARED_BIAS", "0"),
+        ("CATALOG_ENTROPIC_BIAS", "0"),
+        ("CATALOG_HISTO_SCREEN", "0"),
+        ("CATALOG_SEAM_LADDER", "1"),
+        ("CATALOG_FRONTIER_EXCHANGE", "1"),
+        ("CATALOG_COOP_WELLS", "1"),
+        ("CATALOG_BRIDGE", "0"),
+        ("CATALOG_DIFFICULTY", "0"),
+        ("CATALOG_PACKING_PAVE", "0"),
+    ] {
+        assert!(
+            submitter.contains(&format!("{name}={value}")),
+            "the LJ submitter must bind {name}={value}"
+        );
+        assert!(
+            runner.contains(&format!("require_protocol_value {name} {value}")),
+            "the LJ runner must reject a conflicting {name}"
+        );
+        let manifest_name = name
+            .strip_prefix("CATALOG_")
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(
+            runner.contains(&format!("{manifest_name}=%s\\n")),
+            "the LJ manifest must record {name}"
+        );
+    }
+
+    for forbidden in ["CATALOG_TEMP_LADDER", "CATALOG_MD_ENGINE"] {
+        assert!(
+            runner.contains(&format!("reject_protocol_variable {forbidden}")),
+            "the production LJ runner must reject inherited {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn molecular_build_produces_every_paired_campaign_executable() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
