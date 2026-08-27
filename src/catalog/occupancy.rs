@@ -161,9 +161,9 @@ pub enum OccupancyLeaveTarget {
     Walk,
 }
 
-/// Consecutive leftover-sat bits kept for tests of the hatch filter.
-/// Live dwell is [`leftover_hatch_stable`]: one more singleton cannot
-/// lift \(\hat p_0\) through the unseen-mass ceiling.
+/// Consecutive leftover-sat samples required before leftover dwell.
+/// Live leftover_dwell is [`leftover_dwell_from_census`]: a one-shot
+/// leftover-SOAP nick does not flip the dwell bit.
 pub const LEFTOVER_SAT_DWELL: usize = 5;
 
 /// Bank and CSA turn FunnelModel EI on at three observed morphologies.

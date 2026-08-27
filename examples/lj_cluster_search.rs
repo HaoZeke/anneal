@@ -3428,8 +3428,10 @@ fn run_capnp_catalog(
             reference(cfg.n_points),
         ));
         if leave_defers(leave_quiet, leave_patience, leave_crossing) {
-            // First 4000 hops stay on the walk. Policy RPC is the
-            // measured hop-cost gap; census still sees posted minima.
+            // Still inside the recovered quiet stretch or the
+            // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
+            // RPC is the measured hop-cost gap; census still sees
+            // posted minima.
             return CheckpointAction::Continue;
         }
         let policy = match cooperative
