@@ -467,7 +467,6 @@ mod run {
         client: Option<CatalogMailbox>,
         snapshot: Option<CatalogSnapshot>,
         last_slice: u64,
-        last_policy: Option<PolicyState>,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
         policy_pending: bool,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
@@ -509,7 +508,6 @@ mod run {
                             client: None,
                             snapshot: None,
                             last_slice: 0,
-                            last_policy: None,
                             policy_slot: Arc::new(Mutex::new(None)),
                             policy_pending: false,
                             hole_slot: Arc::new(Mutex::new(None)),
@@ -966,7 +964,8 @@ mod run {
             )
         }
 
-        /// Mailbox policy with the replica's leftover-SOAP \(\lambda\).
+        /// Poll one mailbox policy request with the replica's leftover-SOAP \(\lambda\).
+        /// Each completed receipt is consumed exactly once.
         pub fn try_policy_input_with_lambda(
             &mut self,
             replica: u32,
@@ -992,7 +991,6 @@ mod run {
                 self.replica_mut(replica)?.policy_pending = false;
                 match result {
                     Ok(receipt) => {
-                        self.replica_mut(replica)?.last_policy = Some(receipt.state);
                         let input = policy_input_from_state(
                             receipt.state,
                             local_stall_slices,
@@ -1045,30 +1043,6 @@ mod run {
                     });
                     state.policy_pending = true;
                 }
-            }
-            if let Some(policy) = self
-                .replicas
-                .get(&replica)
-                .and_then(|state| state.last_policy)
-            {
-                let input = policy_input_from_state(
-                    policy,
-                    local_stall_slices,
-                    local_deepened,
-                    self.on_published_prize,
-                    leftover_lambda,
-                )?;
-                let version = self
-                    .replicas
-                    .get(&replica)
-                    .and_then(|state| state.snapshot)
-                    .map(|snapshot| snapshot.version);
-                self.push_event(replica, TraceKind::SnapshotRefresh, version, None)?;
-                self.events
-                    .last_mut()
-                    .expect("snapshot-refresh push appends one trace event")
-                    .policy = Some(policy_trace(policy, energy));
-                return Ok(PolicyEvidenceOutcome::Remote(input));
             }
             self.push_event(replica, TraceKind::RpcFallback, None, None)?;
             Ok(PolicyEvidenceOutcome::LocalFallback)
