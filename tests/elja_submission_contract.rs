@@ -219,6 +219,43 @@ fn production_builders_use_the_committed_dependency_graph() {
 }
 
 #[test]
+fn terra_molecular_builder_seals_exact_sources_engines_and_drivers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = root.join("scripts/terra_build_rgpot_ex.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    for required in [
+        "SLURM_JOB_ID",
+        "EXPECTED_COMMIT",
+        "RGPOT_EXPECTED_COMMIT",
+        "git diff --quiet HEAD --",
+        "git -C \"$RGPOT\" diff --quiet HEAD --",
+        "install --locked -e xtbbld",
+        "run --locked -e xtbbld meson setup",
+        "run --locked -e xtbbld meson compile",
+        "-Dwith_xtb=true",
+        "-Dwith_fortran_pots=enabled",
+        "cargo build --locked --release",
+        "rgpot_xtb_force",
+        "rgpot_cuh2_force",
+        "engines/libxtb_engine.so",
+        "engines/librgpot_cuh2.so",
+        "git rev-parse HEAD >SOURCE_COMMIT",
+        "RGPOT_SOURCE_COMMIT",
+        "MOLSLAB_BUILD_SHA256SUMS",
+        "molecular_cluster\" 2 20 1",
+        "slab_adsorption\"",
+        "cuh2_fcc_slab.con\" 15 1",
+    ] {
+        assert!(
+            source.contains(required),
+            "Terra molecular builder is missing {required}"
+        );
+    }
+}
+
+#[test]
 fn molecular_ensembles_are_isolated_paired_slurm_runs() {
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
