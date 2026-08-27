@@ -888,6 +888,70 @@ fn try_boundary_crossing_delivers_each_rpc_result_once() {
 }
 
 #[test]
+fn try_boundary_crossing_requires_the_request_parameters() {
+    let server = server();
+    let digest = signature().digest();
+    let mut producer =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let source = candidate(0, 1, 1.2);
+    let source_descriptor = source.descriptor.clone();
+    let destination = candidate(0, 2, 4.0);
+    let destination_descriptor = destination.descriptor.clone();
+    producer.record_visit(1, source).unwrap();
+    producer
+        .record_transition(
+            2,
+            "surface_relocate",
+            TransitionDestination::Resolved(destination),
+            true,
+        )
+        .unwrap();
+    let mut run = CooperativeRun::new([1], 100).unwrap();
+    run.attach_client(
+        1,
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        run.try_boundary_crossing(1, source_descriptor.clone(), 71)
+            .unwrap(),
+        CatalogBoundaryOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(1).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_boundary_crossing(1, source_descriptor, 72)
+            .unwrap(),
+        CatalogBoundaryOutcome::LocalFallback,
+        "a crossing selected with another draw must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(1).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_boundary_crossing(1, destination_descriptor.clone(), 72)
+            .unwrap(),
+        CatalogBoundaryOutcome::LocalFallback,
+        "a crossing selected from another descriptor must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(1).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_boundary_crossing(1, destination_descriptor, 72)
+            .unwrap(),
+        CatalogBoundaryOutcome::Empty
+    );
+}
+
+#[test]
 fn cooperative_run_traces_explicit_transition_records() {
     let server = server();
     let digest = signature().digest();
