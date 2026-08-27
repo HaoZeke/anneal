@@ -459,6 +459,20 @@ mod run {
         },
     }
 
+    struct PolicyRequest {
+        descriptor: Vec<f64>,
+        energy: f64,
+        leftover_lambda: f64,
+    }
+
+    impl PolicyRequest {
+        fn matches(&self, descriptor: &[f64], energy: f64, leftover_lambda: f64) -> bool {
+            self.descriptor == descriptor
+                && self.energy.to_bits() == energy.to_bits()
+                && self.leftover_lambda.to_bits() == leftover_lambda.to_bits()
+        }
+    }
+
     struct ReplicaState {
         trace_sequence: u64,
         ledger_sequence: u64,
@@ -469,6 +483,7 @@ mod run {
         last_slice: u64,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
         policy_pending: bool,
+        policy_request: Option<PolicyRequest>,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
         sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
@@ -509,6 +524,7 @@ mod run {
                             last_slice: 0,
                             policy_slot: Arc::new(Mutex::new(None)),
                             policy_pending: false,
+                            policy_request: None,
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
                             sample_slot: Arc::new(Mutex::new(None)),
@@ -545,6 +561,7 @@ mod run {
             let state = self.replica_mut(replica)?;
             state.client = Some(CatalogMailbox::spawn(client));
             state.policy_pending = false;
+            state.policy_request = None;
             *state.policy_slot.lock().expect("policy slot") = None;
             state.hole_pending = false;
             *state.hole_slot.lock().expect("hole slot") = None;
@@ -979,47 +996,53 @@ mod run {
             let finished = {
                 let state = self.replica_mut(replica)?;
                 if state.policy_pending {
-                    state.policy_slot.lock().expect("policy slot").take()
+                    let result = state.policy_slot.lock().expect("policy slot").take();
+                    result.map(|result| (result, state.policy_request.take()))
                 } else {
                     None
                 }
             };
-            if let Some(result) = finished {
+            if let Some((result, request)) = finished {
                 self.replica_mut(replica)?.policy_pending = false;
-                match result {
-                    Ok(receipt) => {
-                        let input = policy_input_from_state(
-                            receipt.state,
-                            local_stall_slices,
-                            local_deepened,
-                            self.on_published_prize,
-                            leftover_lambda,
-                        )?;
-                        self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
-                        self.push_event(
-                            replica,
-                            TraceKind::SnapshotRefresh,
-                            Some(receipt.snapshot.version),
-                            None,
-                        )?;
-                        self.events
-                            .last_mut()
-                            .expect("snapshot-refresh push appends one trace event")
-                            .policy = Some(policy_trace(receipt.state, energy));
-                        return Ok(PolicyEvidenceOutcome::Remote(input));
-                    }
-                    Err(CatalogClientError::Rejected(reason)) => {
-                        self.push_event(
-                            replica,
-                            TraceKind::Rejection,
-                            None,
-                            Some(rejection_code(reason)),
-                        )?;
-                        return Ok(PolicyEvidenceOutcome::Rejected);
-                    }
-                    Err(_) => {
-                        self.push_event(replica, TraceKind::RpcFallback, None, None)?;
-                        return Ok(PolicyEvidenceOutcome::LocalFallback);
+                let request_matches = request.as_ref().is_some_and(|request| {
+                    request.matches(&descriptor, energy, leftover_lambda)
+                });
+                if request_matches {
+                    match result {
+                        Ok(receipt) => {
+                            let input = policy_input_from_state(
+                                receipt.state,
+                                local_stall_slices,
+                                local_deepened,
+                                self.on_published_prize,
+                                leftover_lambda,
+                            )?;
+                            self.replica_mut(replica)?.snapshot = Some(receipt.snapshot);
+                            self.push_event(
+                                replica,
+                                TraceKind::SnapshotRefresh,
+                                Some(receipt.snapshot.version),
+                                None,
+                            )?;
+                            self.events
+                                .last_mut()
+                                .expect("snapshot-refresh push appends one trace event")
+                                .policy = Some(policy_trace(receipt.state, energy));
+                            return Ok(PolicyEvidenceOutcome::Remote(input));
+                        }
+                        Err(CatalogClientError::Rejected(reason)) => {
+                            self.push_event(
+                                replica,
+                                TraceKind::Rejection,
+                                None,
+                                Some(rejection_code(reason)),
+                            )?;
+                            return Ok(PolicyEvidenceOutcome::Rejected);
+                        }
+                        Err(_) => {
+                            self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                            return Ok(PolicyEvidenceOutcome::LocalFallback);
+                        }
                     }
                 }
             }
@@ -1029,6 +1052,11 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 let slot = Arc::clone(&state.policy_slot);
                 if let Some(mailbox) = state.client.as_ref() {
+                    state.policy_request = Some(PolicyRequest {
+                        descriptor: descriptor.clone(),
+                        energy,
+                        leftover_lambda,
+                    });
                     mailbox.post(move |client| {
                         let answer = client.policy_state_with_lambda(
                             rpc_sequence,
