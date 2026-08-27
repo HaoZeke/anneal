@@ -329,7 +329,7 @@ impl CatalogPolicy {
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
             }
-            _ if !input.leftover_dwell => {
+            ActiveCatalogRelation::SameBasin if !input.leftover_dwell => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
             _ if input.interface_rank != u32::MAX
