@@ -3943,6 +3943,7 @@ fn run_capnp_catalog(
                     policy.ei_exhausted,
                     p_new,
                     birth_draw,
+                    policy.leftover_dwell,
                 ) {
                     OccupancyLeaveTarget::Walk => {
                         count_walk += 1;

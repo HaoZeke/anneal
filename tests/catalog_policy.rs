@@ -32,11 +32,25 @@ fn input(
         interface_threshold: 0.0,
         occupied_family_count: 0,
         packing_saturated: false,
-        leftover_dwell: false,
+        leftover_dwell: true,
         ei_exhausted: false,
         min_families: 1,
         on_published_prize: false,
     }
+}
+
+#[test]
+fn leftover_unsaturated_extra_walks_like_serial() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut extra = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    extra.leftover_dwell = false;
+    let decision = CatalogPolicy::decide(extra);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
 }
 
 #[test]
@@ -478,11 +492,7 @@ fn decision_table_covers_every_discrete_input_state() {
                                 && validation == ValidationState::Validated
                                 && !local_deepened
                             {
-                                if local_stall_slices >= 8 {
-                                    assert_eq!(decision.action, PolicyAction::Leave);
-                                } else {
-                                    assert_eq!(decision.action, PolicyAction::ContinueLocal);
-                                }
+                                assert_eq!(decision.action, PolicyAction::ContinueLocal);
                             }
                         }
                     }

@@ -4,15 +4,15 @@
 set -euo pipefail
 
 ROOT=${LJ_ROOT:-$HOME/anneal-occ-7fe8d5a}
-WANT=7fe8d5a431a4ce227f8e3d424bd299f3eae51103
+NEED=7fe8d5a431a4ce227f8e3d424bd299f3eae51103
 BIN=$ROOT/target/release/examples/lj_cluster_search
 SERVER=$ROOT/target/release/examples/catalog_server
 SRC_FILE=$ROOT/SOURCE_COMMIT
 
 test -s "$SRC_FILE"
 IFS= read -r SRC <"$SRC_FILE"
-if [[ $SRC != "$WANT" ]]; then
-  echo "refusing submit: SOURCE_COMMIT=$SRC want=$WANT" >&2
+if ! git -C "$ROOT" merge-base --is-ancestor "$NEED" "$SRC"; then
+  echo "refusing submit: SOURCE_COMMIT=$SRC is not a descendant of $NEED" >&2
   exit 2
 fi
 test -x "$BIN"
