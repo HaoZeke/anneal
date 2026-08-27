@@ -18,7 +18,8 @@ mod run {
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
         CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation, CatalogSnapshot,
         DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-        PopulationSelection, ProtocolRejection, TransitionDestination,
+        PopulationSelection, ProtocolRejection, TransitionDestination, INCUMBENT_SAMPLE_DRAW,
+        SPARSE_SAMPLE_DRAW,
     };
     use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
@@ -496,6 +497,52 @@ mod run {
         }
     }
 
+    type SampleResult = Result<Option<CatalogCandidate>, CatalogClientError>;
+
+    struct SampleChannel {
+        slot: Arc<Mutex<Option<SampleResult>>>,
+        pending: bool,
+    }
+
+    impl SampleChannel {
+        fn new() -> Self {
+            Self {
+                slot: Arc::new(Mutex::new(None)),
+                pending: false,
+            }
+        }
+
+        fn reset(&mut self) {
+            self.pending = false;
+            *self.slot.lock().expect("sample slot") = None;
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum SampleRole {
+        Reference,
+        Incumbent,
+        Sparse,
+    }
+
+    impl SampleRole {
+        fn for_draw(draw: u64) -> Self {
+            match draw {
+                INCUMBENT_SAMPLE_DRAW => Self::Incumbent,
+                SPARSE_SAMPLE_DRAW => Self::Sparse,
+                _ => Self::Reference,
+            }
+        }
+
+        const fn index(self) -> usize {
+            match self {
+                Self::Reference => 0,
+                Self::Incumbent => 1,
+                Self::Sparse => 2,
+            }
+        }
+    }
+
     struct ReplicaState {
         trace_sequence: u64,
         ledger_sequence: u64,
@@ -510,8 +557,7 @@ mod run {
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
         hole_request: Option<DescriptorHoleRequest>,
-        sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
-        sample_pending: bool,
+        sample_channels: [SampleChannel; 3],
         crossing_slot:
             Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
         crossing_pending: bool,
@@ -553,8 +599,11 @@ mod run {
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
                             hole_request: None,
-                            sample_slot: Arc::new(Mutex::new(None)),
-                            sample_pending: false,
+                            sample_channels: [
+                                SampleChannel::new(),
+                                SampleChannel::new(),
+                                SampleChannel::new(),
+                            ],
                             crossing_slot: Arc::new(Mutex::new(None)),
                             crossing_pending: false,
                             crossing_request: None,
@@ -593,8 +642,9 @@ mod run {
             state.hole_pending = false;
             state.hole_request = None;
             *state.hole_slot.lock().expect("hole slot") = None;
-            state.sample_pending = false;
-            *state.sample_slot.lock().expect("sample slot") = None;
+            for channel in &mut state.sample_channels {
+                channel.reset();
+            }
             state.crossing_pending = false;
             state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
@@ -1237,16 +1287,18 @@ mod run {
             if self.replica_mut(replica)?.client.is_none() {
                 return Ok(CatalogSampleOutcome::SharingDisabled);
             }
+            let role = SampleRole::for_draw(draw);
             let finished = {
                 let state = self.replica_mut(replica)?;
-                if state.sample_pending {
-                    state.sample_slot.lock().expect("sample slot").take()
+                let channel = &mut state.sample_channels[role.index()];
+                if channel.pending {
+                    channel.slot.lock().expect("sample slot").take()
                 } else {
                     None
                 }
             };
             if let Some(result) = finished {
-                self.replica_mut(replica)?.sample_pending = false;
+                self.replica_mut(replica)?.sample_channels[role.index()].pending = false;
                 match result {
                     Ok(Some(candidate)) => return Ok(CatalogSampleOutcome::Candidate(candidate)),
                     Ok(None) => return Ok(CatalogSampleOutcome::Empty),
@@ -1256,16 +1308,16 @@ mod run {
                     Err(_) => return Ok(CatalogSampleOutcome::LocalFallback),
                 }
             }
-            if !self.replica_mut(replica)?.sample_pending {
+            if !self.replica_mut(replica)?.sample_channels[role.index()].pending {
                 let rpc_sequence = self.next_rpc_sequence(replica)?;
                 let state = self.replica_mut(replica)?;
-                let slot = Arc::clone(&state.sample_slot);
+                let slot = Arc::clone(&state.sample_channels[role.index()].slot);
                 if let Some(mailbox) = state.client.as_ref() {
                     mailbox.post(move |client| {
                         let answer = client.sample_candidate(rpc_sequence, draw);
                         *slot.lock().expect("sample slot") = Some(answer);
                     });
-                    state.sample_pending = true;
+                    state.sample_channels[role.index()].pending = true;
                 }
             }
             Ok(CatalogSampleOutcome::LocalFallback)
