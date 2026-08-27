@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Many LJ catalog replicas in one Slurm allocation. Shared runs keep the
-# synchronous population live; private runs give every replica its own catalog.
+# Many short LJ catalog replicas in one Slurm allocation.
+# Workers launch in waves so one 32-core node does not OOM.
 set -euo pipefail
 
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
@@ -12,21 +12,9 @@ N=${1:?LJ site count}
 PER_REPLICA_BUDGET=${2:?force evaluations per replica}
 ENSEMBLE_INDEX=${3:?ensemble index}
 CENSUS_RADIUS=${4:?calibrated census radius}
-ARM=${5:-shared}
-case $ARM in
-  shared|private) ;;
-  *)
-    echo "arm must be shared or private" >&2
-    exit 2
-    ;;
-esac
 REPLICAS=${CATALOG_REPLICAS:-300}
 WAVE=${CATALOG_WAVE:-24}
 MAX_HOPS=${CATALOG_MAX_HOPS:-}
-if [[ $ARM == shared && $WAVE -ne $REPLICAS ]]; then
-  echo "shared population requires CATALOG_WAVE=CATALOG_REPLICAS" >&2
-  exit 2
-fi
 if [[ -n $MAX_HOPS ]]; then
   export CATALOG_MAX_HOPS="$MAX_HOPS"
 fi
@@ -37,9 +25,9 @@ SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
 CALIBRATION=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}/results_jcc/calibration/lj${N}.json
 CAMPAIGN=${CATALOG_CAMPAIGN:-lj38-many}
-ENSEMBLE="lj${N}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
+ENSEMBLE="lj${N}-shared-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
-OUT="$OUT_ROOT/$CAMPAIGN/lj${N}/$ARM/$ENSEMBLE"
+OUT="$OUT_ROOT/$CAMPAIGN/lj${N}/shared/$ENSEMBLE"
 CAPACITY=${CATALOG_CAPACITY:-30}
 SLICE=${CATALOG_SLICE:-500}
 TRANSPORT_NOISE=${CATALOG_TRANSPORT_NOISE:-0.05}
@@ -99,77 +87,43 @@ if [[ ! -f $CALIBRATION ]]; then
   exit 2
 fi
 
-server_pids=()
-server_prefixes=()
-private_endpoints=()
-shared_endpoint=
-last_started_endpoint=
-stop_servers() {
-  local pid
-  for pid in "${server_pids[@]}"; do
-    kill "$pid" 2>/dev/null || true
-  done
-  for pid in "${server_pids[@]}"; do
-    wait "$pid" 2>/dev/null || true
-  done
-  server_pids=()
-  server_prefixes=()
+server_pid=
+stop_server() {
+  if [[ -n $server_pid ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
 }
-trap stop_servers EXIT
+trap stop_server EXIT
 
-start_catalog() {
-  local prefix=$1
-  local state_dir=$2
-  local replica_list=$3
-  local server_budget=$4
-  local pid endpoint=
-  mkdir -p "$state_dir"
-  "$SERVER" \
-    127.0.0.1:0 \
-    "$N" \
-    "$CAPACITY" \
-    "$CENSUS_RADIUS" \
-    "$server_budget" \
-    "$CAMPAIGN" \
-    "$ENSEMBLE" \
-    "$replica_list" \
-    "$state_dir" \
-    >"${prefix}.jsonl" 2>"${prefix}.err" &
-  pid=$!
-  server_pids+=("$pid")
-  server_prefixes+=("$prefix")
-  for _ in $(seq 1 200); do
-    endpoint=$(grep -o '"addr":"[^"]*"' "${prefix}.jsonl" 2>/dev/null \
-      | head -1 | cut -d '"' -f4 || true)
-    if [[ -n $endpoint ]]; then
-      last_started_endpoint=$endpoint
-      return
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "catalog coordinator exited during startup: $prefix" >&2
-      cat "${prefix}.err" >&2
-      exit 1
-    fi
-    sleep 0.1
-  done
-  echo "catalog coordinator did not publish its address: $prefix" >&2
+"$SERVER" \
+  127.0.0.1:0 \
+  "$N" \
+  "$CAPACITY" \
+  "$CENSUS_RADIUS" \
+  "$TOTAL_BUDGET" \
+  "$CAMPAIGN" \
+  "$ENSEMBLE" \
+  "$REPLICA_LIST" \
+  "$OUT/state" \
+  >"$OUT/coordinator.jsonl" 2>"$OUT/coordinator.err" &
+server_pid=$!
+endpoint=
+for _ in $(seq 1 200); do
+  endpoint=$(grep -o '"addr":"[^"]*"' "$OUT/coordinator.jsonl" 2>/dev/null | head -1 | cut -d '"' -f4 || true)
+  if [[ -n $endpoint ]]; then
+    break
+  fi
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    echo "catalog coordinator exited during startup" >&2
+    cat "$OUT/coordinator.err" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if [[ -z $endpoint ]]; then
+  echo "catalog coordinator did not publish its address" >&2
   exit 1
-}
-
-if [[ $ARM == shared ]]; then
-  start_catalog "$OUT/coordinator" "$OUT/state" "$REPLICA_LIST" "$TOTAL_BUDGET"
-  shared_endpoint=$last_started_endpoint
-  catalog_topology=shared
-else
-  for replica in $(seq 0 $((REPLICAS - 1))); do
-    start_catalog \
-      "$OUT/coordinator-replica-$replica" \
-      "$OUT/state/replica-$replica" \
-      "$replica" \
-      "$PER_REPLICA_BUDGET"
-    private_endpoints[replica]=$last_started_endpoint
-  done
-  catalog_topology=private_per_replica
 fi
 
 status=0
@@ -199,19 +153,9 @@ while (( replica < REPLICAS )); do
       export CATALOG_TRACE="$OUT/traces/replica-${replica}.jsonl"
       export ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json
       export SEED_OFFSET="$seed"
-      export RAYON_NUM_THREADS=1
-      export OMP_NUM_THREADS=1
-      export OPENBLAS_NUM_THREADS=1
-      export MKL_NUM_THREADS=1
-      if [[ $ARM == shared ]]; then
-        export CATALOG_RPC="$shared_endpoint"
-        export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-        CATALOG_BRAIN_PEERS=$(brain_peers "$replica" "$wave_start" "$wave_end")
-        export CATALOG_BRAIN_PEERS
-      else
-        export CATALOG_RPC=${private_endpoints[$replica]}
-        unset CATALOG_BRAIN_LISTEN CATALOG_BRAIN_PEERS
-      fi
+      export CATALOG_RPC="$endpoint"
+      export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
+      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
@@ -228,15 +172,13 @@ while (( replica < REPLICAS )); do
   fi
 done
 
-for index in "${!server_pids[@]}"; do
-  if ! kill -0 "${server_pids[$index]}" 2>/dev/null; then
-    wait "${server_pids[$index]}" || true
-    echo "catalog coordinator exited before the ensemble terminal boundary: ${server_prefixes[$index]}" >&2
-    cat "${server_prefixes[$index]}.err" >&2
-    exit 1
-  fi
-done
-stop_servers
+if ! kill -0 "$server_pid" 2>/dev/null; then
+  echo "catalog coordinator exited before the ensemble terminal boundary" >&2
+  cat "$OUT/coordinator.err" >&2
+  exit 1
+fi
+stop_server
+server_pid=
 
 solved=0
 best_all=
@@ -256,7 +198,5 @@ for r in $(seq 0 $((REPLICAS - 1))); do
     solved=$((solved + 1))
   fi
 done
-printf 'replicas %s solved %s best %s arm %s topology %s source %s\n' \
-  "$REPLICAS" "$solved" "${best_all:-none}" "$ARM" "$catalog_topology" \
-  "$SOURCE_COMMIT" >"$OUT/TERMINAL_OK"
+printf 'replicas %s solved %s best %s source %s\n' "$REPLICAS" "$solved" "${best_all:-none}" "$SOURCE_COMMIT" >"$OUT/TERMINAL_OK"
 cat "$OUT/TERMINAL_OK"
