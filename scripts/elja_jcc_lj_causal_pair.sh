@@ -145,6 +145,11 @@ mkdir -p "$OUT/traces" "$OUT/workers" "$OUT/state"
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 export GCCLIB=${GCCLIB:-$HOME/mkl-lib}
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export BLIS_NUM_THREADS=1
+export RAYON_NUM_THREADS=1
 
 server_pids=()
 server_prefixes=()
