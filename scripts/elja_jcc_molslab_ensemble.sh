@@ -37,6 +37,7 @@ OUT_ROOT=${MOLSLAB_OUT:-$HOME/ljwork/jcc}
 CAPACITY=${BANK_CAPACITY:-30}
 SLICE=${BANK_SLICE:-500}
 SYNC_INTERVAL=${BANK_SYNC:-1}
+TARGET_TOLERANCE=1e-3
 REPLICAS=4
 TOTAL_BUDGET=$((PER_REPLICA_BUDGET * REPLICAS))
 SEED_BASE=$((${SEED_OFFSET_BASE:-0} + ENSEMBLE_INDEX * REPLICAS))
@@ -189,7 +190,7 @@ for replica in 0 1 2 3; do
   (
     export SEED_OFFSET=$seed
     export TARGET_ENERGY=$TARGET
-    export TARGET_TOL=1e-3
+    export TARGET_TOL=$TARGET_TOLERANCE
     export BANK_SLICE=$SLICE
     export BANK_SYNC=$SYNC_INTERVAL
     export BANK_SHARING=$ARM
@@ -284,6 +285,7 @@ peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
   printf 'aggregate_budget=%s\n' "$TOTAL_BUDGET"
   printf 'seed_base=%s\n' "$SEED_BASE"
   printf 'target_energy=%s\n' "$TARGET"
+  printf 'target_tolerance=%s\n' "$TARGET_TOLERANCE"
   printf 'bank_capacity=%s\n' "$CAPACITY"
   printf 'bank_slice=%s\n' "$SLICE"
   printf 'bank_topology=%s\n' "$bank_topology"
