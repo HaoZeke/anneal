@@ -18,6 +18,41 @@ fn hard_lj_arrays_default_to_the_partition_limit() {
 }
 
 #[test]
+fn hard_lj_arrays_submit_causal_pairs_at_paper_budgets() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("elja_submit_jcc_lj.sh");
+    let source = fs::read_to_string(&script)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+    assert!(
+        source.contains("RUNNER=$ROOT/scripts/elja_jcc_lj_causal_pair.sh"),
+        "hard-LJ arrays must use the paired shared/private causal runner"
+    );
+    assert!(
+        source.contains("for n in 38 55 75 98 102 104; do"),
+        "hard-LJ arrays must cover every analyzed cluster"
+    );
+    for (system, budget) in [
+        (38, 400_000),
+        (55, 1_000_000),
+        (75, 4_000_000),
+        (98, 4_000_000),
+        (102, 4_000_000),
+        (104, 4_000_000),
+    ] {
+        assert!(
+            source.contains(&format!("[{system}]={budget}")),
+            "LJ{system} must use a per-replica budget of {budget}"
+        );
+    }
+    assert!(
+        source.contains(r#""$RUNNER" "$n" "$budget" slurm-array "$radius" "$arm""#),
+        "the causal runner must receive system, budget, index, radius, and arm"
+    );
+}
+
+#[test]
 fn hard_lj_arrays_accept_an_isolated_campaign_name() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
@@ -43,19 +78,23 @@ fn hard_lj_arrays_accept_an_isolated_campaign_name() {
 fn hard_lj_manifests_pin_every_scientific_input() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
-        .join("elja_jcc_lj_ensemble.sh");
+        .join("elja_jcc_lj_causal_pair.sh");
     let source = fs::read_to_string(&script)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
 
     for required in [
         r#"source_commit=%s\n"#,
-        r#"requested_options=%s\n"#,
+        r#"catalog_topology=%s\n"#,
+        r#"brain_topology=%s\n"#,
+        r#"wave=%s\n"#,
         r#"resolved_config_sha256=%s\n"#,
         r#"binary_sha256=%s\n"#,
+        r#"server_sha256=%s\n"#,
         r#"runner_sha256=%s\n"#,
         r#"qualifier_sha256=%s\n"#,
         r#"calibration_sha256=%s\n"#,
         r#"ANNEAL_RESOLVED_CONFIG=$worker/resolved-config.json"#,
+        r#""$QUALIFIER_PYTHON" "$QUALIFIER""#,
     ] {
         assert!(
             source.contains(required),
