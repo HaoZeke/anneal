@@ -54,6 +54,21 @@ fn leftover_unsaturated_extra_walks_like_serial() {
 }
 
 #[test]
+fn exact_census_exhaustion_precedes_leftover_dwell() {
+    let (census, basin_id) = census_with_repeated_visits(8);
+    let mut state = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    state.leftover_dwell = false;
+
+    let decision = CatalogPolicy::decide(state);
+    assert_eq!(decision.action, PolicyAction::Leave);
+    assert_eq!(decision.reason, PolicyReason::LocalCensusExhausted);
+}
+
+#[test]
 fn leftover_unsaturated_remote_anchor_is_still_exploited() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let mut state = input(
