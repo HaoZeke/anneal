@@ -14,10 +14,12 @@ cd "$REPRO_ROOT"
 "$PYTHON" workflow/jcc/calibrate_census.py \
   --config config/jcc/census_calibration.json
 
-for n in 75 98 102 104; do
+for n in 38 55 75 98 102 104; do
   "$PYTHON" -m json.tool "results_jcc/calibration/lj${n}.json" >/dev/null
 done
 sha256sum \
+  results_jcc/calibration/lj38.json \
+  results_jcc/calibration/lj55.json \
   results_jcc/calibration/lj75.json \
   results_jcc/calibration/lj98.json \
   results_jcc/calibration/lj102.json \
