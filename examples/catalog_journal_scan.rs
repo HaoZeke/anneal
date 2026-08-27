@@ -50,6 +50,7 @@ fn main() {
             CatalogOperation::BoundaryCrossing { .. } => "boundary_crossing",
             CatalogOperation::PolicyState { .. } => "policy_state",
             CatalogOperation::LedgerEvent { .. } => "ledger",
+            CatalogOperation::LedgerBatch { .. } => "ledger_batch",
             CatalogOperation::PopulationSubmit { .. } => "population_submit",
             CatalogOperation::PopulationJoin { .. } => "population_join",
             CatalogOperation::PopulationAbstain { .. } => "population_abstain",

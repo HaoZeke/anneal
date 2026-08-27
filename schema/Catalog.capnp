@@ -43,6 +43,16 @@ struct LedgerEvent {
   cumulativeCharged @2 :UInt64;
 }
 
+# One exact charged-work boundary carried inside a replay-safe batch.
+# The sequence remains in the replica's global request namespace, so
+# batching changes transport cost without changing ledger identity.
+struct LedgerBatchEvent {
+  eventSequence @0 :UInt64;
+  kind @1 :UInt16;
+  chargedCalls @2 :UInt64;
+  cumulativeCharged @3 :UInt64;
+}
+
 struct DescriptorHoleRequest {
   current @0 :List(Float64);
   samples @1 :UInt32;
@@ -297,6 +307,7 @@ struct CatalogRequest {
     bridgeCrossing @19 :BridgeCrossingRequest;
     postFrontier @20 :FrontierPost;
     drawFrontier @21 :UInt64;
+    ledgerBatch @22 :List(LedgerBatchEvent);
   }
 }
 

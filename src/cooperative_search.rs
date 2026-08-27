@@ -16,7 +16,7 @@ mod run {
     use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
-        CatalogFrontierPost, CatalogMutation, CatalogRelation, CatalogSnapshot,
+        CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation, CatalogSnapshot,
         DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
         PopulationSelection, ProtocolRejection, TransitionDestination,
     };
@@ -573,49 +573,70 @@ mod run {
             kind: ChargeKind,
             charged_calls: u64,
         ) -> Result<(), CooperativeRunError> {
-            let (sequence, cumulative_charged) = {
+            self.record_work_batch(replica, [(kind, charged_calls)])
+        }
+
+        /// Record exact local work boundaries and send them in one request.
+        pub fn record_work_batch(
+            &mut self,
+            replica: u32,
+            work: impl IntoIterator<Item = (ChargeKind, u64)>,
+        ) -> Result<(), CooperativeRunError> {
+            let work = work.into_iter().collect::<Vec<_>>();
+            if work.is_empty() {
+                return Ok(());
+            }
+            let (mut ledger_sequence, mut rpc_sequence, mut cumulative_charged, version) = {
                 let state = self.replica_mut(replica)?;
-                state.ledger_sequence = state
-                    .ledger_sequence
+                (
+                    state.ledger_sequence,
+                    state.rpc_sequence,
+                    state.cumulative_charged,
+                    state.snapshot.map(|snapshot| snapshot.version),
+                )
+            };
+            let mut staged_ledger = self.ledger.clone();
+            let mut remote_events = Vec::with_capacity(work.len());
+            for (kind, charged_calls) in work {
+                ledger_sequence = ledger_sequence
                     .checked_add(1)
                     .ok_or(CooperativeRunError::CounterOverflow)?;
-                state.cumulative_charged = state
-                    .cumulative_charged
+                rpc_sequence = rpc_sequence
+                    .checked_add(1)
+                    .ok_or(CooperativeRunError::CounterOverflow)?;
+                cumulative_charged = cumulative_charged
                     .checked_add(charged_calls)
                     .ok_or(CooperativeRunError::CounterOverflow)?;
-                (state.ledger_sequence, state.cumulative_charged)
-            };
-            self.ledger.record(ReplicaLedgerEvent {
-                replica,
-                sequence,
-                kind,
-                charged_calls,
-                cumulative_charged,
-            })?;
-            let rpc_sequence = self.next_rpc_sequence(replica)?;
-            let result = {
+                staged_ledger.record(ReplicaLedgerEvent {
+                    replica,
+                    sequence: ledger_sequence,
+                    kind,
+                    charged_calls,
+                    cumulative_charged,
+                })?;
+                remote_events.push(CatalogLedgerEvent {
+                    sequence: rpc_sequence,
+                    kind: kind.wire_code(),
+                    charged_calls,
+                    cumulative_charged,
+                });
+            }
+            self.ledger = staged_ledger;
+            let event_count = remote_events.len();
+            {
                 let state = self.replica_mut(replica)?;
-                state.client.as_ref().map(|mailbox| {
+                state.ledger_sequence = ledger_sequence;
+                state.rpc_sequence = rpc_sequence;
+                state.cumulative_charged = cumulative_charged;
+                if let Some(mailbox) = state.client.as_ref() {
+                    let event_sequence = rpc_sequence;
                     mailbox.post(move |client| {
-                        let _ = client.record_ledger_event(
-                            rpc_sequence,
-                            kind,
-                            charged_calls,
-                            cumulative_charged,
-                        );
+                        let _ = client.record_ledger_batch(event_sequence, remote_events);
                     });
-                })
-            };
-            match result {
-                None => self.push_event(replica, TraceKind::LocalWork, None, None)?,
-                Some(()) => {
-                    let version = self
-                        .replicas
-                        .get(&replica)
-                        .and_then(|state| state.snapshot)
-                        .map(|snapshot| snapshot.version);
-                    self.push_event(replica, TraceKind::LocalWork, version, None)?;
                 }
+            }
+            for _ in 0..event_count {
+                self.push_event(replica, TraceKind::LocalWork, version, None)?;
             }
             Ok(())
         }

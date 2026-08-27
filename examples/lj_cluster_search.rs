@@ -2838,35 +2838,31 @@ fn run_capnp_catalog(
             .iter()
             .map(|boundary| boundary.charged_calls())
             .sum::<usize>();
+        let mut checkpoint_work = Vec::with_capacity(snapshot.quench_boundaries().len() + 1);
         for boundary in snapshot.quench_boundaries() {
-            cooperative
-                .record_work(
-                    replica,
-                    match boundary.status() {
-                        QuenchStatus::Validated => ChargeKind::AcceptedQuench,
-                        QuenchStatus::Rejected => ChargeKind::RejectedQuench,
-                    },
-                    u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
-                )
-                .expect("checkpoint quench work must enter the cooperative ledger");
+            checkpoint_work.push((
+                match boundary.status() {
+                    QuenchStatus::Validated => ChargeKind::AcceptedQuench,
+                    QuenchStatus::Rejected => ChargeKind::RejectedQuench,
+                },
+                u64::try_from(boundary.charged_calls()).expect("quench charge must fit u64"),
+            ));
         }
         let checkpoint_charged = snapshot.charged().saturating_sub(last_charged);
         let auxiliary_charged = checkpoint_charged
             .checked_sub(boundary_charged)
             .expect("quench boundaries cannot exceed checkpoint work");
         if auxiliary_charged > 0 {
-            cooperative
-                .record_work(
-                    replica,
-                    ChargeKind::AuxiliaryEvaluation,
-                    u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
-                )
-                .expect("checkpoint auxiliary work must enter the cooperative ledger");
+            checkpoint_work.push((
+                ChargeKind::AuxiliaryEvaluation,
+                u64::try_from(auxiliary_charged).expect("auxiliary charge must fit u64"),
+            ));
         } else if checkpoint_charged == 0 {
-            cooperative
-                .record_work(replica, ChargeKind::LocalProposal, 0)
-                .expect("uncharged checkpoint must enter the cooperative ledger");
+            checkpoint_work.push((ChargeKind::LocalProposal, 0));
         }
+        cooperative
+            .record_work_batch(replica, checkpoint_work)
+            .expect("checkpoint work batch must enter the cooperative ledger");
         last_charged = snapshot.charged();
 
         for transition in snapshot.accepted_transitions() {
@@ -2925,7 +2921,8 @@ fn run_capnp_catalog(
             }
         }
 
-        let mut freshest_boundary = None;
+        let mut boundary_candidates = Vec::new();
+        let mut descriptor_work = Vec::new();
         for boundary in snapshot
             .quench_boundaries()
             .iter()
@@ -2937,9 +2934,7 @@ fn run_capnp_catalog(
             candidate_sequence = candidate_sequence
                 .checked_add(1)
                 .expect("candidate sequence must fit u64");
-            cooperative
-                .record_work(replica, ChargeKind::DescriptorEvaluation, 0)
-                .expect("quench descriptor work must enter the cooperative ledger");
+            descriptor_work.push((ChargeKind::DescriptorEvaluation, 0));
             if let Some(candidate) = lj_catalog_candidate(
                 &descriptor_space,
                 &signature.atomic_numbers,
@@ -2951,9 +2946,16 @@ fn run_capnp_catalog(
                 boundary.state(),
                 gradient,
             ) {
-                let _ = cooperative.post_offer_candidate(replica, candidate.clone());
-                freshest_boundary = Some(candidate);
+                boundary_candidates.push(candidate);
             }
+        }
+        cooperative
+            .record_work_batch(replica, descriptor_work)
+            .expect("quench descriptor batch must enter the cooperative ledger");
+        let mut freshest_boundary = None;
+        for candidate in boundary_candidates {
+            let _ = cooperative.post_offer_candidate(replica, candidate.clone());
+            freshest_boundary = Some(candidate);
         }
 
         let local_deepened = snapshot.best_energy() < best_at_checkpoint - 1e-10;

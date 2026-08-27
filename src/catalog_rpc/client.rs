@@ -10,9 +10,10 @@ use capnp::serialize;
 
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogFrontierPost,
-    CatalogIdentity, CatalogMutation, CatalogOperation, CatalogReply, CatalogRequest,
-    CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState, PopulationEpochState,
-    ProtocolError, ProtocolRejection, TransitionDestination, decode_reply_reader, encode_request,
+    CatalogIdentity, CatalogLedgerEvent, CatalogMutation, CatalogOperation, CatalogReply,
+    CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState,
+    PopulationEpochState, ProtocolError, ProtocolRejection, TransitionDestination,
+    decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -318,6 +319,21 @@ impl CatalogClient {
                 cumulative_charged,
             },
         )?;
+        Ok(MutationReceipt {
+            version: reply.snapshot.version,
+            duplicate: reply.duplicate,
+            snapshot: reply.snapshot,
+            catalog: None,
+        })
+    }
+
+    /// Submit consecutive exact charged-work boundaries in one request.
+    pub fn record_ledger_batch(
+        &mut self,
+        event_sequence: u64,
+        events: Vec<CatalogLedgerEvent>,
+    ) -> Result<MutationReceipt, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::LedgerBatch { events })?;
         Ok(MutationReceipt {
             version: reply.snapshot.version,
             duplicate: reply.duplicate,
