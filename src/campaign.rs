@@ -166,26 +166,6 @@ impl CampaignConfig {
         pairs
     }
 
-    /// Resolve the campaign to tab-separated environment records for a
-    /// process launcher. Values containing record delimiters are rejected so
-    /// a shell can read one validated name/value pair per line without eval.
-    pub fn launcher_environment(&self) -> Result<String, CampaignError> {
-        let mut output = String::new();
-        for (name, value) in self.env_pairs() {
-            if name
-                .chars()
-                .chain(value.chars())
-                .any(|character| matches!(character, '\t' | '\n' | '\r' | '\0'))
-            {
-                return Err(CampaignError(format!(
-                    "campaign environment value {name} contains a record delimiter"
-                )));
-            }
-            let _ = writeln!(output, "{name}\t{value}");
-        }
-        Ok(output)
-    }
-
     /// Channel names and their explicit states.
     pub fn channel_states(&self) -> [(&'static str, bool); 6] {
         [
@@ -349,31 +329,5 @@ SEED_OFFSET_BASE = "9900000"
     fn extra_keys_must_look_like_environment_variables() {
         let text = GOOD.replace("SEED_OFFSET_BASE", "seed_offset_base");
         assert!(CampaignConfig::parse(&text).is_err());
-    }
-
-    #[test]
-    fn launcher_environment_uses_the_canonical_resolved_values() {
-        let cfg = CampaignConfig::parse(GOOD).unwrap();
-        let launcher = cfg.launcher_environment().unwrap();
-        let lines = launcher.lines().collect::<Vec<_>>();
-        assert!(lines.contains(&"CATALOG_CAMPAIGN\tlj75-occ-c48"));
-        assert!(lines.contains(&"CATALOG_REPLICAS\t48"));
-        assert!(lines.contains(&"CATALOG_WAVE\t48"));
-        assert!(lines.contains(&"CATALOG_SHARED_SCREEN\t1"));
-        assert!(lines.contains(&"SEED_OFFSET_BASE\t9900000"));
-        assert!(
-            !lines
-                .iter()
-                .any(|line| line.contains("CATALOG_ENTROPIC_BIAS"))
-        );
-    }
-
-    #[test]
-    fn launcher_environment_rejects_record_delimiters() {
-        let mut cfg = CampaignConfig::parse(GOOD).unwrap();
-        cfg.extra
-            .insert("BAD_VALUE".to_owned(), "first\nsecond".to_owned());
-        let error = cfg.launcher_environment().unwrap_err();
-        assert!(error.0.contains("BAD_VALUE"), "{}", error.0);
     }
 }
