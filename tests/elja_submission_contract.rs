@@ -279,6 +279,30 @@ fn occupancy_runner_resolves_campaign_toml_before_ensemble_defaults() {
 }
 
 #[test]
+fn terra_lj_builds_produce_the_source_bound_campaign_launcher() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    for relative in ["scripts/terra_build_lj.sh", "scripts/terra_build_brains.sh"] {
+        let script = root.join(relative);
+        let source = fs::read_to_string(&script)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", script.display()));
+
+        for required in [
+            "--example campaign_env",
+            "target/release/examples/lj_cluster_search",
+            "target/release/examples/catalog_server",
+            "target/release/examples/campaign_env",
+            "BUILD_SHA256SUMS",
+        ] {
+            assert!(
+                source.contains(required),
+                "{relative} must include {required} in the source-bound LJ build"
+            );
+        }
+    }
+}
+
+#[test]
 fn occupancy_driver_compiles_brains_into_the_bank_rpc_build() {
     let driver = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
