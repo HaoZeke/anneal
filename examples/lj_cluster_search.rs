@@ -12,7 +12,9 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 use anneal_core::bias::BasinBias;
-use anneal_core::catalog::{euclidean_gradient_norm, leave_crossing_slices, leave_defers};
+use anneal_core::catalog::{
+    euclidean_gradient_norm, hops_per_core_hour, leave_crossing_slices, leave_defers,
+};
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
@@ -31,6 +33,7 @@ use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::terminate::Terminator;
 use ndarray::{Array1, ArrayView1};
 use std::io::{self, Write};
+use std::time::Instant;
 
 #[cfg(all(feature = "ira", not(feature = "featomic")))]
 use anneal_core::shape::IraMetric;
@@ -2794,6 +2797,7 @@ fn run_capnp_catalog(
     let mut leave_quiet = 0usize;
     let mut leave_patience = 0usize;
     let leave_crossing = leave_crossing_slices(checkpoint_interval);
+    let occupancy_started = Instant::now();
     // The packing this replica stood on when it last decided to Leave,
     // and how many consecutive Leaves have failed to move it off one.
     //
@@ -3423,6 +3427,11 @@ fn run_capnp_catalog(
             snapshot.best_energy(),
             reference(cfg.n_points),
         ));
+        if leave_defers(leave_quiet, leave_patience, leave_crossing) {
+            // First 4000 hops stay on the walk. Policy RPC is the
+            // measured hop-cost gap; census still sees posted minima.
+            return CheckpointAction::Continue;
+        }
         let policy = match cooperative
             .try_policy_input_with_lambda(
                 replica,
@@ -4145,6 +4154,13 @@ fn run_capnp_catalog(
     println!(
         "  policy: leaves {count_leave} other {count_other_family} walk {count_walk} hole {count_hole} refused {leave_refused}"
     );
+    let wall = occupancy_started.elapsed().as_secs_f64();
+    if let Some(rate) = hops_per_core_hour(outcome.hops as u64, wall, 1) {
+        println!(
+            "  hops-per-core-hour {rate:.1}  hops {}  wall {wall:.3}s",
+            outcome.hops
+        );
+    }
     let open_epoch = population_progress.epoch();
     let _ = population_call(cooperative.abstain_population(replica, open_epoch));
     if open_epoch != 0 {
