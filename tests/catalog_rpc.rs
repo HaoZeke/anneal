@@ -1,6 +1,6 @@
 #![cfg(feature = "bank-rpc")]
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Barrier};
@@ -257,6 +257,85 @@ fn rejected_ledger_batch_does_not_apply_a_valid_prefix() {
         .unwrap();
     assert_eq!(recorded.snapshot.aggregate_charged, 7);
     assert_eq!(recorded.snapshot.version, 1);
+}
+
+#[test]
+fn durable_ledger_batch_is_one_frame_and_replays_every_boundary() {
+    let directory = PathBuf::from(format!(
+        "/tmp/anneal-catalog-batch-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let config = ServerConfig::new("jcc-2026", "ensemble-batch-durable", [0x5a; 32], [0])
+        .unwrap()
+        .with_ledger_budget(100)
+        .unwrap()
+        .with_state_directory(&directory)
+        .unwrap();
+    let events = vec![
+        CatalogLedgerEvent {
+            sequence: 1,
+            kind: ChargeKind::AcceptedQuench.wire_code(),
+            charged_calls: 7,
+            cumulative_charged: 7,
+        },
+        CatalogLedgerEvent {
+            sequence: 2,
+            kind: ChargeKind::DescriptorEvaluation.wire_code(),
+            charged_calls: 0,
+            cumulative_charged: 7,
+        },
+        CatalogLedgerEvent {
+            sequence: 3,
+            kind: ChargeKind::RejectedQuench.wire_code(),
+            charged_calls: 4,
+            cumulative_charged: 11,
+        },
+    ];
+    {
+        let server = CatalogServer::start("127.0.0.1:0", config.clone()).unwrap();
+        let mut client = CatalogClient::connect(
+            server.addr(),
+            identity("ensemble-batch-durable", 0),
+            ClientConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            client
+                .record_ledger_batch(3, events.clone())
+                .unwrap()
+                .snapshot
+                .version,
+            3
+        );
+    }
+
+    let journal_path = directory.join("catalog-requests-v5.bin");
+    let mut journal = std::fs::File::open(&journal_path).unwrap();
+    let mut prefix = [0_u8; 8];
+    journal.read_exact(&mut prefix).unwrap();
+    let length = usize::try_from(u64::from_le_bytes(prefix)).unwrap();
+    let mut payload = vec![0_u8; length];
+    journal.read_exact(&mut payload).unwrap();
+    assert_eq!(journal.read(&mut prefix).unwrap(), 0);
+
+    let restarted = CatalogServer::start("127.0.0.1:0", config).unwrap();
+    assert_eq!(restarted.header().initial_snapshot_version, 3);
+    let mut replay = CatalogClient::connect(
+        restarted.addr(),
+        identity("ensemble-batch-durable", 0),
+        ClientConfig::default(),
+    )
+    .unwrap();
+    let receipt = replay.record_ledger_batch(3, events).unwrap();
+    assert!(receipt.duplicate);
+    assert_eq!(receipt.snapshot.aggregate_charged, 11);
+    assert_eq!(receipt.snapshot.version, 3);
+
+    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
