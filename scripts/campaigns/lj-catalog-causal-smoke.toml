@@ -1,0 +1,22 @@
+# Shared and private arms read this same campaign. The only arm-level
+# difference is whether evidence and brain decrees cross replica boundaries.
+
+campaign = "lj-catalog-causal-smoke"
+
+[channels]
+shared_screen = true
+shared_bias = false
+entropic_bias = false
+histo_screen = false
+seam_ladder = true
+frontier_exchange = true
+
+[ensemble]
+replicas = 4
+wave = 4
+slice = 50
+max_hops = 50
+population_interval = 5000
+
+[extra]
+SEED_OFFSET_BASE = "12000000"
