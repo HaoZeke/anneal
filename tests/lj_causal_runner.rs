@@ -122,6 +122,7 @@ printf 'catalog_rpc=%s\n' "$CATALOG_RPC"
 printf 'brain_listen=%s\n' "${CATALOG_BRAIN_LISTEN:-}"
 printf 'brain_peers=%s\n' "${CATALOG_BRAIN_PEERS:-}"
 printf 'ensemble=%s\n' "$CATALOG_ENSEMBLE"
+printf 'catalog_sharing=%s\n' "$CATALOG_SHARING"
 printf 'seed_offset=%s\n' "$SEED_OFFSET"
 printf '{"kind":"mock-trace","replica":%s}\n' "$CATALOG_REPLICA" >"$CATALOG_TRACE"
 printf 'LJ%s, budget %s charged evaluations, 1 seeds\n' "$1" "$2"
@@ -132,7 +133,7 @@ printf '1/1 solved\n'
 
     let out_root = root.join("output");
     let mut seeds_by_arm = Vec::new();
-    for arm in ["shared", "private"] {
+    for arm in ["shared", "control"] {
         let server_log = root.join(format!("servers-{arm}.log"));
         let output = Command::new("bash")
             .arg(&runner)
@@ -176,6 +177,8 @@ printf '1/1 solved\n'
         assert_eq!(value(&manifest, "per_replica_budget"), "10");
         assert_eq!(value(&manifest, "aggregate_budget"), "20");
         assert_eq!(value(&manifest, "seed_base"), "1214");
+        assert_eq!(value(&manifest, "catalog_capacity"), "30");
+        assert_eq!(value(&manifest, "transport_noise"), "0.05");
 
         let worker0 = fs::read_to_string(run.join("workers/replica-0.out")).unwrap();
         let worker1 = fs::read_to_string(run.join("workers/replica-1.out")).unwrap();
@@ -188,6 +191,8 @@ printf '1/1 solved\n'
         let server_lines = servers.lines().collect::<Vec<_>>();
         if arm == "shared" {
             assert_eq!(value(&manifest, "catalog_topology"), "shared");
+            assert_eq!(value(&worker0, "catalog_sharing"), "shared");
+            assert_eq!(value(&worker1, "catalog_sharing"), "shared");
             assert_eq!(server_lines.len(), 1, "{servers}");
             assert!(server_lines[0].contains("|0,1|"), "{servers}");
             assert_eq!(
@@ -199,6 +204,8 @@ printf '1/1 solved\n'
             assert_eq!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
         } else {
             assert_eq!(value(&manifest, "catalog_topology"), "private_per_replica");
+            assert_eq!(value(&worker0, "catalog_sharing"), "private");
+            assert_eq!(value(&worker1, "catalog_sharing"), "private");
             assert_eq!(server_lines.len(), 2, "{servers}");
             assert!(server_lines.iter().any(|line| line.contains("|0|")));
             assert!(server_lines.iter().any(|line| line.contains("|1|")));
@@ -208,7 +215,7 @@ printf '1/1 solved\n'
             );
             assert_eq!(value(&worker0, "brain_peers"), "");
             assert_eq!(value(&worker1, "brain_peers"), "");
-            assert_ne!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
+            assert_eq!(value(&worker0, "ensemble"), value(&worker1, "ensemble"));
         }
     }
 
