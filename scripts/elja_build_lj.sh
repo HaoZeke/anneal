@@ -82,6 +82,11 @@ fi
   exit 1
 }
 # Registry is on NFS from the login fetch. Compute may have no outbound net.
+if ! git diff --quiet HEAD --; then
+  echo "refusing build: tracked source differs from HEAD" >&2
+  git status --short >&2
+  exit 2
+fi
 cargo build --offline --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example lj_census_calibration \
@@ -89,6 +94,11 @@ cargo build --offline --release --features featomic,ira,bank-rpc \
   --example bank_server \
   --example leave_packing_probe
 ldd "$BIN"
+git rev-parse HEAD >SOURCE_COMMIT
+sha256sum \
+  target/release/examples/lj_cluster_search \
+  target/release/examples/catalog_server \
+  >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
