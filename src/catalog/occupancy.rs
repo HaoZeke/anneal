@@ -74,7 +74,10 @@
 //! A mixing certificate names a putative: uniquely deepest, occupant
 //! mixed. A mixed competitor is required only when a competitor is
 //! on file. A lone mixed floor is Gelman--Rubin on the sampled mode.
-//! Unseen funnels are leftover-dwell and EI, not a second R-hat.
+//! MixingCertified on two packing families still needs leftover
+//! dwell. A mixed ico floor plus a mixed shallower competitor is not
+//! MixingCertified on that pair alone. Unseen funnels are leftover-dwell
+//! and EI, not a second R-hat.
 //! Packing Good--Turing names completeness of the seen codebook
 //! (`packing_saturated`). Leftover-SOAP arrivals stay the hole
 //! generator; leftover Good--Turing is not the stop. Hop re-observes
@@ -1568,7 +1571,8 @@ pub fn occupancy_min_families() -> usize {
 }
 
 /// Generic occupancy completeness. `n_occupied_families` is the DECAF
-/// packing count, not leftover-SOAP basin count.
+/// packing count, not leftover-SOAP basin count. Leftover dwell is
+/// unknown here, so two-family MixingCertified is not emitted.
 pub fn occupancy_complete(
     mixing_certified: bool,
     catalog_saturated: bool,
@@ -1577,19 +1581,24 @@ pub fn occupancy_complete(
     occupancy_complete_at(
         mixing_certified,
         catalog_saturated,
+        false,
         n_occupied_families,
         occupancy_min_families(),
     )
 }
 
 /// Completeness at an explicit family floor.
+/// MixingCertified needs leftover dwell unless the book has one
+/// packing family (`Hop.leftoverOk`). A mixed ico floor plus a mixed
+/// shallower competitor is not MixingCertified on that pair alone.
 pub fn occupancy_complete_at(
     mixing_certified: bool,
     catalog_saturated: bool,
+    leftover_dwell: bool,
     n_occupied_families: usize,
     min_occupied_families: usize,
 ) -> Option<OccupancyCertificate> {
-    if mixing_certified {
+    if mixing_certified && (leftover_dwell || n_occupied_families < 2) {
         Some(OccupancyCertificate::MixingCertified)
     } else if catalog_saturated && n_occupied_families >= min_occupied_families {
         Some(OccupancyCertificate::CatalogSaturated)
@@ -2204,17 +2213,17 @@ mod tests {
 
     #[test]
     fn packing_saturation_below_the_family_floor_is_not_done() {
-        assert_eq!(occupancy_complete_at(false, true, 1, 2), None);
-        assert_eq!(occupancy_complete_at(false, true, 0, 2), None);
+        assert_eq!(occupancy_complete_at(false, true, false, 1, 2), None);
+        assert_eq!(occupancy_complete_at(false, true, false, 0, 2), None);
     }
 
     #[test]
     fn packing_good_turing_with_no_new_families_is_saturated() {
         assert_eq!(
-            occupancy_complete_at(false, true, 1, 1),
+            occupancy_complete_at(false, true, false, 1, 1),
             Some(OccupancyCertificate::CatalogSaturated)
         );
-        assert_eq!(occupancy_complete_at(false, false, 5, 1), None);
+        assert_eq!(occupancy_complete_at(false, false, false, 5, 1), None);
     }
 
     #[test]
@@ -2282,6 +2291,10 @@ mod tests {
     #[test]
     fn mixing_outranks_catalog_saturation() {
         assert_eq!(
+            occupancy_complete_at(true, true, true, 2, 2),
+            Some(OccupancyCertificate::MixingCertified)
+        );
+        assert_ne!(
             occupancy_complete(true, true, 2),
             Some(OccupancyCertificate::MixingCertified)
         );
@@ -2359,6 +2372,18 @@ mod tests {
             1,
             1
         ));
+        assert_ne!(
+            occupancy_complete_at(true, true, false, 2, 2),
+            Some(OccupancyCertificate::MixingCertified)
+        );
+        assert_eq!(
+            occupancy_complete_at(true, true, leftover_sat_dwell(&[true; 5]), 2, 2),
+            Some(OccupancyCertificate::MixingCertified)
+        );
+        assert_eq!(
+            occupancy_complete_at(true, true, false, 1, 1),
+            Some(OccupancyCertificate::MixingCertified)
+        );
     }
 
     #[test]
@@ -2836,7 +2861,7 @@ mod tests {
     #[test]
     fn a_user_family_floor_of_one_is_good_turing_alone() {
         assert_eq!(
-            occupancy_complete_at(false, true, 1, 1),
+            occupancy_complete_at(false, true, false, 1, 1),
             Some(OccupancyCertificate::CatalogSaturated)
         );
         assert!(!occupancy_retire_at(
