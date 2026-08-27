@@ -166,6 +166,26 @@ impl CampaignConfig {
         pairs
     }
 
+    /// Resolve the campaign to tab-separated environment records for a
+    /// process launcher. Values containing record delimiters are rejected so
+    /// a shell can read one validated name/value pair per line without eval.
+    pub fn launcher_environment(&self) -> Result<String, CampaignError> {
+        let mut output = String::new();
+        for (name, value) in self.env_pairs() {
+            if name
+                .chars()
+                .chain(value.chars())
+                .any(|character| matches!(character, '\t' | '\n' | '\r' | '\0'))
+            {
+                return Err(CampaignError(format!(
+                    "campaign environment value {name} contains a record delimiter"
+                )));
+            }
+            let _ = writeln!(output, "{name}\t{value}");
+        }
+        Ok(output)
+    }
+
     /// Channel names and their explicit states.
     pub fn channel_states(&self) -> [(&'static str, bool); 6] {
         [
