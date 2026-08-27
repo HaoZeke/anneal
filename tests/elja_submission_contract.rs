@@ -1,4 +1,6 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 #[test]
@@ -422,5 +424,21 @@ fn terra_audit_build_binds_the_census_calibrator_to_source() {
     assert!(
         build.contains("seeded-random-cluster-quench-v1"),
         "the Terra audit build must reject a calibrator without target-blind provenance"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn census_calibration_runner_is_executable() {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts/elja_jcc_lj_calibration.sh");
+    let mode = fs::metadata(&script)
+        .unwrap_or_else(|error| panic!("failed to stat {}: {error}", script.display()))
+        .permissions()
+        .mode();
+    assert_ne!(
+        mode & 0o111,
+        0,
+        "the calibration submitter invokes the runner as an executable"
     );
 }
