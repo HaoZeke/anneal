@@ -404,3 +404,23 @@ fn marks_build_and_submit_bind_source_to_binaries() {
         "submission must verify the exact executables emitted by the build"
     );
 }
+
+#[test]
+fn terra_audit_build_binds_the_census_calibrator_to_source() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build = fs::read_to_string(root.join("scripts/terra_build_brains.sh"))
+        .unwrap_or_else(|error| panic!("failed to read Terra build: {error}"));
+
+    assert!(
+        build.contains("--example lj_census_calibration"),
+        "the Terra audit build must compile the production census calibrator"
+    );
+    assert!(
+        build.contains("target/release/examples/lj_census_calibration"),
+        "the Terra audit build must hash the production census calibrator"
+    );
+    assert!(
+        build.contains("seeded-random-cluster-quench-v1"),
+        "the Terra audit build must reject a calibrator without target-blind provenance"
+    );
+}
