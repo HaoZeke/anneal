@@ -328,3 +328,36 @@ fn occupancy_brains_sbatch_require_family_floor_and_leftover_well_stop() {
         );
     }
 }
+
+#[test]
+fn marks_submit_pins_the_crossing_floor_commit() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let submit = fs::read_to_string(root.join("scripts/elja_submit_occ_marks.sh"))
+        .unwrap_or_else(|error| panic!("failed to read marks submit: {error}"));
+    assert!(
+        submit.contains("WANT=7fe8d5a431a4ce227f8e3d424bd299f3eae51103"),
+        "marks submit must pin packing-gt-stop 7fe8d5a"
+    );
+    assert!(
+        submit.contains("anneal-occ-7fe8d5a"),
+        "marks submit must use an isolated tree, not anneal-stop"
+    );
+    assert!(
+        !submit.contains("lj75-shared-0002"),
+        "marks submit must not write sealed ensemble 0002"
+    );
+    let hops = fs::read_to_string(root.join("scripts/elja_lj75_occ_marks.sbatch"))
+        .unwrap_or_else(|error| panic!("failed to read marks hops: {error}"));
+    assert!(
+        !hops.contains("--mem="),
+        "f2zw: omit --mem on the Marks hops allocation"
+    );
+    assert!(
+        hops.contains("elja_jcc_lj_many_chains.sh 75 4000000"),
+        "Marks hops must use the paper 4e6 budget"
+    );
+    assert!(
+        hops.contains("CATALOG_WAVE=24"),
+        "Marks hops must use WAVE 24"
+    );
+}
