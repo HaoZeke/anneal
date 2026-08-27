@@ -2345,6 +2345,77 @@ where
     outcome
 }
 
+#[cfg(feature = "bank-rpc")]
+fn complete_checkpoint_trace<T>(
+    cooperative: &mut anneal_core::cooperative_search::CooperativeRun,
+    replica: u32,
+    slice_sequence: &mut u64,
+    charged_work: usize,
+    energy: f64,
+    body: impl FnOnce(&mut anneal_core::cooperative_search::CooperativeRun, &mut u64) -> T,
+) -> T {
+    use anneal_core::cooperative_search::{
+        PolicyRole, ProposalFamily, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
+    };
+
+    let slices_before = cooperative
+        .events()
+        .iter()
+        .filter(|event| event.slice.is_some())
+        .count();
+    let sequence_before = *slice_sequence;
+    let result = body(cooperative, slice_sequence);
+    let slices_after = cooperative
+        .events()
+        .iter()
+        .filter(|event| event.slice.is_some())
+        .count();
+    match slices_after.saturating_sub(slices_before) {
+        0 => {
+            assert_eq!(
+                *slice_sequence, sequence_before,
+                "slice sequence cannot advance without a diagnostic"
+            );
+            let slice = sequence_before
+                .checked_add(1)
+                .expect("slice sequence must fit u64");
+            cooperative
+                .record_slice(
+                    replica,
+                    SliceTrace {
+                        slice,
+                        current_basin: None,
+                        active_relation: None,
+                        policy_role: PolicyRole::Local,
+                        policy_reason: "local_checkpoint",
+                        proposal_family: ProposalFamily::Local,
+                        sampled_basin: None,
+                        descriptor_step_norm: None,
+                        cartesian_step_norm: None,
+                        validation: SliceValidation::NotAttempted,
+                        quench: SliceQuench::NotAttempted,
+                        adoption: SliceAdoption::NotAttempted,
+                        novelty: None,
+                        energy: Some(energy),
+                        charged_work: u64::try_from(charged_work)
+                            .expect("checkpoint charge must fit u64"),
+                    },
+                )
+                .expect("local checkpoint trace must remain complete");
+            *slice_sequence = slice;
+        }
+        1 => assert_eq!(
+            *slice_sequence,
+            sequence_before
+                .checked_add(1)
+                .expect("slice sequence must fit u64"),
+            "one checkpoint diagnostic must advance one slice"
+        ),
+        count => panic!("one checkpoint emitted {count} slice diagnostics"),
+    }
+    result
+}
+
 /// One independently budgeted LJ replica against an isolated descriptor catalog.
 #[cfg(feature = "bank-rpc")]
 fn run_capnp_catalog(
@@ -3351,7 +3422,14 @@ fn run_capnp_catalog(
                     .zip(live.iter())
                     .all(|(a, b)| (a - b).abs() <= 1e-12)
                 {
-                    return CheckpointAction::Continue;
+                    return complete_checkpoint_trace(
+                        &mut cooperative,
+                        replica,
+                        &mut slice_sequence,
+                        checkpoint_charged,
+                        snapshot.current_energy(),
+                        |_cooperative, _slice_sequence| CheckpointAction::Continue,
+                    );
                 }
                 slice_sequence = slice_sequence
                     .checked_add(1)
@@ -3406,7 +3484,14 @@ fn run_capnp_catalog(
         let Ok(position) =
             descriptor_space.describe(snapshot.current_state(), Some(&signature.atomic_numbers))
         else {
-            return CheckpointAction::Continue;
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.current_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::Continue,
+            );
         };
         let descriptor = position.values().to_vec();
         #[cfg(feature = "bank-rpc")]
@@ -3473,7 +3558,14 @@ fn run_capnp_catalog(
             // measured crossing floor (LEAVE_CROSSING_HOPS). Policy
             // RPC is the measured hop-cost gap; census still sees
             // posted minima.
-            return CheckpointAction::Continue;
+            return complete_checkpoint_trace(
+                &mut cooperative,
+                replica,
+                &mut slice_sequence,
+                checkpoint_charged,
+                snapshot.current_energy(),
+                |_cooperative, _slice_sequence| CheckpointAction::Continue,
+            );
         }
         let policy = match cooperative
             .try_policy_input_with_lambda(
@@ -3489,7 +3581,16 @@ fn run_capnp_catalog(
             PolicyEvidenceOutcome::Remote(input) => input,
             PolicyEvidenceOutcome::Rejected
             | PolicyEvidenceOutcome::LocalFallback
-            | PolicyEvidenceOutcome::SharingDisabled => return CheckpointAction::Continue,
+            | PolicyEvidenceOutcome::SharingDisabled => {
+                return complete_checkpoint_trace(
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    checkpoint_charged,
+                    snapshot.current_energy(),
+                    |_cooperative, _slice_sequence| CheckpointAction::Continue,
+                );
+            }
         };
         leave_path.push(
             snapshot.current_state().to_vec(),
@@ -3528,9 +3629,16 @@ fn run_capnp_catalog(
                     let _ = std::io::stdout().flush();
                     announced_done = true;
                 }
-                return CheckpointAction::Retire {
-                    reason: certificate.as_str().to_owned(),
-                };
+                return complete_checkpoint_trace(
+                    &mut cooperative,
+                    replica,
+                    &mut slice_sequence,
+                    checkpoint_charged,
+                    snapshot.current_energy(),
+                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
+                        reason: certificate.as_str().to_owned(),
+                    },
+                );
             }
             if !announced_putative {
                 println!(
