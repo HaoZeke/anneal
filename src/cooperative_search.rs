@@ -485,6 +485,17 @@ mod run {
         }
     }
 
+    struct BoundaryCrossingRequest {
+        current: Vec<f64>,
+        draw: u64,
+    }
+
+    impl BoundaryCrossingRequest {
+        fn matches(&self, current: &[f64], draw: u64) -> bool {
+            self.current == current && self.draw == draw
+        }
+    }
+
     struct ReplicaState {
         trace_sequence: u64,
         ledger_sequence: u64,
@@ -504,6 +515,7 @@ mod run {
         crossing_slot:
             Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
         crossing_pending: bool,
+        crossing_request: Option<BoundaryCrossingRequest>,
     }
 
     /// Four-replica-compatible driver for accounting, policy, RPC, and event output.
@@ -545,6 +557,7 @@ mod run {
                             sample_pending: false,
                             crossing_slot: Arc::new(Mutex::new(None)),
                             crossing_pending: false,
+                            crossing_request: None,
                         },
                     )
                 })
@@ -583,6 +596,7 @@ mod run {
             state.sample_pending = false;
             *state.sample_slot.lock().expect("sample slot") = None;
             state.crossing_pending = false;
+            state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
             Ok(())
         }
@@ -1417,20 +1431,28 @@ mod run {
             let finished = {
                 let state = self.replica_mut(replica)?;
                 if state.crossing_pending {
-                    state.crossing_slot.lock().expect("crossing slot").take()
+                    let result = state.crossing_slot.lock().expect("crossing slot").take();
+                    result.map(|result| (result, state.crossing_request.take()))
                 } else {
                     None
                 }
             };
-            if let Some(result) = finished {
+            if let Some((result, request)) = finished {
                 self.replica_mut(replica)?.crossing_pending = false;
-                match result {
-                    Ok(Some(crossing)) => return Ok(CatalogBoundaryOutcome::Crossing(crossing)),
-                    Ok(None) => return Ok(CatalogBoundaryOutcome::Empty),
-                    Err(CatalogClientError::Rejected(_)) => {
-                        return Ok(CatalogBoundaryOutcome::Rejected);
+                let request_matches = request
+                    .as_ref()
+                    .is_some_and(|request| request.matches(&current, draw));
+                if request_matches {
+                    match result {
+                        Ok(Some(crossing)) => {
+                            return Ok(CatalogBoundaryOutcome::Crossing(crossing));
+                        }
+                        Ok(None) => return Ok(CatalogBoundaryOutcome::Empty),
+                        Err(CatalogClientError::Rejected(_)) => {
+                            return Ok(CatalogBoundaryOutcome::Rejected);
+                        }
+                        Err(_) => return Ok(CatalogBoundaryOutcome::LocalFallback),
                     }
-                    Err(_) => return Ok(CatalogBoundaryOutcome::LocalFallback),
                 }
             }
             if !self.replica_mut(replica)?.crossing_pending {
@@ -1438,6 +1460,10 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 let slot = Arc::clone(&state.crossing_slot);
                 if let Some(mailbox) = state.client.as_ref() {
+                    state.crossing_request = Some(BoundaryCrossingRequest {
+                        current: current.clone(),
+                        draw,
+                    });
                     mailbox.post(move |client| {
                         let answer = client.boundary_crossing(rpc_sequence, current, draw);
                         *slot.lock().expect("crossing slot") = Some(answer);
