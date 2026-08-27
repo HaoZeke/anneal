@@ -8,7 +8,8 @@ set -euo pipefail
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 PIXI=${PIXI:-$HOME/.pixi/bin/pixi}
-BDIR=${RGPOT_BDIR:-$RGPOT/bdir-xtb}
+RGPOT_EXPECTED_COMMIT=${RGPOT_EXPECTED_COMMIT:?set RGPOT_EXPECTED_COMMIT}
+BDIR=${RGPOT_BDIR:-$RGPOT/bdir-xtb-${RGPOT_EXPECTED_COMMIT:0:12}}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 
@@ -17,16 +18,35 @@ if [[ -z ${SLURM_JOB_ID:-} && ${1:-} != login-cargo ]]; then
   exit 1
 fi
 
+verify_rgpot_source() {
+  local head
+  head=$(git -C "$RGPOT" rev-parse HEAD)
+  if [[ $head != "$RGPOT_EXPECTED_COMMIT" ]]; then
+    echo "RGPOT_EXPECTED_COMMIT=$RGPOT_EXPECTED_COMMIT does not match rgpot HEAD=$head" >&2
+    exit 2
+  fi
+  if ! git -C "$RGPOT" diff --quiet HEAD --; then
+    echo "rgpot tracked source differs from HEAD=$head" >&2
+    git -C "$RGPOT" status --short >&2
+    exit 2
+  fi
+  if [[ ! -s $RGPOT/pixi.lock ]]; then
+    echo "missing tracked rgpot Pixi lockfile: $RGPOT/pixi.lock" >&2
+    exit 2
+  fi
+}
+
 build_engines() {
   if [[ ! -x $PIXI ]]; then
     echo "missing pixi at $PIXI" >&2
     exit 1
   fi
+  verify_rgpot_source
   cd "$RGPOT"
   # xtbbld = default compilers + conda-forge xtb.
-  "$PIXI" install -e xtbbld
+  "$PIXI" install --locked -e xtbbld
   if [[ ! -f $BDIR/build.ninja ]]; then
-    "$PIXI" run -e xtbbld meson setup "$BDIR" \
+    "$PIXI" run --locked -e xtbbld meson setup "$BDIR" \
       -Dwith_xtb=true \
       -Dwith_fortran_pots=enabled \
       -Dwith_tests=false \
@@ -34,7 +54,7 @@ build_engines() {
       -Dwith_cache=false \
       --buildtype=release
   fi
-  "$PIXI" run -e xtbbld meson compile -C "$BDIR"
+  "$PIXI" run --locked -e xtbbld meson compile -C "$BDIR"
   local xtbso="" cuh2so=""
   if [[ -e $BDIR/CppCore/rgpot/XTBPot/libxtb_engine.so ]]; then
     xtbso=$BDIR/CppCore/rgpot/XTBPot/libxtb_engine.so
@@ -54,22 +74,25 @@ build_engines() {
     echo "librgpot_cuh2.so missing under $BDIR" >&2
     exit 1
   fi
-  nm -D "$cuh2so" | grep -q rgpot_cuh2_force || {
+  nm -D "$cuh2so" | grep -F rgpot_cuh2_force >/dev/null || {
     echo "$cuh2so has no rgpot_cuh2_force" >&2
     nm -D "$cuh2so" | head >&2
     exit 1
   }
-  nm -D "$xtbso" | grep -q rgpot_xtb_force || {
+  nm -D "$xtbso" | grep -F rgpot_xtb_force >/dev/null || {
     echo "$xtbso has no rgpot_xtb_force" >&2
     exit 1
   }
   mkdir -p "$ROOT/engines"
-  ln -sfn "$xtbso" "$ROOT/engines/libxtb_engine.so"
-  ln -sfn "$cuh2so" "$ROOT/engines/librgpot_cuh2.so"
+  cp "$xtbso" "$ROOT/engines/libxtb_engine.so"
+  cp "$cuh2so" "$ROOT/engines/librgpot_cuh2.so"
+  git -C "$RGPOT" rev-parse HEAD >"$ROOT/RGPOT_SOURCE_COMMIT"
+  sha256sum "$RGPOT/pixi.lock" | awk '{print $1}' >"$ROOT/RGPOT_PIXI_LOCK_SHA256"
   echo "ENGINES_OK xtb=$xtbso cuh2=$cuh2so"
 }
 
 build_examples() {
+  verify_rgpot_source
   export PATH="${HOME}/.cargo/bin:${PATH}"
   cd "$ROOT"
   if ! git diff --quiet HEAD --; then
@@ -93,7 +116,22 @@ build_examples() {
     echo "molecular engines missing below $ROOT/engines" >&2
     exit 1
   }
+  if [[ $(<RGPOT_SOURCE_COMMIT) != "$RGPOT_EXPECTED_COMMIT" ]]; then
+    echo "staged rgpot source record does not match $RGPOT_EXPECTED_COMMIT" >&2
+    exit 2
+  fi
+  rgpot_lock_sha256=$(sha256sum "$RGPOT/pixi.lock" | awk '{print $1}')
+  if [[ $(<RGPOT_PIXI_LOCK_SHA256) != "$rgpot_lock_sha256" ]]; then
+    echo "staged rgpot Pixi lock digest does not match $RGPOT/pixi.lock" >&2
+    exit 2
+  fi
   git rev-parse HEAD >SOURCE_COMMIT
+  {
+    printf 'source_commit=%s\n' "$(<SOURCE_COMMIT)"
+    printf 'rgpot_source_commit=%s\n' "$(<RGPOT_SOURCE_COMMIT)"
+    printf 'rgpot_pixi_lock_sha256=%s\n' "$(<RGPOT_PIXI_LOCK_SHA256)"
+    printf 'pixi=%s\n' "$("$PIXI" --version)"
+  } >MOLSLAB_BUILD_PROVENANCE
   sha256sum \
     target/release/examples/molecular_cluster \
     target/release/examples/slab_adsorption \
@@ -101,12 +139,17 @@ build_examples() {
     target/release/examples/bank_peek \
     engines/libxtb_engine.so \
     engines/librgpot_cuh2.so \
+    SOURCE_COMMIT \
+    RGPOT_SOURCE_COMMIT \
+    RGPOT_PIXI_LOCK_SHA256 \
+    MOLSLAB_BUILD_PROVENANCE \
     >MOLSLAB_BUILD_SHA256SUMS
   sha256sum -c MOLSLAB_BUILD_SHA256SUMS
   echo "EXAMPLES_OK $mol $slab $bank $peek"
 }
 
 smoke() {
+  verify_rgpot_source
   (cd "$ROOT" && sha256sum -c MOLSLAB_BUILD_SHA256SUMS)
   export RGPOT_XTB_ENGINE=$ROOT/engines/libxtb_engine.so
   export RGPOT_CUH2_LIBRARY=$ROOT/engines/librgpot_cuh2.so
