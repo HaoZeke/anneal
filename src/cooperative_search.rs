@@ -349,6 +349,21 @@ mod run {
         SharingDisabled,
     }
 
+    /// Result of requesting one batch of active-catalog candidates.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum CatalogSamplesOutcome {
+        /// Validated candidates returned for the completed draw batch.
+        Candidates(Vec<CatalogCandidate>),
+        /// The active catalog returned no candidate for any draw.
+        Empty,
+        /// The coordinator rejected the request.
+        Rejected,
+        /// Communication failed and local search remains authoritative.
+        LocalFallback,
+        /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
     /// Result of requesting one descriptor-hole proposal.
     #[derive(Debug, Clone, PartialEq)]
     pub enum CatalogHoleOutcome {
@@ -498,6 +513,7 @@ mod run {
     }
 
     type SampleResult = Result<Option<CatalogCandidate>, CatalogClientError>;
+    type SampleBatchResult = Result<Vec<Option<CatalogCandidate>>, CatalogClientError>;
 
     struct SampleChannel {
         slot: Arc<Mutex<Option<SampleResult>>>,
@@ -558,6 +574,8 @@ mod run {
         hole_pending: bool,
         hole_request: Option<DescriptorHoleRequest>,
         sample_channels: [SampleChannel; 3],
+        sample_batch_slot: Arc<Mutex<Option<SampleBatchResult>>>,
+        sample_batch_pending: bool,
         crossing_slot:
             Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
         crossing_pending: bool,
@@ -604,6 +622,8 @@ mod run {
                                 SampleChannel::new(),
                                 SampleChannel::new(),
                             ],
+                            sample_batch_slot: Arc::new(Mutex::new(None)),
+                            sample_batch_pending: false,
                             crossing_slot: Arc::new(Mutex::new(None)),
                             crossing_pending: false,
                             crossing_request: None,
@@ -645,6 +665,8 @@ mod run {
             for channel in &mut state.sample_channels {
                 channel.reset();
             }
+            state.sample_batch_pending = false;
+            *state.sample_batch_slot.lock().expect("sample batch slot") = None;
             state.crossing_pending = false;
             state.crossing_request = None;
             *state.crossing_slot.lock().expect("crossing slot") = None;
@@ -1321,6 +1343,70 @@ mod run {
                 }
             }
             Ok(CatalogSampleOutcome::LocalFallback)
+        }
+
+        /// Poll one asynchronous batch of reference-cloud draws without blocking.
+        /// A completed batch is consumed once while the supplied draws start the
+        /// succeeding batch on the mailbox thread.
+        pub fn try_sample_candidates(
+            &mut self,
+            replica: u32,
+            draws: impl IntoIterator<Item = u64>,
+        ) -> Result<CatalogSamplesOutcome, CooperativeRunError> {
+            if self.replica_mut(replica)?.client.is_none() {
+                return Ok(CatalogSamplesOutcome::SharingDisabled);
+            }
+            let draws = draws.into_iter().collect::<Vec<_>>();
+            let finished = {
+                let state = self.replica_mut(replica)?;
+                if state.sample_batch_pending {
+                    state
+                        .sample_batch_slot
+                        .lock()
+                        .expect("sample batch slot")
+                        .take()
+                } else {
+                    None
+                }
+            };
+            if finished.is_some() {
+                self.replica_mut(replica)?.sample_batch_pending = false;
+            }
+            if !draws.is_empty() && !self.replica_mut(replica)?.sample_batch_pending {
+                let mut requests = Vec::with_capacity(draws.len());
+                for draw in draws {
+                    requests.push((self.next_rpc_sequence(replica)?, draw));
+                }
+                let state = self.replica_mut(replica)?;
+                let slot = Arc::clone(&state.sample_batch_slot);
+                if let Some(mailbox) = state.client.as_ref() {
+                    mailbox.post(move |client| {
+                        let answer = requests
+                            .into_iter()
+                            .map(|(rpc_sequence, draw)| {
+                                client.sample_candidate(rpc_sequence, draw)
+                            })
+                            .collect::<Result<Vec<_>, _>>();
+                        *slot.lock().expect("sample batch slot") = Some(answer);
+                    });
+                    state.sample_batch_pending = true;
+                }
+            }
+            match finished {
+                Some(Ok(samples)) => {
+                    let candidates = samples.into_iter().flatten().collect::<Vec<_>>();
+                    if candidates.is_empty() {
+                        Ok(CatalogSamplesOutcome::Empty)
+                    } else {
+                        Ok(CatalogSamplesOutcome::Candidates(candidates))
+                    }
+                }
+                Some(Err(CatalogClientError::Rejected(_))) => {
+                    Ok(CatalogSamplesOutcome::Rejected)
+                }
+                Some(Err(_)) => Ok(CatalogSamplesOutcome::LocalFallback),
+                None => Ok(CatalogSamplesOutcome::LocalFallback),
+            }
         }
 
         /// Request one seeded target-free descriptor-hole proposal.
