@@ -3447,6 +3447,7 @@ fn run_capnp_catalog(
         if let Some(certificate) = occupancy_complete_at(
             policy.mixing.certified_attractor,
             policy.packing_saturated,
+            policy.leftover_dwell,
             n_occupied_families,
             policy.min_families,
         ) {

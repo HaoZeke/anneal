@@ -9,7 +9,9 @@
 //!   strictly more occupied than every competing basin.
 //!
 //! Mixing onto a lone icosahedral floor is the sampled-mode
-//! certificate. Unseen modes are leftover dwell and FunnelModel EI.
+//! certificate. A mixed ico floor plus a mixed shallower competitor
+//! is a putative, not MixingCertified: unseen modes are leftover
+//! dwell and FunnelModel EI.
 
 use std::cmp::Ordering;
 
@@ -167,9 +169,11 @@ pub fn stronger(left: &AttractorStrength, right: &AttractorStrength) -> bool {
 /// mixed competitor is required only when a competitor is on file:
 /// that competitor must be mixed (an attractor, not a flyby) and the
 /// putative must be strictly more occupied. An empty competitor set
-/// is one sampled mode, not a missed mode. Unseen modes are leftover
-/// dwell and FunnelModel EI, the Boender--Rinnooy Kan / Good--Turing
-/// stop, not a second R-hat series that does not exist.
+/// is one sampled mode, not a missed mode. MixingCertified from
+/// [`crate::catalog::occupancy_complete_at`] still needs leftover
+/// dwell when the book holds more than one family. Unseen modes are
+/// leftover dwell and FunnelModel EI, the Boender--Rinnooy Kan /
+/// Good--Turing stop, not a second R-hat series that does not exist.
 pub fn certified_global_minimum(
     putative: &AttractorStrength,
     competitors: &[AttractorStrength],
