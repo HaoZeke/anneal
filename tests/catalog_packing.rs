@@ -461,7 +461,7 @@ fn leftover_waiver_uses_book_families_not_live_rematch() {
     assert_eq!(book.occupied_family_count(), 2);
     assert_eq!(book.occupied_among([ico.as_slice().unwrap()]), 1);
     assert!(
-        occupancy_retire_at(
+        !occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             false,
@@ -469,7 +469,18 @@ fn leftover_waiver_uses_book_families_not_live_rematch() {
             book.occupied_family_count(),
             1
         ),
-        "leftover-SOAP wells of packings already on the book do not block MixingCertified retire"
+        "unsaturated leftover refuses MixingCertified retire when the book holds two packing families"
+    );
+    assert!(
+        occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            book.occupied_among([ico.as_slice().unwrap()]),
+            1
+        ),
+        "one packing family on the book waives leftover dwell"
     );
 }
 

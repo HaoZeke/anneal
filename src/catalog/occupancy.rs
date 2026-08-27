@@ -1909,15 +1909,16 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Replica retire. Mixing certified, packing Good--Turing, FunnelModel
-/// EI exhausted on seen packings, and the rematched family floor.
+/// Replica retire. Mixing certified, packing Good--Turing, leftover
+/// dwell (or one packing family on the book), FunnelModel EI exhausted
+/// on seen packings, and the rematched family floor.
 /// CatalogSaturated names census completeness and does not retire.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
 /// Leftover-SOAP hatches are the champion isomer walk of a seen
-/// packing. They are reported; they do not block retire after packing
-/// Chao1 and MixingCertified. Requiring leftover-SOAP dwell walks the
-/// force budget after the putative is already certified.
-/// `leftover_dwell` stays on the signature as the census bit.
+/// packing. They block retire while leftover has not dwelt and the
+/// book holds more than one family (`Hop.leftover_unsaturated_does_not_retire`).
+/// One packing family waives leftover (`Hop.one_book_family_waives_leftover`):
+/// leftover-SOAP hatches are then intra-well.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the packing-book occupied-family count
@@ -1940,6 +1941,8 @@ pub fn occupancy_retire(
 }
 
 /// Retire at an explicit family floor. Good--Turing alone is floor 1.
+/// Leftover dwell is required unless the book has one packing family
+/// (`Hop.leftoverOk`: leftover_dwell || n_occupied_families < 2).
 pub fn occupancy_retire_at(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
@@ -1948,9 +1951,9 @@ pub fn occupancy_retire_at(
     n_occupied_families: usize,
     min_occupied_families: usize,
 ) -> bool {
-    let _ = leftover_dwell;
     n_occupied_families >= min_occupied_families
         && catalog_saturated
+        && (leftover_dwell || n_occupied_families < 2)
         && ei_exhausted
         && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
@@ -2324,16 +2327,24 @@ mod tests {
     }
 
     #[test]
-    fn leftover_soap_does_not_block_mixing_packing_and_ei() {
+    fn leftover_soap_requires_dwell_when_two_families() {
         assert!(!leftover_sat_dwell(&[false]));
         assert!(!leftover_sat_dwell(&[true]));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             false,
             true,
             2,
             2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
         ));
         assert!(!occupancy_retire_at(
             OccupancyCertificate::CatalogSaturated,
@@ -2447,7 +2458,7 @@ mod tests {
         let mut dwell_then_hatch = vec![true; 5];
         dwell_then_hatch.push(false);
         assert!(!leftover_sat_dwell(&dwell_then_hatch));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             leftover_sat_dwell(&[true]),
@@ -2463,7 +2474,7 @@ mod tests {
             1,
             1
         ));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             false,
@@ -2515,6 +2526,26 @@ mod tests {
             false,
             2,
             2
+        ));
+    }
+
+    #[test]
+    fn leftover_unsaturated_does_not_retire() {
+        assert!(!occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            2,
+            2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
         ));
     }
 
