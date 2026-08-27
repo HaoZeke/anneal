@@ -129,6 +129,11 @@ printf 'brain_peers=%s\n' "${CATALOG_BRAIN_PEERS:-}"
 printf 'ensemble=%s\n' "$CATALOG_ENSEMBLE"
 printf 'catalog_sharing=%s\n' "$CATALOG_SHARING"
 printf 'seed_offset=%s\n' "$SEED_OFFSET"
+printf 'omp_num_threads=%s\n' "${OMP_NUM_THREADS:-}"
+printf 'openblas_num_threads=%s\n' "${OPENBLAS_NUM_THREADS:-}"
+printf 'mkl_num_threads=%s\n' "${MKL_NUM_THREADS:-}"
+printf 'blis_num_threads=%s\n' "${BLIS_NUM_THREADS:-}"
+printf 'rayon_num_threads=%s\n' "${RAYON_NUM_THREADS:-}"
 if [[ ${FAKE_OMIT_CONFIG:-0} != 1 ]]; then
   printf '{"schema":"anneal-cluster-config-v1","soap_mode":"flexible"}\n' \
     >"$ANNEAL_RESOLVED_CONFIG"
@@ -247,6 +252,17 @@ printf '{"qualified":true}\n' >"$output"
             value(&worker0, "seed_offset").to_owned(),
             value(&worker1, "seed_offset").to_owned(),
         ));
+        for worker in [&worker0, &worker1] {
+            for variable in [
+                "omp_num_threads",
+                "openblas_num_threads",
+                "mkl_num_threads",
+                "blis_num_threads",
+                "rayon_num_threads",
+            ] {
+                assert_eq!(value(worker, variable), "1", "{arm} {variable}");
+            }
+        }
 
         let servers = fs::read_to_string(&server_log).unwrap();
         let server_lines = servers.lines().collect::<Vec<_>>();
