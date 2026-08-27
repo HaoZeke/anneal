@@ -235,8 +235,8 @@ while ((replica < REPLICAS)); do
         "$private_ensemble" \
         "$private_replica" \
         "$OUT/state/replica-${private_replica}"
-      private_endpoints[$private_replica]=$last_started_endpoint
-      private_ensembles[$private_replica]=$private_ensemble
+      private_endpoints[private_replica]=$last_started_endpoint
+      private_ensembles[private_replica]=$private_ensemble
     done
   fi
 
@@ -352,7 +352,7 @@ fi
 printf 'replicas %s solved %s best %s source %s arm %s\n' \
   "$REPLICAS" "$solved" "${best_all:-none}" "$SOURCE_COMMIT" "$ARM" \
   >"$OUT/TERMINAL_OK"
-(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
-  | sort -z \
-  | xargs -0 sha256sum >SHA256SUMS)
+mapfile -d '' artifact_files < <(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
+  | sort -z)
+(cd "$OUT" && sha256sum "${artifact_files[@]}" >SHA256SUMS)
 cat "$OUT/TERMINAL_OK"
