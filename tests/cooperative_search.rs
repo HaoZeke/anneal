@@ -733,6 +733,57 @@ fn cooperative_run_exposes_an_observed_boundary_crossing() {
 }
 
 #[test]
+fn try_boundary_crossing_delivers_each_rpc_result_once() {
+    let server = server();
+    let digest = signature().digest();
+    let mut producer =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let source = candidate(0, 1, 1.2);
+    let source_descriptor = source.descriptor.clone();
+    producer.record_visit(1, source).unwrap();
+    producer
+        .record_transition(
+            2,
+            "surface_relocate",
+            TransitionDestination::Resolved(candidate(0, 2, 4.0)),
+            true,
+        )
+        .unwrap();
+    let mut run = CooperativeRun::new([1], 100).unwrap();
+    run.attach_client(
+        1,
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut delivered = false;
+    for _ in 0..200 {
+        match run
+            .try_boundary_crossing(1, source_descriptor.clone(), 71)
+            .unwrap()
+        {
+            CatalogBoundaryOutcome::Crossing(_) => {
+                delivered = true;
+                break;
+            }
+            CatalogBoundaryOutcome::LocalFallback => {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            outcome => panic!("unexpected boundary-crossing outcome: {outcome:?}"),
+        }
+    }
+    assert!(delivered, "mailbox never delivered a boundary crossing");
+    assert_eq!(
+        run.try_boundary_crossing(1, source_descriptor, 72)
+            .unwrap(),
+        CatalogBoundaryOutcome::LocalFallback,
+        "a completed boundary crossing must not be replayed while another RPC is pending"
+    );
+}
+
+#[test]
 fn cooperative_run_traces_explicit_transition_records() {
     let server = server();
     let digest = signature().digest();
