@@ -283,8 +283,8 @@ pub fn occupancy_leave_target(
 /// A one-community book is Walk only once EI on the seen packings is
 /// exhausted: the hole then has no remaining improvement to chase.
 /// While EI is open the extra still ArchiveHoles, because that is how
-/// a second community appears. OtherFamily stays the draw when the
-/// book already has two communities and a representative.
+/// a second community appears. Two communities with exhausted EI Walk:
+/// amorphous packings above the floor are not worth occupying.
 pub fn occupancy_leave_by_ei(
     other_family_in_catalog: bool,
     packing_saturated: bool,
@@ -297,6 +297,9 @@ pub fn occupancy_leave_by_ei(
             return OccupancyLeaveTarget::Walk;
         }
         return OccupancyLeaveTarget::ArchiveHole;
+    }
+    if ei_exhausted {
+        return OccupancyLeaveTarget::Walk;
     }
     if other_family_in_catalog {
         OccupancyLeaveTarget::OtherFamily
@@ -2087,15 +2090,31 @@ mod tests {
     #[test]
     fn occupancy_leave_is_another_family_or_an_archive_hole() {
         assert_eq!(
-            occupancy_leave_target(true, false, 2),
+            occupancy_leave_by_ei(true, false, 2, false),
             OccupancyLeaveTarget::OtherFamily
         );
         assert_eq!(
-            occupancy_leave_target(false, false, 2),
+            occupancy_leave_by_ei(false, false, 2, false),
             OccupancyLeaveTarget::ArchiveHole
         );
-        assert_ne!(
-            occupancy_leave_target(false, false, 2),
+        assert_eq!(
+            occupancy_leave_target(true, false, 2),
+            OccupancyLeaveTarget::Walk
+        );
+    }
+
+    #[test]
+    fn exhausted_ei_walks_even_with_two_communities() {
+        assert_eq!(
+            occupancy_leave_by_ei(true, false, 2, true),
+            OccupancyLeaveTarget::Walk
+        );
+        assert_eq!(
+            occupancy_leave_by_ei(true, true, 2, true),
+            OccupancyLeaveTarget::Walk
+        );
+        assert_eq!(
+            occupancy_leave_by_ei(true, false, 2, false),
             OccupancyLeaveTarget::OtherFamily
         );
     }
@@ -2159,30 +2178,26 @@ mod tests {
         );
         assert_eq!(
             occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::OtherFamily
+            OccupancyLeaveTarget::Walk
         );
     }
 
     #[test]
     fn packing_sat_leave_still_draws_other_family() {
         assert_eq!(
-            occupancy_leave_target(true, true, 2),
+            occupancy_leave_by_ei(true, true, 2, false),
             OccupancyLeaveTarget::OtherFamily
         );
-        assert_ne!(
+        assert_eq!(
             occupancy_leave_target(true, true, 2),
-            OccupancyLeaveTarget::ArchiveHole
+            OccupancyLeaveTarget::Walk
         );
         assert_eq!(
             occupancy_leave_target(false, true, 1),
             OccupancyLeaveTarget::Walk
         );
         assert_eq!(
-            occupancy_leave_target(true, false, 2),
-            OccupancyLeaveTarget::OtherFamily
-        );
-        assert_eq!(
-            occupancy_leave_target(false, false, 2),
+            occupancy_leave_by_ei(false, false, 2, false),
             OccupancyLeaveTarget::ArchiveHole
         );
     }
@@ -2641,7 +2656,7 @@ mod tests {
         assert!(map.holes);
         assert!(!map.saturated());
         assert_eq!(
-            occupancy_leave_target(true, map.saturated(), map.communities),
+            occupancy_leave_by_ei(true, map.saturated(), map.communities, false),
             OccupancyLeaveTarget::OtherFamily
         );
     }
@@ -2654,9 +2669,9 @@ mod tests {
         assert_eq!(map.communities, 2);
         assert!(!map.holes);
         assert_eq!(
-            occupancy_leave_target(true, map.saturated(), map.communities),
+            occupancy_leave_by_ei(true, map.saturated(), map.communities, false),
             OccupancyLeaveTarget::OtherFamily,
-            "saturation does not disable the draw once a second packing is on the book"
+            "open EI still draws the second packing; exhausted EI walks"
         );
     }
 
@@ -2739,7 +2754,7 @@ mod tests {
             "Oh on the book with no wells is a hole extras Leave into"
         );
         assert_eq!(
-            occupancy_leave_target(true, map.saturated(), map.communities),
+            occupancy_leave_by_ei(true, map.saturated(), map.communities, false),
             OccupancyLeaveTarget::OtherFamily
         );
     }
