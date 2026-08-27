@@ -167,7 +167,7 @@ else
       "$OUT/state/replica-$replica" \
       "$replica" \
       "$PER_REPLICA_BUDGET"
-    private_endpoints[$replica]=$last_started_endpoint
+    private_endpoints[replica]=$last_started_endpoint
   done
   catalog_topology=private_per_replica
 fi
@@ -206,7 +206,8 @@ while (( replica < REPLICAS )); do
       if [[ $ARM == shared ]]; then
         export CATALOG_RPC="$shared_endpoint"
         export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-        export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
+        CATALOG_BRAIN_PEERS=$(brain_peers "$replica" "$wave_start" "$wave_end")
+        export CATALOG_BRAIN_PEERS
       else
         export CATALOG_RPC=${private_endpoints[$replica]}
         unset CATALOG_BRAIN_LISTEN CATALOG_BRAIN_PEERS
