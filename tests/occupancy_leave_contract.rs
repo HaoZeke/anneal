@@ -157,6 +157,35 @@ fn leftover_census_dwell_requires_the_sat_streak() {
 }
 
 #[test]
+fn live_leave_gate_does_not_document_the_4000_hop_floor() {
+    let hop = include_str!("../examples/lj_cluster_search.rs");
+    assert!(
+        !hop.contains("First 4000 hops stay on the walk"),
+        "live Leave comment must name LEAVE_CROSSING_HOPS, not the expired 4000-hop floor"
+    );
+    assert!(
+        hop.contains("measured crossing floor (LEAVE_CROSSING_HOPS)"),
+        "live Leave comment must name the crossing-floor constant"
+    );
+    let occupancy = include_str!("../src/catalog/occupancy.rs");
+    let dwell_docs = occupancy
+        .split("pub const LEFTOVER_SAT_DWELL")
+        .next()
+        .expect("LEFTOVER_SAT_DWELL must exist")
+        .rsplit("/// Consecutive leftover-sat")
+        .next()
+        .expect("LEFTOVER_SAT_DWELL docs must start at the consecutive-sat sentence");
+    assert!(
+        dwell_docs.contains("leftover_dwell_from_census"),
+        "LEFTOVER_SAT_DWELL docs name leftover_dwell_from_census as live dwell"
+    );
+    assert!(
+        !dwell_docs.contains("leftover_hatch_stable"),
+        "LEFTOVER_SAT_DWELL is the census streak, not leftover_hatch_stable"
+    );
+}
+
+#[test]
 fn occupancy_fes_report_does_not_advance_leftover_dwell() {
     let source = include_str!("../src/catalog_rpc/server.rs");
     let report = source
