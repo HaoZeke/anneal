@@ -193,6 +193,17 @@ pub fn leftover_sat_dwell(consecutive: &[bool]) -> bool {
             .all(|&sat| sat)
 }
 
+/// Live leftover dwell from a leftover-SOAP census nick plus the
+/// consecutive saturated-sample streak.
+///
+/// Leftover SOAP saturates after a handful of leftover-well arrivals.
+/// A one-shot hatch-stable nick would re-open Leave before the
+/// measured Marks crossings. The streak is independent leftover
+/// samples, not repeated diagnostic reports.
+pub fn leftover_dwell_from_census(saturated: bool, esty_stable: bool, sat_streak: u32) -> bool {
+    saturated && esty_stable && sat_streak as usize >= LEFTOVER_SAT_DWELL
+}
+
 /// Hatch-stable leftover dwell from the Good--Turing increment.
 ///
 /// Good, I. J. (1953), *Biometrika* 40:237-264. A new singleton sends
@@ -335,10 +346,7 @@ pub fn occupancy_leave_by_birth(
         ei_exhausted,
         leftover_dwell,
     );
-    if leftover_dwell
-        && target == OccupancyLeaveTarget::Walk
-        && draw < p_new.clamp(0.0, 1.0)
-    {
+    if leftover_dwell && target == OccupancyLeaveTarget::Walk && draw < p_new.clamp(0.0, 1.0) {
         OccupancyLeaveTarget::ArchiveHole
     } else {
         target
@@ -1622,8 +1630,9 @@ pub fn occupancy_complete_at(
     }
 }
 
-/// Measured LJ75 Marks crossings sit at hops 4160, 6226, and 4411.
-pub const LEAVE_CROSSING_HOPS: usize = 4000;
+/// Measured LJ75 Marks crossings sit at hops 4160, 6226, and 4411
+/// of about 11000. A 4000-hop floor expires before every named hit.
+pub const LEAVE_CROSSING_HOPS: usize = 11000;
 
 /// Quiet checkpoint slices a replica must walk before the first Leave.
 pub fn leave_crossing_slices(checkpoint_interval: usize) -> usize {
@@ -2011,25 +2020,24 @@ pub fn occupancy_retire_at(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
-        OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
-        assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        hops_per_core_hour, leave_crossing_slices, leave_defers, leave_shot_accepted,
-        leftover_birth_probability,
-        leftover_esty_stable, leftover_esty_var,
-        leftover_hatch_stable,
-        leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
-        occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
-        occupancy_fes, occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
-        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
-        occupancy_leave_by_ei, pitman_yor_p_new,
-        occupancy_leave_new_class, occupancy_leave_target, occupancy_map_floor, occupancy_retire,
-        occupancy_retire_at, occupancy_ring_class_changed, occupancy_ring_floor,
-        occupancy_sparsify_book, packing_role, promote_one_sided, published_energy_score,
-        retis_exchange_adjacent, retis_should_swap, ring_leave_weight, ring_novelty, seat_extras,
-    };
     use super::OccupancyBookMap;
+    use super::{
+        CHAMPION_RANK, InterfaceSeat, LEAVE_CROSSING_HOPS, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE,
+        OccupancyCertificate, OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget,
+        PackingRole, assign_interfaces, hops_per_core_hour, in_interface_ensemble,
+        interface_ladder, is_occupancy_leave_action, leave_crossing_slices, leave_defers,
+        leave_shot_accepted, leftover_birth_probability, leftover_dwell_from_census,
+        leftover_esty_stable, leftover_esty_var, leftover_hatch_stable, leftover_lambda,
+        leftover_sat_dwell, occupancy_book_holes, occupancy_compact, occupancy_complete,
+        occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes,
+        occupancy_fes_delta, occupancy_fes_from_histograms, occupancy_is_cluster,
+        occupancy_landfold_floor, occupancy_leave_adopt, occupancy_leave_by_birth,
+        occupancy_leave_by_ei, occupancy_leave_new_class, occupancy_leave_target,
+        occupancy_map_floor, occupancy_retire, occupancy_retire_at, occupancy_ring_class_changed,
+        occupancy_ring_floor, occupancy_sparsify_book, packing_role, pitman_yor_p_new,
+        promote_one_sided, published_energy_score, retis_exchange_adjacent, retis_should_swap,
+        ring_leave_weight, ring_novelty, seat_extras,
+    };
 
     fn book_of(counts: &[u64]) -> OccupancyBookMap {
         OccupancyBookMap {
@@ -2413,12 +2421,16 @@ mod tests {
 
     #[test]
     fn leave_defers_through_the_measured_crossing() {
-        assert_eq!(leave_crossing_slices(500), 8);
-        assert!(leave_defers(1, 0, 8));
-        assert!(leave_defers(8, 0, 8));
-        assert!(!leave_defers(9, 0, 8));
-        assert!(leave_defers(3, 12, 8));
-        assert!(!leave_defers(13, 12, 8));
+        assert!(
+            LEAVE_CROSSING_HOPS >= 6226,
+            "floor {LEAVE_CROSSING_HOPS} expires before the latest named Marks crossing"
+        );
+        assert_eq!(leave_crossing_slices(500), 22);
+        assert!(leave_defers(1, 0, 22));
+        assert!(leave_defers(22, 0, 22));
+        assert!(!leave_defers(23, 0, 22));
+        assert!(leave_defers(3, 12, 22));
+        assert!(!leave_defers(13, 22, 22));
     }
 
     #[test]
@@ -2562,6 +2574,14 @@ mod tests {
     }
 
     #[test]
+    fn leftover_nick_is_not_census_dwell() {
+        assert!(!leftover_dwell_from_census(true, true, 1));
+        assert!(!leftover_dwell_from_census(true, true, 4));
+        assert!(leftover_dwell_from_census(true, true, 5));
+        assert!(!leftover_dwell_from_census(true, false, 5));
+        assert!(!leftover_dwell_from_census(false, true, 5));
+    }
+
     fn leftover_nick_is_not_a_retire_dwell() {
         assert!(!leftover_sat_dwell(&[true, false]));
         assert!(!leftover_sat_dwell(&[false, true]));

@@ -29,9 +29,9 @@ use crate::catalog::{
     DEFAULT_MIN_OCCUPIED_FAMILIES, FreshEvaluation, GoodTuringSample, INTERFACE_HORIZON,
     InterfaceSeat, MixingEvidence, PackingBook, PackingRole, QuenchStatus, REDUCTION_FACTOR,
     SystemSignature, ValidatedCandidate, ValidatorConfig, WalkRecord, euclidean_gradient_norm,
-    explore_must_leave, invert_mixing, leftover_esty_stable, leftover_lambda,
-    occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta, occupancy_landfold_split,
-    occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
+    explore_must_leave, invert_mixing, leftover_dwell_from_census, leftover_esty_stable,
+    leftover_lambda, occupancy_ei_exhausted, occupancy_family_floor, occupancy_fes_delta,
+    occupancy_landfold_split, occupancy_min_families, occupancy_ring_profile, occupancy_ring_split,
     occupancy_sparsify_packing, occupant_rhat, packing_role, promote_one_sided, prune,
     retis_exchange_adjacent, same_packing, seat_extras,
 };
@@ -718,7 +718,13 @@ fn precompute_validation(
             Arc::clone(&scientific.evaluate),
         )
     };
-    validate_candidate(&signature, &validator, evaluate.as_ref(), identity, candidate)
+    validate_candidate(
+        &signature,
+        &validator,
+        evaluate.as_ref(),
+        identity,
+        candidate,
+    )
 }
 
 fn process_request(
@@ -1201,7 +1207,9 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate) else {
+            let Ok(validated) =
+                resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
+            else {
                 return rejected(
                     state,
                     request.event_sequence,
@@ -1536,7 +1544,8 @@ fn apply_request(
         }
         CatalogOperation::RecordVisit { candidate } => {
             let census_visits = if let Some(scientific) = state.scientific.as_mut() {
-                let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
+                let Ok(validated) =
+                    resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
                     return rejected(
                         state,
@@ -1634,7 +1643,8 @@ fn apply_request(
             let (census_visits, active_entries, mutation) = if let Some(scientific) =
                 state.scientific.as_mut()
             {
-                let Ok(validated) = resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
+                let Ok(validated) =
+                    resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
                 else {
                     return rejected(
                         state,
@@ -1802,9 +1812,12 @@ fn apply_request(
             let outcome = match destination {
                 TransitionDestination::Unresolved => TransitionOutcome::Unresolved,
                 TransitionDestination::Resolved(candidate) => {
-                    let Ok(validated) =
-                        resolve_validation(&mut precomputed, scientific, &request.identity, candidate)
-                    else {
+                    let Ok(validated) = resolve_validation(
+                        &mut precomputed,
+                        scientific,
+                        &request.identity,
+                        candidate,
+                    ) else {
                         return rejected(
                             state,
                             request.event_sequence,
@@ -2778,7 +2791,7 @@ fn q_ei_family_entry(scientific: &mut ScientificState, replica: u32) -> Option<(
             continue;
         };
         let family = archive_cell(scientific, descriptor, coordinates).unwrap_or(*slot);
-        by_family.entry(family).or_insert(( *slot, histogram));
+        by_family.entry(family).or_insert((*slot, histogram));
     }
     if by_family.is_empty() {
         return highest_ei_family_entry(scientific);
@@ -3100,13 +3113,16 @@ fn leftover_census_dwell(scientific: &mut ScientificState) -> bool {
             scientific.leftover_sat_streak = 0;
         }
     }
-    scientific.leftover_dwell = leftover.saturated()
-        && leftover_esty_stable(
+    scientific.leftover_dwell = leftover_dwell_from_census(
+        leftover.saturated(),
+        leftover_esty_stable(
             leftover.n,
             leftover.n1,
             leftover.n2,
             crate::catalog::PRODUCTION_MAX_UNSEEN_MASS,
-        );
+        ),
+        scientific.leftover_sat_streak,
+    );
     scientific.leftover_dwell
 }
 

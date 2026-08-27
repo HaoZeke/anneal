@@ -137,6 +137,26 @@ fn occupancy_fes_report_key_tracks_the_discrete_gap() {
 }
 
 #[test]
+fn leftover_census_dwell_requires_the_sat_streak() {
+    let source = include_str!("../src/catalog_rpc/server.rs");
+    let dwell = source
+        .split("fn leftover_census_dwell(")
+        .nth(1)
+        .expect("leftover_census_dwell must exist")
+        .split("fn report_occupancy_gt(")
+        .next()
+        .expect("leftover dwell ends at occupancy report");
+    assert!(
+        dwell.contains("leftover_dwell_from_census"),
+        "live leftover_dwell is leftover_dwell_from_census, not a one-shot nick"
+    );
+    assert!(
+        dwell.contains("leftover_sat_streak"),
+        "leftover_dwell must require the consecutive leftover-sat streak"
+    );
+}
+
+#[test]
 fn occupancy_fes_report_does_not_advance_leftover_dwell() {
     let source = include_str!("../src/catalog_rpc/server.rs");
     let report = source
