@@ -442,3 +442,33 @@ fn census_calibration_runner_is_executable() {
         "the calibration submitter invokes the runner as an executable"
     );
 }
+
+#[test]
+fn census_calibration_campaign_covers_every_analyzed_lj_system() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_calibration.sh"))
+        .unwrap_or_else(|error| panic!("failed to read calibration runner: {error}"));
+    let submitter = fs::read_to_string(root.join("scripts/elja_submit_jcc_calibration.sh"))
+        .unwrap_or_else(|error| panic!("failed to read calibration submitter: {error}"));
+    let finalizer = fs::read_to_string(root.join("scripts/elja_jcc_finalize_calibration.sh"))
+        .unwrap_or_else(|error| panic!("failed to read calibration finalizer: {error}"));
+
+    assert!(
+        runner.contains("38|55|75|98|102|104)"),
+        "the calibration runner must accept every hard-LJ analysis system"
+    );
+    for system in [38, 55, 75, 98, 102, 104] {
+        assert!(
+            submitter.contains(&format!("[{system}]={system}00000")),
+            "the calibration submitter must assign a deterministic LJ{system} seed"
+        );
+    }
+    assert!(
+        submitter.contains("for n in 38 55 75 98 102 104; do"),
+        "the calibration submitter must launch every hard-LJ analysis system"
+    );
+    assert!(
+        finalizer.contains("for n in 38 55 75 98 102 104; do"),
+        "the calibration finalizer must validate every hard-LJ analysis system"
+    );
+}
