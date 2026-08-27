@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit four independent hard-LJ calibration tasks and their validator.
+# Submit independent hard-LJ calibration tasks and their validator.
 set -euo pipefail
 
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
@@ -13,6 +13,8 @@ LOG_DIR=${JCC_CALIBRATION_LOG_DIR:-$REPRO_ROOT/results_jcc/calibration/logs}
 mkdir -p "$LOG_DIR"
 
 declare -A BASE_SEED=(
+  [38]=3800000
+  [55]=5500000
   [75]=7500000
   [98]=9800000
   [102]=10200000
@@ -20,7 +22,7 @@ declare -A BASE_SEED=(
 )
 
 job_ids=()
-for n in 75 98 102 104; do
+for n in 38 55 75 98 102 104; do
   job_id=$(sbatch \
     --parsable \
     --job-name="jcc-cal-lj${n}" \

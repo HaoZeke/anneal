@@ -11,7 +11,7 @@ N=${1:?LJ point count}
 BASE_SEED=${2:?base search seed}
 SIGMA=${3:-0.01}
 case "$N" in
-  38|75|98|102|104) ;;
+  38|55|75|98|102|104) ;;
   *) echo "unsupported calibration size: $N" >&2; exit 2 ;;
 esac
 
