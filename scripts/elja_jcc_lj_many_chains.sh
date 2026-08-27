@@ -12,24 +12,6 @@ N=${1:?LJ site count}
 PER_REPLICA_BUDGET=${2:?force evaluations per replica}
 ENSEMBLE_INDEX=${3:?ensemble index}
 CENSUS_RADIUS=${4:?calibrated census radius}
-ROOT=${LJ_ROOT:-$HOME/anneal-dev}
-CAMPAIGN_ENV_BIN=${CAMPAIGN_ENV_BIN:-$ROOT/target/release/examples/campaign_env}
-if [[ -n ${CATALOG_CONFIG:-} ]]; then
-  if [[ ! -x $CAMPAIGN_ENV_BIN ]]; then
-    echo "missing campaign resolver: $CAMPAIGN_ENV_BIN" >&2
-    exit 2
-  fi
-  campaign_env_text=$("$CAMPAIGN_ENV_BIN" "$CATALOG_CONFIG")
-  while IFS=$'\t' read -r name value; do
-    [[ -n $name ]] || continue
-    if [[ -v $name && ${!name} != "$value" ]]; then
-      echo "$name=${!name} conflicts with $CATALOG_CONFIG value $value" >&2
-      exit 2
-    fi
-    printf -v "$name" '%s' "$value"
-    export "${name?}"
-  done <<<"$campaign_env_text"
-fi
 REPLICAS=${CATALOG_REPLICAS:-300}
 WAVE=${CATALOG_WAVE:-24}
 MAX_HOPS=${CATALOG_MAX_HOPS:-}
@@ -37,6 +19,7 @@ if [[ -n $MAX_HOPS ]]; then
   export CATALOG_MAX_HOPS="$MAX_HOPS"
 fi
 
+ROOT=${LJ_ROOT:-$HOME/anneal-dev}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
@@ -172,8 +155,7 @@ while (( replica < REPLICAS )); do
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
       export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-      CATALOG_BRAIN_PEERS=$(brain_peers "$replica" "$wave_start" "$wave_end")
-      export CATALOG_BRAIN_PEERS
+      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
