@@ -124,7 +124,17 @@ printf 'brain_peers=%s\n' "${CATALOG_BRAIN_PEERS:-}"
 printf 'ensemble=%s\n' "$CATALOG_ENSEMBLE"
 printf 'catalog_sharing=%s\n' "$CATALOG_SHARING"
 printf 'seed_offset=%s\n' "$SEED_OFFSET"
-printf '{"kind":"mock-trace","replica":%s}\n' "$CATALOG_REPLICA" >"$CATALOG_TRACE"
+case $CATALOG_SHARING in
+  shared) sharing=true ;;
+  private) sharing=false ;;
+  *) exit 3 ;;
+esac
+printf '{"kind":"manifest_header","campaign":"%s","ensemble":"%s","sharing":%s}\n' \
+  "$CATALOG_CAMPAIGN" "$CATALOG_ENSEMBLE" "$sharing" >"$CATALOG_TRACE"
+if [[ ${FAKE_OMIT_SLICE:-0} != 1 ]]; then
+  printf '{"kind":"slice","replica":%s,"slice":1,"slice_charged_work":1,"slice_energy":-44.326801}\n' \
+    "$CATALOG_REPLICA" >>"$CATALOG_TRACE"
+fi
 printf 'LJ%s, budget %s charged evaluations, 1 seeds\n' "$1" "$2"
 printf 'seed %s: best -44.326801\n' "$SEED_OFFSET"
 printf '1/1 solved\n'
@@ -220,4 +230,35 @@ printf '1/1 solved\n'
     }
 
     assert_eq!(seeds_by_arm[0], seeds_by_arm[1]);
+
+    let incomplete_server_log = root.join("servers-incomplete.log");
+    let incomplete = Command::new("bash")
+        .arg(&runner)
+        .args(["13", "10", "8", "0.1", "shared"])
+        .env("SLURM_JOB_ID", "4243")
+        .env("LJ_ROOT", &root)
+        .env("LJ_BIN", &search)
+        .env("CATALOG_SERVER_BIN", &server)
+        .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
+        .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+        .env("LJ_OUT", root.join("incomplete-output"))
+        .env("CATALOG_CAMPAIGN", "causal-incomplete-test")
+        .env("CATALOG_REPLICAS", "2")
+        .env("CATALOG_WAVE", "2")
+        .env("CATALOG_SLICE", "1")
+        .env("CATALOG_MAX_HOPS", "3")
+        .env("CATALOG_POPULATION_INTERVAL", "10")
+        .env("CATALOG_BRAIN_PORT_BASE", "29100")
+        .env("SEED_OFFSET_BASE", "1200")
+        .env("FAKE_SERVER_LOG", &incomplete_server_log)
+        .env("FAKE_OMIT_SLICE", "1")
+        .env_remove("CATALOG_CONFIG")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
+    assert!(
+        !incomplete.status.success(),
+        "runner accepted traces without analyzer slices\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&incomplete.stdout),
+        String::from_utf8_lossy(&incomplete.stderr)
+    );
 }
