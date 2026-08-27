@@ -92,7 +92,12 @@ fn causal_runner_pairs_shared_and_private_catalog_topologies() {
     let calibration_dir = root.join("repro/results_jcc/calibration");
     fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&calibration_dir).unwrap();
-    fs::write(root.join("SOURCE_COMMIT"), format!("{}\n", "a".repeat(40))).unwrap();
+    let source_commit = Command::new("git")
+        .args(["-C", repository.to_str().unwrap(), "rev-parse", "HEAD"])
+        .output()
+        .expect("git must resolve the source checkout");
+    assert!(source_commit.status.success());
+    fs::write(root.join("SOURCE_COMMIT"), &source_commit.stdout).unwrap();
     fs::write(calibration_dir.join("lj13.json"), "{}\n").unwrap();
 
     let server = bin_dir.join("catalog_server");
@@ -148,6 +153,16 @@ printf 'seed %s: best -44.326801\n' "$SEED_OFFSET"
 printf '1/1 solved\n'
 "#,
     );
+    let build_seal = Command::new("sha256sum")
+        .current_dir(&root)
+        .args([
+            "target/release/examples/lj_cluster_search",
+            "target/release/examples/catalog_server",
+        ])
+        .output()
+        .expect("sha256sum must seal the staged executables");
+    assert!(build_seal.status.success());
+    fs::write(root.join("BUILD_SHA256SUMS"), build_seal.stdout).unwrap();
     let qualifier = root.join("qualifier.sh");
     write_executable(
         &qualifier,
@@ -180,6 +195,7 @@ printf '{"qualified":true}\n' >"$output"
             .env("LJ_ROOT", &root)
             .env("LJ_BIN", &search)
             .env("CATALOG_SERVER_BIN", &server)
+            .env("JCC_SOURCE_ROOT", &repository)
             .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
             .env("ANNEAL_REPRO_ROOT", root.join("repro"))
             .env("JCC_QUALIFIER", &qualifier)

@@ -52,6 +52,7 @@ if [[ -n $MAX_HOPS ]]; then
 fi
 
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+SOURCE_ROOT=${JCC_SOURCE_ROOT:-$ROOT}
 REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
@@ -112,14 +113,14 @@ if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 2
 fi
-HEAD=$(git -C "$ROOT" rev-parse HEAD)
+HEAD=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
 if [[ $SOURCE_COMMIT != "$HEAD" ]]; then
   echo "SOURCE_COMMIT=$SOURCE_COMMIT does not match HEAD=$HEAD" >&2
   exit 2
 fi
-if ! git -C "$ROOT" diff --quiet HEAD --; then
+if ! (cd "$SOURCE_ROOT" && git diff --quiet HEAD --); then
   echo "tracked source differs from HEAD=$HEAD" >&2
-  git -C "$ROOT" status --short >&2
+  (cd "$SOURCE_ROOT" && git status --short >&2)
   exit 2
 fi
 if [[ ! -s $ROOT/BUILD_SHA256SUMS ]]; then
