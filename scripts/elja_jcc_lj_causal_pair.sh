@@ -18,9 +18,11 @@ fi
 case $ARM in
   shared)
     SHARING_MODE=shared
+    TRACE_SHARING=true
     ;;
   control)
     SHARING_MODE=private
+    TRACE_SHARING=false
     ;;
   *)
     echo "arm must be shared or control" >&2
@@ -285,8 +287,18 @@ solved=0
 best_all=
 for replica in $(seq 0 $((REPLICAS - 1))); do
   output="$OUT/workers/replica-${replica}.out"
+  trace="$OUT/traces/replica-${replica}.jsonl"
   test -s "$output"
-  test -s "$OUT/traces/replica-${replica}.jsonl"
+  test -s "$trace"
+  if ! head -n 1 "$trace" \
+    | grep -F -q "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING"; then
+    echo "trace manifest does not match $ENSEMBLE sharing=$TRACE_SHARING: $trace" >&2
+    exit 1
+  fi
+  if ! grep -F -q '"kind":"slice"' "$trace"; then
+    echo "trace has no analyzer slice: $trace" >&2
+    exit 1
+  fi
   grep -q "budget ${PER_REPLICA_BUDGET} " "$output"
   line=$(grep -E "seed [0-9]+: best " "$output" | tail -1 || true)
   energy=$(printf '%s\n' "$line" | awk '{for(i=1;i<=NF;i++) if($i=="best") print $(i+1)}')
