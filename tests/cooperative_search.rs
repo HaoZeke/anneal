@@ -1117,6 +1117,35 @@ fn distributed_trace_uses_the_coordinator_aggregate_counter() {
 }
 
 #[test]
+fn work_batch_keeps_every_local_boundary_and_one_remote_aggregate() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 100).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+
+    run.record_work_batch(
+        0,
+        [
+            (ChargeKind::AcceptedQuench, 7),
+            (ChargeKind::DescriptorEvaluation, 0),
+            (ChargeKind::RejectedQuench, 4),
+        ],
+    )
+    .unwrap();
+    run.flush(0).unwrap();
+    run.synchronize(0).unwrap();
+
+    assert_eq!(run.ledger().event_count(), 3);
+    assert_eq!(run.ledger().ensemble_total(), 11);
+    assert_eq!(run.events().last().unwrap().aggregate_charged, 11);
+}
+
+#[test]
 fn four_replica_trace_covers_policy_ingress_refresh_and_fallback() {
     let server = server();
     let digest = signature().digest();
