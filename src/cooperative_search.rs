@@ -473,7 +473,6 @@ mod run {
         hole_pending: bool,
         sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
         sample_pending: bool,
-        last_crossing: Option<BoundaryCrossingRecord>,
         crossing_slot:
             Arc<Mutex<Option<Result<Option<BoundaryCrossingRecord>, CatalogClientError>>>>,
         crossing_pending: bool,
@@ -514,7 +513,6 @@ mod run {
                             hole_pending: false,
                             sample_slot: Arc::new(Mutex::new(None)),
                             sample_pending: false,
-                            last_crossing: None,
                             crossing_slot: Arc::new(Mutex::new(None)),
                             crossing_pending: false,
                         },
@@ -554,7 +552,6 @@ mod run {
             *state.sample_slot.lock().expect("sample slot") = None;
             state.crossing_pending = false;
             *state.crossing_slot.lock().expect("crossing slot") = None;
-            state.last_crossing = None;
             Ok(())
         }
 
@@ -1352,7 +1349,8 @@ mod run {
             }
         }
 
-        /// Post a crossing request and return the last one. Hop never waits.
+        /// Poll one crossing request without blocking.
+        /// Each completed mailbox result is consumed exactly once.
         pub fn try_boundary_crossing(
             &mut self,
             replica: u32,
@@ -1373,10 +1371,7 @@ mod run {
             if let Some(result) = finished {
                 self.replica_mut(replica)?.crossing_pending = false;
                 match result {
-                    Ok(Some(crossing)) => {
-                        self.replica_mut(replica)?.last_crossing = Some(crossing.clone());
-                        return Ok(CatalogBoundaryOutcome::Crossing(crossing));
-                    }
+                    Ok(Some(crossing)) => return Ok(CatalogBoundaryOutcome::Crossing(crossing)),
                     Ok(None) => return Ok(CatalogBoundaryOutcome::Empty),
                     Err(CatalogClientError::Rejected(_)) => {
                         return Ok(CatalogBoundaryOutcome::Rejected);
@@ -1395,13 +1390,6 @@ mod run {
                     });
                     state.crossing_pending = true;
                 }
-            }
-            if let Some(crossing) = self
-                .replicas
-                .get(&replica)
-                .and_then(|state| state.last_crossing.clone())
-            {
-                return Ok(CatalogBoundaryOutcome::Crossing(crossing));
             }
             Ok(CatalogBoundaryOutcome::LocalFallback)
         }
