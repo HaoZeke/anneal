@@ -17,7 +17,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -92,6 +92,19 @@ pub struct CatalogFrontierPost {
     pub producer_replica: u32,
     /// Producer event sequence at the post, for freshness accounting.
     pub posted_sequence: u64,
+}
+
+/// One exact charged-work boundary carried inside a replay-safe batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogLedgerEvent {
+    /// Replica-global request sequence assigned to this boundary.
+    pub sequence: u64,
+    /// Stable [`crate::cooperative_search::ledger::ChargeKind`] wire code.
+    pub kind: u16,
+    /// Potential calls charged at this boundary.
+    pub charged_calls: u64,
+    /// Replica charged counter including this boundary.
+    pub cumulative_charged: u64,
 }
 
 /// Resolved or unresolved result of one action-labelled perturb--quench step.
@@ -214,6 +227,11 @@ pub enum CatalogOperation {
         charged_calls: u64,
         /// Replica counter including this event.
         cumulative_charged: u64,
+    },
+    /// Submit consecutive exact charged-work events in one durable request.
+    LedgerBatch {
+        /// Boundaries in strictly increasing replica request order.
+        events: Vec<CatalogLedgerEvent>,
     },
     /// Submit one validated representative to a synchronous population epoch.
     PopulationSubmit {
@@ -761,6 +779,16 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             ledger.set_charged_calls(*charged_calls);
             ledger.set_cumulative_charged(*cumulative_charged);
         }
+        CatalogOperation::LedgerBatch { events } => {
+            let mut batch = operation.init_ledger_batch(events.len() as u32);
+            for (index, event) in events.iter().enumerate() {
+                let mut wire = batch.reborrow().get(index as u32);
+                wire.set_event_sequence(event.sequence);
+                wire.set_kind(event.kind);
+                wire.set_charged_calls(event.charged_calls);
+                wire.set_cumulative_charged(event.cumulative_charged);
+            }
+        }
         CatalogOperation::PopulationSubmit { epoch, candidate } => {
             let mut submission = operation.init_population_submit();
             submission.set_epoch(*epoch);
@@ -915,6 +943,19 @@ pub(crate) fn decode_request_reader(
                 charged_calls: ledger.get_charged_calls(),
                 cumulative_charged: ledger.get_cumulative_charged(),
             }
+        }
+        catalog_request::operation::LedgerBatch(batch) => {
+            let batch = batch.map_err(wire_error)?;
+            let mut events = Vec::with_capacity(batch.len() as usize);
+            for event in batch.iter() {
+                events.push(CatalogLedgerEvent {
+                    sequence: event.get_event_sequence(),
+                    kind: event.get_kind(),
+                    charged_calls: event.get_charged_calls(),
+                    cumulative_charged: event.get_cumulative_charged(),
+                });
+            }
+            CatalogOperation::LedgerBatch { events }
         }
         catalog_request::operation::PopulationSubmit(submission) => {
             let submission = submission.map_err(wire_error)?;

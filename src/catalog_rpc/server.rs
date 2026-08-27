@@ -1957,6 +1957,81 @@ fn apply_request(
             };
             state.snapshot_version = snapshot_version;
         }
+        CatalogOperation::LedgerBatch { events } => {
+            let ordered = !events.is_empty()
+                && events.first().is_some_and(|event| {
+                    state
+                        .maximum_sequence
+                        .get(&request.identity.replica)
+                        .is_none_or(|maximum| event.sequence > *maximum)
+                })
+                && events
+                    .windows(2)
+                    .all(|pair| pair[0].sequence.checked_add(1) == Some(pair[1].sequence))
+                && events
+                    .last()
+                    .is_some_and(|event| event.sequence == request.event_sequence);
+            if !ordered {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Some(ledger) = state.ledger.as_ref() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let mut staged = ledger.clone();
+            for event in events {
+                let Some(kind) = ChargeKind::from_wire_code(event.kind) else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                if staged
+                    .record(ReplicaLedgerEvent {
+                        replica: request.identity.replica,
+                        sequence: event.sequence,
+                        kind,
+                        charged_calls: event.charged_calls,
+                        cumulative_charged: event.cumulative_charged,
+                    })
+                    .is_err()
+                {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
+            }
+            let aggregate_charged = staged.ensemble_total();
+            let Ok(event_count) = u64::try_from(events.len()) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let Some(snapshot_version) = state.snapshot_version.checked_add(event_count) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            state.ledger = Some(staged);
+            if let Some(scientific) = state.scientific.as_mut() {
+                scientific.catalog.update_threshold(aggregate_charged);
+            }
+            state.snapshot_version = snapshot_version;
+        }
     }
     state
         .maximum_sequence
