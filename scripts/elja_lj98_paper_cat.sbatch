@@ -21,7 +21,7 @@ export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
 export LD_LIBRARY_PATH=$HOME/ira/lib:$GCCLIB:${LD_LIBRARY_PATH:-}
 export CATALOG_REPLICAS=48
-export CATALOG_WAVE=24
+export CATALOG_WAVE=48
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 unset CATALOG_MAX_HOPS

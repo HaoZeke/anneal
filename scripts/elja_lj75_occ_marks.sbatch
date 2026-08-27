@@ -6,7 +6,7 @@
 #SBATCH --time=4-00:00:00
 #SBATCH --output=/users/home/rog32/ljwork/jcc/lj75-occ-dwell/slurm.%j.out
 # LJ75 occupancy on packing-gt-stop 9dde60d. Paper budget 4e6,
-# 48 replicas, WAVE 24 on one 32-core node. Extras Walk while
+# 48 replicas, WAVE 48 on one 32-core node. Extras Walk while
 # leftover SOAP is unsaturated. Isolated from anneal-stop.
 set -euo pipefail
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
@@ -20,7 +20,7 @@ export IRA_LIB_DIR=$HOME/ira/lib
 export GCCLIB=/opt/ohpc/pub/compiler/gcc/12.4.0/lib64
 export LD_LIBRARY_PATH=$HOME/ira/lib:$GCCLIB:${LD_LIBRARY_PATH:-}
 export CATALOG_REPLICAS=48
-export CATALOG_WAVE=24
+export CATALOG_WAVE=48
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000

@@ -8,7 +8,7 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --output=slurm.%j.out
 # LJ38 occupancy on Terra. Paper budget 4e5, hop 60000, 48 replicas.
-# WAVE 24 matches the Elja occupancy allocations.
+# WAVE 48 matches the Elja occupancy allocations.
 set -euo pipefail
 export SLURM_CONF=/etc/slurm-llnl/slurm.conf
 export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
@@ -21,7 +21,7 @@ export ANNEAL_REPRO_ROOT=$HOME/anneal_repro
 export IRA_LIB_DIR=$HOME/ira/lib
 export LD_LIBRARY_PATH=$HOME/ira/lib:${LD_LIBRARY_PATH:-}
 export CATALOG_REPLICAS=48
-export CATALOG_WAVE=24
+export CATALOG_WAVE=48
 export CATALOG_SLICE=500
 export CATALOG_POPULATION_INTERVAL=50000
 export CATALOG_MAX_HOPS=60000
