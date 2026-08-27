@@ -473,7 +473,6 @@ mod run {
         last_hole: Option<DescriptorHoleProposal>,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
-        last_sample: Option<CatalogCandidate>,
         sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
         sample_pending: bool,
         last_crossing: Option<BoundaryCrossingRecord>,
@@ -517,7 +516,6 @@ mod run {
                             last_hole: None,
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
-                            last_sample: None,
                             sample_slot: Arc::new(Mutex::new(None)),
                             sample_pending: false,
                             last_crossing: None,
@@ -559,7 +557,6 @@ mod run {
             state.last_hole = None;
             state.sample_pending = false;
             *state.sample_slot.lock().expect("sample slot") = None;
-            state.last_sample = None;
             state.crossing_pending = false;
             *state.crossing_slot.lock().expect("crossing slot") = None;
             state.last_crossing = None;
@@ -1205,6 +1202,8 @@ mod run {
             }
         }
 
+        /// Poll one asynchronous sample request without blocking.
+        /// Each completed mailbox result is consumed exactly once.
         pub fn try_sample_candidate(
             &mut self,
             replica: u32,
@@ -1224,10 +1223,7 @@ mod run {
             if let Some(result) = finished {
                 self.replica_mut(replica)?.sample_pending = false;
                 match result {
-                    Ok(Some(candidate)) => {
-                        self.replica_mut(replica)?.last_sample = Some(candidate.clone());
-                        return Ok(CatalogSampleOutcome::Candidate(candidate));
-                    }
+                    Ok(Some(candidate)) => return Ok(CatalogSampleOutcome::Candidate(candidate)),
                     Ok(None) => return Ok(CatalogSampleOutcome::Empty),
                     Err(CatalogClientError::Rejected(_)) => {
                         return Ok(CatalogSampleOutcome::Rejected);
@@ -1246,13 +1242,6 @@ mod run {
                     });
                     state.sample_pending = true;
                 }
-            }
-            if let Some(candidate) = self
-                .replicas
-                .get(&replica)
-                .and_then(|state| state.last_sample.clone())
-            {
-                return Ok(CatalogSampleOutcome::Candidate(candidate));
             }
             Ok(CatalogSampleOutcome::LocalFallback)
         }
