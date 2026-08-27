@@ -19,6 +19,11 @@ if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
   exit 1
 fi
 cd "$ROOT"
+if ! git diff --quiet HEAD --; then
+  echo "refusing build: tracked source differs from HEAD" >&2
+  git status --short >&2
+  exit 2
+fi
 git rev-parse HEAD >SOURCE_COMMIT
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
@@ -28,6 +33,7 @@ echo "cmake=$(cmake --version | head -1)"
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server \
+  --example campaign_env \
   --example leave_packing_probe
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
@@ -50,6 +56,11 @@ for symbol in different_decaf_family occupancy_leave_new_class; do
     exit 1
   fi
 done
+sha256sum \
+  target/release/examples/lj_cluster_search \
+  target/release/examples/catalog_server \
+  target/release/examples/campaign_env \
+  >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"

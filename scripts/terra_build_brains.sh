@@ -14,6 +14,11 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   exit 1
 fi
 cd "$ROOT"
+if ! git diff --quiet HEAD --; then
+  echo "refusing build: tracked source differs from HEAD" >&2
+  git status --short >&2
+  exit 2
+fi
 git rev-parse HEAD >SOURCE_COMMIT
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
@@ -47,7 +52,8 @@ cargo test --release --lib span_rises_when_the_packing
 cargo test --release --lib from_origin_climbs_the_covering
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
-  --example catalog_server
+  --example catalog_server \
+  --example campaign_env
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
 for symbol in different_packing_family "occupancy leave archive hole" "packing invert nu3 pullback" "leave ridge climb" CATALOG_BRAIN_LISTEN "leftover-SOAP TIS seats" "occupancy min families" "gt stop packing"; do
@@ -61,6 +67,11 @@ if ! grep -a -F -q occupancy_gt "$SERVER"; then
   echo "built binary missing occupancy_gt" >&2
   exit 1
 fi
+sha256sum \
+  target/release/examples/lj_cluster_search \
+  target/release/examples/catalog_server \
+  target/release/examples/campaign_env \
+  >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
 echo "BUILD_OK $PWD/$BIN"
