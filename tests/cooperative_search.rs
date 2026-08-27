@@ -17,7 +17,7 @@ use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, Client
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
     CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection,
-    TransitionDestination,
+    SPARSE_SAMPLE_DRAW, TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -530,6 +530,46 @@ fn try_sample_candidate_delivers_each_rpc_result_once() {
         CatalogSampleOutcome::LocalFallback,
         "a completed sample must not be replayed while another RPC is pending"
     );
+}
+
+#[test]
+fn try_sample_candidate_keeps_sample_roles_separate() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    assert_eq!(
+        run.offer_candidate(0, admitted).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    assert_eq!(
+        run.try_sample_candidate(0, 91).unwrap(),
+        CatalogSampleOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_sample_candidate(0, SPARSE_SAMPLE_DRAW).unwrap(),
+        CatalogSampleOutcome::LocalFallback,
+        "a generic catalog result must not satisfy a sparse-family request"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert!(matches!(
+        run.try_sample_candidate(0, SPARSE_SAMPLE_DRAW).unwrap(),
+        CatalogSampleOutcome::Candidate(_)
+    ));
 }
 
 #[test]
