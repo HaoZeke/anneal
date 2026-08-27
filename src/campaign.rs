@@ -330,4 +330,14 @@ SEED_OFFSET_BASE = "9900000"
         let text = GOOD.replace("SEED_OFFSET_BASE", "seed_offset_base");
         assert!(CampaignConfig::parse(&text).is_err());
     }
+
+    #[test]
+    fn catalog_sharing_distinguishes_private_rpc_from_shared_rpc() {
+        assert!(catalog_transport_is_shared(Some("shared"), true).unwrap());
+        assert!(!catalog_transport_is_shared(Some("private"), true).unwrap());
+        assert!(catalog_transport_is_shared(None, true).unwrap());
+        assert!(!catalog_transport_is_shared(None, false).unwrap());
+        let error = catalog_transport_is_shared(Some("control"), true).unwrap_err();
+        assert!(error.0.contains("shared or private"), "{}", error.0);
+    }
 }
