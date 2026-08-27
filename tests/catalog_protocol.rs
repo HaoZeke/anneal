@@ -1,9 +1,9 @@
 #![cfg(feature = "bank-rpc")]
 
 use anneal_core::catalog_rpc::{
-    BridgeCrossingRecord, CatalogCandidate, CatalogFrontierPost, CatalogIdentity, CatalogOperation,
-    CatalogRequest, PROTOCOL_VERSION, ProtocolError, TransitionDestination, decode_request,
-    encode_request, validate_identity,
+    BridgeCrossingRecord, CatalogCandidate, CatalogFrontierPost, CatalogIdentity,
+    CatalogLedgerEvent, CatalogOperation, CatalogRequest, PROTOCOL_VERSION, ProtocolError,
+    TransitionDestination, decode_request, encode_request, validate_identity,
 };
 
 fn identity(ensemble: &str) -> CatalogIdentity {
@@ -62,6 +62,28 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             kind: 5,
             charged_calls: 3,
             cumulative_charged: 81,
+        },
+        CatalogOperation::LedgerBatch {
+            events: vec![
+                CatalogLedgerEvent {
+                    sequence: 40,
+                    kind: 3,
+                    charged_calls: 7,
+                    cumulative_charged: 74,
+                },
+                CatalogLedgerEvent {
+                    sequence: 41,
+                    kind: 2,
+                    charged_calls: 0,
+                    cumulative_charged: 74,
+                },
+                CatalogLedgerEvent {
+                    sequence: 42,
+                    kind: 4,
+                    charged_calls: 7,
+                    cumulative_charged: 81,
+                },
+            ],
         },
         CatalogOperation::PopulationSubmit {
             epoch: 7,
