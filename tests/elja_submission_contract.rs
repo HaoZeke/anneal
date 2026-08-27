@@ -335,8 +335,12 @@ fn marks_submit_pins_the_crossing_floor_commit() {
     let submit = fs::read_to_string(root.join("scripts/elja_submit_occ_marks.sh"))
         .unwrap_or_else(|error| panic!("failed to read marks submit: {error}"));
     assert!(
-        submit.contains("WANT=7fe8d5a431a4ce227f8e3d424bd299f3eae51103"),
-        "marks submit must pin packing-gt-stop 7fe8d5a"
+        submit.contains("NEED=7fe8d5a431a4ce227f8e3d424bd299f3eae51103"),
+        "marks submit must require a descendant of packing-gt-stop 7fe8d5a"
+    );
+    assert!(
+        submit.contains("merge-base --is-ancestor"),
+        "marks submit must accept later walk-fix commits on that line"
     );
     assert!(
         submit.contains("anneal-occ-7fe8d5a"),
