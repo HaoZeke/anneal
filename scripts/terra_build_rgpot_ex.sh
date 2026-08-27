@@ -171,7 +171,8 @@ fi
 
 export RGPOT_XTB_ENGINE=$ROOT/engines/libxtb_engine.so
 export RGPOT_CUH2_LIBRARY=$ROOT/engines/librgpot_cuh2.so
-export RGPOT_BUILD_IDENTITY=$(sha256sum "$RGPOT_XTB_ENGINE" | awk '{print $1}')
+RGPOT_BUILD_IDENTITY=$(sha256sum "$RGPOT_XTB_ENGINE" | awk '{print $1}')
+export RGPOT_BUILD_IDENTITY
 "$ROOT/target/release/examples/molecular_cluster" 2 20 1
 "$ROOT/target/release/examples/slab_adsorption" \
   "$ROOT/examples/fixtures/cuh2_fcc_slab.con" 15 1

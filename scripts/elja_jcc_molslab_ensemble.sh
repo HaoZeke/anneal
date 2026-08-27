@@ -221,7 +221,7 @@ if [[ $ARM == shared ]]; then
 else
   for replica in 0 1 2 3; do
     start_bank "$OUT/bank-private-$replica"
-    private_endpoints[$replica]=$last_started_endpoint
+    private_endpoints[replica]=$last_started_endpoint
   done
   bank_topology=private_per_replica
 fi
@@ -359,7 +359,6 @@ peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
 } >"$OUT/run.manifest"
 
 touch "$OUT/TERMINAL_OK"
-(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
-  | sort -z \
-  | xargs -0 sha256sum >SHA256SUMS)
+mapfile -d '' artifacts < <(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z)
+(cd "$OUT" && sha256sum "${artifacts[@]}" >SHA256SUMS)
 printf '%s\n' "$OUT"
