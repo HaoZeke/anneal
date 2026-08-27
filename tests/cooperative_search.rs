@@ -304,6 +304,48 @@ fn try_descriptor_hole_does_not_block_the_hop() {
 }
 
 #[test]
+fn try_descriptor_hole_delivers_each_rpc_result_once() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    assert_eq!(
+        run.offer_candidate(0, admitted.clone()).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    let mut delivered = false;
+    for _ in 0..200 {
+        match run
+            .try_descriptor_hole(0, admitted.descriptor.clone(), 32, 7)
+            .unwrap()
+        {
+            CatalogHoleOutcome::Proposal(_) => {
+                delivered = true;
+                break;
+            }
+            CatalogHoleOutcome::LocalFallback => {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            outcome => panic!("unexpected descriptor-hole outcome: {outcome:?}"),
+        }
+    }
+    assert!(delivered, "mailbox never delivered a catalog hole");
+    assert_eq!(
+        run.try_descriptor_hole(0, admitted.descriptor, 32, 8)
+            .unwrap(),
+        CatalogHoleOutcome::LocalFallback,
+        "a completed descriptor hole must not be replayed while another RPC is pending"
+    );
+}
+
+#[test]
 fn try_sample_candidate_delivers_each_rpc_result_once() {
     let server = server();
     let digest = signature().digest();
