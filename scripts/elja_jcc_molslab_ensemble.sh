@@ -109,6 +109,11 @@ if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
   exit 1
 fi
 export LD_LIBRARY_PATH="${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export BLIS_NUM_THREADS=1
+export RAYON_NUM_THREADS=1
 for executable in "$BIN" "$SERVER" "$PEEK"; do
   if ldd "$executable" | grep -q "not found"; then
     echo "unresolved libraries in $executable" >&2

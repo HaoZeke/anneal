@@ -46,7 +46,7 @@ for specification in "${systems[@]}"; do
         --partition="${ELJA_PARTITION:-s-normal}" \
         --account="${ELJA_ACCOUNT:-chem-ui}" \
         --time="${ELJA_MOLSLAB_TIME:-12:00:00}" \
-        --cpus-per-task=5 \
+        --cpus-per-task="${ELJA_CPUS_PER_TASK:-8}" \
         --mem="${ELJA_MOLSLAB_MEM:-16G}" \
         --output="$log" \
         --export="ALL,MOLSLAB_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
