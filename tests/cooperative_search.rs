@@ -424,6 +424,70 @@ fn try_descriptor_hole_delivers_each_rpc_result_once() {
 }
 
 #[test]
+fn try_descriptor_hole_requires_the_request_parameters() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    let other = candidate(0, 2, 2.0);
+    assert_eq!(
+        run.offer_candidate(0, admitted.clone()).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    assert_eq!(
+        run.try_descriptor_hole(0, admitted.descriptor.clone(), 32, 7)
+            .unwrap(),
+        CatalogHoleOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_descriptor_hole(0, admitted.descriptor.clone(), 64, 7)
+            .unwrap(),
+        CatalogHoleOutcome::LocalFallback,
+        "a proposal computed with another sample count must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_descriptor_hole(0, admitted.descriptor.clone(), 64, 8)
+            .unwrap(),
+        CatalogHoleOutcome::LocalFallback,
+        "a proposal computed with another draw must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_descriptor_hole(0, other.descriptor.clone(), 64, 8)
+            .unwrap(),
+        CatalogHoleOutcome::LocalFallback,
+        "a proposal computed from another descriptor must be discarded"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert!(matches!(
+        run.try_descriptor_hole(0, other.descriptor, 64, 8)
+            .unwrap(),
+        CatalogHoleOutcome::Proposal(_)
+    ));
+}
+
+#[test]
 fn try_sample_candidate_delivers_each_rpc_result_once() {
     let server = server();
     let digest = signature().digest();
