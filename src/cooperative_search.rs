@@ -470,7 +470,6 @@ mod run {
         last_policy: Option<PolicyState>,
         policy_slot: Arc<Mutex<Option<Result<PolicyStateReceipt, CatalogClientError>>>>,
         policy_pending: bool,
-        last_hole: Option<DescriptorHoleProposal>,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
         sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
@@ -513,7 +512,6 @@ mod run {
                             last_policy: None,
                             policy_slot: Arc::new(Mutex::new(None)),
                             policy_pending: false,
-                            last_hole: None,
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
                             sample_slot: Arc::new(Mutex::new(None)),
@@ -554,7 +552,6 @@ mod run {
             *state.policy_slot.lock().expect("policy slot") = None;
             state.hole_pending = false;
             *state.hole_slot.lock().expect("hole slot") = None;
-            state.last_hole = None;
             state.sample_pending = false;
             *state.sample_slot.lock().expect("sample slot") = None;
             state.crossing_pending = false;
@@ -1285,7 +1282,8 @@ mod run {
             }
         }
 
-        /// Post a shared-cloud hole and return the last one.
+        /// Poll one shared-cloud hole request without blocking.
+        /// Each completed mailbox result is consumed exactly once.
         /// The hop thread never waits. Leave applies this hole, not a
         /// private well list, so extras bias off known superbasins.
         pub fn try_descriptor_hole(
@@ -1310,10 +1308,7 @@ mod run {
             if let Some(result) = finished {
                 self.replica_mut(replica)?.hole_pending = false;
                 match result {
-                    Ok(proposal) => {
-                        self.replica_mut(replica)?.last_hole = Some(proposal.clone());
-                        return Ok(CatalogHoleOutcome::Proposal(proposal));
-                    }
+                    Ok(proposal) => return Ok(CatalogHoleOutcome::Proposal(proposal)),
                     Err(CatalogClientError::Rejected(reason)) => {
                         self.push_event(
                             replica,
@@ -1341,13 +1336,6 @@ mod run {
                     });
                     state.hole_pending = true;
                 }
-            }
-            if let Some(proposal) = self
-                .replicas
-                .get(&replica)
-                .and_then(|state| state.last_hole.clone())
-            {
-                return Ok(CatalogHoleOutcome::Proposal(proposal));
             }
             Ok(CatalogHoleOutcome::LocalFallback)
         }
