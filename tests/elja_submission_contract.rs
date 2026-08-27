@@ -335,20 +335,28 @@ fn marks_submit_pins_the_crossing_floor_commit() {
     let submit = fs::read_to_string(root.join("scripts/elja_submit_occ_marks.sh"))
         .unwrap_or_else(|error| panic!("failed to read marks submit: {error}"));
     assert!(
-        submit.contains("NEED=7fe8d5a431a4ce227f8e3d424bd299f3eae51103"),
-        "marks submit must require a descendant of packing-gt-stop 7fe8d5a"
+        submit.contains("NEED=9dde60d5130623c7862e29181697508af4dc2ba8"),
+        "marks submit must require a descendant of leftover-dwell 9dde60d"
     );
     assert!(
         submit.contains("merge-base --is-ancestor"),
         "marks submit must accept later walk-fix commits on that line"
     );
     assert!(
-        submit.contains("anneal-occ-7fe8d5a"),
+        submit.contains("anneal-occ-9dde60d"),
         "marks submit must use an isolated tree, not anneal-stop"
     );
     assert!(
         !submit.contains("lj75-shared-0002"),
         "marks submit must not write sealed ensemble 0002"
+    );
+    assert!(
+        !submit.contains("lj75-shared-0003"),
+        "marks submit must not write sealed ensemble 0003"
+    );
+    assert!(
+        submit.contains("lj75-occ-dwell"),
+        "marks submit must write the leftover-dwell campaign, not anneal-stop"
     );
     let hops = fs::read_to_string(root.join("scripts/elja_lj75_occ_marks.sbatch"))
         .unwrap_or_else(|error| panic!("failed to read marks hops: {error}"));
