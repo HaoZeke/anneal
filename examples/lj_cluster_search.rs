@@ -12,7 +12,7 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 use anneal_core::bias::BasinBias;
-use anneal_core::catalog::euclidean_gradient_norm;
+use anneal_core::catalog::{euclidean_gradient_norm, leave_crossing_slices, leave_defers};
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
@@ -2793,6 +2793,7 @@ fn run_capnp_catalog(
     let mut leave_best = f64::INFINITY;
     let mut leave_quiet = 0usize;
     let mut leave_patience = 0usize;
+    let leave_crossing = leave_crossing_slices(checkpoint_interval);
     // The packing this replica stood on when it last decided to Leave,
     // and how many consecutive Leaves have failed to move it off one.
     //
@@ -3760,9 +3761,9 @@ fn run_capnp_catalog(
             }
             PolicyAction::Leave => {
                 trace.policy_role = PolicyRole::Leave;
-                if leave_quiet <= leave_patience {
-                    // Still inside the quiet stretch this replica has
-                    // recovered from before. Keep walking.
+                if leave_defers(leave_quiet, leave_patience, leave_crossing) {
+                    // Still inside the recovered quiet stretch or the
+                    // measured crossing floor. Keep walking.
                     trace.adoption = SliceAdoption::Rejected;
                     cooperative
                         .record_slice(replica, trace)
