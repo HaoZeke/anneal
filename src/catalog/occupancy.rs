@@ -2430,7 +2430,7 @@ mod tests {
         assert!(leave_defers(22, 0, 22));
         assert!(!leave_defers(23, 0, 22));
         assert!(leave_defers(3, 12, 22));
-        assert!(!leave_defers(13, 22, 22));
+        assert!(!leave_defers(23, 12, 22));
     }
 
     #[test]
