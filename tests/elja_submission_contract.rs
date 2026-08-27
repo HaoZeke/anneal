@@ -256,6 +256,47 @@ fn terra_molecular_builder_seals_exact_sources_engines_and_drivers() {
 }
 
 #[test]
+fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
+        let source = fs::read_to_string(root.join("scripts").join(builder))
+            .unwrap_or_else(|error| panic!("failed to read {builder}: {error}"));
+        for required in [
+            "RGPOT_EXPECTED_COMMIT",
+            "git -C \"$RGPOT\" diff --quiet HEAD --",
+            "install --locked -e xtbbld",
+            "run --locked -e xtbbld meson",
+            "RGPOT_SOURCE_COMMIT",
+            "RGPOT_PIXI_LOCK_SHA256",
+            "MOLSLAB_BUILD_SHA256SUMS",
+        ] {
+            assert!(source.contains(required), "{builder} is missing {required}");
+        }
+    }
+
+    for script in [
+        "elja_submit_jcc_molslab.sh",
+        "elja_jcc_molslab_ensemble.sh",
+    ] {
+        let source = fs::read_to_string(root.join("scripts").join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        for required in [
+            "RGPOT_SOURCE_COMMIT",
+            "RGPOT_PIXI_LOCK_SHA256",
+            "git -C \"$RGPOT\" diff --quiet HEAD --",
+            "sha256sum \"$RGPOT/pixi.lock\"",
+        ] {
+            assert!(source.contains(required), "{script} is missing {required}");
+        }
+    }
+
+    let runner = fs::read_to_string(root.join("scripts/elja_jcc_molslab_ensemble.sh"))
+        .unwrap_or_else(|error| panic!("failed to read molecular runner: {error}"));
+    assert!(runner.contains(r#"rgpot_source_commit=%s\n"#));
+    assert!(runner.contains(r#"rgpot_pixi_lock_sha256=%s\n"#));
+}
+
+#[test]
 fn molecular_ensembles_are_isolated_paired_slurm_runs() {
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
