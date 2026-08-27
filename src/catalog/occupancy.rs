@@ -1624,6 +1624,14 @@ pub fn leave_defers(quiet: usize, patience: usize, crossing_slices: usize) -> bo
     quiet <= patience.max(crossing_slices)
 }
 
+/// Hop throughput on one worker. Serial LJ75 was about 75000; occupancy talking about 200.
+pub fn hops_per_core_hour(hops: u64, wall_secs: f64, cores: u32) -> Option<f64> {
+    if !(wall_secs > 0.0) || cores == 0 {
+        return None;
+    }
+    Some((hops as f64) / (wall_secs / 3600.0) / f64::from(cores))
+}
+
 /// Role of one walk against DECAF packing families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackingRole {
@@ -1995,7 +2003,8 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_crossing_slices, leave_defers, leave_shot_accepted, leftover_birth_probability,
+        hops_per_core_hour, leave_crossing_slices, leave_defers, leave_shot_accepted,
+        leftover_birth_probability,
         leftover_esty_stable, leftover_esty_var,
         leftover_hatch_stable,
         leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
@@ -2382,6 +2391,14 @@ mod tests {
         assert!(!leave_defers(9, 0, 8));
         assert!(leave_defers(3, 12, 8));
         assert!(!leave_defers(13, 12, 8));
+    }
+
+    #[test]
+    fn hops_per_core_hour_matches_the_serial_ledger() {
+        assert_eq!(hops_per_core_hour(75_000, 3600.0, 1), Some(75_000.0));
+        assert_eq!(hops_per_core_hour(200, 3600.0, 1), Some(200.0));
+        assert_eq!(hops_per_core_hour(100, 0.0, 1), None);
+        assert_eq!(hops_per_core_hour(100, 10.0, 0), None);
     }
 
     #[test]
