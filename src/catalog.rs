@@ -83,10 +83,11 @@ pub use packing::{
     SEAM_BIN_WIDTH, SEAM_BINS, SEAM_BURST_SHOTS, SEAM_DOORWAY_GAP, SEAM_DOORWAY_WINDOW,
     SEAM_WINDOW, SeamBank, credit_packing_deposit, deliver_frontier_post, different_decaf_family,
     different_packing_family, drain_frontier_arrivals, leaves_packing, leftover_arrivals_saturated,
-    offer_frontier_post, offer_known_minimum, packing_communities, packing_community_count,
-    packing_distance, packing_fingerprint, packing_link_labels, packing_reference_book,
-    packing_references, packing_seam_gap, packing_vector, remember_packing_reference, same_packing,
-    set_packing_references, take_frontier_posts, take_known_minima,
+    include_packing_reference, offer_frontier_post, offer_known_minimum, packing_communities,
+    packing_community_count, packing_distance, packing_fingerprint, packing_link_labels,
+    packing_reference_book, packing_references, packing_seam_gap, packing_vector,
+    remember_packing_reference, same_packing, set_packing_references, take_frontier_posts,
+    take_known_minima,
 };
 pub use signature::{DescriptorSignature, EngineSignature, SignatureDigest, SystemSignature};
 pub use validator::{

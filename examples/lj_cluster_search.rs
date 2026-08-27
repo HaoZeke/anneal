@@ -3888,7 +3888,7 @@ fn run_capnp_catalog(
                     // interaction at the minimisation level, and without it
                     // the reference cloud is only ever this chain's own
                     // history and the chains do not talk during the quench.
-                    anneal_core::catalog::remember_packing_reference(&candidate.coordinates);
+                    anneal_core::catalog::include_packing_reference(&candidate.coordinates);
                     anneal_core::catalog::offer_known_minimum(
                         candidate.energy,
                         &candidate.coordinates,
@@ -3984,7 +3984,7 @@ fn run_capnp_catalog(
                         if held.coordinates.len() != snapshot.current_state().len() {
                             continue;
                         }
-                        anneal_core::catalog::remember_packing_reference(&held.coordinates);
+                        anneal_core::catalog::include_packing_reference(&held.coordinates);
                         anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
                     }
                 }
@@ -4054,7 +4054,7 @@ fn run_capnp_catalog(
                         // Another packing, not another book cell: a draw
                         // that only clears the cell grain hands the extra
                         // an isomer of the packing it is trying to leave.
-                        anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
+                        anneal_core::catalog::include_packing_reference(&sparse.coordinates);
                         anneal_core::catalog::offer_known_minimum(
                             sparse.energy,
                             &sparse.coordinates,
@@ -4112,7 +4112,7 @@ fn run_capnp_catalog(
                     OccupancyLeaveTarget::OtherFamily => {
                         count_other_family += 1;
                         let sparse = other_family.expect("other family is on file");
-                        anneal_core::catalog::remember_packing_reference(&sparse.coordinates);
+                        anneal_core::catalog::include_packing_reference(&sparse.coordinates);
                         trace.proposal_family = ProposalFamily::CatalogSample;
                         trace.adoption = SliceAdoption::Adopted;
                         leave_path.clear();
@@ -4183,7 +4183,7 @@ fn run_capnp_catalog(
                 {
                     // A boundary crossing carries another chain's structure
                     // too, so the invert learns the packing it sits in.
-                    anneal_core::catalog::remember_packing_reference(&crossing.to);
+                    anneal_core::catalog::include_packing_reference(&crossing.to);
                     if shared_bias_enabled {
                         pending_deposits.push(Array1::from(crossing.to.clone()));
                     }

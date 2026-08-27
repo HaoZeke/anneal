@@ -742,8 +742,8 @@ pub fn credit_packing_deposit(coordinates: &[f64], amount: f64) {
     });
 }
 
-/// Add one well to the reference cloud, and evict from the packing that can
-/// spare it.
+/// Include one remotely observed well in the reference cloud without
+/// crediting another arrival, and evict from the packing that can spare it.
 ///
 /// The cloud is what the Leave invert repels a quench from, so it holds
 /// wells rather than packings: an ensemble of 48 chains in one funnel has
@@ -754,7 +754,20 @@ pub fn credit_packing_deposit(coordinates: &[f64], amount: f64) {
 /// Over the cap the oldest member of the largest community goes, so a
 /// community with one member survives: it is the only record that packing
 /// exists, and dropping it would let the run rediscover it as new.
+pub fn include_packing_reference(coordinates: &[f64]) {
+    update_packing_reference(coordinates, false);
+}
+
+/// Record one local arrival in the reference cloud.
+///
+/// A matching well gains one configurational-entropy visit. A novel well is
+/// included with its first arrival and follows the same bounded-cloud policy
+/// as [`include_packing_reference`].
 pub fn remember_packing_reference(coordinates: &[f64]) {
+    update_packing_reference(coordinates, true);
+}
+
+fn update_packing_reference(coordinates: &[f64], count_matching_arrival: bool) {
     let held = packing_reference_book();
     let mut book = PackingBook::default();
     for reference in &held {
@@ -779,11 +792,13 @@ pub fn remember_packing_reference(coordinates: &[f64]) {
             // the free-energy deposit needs. Discarding it left the cloud
             // honest about where the ensemble is and silent about how
             // much of it is there.
-            PACKING_REFERENCES.with(|slot| {
-                if let Some(reference) = slot.borrow_mut().get_mut(index) {
-                    reference.visits = reference.visits.saturating_add(1);
-                }
-            });
+            if count_matching_arrival {
+                PACKING_REFERENCES.with(|slot| {
+                    if let Some(reference) = slot.borrow_mut().get_mut(index) {
+                        reference.visits = reference.visits.saturating_add(1);
+                    }
+                });
+            }
             return;
         }
         histograms.push(histogram);
