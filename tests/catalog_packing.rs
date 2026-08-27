@@ -5,7 +5,8 @@ use anneal_core::catalog::{
     occupancy_leave_new_class, occupancy_leave_new_packing, occupancy_map_fold,
     occupancy_retire_at, occupancy_ring_census, occupancy_ring_floor, occupancy_ring_profile,
     occupancy_sparsify_packing, packing_community_count, packing_distance, packing_fingerprint,
-    packing_link_labels, ring_leave_weight, same_packing,
+    packing_link_labels, packing_reference_book, remember_packing_reference, ring_leave_weight,
+    same_packing, set_packing_references, include_packing_reference,
 };
 use anneal_core::methods::warm_lbfgs::WarmLbfgs;
 use anneal_core::potentials::{PairKind, PairPotential};
@@ -63,6 +64,25 @@ fn different_decaf_family_is_ico_versus_marks_not_an_ico_isomer() {
     let marks = marks.as_slice().unwrap();
     assert!(different_decaf_family(ico, marks));
     assert!(!different_decaf_family(ico, ico));
+}
+
+#[test]
+fn catalog_reference_refresh_does_not_count_a_well_arrival() {
+    let ico = load_xyz(include_str!("fixtures/lj75_ico.xyz"));
+    let ico = ico.as_slice().unwrap();
+    set_packing_references(Vec::new());
+
+    include_packing_reference(ico);
+    include_packing_reference(ico);
+    let refreshed = packing_reference_book();
+    assert_eq!(refreshed.len(), 1);
+    assert_eq!(refreshed[0].visits, 1);
+
+    remember_packing_reference(ico);
+    let arrived = packing_reference_book();
+    assert_eq!(arrived.len(), 1);
+    assert_eq!(arrived[0].visits, 2);
+    set_packing_references(Vec::new());
 }
 
 #[test]
