@@ -1607,6 +1607,20 @@ pub fn occupancy_complete_at(
     }
 }
 
+/// Measured LJ75 Marks crossings sit at hops 4160, 6226, and 4411.
+pub const LEAVE_CROSSING_HOPS: usize = 4000;
+
+/// Quiet checkpoint slices a replica must walk before the first Leave.
+pub fn leave_crossing_slices(checkpoint_interval: usize) -> usize {
+    LEAVE_CROSSING_HOPS.div_ceil(checkpoint_interval.max(1))
+}
+
+/// Defer Leave while the replica is inside its recovered quiet stretch
+/// or the measured crossing floor, whichever is longer.
+pub fn leave_defers(quiet: usize, patience: usize, crossing_slices: usize) -> bool {
+    quiet <= patience.max(crossing_slices)
+}
+
 /// Role of one walk against DECAF packing families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PackingRole {
@@ -1978,7 +1992,8 @@ mod tests {
         CHAMPION_RANK, InterfaceSeat, LeavePath, OCCUPANCY_SEAM_CONDUCTANCE, OccupancyCertificate,
         OccupancyFesError, OccupancyLeaveAdopt, OccupancyLeaveTarget, PackingRole,
         assign_interfaces, in_interface_ensemble, interface_ladder, is_occupancy_leave_action,
-        leave_shot_accepted, leftover_birth_probability, leftover_esty_stable, leftover_esty_var,
+        leave_crossing_slices, leave_defers, leave_shot_accepted, leftover_birth_probability,
+        leftover_esty_stable, leftover_esty_var,
         leftover_hatch_stable,
         leftover_lambda, leftover_sat_dwell, occupancy_book_holes, occupancy_compact,
         occupancy_complete, occupancy_complete_at, occupancy_ei_exhausted, occupancy_family_floor,
@@ -2342,6 +2357,16 @@ mod tests {
             2
         ));
         assert_eq!(occupancy_complete(false, false, 8), None);
+    }
+
+    #[test]
+    fn leave_defers_through_the_measured_crossing() {
+        assert_eq!(leave_crossing_slices(500), 8);
+        assert!(leave_defers(1, 0, 8));
+        assert!(leave_defers(8, 0, 8));
+        assert!(!leave_defers(9, 0, 8));
+        assert!(leave_defers(3, 12, 8));
+        assert!(!leave_defers(13, 12, 8));
     }
 
     #[test]
