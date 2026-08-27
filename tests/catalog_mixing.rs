@@ -1,7 +1,7 @@
 use anneal_core::catalog::{
     AttractorStrength, MIXED_RHAT, OccupancyCertificate, certified_global_minimum,
-    explore_collapsed, explore_must_leave, invert_mixing, mixed, occupant_rhat,
-    occupancy_complete_at, rhat_series, stronger,
+    explore_collapsed, explore_must_leave, invert_mixing, mixed, occupancy_complete_at,
+    occupant_rhat, rhat_series, stronger,
 };
 
 fn constant(value: f64, len: usize) -> Vec<f64> {

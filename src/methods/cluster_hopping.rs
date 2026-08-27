@@ -1021,10 +1021,9 @@ where
     // linkage test the first time each basin is seen, and on unless the
     // caller has a reason: the cell-grain pile alone has never taken an
     // LJ75 chain out of the icosahedral funnel.
-    let mut pave: Option<crate::catalog::PackingPave> =
-        std::env::var("CATALOG_PACKING_PAVE")
-            .is_ok_and(|value| value == "1")
-            .then(crate::catalog::PackingPave::new);
+    let mut pave: Option<crate::catalog::PackingPave> = std::env::var("CATALOG_PACKING_PAVE")
+        .is_ok_and(|value| value == "1")
+        .then(crate::catalog::PackingPave::new);
     // The seam bank. Shares partial progress along the road out of the
     // occupied packing: every accepted quench is offered by its DECAF
     // distance from the run's floor, and a stuck chain restarts from the
@@ -1388,46 +1387,46 @@ where
                     if let Some(found) = climbed {
                         found
                     } else {
-                    let ladder = {
-                        let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
-                        for rung in 0..crate::known_basin::LEAVE_RUNGS {
-                            starts.push(crate::known_basin::leave_packing_rung_to(
+                        let ladder = {
+                            let mut starts = Vec::with_capacity(crate::known_basin::LEAVE_RUNGS);
+                            for rung in 0..crate::known_basin::LEAVE_RUNGS {
+                                starts.push(crate::known_basin::leave_packing_rung_to(
+                                    from_state.view(),
+                                    leave_cover,
+                                    crate::known_basin::rung_barrier(leave_depth, rung),
+                                    &references,
+                                    cfg.species.as_deref(),
+                                    None,
+                                    |trial| Some(relax(ledger, trial, 0).0),
+                                ));
+                            }
+                            let mut quench =
+                                |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
+                            crate::known_basin::leave_packing_starts(
+                                from_state.view(),
+                                &starts,
+                                &references,
+                                &mut quench,
+                            )
+                        };
+                        if let Some((energy, landed, _)) = ladder {
+                            (energy, landed)
+                        } else if let Some((energy, landed, _)) =
+                            crate::known_basin::leave_packing_ridge(
                                 from_state.view(),
                                 leave_cover,
-                                crate::known_basin::rung_barrier(leave_depth, rung),
                                 &references,
                                 cfg.species.as_deref(),
                                 None,
-                                |trial| Some(relax(ledger, trial, 0).0),
-                            ));
+                                leave_depth,
+                                cfg.relax_steps,
+                                |trial, steps| relax(ledger, trial, steps),
+                            )
+                        {
+                            (energy, landed)
+                        } else {
+                            relax(ledger, state.view(), cfg.relax_steps)
                         }
-                        let mut quench =
-                            |trial: ArrayView1<f64>| relax(ledger, trial, cfg.relax_steps);
-                        crate::known_basin::leave_packing_starts(
-                            from_state.view(),
-                            &starts,
-                            &references,
-                            &mut quench,
-                        )
-                    };
-                    if let Some((energy, landed, _)) = ladder {
-                        (energy, landed)
-                    } else if let Some((energy, landed, _)) =
-                        crate::known_basin::leave_packing_ridge(
-                            from_state.view(),
-                            leave_cover,
-                            &references,
-                            cfg.species.as_deref(),
-                            None,
-                            leave_depth,
-                            cfg.relax_steps,
-                            |trial, steps| relax(ledger, trial, steps),
-                        )
-                    {
-                        (energy, landed)
-                    } else {
-                        relax(ledger, state.view(), cfg.relax_steps)
-                    }
                     }
                 } else {
                     relax(ledger, state.view(), cfg.relax_steps)
@@ -1998,9 +1997,7 @@ where
         // icosahedral shelf and cut LJ75 Marks from 10/48 to 4/48.
         // The ordinary screens stay on. Molecule and slab leftover
         // never hit this packing path.
-        if frontier_exchange
-            && let Some(seam) = seam.as_mut()
-        {
+        if frontier_exchange && let Some(seam) = seam.as_mut() {
             for (gap, energy, coordinates) in crate::catalog::drain_frontier_arrivals() {
                 seam.offer(gap, energy, &coordinates);
             }
@@ -2019,8 +2016,7 @@ where
         // the Metropolis test still sees a real quenched energy for that
         // basin, so the per-attempt rate is untouched and the remaining
         // force calls are refunded.
-        let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen
-            && !screen_bank.is_empty()
+        let known_stand_in: Option<(f64, Array1<f64>)> = if shared_screen && !screen_bank.is_empty()
         {
             let ds = bias.cv(x_screen.view());
             screen_bank
@@ -2470,7 +2466,10 @@ where
                 && recordable
                 && e_new <= ledger.best + crate::catalog::SEAM_WINDOW
                 && let (Some(floor), Some(trial)) = (
-                    ledger.best_state.as_ref().and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
+                    ledger
+                        .best_state
+                        .as_ref()
+                        .and_then(|b| b.as_slice().map(<[f64]>::to_vec)),
                     x_new.as_slice(),
                 )
             {

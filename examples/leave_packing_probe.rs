@@ -579,10 +579,7 @@ fn main() {
             });
             seeded += 1;
         }
-        let cloud: Vec<Vec<f64>> = book
-            .iter()
-            .map(|held| held.coordinates.clone())
-            .collect();
+        let cloud: Vec<Vec<f64>> = book.iter().map(|held| held.coordinates.clone()).collect();
         // Total arrivals and the Shannon entropy of the packing histogram,
         // which is what an ensemble buys that a single chain does not.
         let arrivals: u32 = book.iter().map(|held| held.visits).sum();
@@ -634,13 +631,7 @@ fn main() {
             // T = 0.8 is the run temperature in the resolved config, and
             // the tempering scale is the same, so the converged pile is
             // half the free energy.
-            known_basin::arm_leave_free(
-                ico.view(),
-                known_basin::LEAVE_RUNG_RMSD,
-                &book,
-                0.8,
-                0.8,
-            );
+            known_basin::arm_leave_free(ico.view(), known_basin::LEAVE_RUNG_RMSD, &book, 0.8, 0.8);
             let walked = known_basin::leave_packing_ladder(
                 ico.view(),
                 index,
@@ -671,13 +662,7 @@ fn main() {
             // 10.57, and the measured saddles are 8.69 and 7.48. Rung 2
             // stops short of both, which would measure a walk that was
             // never given enough to cross with.
-            known_basin::arm_leave_free(
-                ico.view(),
-                known_basin::LEAVE_RUNG_RMSD,
-                &book,
-                0.8,
-                0.8,
-            );
+            known_basin::arm_leave_free(ico.view(), known_basin::LEAVE_RUNG_RMSD, &book, 0.8, 0.8);
             let start = known_basin::leave_packing_rung_to(
                 ico.view(),
                 index,
@@ -725,11 +710,9 @@ fn main() {
                 let sample = ridge.clone();
                 let fallen = known_basin::with_disarmed(|| {
                     let mut opt = WarmLbfgs::default();
-                    opt.minimize(
-                        sample.view(),
-                        steps,
-                        |v: ArrayView1<f64>| Some(potential.value_and_gradient(v)),
-                    )
+                    opt.minimize(sample.view(), steps, |v: ArrayView1<f64>| {
+                        Some(potential.value_and_gradient(v))
+                    })
                     .1
                 });
                 if let Some(landed) = fallen.as_slice() {

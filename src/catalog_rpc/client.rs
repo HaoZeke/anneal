@@ -8,11 +8,11 @@ use std::time::Duration;
 use capnp::message::ReaderOptions;
 use capnp::serialize;
 
-use super::{CatalogFrontierPost, 
-    AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
-    CatalogMutation, CatalogOperation, CatalogReply, CatalogRequest, CatalogSnapshot,
-    DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError,
-    ProtocolRejection, TransitionDestination, decode_reply_reader, encode_request,
+use super::{
+    AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogFrontierPost,
+    CatalogIdentity, CatalogMutation, CatalogOperation, CatalogReply, CatalogRequest,
+    CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState, PopulationEpochState,
+    ProtocolError, ProtocolRejection, TransitionDestination, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -262,7 +262,8 @@ impl CatalogClient {
             | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
-            | AcceptedPayload::PopulationEpoch(_) | AcceptedPayload::FrontierPost(_) => {
+            | AcceptedPayload::PopulationEpoch(_)
+            | AcceptedPayload::FrontierPost(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -343,7 +344,8 @@ impl CatalogClient {
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
-            | AcceptedPayload::CatalogMutation(_) | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::CatalogMutation(_)
+            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -414,7 +416,8 @@ impl CatalogClient {
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
-            | AcceptedPayload::CatalogMutation(_) | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::CatalogMutation(_)
+            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -443,7 +446,8 @@ impl CatalogClient {
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
-            | AcceptedPayload::CatalogMutation(_) | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::CatalogMutation(_)
+            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -500,7 +504,8 @@ impl CatalogClient {
             | AcceptedPayload::CoordinatorStatus(_)
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PopulationEpoch(_)
-            | AcceptedPayload::CatalogMutation(_) | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::CatalogMutation(_)
+            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -729,7 +734,8 @@ fn population_epoch_payload(
         | AcceptedPayload::CoordinatorStatus(_)
         | AcceptedPayload::BridgeAssignment(_)
         | AcceptedPayload::PolicyState(_)
-        | AcceptedPayload::CatalogMutation(_) | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::CatalogMutation(_)
+        | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),

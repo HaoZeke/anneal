@@ -15,11 +15,10 @@ mod run {
     use crate::catalog_rpc::client::{CatalogClient, CatalogClientError, PolicyStateReceipt};
     use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
-        CatalogFrontierPost,
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
-        CatalogMutation, CatalogRelation, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
-        PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolRejection,
-        TransitionDestination,
+        CatalogFrontierPost, CatalogMutation, CatalogRelation, CatalogSnapshot,
+        DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
+        PopulationSelection, ProtocolRejection, TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
