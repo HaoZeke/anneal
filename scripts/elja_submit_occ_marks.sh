@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Submit LJ75 Marks occupancy on packing-gt-stop 7fe8d5a after BUILD_OK.
-# Isolated tree. Does not write sealed lj75-shared-0002 or anneal-stop.
+# Submit LJ75 Marks occupancy on packing-gt-stop 9dde60d after BUILD_OK.
+# Isolated tree. Does not write sealed ensembles 0002 or 0003, or anneal-stop.
 set -euo pipefail
 
-ROOT=${LJ_ROOT:-$HOME/anneal-occ-7fe8d5a}
-NEED=7fe8d5a431a4ce227f8e3d424bd299f3eae51103
+ROOT=${LJ_ROOT:-$HOME/anneal-occ-9dde60d}
+NEED=9dde60d5130623c7862e29181697508af4dc2ba8
 BIN=$ROOT/target/release/examples/lj_cluster_search
 SERVER=$ROOT/target/release/examples/catalog_server
 SRC_FILE=$ROOT/SOURCE_COMMIT
@@ -17,7 +17,7 @@ if ! git -C "$ROOT" merge-base --is-ancestor "$NEED" "$SRC"; then
 fi
 test -x "$BIN"
 test -x "$SERVER"
-OUT75=$HOME/ljwork/jcc/lj75-occ-gt/lj75/shared/lj75-shared-0000
+OUT75=$HOME/ljwork/jcc/lj75-occ-dwell/lj75/shared/lj75-shared-0021
 if [[ -e $OUT75 ]]; then
   echo "refusing submit: $OUT75 already exists" >&2
   exit 2
