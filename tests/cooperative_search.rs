@@ -319,6 +319,10 @@ fn try_sample_candidate_delivers_each_rpc_result_once() {
         run.offer_candidate(0, admitted.clone()).unwrap(),
         CatalogOfferOutcome::Admitted
     );
+    let expected = CatalogCandidate {
+        census_basin: Some(0),
+        ..admitted
+    };
 
     let mut delivered = None;
     for _ in 0..200 {
@@ -335,7 +339,7 @@ fn try_sample_candidate_delivers_each_rpc_result_once() {
     }
     assert_eq!(
         delivered.expect("mailbox never delivered a catalog sample"),
-        admitted
+        expected
     );
     assert_eq!(
         run.try_sample_candidate(0, 92).unwrap(),
