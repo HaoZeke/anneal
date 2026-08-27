@@ -30,6 +30,54 @@ case $ARM in
     ;;
 esac
 
+require_protocol_value() {
+  local name=$1
+  local expected=$2
+  if [[ -v $name && ${!name} != "$expected" ]]; then
+    echo "$name=${!name} conflicts with the JCC LJ protocol value $expected" >&2
+    exit 2
+  fi
+  printf -v "$name" '%s' "$expected"
+  export "$name"
+}
+
+reject_protocol_variable() {
+  local name=$1
+  if [[ -v $name ]]; then
+    echo "$name is not part of the JCC LJ causal protocol" >&2
+    exit 2
+  fi
+}
+
+require_protocol_value CATALOG_SHARED_SCREEN 1
+require_protocol_value CATALOG_SHARED_BIAS 0
+require_protocol_value CATALOG_ENTROPIC_BIAS 0
+require_protocol_value CATALOG_HISTO_SCREEN 0
+require_protocol_value CATALOG_SEAM_LADDER 1
+require_protocol_value CATALOG_FRONTIER_EXCHANGE 1
+require_protocol_value CATALOG_COOP_WELLS 1
+require_protocol_value CATALOG_BRIDGE 0
+require_protocol_value CATALOG_DIFFICULTY 0
+require_protocol_value CATALOG_PACKING_PAVE 0
+require_protocol_value CATALOG_SEAM_PATIENCE 800
+require_protocol_value CATALOG_SEAM_TRACE 0
+require_protocol_value CATALOG_HISTO_RADIUS 1.4
+require_protocol_value CATALOG_PROBE_INTERVAL 8
+require_protocol_value CATALOG_PROBE_SCALE 0.2
+require_protocol_value CATALOG_BRIDGE_INTERVAL 64
+require_protocol_value QUENCH_NOISE 0
+
+reject_protocol_variable CATALOG_CONFIG
+reject_protocol_variable CATALOG_TEMP_LADDER
+reject_protocol_variable CATALOG_MD_ENGINE
+reject_protocol_variable CATALOG_MD_BIN
+reject_protocol_variable CATALOG_MD_INTERVAL
+reject_protocol_variable CATALOG_MD_STEPS
+reject_protocol_variable CATALOG_MD_TEMP
+reject_protocol_variable CATALOG_START_FILE
+reject_protocol_variable CATALOG_START_REPLICA
+reject_protocol_variable CATALOG_BRAIN_PUBLISH
+
 REPLICAS=${CATALOG_REPLICAS:-4}
 WAVE=${CATALOG_WAVE:-4}
 MAX_HOPS=${CATALOG_MAX_HOPS:-}
@@ -388,6 +436,26 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'seed_base=%s\n' "$SEED_BASE"
   printf 'catalog_capacity=%s\n' "$CAPACITY"
   printf 'slice=%s\n' "$SLICE"
+  printf 'coordination_protocol=%s\n' 'jcc-lj-causal-v1'
+  printf 'shared_screen=%s\n' "$CATALOG_SHARED_SCREEN"
+  printf 'shared_bias=%s\n' "$CATALOG_SHARED_BIAS"
+  printf 'entropic_bias=%s\n' "$CATALOG_ENTROPIC_BIAS"
+  printf 'histo_screen=%s\n' "$CATALOG_HISTO_SCREEN"
+  printf 'seam_ladder=%s\n' "$CATALOG_SEAM_LADDER"
+  printf 'frontier_exchange=%s\n' "$CATALOG_FRONTIER_EXCHANGE"
+  printf 'coop_wells=%s\n' "$CATALOG_COOP_WELLS"
+  printf 'bridge=%s\n' "$CATALOG_BRIDGE"
+  printf 'difficulty=%s\n' "$CATALOG_DIFFICULTY"
+  printf 'packing_pave=%s\n' "$CATALOG_PACKING_PAVE"
+  printf 'seam_patience=%s\n' "$CATALOG_SEAM_PATIENCE"
+  printf 'seam_trace=%s\n' "$CATALOG_SEAM_TRACE"
+  printf 'histo_radius=%s\n' "$CATALOG_HISTO_RADIUS"
+  printf 'probe_interval=%s\n' "$CATALOG_PROBE_INTERVAL"
+  printf 'probe_scale=%s\n' "$CATALOG_PROBE_SCALE"
+  printf 'bridge_interval=%s\n' "$CATALOG_BRIDGE_INTERVAL"
+  printf 'quench_noise=%s\n' "$QUENCH_NOISE"
+  printf 'temperature_ladder=%s\n' 'none'
+  printf 'md_engine=%s\n' 'none'
   printf 'transport_noise=%s\n' "$TRANSPORT_NOISE"
   printf 'transport_radius=%s\n' "$TRANSPORT_RADIUS"
   printf 'max_hops=%s\n' "${MAX_HOPS:-none}"
