@@ -473,6 +473,18 @@ mod run {
         }
     }
 
+    struct DescriptorHoleRequest {
+        current: Vec<f64>,
+        samples: u32,
+        draw: u64,
+    }
+
+    impl DescriptorHoleRequest {
+        fn matches(&self, current: &[f64], samples: u32, draw: u64) -> bool {
+            self.current == current && self.samples == samples && self.draw == draw
+        }
+    }
+
     struct ReplicaState {
         trace_sequence: u64,
         ledger_sequence: u64,
@@ -486,6 +498,7 @@ mod run {
         policy_request: Option<PolicyRequest>,
         hole_slot: Arc<Mutex<Option<Result<DescriptorHoleProposal, CatalogClientError>>>>,
         hole_pending: bool,
+        hole_request: Option<DescriptorHoleRequest>,
         sample_slot: Arc<Mutex<Option<Result<Option<CatalogCandidate>, CatalogClientError>>>>,
         sample_pending: bool,
         crossing_slot:
@@ -527,6 +540,7 @@ mod run {
                             policy_request: None,
                             hole_slot: Arc::new(Mutex::new(None)),
                             hole_pending: false,
+                            hole_request: None,
                             sample_slot: Arc::new(Mutex::new(None)),
                             sample_pending: false,
                             crossing_slot: Arc::new(Mutex::new(None)),
@@ -564,6 +578,7 @@ mod run {
             state.policy_request = None;
             *state.policy_slot.lock().expect("policy slot") = None;
             state.hole_pending = false;
+            state.hole_request = None;
             *state.hole_slot.lock().expect("hole slot") = None;
             state.sample_pending = false;
             *state.sample_slot.lock().expect("sample slot") = None;
@@ -1299,27 +1314,33 @@ mod run {
             let finished = {
                 let state = self.replica_mut(replica)?;
                 if state.hole_pending {
-                    state.hole_slot.lock().expect("hole slot").take()
+                    let result = state.hole_slot.lock().expect("hole slot").take();
+                    result.map(|result| (result, state.hole_request.take()))
                 } else {
                     None
                 }
             };
-            if let Some(result) = finished {
+            if let Some((result, request)) = finished {
                 self.replica_mut(replica)?.hole_pending = false;
-                match result {
-                    Ok(proposal) => return Ok(CatalogHoleOutcome::Proposal(proposal)),
-                    Err(CatalogClientError::Rejected(reason)) => {
-                        self.push_event(
-                            replica,
-                            TraceKind::Rejection,
-                            None,
-                            Some(rejection_code(reason)),
-                        )?;
-                        return Ok(CatalogHoleOutcome::Rejected);
-                    }
-                    Err(_) => {
-                        self.push_event(replica, TraceKind::RpcFallback, None, None)?;
-                        return Ok(CatalogHoleOutcome::LocalFallback);
+                let request_matches = request
+                    .as_ref()
+                    .is_some_and(|request| request.matches(&current, samples, draw));
+                if request_matches {
+                    match result {
+                        Ok(proposal) => return Ok(CatalogHoleOutcome::Proposal(proposal)),
+                        Err(CatalogClientError::Rejected(reason)) => {
+                            self.push_event(
+                                replica,
+                                TraceKind::Rejection,
+                                None,
+                                Some(rejection_code(reason)),
+                            )?;
+                            return Ok(CatalogHoleOutcome::Rejected);
+                        }
+                        Err(_) => {
+                            self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                            return Ok(CatalogHoleOutcome::LocalFallback);
+                        }
                     }
                 }
             }
@@ -1329,6 +1350,11 @@ mod run {
                 let state = self.replica_mut(replica)?;
                 let slot = Arc::clone(&state.hole_slot);
                 if let Some(mailbox) = state.client.as_ref() {
+                    state.hole_request = Some(DescriptorHoleRequest {
+                        current: current.clone(),
+                        samples,
+                        draw,
+                    });
                     mailbox.post(move |client| {
                         let answer = client.descriptor_hole(rpc_sequence, current, samples, draw);
                         *slot.lock().expect("hole slot") = Some(answer);
