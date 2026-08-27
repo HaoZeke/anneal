@@ -52,10 +52,13 @@ if [[ -n $MAX_HOPS ]]; then
 fi
 
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
+REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
-CALIBRATION=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}/results_jcc/calibration/lj${N}.json
+CALIBRATION=$REPRO_ROOT/results_jcc/calibration/lj${N}.json
+QUALIFIER=${JCC_QUALIFIER:-$REPRO_ROOT/workflow/jcc/validate_hard_lj_qualification.py}
+QUALIFIER_PYTHON=${JCC_QUALIFIER_PYTHON:-$REPRO_ROOT/.pixi/envs/default/bin/python}
 CAMPAIGN=${CATALOG_CAMPAIGN:-lj-catalog-causal}
 ENSEMBLE="lj${N}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
@@ -111,6 +114,14 @@ if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
 fi
 if [[ ! -f $CALIBRATION ]]; then
   echo "missing census-radius calibration: $CALIBRATION" >&2
+  exit 2
+fi
+if [[ ! -f $QUALIFIER ]]; then
+  echo "missing hard-LJ qualifier: $QUALIFIER" >&2
+  exit 2
+fi
+if [[ ! -x $QUALIFIER_PYTHON ]]; then
+  echo "missing qualification Python: $QUALIFIER_PYTHON" >&2
   exit 2
 fi
 
@@ -285,6 +296,7 @@ fi
 
 solved=0
 best_all=
+qualification_traces=()
 for replica in $(seq 0 $((REPLICAS - 1))); do
   output="$OUT/workers/replica-${replica}.out"
   trace="$OUT/traces/replica-${replica}.jsonl"
@@ -292,6 +304,7 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
   test -s "$output"
   test -s "$trace"
   test -s "$resolved_config"
+  qualification_traces+=("$trace")
   if ! head -n 1 "$trace" \
     | grep -F -q "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING"; then
     echo "trace manifest does not match $ENSEMBLE sharing=$TRACE_SHARING: $trace" >&2
@@ -313,6 +326,11 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
     solved=$((solved + 1))
   fi
 done
+
+"$QUALIFIER_PYTHON" "$QUALIFIER" \
+  --output "$OUT/qualification.json" \
+  "${qualification_traces[@]}"
+
 for replica in $(seq 1 $((REPLICAS - 1))); do
   cmp -s "$OUT/workers/replica-0/resolved-config.json" \
     "$OUT/workers/replica-${replica}/resolved-config.json"
@@ -323,6 +341,7 @@ resolved_config_sha256=$(sha256sum "$OUT/resolved-config.json" | awk '{print $1}
 binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
 server_sha256=$(sha256sum "$SERVER" | awk '{print $1}')
 runner_sha256=$(sha256sum "$0" | awk '{print $1}')
+qualifier_sha256=$(sha256sum "$QUALIFIER" | awk '{print $1}')
 calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
 {
   printf 'campaign=%s\n' "$CAMPAIGN"
@@ -348,6 +367,7 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'binary_sha256=%s\n' "$binary_sha256"
   printf 'server_sha256=%s\n' "$server_sha256"
   printf 'runner_sha256=%s\n' "$runner_sha256"
+  printf 'qualifier_sha256=%s\n' "$qualifier_sha256"
   printf 'calibration_sha256=%s\n' "$calibration_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
