@@ -944,7 +944,7 @@ fn apply_request(
                         draw ^ u64::from(request.identity.replica),
                     );
                     let picked = if scientific.funnel.len() >= 3 {
-                        highest_ei_family_entry(scientific)
+                        q_ei_family_entry(scientific, request.identity.replica)
                     } else {
                         sparsest_family_entry(scientific, &mut rng)
                     };
@@ -2752,6 +2752,48 @@ fn highest_ei_family_entry(scientific: &mut ScientificState) -> Option<(usize, u
         }
     }
     best.map(|(_, family, slot)| (family, slot))
+}
+
+/// WAVE batch: greedy q-EI over packing families, then this replica
+/// takes assignment[replica % q]. Independent highest-EI would send
+/// every extra to the same family.
+fn q_ei_family_entry(scientific: &mut ScientificState, replica: u32) -> Option<(usize, usize)> {
+    let mut by_family: std::collections::BTreeMap<usize, (usize, Vec<f64>)> =
+        std::collections::BTreeMap::new();
+    let sites: Vec<(usize, Vec<f64>, Vec<f64>)> = scientific
+        .catalog
+        .entries()
+        .iter()
+        .enumerate()
+        .map(|(slot, entry)| {
+            (
+                slot,
+                entry.coordinates().to_vec(),
+                entry.descriptor().to_vec(),
+            )
+        })
+        .collect();
+    for (slot, coordinates, descriptor) in &sites {
+        let Some(histogram) = scientific.packing.histogram(coordinates) else {
+            continue;
+        };
+        let family = archive_cell(scientific, descriptor, coordinates).unwrap_or(*slot);
+        by_family.entry(family).or_insert(( *slot, histogram));
+    }
+    if by_family.is_empty() {
+        return highest_ei_family_entry(scientific);
+    }
+    let candidates: Vec<(usize, Vec<f64>)> = by_family
+        .iter()
+        .map(|(family, (_, histogram))| (*family, histogram.clone()))
+        .collect();
+    let q = scientific.last_candidate_by_replica.len().max(1);
+    let order = scientific.funnel.assign_q_ei(&candidates, q);
+    if order.is_empty() {
+        return highest_ei_family_entry(scientific);
+    }
+    let family = order[replica as usize % order.len()];
+    by_family.get(&family).map(|(slot, _)| (family, *slot))
 }
 
 /// The folded book, recomputed only when the book has changed.

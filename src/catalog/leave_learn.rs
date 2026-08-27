@@ -64,11 +64,18 @@ impl LeaveLearner {
 
     /// Record a quenched landing.
     ///
-    /// The funnel sees the packing histogram and the energy. The cover
-    /// arm is rewarded only when the landing beats this replica's best:
-    /// leaving ico for a \(-380\) defect is coverage, not improvement,
-    /// and must not crowd out the next shot.
-    pub fn observe(&mut self, histogram: &[f64], energy: f64, cover: Option<usize>) {
+    /// The funnel sees the packing histogram and the energy. A cover
+    /// that beats this replica's best is improvement. A cover that
+    /// opens a new packing is information about \(A^\star\) (IDS):
+    /// leaving ico for a \(-380\) defect must increment the posterior,
+    /// not crowd it out. A same-packing miss still penalises.
+    pub fn observe(
+        &mut self,
+        histogram: &[f64],
+        energy: f64,
+        cover: Option<usize>,
+        new_packing: bool,
+    ) {
         if energy.is_finite()
             && !histogram.is_empty()
             && histogram.iter().all(|value| value.is_finite())
@@ -82,7 +89,7 @@ impl LeaveLearner {
         }
         if let Some(cover) = cover {
             self.covers.ensure(cover + 1);
-            if improved {
+            if improved || new_packing {
                 self.covers.reward(cover);
             } else {
                 self.covers.penalise(cover);
@@ -91,9 +98,12 @@ impl LeaveLearner {
     }
 
     /// Credit an action after the slice that used it.
-    pub fn credit_action(&mut self, action: usize, improved: bool) {
+    ///
+    /// `paid` is energy drop or a new packing (IDS). A Leave that only
+    /// rematches ico is still a miss.
+    pub fn credit_action(&mut self, action: usize, paid: bool) {
         self.actions.ensure(action + 1);
-        if improved {
+        if paid {
             self.actions.reward(action);
         } else {
             self.actions.penalise(action);
@@ -166,8 +176,11 @@ std::thread_local! {
 }
 
 /// Observe a quenched Leave on this replica's learner.
-pub fn observe_leave(histogram: &[f64], energy: f64, cover: Option<usize>) {
-    LEARNER.with(|slot| slot.borrow_mut().observe(histogram, energy, cover));
+pub fn observe_leave(histogram: &[f64], energy: f64, cover: Option<usize>, new_packing: bool) {
+    LEARNER.with(|slot| {
+        slot.borrow_mut()
+            .observe(histogram, energy, cover, new_packing)
+    });
 }
 
 /// Credit the policy action this slice took.
@@ -227,8 +240,8 @@ mod tests {
         let ico = vec![1.0, 0.0, 0.0];
         let junk = vec![0.0, 1.0, 0.0];
         let unseen = vec![0.0, 0.0, 1.0];
-        learner.observe(&ico, -396.28, Some(0));
-        learner.observe(&junk, -380.0, Some(1));
+        learner.observe(&ico, -396.28, Some(0), false);
+        learner.observe(&junk, -380.0, Some(1), true);
         let picked = learner
             .pick_cover_ei(&[(0, ico), (1, junk), (2, unseen)])
             .expect("funnel with two observations scores");
@@ -236,13 +249,24 @@ mod tests {
     }
 
     #[test]
-    fn only_an_improvement_rewards_the_cover() {
+    fn a_new_packing_rewards_the_cover() {
         let mut learner = LeaveLearner::new();
-        learner.observe(&[1.0], -396.28, Some(0));
-        learner.observe(&[0.0, 1.0], -380.0, Some(1));
+        learner.observe(&[1.0, 0.0], -396.28, Some(0), false);
+        learner.observe(&[0.0, 1.0], -380.0, Some(1), true);
+        assert!(
+            (learner.covers.score(1) - learner.covers.score(0)).abs() < 1e-12,
+            "a Leave that opens a packing is information, not a miss"
+        );
+    }
+
+    #[test]
+    fn a_same_packing_miss_still_penalises() {
+        let mut learner = LeaveLearner::new();
+        learner.observe(&[1.0, 0.0], -396.28, Some(0), false);
+        learner.observe(&[1.0, 0.0], -396.20, Some(1), false);
         assert!(
             learner.covers.score(0) > learner.covers.score(1),
-            "a worse landing must not outvote the well it left"
+            "a rematch that does not drop the energy is still a miss"
         );
     }
 

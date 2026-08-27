@@ -108,6 +108,11 @@ impl FunnelModel {
         })
     }
 
+    /// Hellinger (or Euclidean) kernel between two descriptors.
+    pub fn similarity(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
+        self.kernel(a, b)
+    }
+
     fn kernel(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         let amp2 = self.amplitude * self.amplitude;
         let ell2 = self.length_scale * self.length_scale;
@@ -354,6 +359,53 @@ impl FunnelModel {
         }
         out
     }
+
+    /// Rank-and-cycle q-EI on a discrete family table.
+    ///
+    /// Independent argmax EI repeats the same family `q` times. Rank the
+    /// table by Jones EI and cycle without replacement so a WAVE spreads
+    /// across families that still have remaining improvement.
+    pub fn assign_q_ei(&mut self, candidates: &[(usize, Vec<f64>)], q: usize) -> Vec<usize> {
+        if candidates.is_empty() || q == 0 {
+            return Vec::new();
+        }
+        let mut scored: Vec<(f64, usize)> = Vec::new();
+        for (id, histogram) in candidates {
+            if histogram.is_empty() {
+                continue;
+            }
+            let ei = self.expected_improvement(Array1::from(histogram.clone()).view());
+            if ei.is_finite() {
+                scored.push((ei, *id));
+            }
+        }
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        if scored.is_empty() {
+            return Vec::new();
+        }
+        (0..q).map(|i| scored[i % scored.len()].1).collect()
+    }
+
+    /// `q` copies of the lowest posterior mean. The greedy lie q-EI replaces.
+    pub fn assign_by_mean(&mut self, candidates: &[(usize, Vec<f64>)], q: usize) -> Vec<usize> {
+        if candidates.is_empty() || q == 0 {
+            return Vec::new();
+        }
+        let mut best: Option<(f64, usize)> = None;
+        for (id, histogram) in candidates {
+            if histogram.is_empty() {
+                continue;
+            }
+            let (mean, _) = self.predict(Array1::from(histogram.clone()).view());
+            if mean.is_finite() && best.as_ref().is_none_or(|(held, _)| mean < *held) {
+                best = Some((mean, *id));
+            }
+        }
+        match best {
+            Some((_, id)) => vec![id; q],
+            None => Vec::new(),
+        }
+    }
 }
 
 fn simplex_weights(x: ArrayView1<f64>) -> Option<Vec<f64>> {
@@ -597,6 +649,42 @@ mod tests {
         assert!(
             ei_ratio > 2.0 * mes_ratio || mes_ratio > 2.0 * ei_ratio,
             "EI ratio {ei_ratio} MES ratio {mes_ratio} (near EI {ei_near} MES {mes_near}, far EI {ei_far} MES {mes_far})"
+        );
+    }
+
+    #[test]
+    fn q_ei_puts_a_slot_on_the_defect() {
+        let mut m = FunnelModel::new(0.15, 20.0, 1e-2);
+        let ico = pt(&[1.0, 0.0, 0.0]);
+        let defect = pt(&[0.0, 1.0, 0.0]);
+        for _ in 0..6 {
+            m.observe(ico.view(), -396.28);
+        }
+        m.observe(defect.view(), -380.0);
+        let cands = [(0usize, ico.to_vec()), (1usize, defect.to_vec())];
+        let mean = m.assign_by_mean(&cands, 4);
+        assert!(
+            mean.iter().all(|&id| id == 0),
+            "mean-greedy WAVE {mean:?} stays on the ico floor"
+        );
+        let qei = m.assign_q_ei(&cands, 4);
+        assert!(
+            qei.contains(&1),
+            "q-EI WAVE {qei:?} must send a replica to the defect"
+        );
+    }
+
+    #[test]
+    fn hellinger_ranks_marks_farther_than_a_near_ico() {
+        let m = FunnelModel::new(0.15, 20.0, 1e-2);
+        let ico = pt(&[1.0, 0.0, 0.0]);
+        let near = pt(&[0.97, 0.03, 0.0]);
+        let marks = pt(&[0.0, 0.0, 1.0]);
+        let k_near = m.similarity(ico.view(), near.view());
+        let k_marks = m.similarity(ico.view(), marks.view());
+        assert!(
+            k_near > k_marks,
+            "near-ico kernel {k_near} must beat ico-Marks {k_marks}"
         );
     }
 }

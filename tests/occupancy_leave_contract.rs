@@ -197,6 +197,11 @@ fn occupancy_leave_action_does_not_fall_back_to_a_random_cluster() {
         arm.contains("leave_archive_hole") || arm.contains("leave_packing_state"),
         "ArchiveHole is leftover-orthogonal, not a leftover hole"
     );
+    let server = include_str!("../src/catalog_rpc/server.rs");
+    assert!(
+        server.contains("q_ei_family_entry"),
+        "WAVE OtherFamily draws cycle q-EI, not a single highest-EI family"
+    );
     assert!(
         arm.contains("archive_cover_index") || arm.contains("cover_index"),
         "ArchiveHole is a SoftSaddle covering direction, not a random nu3 kick"
