@@ -299,11 +299,17 @@ best_all=
 qualification_traces=()
 for replica in $(seq 0 $((REPLICAS - 1))); do
   output="$OUT/workers/replica-${replica}.out"
+  errors="$OUT/workers/replica-${replica}.err"
   trace="$OUT/traces/replica-${replica}.jsonl"
   resolved_config="$OUT/workers/replica-${replica}/resolved-config.json"
   test -s "$output"
   test -s "$trace"
   test -s "$resolved_config"
+  if [[ -s $errors ]]; then
+    echo "replica $replica wrote error output" >&2
+    cat "$errors" >&2
+    exit 1
+  fi
   qualification_traces+=("$trace")
   if ! head -n 1 "$trace" \
     | grep -F -q "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING"; then
@@ -312,6 +318,10 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
   fi
   if ! grep -F -q '"kind":"slice"' "$trace"; then
     echo "trace has no analyzer slice: $trace" >&2
+    exit 1
+  fi
+  if grep -F -q '"kind":"rpc_fallback"' "$trace"; then
+    echo "trace records catalog RPC fallback: $trace" >&2
     exit 1
   fi
   grep -q "budget ${PER_REPLICA_BUDGET} " "$output"

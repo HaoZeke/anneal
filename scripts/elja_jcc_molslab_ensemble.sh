@@ -246,6 +246,14 @@ for replica in 0 1 2 3; do
   output=$worker/stdout.log
   test -s "$output"
   test ! -s "$worker/stderr.log"
+  if ! grep -F -q "capnp bank " "$output"; then
+    echo "replica $replica did not connect to its bank" >&2
+    exit 1
+  fi
+  if grep -F -q " own walk" "$output"; then
+    echo "replica $replica fell back to an unbanked walk" >&2
+    exit 1
+  fi
   grep -q "charged ${PER_REPLICA_BUDGET}" "$output"
   grep -q "arm ${label}" "$output"
   grep -q "encounter target=" "$output"
