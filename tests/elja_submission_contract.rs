@@ -149,6 +149,8 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
         r#"export OMP_NUM_THREADS=1"#,
         r#"export OPENBLAS_NUM_THREADS=1"#,
         r#"export MKL_NUM_THREADS=1"#,
+        r#"grep -F -q "capnp bank ""#,
+        r#"grep -F -q " own walk""#,
         r#"source_commit=%s\n"#,
         r#"soap_mode=%s\n"#,
         r#"requested_options=%s\n"#,
