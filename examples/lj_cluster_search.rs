@@ -3967,16 +3967,16 @@ fn run_capnp_catalog(
                 // at once.
                 let reference_draws =
                     (0..anneal_core::catalog::PACKING_REFERENCE_DRAWS).map(|step| {
-                    // Any draw that is neither sentinel indexes an entry
-                    // modulo the catalog length; masking the top bits
-                    // keeps it off INCUMBENT_SAMPLE_DRAW and
-                    // SPARSE_SAMPLE_DRAW, which mean a policy rather than
-                    // a slot.
-                    ((u64::from(replica) << 40)
-                        ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                        ^ (step as u64).wrapping_mul(0x85EB_CA6B))
-                        & (u64::MAX >> 2)
-                });
+                        // Any draw that is neither sentinel indexes an entry
+                        // modulo the catalog length; masking the top bits
+                        // keeps it off INCUMBENT_SAMPLE_DRAW and
+                        // SPARSE_SAMPLE_DRAW, which mean a policy rather than
+                        // a slot.
+                        ((u64::from(replica) << 40)
+                            ^ (checkpoint_sequence as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                            ^ (step as u64).wrapping_mul(0x85EB_CA6B))
+                            & (u64::MAX >> 2)
+                    });
                 if let Ok(CatalogSamplesOutcome::Candidates(held)) =
                     cooperative.try_sample_candidates(replica, reference_draws)
                 {
