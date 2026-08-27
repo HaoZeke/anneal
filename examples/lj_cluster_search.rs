@@ -3635,8 +3635,10 @@ fn run_capnp_catalog(
                     &mut slice_sequence,
                     checkpoint_charged,
                     snapshot.current_energy(),
-                    |_cooperative, _slice_sequence| CheckpointAction::Retire {
-                        reason: certificate.as_str().to_owned(),
+                    |_cooperative, _slice_sequence| {
+                        return CheckpointAction::Retire {
+                            reason: certificate.as_str().to_owned(),
+                        };
                     },
                 );
             }
