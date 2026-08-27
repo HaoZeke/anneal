@@ -194,6 +194,31 @@ fn causal_campaigns_bind_source_to_built_artifacts() {
 }
 
 #[test]
+fn production_builders_use_the_committed_dependency_graph() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for script in [
+        "elja_build_brains.sh",
+        "elja_build_lj.sh",
+        "elja_build_rgpot_ex.sh",
+        "terra_build_brains.sh",
+        "terra_build_lj.sh",
+    ] {
+        let source = fs::read_to_string(root.join("scripts").join(script))
+            .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
+        let logical_lines = source.replace("\\\n", " ");
+        for command in logical_lines
+            .lines()
+            .filter(|line| line.contains("cargo build ") || line.contains("cargo test "))
+        {
+            assert!(
+                command.contains("--locked"),
+                "{script} must use the committed dependency graph: {command}"
+            );
+        }
+    }
+}
+
+#[test]
 fn molecular_ensembles_are_isolated_paired_slurm_runs() {
     let runner = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("scripts")
