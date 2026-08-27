@@ -139,6 +139,10 @@ if [[ ${FAKE_OMIT_SLICE:-0} != 1 ]]; then
   printf '{"kind":"slice","replica":%s,"slice":1,"slice_charged_work":1,"slice_energy":-44.326801}\n' \
     "$CATALOG_REPLICA" >>"$CATALOG_TRACE"
 fi
+if [[ ${FAKE_RPC_FALLBACK:-0} == 1 ]]; then
+  printf '{"kind":"rpc_fallback","replica":%s,"sequence":2,"aggregate_charged":1}\n' \
+    "$CATALOG_REPLICA" >>"$CATALOG_TRACE"
+fi
 printf 'LJ%s, budget %s charged evaluations, 1 seeds\n' "$1" "$2"
 printf 'seed %s: best -44.326801\n' "$SEED_OFFSET"
 printf '1/1 solved\n'
@@ -327,5 +331,38 @@ printf '{"qualified":true}\n' >"$output"
         "runner accepted workers without resolved configurations\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&missing_config.stdout),
         String::from_utf8_lossy(&missing_config.stderr)
+    );
+
+    let fallback_server_log = root.join("servers-fallback.log");
+    let fallback = Command::new("bash")
+        .arg(&runner)
+        .args(["13", "10", "10", "0.1", "shared"])
+        .env("SLURM_JOB_ID", "4245")
+        .env("LJ_ROOT", &root)
+        .env("LJ_BIN", &search)
+        .env("CATALOG_SERVER_BIN", &server)
+        .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
+        .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+        .env("JCC_QUALIFIER", &qualifier)
+        .env("JCC_QUALIFIER_PYTHON", "/bin/bash")
+        .env("LJ_OUT", root.join("fallback-output"))
+        .env("CATALOG_CAMPAIGN", "causal-fallback-test")
+        .env("CATALOG_REPLICAS", "2")
+        .env("CATALOG_WAVE", "2")
+        .env("CATALOG_SLICE", "1")
+        .env("CATALOG_MAX_HOPS", "3")
+        .env("CATALOG_POPULATION_INTERVAL", "10")
+        .env("CATALOG_BRAIN_PORT_BASE", "29300")
+        .env("SEED_OFFSET_BASE", "1200")
+        .env("FAKE_SERVER_LOG", &fallback_server_log)
+        .env("FAKE_RPC_FALLBACK", "1")
+        .env_remove("CATALOG_CONFIG")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
+    assert!(
+        !fallback.status.success(),
+        "runner sealed traces containing RPC fallback evidence\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&fallback.stdout),
+        String::from_utf8_lossy(&fallback.stderr)
     );
 }
