@@ -45,6 +45,8 @@ SEED_BASE=$((${SEED_OFFSET_BASE:-0} + ENSEMBLE_INDEX * REPLICAS))
 ENSEMBLE="${SYSTEM}-${SOAP_MODE}-${ARM}-$(printf '%04d' "$ENSEMBLE_INDEX")"
 OUT="$OUT_ROOT/$CAMPAIGN/$SYSTEM/$ARM/$ENSEMBLE"
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
+RGPOT_SOURCE_COMMIT_FILE=${JCC_RGPOT_SOURCE_COMMIT_FILE:-$ROOT/RGPOT_SOURCE_COMMIT}
+RGPOT_PIXI_LOCK_SHA256_FILE=${JCC_RGPOT_PIXI_LOCK_SHA256_FILE:-$ROOT/RGPOT_PIXI_LOCK_SHA256}
 SERVER=$ROOT/target/release/examples/bank_server
 PEEK=$ROOT/target/release/examples/bank_peek
 CON=$ROOT/examples/fixtures/cuh2_fcc_slab.con
@@ -125,6 +127,31 @@ if [[ ! -s $ROOT/MOLSLAB_BUILD_SHA256SUMS ]]; then
   exit 2
 fi
 (cd "$ROOT" && sha256sum -c MOLSLAB_BUILD_SHA256SUMS)
+if [[ ! -s $RGPOT_SOURCE_COMMIT_FILE || ! -s $RGPOT_PIXI_LOCK_SHA256_FILE ]]; then
+  echo "missing rgpot source provenance below $ROOT" >&2
+  exit 2
+fi
+IFS= read -r RGPOT_SOURCE_COMMIT <"$RGPOT_SOURCE_COMMIT_FILE"
+IFS= read -r RGPOT_PIXI_LOCK_SHA256 <"$RGPOT_PIXI_LOCK_SHA256_FILE"
+if [[ ! $RGPOT_SOURCE_COMMIT =~ ^[0-9a-f]{40}$ || ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
+  echo "invalid rgpot source provenance below $ROOT" >&2
+  exit 2
+fi
+RGPOT_HEAD=$(git -C "$RGPOT" rev-parse HEAD)
+if [[ $RGPOT_SOURCE_COMMIT != "$RGPOT_HEAD" ]]; then
+  echo "RGPOT_SOURCE_COMMIT=$RGPOT_SOURCE_COMMIT does not match HEAD=$RGPOT_HEAD" >&2
+  exit 2
+fi
+if ! git -C "$RGPOT" diff --quiet HEAD --; then
+  echo "rgpot tracked source differs from HEAD=$RGPOT_HEAD" >&2
+  git -C "$RGPOT" status --short >&2
+  exit 2
+fi
+RGPOT_LOCK_ACTUAL=$(sha256sum "$RGPOT/pixi.lock" | awk '{print $1}')
+if [[ $RGPOT_PIXI_LOCK_SHA256 != "$RGPOT_LOCK_ACTUAL" ]]; then
+  echo "rgpot Pixi lock digest does not match $RGPOT/pixi.lock" >&2
+  exit 2
+fi
 export LD_LIBRARY_PATH="${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
@@ -316,6 +343,8 @@ peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
   printf 'bank_sync=charged_slices\n'
   printf 'bank_sync_interval=%s\n' "$SYNC_INTERVAL"
   printf 'source_commit=%s\n' "$SOURCE_COMMIT"
+  printf 'rgpot_source_commit=%s\n' "$RGPOT_SOURCE_COMMIT"
+  printf 'rgpot_pixi_lock_sha256=%s\n' "$RGPOT_PIXI_LOCK_SHA256"
   printf 'resolved_config_sha256=%s\n' "$resolved_config_sha256"
   printf 'binary_sha256=%s\n' "$binary_sha256"
   printf 'engine_sha256=%s\n' "$engine_sha256"

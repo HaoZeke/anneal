@@ -5,6 +5,7 @@ set -euo pipefail
 STAGE=${1:?development, qualification, or production}
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 SOURCE_ROOT=${JCC_SOURCE_ROOT:-$ROOT}
+RGPOT=${RGPOT_ROOT:-$HOME/rgpot}
 RUNNER=$ROOT/scripts/elja_jcc_molslab_ensemble.sh
 OUT_ROOT=${MOLSLAB_OUT:-$HOME/ljwork/jcc}
 CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}
@@ -49,6 +50,33 @@ if ! (cd "$SOURCE_ROOT" && git diff --quiet HEAD --); then
   exit 2
 fi
 (cd "$ROOT" && sha256sum -c MOLSLAB_BUILD_SHA256SUMS)
+RGPOT_SOURCE_COMMIT_FILE=$ROOT/RGPOT_SOURCE_COMMIT
+RGPOT_PIXI_LOCK_SHA256_FILE=$ROOT/RGPOT_PIXI_LOCK_SHA256
+if [[ ! -s $RGPOT_SOURCE_COMMIT_FILE || ! -s $RGPOT_PIXI_LOCK_SHA256_FILE ]]; then
+  echo "missing rgpot source provenance below $ROOT" >&2
+  exit 2
+fi
+IFS= read -r RGPOT_SOURCE_COMMIT <"$RGPOT_SOURCE_COMMIT_FILE"
+IFS= read -r RGPOT_PIXI_LOCK_SHA256 <"$RGPOT_PIXI_LOCK_SHA256_FILE"
+if [[ ! $RGPOT_SOURCE_COMMIT =~ ^[0-9a-f]{40}$ || ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
+  echo "invalid rgpot source provenance below $ROOT" >&2
+  exit 2
+fi
+RGPOT_HEAD=$(git -C "$RGPOT" rev-parse HEAD)
+if [[ $RGPOT_SOURCE_COMMIT != "$RGPOT_HEAD" ]]; then
+  echo "RGPOT_SOURCE_COMMIT=$RGPOT_SOURCE_COMMIT does not match HEAD=$RGPOT_HEAD" >&2
+  exit 2
+fi
+if ! git -C "$RGPOT" diff --quiet HEAD --; then
+  echo "rgpot tracked source differs from HEAD=$RGPOT_HEAD" >&2
+  git -C "$RGPOT" status --short >&2
+  exit 2
+fi
+RGPOT_LOCK_ACTUAL=$(sha256sum "$RGPOT/pixi.lock" | awk '{print $1}')
+if [[ $RGPOT_PIXI_LOCK_SHA256 != "$RGPOT_LOCK_ACTUAL" ]]; then
+  echo "rgpot Pixi lock digest does not match $RGPOT/pixi.lock" >&2
+  exit 2
+fi
 mkdir -p "$OUT_ROOT/submissions"
 last=$((ENSEMBLES - 1))
 systems=(h2o2:2500 h2o4:2500 h2o6:4000 cuh2:2500)
@@ -67,7 +95,7 @@ for specification in "${systems[@]}"; do
         --cpus-per-task="${ELJA_CPUS_PER_TASK:-8}" \
         --mem="${ELJA_MOLSLAB_MEM:-16G}" \
         --output="$log" \
-        --export="ALL,MOLSLAB_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE}" \
+        --export="ALL,MOLSLAB_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE},RGPOT_ROOT=${RGPOT}" \
         "$RUNNER" "$system" "$budget" "$arm" slurm-array "$soap_mode"
     done
   done
