@@ -72,7 +72,12 @@ build_engines() {
 build_examples() {
   export PATH="${HOME}/.cargo/bin:${PATH}"
   cd "$ROOT"
-  cargo build --offline --release --features rgpot-ex,featomic,bank-rpc \
+  if ! git diff --quiet HEAD --; then
+    echo "refusing build: tracked source differs from HEAD" >&2
+    git status --short >&2
+    exit 2
+  fi
+  cargo build --offline --locked --release --features rgpot-ex,featomic,bank-rpc \
     --example molecular_cluster --example slab_adsorption --example bank_server \
     --example bank_peek
   local mol slab bank peek
@@ -84,10 +89,25 @@ build_examples() {
     echo "examples missing" >&2
     exit 1
   }
+  [[ -e $ROOT/engines/libxtb_engine.so && -e $ROOT/engines/librgpot_cuh2.so ]] || {
+    echo "molecular engines missing below $ROOT/engines" >&2
+    exit 1
+  }
+  git rev-parse HEAD >SOURCE_COMMIT
+  sha256sum \
+    target/release/examples/molecular_cluster \
+    target/release/examples/slab_adsorption \
+    target/release/examples/bank_server \
+    target/release/examples/bank_peek \
+    engines/libxtb_engine.so \
+    engines/librgpot_cuh2.so \
+    >MOLSLAB_BUILD_SHA256SUMS
+  sha256sum -c MOLSLAB_BUILD_SHA256SUMS
   echo "EXAMPLES_OK $mol $slab $bank $peek"
 }
 
 smoke() {
+  (cd "$ROOT" && sha256sum -c MOLSLAB_BUILD_SHA256SUMS)
   export RGPOT_XTB_ENGINE=$ROOT/engines/libxtb_engine.so
   export RGPOT_CUH2_LIBRARY=$ROOT/engines/librgpot_cuh2.so
   export LD_LIBRARY_PATH="${RGPOT}/.pixi/envs/xtbbld/lib:${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"

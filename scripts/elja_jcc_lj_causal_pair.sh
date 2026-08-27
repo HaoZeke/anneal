@@ -112,6 +112,21 @@ if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 2
 fi
+HEAD=$(git -C "$ROOT" rev-parse HEAD)
+if [[ $SOURCE_COMMIT != "$HEAD" ]]; then
+  echo "SOURCE_COMMIT=$SOURCE_COMMIT does not match HEAD=$HEAD" >&2
+  exit 2
+fi
+if ! git -C "$ROOT" diff --quiet HEAD --; then
+  echo "tracked source differs from HEAD=$HEAD" >&2
+  git -C "$ROOT" status --short >&2
+  exit 2
+fi
+if [[ ! -s $ROOT/BUILD_SHA256SUMS ]]; then
+  echo "missing LJ build artifact seal: $ROOT/BUILD_SHA256SUMS" >&2
+  exit 2
+fi
+(cd "$ROOT" && sha256sum -c BUILD_SHA256SUMS)
 if [[ ! -f $CALIBRATION ]]; then
   echo "missing census-radius calibration: $CALIBRATION" >&2
   exit 2
