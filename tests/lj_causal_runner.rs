@@ -144,6 +144,25 @@ printf 'seed %s: best -44.326801\n' "$SEED_OFFSET"
 printf '1/1 solved\n'
 "#,
     );
+    let qualifier = root.join("qualifier.sh");
+    write_executable(
+        &qualifier,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+output=
+while (($#)); do
+  case $1 in
+    --output)
+      output=$2
+      shift 2
+      ;;
+    *) shift ;;
+  esac
+done
+test -n "$output"
+printf '{"qualified":true}\n' >"$output"
+"#,
+    );
 
     let out_root = root.join("output");
     let mut seeds_by_arm = Vec::new();
@@ -159,6 +178,8 @@ printf '1/1 solved\n'
             .env("CATALOG_SERVER_BIN", &server)
             .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
             .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+            .env("JCC_QUALIFIER", &qualifier)
+            .env("JCC_QUALIFIER_PYTHON", "/bin/bash")
             .env("LJ_OUT", &out_root)
             .env("CATALOG_CAMPAIGN", "causal-test")
             .env("CATALOG_REPLICAS", "2")
@@ -186,6 +207,7 @@ printf '1/1 solved\n'
             .join(arm)
             .join(ensemble);
         assert!(run.join("TERMINAL_OK").is_file());
+        assert!(run.join("qualification.json").is_file());
         let manifest = fs::read_to_string(run.join("run.manifest")).unwrap();
         assert_eq!(value(&manifest, "arm"), arm);
         assert_eq!(value(&manifest, "replicas"), "2");
@@ -196,6 +218,7 @@ printf '1/1 solved\n'
         assert_eq!(value(&manifest, "transport_noise"), "0.05");
         assert!(run.join("resolved-config.json").is_file());
         assert_eq!(value(&manifest, "resolved_config_sha256").len(), 64);
+        assert_eq!(value(&manifest, "qualifier_sha256").len(), 64);
         resolved_hashes.push(value(&manifest, "resolved_config_sha256").to_owned());
 
         let worker0 = fs::read_to_string(run.join("workers/replica-0.out")).unwrap();
@@ -250,6 +273,8 @@ printf '1/1 solved\n'
         .env("CATALOG_SERVER_BIN", &server)
         .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
         .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+        .env("JCC_QUALIFIER", &qualifier)
+        .env("JCC_QUALIFIER_PYTHON", "/bin/bash")
         .env("LJ_OUT", root.join("incomplete-output"))
         .env("CATALOG_CAMPAIGN", "causal-incomplete-test")
         .env("CATALOG_REPLICAS", "2")
@@ -281,6 +306,8 @@ printf '1/1 solved\n'
         .env("CATALOG_SERVER_BIN", &server)
         .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
         .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+        .env("JCC_QUALIFIER", &qualifier)
+        .env("JCC_QUALIFIER_PYTHON", "/bin/bash")
         .env("LJ_OUT", root.join("missing-config-output"))
         .env("CATALOG_CAMPAIGN", "causal-missing-config-test")
         .env("CATALOG_REPLICAS", "2")
