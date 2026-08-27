@@ -81,10 +81,10 @@
 //! of the same well are not draws. A saturated packing census of
 //! shallow families is not retire: extras keep Leaving so an unseen
 //! funnel can still appear. Replicas retire when a mixing putative is
-//! certified and that packing census is saturated and FunnelModel EI
-//! on the seen packings is exhausted and the rematched family floor
-//! is met. Leftover-SOAP hatches of a seen packing do not walk the
-//! remaining force budget once the sparsified book has no holes. After the
+//! certified and that packing census is saturated and leftover SOAP
+//! has dwelt under the unseen-mass ceiling (or the packing book holds
+//! one family) and FunnelModel EI on the seen packings is exhausted
+//! and the rematched family floor is met. After the
 //! book exists, single linkage at [`crate::catalog::PACKING_LINK`] folds
 //! cells of one packing into one community. Leave continues only while that
 //! compacted book still has holes: a community with no well arrivals, or
@@ -1909,19 +1909,25 @@ pub fn promote_one_sided(seats: &mut [InterfaceSeat]) -> bool {
     promoted
 }
 
-/// Replica retire. Mixing certified, packing Good--Turing, FunnelModel
-/// EI exhausted on seen packings, and the rematched family floor.
-/// CatalogSaturated names census completeness and does not retire.
+/// Replica retire. Mixing certified, packing Good--Turing, leftover
+/// dwell (or one packing family on the book), FunnelModel EI exhausted
+/// on seen packings, and the rematched family floor. CatalogSaturated
+/// names census completeness and does not retire: extras keep Leaving.
 /// `catalog_saturated` is packing-family saturation, not leftover-SOAP.
-/// Leftover-SOAP hatches are the champion isomer walk of a seen
-/// packing. They are reported; they do not block retire after packing
-/// Chao1 and MixingCertified. Requiring leftover-SOAP dwell walks the
-/// force budget after the putative is already certified.
-/// `leftover_dwell` stays on the signature as the census bit.
+/// `leftover_dwell` is consecutive saturated independent leftover samples,
+/// not repeated diagnostic reports or a one-shot leftover nick. Required
+/// whenever the packing book holds more than one family
+/// (`Hop.leftover_unsaturated_does_not_retire`). A single book family
+/// is Boender--Rinnooy Kan on one cell (`Hop.one_book_family_waives_leftover`):
+/// leftover-SOAP hatches are intra-well and do not block. Live rematch of
+/// last candidates after extras Leave is not that count. A one-community
+/// Fiedler floor with many DECAF packings is not that case.
 /// `ei_exhausted` is Jones remaining improvement on observed
 /// FunnelModel morphologies, not a far-field GP probe.
 /// `n_occupied_families` is the packing-book occupied-family count
-/// (visits > 0), not leftover-SOAP basin count.
+/// (visits > 0), not live rematch of last candidates and not a
+/// leftover-SOAP basin count. One book family is Boender--Rinnooy Kan
+/// on one cell. Many book families with extras already Left is not.
 pub fn occupancy_retire(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
@@ -1940,6 +1946,8 @@ pub fn occupancy_retire(
 }
 
 /// Retire at an explicit family floor. Good--Turing alone is floor 1.
+/// Leftover dwell is required unless the book has one packing family
+/// (`Hop.leftoverOk`: leftover_dwell || n_occupied_families < 2).
 pub fn occupancy_retire_at(
     certificate: OccupancyCertificate,
     catalog_saturated: bool,
@@ -1948,9 +1956,9 @@ pub fn occupancy_retire_at(
     n_occupied_families: usize,
     min_occupied_families: usize,
 ) -> bool {
-    let _ = leftover_dwell;
     n_occupied_families >= min_occupied_families
         && catalog_saturated
+        && (leftover_dwell || n_occupied_families < 2)
         && ei_exhausted
         && matches!(certificate, OccupancyCertificate::MixingCertified)
 }
@@ -2324,10 +2332,10 @@ mod tests {
     }
 
     #[test]
-    fn leftover_soap_does_not_block_mixing_packing_and_ei() {
+    fn leftover_unsaturated_does_not_retire() {
         assert!(!leftover_sat_dwell(&[false]));
         assert!(!leftover_sat_dwell(&[true]));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             false,
@@ -2342,6 +2350,14 @@ mod tests {
             true,
             2,
             2
+        ));
+        assert!(occupancy_retire_at(
+            OccupancyCertificate::MixingCertified,
+            true,
+            false,
+            true,
+            1,
+            1
         ));
     }
 
@@ -2447,7 +2463,7 @@ mod tests {
         let mut dwell_then_hatch = vec![true; 5];
         dwell_then_hatch.push(false);
         assert!(!leftover_sat_dwell(&dwell_then_hatch));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             leftover_sat_dwell(&[true]),
@@ -2463,7 +2479,7 @@ mod tests {
             1,
             1
         ));
-        assert!(occupancy_retire_at(
+        assert!(!occupancy_retire_at(
             OccupancyCertificate::MixingCertified,
             true,
             false,
