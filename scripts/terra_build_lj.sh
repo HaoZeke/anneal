@@ -33,7 +33,6 @@ echo "cmake=$(cmake --version | head -1)"
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server \
-  --example campaign_env \
   --example leave_packing_probe
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
@@ -59,7 +58,6 @@ done
 sha256sum \
   target/release/examples/lj_cluster_search \
   target/release/examples/catalog_server \
-  target/release/examples/campaign_env \
   >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
