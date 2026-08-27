@@ -652,6 +652,19 @@ fn a_packing_is_what_its_cells_chain_into_not_a_radius() {
         .collect();
     let to_marks = packing_distance(&histograms[0], &histograms[1]);
     let to_isomer = packing_distance(&histograms[0], &histograms[2]);
+    let funnel = anneal_core::funnel_bo::FunnelModel::new(0.15, 20.0, 1e-2);
+    let k_iso = funnel.similarity(
+        ndarray::Array1::from(histograms[0].clone()).view(),
+        ndarray::Array1::from(histograms[2].clone()).view(),
+    );
+    let k_marks = funnel.similarity(
+        ndarray::Array1::from(histograms[0].clone()).view(),
+        ndarray::Array1::from(histograms[1].clone()).view(),
+    );
+    assert!(
+        k_iso > k_marks,
+        "Hellinger kernel must rank ico-isomer {k_iso} closer than ico-Marks {k_marks}"
+    );
     assert!(
         to_marks > PACKING_MERGE,
         "ico-Marks {to_marks} must clear the cell grain"

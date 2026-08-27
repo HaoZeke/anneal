@@ -1464,12 +1464,13 @@ where
                                 &histogram,
                                 candidate_energy,
                                 Some(leave_cover),
+                                walked_off,
                             );
                         }
                     }
                     crate::catalog::credit_action(
                         crate::catalog::ACTION_LEAVE,
-                        candidate_energy < from_energy - 1e-6,
+                        walked_off || candidate_energy < from_energy - 1e-6,
                     );
                     // What this Leave actually left standing on the packing
                     // it started from. The amplitude is set on the first
