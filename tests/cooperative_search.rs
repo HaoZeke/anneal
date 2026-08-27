@@ -22,9 +22,9 @@ use anneal_core::catalog_rpc::{
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome,
-    CooperativeRun, PolicyEvidenceOutcome, PolicyRole, PopulationSynchronizationOutcome,
-    ProposalFamily, RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation,
-    SynchronizationOutcome, TraceKind, TransitionRecordOutcome,
+    CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
+    PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
+    SliceTrace, SliceValidation, SynchronizationOutcome, TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -570,6 +570,61 @@ fn try_sample_candidate_keeps_sample_roles_separate() {
         run.try_sample_candidate(0, SPARSE_SAMPLE_DRAW).unwrap(),
         CatalogSampleOutcome::Candidate(_)
     ));
+}
+
+#[test]
+fn try_sample_candidates_pipelines_every_reference_draw() {
+    let server = server_with_capacity(2);
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    for admitted in [candidate(0, 1, 1.2), candidate(0, 2, 2.0)] {
+        assert_eq!(
+            run.offer_candidate(0, admitted).unwrap(),
+            CatalogOfferOutcome::Admitted
+        );
+    }
+
+    assert_eq!(
+        run.try_sample_candidates(0, [0, 1]).unwrap(),
+        CatalogSamplesOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    let CatalogSamplesOutcome::Candidates(first) =
+        run.try_sample_candidates(0, [2, 3]).unwrap()
+    else {
+        panic!("the completed two-draw batch must be delivered")
+    };
+    let mut first_separations = first
+        .iter()
+        .map(|candidate| candidate.coordinates[3])
+        .collect::<Vec<_>>();
+    first_separations.sort_by(f64::total_cmp);
+    assert_eq!(first_separations, vec![1.2, 2.0]);
+
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    let CatalogSamplesOutcome::Candidates(second) =
+        run.try_sample_candidates(0, [4, 5]).unwrap()
+    else {
+        panic!("consuming one batch must pipeline the succeeding draws")
+    };
+    let mut second_separations = second
+        .iter()
+        .map(|candidate| candidate.coordinates[3])
+        .collect::<Vec<_>>();
+    second_separations.sort_by(f64::total_cmp);
+    assert_eq!(second_separations, vec![1.2, 2.0]);
 }
 
 #[test]
