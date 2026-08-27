@@ -135,6 +135,12 @@ fn molecular_build_produces_every_paired_campaign_executable() {
 #[test]
 fn causal_campaigns_bind_source_to_built_artifacts() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let lj_build = fs::read_to_string(root.join("scripts/elja_build_lj.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ build: {error}"));
+    assert!(
+        lj_build.contains("cargo build --offline --locked --release"),
+        "the LJ build must use the committed dependency graph"
+    );
     let lj_submit = fs::read_to_string(root.join("scripts/elja_submit_jcc_lj.sh"))
         .unwrap_or_else(|error| panic!("failed to read LJ submitter: {error}"));
     let lj_runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_causal_pair.sh"))
@@ -164,6 +170,10 @@ fn causal_campaigns_bind_source_to_built_artifacts() {
     assert!(
         molecular_build.contains("MOLSLAB_BUILD_SHA256SUMS"),
         "the molecular build must seal engines, drivers, bank, and inspector"
+    );
+    assert!(
+        molecular_build.contains("cargo build --offline --locked --release"),
+        "the molecular build must use the committed dependency graph"
     );
     for script in ["elja_submit_jcc_molslab.sh", "elja_jcc_molslab_ensemble.sh"] {
         let source = fs::read_to_string(root.join("scripts").join(script))
