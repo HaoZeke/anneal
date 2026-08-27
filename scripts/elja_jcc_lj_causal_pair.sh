@@ -23,25 +23,6 @@ case $ARM in
     ;;
 esac
 
-ROOT=${LJ_ROOT:-$HOME/anneal-build}
-CAMPAIGN_ENV_BIN=${CAMPAIGN_ENV_BIN:-$ROOT/target/release/examples/campaign_env}
-if [[ -n ${CATALOG_CONFIG:-} ]]; then
-  if [[ ! -x $CAMPAIGN_ENV_BIN ]]; then
-    echo "missing campaign resolver: $CAMPAIGN_ENV_BIN" >&2
-    exit 2
-  fi
-  campaign_env_text=$("$CAMPAIGN_ENV_BIN" "$CATALOG_CONFIG")
-  while IFS=$'\t' read -r name value; do
-    [[ -n $name ]] || continue
-    if [[ -v $name && ${!name} != "$value" ]]; then
-      echo "$name=${!name} conflicts with $CATALOG_CONFIG value $value" >&2
-      exit 2
-    fi
-    printf -v "$name" '%s' "$value"
-    export "${name?}"
-  done <<<"$campaign_env_text"
-fi
-
 REPLICAS=${CATALOG_REPLICAS:-4}
 WAVE=${CATALOG_WAVE:-4}
 MAX_HOPS=${CATALOG_MAX_HOPS:-}
@@ -63,6 +44,7 @@ if [[ -n $MAX_HOPS ]]; then
   export CATALOG_MAX_HOPS="$MAX_HOPS"
 fi
 
+ROOT=${LJ_ROOT:-$HOME/anneal-build}
 BIN=${LJ_BIN:-$ROOT/target/release/examples/lj_cluster_search}
 SERVER=${CATALOG_SERVER_BIN:-$ROOT/target/release/examples/catalog_server}
 SOURCE_COMMIT_FILE=${JCC_SOURCE_COMMIT_FILE:-$ROOT/SOURCE_COMMIT}
@@ -319,10 +301,6 @@ binary_sha256=$(sha256sum "$BIN" | awk '{print $1}')
 server_sha256=$(sha256sum "$SERVER" | awk '{print $1}')
 runner_sha256=$(sha256sum "$0" | awk '{print $1}')
 calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
-campaign_config_sha256=none
-if [[ -n ${CATALOG_CONFIG:-} ]]; then
-  campaign_config_sha256=$(sha256sum "$CATALOG_CONFIG" | awk '{print $1}')
-fi
 {
   printf 'campaign=%s\n' "$CAMPAIGN"
   printf 'system=lj%s\n' "$N"
@@ -344,7 +322,6 @@ fi
   printf 'server_sha256=%s\n' "$server_sha256"
   printf 'runner_sha256=%s\n' "$runner_sha256"
   printf 'calibration_sha256=%s\n' "$calibration_sha256"
-  printf 'campaign_config_sha256=%s\n' "$campaign_config_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
   printf 'host=%s\n' "$(hostname)"
 } >"$OUT/run.manifest"
