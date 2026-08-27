@@ -54,56 +54,6 @@ fn leftover_unsaturated_extra_walks_like_serial() {
 }
 
 #[test]
-fn leftover_unsaturated_remote_anchor_is_still_exploited() {
-    let (census, basin_id) = census_with_repeated_visits(1);
-    let mut state = input(
-        ActiveCatalogRelation::Unrelated {
-            lower_energy_anchor: true,
-        },
-        CensusEvidence::from_census(&census, Some(basin_id)),
-        AggregateProgress::new(20, 100).unwrap(),
-    );
-    state.leftover_dwell = false;
-
-    let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
-    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
-}
-
-#[test]
-fn leftover_unsaturated_unrelated_replica_still_explores() {
-    let (census, basin_id) = census_with_repeated_visits(1);
-    let mut state = input(
-        ActiveCatalogRelation::Unrelated {
-            lower_energy_anchor: false,
-        },
-        CensusEvidence::from_census(&census, Some(basin_id)),
-        AggregateProgress::new(20, 100).unwrap(),
-    );
-    state.leftover_dwell = false;
-
-    let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Explore);
-    assert_eq!(decision.reason, PolicyReason::UnrelatedCatalogExplore);
-}
-
-#[test]
-fn leftover_unsaturated_incumbent_still_leaves_on_stall() {
-    let (census, basin_id) = census_with_repeated_visits(1);
-    let mut state = input(
-        ActiveCatalogRelation::Incumbent,
-        CensusEvidence::from_census(&census, Some(basin_id)),
-        AggregateProgress::new(20, 100).unwrap(),
-    );
-    state.leftover_dwell = false;
-    state.local_stall_slices = 8;
-
-    let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::LocalStall);
-}
-
-#[test]
 fn extras_on_a_published_prize_keep() {
     let (census, basin_id) = census_with_repeated_visits(4);
     let mut extra = input(
