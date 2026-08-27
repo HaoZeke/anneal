@@ -50,6 +50,10 @@ fn hard_lj_arrays_submit_causal_pairs_at_paper_budgets() {
         source.contains(r#""$RUNNER" "$n" "$budget" slurm-array "$radius" "$arm""#),
         "the causal runner must receive system, budget, index, radius, and arm"
     );
+    assert!(
+        source.contains(r#"--cpus-per-task="${ELJA_CPUS_PER_TASK:-8}""#),
+        "both arms must reserve capacity for four workers and four coordinators"
+    );
 }
 
 #[test]
