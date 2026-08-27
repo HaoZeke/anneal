@@ -155,6 +155,41 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn local_checkpoint_early_return_emits_one_analyzer_slice() {
+        use anneal_core::cooperative_search::CooperativeRun;
+        use anneal_core::cooperative_search::ledger::ChargeKind;
+
+        let mut cooperative = CooperativeRun::new([0], 100).unwrap();
+        cooperative
+            .record_work(0, ChargeKind::LocalProposal, 7)
+            .unwrap();
+        let mut slice_sequence = 0;
+
+        let action = complete_checkpoint_trace(
+            &mut cooperative,
+            0,
+            &mut slice_sequence,
+            7,
+            -3.25,
+            |_cooperative, _slice_sequence| CheckpointAction::Continue,
+        );
+
+        assert!(matches!(action, CheckpointAction::Continue));
+        assert_eq!(slice_sequence, 1);
+        let slices = cooperative
+            .events()
+            .iter()
+            .filter_map(|event| event.slice)
+            .collect::<Vec<_>>();
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].slice, 1);
+        assert_eq!(slices[0].policy_reason, "local_checkpoint");
+        assert_eq!(slices[0].energy, Some(-3.25));
+        assert_eq!(slices[0].charged_work, 7);
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn fixed_probe_is_seeded_target_blind_and_translation_free() {
         let current = Array1::from(vec![0.0; 12]);
         let mut first_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
