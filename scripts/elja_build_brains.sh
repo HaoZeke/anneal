@@ -36,31 +36,31 @@ echo "gcc=$($PIXI run -e cluster gcc --version | head -1)"
 if command -v rustfmt >/dev/null 2>&1; then
   "$PIXI" run -e cluster cargo fmt --all -- --check
 fi
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test elja_submission_contract occupancy_
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test cooperative_search visit_merges_the_posted
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --lib two_brains_exchange
-"$PIXI" run -e cluster cargo test --offline --release --lib leftover_lambda
-"$PIXI" run -e cluster cargo test --offline --release --lib leftover_soap_gt_with_two
-"$PIXI" run -e cluster cargo test --offline --release --lib packing_role_is_per_family
-"$PIXI" run -e cluster cargo test --offline --release --lib a_user_family_floor_of_one
-"$PIXI" run -e cluster cargo test --offline --release --lib catalog_leave_refuses_a_same_family
-"$PIXI" run -e cluster cargo test --offline --release --lib occupancy_leave_is_another_family_or_an_archive
-"$PIXI" run -e cluster cargo test --offline --release --test occupancy_leave_contract leave_quench_keeps_the_walk
-"$PIXI" run -e cluster cargo test --offline --release --lib interface_ranks_follow
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_policy extras_on_a_published
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_policy tis_extras_walk
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_policy explore_collapse_does_not_yank
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_mixing
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_packing leftover_soap_gt_plus
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_packing leftover_first_wave
-"$PIXI" run -e cluster cargo test --offline --release --features bank-rpc --test catalog_packing packing_good_turing
-"$PIXI" run -e cluster cargo test --offline --release --features featomic --lib leave_occupied_packing
-"$PIXI" run -e cluster cargo test --offline --release --lib packing_householder_flips
-"$PIXI" run -e cluster cargo test --offline --release --lib rgmin_walks_off_the_known
-"$PIXI" run -e cluster cargo test --offline --release --lib packing_mode_is_nu3_mean
-"$PIXI" run -e cluster cargo test --offline --release --lib span_rises_when_the_packing
-"$PIXI" run -e cluster cargo test --offline --release --lib from_origin_climbs_the_covering
-"$PIXI" run -e cluster cargo build --offline --release --features featomic,ira,bank-rpc \
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test elja_submission_contract occupancy_
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test cooperative_search visit_merges_the_posted
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --lib two_brains_exchange
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib leftover_lambda
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib leftover_soap_gt_with_two
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib packing_role_is_per_family
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib a_user_family_floor_of_one
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib catalog_leave_refuses_a_same_family
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib occupancy_leave_is_another_family_or_an_archive
+"$PIXI" run -e cluster cargo test --offline --locked --release --test occupancy_leave_contract leave_quench_keeps_the_walk
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib interface_ranks_follow
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_policy extras_on_a_published
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_policy tis_extras_walk
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_policy explore_collapse_does_not_yank
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_mixing
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_packing leftover_soap_gt_plus
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_packing leftover_first_wave
+"$PIXI" run -e cluster cargo test --offline --locked --release --features bank-rpc --test catalog_packing packing_good_turing
+"$PIXI" run -e cluster cargo test --offline --locked --release --features featomic --lib leave_occupied_packing
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib packing_householder_flips
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib rgmin_walks_off_the_known
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib packing_mode_is_nu3_mean
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib span_rises_when_the_packing
+"$PIXI" run -e cluster cargo test --offline --locked --release --lib from_origin_climbs_the_covering
+"$PIXI" run -e cluster cargo build --offline --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search

@@ -30,7 +30,7 @@ echo "source=$(cat SOURCE_COMMIT)"
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | head -1)"
 echo "cmake=$(cmake --version | head -1)"
-cargo build --release --features featomic,ira,bank-rpc \
+cargo build --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server \
   --example leave_packing_probe
