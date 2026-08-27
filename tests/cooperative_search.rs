@@ -299,6 +299,46 @@ fn try_policy_input_delivers_each_rpc_result_once() {
 }
 
 #[test]
+fn try_policy_input_requires_the_request_state() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let first = candidate(0, 1, 1.2);
+    let second = candidate(0, 2, 2.0);
+
+    assert_eq!(
+        run.try_policy_input(0, first.descriptor, first.energy, 0, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::LocalFallback
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert_eq!(
+        run.try_policy_input(0, second.descriptor.clone(), second.energy, 0, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::LocalFallback,
+        "policy evidence for another state must not drive this checkpoint"
+    );
+    assert!(matches!(
+        run.synchronize(0).unwrap(),
+        SynchronizationOutcome::Refreshed(_)
+    ));
+    assert!(matches!(
+        run.try_policy_input(0, second.descriptor, second.energy, 0, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::Remote(_)
+    ));
+}
+
+#[test]
 fn try_descriptor_hole_does_not_block_the_hop() {
     let server = server();
     let digest = signature().digest();
