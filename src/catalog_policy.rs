@@ -329,8 +329,10 @@ impl CatalogPolicy {
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
             }
-            ActiveCatalogRelation::Incumbent | ActiveCatalogRelation::SameBasin
-                if !input.leftover_dwell =>
+            _ if !input.leftover_dwell
+                && (matches!(input.relation, ActiveCatalogRelation::Incumbent)
+                    || (matches!(input.relation, ActiveCatalogRelation::SameBasin)
+                        && input.census.local_basin_visits() < LOCAL_CENSUS_LEAVE)) =>
             {
                 decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
