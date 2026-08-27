@@ -407,6 +407,36 @@ fn putative_saturated_does_not_latch_the_done_line() {
 }
 
 #[test]
+fn slice_diagnostics_report_the_validated_local_best() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let checkpoint = source
+        .split("let mut checkpoint = |snapshot: ChainCheckpoint<'_>| {")
+        .nth(1)
+        .expect("catalog checkpoint callback must exist")
+        .split("let outcome = run_with_bias_at_checkpoints")
+        .next()
+        .expect("catalog checkpoint callback must end at the run");
+    let compact: String = checkpoint.split_whitespace().collect();
+    assert!(
+        compact.contains("energy:Some(snapshot.best_energy())"),
+        "slice diagnostics must expose the validated local best"
+    );
+    assert!(
+        !compact.contains("energy:Some(snapshot.current_energy())"),
+        "leaving a target basin within one slice must not erase its encounter"
+    );
+    assert!(
+        !compact.contains("energy:Some(parent.energy)")
+            && !compact.contains("trace.energy=Some(candidate.energy)"),
+        "an unvalidated remote candidate is not a local target encounter"
+    );
+    assert!(
+        !compact.contains("checkpoint_charged,snapshot.current_energy(),"),
+        "early checkpoint exits must retain the validated local best"
+    );
+}
+
+#[test]
 fn foreign_parent_population_reseed_is_not_a_box_start() {
     let source = include_str!("../examples/lj_cluster_search.rs");
     let extra = source
