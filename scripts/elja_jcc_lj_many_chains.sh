@@ -27,7 +27,7 @@ if [[ -n ${CATALOG_CONFIG:-} ]]; then
       exit 2
     fi
     printf -v "$name" '%s' "$value"
-    export "$name"
+    export "${name?}"
   done <<<"$campaign_env_text"
 fi
 REPLICAS=${CATALOG_REPLICAS:-300}
@@ -172,7 +172,8 @@ while (( replica < REPLICAS )); do
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
       export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
+      CATALOG_BRAIN_PEERS=$(brain_peers "$replica" "$wave_start" "$wave_end")
+      export CATALOG_BRAIN_PEERS
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
