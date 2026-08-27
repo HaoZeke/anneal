@@ -5,12 +5,20 @@ set -euo pipefail
 STAGE=${1:?development, qualification, or production}
 ROOT=${LJ_ROOT:-$HOME/anneal-build}
 REPRO_ROOT=${ANNEAL_REPRO_ROOT:-$HOME/anneal_repro}
-RUNNER=$ROOT/scripts/elja_jcc_lj_ensemble.sh
+RUNNER=$ROOT/scripts/elja_jcc_lj_causal_pair.sh
 OUT_ROOT=${LJ_OUT:-$HOME/ljwork/jcc}
 PYTHON=${JCC_PYTHON:-$HOME/rgpot/.pixi/envs/xtbbld/bin/python}
 QUALIFIER_PYTHON=${JCC_QUALIFIER_PYTHON:-$PYTHON}
 RADIUS_READER=$REPRO_ROOT/workflow/jcc/read_census_radius.py
 CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}
+declare -Ar PAPER_BUDGETS=(
+  [38]=400000
+  [55]=1000000
+  [75]=4000000
+  [98]=4000000
+  [102]=4000000
+  [104]=4000000
+)
 
 case "$STAGE" in
   development)
@@ -47,7 +55,8 @@ fi
 
 mkdir -p "$OUT_ROOT/submissions"
 last=$((ENSEMBLES - 1))
-for n in 75 98 102 104; do
+for n in 38 55 75 98 102 104; do
+  budget=${PAPER_BUDGETS[$n]}
   radius_variable="LJ${n}_CENSUS_RADIUS"
   radius=${!radius_variable:-}
   if [[ -z $radius ]]; then
@@ -63,10 +72,10 @@ for n in 75 98 102 104; do
       --partition="${ELJA_PARTITION:-s-normal}" \
       --account="${ELJA_ACCOUNT:-chem-ui}" \
       --time="${ELJA_TIME:-2-00:00:00}" \
-      --cpus-per-task=5 \
+      --cpus-per-task="${ELJA_CPUS_PER_TASK:-8}" \
       --mem="${ELJA_MEM:-16G}" \
       --output="$log" \
       --export="ALL,CATALOG_CAMPAIGN=${CAMPAIGN},SEED_OFFSET_BASE=${SEED_OFFSET_BASE},JCC_QUALIFIER_PYTHON=${QUALIFIER_PYTHON}" \
-      "$RUNNER" "$n" 4000000 "$arm" slurm-array "$radius"
+      "$RUNNER" "$n" "$budget" slurm-array "$radius" "$arm"
   done
 done
