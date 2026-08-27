@@ -373,3 +373,34 @@ fn marks_submit_pins_the_crossing_floor_commit() {
         "Marks hops must use WAVE 24"
     );
 }
+
+#[test]
+fn marks_build_and_submit_bind_source_to_binaries() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let build = fs::read_to_string(root.join("scripts/elja_build_lj.sh"))
+        .unwrap_or_else(|error| panic!("failed to read LJ build: {error}"));
+    assert!(
+        build.contains("git diff --quiet HEAD --"),
+        "the build must reject tracked source changes"
+    );
+    assert!(
+        build.contains("git rev-parse HEAD >SOURCE_COMMIT"),
+        "the build must derive SOURCE_COMMIT from the checkout it compiles"
+    );
+    assert!(
+        build.contains("sha256sum") && build.contains("BUILD_SHA256SUMS"),
+        "the build must seal the campaign executables in a checksum manifest"
+    );
+
+    let submit = fs::read_to_string(root.join("scripts/elja_submit_occ_marks.sh"))
+        .unwrap_or_else(|error| panic!("failed to read Marks submit: {error}"));
+    assert!(
+        submit.contains("git -C \"$ROOT\" rev-parse HEAD")
+            && submit.contains("SOURCE_COMMIT=$SRC does not match HEAD=$HEAD"),
+        "submission must compare the recorded source to the checkout HEAD"
+    );
+    assert!(
+        submit.contains("sha256sum -c BUILD_SHA256SUMS"),
+        "submission must verify the exact executables emitted by the build"
+    );
+}
