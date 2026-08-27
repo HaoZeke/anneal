@@ -161,7 +161,7 @@ mod option_tests {
 
         let mut cooperative = CooperativeRun::new([0], 100).unwrap();
         cooperative
-            .record_work(0, ChargeKind::LocalProposal, 7)
+            .record_work(0, ChargeKind::AcceptedQuench, 7)
             .unwrap();
         let mut slice_sequence = 0;
 
