@@ -52,6 +52,7 @@ cargo test --release --lib span_rises_when_the_packing
 cargo test --release --lib from_origin_climbs_the_covering
 cargo build --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
+  --example lj_census_calibration \
   --example catalog_server
 BIN=target/release/examples/lj_cluster_search
 ldd "$BIN"
@@ -66,9 +67,15 @@ if ! grep -a -F -q occupancy_gt "$SERVER"; then
   echo "built binary missing occupancy_gt" >&2
   exit 1
 fi
+CALIBRATOR=target/release/examples/lj_census_calibration
+if ! grep -a -F -q seeded-random-cluster-quench-v1 "$CALIBRATOR"; then
+  echo "built calibrator missing target-blind source policy" >&2
+  exit 1
+fi
 sha256sum \
   target/release/examples/lj_cluster_search \
   target/release/examples/catalog_server \
+  target/release/examples/lj_census_calibration \
   >BUILD_SHA256SUMS
 echo "SMOKE"
 "$BIN" 13 200 1 rec
