@@ -17,9 +17,9 @@ mod run {
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
         CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation, CatalogSnapshot,
-        DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan,
-        PopulationSelection, ProtocolRejection, TransitionDestination, INCUMBENT_SAMPLE_DRAW,
-        SPARSE_SAMPLE_DRAW,
+        DescriptorHoleProposal, INCUMBENT_SAMPLE_DRAW, PolicyState, PopulationEpochState,
+        PopulationPlan, PopulationSelection, ProtocolRejection, SPARSE_SAMPLE_DRAW,
+        TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
@@ -1105,9 +1105,9 @@ mod run {
             };
             if let Some((result, request)) = finished {
                 self.replica_mut(replica)?.policy_pending = false;
-                let request_matches = request.as_ref().is_some_and(|request| {
-                    request.matches(&descriptor, energy, leftover_lambda)
-                });
+                let request_matches = request
+                    .as_ref()
+                    .is_some_and(|request| request.matches(&descriptor, energy, leftover_lambda));
                 if request_matches {
                     match result {
                         Ok(receipt) => {
@@ -1383,9 +1383,7 @@ mod run {
                     mailbox.post(move |client| {
                         let answer = requests
                             .into_iter()
-                            .map(|(rpc_sequence, draw)| {
-                                client.sample_candidate(rpc_sequence, draw)
-                            })
+                            .map(|(rpc_sequence, draw)| client.sample_candidate(rpc_sequence, draw))
                             .collect::<Result<Vec<_>, _>>();
                         *slot.lock().expect("sample batch slot") = Some(answer);
                     });
@@ -1401,9 +1399,7 @@ mod run {
                         Ok(CatalogSamplesOutcome::Candidates(candidates))
                     }
                 }
-                Some(Err(CatalogClientError::Rejected(_))) => {
-                    Ok(CatalogSamplesOutcome::Rejected)
-                }
+                Some(Err(CatalogClientError::Rejected(_))) => Ok(CatalogSamplesOutcome::Rejected),
                 Some(Err(_)) => Ok(CatalogSamplesOutcome::LocalFallback),
                 None => Ok(CatalogSamplesOutcome::LocalFallback),
             }

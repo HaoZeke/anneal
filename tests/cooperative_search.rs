@@ -16,8 +16,8 @@ use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection,
-    SPARSE_SAMPLE_DRAW, TransitionDestination,
+    CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection, SPARSE_SAMPLE_DRAW,
+    TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -481,8 +481,7 @@ fn try_descriptor_hole_requires_the_request_parameters() {
         SynchronizationOutcome::Refreshed(_)
     ));
     assert!(matches!(
-        run.try_descriptor_hole(0, other.descriptor, 64, 8)
-            .unwrap(),
+        run.try_descriptor_hole(0, other.descriptor, 64, 8).unwrap(),
         CatalogHoleOutcome::Proposal(_)
     ));
 }
@@ -598,8 +597,7 @@ fn try_sample_candidates_pipelines_every_reference_draw() {
         run.synchronize(0).unwrap(),
         SynchronizationOutcome::Refreshed(_)
     ));
-    let CatalogSamplesOutcome::Candidates(first) =
-        run.try_sample_candidates(0, [2, 3]).unwrap()
+    let CatalogSamplesOutcome::Candidates(first) = run.try_sample_candidates(0, [2, 3]).unwrap()
     else {
         panic!("the completed two-draw batch must be delivered")
     };
@@ -614,8 +612,7 @@ fn try_sample_candidates_pipelines_every_reference_draw() {
         run.synchronize(0).unwrap(),
         SynchronizationOutcome::Refreshed(_)
     ));
-    let CatalogSamplesOutcome::Candidates(second) =
-        run.try_sample_candidates(0, [4, 5]).unwrap()
+    let CatalogSamplesOutcome::Candidates(second) = run.try_sample_candidates(0, [4, 5]).unwrap()
     else {
         panic!("consuming one batch must pipeline the succeeding draws")
     };
@@ -975,8 +972,7 @@ fn try_boundary_crossing_delivers_each_rpc_result_once() {
     }
     assert!(delivered, "mailbox never delivered a boundary crossing");
     assert_eq!(
-        run.try_boundary_crossing(1, source_descriptor, 72)
-            .unwrap(),
+        run.try_boundary_crossing(1, source_descriptor, 72).unwrap(),
         CatalogBoundaryOutcome::LocalFallback,
         "a completed boundary crossing must not be replayed while another RPC is pending"
     );
@@ -1020,8 +1016,7 @@ fn try_boundary_crossing_requires_the_request_parameters() {
         SynchronizationOutcome::Refreshed(_)
     ));
     assert_eq!(
-        run.try_boundary_crossing(1, source_descriptor, 72)
-            .unwrap(),
+        run.try_boundary_crossing(1, source_descriptor, 72).unwrap(),
         CatalogBoundaryOutcome::LocalFallback,
         "a crossing selected with another draw must be discarded"
     );
