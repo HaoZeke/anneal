@@ -146,6 +146,9 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
         r#"private_endpoints"#,
         r#"BANK_SHARING=$ARM"#,
         r#"BANK_RPC=${private_endpoints[$replica]}"#,
+        r#"export OMP_NUM_THREADS=1"#,
+        r#"export OPENBLAS_NUM_THREADS=1"#,
+        r#"export MKL_NUM_THREADS=1"#,
         r#"source_commit=%s\n"#,
         r#"soap_mode=%s\n"#,
         r#"requested_options=%s\n"#,
@@ -182,6 +185,10 @@ fn molecular_submission_pairs_every_system_and_arm() {
     assert!(source.contains("for arm in shared control"));
     assert!(source.contains("for soap_mode in flexible off"));
     assert!(source.contains(r#"CAMPAIGN=${JCC_CAMPAIGN:-jcc-2026-${STAGE}}"#));
+    assert!(
+        source.contains(r#"--cpus-per-task="${ELJA_CPUS_PER_TASK:-8}""#),
+        "both arms must reserve capacity for four workers and four banks"
+    );
 }
 
 #[test]
