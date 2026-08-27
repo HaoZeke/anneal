@@ -3242,7 +3242,7 @@ fn run_capnp_catalog(
                         quench: SliceQuench::Converged,
                         adoption: SliceAdoption::Adopted,
                         novelty: None,
-                        energy: Some(snapshot.current_energy()),
+                        energy: Some(snapshot.best_energy()),
                         charged_work: u64::try_from(checkpoint_charged)
                             .expect("checkpoint charge must fit u64"),
                     };
@@ -3304,7 +3304,7 @@ fn run_capnp_catalog(
                             quench: SliceQuench::Converged,
                             adoption: SliceAdoption::Adopted,
                             novelty: None,
-                            energy: Some(parent.energy),
+                            energy: Some(snapshot.best_energy()),
                             charged_work: u64::try_from(checkpoint_charged)
                                 .expect("checkpoint charge must fit u64"),
                         };
@@ -3362,7 +3362,7 @@ fn run_capnp_catalog(
                         quench: SliceQuench::Converged,
                         adoption: SliceAdoption::Adopted,
                         novelty: None,
-                        energy: Some(snapshot.current_energy()),
+                        energy: Some(snapshot.best_energy()),
                         charged_work: u64::try_from(checkpoint_charged)
                             .expect("checkpoint charge must fit u64"),
                     };
@@ -3427,7 +3427,7 @@ fn run_capnp_catalog(
                         replica,
                         &mut slice_sequence,
                         checkpoint_charged,
-                        snapshot.current_energy(),
+                        snapshot.best_energy(),
                         |_cooperative, _slice_sequence| CheckpointAction::Continue,
                     );
                 }
@@ -3454,7 +3454,7 @@ fn run_capnp_catalog(
                     quench: SliceQuench::Converged,
                     adoption: SliceAdoption::Adopted,
                     novelty: None,
-                    energy: Some(snapshot.current_energy()),
+                    energy: Some(snapshot.best_energy()),
                     charged_work: u64::try_from(checkpoint_charged)
                         .expect("checkpoint charge must fit u64"),
                 };
@@ -3489,7 +3489,7 @@ fn run_capnp_catalog(
                 replica,
                 &mut slice_sequence,
                 checkpoint_charged,
-                snapshot.current_energy(),
+                snapshot.best_energy(),
                 |_cooperative, _slice_sequence| CheckpointAction::Continue,
             );
         };
@@ -3563,7 +3563,7 @@ fn run_capnp_catalog(
                 replica,
                 &mut slice_sequence,
                 checkpoint_charged,
-                snapshot.current_energy(),
+                snapshot.best_energy(),
                 |_cooperative, _slice_sequence| CheckpointAction::Continue,
             );
         }
@@ -3587,7 +3587,7 @@ fn run_capnp_catalog(
                     replica,
                     &mut slice_sequence,
                     checkpoint_charged,
-                    snapshot.current_energy(),
+                    snapshot.best_energy(),
                     |_cooperative, _slice_sequence| CheckpointAction::Continue,
                 );
             }
@@ -3634,7 +3634,7 @@ fn run_capnp_catalog(
                     replica,
                     &mut slice_sequence,
                     checkpoint_charged,
-                    snapshot.current_energy(),
+                    snapshot.best_energy(),
                     |_cooperative, _slice_sequence| {
                         return CheckpointAction::Retire {
                             reason: certificate.as_str().to_owned(),
@@ -3701,7 +3701,7 @@ fn run_capnp_catalog(
             quench: SliceQuench::Converged,
             adoption: SliceAdoption::NotAttempted,
             novelty: Some(policy_trace.novelty),
-            energy: Some(snapshot.current_energy()),
+            energy: Some(snapshot.best_energy()),
             charged_work: u64::try_from(checkpoint_charged)
                 .expect("checkpoint charge must fit u64"),
         };
@@ -3900,7 +3900,7 @@ fn run_capnp_catalog(
                         && (!win_only || improves)
                     {
                         trace.sampled_basin = candidate.census_basin;
-                        trace.energy = Some(candidate.energy);
+                        trace.energy = Some(snapshot.best_energy());
                         trace.adoption = SliceAdoption::Adopted;
                         cooperative
                             .record_slice(replica, trace)
