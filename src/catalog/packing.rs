@@ -1088,14 +1088,10 @@ impl SeamBank {
 
     /// The furthest banked structure, with its band index.
     pub fn frontier(&self) -> Option<(usize, f64, &[f64])> {
-        self.bins
-            .iter()
-            .enumerate()
-            .rev()
-            .find_map(|(bin, held)| {
-                held.as_ref()
-                    .map(|(energy, coords)| (bin, *energy, coords.as_slice()))
-            })
+        self.bins.iter().enumerate().rev().find_map(|(bin, held)| {
+            held.as_ref()
+                .map(|(energy, coords)| (bin, *energy, coords.as_slice()))
+        })
     }
 
     /// Bands currently holding a representative.
