@@ -361,7 +361,11 @@ SEED_OFFSET_BASE = "9900000"
         assert!(lines.contains(&"CATALOG_WAVE\t48"));
         assert!(lines.contains(&"CATALOG_SHARED_SCREEN\t1"));
         assert!(lines.contains(&"SEED_OFFSET_BASE\t9900000"));
-        assert!(!lines.iter().any(|line| line.contains("CATALOG_ENTROPIC_BIAS")));
+        assert!(
+            !lines
+                .iter()
+                .any(|line| line.contains("CATALOG_ENTROPIC_BIAS"))
+        );
     }
 
     #[test]
