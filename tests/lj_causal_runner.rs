@@ -124,6 +124,10 @@ printf 'brain_peers=%s\n' "${CATALOG_BRAIN_PEERS:-}"
 printf 'ensemble=%s\n' "$CATALOG_ENSEMBLE"
 printf 'catalog_sharing=%s\n' "$CATALOG_SHARING"
 printf 'seed_offset=%s\n' "$SEED_OFFSET"
+if [[ ${FAKE_OMIT_CONFIG:-0} != 1 ]]; then
+  printf '{"schema":"anneal-cluster-config-v1","soap_mode":"flexible"}\n' \
+    >"$ANNEAL_RESOLVED_CONFIG"
+fi
 case $CATALOG_SHARING in
   shared) sharing=true ;;
   private) sharing=false ;;
@@ -143,6 +147,7 @@ printf '1/1 solved\n'
 
     let out_root = root.join("output");
     let mut seeds_by_arm = Vec::new();
+    let mut resolved_hashes = Vec::new();
     for arm in ["shared", "control"] {
         let server_log = root.join(format!("servers-{arm}.log"));
         let output = Command::new("bash")
@@ -189,6 +194,9 @@ printf '1/1 solved\n'
         assert_eq!(value(&manifest, "seed_base"), "1214");
         assert_eq!(value(&manifest, "catalog_capacity"), "30");
         assert_eq!(value(&manifest, "transport_noise"), "0.05");
+        assert!(run.join("resolved-config.json").is_file());
+        assert_eq!(value(&manifest, "resolved_config_sha256").len(), 64);
+        resolved_hashes.push(value(&manifest, "resolved_config_sha256").to_owned());
 
         let worker0 = fs::read_to_string(run.join("workers/replica-0.out")).unwrap();
         let worker1 = fs::read_to_string(run.join("workers/replica-1.out")).unwrap();
@@ -230,6 +238,7 @@ printf '1/1 solved\n'
     }
 
     assert_eq!(seeds_by_arm[0], seeds_by_arm[1]);
+    assert_eq!(resolved_hashes[0], resolved_hashes[1]);
 
     let incomplete_server_log = root.join("servers-incomplete.log");
     let incomplete = Command::new("bash")
@@ -260,5 +269,36 @@ printf '1/1 solved\n'
         "runner accepted traces without analyzer slices\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&incomplete.stdout),
         String::from_utf8_lossy(&incomplete.stderr)
+    );
+
+    let missing_config_server_log = root.join("servers-missing-config.log");
+    let missing_config = Command::new("bash")
+        .arg(&runner)
+        .args(["13", "10", "9", "0.1", "shared"])
+        .env("SLURM_JOB_ID", "4244")
+        .env("LJ_ROOT", &root)
+        .env("LJ_BIN", &search)
+        .env("CATALOG_SERVER_BIN", &server)
+        .env("JCC_SOURCE_COMMIT_FILE", root.join("SOURCE_COMMIT"))
+        .env("ANNEAL_REPRO_ROOT", root.join("repro"))
+        .env("LJ_OUT", root.join("missing-config-output"))
+        .env("CATALOG_CAMPAIGN", "causal-missing-config-test")
+        .env("CATALOG_REPLICAS", "2")
+        .env("CATALOG_WAVE", "2")
+        .env("CATALOG_SLICE", "1")
+        .env("CATALOG_MAX_HOPS", "3")
+        .env("CATALOG_POPULATION_INTERVAL", "10")
+        .env("CATALOG_BRAIN_PORT_BASE", "29200")
+        .env("SEED_OFFSET_BASE", "1200")
+        .env("FAKE_SERVER_LOG", &missing_config_server_log)
+        .env("FAKE_OMIT_CONFIG", "1")
+        .env_remove("CATALOG_CONFIG")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run {}: {error}", runner.display()));
+    assert!(
+        !missing_config.status.success(),
+        "runner accepted workers without resolved configurations\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&missing_config.stdout),
+        String::from_utf8_lossy(&missing_config.stderr)
     );
 }
