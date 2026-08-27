@@ -304,6 +304,47 @@ fn try_descriptor_hole_does_not_block_the_hop() {
 }
 
 #[test]
+fn try_sample_candidate_delivers_each_rpc_result_once() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+    assert_eq!(
+        run.offer_candidate(0, admitted.clone()).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+
+    let mut delivered = None;
+    for _ in 0..200 {
+        match run.try_sample_candidate(0, 91).unwrap() {
+            CatalogSampleOutcome::Candidate(sampled) => {
+                delivered = Some(sampled);
+                break;
+            }
+            CatalogSampleOutcome::LocalFallback => {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            outcome => panic!("unexpected sample outcome: {outcome:?}"),
+        }
+    }
+    assert_eq!(
+        delivered.expect("mailbox never delivered a catalog sample"),
+        admitted
+    );
+    assert_eq!(
+        run.try_sample_candidate(0, 92).unwrap(),
+        CatalogSampleOutcome::LocalFallback,
+        "a completed sample must not be replayed while another RPC is pending"
+    );
+}
+
+#[test]
 fn catalog_outputs_are_actionable_and_seeded() {
     let server = server();
     let digest = signature().digest();
