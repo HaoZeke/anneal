@@ -12,16 +12,14 @@
 #![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 use anneal_core::bias::BasinBias;
-use anneal_core::catalog::{
-    euclidean_gradient_norm, hops_per_core_hour, leave_crossing_slices, leave_defers,
-};
 #[cfg(feature = "bank-rpc")]
 use anneal_core::catalog::{
     ACTION_EXPLORE, ACTION_LEAVE, ACTION_LOCAL, LEAVE_REFUSAL_DWELL, LeavePath,
-    OccupancyLeaveTarget, credit_action,
-    leftover_birth_probability, occupancy_complete_at, occupancy_is_cluster,
-    occupancy_leave_by_birth, occupancy_retire_at,
-    published_energy_score,
+    OccupancyLeaveTarget, credit_action, leftover_birth_probability, occupancy_complete_at,
+    occupancy_is_cluster, occupancy_leave_by_birth, occupancy_retire_at, published_energy_score,
+};
+use anneal_core::catalog::{
+    euclidean_gradient_norm, hops_per_core_hour, leave_crossing_slices, leave_defers,
 };
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, ClusterFingerprint, Config, Keying,
@@ -3694,9 +3692,7 @@ fn run_capnp_catalog(
             }
             // A deterministic draw untangled from every sampling stream:
             // the checkpoint index hashed with the replica identity.
-            let draw = checkpoint_sequence
-                .wrapping_mul(0x9E37_79B9_7F4A_7C15)
-                ^ u64::from(replica);
+            let draw = checkpoint_sequence.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ u64::from(replica);
             if let Ok(Some(post)) = cooperative.draw_frontier(replica, draw)
                 && post.producer_replica != replica
             {
@@ -3831,10 +3827,7 @@ fn run_capnp_catalog(
                         && held.coordinates.len() == snapshot.current_state().len()
                     {
                         anneal_core::catalog::remember_packing_reference(&held.coordinates);
-                        anneal_core::catalog::offer_known_minimum(
-                            held.energy,
-                            &held.coordinates,
-                        );
+                        anneal_core::catalog::offer_known_minimum(held.energy, &held.coordinates);
                     }
                 }
                 // Energy landscape paving, with occupancy for the

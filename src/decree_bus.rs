@@ -214,7 +214,6 @@ mod tests {
         std::array::from_fn(|slot| format!("tcp://127.0.0.1:{}", base + slot as u16))
     }
 
-
     #[test]
     fn two_brains_exchange_addressed_envelopes_over_loopback() {
         let [ea, eb] = endpoints::<2>(0);

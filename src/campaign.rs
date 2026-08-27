@@ -141,10 +141,16 @@ impl CampaignConfig {
     pub fn env_pairs(&self) -> Vec<(String, String)> {
         let mut pairs: Vec<(String, String)> = Vec::new();
         pairs.push(("CATALOG_CAMPAIGN".into(), self.campaign.clone()));
-        pairs.push(("CATALOG_REPLICAS".into(), self.ensemble.replicas.to_string()));
+        pairs.push((
+            "CATALOG_REPLICAS".into(),
+            self.ensemble.replicas.to_string(),
+        ));
         pairs.push(("CATALOG_WAVE".into(), self.ensemble.wave.to_string()));
         pairs.push(("CATALOG_SLICE".into(), self.ensemble.slice.to_string()));
-        pairs.push(("CATALOG_MAX_HOPS".into(), self.ensemble.max_hops.to_string()));
+        pairs.push((
+            "CATALOG_MAX_HOPS".into(),
+            self.ensemble.max_hops.to_string(),
+        ));
         pairs.push((
             "CATALOG_POPULATION_INTERVAL".into(),
             self.ensemble.population_interval.to_string(),
@@ -205,7 +211,9 @@ impl CampaignConfig {
         for (k, v) in self.env_pairs() {
             if let Ok(existing) = std::env::var(&k) {
                 if existing != v {
-                    out.push(format!("{k} is {existing:?} in the environment but {v:?} in the campaign file"));
+                    out.push(format!(
+                        "{k} is {existing:?} in the environment but {v:?} in the campaign file"
+                    ));
                 }
             }
         }
@@ -291,9 +299,17 @@ SEED_OFFSET_BASE = "9900000"
         assert!(banner.contains("CATALOG_SHARED_SCREEN: ON"));
         assert!(banner.contains("CATALOG_ENTROPIC_BIAS: off"));
         let pairs = cfg.env_pairs();
-        assert!(pairs.iter().any(|(k, v)| k == "CATALOG_SHARED_SCREEN" && v == "1"));
+        assert!(
+            pairs
+                .iter()
+                .any(|(k, v)| k == "CATALOG_SHARED_SCREEN" && v == "1")
+        );
         assert!(!pairs.iter().any(|(k, _)| k == "CATALOG_ENTROPIC_BIAS"));
-        assert!(pairs.iter().any(|(k, v)| k == "SEED_OFFSET_BASE" && v == "9900000"));
+        assert!(
+            pairs
+                .iter()
+                .any(|(k, v)| k == "SEED_OFFSET_BASE" && v == "9900000")
+        );
     }
 
     #[test]

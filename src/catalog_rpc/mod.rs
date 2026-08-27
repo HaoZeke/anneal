@@ -884,9 +884,7 @@ pub(crate) fn decode_request_reader(
                 },
             }
         }
-        catalog_request::operation::DrawFrontier(draw) => {
-            CatalogOperation::DrawFrontier { draw }
-        }
+        catalog_request::operation::DrawFrontier(draw) => CatalogOperation::DrawFrontier { draw },
         catalog_request::operation::DescriptorHole(hole) => {
             let hole = hole.map_err(wire_error)?;
             CatalogOperation::DescriptorHole {
