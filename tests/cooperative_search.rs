@@ -261,6 +261,44 @@ fn try_policy_input_does_not_block_the_hop() {
 }
 
 #[test]
+fn try_policy_input_delivers_each_rpc_result_once() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+
+    let mut delivered = false;
+    for _ in 0..200 {
+        match run
+            .try_policy_input(0, admitted.descriptor.clone(), admitted.energy, 0, false)
+            .unwrap()
+        {
+            PolicyEvidenceOutcome::Remote(_) => {
+                delivered = true;
+                break;
+            }
+            PolicyEvidenceOutcome::LocalFallback => {
+                thread::sleep(std::time::Duration::from_millis(5));
+            }
+            outcome => panic!("unexpected policy outcome: {outcome:?}"),
+        }
+    }
+    assert!(delivered, "mailbox never delivered a policy");
+    assert_eq!(
+        run.try_policy_input(0, admitted.descriptor, admitted.energy, 1, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::LocalFallback,
+        "a completed policy must not be replayed while another RPC is pending"
+    );
+}
+
+#[test]
 fn try_descriptor_hole_does_not_block_the_hop() {
     let server = server();
     let digest = signature().digest();
