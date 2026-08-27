@@ -11,14 +11,19 @@ N=${1:?LJ site count}
 PER_REPLICA_BUDGET=${2:?force evaluations per replica}
 ENSEMBLE_INDEX=${3:?ensemble index or slurm-array}
 CENSUS_RADIUS=${4:?calibrated census radius}
-ARM=${5:?shared or private}
+ARM=${5:?shared or control}
 if [[ $ENSEMBLE_INDEX == slurm-array ]]; then
   ENSEMBLE_INDEX=${SLURM_ARRAY_TASK_ID:?Slurm array index}
 fi
 case $ARM in
-  shared|private) ;;
+  shared)
+    SHARING_MODE=shared
+    ;;
+  control)
+    SHARING_MODE=private
+    ;;
   *)
-    echo "arm must be shared or private" >&2
+    echo "arm must be shared or control" >&2
     exit 2
     ;;
 esac
@@ -201,24 +206,21 @@ replica=0
 while ((replica < REPLICAS)); do
   pids=()
   private_endpoints=()
-  private_ensembles=()
   wave_start=$replica
   wave_end=$((replica + WAVE))
   if ((wave_end > REPLICAS)); then
     wave_end=$REPLICAS
   fi
 
-  if [[ $ARM == private ]]; then
+  if [[ $ARM == control ]]; then
     for private_replica in $(seq "$wave_start" $((wave_end - 1))); do
-      private_ensemble="${ENSEMBLE}-replica-$(printf '%04d' "$private_replica")"
       start_catalog \
         "$OUT/coordinator-replica-${private_replica}" \
         "$PER_REPLICA_BUDGET" \
-        "$private_ensemble" \
+        "$ENSEMBLE" \
         "$private_replica" \
         "$OUT/state/replica-${private_replica}"
       private_endpoints[private_replica]=$last_started_endpoint
-      private_ensembles[private_replica]=$private_ensemble
     done
   fi
 
@@ -232,13 +234,14 @@ while ((replica < REPLICAS)); do
       worker_brain_peers=$(brain_peers "$replica" "$wave_start" "$wave_end")
     else
       worker_endpoint=${private_endpoints[$replica]}
-      worker_ensemble=${private_ensembles[$replica]}
+      worker_ensemble=$ENSEMBLE
       worker_brain_peers=
     fi
     (
       export CATALOG_CAMPAIGN="$CAMPAIGN"
       export CATALOG_ENSEMBLE="$worker_ensemble"
       export CATALOG_REPLICA="$replica"
+      export CATALOG_SHARING="$SHARING_MODE"
       export CATALOG_SLICE="$SLICE"
       export CATALOG_TRANSPORT_NOISE="$TRANSPORT_NOISE"
       export CATALOG_TRANSPORT_RADIUS="$TRANSPORT_RADIUS"
@@ -268,7 +271,7 @@ while ((replica < REPLICAS)); do
     exit "$status"
   fi
   require_live_servers
-  if [[ $ARM == private ]]; then
+  if [[ $ARM == control ]]; then
     stop_servers
   fi
 done
@@ -313,7 +316,10 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'per_replica_budget=%s\n' "$PER_REPLICA_BUDGET"
   printf 'aggregate_budget=%s\n' "$TOTAL_BUDGET"
   printf 'seed_base=%s\n' "$SEED_BASE"
+  printf 'catalog_capacity=%s\n' "$CAPACITY"
   printf 'slice=%s\n' "$SLICE"
+  printf 'transport_noise=%s\n' "$TRANSPORT_NOISE"
+  printf 'transport_radius=%s\n' "$TRANSPORT_RADIUS"
   printf 'max_hops=%s\n' "${MAX_HOPS:-none}"
   printf 'population_interval=%s\n' "$POPULATION_INTERVAL"
   printf 'census_radius=%s\n' "$CENSUS_RADIUS"

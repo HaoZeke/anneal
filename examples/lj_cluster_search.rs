@@ -2341,6 +2341,12 @@ fn run_capnp_catalog(
 
     let campaign = required_catalog_env("CATALOG_CAMPAIGN");
     let ensemble = required_catalog_env("CATALOG_ENSEMBLE");
+    let sharing_mode = std::env::var("CATALOG_SHARING").ok();
+    let sharing = anneal_core::campaign::catalog_transport_is_shared(
+        sharing_mode.as_deref(),
+        endpoint.is_some(),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
     let replica = required_catalog_env("CATALOG_REPLICA")
         .parse::<u32>()
         .expect("CATALOG_REPLICA must be an unsigned integer");
@@ -4174,7 +4180,7 @@ fn run_capnp_catalog(
     let trace = cooperative.json_lines(&RunManifest {
         campaign,
         ensemble,
-        sharing: endpoint.is_some(),
+        sharing,
         engine: anneal_core::compatibility::EngineDescriptor::default(),
     });
     if let Ok(path) = std::env::var("CATALOG_TRACE") {

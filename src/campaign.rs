@@ -104,6 +104,25 @@ impl std::fmt::Display for CampaignError {
 
 impl std::error::Error for CampaignError {}
 
+/// Resolve whether a catalog transport crosses replica boundaries.
+///
+/// A private catalog still has an RPC endpoint, so transport presence alone
+/// cannot label a causal control. An absent mode retains the endpoint-based
+/// behavior used by existing launchers.
+pub fn catalog_transport_is_shared(
+    mode: Option<&str>,
+    endpoint_present: bool,
+) -> Result<bool, CampaignError> {
+    match mode {
+        None => Ok(endpoint_present),
+        Some("shared") => Ok(true),
+        Some("private") => Ok(false),
+        Some(value) => Err(CampaignError(format!(
+            "CATALOG_SHARING must be shared or private, not {value:?}"
+        ))),
+    }
+}
+
 impl CampaignConfig {
     /// Parse and validate a campaign file's contents.
     pub fn parse(text: &str) -> Result<Self, CampaignError> {
