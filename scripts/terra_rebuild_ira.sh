@@ -17,7 +17,7 @@ rm -rf "$IRA/src/Obj"
 mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"
 FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops"
 cd "$IRA/src"
-LIBLAPACK= make shlib FFLAGS="$FFLAGS"
+LIBLAPACK='' make shlib FFLAGS="$FFLAGS"
 gfortran -o "$IRA/lib/libira.so.new" -shared \
   -J"$IRA/include" -I"$IRA/include" \
   "$IRA/src/Obj"/*.o \

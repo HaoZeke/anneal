@@ -61,7 +61,7 @@ submit_arm() {
     --name "n${n}-lj${n}-rec" \
     --array="0-${last}" \
     --cpus 1 \
-    --time-limit=${HQ_TIME:-24h} \
+    --time-limit="${HQ_TIME:-24h}" \
     --cwd "$out" \
     --stdout "$out/lj${n}_rec_%{TASK_ID}.out" \
     --stderr "$out/lj${n}_rec_%{TASK_ID}.err" \
