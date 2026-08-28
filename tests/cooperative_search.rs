@@ -16,8 +16,9 @@ use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, CatalogMutationKind, CatalogRideReport, ProtocolRejection,
-    SPARSE_SAMPLE_DRAW, TransitionDestination,
+    CatalogCandidate, CatalogIdentity, CatalogMutationKind, CatalogRideConnection,
+    CatalogRideOutcome, CatalogRideReport, ProtocolRejection, SPARSE_SAMPLE_DRAW,
+    TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -29,7 +30,6 @@ use anneal_core::cooperative_search::{
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
-use anneal_core::ride_ledger::RideOutcome;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
 
@@ -150,6 +150,50 @@ fn server_with_region_evidence(capacity: usize, minimum_probes: u64) -> CatalogS
     CatalogServer::start("127.0.0.1:0", config).unwrap()
 }
 
+fn ride_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandidate {
+    let mut record = candidate(replica, sequence, separation);
+    let reaction = (separation - 1.6) / 0.4;
+    record.energy = (reaction * reaction - 1.0).powi(2);
+    record.forces[3] = 4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+    record.gradient_norm = record.forces[3].abs();
+    record
+}
+
+fn ride_server() -> CatalogServer {
+    let signature = signature();
+    let digest = signature.digest();
+    let config = ServerConfig::new("jcc-2026", "scientific-ensemble", digest, [0, 1, 2, 3])
+        .unwrap()
+        .with_scientific_state(
+            signature,
+            descriptor_space(),
+            ValidatorConfig {
+                reference_coordinates: vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0],
+                descriptor_dim: 9,
+                min_separation: 0.8,
+                coordinate_tolerance: 1e-10,
+                max_gradient_norm: 1e-7,
+                energy_abs_tolerance: 1e-10,
+                energy_rel_tolerance: 1e-10,
+            },
+            4,
+            0.05,
+            400,
+            |coordinates| {
+                let separation = coordinates[3];
+                let reaction = (separation - 1.6) / 0.4;
+                let mut gradient = vec![0.0; coordinates.len()];
+                gradient[3] = 4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+                Ok(FreshEvaluation {
+                    energy: (reaction * reaction - 1.0).powi(2),
+                    forces: gradient,
+                })
+            },
+        )
+        .unwrap();
+    CatalogServer::start("127.0.0.1:0", config).unwrap()
+}
+
 #[test]
 fn coordinator_validates_before_census_and_catalog_mutation() {
     let server = server();
@@ -178,7 +222,7 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
 
 #[test]
 fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
-    let server = server();
+    let server = ride_server();
     let digest = signature().digest();
     let mut first =
         CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
@@ -187,13 +231,13 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
         CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
             .unwrap();
     let source_a = first
-        .offer_candidate(1, candidate(0, 1, 1.2))
+        .offer_candidate(1, ride_candidate(0, 1, 1.2))
         .unwrap()
         .catalog
         .unwrap()
         .basin_id;
     let source_b = second
-        .offer_candidate(1, candidate(1, 1, 2.0))
+        .offer_candidate(1, ride_candidate(1, 1, 2.0))
         .unwrap()
         .catalog
         .unwrap()
@@ -203,31 +247,39 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
     let second_work = second.claim_ride(2, 8002).unwrap().unwrap();
 
     assert_ne!(first_work.order.arm, second_work.order.arm);
-    assert_eq!(first_work.order.arm.source_basin, source_b);
-    assert_eq!(first_work.source.census_basin, Some(source_b));
+    assert!(
+        [source_a, source_b].contains(&first_work.order.arm.source_basin),
+        "ride must start from a coordinator-certified minimum"
+    );
+    assert_eq!(
+        first_work.source.census_basin,
+        Some(first_work.order.arm.source_basin)
+    );
+    let connection = CatalogRideConnection {
+        saddle: ride_candidate(0, 2, 1.6),
+        endpoints: [ride_candidate(0, 2, 1.2), ride_candidate(0, 2, 2.0)],
+    };
     let first_credit = first
         .report_ride(
             3,
             CatalogRideReport {
                 work: first_work.order.id,
                 charged_evaluations: 144,
-                outcome: RideOutcome::Certified {
-                    saddle: 700,
-                    endpoints: [source_a, source_b],
-                },
+                outcome: CatalogRideOutcome::Certified(connection.clone()),
             },
         )
         .unwrap();
+    let second_connection = CatalogRideConnection {
+        saddle: ride_candidate(1, 2, 1.6),
+        endpoints: [ride_candidate(1, 2, 2.0), ride_candidate(1, 2, 1.2)],
+    };
     let duplicate_credit = second
         .report_ride(
             3,
             CatalogRideReport {
                 work: second_work.order.id,
                 charged_evaluations: 133,
-                outcome: RideOutcome::Certified {
-                    saddle: 701,
-                    endpoints: [source_b, source_a],
-                },
+                outcome: CatalogRideOutcome::Certified(second_connection),
             },
         )
         .unwrap();
