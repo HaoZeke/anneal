@@ -310,6 +310,8 @@ pub struct SaddleConnection {
     pub context: StructureContext,
     /// Lowest curvature reported at the force-converged candidate.
     pub curvature: f64,
+    /// Receiving-side lowest Hessian eigenvector at the certified saddle.
+    pub lowest_mode: Array1<f64>,
     /// Number of certified negative Hessian eigenvalues.
     pub negative_modes: usize,
     /// Saddle gradient infinity norm.
@@ -353,6 +355,13 @@ impl PesNetwork {
     /// Stored saddle connections in stable admission order.
     pub fn saddles(&self) -> &[SaddleConnection] {
         &self.saddles
+    }
+
+    pub(crate) fn from_records(
+        minima: Vec<MinimumRecord>,
+        saddles: Vec<SaddleConnection>,
+    ) -> Self {
+        Self { minima, saddles }
     }
 
     /// Admit a certified minimum without applying a descriptor cutoff.
@@ -862,6 +871,7 @@ where
                 saddle_coordinates,
                 context,
                 curvature,
+                lowest_mode: saddle_mode,
                 negative_modes: index.negative_modes,
                 saddle_max_gradient,
                 descriptor: saddle_descriptor,

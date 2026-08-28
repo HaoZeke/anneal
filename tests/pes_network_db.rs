@@ -123,6 +123,7 @@ fn readcon_db_round_trips_minima_saddles_descriptors_and_provenance() {
     assert_eq!(stored.descriptor, original.descriptor);
     assert_eq!(stored.negative_modes, 1);
     assert_eq!(stored.curvature.to_bits(), original.curvature.to_bits());
+    assert_eq!(stored.lowest_mode, original.lowest_mode);
 }
 
 #[test]
