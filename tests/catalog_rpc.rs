@@ -79,6 +79,43 @@ fn isolated_server_starts_with_a_verifiable_empty_snapshot() {
 }
 
 #[test]
+fn observer_status_is_isolated_by_system_signature() {
+    let server = CatalogServer::start(
+        "127.0.0.1:0",
+        ServerConfig::new("jcc-2026", "observer-system", [0x5a; 32], [0]).unwrap(),
+    )
+    .unwrap();
+    let mut matching = CatalogClient::connect(
+        server.addr(),
+        CatalogIdentity {
+            campaign: "jcc-2026".into(),
+            ensemble: "observer-system".into(),
+            replica: u32::MAX,
+            signature_digest: [0x5a; 32],
+        },
+        ClientConfig::default(),
+    )
+    .unwrap();
+    matching.observer_status(1).unwrap();
+
+    let mut foreign = CatalogClient::connect(
+        server.addr(),
+        CatalogIdentity {
+            campaign: "jcc-2026".into(),
+            ensemble: "observer-system".into(),
+            replica: u32::MAX,
+            signature_digest: [0x6b; 32],
+        },
+        ClientConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        foreign.observer_status(1).unwrap_err(),
+        CatalogClientError::Rejected(ProtocolRejection::SignatureMismatch)
+    );
+}
+
+#[test]
 fn accepted_connection_remains_open_between_requests() {
     let server = CatalogServer::start(
         "127.0.0.1:0",
