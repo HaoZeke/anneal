@@ -34,11 +34,7 @@ fn rigid_transform(coordinates: &Array1<f64>) -> Array1<f64> {
     transformed
 }
 
-fn permute(
-    coordinates: &Array1<f64>,
-    species: &[u32],
-    order: &[usize],
-) -> (Array1<f64>, Vec<u32>) {
+fn permute(coordinates: &Array1<f64>, species: &[u32], order: &[usize]) -> (Array1<f64>, Vec<u32>) {
     let mut permuted = Vec::with_capacity(coordinates.len());
     let mut permuted_species = Vec::with_capacity(species.len());
     for &atom in order {
@@ -76,8 +72,8 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
     let water = finite(1.32)
         .describe(
             Array1::from_vec(vec![
-                0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0, 2.8, 0.1,
-                0.0, 3.5572, 0.6865, 0.0, 2.0428, 0.6865, 0.0,
+                0.0, 0.0, 0.0, 0.7572, 0.5865, 0.0, -0.7572, 0.5865, 0.0, 2.8, 0.1, 0.0, 3.5572,
+                0.6865, 0.0, 2.0428, 0.6865, 0.0,
             ])
             .view(),
             Some(&[8, 1, 1, 8, 1, 1]),
@@ -92,8 +88,8 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
     let surface = universal_descriptor_space(surface_geometry)
         .describe(
             Array1::from_vec(vec![
-                0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 0.8,
-                0.8, 1.7, 1.6, 0.8, 1.7,
+                0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 2.0, 2.0, 0.0, 0.8, 0.8, 1.7, 1.6,
+                0.8, 1.7,
             ])
             .view(),
             Some(&[29, 29, 29, 29, 1, 1]),
@@ -122,8 +118,7 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
 #[test]
 fn universal_descriptor_is_rigid_motion_and_like_species_permutation_invariant() {
     let coordinates = Array1::from_vec(vec![
-        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5, -1.0, -0.7,
-        0.2,
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5, -1.0, -0.7, 0.2,
     ]);
     let species = [6, 8, 6, 8, 6];
     let descriptor_space = finite(1.0);
