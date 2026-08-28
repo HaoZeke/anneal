@@ -374,7 +374,9 @@ fn molecular_ensembles_are_isolated_paired_slurm_runs() {
         r#"target_tolerance=%s\n"#,
         r#"bank_sync=charged_slices\n"#,
         r#"touch "$OUT/TERMINAL_OK""#,
-        r#"xargs -0 sha256sum >SHA256SUMS"#,
+        r#"mapfile -d '' artifacts"#,
+        r#"find . -type f ! -name SHA256SUMS -print0 | sort -z"#,
+        r#"sha256sum "${artifacts[@]}" >SHA256SUMS"#,
     ] {
         assert!(
             source.contains(required),
