@@ -332,6 +332,9 @@ pub enum DescriptorError {
     /// Universal blocks need the length scale and boundary conditions they encode.
     #[error("universal descriptor blocks require descriptor geometry")]
     UniversalGeometryRequired,
+    /// Periodic linked-cell construction or search rejected the geometry.
+    #[error("universal descriptor neighbour search failed")]
+    NeighborSearch,
 }
 
 /// Evaluator bound to one immutable descriptor schema.
