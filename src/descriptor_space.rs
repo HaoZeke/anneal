@@ -35,6 +35,8 @@ pub enum DescriptorBlockKind {
     InvariantSoapMean,
     /// Fixed-channel rotation-invariant ACE nu=3 mean.
     InvariantAceNu3Mean,
+    /// Permutation-invariant pseudoscalar moments that distinguish mirror minima.
+    ChiralMoment,
 }
 
 impl DescriptorBlockKind {
@@ -46,6 +48,7 @@ impl DescriptorBlockKind {
                 | Self::GraphTopology
                 | Self::InvariantSoapMean
                 | Self::InvariantAceNu3Mean
+                | Self::ChiralMoment
         )
     }
 }
@@ -418,7 +421,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::ThreeBodyAngular
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
-                | DescriptorBlockKind::InvariantAceNu3Mean => unreachable!(),
+                | DescriptorBlockKind::InvariantAceNu3Mean
+                | DescriptorBlockKind::ChiralMoment => unreachable!(),
             };
             let mut aggregated = match block.kind {
                 DescriptorBlockKind::SoapMean => column_mean(&local, 0),
@@ -431,7 +435,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::ThreeBodyAngular
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
-                | DescriptorBlockKind::InvariantAceNu3Mean => unreachable!(),
+                | DescriptorBlockKind::InvariantAceNu3Mean
+                | DescriptorBlockKind::ChiralMoment => unreachable!(),
             };
             if let Some(index) = aggregated.iter().position(|value| !value.is_finite()) {
                 return Err(DescriptorError::NonFiniteDescriptor {
@@ -544,7 +549,8 @@ impl DescriptorSpace {
                 | DescriptorBlockKind::ThreeBodyAngular
                 | DescriptorBlockKind::GraphTopology
                 | DescriptorBlockKind::InvariantSoapMean
-                | DescriptorBlockKind::InvariantAceNu3Mean => {
+                | DescriptorBlockKind::InvariantAceNu3Mean
+                | DescriptorBlockKind::ChiralMoment => {
                     return Err(DescriptorError::UniversalGeometryRequired);
                 }
             };
