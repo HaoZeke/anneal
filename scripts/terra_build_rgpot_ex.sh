@@ -35,6 +35,11 @@ if [[ $MAIN_COMMIT != "$EXPECTED_COMMIT" ]]; then
   echo "EXPECTED_COMMIT=$EXPECTED_COMMIT does not match anneal HEAD=$MAIN_COMMIT" >&2
   exit 2
 fi
+if ! git -C "$ROOT" diff --quiet HEAD --; then
+  echo "anneal tracked source differs from HEAD=$MAIN_COMMIT" >&2
+  git -C "$ROOT" status --short >&2
+  exit 2
+fi
 MAIN_STATUS=$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)
 if [[ -n $MAIN_STATUS ]]; then
   echo "anneal source tree differs from HEAD=$MAIN_COMMIT" >&2
@@ -45,6 +50,11 @@ fi
 RGPOT_COMMIT=$(git -C "$RGPOT" rev-parse HEAD)
 if [[ $RGPOT_COMMIT != "$RGPOT_EXPECTED_COMMIT" ]]; then
   echo "RGPOT_EXPECTED_COMMIT=$RGPOT_EXPECTED_COMMIT does not match rgpot HEAD=$RGPOT_COMMIT" >&2
+  exit 2
+fi
+if ! git -C "$RGPOT" diff --quiet HEAD --; then
+  echo "rgpot tracked source differs from HEAD=$RGPOT_COMMIT" >&2
+  git -C "$RGPOT" status --short >&2
   exit 2
 fi
 RGPOT_STATUS=$(git -C "$RGPOT" status --porcelain=v1 --untracked-files=all)

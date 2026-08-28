@@ -31,6 +31,11 @@ verify_rgpot_source() {
     echo "RGPOT_EXPECTED_COMMIT=$RGPOT_EXPECTED_COMMIT does not match rgpot HEAD=$head" >&2
     exit 2
   fi
+  if ! git -C "$RGPOT" diff --quiet HEAD --; then
+    echo "rgpot tracked source differs from HEAD=$head" >&2
+    git -C "$RGPOT" status --short >&2
+    exit 2
+  fi
   local source_status
   source_status=$(git -C "$RGPOT" status --porcelain=v1 --untracked-files=all)
   if [[ -n $source_status ]]; then
