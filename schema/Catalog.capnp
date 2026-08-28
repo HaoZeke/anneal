@@ -288,9 +288,13 @@ struct RideWorkOrder {
 }
 
 struct RideCertifiedConnection {
-  saddle @0 :UInt64;
-  endpointA @1 :UInt64;
-  endpointB @2 :UInt64;
+  # Producer-side stationary candidate. The coordinator fresh-evaluates its
+  # gradient and central-difference Hessian before accepting the connection.
+  saddle @0 :CandidateRecord;
+  # Producer-side quenched branches. The coordinator validates and assigns
+  # their fixed-census basin identities; clients never choose endpoint ids.
+  endpointA @1 :CandidateRecord;
+  endpointB @2 :CandidateRecord;
 }
 
 struct RideReportRequest {
