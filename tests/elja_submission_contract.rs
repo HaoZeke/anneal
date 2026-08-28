@@ -135,10 +135,7 @@ fn hard_lj_campaigns_bind_every_coordination_channel() {
             runner.contains(&format!("require_protocol_value {name} {value}")),
             "the LJ runner must reject a conflicting {name}"
         );
-        let manifest_name = name
-            .strip_prefix("CATALOG_")
-            .unwrap()
-            .to_ascii_lowercase();
+        let manifest_name = name.strip_prefix("CATALOG_").unwrap().to_ascii_lowercase();
         assert!(
             runner.contains(&format!("{manifest_name}=%s\\n")),
             "the LJ manifest must record {name}"
@@ -320,10 +317,7 @@ fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
         }
     }
 
-    for script in [
-        "elja_submit_jcc_molslab.sh",
-        "elja_jcc_molslab_ensemble.sh",
-    ] {
+    for script in ["elja_submit_jcc_molslab.sh", "elja_jcc_molslab_ensemble.sh"] {
         let source = fs::read_to_string(root.join("scripts").join(script))
             .unwrap_or_else(|error| panic!("failed to read {script}: {error}"));
         for required in [
