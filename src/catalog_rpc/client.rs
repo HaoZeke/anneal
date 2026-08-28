@@ -11,9 +11,9 @@ use capnp::serialize;
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogFrontierPost,
     CatalogIdentity, CatalogLedgerEvent, CatalogMutation, CatalogOperation, CatalogReply,
-    CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PROTOCOL_VERSION, PolicyState,
-    PopulationEpochState, ProtocolError, ProtocolRejection, TransitionDestination,
-    decode_reply_reader, encode_request,
+    CatalogRequest, CatalogRideReport, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal,
+    PROTOCOL_VERSION, PolicyState, PopulationEpochState, ProtocolError, ProtocolRejection,
+    TransitionDestination, decode_reply_reader, encode_request,
 };
 use crate::Catalog_capnp::catalog_reply;
 use crate::cooperative_search::ledger::ChargeKind;
@@ -264,7 +264,9 @@ impl CatalogClient {
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
-            | AcceptedPayload::FrontierPost(_) => {
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => {
                 return Err(ProtocolError::Malformed(
                     "catalog offer returned an incompatible payload".into(),
                 )
@@ -301,6 +303,39 @@ impl CatalogClient {
             snapshot: reply.snapshot,
             catalog: None,
         })
+    }
+
+    /// Claim one exclusive same-system transition experiment.
+    pub fn claim_ride(
+        &mut self,
+        event_sequence: u64,
+        seed: u64,
+    ) -> Result<Option<CatalogRideWork>, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::ClaimRide { seed })?;
+        match reply.payload {
+            AcceptedPayload::RideWork(work) => Ok(Some(work)),
+            AcceptedPayload::None => Ok(None),
+            _ => Err(ProtocolError::Malformed(
+                "ride claim returned an incompatible payload".into(),
+            )
+            .into()),
+        }
+    }
+
+    /// Share the charged result of one transition experiment.
+    pub fn report_ride(
+        &mut self,
+        event_sequence: u64,
+        report: CatalogRideReport,
+    ) -> Result<crate::ride_ledger::RideCredit, CatalogClientError> {
+        let reply = self.call(event_sequence, CatalogOperation::ReportRide { report })?;
+        match reply.payload {
+            AcceptedPayload::RideCredit(credit) => Ok(credit),
+            _ => Err(ProtocolError::Malformed(
+                "ride report returned an incompatible payload".into(),
+            )
+            .into()),
+        }
     }
 
     /// Submit one exact replay-safe charged-work boundary.
@@ -361,7 +396,9 @@ impl CatalogClient {
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_)
-            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
                 "sample returned an incompatible payload".into(),
             )
             .into()),
@@ -433,7 +470,9 @@ impl CatalogClient {
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_)
-            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
                 "descriptor-hole request returned an incompatible payload".into(),
             )
             .into()),
@@ -463,7 +502,9 @@ impl CatalogClient {
             | AcceptedPayload::PolicyState(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_)
-            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
                 "boundary-crossing request returned an incompatible payload".into(),
             )
             .into()),
@@ -521,7 +562,9 @@ impl CatalogClient {
             | AcceptedPayload::BridgeAssignment(_)
             | AcceptedPayload::PopulationEpoch(_)
             | AcceptedPayload::CatalogMutation(_)
-            | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(
+            | AcceptedPayload::FrontierPost(_)
+            | AcceptedPayload::RideWork(_)
+            | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(
                 "policy-state request returned an incompatible payload".into(),
             )
             .into()),
@@ -751,7 +794,9 @@ fn population_epoch_payload(
         | AcceptedPayload::BridgeAssignment(_)
         | AcceptedPayload::PolicyState(_)
         | AcceptedPayload::CatalogMutation(_)
-        | AcceptedPayload::FrontierPost(_) => Err(ProtocolError::Malformed(format!(
+        | AcceptedPayload::FrontierPost(_)
+        | AcceptedPayload::RideWork(_)
+        | AcceptedPayload::RideCredit(_) => Err(ProtocolError::Malformed(format!(
             "{operation} returned an incompatible payload"
         ))
         .into()),

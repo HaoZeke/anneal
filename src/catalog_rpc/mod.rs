@@ -7,17 +7,20 @@ use capnp::serialize;
 
 use crate::Catalog_capnp::{
     CatalogMutationKind as WireCatalogMutationKind, CatalogRelation as WireCatalogRelation,
-    QuenchStatus as WireQuenchStatus, RejectionKind, accepted_reply, bridge_assignment,
-    candidate_record, catalog_mutation_reply, catalog_reply, catalog_request, policy_state_reply,
-    population_epoch_reply, transition_record,
+    QuenchStatus as WireQuenchStatus, RejectionKind, RideDirection as WireRideDirection,
+    RideFailure as WireRideFailure, RideMethod as WireRideMethod, accepted_reply,
+    bridge_assignment, candidate_record, catalog_mutation_reply, catalog_reply, catalog_request,
+    policy_state_reply, population_epoch_reply, ride_report_request, transition_record,
 };
+use crate::pes_exploration::RideMethod;
+use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideOutcome, RideWorkOrder};
 
 pub mod client;
 pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 13;
+pub const PROTOCOL_VERSION: u16 = 14;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -114,6 +117,26 @@ pub enum TransitionDestination {
     Unresolved,
     /// The step reached a candidate requiring receiving-side validation.
     Resolved(CatalogCandidate),
+}
+
+/// Charged receiving-side result for one claimed transition experiment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogRideReport {
+    /// Coordinator-issued work identifier.
+    pub work: u64,
+    /// PES evaluations consumed by the complete ride and certification.
+    pub charged_evaluations: u64,
+    /// Certified connection or explicit failure class.
+    pub outcome: RideOutcome,
+}
+
+/// Exclusive ride assignment and its validated source minimum.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogRideWork {
+    /// Portfolio arm, representative atom, attempt, and seed.
+    pub order: RideWorkOrder,
+    /// Receiving-side validated source structure.
+    pub source: CatalogCandidate,
 }
 
 /// Exact serialized outcome of one active-catalog admission attempt.
@@ -288,6 +311,16 @@ pub enum CatalogOperation {
         destination: TransitionDestination,
         /// Whether the reached endpoint became the replica's live state.
         adopted: bool,
+    },
+    /// Claim one exclusive same-system transition experiment.
+    ClaimRide {
+        /// Deterministic seed used if a new claim is issued.
+        seed: u64,
+    },
+    /// Share the charged result of a claimed transition experiment.
+    ReportRide {
+        /// Work identity, cost, and scientific outcome.
+        report: CatalogRideReport,
     },
 }
 
@@ -629,6 +662,10 @@ pub enum AcceptedPayload {
     BridgeAssignment(BridgeAssignmentRecord),
     /// One shared frontier excursion state from the ladder.
     FrontierPost(CatalogFrontierPost),
+    /// Exclusive transition experiment and its validated source minimum.
+    RideWork(CatalogRideWork),
+    /// Coordinator-computed novelty credit for a transition report.
+    RideCredit(RideCredit),
 }
 
 /// Accepted coordinator response.
@@ -857,6 +894,22 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
                 }
             }
         }
+        CatalogOperation::ClaimRide { seed } => operation.set_claim_ride(*seed),
+        CatalogOperation::ReportRide { report } => {
+            let mut wire = operation.init_report_ride();
+            wire.set_work(report.work);
+            wire.set_charged_evaluations(report.charged_evaluations);
+            let mut outcome = wire.init_outcome();
+            match &report.outcome {
+                RideOutcome::Certified { saddle, endpoints } => {
+                    let mut certified = outcome.init_certified();
+                    certified.set_saddle(*saddle);
+                    certified.set_endpoint_a(endpoints[0]);
+                    certified.set_endpoint_b(endpoints[1]);
+                }
+                RideOutcome::Failed(failure) => outcome.set_failed((*failure).into()),
+            }
+        }
     }
     let mut bytes = Vec::new();
     serialize::write_message(&mut bytes, &message).map_err(wire_error)?;
@@ -1014,6 +1067,29 @@ pub(crate) fn decode_request_reader(
                 adopted: transition.get_adopted(),
             }
         }
+        catalog_request::operation::ClaimRide(seed) => CatalogOperation::ClaimRide { seed },
+        catalog_request::operation::ReportRide(report) => {
+            let report = report.map_err(wire_error)?;
+            let outcome = match report.get_outcome().which().map_err(wire_error)? {
+                ride_report_request::outcome::Certified(certified) => {
+                    let certified = certified.map_err(wire_error)?;
+                    RideOutcome::Certified {
+                        saddle: certified.get_saddle(),
+                        endpoints: [certified.get_endpoint_a(), certified.get_endpoint_b()],
+                    }
+                }
+                ride_report_request::outcome::Failed(failure) => {
+                    RideOutcome::Failed(failure.map_err(wire_error)?.into())
+                }
+            };
+            CatalogOperation::ReportRide {
+                report: CatalogRideReport {
+                    work: report.get_work(),
+                    charged_evaluations: report.get_charged_evaluations(),
+                    outcome,
+                },
+            }
+        }
     };
     Ok(CatalogRequest {
         protocol_version,
@@ -1133,6 +1209,23 @@ pub(crate) fn encode_reply(reply: CatalogReply) -> Result<Vec<u8>, ProtocolError
                     );
                     output.set_producer_replica(post.producer_replica);
                     output.set_posted_sequence(post.posted_sequence);
+                }
+                AcceptedPayload::RideWork(work) => {
+                    let mut output = payload.init_ride_work();
+                    output.set_id(work.order.id);
+                    output.set_replica(work.order.replica);
+                    output.set_source_basin(work.order.arm.source_basin);
+                    output.set_environment_class(work.order.arm.environment_class);
+                    output.set_representative_atom(work.order.representative_atom);
+                    output.set_mode_rank(work.order.arm.mode_rank);
+                    output.set_direction(work.order.arm.direction.into());
+                    output.set_method(work.order.arm.method.into());
+                    output.set_attempt(work.order.attempt);
+                    output.set_seed(work.order.seed);
+                    fill_candidate(output.init_source(), &work.source);
+                }
+                AcceptedPayload::RideCredit(credit) => {
+                    payload.init_ride_credit().set_novel_edge(credit.novel_edge);
                 }
                 AcceptedPayload::PolicyState(state) => {
                     let mut output = payload.init_policy_state();
@@ -1320,6 +1413,33 @@ pub(crate) fn decode_reply_reader(
                         coordinates: list_f64(post.get_coordinates().map_err(wire_error)?),
                         producer_replica: post.get_producer_replica(),
                         posted_sequence: post.get_posted_sequence(),
+                    })
+                }
+                accepted_reply::payload::RideWork(work) => {
+                    let work = work.map_err(wire_error)?;
+                    let source = read_candidate(work.get_source().map_err(wire_error)?)?;
+                    AcceptedPayload::RideWork(CatalogRideWork {
+                        order: RideWorkOrder {
+                            id: work.get_id(),
+                            replica: work.get_replica(),
+                            arm: crate::ride_ledger::RideArm {
+                                source_basin: work.get_source_basin(),
+                                environment_class: work.get_environment_class(),
+                                mode_rank: work.get_mode_rank(),
+                                direction: work.get_direction().map_err(wire_error)?.into(),
+                                method: work.get_method().map_err(wire_error)?.into(),
+                            },
+                            representative_atom: work.get_representative_atom(),
+                            attempt: work.get_attempt(),
+                            seed: work.get_seed(),
+                        },
+                        source,
+                    })
+                }
+                accepted_reply::payload::RideCredit(credit) => {
+                    let credit = credit.map_err(wire_error)?;
+                    AcceptedPayload::RideCredit(RideCredit {
+                        novel_edge: credit.get_novel_edge(),
                     })
                 }
                 accepted_reply::payload::BridgeAssignment(assignment) => {
@@ -1510,6 +1630,72 @@ impl From<WireCatalogRelation> for CatalogRelation {
             WireCatalogRelation::SameBasin => Self::SameBasin,
             WireCatalogRelation::UnrelatedNoAnchor => Self::UnrelatedNoAnchor,
             WireCatalogRelation::UnrelatedLowerAnchor => Self::UnrelatedLowerAnchor,
+        }
+    }
+}
+
+impl From<RideDirection> for WireRideDirection {
+    fn from(value: RideDirection) -> Self {
+        match value {
+            RideDirection::Negative => Self::Negative,
+            RideDirection::Positive => Self::Positive,
+        }
+    }
+}
+
+impl From<WireRideDirection> for RideDirection {
+    fn from(value: WireRideDirection) -> Self {
+        match value {
+            WireRideDirection::Negative => Self::Negative,
+            WireRideDirection::Positive => Self::Positive,
+        }
+    }
+}
+
+impl From<RideMethod> for WireRideMethod {
+    fn from(value: RideMethod) -> Self {
+        match value {
+            RideMethod::Dimer => Self::Dimer,
+            RideMethod::Lanczos => Self::Lanczos,
+        }
+    }
+}
+
+impl From<WireRideMethod> for RideMethod {
+    fn from(value: WireRideMethod) -> Self {
+        match value {
+            WireRideMethod::Dimer => Self::Dimer,
+            WireRideMethod::Lanczos => Self::Lanczos,
+        }
+    }
+}
+
+impl From<RideFailure> for WireRideFailure {
+    fn from(value: RideFailure) -> Self {
+        match value {
+            RideFailure::QuenchNotConverged => Self::QuenchNotConverged,
+            RideFailure::SaddleNotConverged => Self::SaddleNotConverged,
+            RideFailure::NoNegativeMode => Self::NoNegativeMode,
+            RideFailure::HigherIndex => Self::HigherIndex,
+            RideFailure::IrcNotConverged => Self::IrcNotConverged,
+            RideFailure::CollapsedConnection => Self::CollapsedConnection,
+            RideFailure::Surface => Self::Surface,
+            RideFailure::BudgetExhausted => Self::BudgetExhausted,
+        }
+    }
+}
+
+impl From<WireRideFailure> for RideFailure {
+    fn from(value: WireRideFailure) -> Self {
+        match value {
+            WireRideFailure::QuenchNotConverged => Self::QuenchNotConverged,
+            WireRideFailure::SaddleNotConverged => Self::SaddleNotConverged,
+            WireRideFailure::NoNegativeMode => Self::NoNegativeMode,
+            WireRideFailure::HigherIndex => Self::HigherIndex,
+            WireRideFailure::IrcNotConverged => Self::IrcNotConverged,
+            WireRideFailure::CollapsedConnection => Self::CollapsedConnection,
+            WireRideFailure::Surface => Self::Surface,
+            WireRideFailure::BudgetExhausted => Self::BudgetExhausted,
         }
     }
 }
