@@ -2286,6 +2286,8 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
     }
 }
 
+impl eindir_core::gradient::DifferentiableObjective<f64> for CallableDiffObjective {}
+
 fn cluster_bounds(n: usize) -> Bounds<f64> {
     let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt();
     let dim = 3 * n;
