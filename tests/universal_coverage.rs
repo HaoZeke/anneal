@@ -3,9 +3,7 @@ use anneal_core::descriptor_space::{
     DescriptorSpace, DescriptorVector, universal_descriptor_space,
 };
 use anneal_core::funnel_bo::FunnelModel;
-use anneal_core::universal_coverage::{
-    CoverageConfig, StableDeepKernel, UniversalCoverage,
-};
+use anneal_core::universal_coverage::{CoverageConfig, StableDeepKernel, UniversalCoverage};
 use ndarray::Array1;
 
 fn descriptor(coordinates: Vec<f64>, species: &[u32]) -> DescriptorVector {
@@ -19,9 +17,7 @@ fn tetrahedron() -> DescriptorVector {
 }
 
 fn tetrahedron_coordinates() -> Vec<f64> {
-    vec![
-        0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.2, 1.0, 0.0, 0.3, 0.4, 0.9,
-    ]
+    vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.2, 1.0, 0.0, 0.3, 0.4, 0.9]
 }
 
 fn proper_transform(coordinates: &[f64]) -> Vec<f64> {
@@ -63,9 +59,7 @@ fn proper_transform(coordinates: &[f64]) -> Vec<f64> {
 
 fn chain() -> DescriptorVector {
     descriptor(
-        vec![
-            0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 2.3, 0.0, 0.0, 3.8, 0.0, 0.0,
-        ],
+        vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 2.3, 0.0, 0.0, 3.8, 0.0, 0.0],
         &[6, 8, 6, 8],
     )
 }
@@ -85,14 +79,18 @@ fn universal_gp_uses_euclidean_geometry_for_nonnegative_vectors() {
 fn unseen_block_structure_outranks_an_observed_minimum_without_a_radius() {
     let observed = tetrahedron();
     let unseen = chain();
-    let mut coverage =
-        UniversalCoverage::new(&observed, CoverageConfig::default()).unwrap();
+    let mut coverage = UniversalCoverage::new(&observed, CoverageConfig::default()).unwrap();
     coverage.observe(0, &observed, -12.0).unwrap();
 
     let known = coverage.evidence(&observed, Some(0)).unwrap();
     let novel = coverage.evidence(&unseen, None).unwrap();
 
-    assert!(known.nearest_block_distances.iter().all(|value| *value == Some(0.0)));
+    assert!(
+        known
+            .nearest_block_distances
+            .iter()
+            .all(|value| *value == Some(0.0))
+    );
     assert!(novel.block_novelty > known.block_novelty);
     assert!(novel.energy_standard_deviation > known.energy_standard_deviation);
     assert!(novel.residual_variance > known.residual_variance);
@@ -113,7 +111,12 @@ fn exact_classes_survive_a_zero_descriptor_distance() {
     assert_eq!(coverage.exact_class_count(), 2);
     assert_eq!(coverage.observation_count(), 2);
     let evidence = coverage.evidence(&translated, Some(1)).unwrap();
-    assert!(evidence.nearest_block_distances.iter().all(|value| *value == Some(0.0)));
+    assert!(
+        evidence
+            .nearest_block_distances
+            .iter()
+            .all(|value| *value == Some(0.0))
+    );
 }
 
 #[test]
@@ -123,7 +126,12 @@ fn stable_deep_kernel_preserves_invariance_and_raw_separation() {
     let distinct = chain();
     let kernel = StableDeepKernel::seeded(original.values().len(), &[24, 8], 73).unwrap();
 
-    assert!(kernel.distance(original.values(), rotated.values()).unwrap() < 1e-3);
+    assert!(
+        kernel
+            .distance(original.values(), rotated.values())
+            .unwrap()
+            < 1e-3
+    );
     assert!(
         kernel
             .distance(original.values(), distinct.values())
@@ -131,12 +139,8 @@ fn stable_deep_kernel_preserves_invariance_and_raw_separation() {
             >= original.distance(&distinct).unwrap()
     );
 
-    let mut coverage = UniversalCoverage::with_deep_kernel(
-        &original,
-        CoverageConfig::default(),
-        kernel,
-    )
-    .unwrap();
+    let mut coverage =
+        UniversalCoverage::with_deep_kernel(&original, CoverageConfig::default(), kernel).unwrap();
     coverage.observe(0, &original, -12.0).unwrap();
     let evidence = coverage.evidence(&distinct, None).unwrap();
     assert!(evidence.deep_kernel_mean.is_some());
@@ -151,9 +155,7 @@ fn coverage_rejects_an_incompatible_descriptor_schema() {
         DescriptorSchema::new(
             "other-descriptor",
             1,
-            vec![
-                DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.0).unwrap(),
-            ],
+            vec![DescriptorBlockSpec::new(DescriptorBlockKind::SoapMean, 2, 2, 3.0).unwrap()],
         )
         .unwrap(),
     );
