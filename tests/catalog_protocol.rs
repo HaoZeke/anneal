@@ -2,10 +2,11 @@
 
 use anneal_core::catalog_rpc::{
     BridgeCrossingRecord, CatalogCandidate, CatalogFrontierPost, CatalogIdentity,
-    CatalogLedgerEvent, CatalogOperation, CatalogRequest, CatalogRideReport, PROTOCOL_VERSION,
-    ProtocolError, TransitionDestination, decode_request, encode_request, validate_identity,
+    CatalogLedgerEvent, CatalogOperation, CatalogRequest, CatalogRideConnection,
+    CatalogRideOutcome, CatalogRideReport, PROTOCOL_VERSION, ProtocolError, TransitionDestination,
+    decode_request, encode_request, validate_identity,
 };
-use anneal_core::ride_ledger::{RideFailure, RideOutcome};
+use anneal_core::ride_ledger::RideFailure;
 
 fn identity(ensemble: &str) -> CatalogIdentity {
     CatalogIdentity {
@@ -130,17 +131,17 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
             report: CatalogRideReport {
                 work: 51,
                 charged_evaluations: 144,
-                outcome: RideOutcome::Certified {
-                    saddle: 700,
-                    endpoints: [17, 29],
-                },
+                outcome: CatalogRideOutcome::Certified(CatalogRideConnection {
+                    saddle: candidate(),
+                    endpoints: [candidate(), candidate()],
+                }),
             },
         },
         CatalogOperation::ReportRide {
             report: CatalogRideReport {
                 work: 52,
                 charged_evaluations: 91,
-                outcome: RideOutcome::Failed(RideFailure::HigherIndex),
+                outcome: CatalogRideOutcome::Failed(RideFailure::HigherIndex),
             },
         },
     ];
