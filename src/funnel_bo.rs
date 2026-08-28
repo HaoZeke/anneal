@@ -93,12 +93,7 @@ impl FunnelModel {
     /// when every coordinate happens to be nonnegative. This constructor keeps
     /// their block amplitudes and concatenated geometry intact.
     pub fn new_euclidean(length_scale: f64, amplitude: f64, noise: f64) -> Self {
-        Self::with_metric(
-            length_scale,
-            amplitude,
-            noise,
-            DescriptorMetric::Euclidean,
-        )
+        Self::with_metric(length_scale, amplitude, noise, DescriptorMetric::Euclidean)
     }
 
     fn with_metric(
@@ -156,11 +151,7 @@ impl FunnelModel {
             DescriptorMetric::AutoSimplex => match (simplex_weights(a), simplex_weights(b)) {
                 (Some(p), Some(q)) => amp2 * (-hellinger2(&p, &q) / ell2).exp(),
                 _ => {
-                    let d2: f64 = a
-                        .iter()
-                        .zip(b.iter())
-                        .map(|(u, v)| (u - v) * (u - v))
-                        .sum();
+                    let d2: f64 = a.iter().zip(b.iter()).map(|(u, v)| (u - v) * (u - v)).sum();
                     amp2 * (-0.5 * d2 / ell2).exp()
                 }
             },
