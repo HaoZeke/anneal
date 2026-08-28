@@ -144,6 +144,13 @@ fn every_catalog_operation_round_trips_all_identity_and_sequence_fields() {
                 outcome: CatalogRideOutcome::Failed(RideFailure::HigherIndex),
             },
         },
+        CatalogOperation::ReportRide {
+            report: CatalogRideReport {
+                work: 53,
+                charged_evaluations: 117,
+                outcome: CatalogRideOutcome::Failed(RideFailure::DisconnectedConnection),
+            },
+        },
     ];
     for operation in operations {
         let request = CatalogRequest {
