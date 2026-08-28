@@ -57,7 +57,8 @@ fn apply_boolean_options(cfg: &mut Config, opts: &[&str]) {
 }
 
 /// Occupancy catalog: leftover-SOAP packing key plus AS-KMC height
-/// on the occupied well. Not the paper-budget recommended hop.
+/// on the occupied well. Not the paper-budget recommended hop, and
+/// not applied on CATALOG_RPC startup.
 fn apply_occupancy_superbasin(cfg: &mut Config, n: usize) {
     let sb = Config::packing_superbasin(n);
     cfg.adaptive_height = sb.adaptive_height;
@@ -1062,12 +1063,9 @@ fn main() {
     cfg.budget_window = opts.contains(&"bfwt");
     cfg.allocate_moves = cfg.allocate_moves || opts.contains(&"thompson");
     apply_boolean_options(&mut cfg, &opts);
-    if std::env::var("CATALOG_RPC")
-        .ok()
-        .is_some_and(|value| !value.is_empty())
-    {
-        apply_occupancy_superbasin(&mut cfg, n);
-    }
+    // Catalog talking must keep Config::recommended. SOAP packing
+    // superbasin plus AS-KMC height is an intra-packing leftover walk:
+    // LJ75 sits on the Mackay shelf and never reaches ico or Marks.
     cfg.anneal_diversity = opts.contains(&"csa");
     cfg.path_on_stall = opts.contains(&"path");
     // Stall exits through the recorded basin entry, named so it is

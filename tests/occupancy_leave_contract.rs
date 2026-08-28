@@ -157,6 +157,23 @@ fn leftover_census_dwell_requires_the_sat_streak() {
 }
 
 #[test]
+fn catalog_rpc_keeps_the_recommended_hop() {
+    let source = include_str!("../examples/lj_cluster_search.rs");
+    let after_opts = source
+        .split("apply_boolean_options(&mut cfg, &opts);")
+        .nth(1)
+        .expect("boolean options apply before hop identity");
+    let hop = after_opts
+        .split("cfg.anneal_diversity")
+        .next()
+        .expect("recommended hop identity ends at diversity");
+    assert!(
+        !hop.contains("apply_occupancy_superbasin"),
+        "catalog talking must keep Config::recommended; SOAP packing superbasin is the Mackay shelf"
+    );
+}
+
+#[test]
 fn live_leave_gate_does_not_document_the_4000_hop_floor() {
     let hop = include_str!("../examples/lj_cluster_search.rs");
     assert!(
