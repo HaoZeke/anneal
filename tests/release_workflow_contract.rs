@@ -15,7 +15,7 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     assert!(manifest.contains("linkcell    = { version = \"0.3.3\", git = \"https://github.com/d-SEAMS/linkcell\", rev = \"a46717c564d01ea4f3dab09c07bd2d215290b2ab\""));
     assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9\", version = \"0.6.0\", features = [\"capi\"]"));
     assert!(manifest.contains("rgmin = { git = \"https://github.com/HaoZeke/rgmin.git\", rev = \"20832fd169932a1cd0d47ac84dc77fa9b435f940\""));
-    assert!(manifest.contains("rgsaddle = { git = \"https://github.com/OmniPotentRPC/rgsaddle.git\", rev = \"41207a57ea8a85b94d51dd28b1bc147f662a5cd2\""));
+    assert!(manifest.contains("rgsaddle = { git = \"https://github.com/OmniPotentRPC/rgsaddle.git\", rev = \"3015f68b12ebac9b7950469efa86d0f1ecfa001d\""));
     assert!(workflow.contains("cargo publish --dry-run"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
 }
