@@ -59,7 +59,7 @@ sha2        = "0.10"
 pyo3        = { version = "0.26", features = ["extension-module", "abi3-py310"], optional = true }
 numpy       = { version = "0.26", optional = true }
 # Only examples/molecular_cluster, slab_adsorption, and rgpot_minimize.
-rgpot-core = { version = "=3.0.2", git = "https://github.com/HaoZeke/potlib.git", rev = "b1baa1b68a46143ad49bf4860728d779b76a647c", optional = true }
+rgpot-core = { version = "=3.0.2", git = "https://github.com/HaoZeke/potlib.git", rev = "b19227f9197a4c927633f1225f1e7546794a6f1e", optional = true }
 libloading = { version = "0.8", optional = true }
 capnp = { version = "0.21", optional = true }
 nng = { version = "1.0", optional = true }
@@ -175,4 +175,3 @@ required-features = ["featomic"]
 [[example]]
 name = "lj_census_calibration"
 required-features = ["ira"]
-

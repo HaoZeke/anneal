@@ -1396,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/HaoZeke/potlib.git?rev=b1baa1b68a46143ad49bf4860728d779b76a647c#b1baa1b68a46143ad49bf4860728d779b76a647c"
+source = "git+https://github.com/HaoZeke/potlib.git?rev=b19227f9197a4c927633f1225f1e7546794a6f1e#b19227f9197a4c927633f1225f1e7546794a6f1e"
 dependencies = [
  "dlpk",
  "eindir-core",
