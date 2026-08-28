@@ -66,9 +66,7 @@ fn block_values(descriptor: &DescriptorVector, kind: DescriptorBlockKind) -> Vec
         .blocks()
         .iter()
         .filter(|block| block.kind() == kind)
-        .map(|block| {
-            &descriptor.values()[block.offset()..block.offset() + block.len()]
-        })
+        .map(|block| &descriptor.values()[block.offset()..block.offset() + block.len()])
         .collect()
 }
 
@@ -184,9 +182,7 @@ fn periodic_descriptor_is_invariant_to_a_unimodular_cell_basis_change() {
         [true; 3],
     )
     .unwrap();
-    let coordinates = Array1::from_vec(vec![
-        0.1, 0.1, 0.2, 3.9, 0.55, 0.2, 1.7, 0.72, 3.1,
-    ]);
+    let coordinates = Array1::from_vec(vec![0.1, 0.1, 0.2, 3.9, 0.55, 0.2, 1.7, 0.72, 3.1]);
     let species = [14, 8, 14];
     let left = universal_descriptor_space(sheared)
         .describe(coordinates.view(), Some(&species))
@@ -269,12 +265,7 @@ fn equivalent_periodic_primitive_and_supercells_have_the_same_descriptor() {
             .filter(|block| block.kind() == DescriptorBlockKind::InvariantSoapMean)
             .all(|block| block.raw_norm() > 0.0)
     );
-    assert!(
-        distance(
-            primitive_descriptor.values(),
-            supercell_descriptor.values()
-        ) < 1e-8
-    );
+    assert!(distance(primitive_descriptor.values(), supercell_descriptor.values()) < 1e-8);
 }
 
 #[test]
@@ -305,15 +296,13 @@ fn graph_block_is_continuous_at_every_radial_scale() {
         let epsilon = 1e-8;
         let inside = descriptor_space
             .describe(
-                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 - epsilon, 0.0, 0.0])
-                    .view(),
+                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 - epsilon, 0.0, 0.0]).view(),
                 Some(&[6, 6]),
             )
             .unwrap();
         let outside = descriptor_space
             .describe(
-                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 + epsilon, 0.0, 0.0])
-                    .view(),
+                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 + epsilon, 0.0, 0.0]).view(),
                 Some(&[6, 6]),
             )
             .unwrap();
