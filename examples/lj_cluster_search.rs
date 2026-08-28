@@ -2492,6 +2492,7 @@ fn run_capnp_catalog(
         .parse::<u32>()
         .expect("CATALOG_REPLICA must be an unsigned integer");
     let signature = system_signature(cfg.n_points).expect("LJ catalog signature must be valid");
+    let signature_digest = signature.digest();
     let descriptor_space = descriptor_space();
     let mut cooperative = CooperativeRun::new(
         [replica],
@@ -2506,7 +2507,7 @@ fn run_capnp_catalog(
             campaign: campaign.clone(),
             ensemble: ensemble.clone(),
             replica,
-            signature_digest: signature.digest(),
+            signature_digest,
         };
         match CatalogClient::connect(address, identity, ClientConfig::default()) {
             Ok(client) => cooperative
@@ -2557,6 +2558,7 @@ fn run_capnp_catalog(
         let brain_endpoint = endpoint.map(str::to_owned);
         let brain_campaign = campaign.clone();
         let brain_ensemble = ensemble.clone();
+        let brain_signature_digest = signature_digest;
         let decree_members = anneal_core::raft::decree_members(replica, &peer_ids);
         let brain_publish = std::env::var("CATALOG_BRAIN_PUBLISH").ok();
         Some(std::thread::spawn(move || {
@@ -2605,7 +2607,7 @@ fn run_capnp_catalog(
                             campaign: brain_campaign.clone(),
                             ensemble: brain_ensemble.clone(),
                             replica: u32::MAX,
-                            signature_digest: [0; 32],
+                            signature_digest: brain_signature_digest,
                         };
                         observer = endpoint.parse().ok().and_then(|address| {
                             anneal_core::catalog_rpc::client::CatalogClient::connect(

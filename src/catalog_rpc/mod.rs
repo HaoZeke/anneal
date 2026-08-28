@@ -255,8 +255,9 @@ pub enum CatalogOperation {
         /// Charged-work synchronization epoch.
         epoch: u64,
     },
-    /// Read-only aggregate status, answerable by any observer that names
-    /// the right campaign and ensemble.
+    /// Read-only aggregate status for an observer naming the same campaign,
+    /// ensemble, and system signature. Observer replica membership is not
+    /// required.
     ObserverStatus,
     /// Poll for a bridge segment assignment; the argument selects an
     /// entry state from the assigned region's stored entries.

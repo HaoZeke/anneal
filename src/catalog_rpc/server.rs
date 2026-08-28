@@ -743,17 +743,10 @@ fn process_request(
     if matches!(request.operation, CatalogOperation::ObserverStatus) {
         // Observation is not history: the reply is assembled from the live
         // state, never journaled, and never advances a replica's sequence.
-        // The observer must name the right campaign and ensemble, nothing
-        // more, so a coordinator can be watched without holding a replica
-        // identity or the system signature.
-        if request.identity.campaign != config.campaign
-            || request.identity.ensemble != config.ensemble
-        {
-            return Ok(rejected(
-                &state,
-                request.event_sequence,
-                ProtocolRejection::CampaignMismatch,
-            ));
+        // An observer need not occupy a replica slot, but it must identify the
+        // same system as the coordinator so live state cannot cross PESes.
+        if let Some(reason) = system_identity_rejection(config, &request.identity) {
+            return Ok(rejected(&state, request.event_sequence, reason));
         }
         return Ok(observer_status_reply(
             config,
@@ -3906,14 +3899,26 @@ fn identity_rejection(
     config: &ServerConfig,
     identity: &CatalogIdentity,
 ) -> Option<ProtocolRejection> {
+    if let Some(reason) = system_identity_rejection(config, identity) {
+        return Some(reason);
+    }
+    if !config.replicas.contains(&identity.replica) {
+        Some(ProtocolRejection::ReplicaMismatch)
+    } else {
+        None
+    }
+}
+
+fn system_identity_rejection(
+    config: &ServerConfig,
+    identity: &CatalogIdentity,
+) -> Option<ProtocolRejection> {
     if identity.campaign != config.campaign {
         Some(ProtocolRejection::CampaignMismatch)
     } else if identity.ensemble != config.ensemble {
         Some(ProtocolRejection::EnsembleMismatch)
     } else if identity.signature_digest != config.signature_digest {
         Some(ProtocolRejection::SignatureMismatch)
-    } else if !config.replicas.contains(&identity.replica) {
-        Some(ProtocolRejection::ReplicaMismatch)
     } else {
         None
     }
