@@ -2538,7 +2538,7 @@ fn run_capnp_catalog(
         std::env::var("CATALOG_BRAIN_PEERS"),
     ) {
         use anneal_core::raft::wire::{
-            ExplorationDecree, ReplicaAssignment as DecreeAssignment, decode_decree, encode_decree,
+            ExplorationDecree, assign_seam_work, decode_decree, encode_decree,
         };
         use anneal_core::raft::{RaftNode, Role};
         let mut peer_ids = Vec::new();
@@ -2625,19 +2625,14 @@ fn run_capnp_catalog(
                                 *sequence += 1;
                                 if let Some(seam) = status.seam {
                                     decree_sequence += 1;
-                                    let assignments = decree_members
-                                        .iter()
-                                        .copied()
-                                        .map(|member| DecreeAssignment {
-                                            replica: member,
-                                            right_side: false,
-                                            histogram_classes: Vec::new(),
-                                            histogram_masses: Vec::new(),
-                                            anchor_basin: seam.left_basin,
-                                            bridge_duty: false,
-                                            decree_index: decree_sequence,
-                                        })
-                                        .collect();
+                                    let assignments = assign_seam_work(
+                                        &decree_members,
+                                        seam.left_basin,
+                                        seam.right_basin,
+                                        seam.community_left,
+                                        seam.community_right,
+                                        decree_sequence,
+                                    );
                                     let decree = ExplorationDecree {
                                         algebraic_connectivity: seam.algebraic_connectivity,
                                         seam_conductance: seam.conductance,
