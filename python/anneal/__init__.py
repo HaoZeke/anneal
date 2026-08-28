@@ -71,7 +71,9 @@ def cluster_search(obj_fn, grad_fn, n: int, budget: int, seed: int = 0, recommen
 
     Args:
       obj_fn: callable ``f(numpy.ndarray) -> float``.
-      grad_fn: callable ``g(x) -> numpy.ndarray``.
+      grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``. A charged
+        central-difference probe determines its orientation when the budget is
+        at least four evaluations.
       n: number of points (state length is ``3 * n``).
       budget: charged objective and gradient evaluations.
       seed: RNG seed.
