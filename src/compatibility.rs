@@ -46,8 +46,8 @@ impl AbiStamp {
     pub const fn anneal_default() -> Self {
         Self {
             abi_major: 1,
-            abi_minor: 0,
-            layout_revision: 1,
+            abi_minor: 1,
+            layout_revision: 3,
             dlpack_major: 1,
             dlpack_minor: 0,
             features: EINDIR_ABI_FEATURE_GRADIENT | EINDIR_ABI_FEATURE_BATCH,
@@ -174,9 +174,9 @@ impl Default for EngineDescriptor {
 /// Validate the memory and numerical shape invariants required by an eindir
 /// objective before adapting it to an [`eindir_core::Objective`].
 ///
-/// The handle is borrowed and no callback is invoked. Semantic metadata such
-/// as units and force sign requires the versioned objective descriptor tracked
-/// separately from the embedded binary handle.
+/// The handle is borrowed and no callback is invoked. The optional embedded
+/// descriptor carries semantic metadata such as units and force sign; callers
+/// that require those semantics validate it separately.
 ///
 /// # Safety
 ///
