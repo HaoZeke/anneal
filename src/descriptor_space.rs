@@ -1,6 +1,12 @@
 //! Versioned multiscale invariant descriptor spaces for catalog geometry.
 
 pub mod pullback;
+mod universal;
+
+pub use universal::{
+    DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA, UNIVERSAL_DESCRIPTOR_VERSION,
+    universal_descriptor_space,
+};
 
 use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
 use ndarray::{Array2, ArrayView1};
@@ -18,6 +24,29 @@ pub enum DescriptorBlockKind {
     AceNu3Mean,
     /// Stacked species-conditioned leftover \(p_i-\mu_{z(i)}\).
     SoapLeftover,
+    /// Fixed-channel radial spectrum of minimum-image pair distances.
+    PairRadial,
+    /// Fixed-channel radial and angular spectrum of centred triples.
+    ThreeBodyAngular,
+    /// Multiscale graph moments and connectivity statistics.
+    GraphTopology,
+    /// Fixed-channel rotation-invariant SOAP mean.
+    InvariantSoapMean,
+    /// Fixed-channel rotation-invariant ACE nu=3 mean.
+    InvariantAceNu3Mean,
+}
+
+impl DescriptorBlockKind {
+    fn requires_geometry(self) -> bool {
+        matches!(
+            self,
+            Self::PairRadial
+                | Self::ThreeBodyAngular
+                | Self::GraphTopology
+                | Self::InvariantSoapMean
+                | Self::InvariantAceNu3Mean
+        )
+    }
 }
 
 /// Resolution and aggregation contract for one normalized block.
@@ -257,6 +286,15 @@ pub enum DescriptorError {
     /// SOAP cutoff must be finite and positive.
     #[error("SOAP cutoff must be finite and positive")]
     InvalidCutoff,
+    /// Universal coordinates require a finite positive reference length.
+    #[error("descriptor length scale must be finite and positive")]
+    InvalidLengthScale,
+    /// Periodic axes require an explicit simulation cell.
+    #[error("periodic descriptor geometry requires a simulation cell")]
+    PeriodicCellRequired,
+    /// A simulation cell must be finite and nonsingular.
+    #[error("descriptor simulation cell must be finite and nonsingular")]
+    InvalidCell,
     /// Cartesian coordinates must have exactly three components per atom.
     #[error("coordinate dimension {actual} is not a positive multiple of three")]
     CoordinateDimension {
@@ -291,18 +329,32 @@ pub enum DescriptorError {
     /// Distances require vectors from one exact descriptor schema.
     #[error("descriptor vectors use incompatible schemas")]
     IncompatibleDescriptorVectors,
+    /// Universal blocks need the length scale and boundary conditions they encode.
+    #[error("universal descriptor blocks require descriptor geometry")]
+    UniversalGeometryRequired,
 }
 
 /// Evaluator bound to one immutable descriptor schema.
 #[derive(Debug, Clone)]
 pub struct DescriptorSpace {
     schema: DescriptorSchema,
+    geometry: Option<DescriptorGeometry>,
 }
 
 impl DescriptorSpace {
     /// Bind an evaluator to a validated schema.
     pub fn new(schema: DescriptorSchema) -> Self {
-        Self { schema }
+        Self {
+            schema,
+            geometry: None,
+        }
+    }
+
+    pub(crate) fn with_geometry(schema: DescriptorSchema, geometry: DescriptorGeometry) -> Self {
+        Self {
+            schema,
+            geometry: Some(geometry),
+        }
     }
 
     /// Immutable schema interpreted by this evaluator.
@@ -334,6 +386,18 @@ impl DescriptorSpace {
             });
         }
 
+        if let Some(geometry) = self.geometry {
+            return universal::describe(&self.schema, geometry, coordinates, species);
+        }
+        if self
+            .schema
+            .blocks
+            .iter()
+            .any(|block| block.kind.requires_geometry())
+        {
+            return Err(DescriptorError::UniversalGeometryRequired);
+        }
+
         let mut values = Vec::new();
         let mut metadata = Vec::with_capacity(self.schema.blocks.len());
         for (block_index, block) in self.schema.blocks.iter().copied().enumerate() {
@@ -344,6 +408,11 @@ impl DescriptorSpace {
                     local_spectra_z(coordinates, block.soap, species)
                 }
                 DescriptorBlockKind::AceNu3Mean => local_nu3_z(coordinates, block.soap, species),
+                DescriptorBlockKind::PairRadial
+                | DescriptorBlockKind::ThreeBodyAngular
+                | DescriptorBlockKind::GraphTopology
+                | DescriptorBlockKind::InvariantSoapMean
+                | DescriptorBlockKind::InvariantAceNu3Mean => unreachable!(),
             };
             let mut aggregated = match block.kind {
                 DescriptorBlockKind::SoapMean => column_mean(&local, 0),
@@ -352,6 +421,11 @@ impl DescriptorSpace {
                     column_mean(&local, block.soap.feat_dim(species))
                 }
                 DescriptorBlockKind::SoapLeftover => leftover_stack(&local, species),
+                DescriptorBlockKind::PairRadial
+                | DescriptorBlockKind::ThreeBodyAngular
+                | DescriptorBlockKind::GraphTopology
+                | DescriptorBlockKind::InvariantSoapMean
+                | DescriptorBlockKind::InvariantAceNu3Mean => unreachable!(),
             };
             if let Some(index) = aggregated.iter().position(|value| !value.is_finite()) {
                 return Err(DescriptorError::NonFiniteDescriptor {
@@ -426,6 +500,9 @@ impl DescriptorSpace {
         coordinates: ArrayView1<f64>,
         species: Option<&[u32]>,
     ) -> Result<Array2<f64>, DescriptorError> {
+        if self.geometry.is_some() {
+            return self.jacobian_fd(coordinates, species, 1e-6);
+        }
         let descriptor = self.describe(coordinates, species)?;
         let coordinate_dimension = coordinates.len();
         let mut jacobian = Array2::zeros((descriptor.values.len(), coordinate_dimension));
@@ -455,6 +532,13 @@ impl DescriptorSpace {
                 }
                 DescriptorBlockKind::SoapLeftover => {
                     return self.jacobian_fd(coordinates, species, 1e-6);
+                }
+                DescriptorBlockKind::PairRadial
+                | DescriptorBlockKind::ThreeBodyAngular
+                | DescriptorBlockKind::GraphTopology
+                | DescriptorBlockKind::InvariantSoapMean
+                | DescriptorBlockKind::InvariantAceNu3Mean => {
+                    return Err(DescriptorError::UniversalGeometryRequired);
                 }
             };
             debug_assert_eq!(raw_jacobian.ncols(), coordinate_dimension);
