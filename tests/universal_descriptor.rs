@@ -1,5 +1,5 @@
 use anneal_core::descriptor_space::{
-    DescriptorBlockKind, DescriptorGeometry, UNIVERSAL_DESCRIPTOR_SCHEMA,
+    DescriptorBlockKind, DescriptorGeometry, DescriptorVector, UNIVERSAL_DESCRIPTOR_SCHEMA,
     UNIVERSAL_DESCRIPTOR_VERSION, universal_descriptor_space,
 };
 use ndarray::Array1;
@@ -59,6 +59,17 @@ fn load_xyz(text: &str) -> Array1<f64> {
             .collect::<Result<Vec<_>, _>>()
             .unwrap(),
     )
+}
+
+fn block_values(descriptor: &DescriptorVector, kind: DescriptorBlockKind) -> Vec<&[f64]> {
+    descriptor
+        .blocks()
+        .iter()
+        .filter(|block| block.kind() == kind)
+        .map(|block| {
+            &descriptor.values()[block.offset()..block.offset() + block.len()]
+        })
+        .collect()
 }
 
 #[test]
@@ -157,6 +168,203 @@ fn periodic_images_have_the_same_descriptor() {
         .unwrap();
 
     assert!(distance(left.values(), right.values()) < 1e-9);
+}
+
+#[test]
+fn periodic_descriptor_is_invariant_to_a_unimodular_cell_basis_change() {
+    let sheared = DescriptorGeometry::new(
+        1.0,
+        Some([4.0, 0.0, 0.0, 3.8, 1.0, 0.0, 0.0, 0.0, 8.0]),
+        [true; 3],
+    )
+    .unwrap();
+    let reduced = DescriptorGeometry::new(
+        1.0,
+        Some([4.0, 0.0, 0.0, -0.2, 1.0, 0.0, 0.0, 0.0, 8.0]),
+        [true; 3],
+    )
+    .unwrap();
+    let coordinates = Array1::from_vec(vec![
+        0.1, 0.1, 0.2, 3.9, 0.55, 0.2, 1.7, 0.72, 3.1,
+    ]);
+    let species = [14, 8, 14];
+    let left = universal_descriptor_space(sheared)
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+    let right = universal_descriptor_space(reduced)
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+
+    assert!(distance(left.values(), right.values()) < 1e-8);
+}
+
+#[test]
+fn slab_geometry_wraps_only_its_periodic_axes() {
+    let geometry = DescriptorGeometry::new(
+        1.0,
+        Some([6.0, 0.0, 0.0, 1.0, 5.0, 0.0, 0.0, 0.0, 12.0]),
+        [true, true, false],
+    )
+    .unwrap();
+    let descriptor_space = universal_descriptor_space(geometry);
+    let coordinates = Array1::from_vec(vec![
+        0.2, 0.3, 0.4, 1.4, 0.5, 0.7, 0.8, 1.7, 1.1, 2.1, 1.9, 2.0,
+    ]);
+    let species = [78, 78, 78, 1];
+    let mut in_plane_image = coordinates.clone();
+    in_plane_image[3] += 7.0;
+    in_plane_image[4] += 5.0;
+    let mut vacuum_shift = coordinates.clone();
+    vacuum_shift[5] += 12.0;
+
+    let reference = descriptor_space
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+    let wrapped = descriptor_space
+        .describe(in_plane_image.view(), Some(&species))
+        .unwrap();
+    let displaced = descriptor_space
+        .describe(vacuum_shift.view(), Some(&species))
+        .unwrap();
+
+    assert!(distance(reference.values(), wrapped.values()) < 1e-8);
+    assert!(distance(reference.values(), displaced.values()) > 1e-3);
+}
+
+#[test]
+fn equivalent_periodic_primitive_and_supercells_have_the_same_descriptor() {
+    let primitive = DescriptorGeometry::new(
+        1.0,
+        Some([2.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0]),
+        [true; 3],
+    )
+    .unwrap();
+    let supercell = DescriptorGeometry::new(
+        1.0,
+        Some([4.0, 0.0, 0.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0]),
+        [true; 3],
+    )
+    .unwrap();
+    let primitive_descriptor = universal_descriptor_space(primitive)
+        .describe(Array1::from_vec(vec![0.0, 0.0, 0.0]).view(), Some(&[18]))
+        .unwrap();
+    let supercell_descriptor = universal_descriptor_space(supercell)
+        .describe(
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]).view(),
+            Some(&[18, 18]),
+        )
+        .unwrap();
+
+    assert!(
+        primitive_descriptor
+            .blocks()
+            .iter()
+            .filter(|block| block.kind() == DescriptorBlockKind::PairRadial)
+            .all(|block| block.raw_norm() > 0.0)
+    );
+    assert!(
+        primitive_descriptor
+            .blocks()
+            .iter()
+            .filter(|block| block.kind() == DescriptorBlockKind::InvariantSoapMean)
+            .all(|block| block.raw_norm() > 0.0)
+    );
+    assert!(
+        distance(
+            primitive_descriptor.values(),
+            supercell_descriptor.values()
+        ) < 1e-8
+    );
+}
+
+#[test]
+fn universal_descriptor_is_reflection_invariant() {
+    let coordinates = Array1::from_vec(vec![
+        0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5, -1.0, -0.7, 0.2,
+    ]);
+    let mut reflected = coordinates.clone();
+    for atom in 0..coordinates.len() / 3 {
+        reflected[3 * atom] = -reflected[3 * atom];
+    }
+    let species = [6, 8, 6, 8, 6];
+    let descriptor_space = finite(1.0);
+    let original = descriptor_space
+        .describe(coordinates.view(), Some(&species))
+        .unwrap();
+    let mirror = descriptor_space
+        .describe(reflected.view(), Some(&species))
+        .unwrap();
+
+    assert!(distance(original.values(), mirror.values()) < 1e-8);
+}
+
+#[test]
+fn graph_block_is_continuous_at_every_radial_scale() {
+    let descriptor_space = finite(1.0);
+    for threshold in 1..=6 {
+        let epsilon = 1e-8;
+        let inside = descriptor_space
+            .describe(
+                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 - epsilon, 0.0, 0.0])
+                    .view(),
+                Some(&[6, 6]),
+            )
+            .unwrap();
+        let outside = descriptor_space
+            .describe(
+                Array1::from_vec(vec![0.0, 0.0, 0.0, threshold as f64 + epsilon, 0.0, 0.0])
+                    .view(),
+                Some(&[6, 6]),
+            )
+            .unwrap();
+        let inside_graph = block_values(&inside, DescriptorBlockKind::GraphTopology);
+        let outside_graph = block_values(&outside, DescriptorBlockKind::GraphTopology);
+
+        assert_eq!(inside_graph.len(), 1);
+        assert_eq!(outside_graph.len(), 1);
+        assert!(
+            distance(inside_graph[0], outside_graph[0]) < 1e-5,
+            "graph block jumps at radial scale {threshold}"
+        );
+    }
+}
+
+#[test]
+fn descriptor_is_continuous_when_the_last_neighbor_crosses_a_cutoff() {
+    let descriptor_space = finite(1.0);
+    let epsilon = 1e-8;
+    let inside = descriptor_space
+        .describe(
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 6.0 - epsilon, 0.0, 0.0]).view(),
+            Some(&[8, 1]),
+        )
+        .unwrap();
+    let outside = descriptor_space
+        .describe(
+            Array1::from_vec(vec![0.0, 0.0, 0.0, 6.0 + epsilon, 0.0, 0.0]).view(),
+            Some(&[8, 1]),
+        )
+        .unwrap();
+
+    assert!(distance(inside.values(), outside.values()) < 1e-5);
+}
+
+#[test]
+fn zero_signal_blocks_stay_finite_under_soft_normalization() {
+    let descriptor = finite(1.0)
+        .describe(Array1::from_vec(vec![0.0, 0.0, 0.0]).view(), Some(&[2]))
+        .unwrap();
+
+    assert!(descriptor.values().iter().all(|value| value.is_finite()));
+    for block in descriptor.blocks() {
+        assert_eq!(block.normalization(), "soft-l2-eps-v1");
+        let values = &descriptor.values()[block.offset()..block.offset() + block.len()];
+        if block.raw_norm() == 0.0 {
+            assert!(values.iter().all(|&value| value == 0.0));
+        } else {
+            assert!(norm(values) <= 1.0);
+        }
+    }
 }
 
 #[test]
