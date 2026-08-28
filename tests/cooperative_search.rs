@@ -24,8 +24,9 @@ use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
     CatalogBoundaryOutcome, CatalogHoleOutcome, CatalogOfferOutcome, CatalogSampleOutcome,
     CatalogSamplesOutcome, CooperativeRun, PolicyEvidenceOutcome, PolicyRole,
-    PopulationSynchronizationOutcome, ProposalFamily, RunManifest, SliceAdoption, SliceQuench,
-    SliceTrace, SliceValidation, SynchronizationOutcome, TraceKind, TransitionRecordOutcome,
+    PopulationSynchronizationOutcome, ProposalFamily, RideClaimOutcome, RideReportOutcome,
+    RunManifest, SliceAdoption, SliceQuench, SliceTrace, SliceValidation, SynchronizationOutcome,
+    TraceKind, TransitionRecordOutcome,
 };
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
@@ -286,6 +287,49 @@ fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
 
     assert!(first_credit.novel_edge);
     assert!(!duplicate_credit.novel_edge);
+}
+
+#[test]
+fn cooperative_run_routes_certified_ride_work_through_the_live_mailbox() {
+    let server = ride_server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        run.offer_candidate(0, ride_candidate(0, 1, 1.2)).unwrap(),
+        CatalogOfferOutcome::Admitted
+    );
+    let RideClaimOutcome::Work(work) = run.claim_ride(0, 8003).unwrap() else {
+        panic!("a validated source must produce live ride work")
+    };
+    let report = CatalogRideReport {
+        work: work.order.id,
+        charged_evaluations: 144,
+        outcome: CatalogRideOutcome::Certified(CatalogRideConnection {
+            saddle: ride_candidate(0, 2, 1.6),
+            endpoints: [ride_candidate(0, 2, 1.2), ride_candidate(0, 2, 2.0)],
+        }),
+    };
+    let RideReportOutcome::Credited(credit) = run.report_ride(0, report).unwrap() else {
+        panic!("a receiving-certified index-one connection must be credited")
+    };
+
+    assert!(credit.novel_edge);
+    assert!(
+        run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::RideClaim)
+    );
+    assert!(
+        run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::RideReport)
+    );
 }
 
 #[test]
