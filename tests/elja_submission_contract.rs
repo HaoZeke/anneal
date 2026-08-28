@@ -401,6 +401,12 @@ fn strict_pipefail_scripts_do_not_short_circuit_producers() {
                 path.display(),
                 index + 1
             );
+            assert!(
+                !line.contains("| head"),
+                "{}:{} uses head to short-circuit a pipefail producer",
+                path.display(),
+                index + 1
+            );
         }
     }
 }
