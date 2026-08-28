@@ -2,8 +2,10 @@ use std::collections::BTreeSet;
 
 use anneal_core::pes_exploration::RideMethod;
 use anneal_core::ride_ledger::{
-    EnvironmentTarget, RideFailure, RideLedger, RideOutcome, RidePortfolio, RideSource,
+    EnvironmentBook, EnvironmentTarget, RideFailure, RideLedger, RideOutcome, RidePortfolio,
+    RideSource,
 };
+use ndarray::array;
 
 fn source(basin: u64, energy: f64, environments: &[(u32, u32)]) -> RideSource {
     RideSource {
@@ -112,4 +114,68 @@ fn ape_energy_priority_selects_the_lowest_untried_source() {
 
     assert_eq!(work.arm.source_basin, 20);
     assert_eq!(work.representative_atom, 8);
+}
+
+#[test]
+fn local_environment_book_exposes_one_stable_representative_per_class() {
+    let mut book = EnvironmentBook::new(0.12).unwrap();
+    let first = book
+        .observe(array![[1.0, 0.0], [0.96, 0.04], [0.0, 1.0]].view())
+        .unwrap();
+    let second = book
+        .observe(array![[0.98, 0.01], [0.02, 0.97], [0.55, 0.55]].view())
+        .unwrap();
+
+    assert_eq!(
+        first,
+        vec![
+            EnvironmentTarget { class: 0, atom: 0 },
+            EnvironmentTarget { class: 1, atom: 2 },
+        ]
+    );
+    assert_eq!(
+        second,
+        vec![
+            EnvironmentTarget { class: 0, atom: 0 },
+            EnvironmentTarget { class: 1, atom: 1 },
+            EnvironmentTarget { class: 2, atom: 2 },
+        ]
+    );
+    assert_eq!(book.class_count(), 3);
+}
+
+#[test]
+fn novel_edge_yield_outweighs_a_failed_arm_after_initial_coverage() {
+    let portfolio = RidePortfolio::new(1, vec![RideMethod::Dimer]).unwrap();
+    let mut ledger = RideLedger::new(portfolio);
+    ledger
+        .register_source(source(17, -104.2, &[(4, 6)]))
+        .unwrap();
+
+    let productive = ledger.claim(2, 101).unwrap();
+    ledger
+        .report(
+            2,
+            productive.id,
+            140,
+            RideOutcome::Certified {
+                saddle: 70,
+                endpoints: [17, 29],
+            },
+        )
+        .unwrap();
+    let failed = ledger.claim(7, 102).unwrap();
+    ledger
+        .report(
+            7,
+            failed.id,
+            90,
+            RideOutcome::Failed(RideFailure::SaddleNotConverged),
+        )
+        .unwrap();
+
+    let repeated = ledger.claim(9, 103).unwrap();
+
+    assert_eq!(repeated.arm, productive.arm);
+    assert_ne!(repeated.arm, failed.arm);
 }
