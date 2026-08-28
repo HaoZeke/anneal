@@ -471,7 +471,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "eindir-core"
 version = "0.6.0"
-source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=091c6f7d6ea70821c3374152481fb9500e799af2#091c6f7d6ea70821c3374152481fb9500e799af2"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1383,7 +1383,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgmin"
 version = "0.2.0"
-source = "git+https://github.com/OmniPotentRPC/rgmin.git?rev=5be2e963d2239fd2bf6f7f2ae3b9a4e54f2a3aaf#5be2e963d2239fd2bf6f7f2ae3b9a4e54f2a3aaf"
+source = "git+https://github.com/HaoZeke/rgmin.git?rev=2b99087d0bd493b8e91fc41ba73ee89c7eecad3a#2b99087d0bd493b8e91fc41ba73ee89c7eecad3a"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
@@ -1396,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "rgpot-core"
 version = "3.0.2"
-source = "git+https://github.com/HaoZeke/potlib.git?rev=b19227f9197a4c927633f1225f1e7546794a6f1e#b19227f9197a4c927633f1225f1e7546794a6f1e"
+source = "git+https://github.com/HaoZeke/potlib.git?rev=65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf#65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf"
 dependencies = [
  "dlpk",
  "eindir-core",
