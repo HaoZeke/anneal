@@ -179,6 +179,8 @@ pub mod transition_graph;
 pub mod twin;
 /// Shared algebra-facing type definitions.
 pub mod types;
+/// Uncertainty-aware coverage over universal stationary-point descriptors.
+pub mod universal_coverage;
 /// The fully-typed `SaVariant` tuple satisfying L1-L4.
 pub mod variant;
 /// Package version metadata.
