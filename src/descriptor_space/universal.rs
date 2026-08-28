@@ -75,7 +75,7 @@ impl DescriptorGeometry {
         self.periodic
     }
 
-    fn displacement(self, delta: [f64; 3]) -> [f64; 3] {
+    pub(crate) fn displacement(self, delta: [f64; 3]) -> [f64; 3] {
         let mut displacement = delta;
         if let Some(cell) = self.cell
             && self.periodic.iter().any(|&axis| axis)
