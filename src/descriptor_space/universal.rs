@@ -5,7 +5,7 @@ use super::{
     DescriptorSchema, DescriptorSpace, DescriptorVector, SOFT_L2_NORMALIZATION_SCHEMA,
 };
 use crate::soap::central_spectrum_from_displacements;
-use linkcell::{Cell, knearest};
+use linkcell::Cell;
 use ndarray::ArrayView1;
 use std::f64::consts::{PI, TAU};
 
@@ -144,7 +144,12 @@ pub(super) fn describe(
     coordinates: ArrayView1<f64>,
     species: Option<&[u32]>,
 ) -> Result<DescriptorVector, DescriptorError> {
-    let environment = Environment::new(geometry, coordinates, species)?;
+    let maximum_cutoff = schema
+        .blocks
+        .iter()
+        .map(|block| block.cutoff())
+        .fold(0.0, f64::max);
+    let environment = Environment::new(geometry, coordinates, species, maximum_cutoff)?;
     let mut values = Vec::new();
     let mut metadata = Vec::with_capacity(schema.blocks.len());
     for (block_index, block) in schema.blocks.iter().copied().enumerate() {
@@ -200,10 +205,15 @@ pub(super) fn describe(
 
 struct Environment {
     atoms: usize,
-    displacements: Vec<[f64; 3]>,
-    distances: Vec<f64>,
     species: Vec<u32>,
-    nearest: Vec<Vec<usize>>,
+    neighbors: Vec<Vec<NeighborImage>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct NeighborImage {
+    atom: usize,
+    displacement: [f64; 3],
+    distance: f64,
 }
 
 impl Environment {
@@ -211,6 +221,7 @@ impl Environment {
         geometry: DescriptorGeometry,
         coordinates: ArrayView1<f64>,
         species: Option<&[u32]>,
+        maximum_cutoff: f64,
     ) -> Result<Self, DescriptorError> {
         let atoms = coordinates.len() / 3;
         let positions = (0..atoms)
@@ -222,7 +233,7 @@ impl Environment {
                 ]
             })
             .collect::<Vec<_>>();
-        let periodic_cell = if geometry.periodic == [true; 3] {
+        let periodic_cell = if geometry.periodic.iter().any(|&axis| axis) {
             let cell = geometry.cell.expect("fully periodic geometry has a cell");
             Some(
                 Cell::from_vectors(
@@ -236,59 +247,86 @@ impl Environment {
         } else {
             None
         };
-        let mut displacements = vec![[0.0; 3]; atoms * atoms];
-        let mut distances = vec![0.0; atoms * atoms];
-        for i in 0..atoms {
-            for j in i + 1..atoms {
-                let displacement = match periodic_cell.as_ref() {
-                    Some(cell) => linkcell_displacement(cell, positions[i], positions[j], geometry),
-                    None => geometry.displacement([
-                        positions[j][0] - positions[i][0],
-                        positions[j][1] - positions[i][1],
-                        positions[j][2] - positions[i][2],
-                    ]),
-                };
-                let reverse = [-displacement[0], -displacement[1], -displacement[2]];
-                let distance = dot(displacement, displacement).sqrt();
-                displacements[i * atoms + j] = displacement;
-                displacements[j * atoms + i] = reverse;
-                distances[i * atoms + j] = distance;
-                distances[j * atoms + i] = distance;
+        let image_bounds = periodic_cell
+            .as_ref()
+            .map(|cell| periodic_image_bounds(cell, geometry, maximum_cutoff))
+            .transpose()?
+            .unwrap_or([0; 3]);
+        let mut neighbors = vec![Vec::new(); atoms];
+        for centre in 0..atoms {
+            for target in 0..atoms {
+                let delta = [
+                    positions[target][0] - positions[centre][0],
+                    positions[target][1] - positions[centre][1],
+                    positions[target][2] - positions[centre][2],
+                ];
+                let base = geometry.displacement(delta);
+                for na in -image_bounds[0]..=image_bounds[0] {
+                    for nb in -image_bounds[1]..=image_bounds[1] {
+                        for nc in -image_bounds[2]..=image_bounds[2] {
+                            if centre == target && na == 0 && nb == 0 && nc == 0 {
+                                continue;
+                            }
+                            let shift = periodic_cell
+                                .as_ref()
+                                .map(|cell| cell.lattice_shift(na, nb, nc))
+                                .unwrap_or([0.0; 3]);
+                            let displacement = [
+                                base[0] + shift[0] / geometry.length_scale,
+                                base[1] + shift[1] / geometry.length_scale,
+                                base[2] + shift[2] / geometry.length_scale,
+                            ];
+                            let distance = dot(displacement, displacement).sqrt();
+                            if distance <= 1e-12 || distance >= maximum_cutoff {
+                                continue;
+                            }
+                            neighbors[centre].push(NeighborImage {
+                                atom: target,
+                                displacement,
+                                distance,
+                            });
+                        }
+                    }
+                }
             }
+            neighbors[centre].sort_by(|left, right| {
+                left.distance
+                    .total_cmp(&right.distance)
+                    .then_with(|| left.atom.cmp(&right.atom))
+                    .then_with(|| left.displacement[0].total_cmp(&right.displacement[0]))
+                    .then_with(|| left.displacement[1].total_cmp(&right.displacement[1]))
+                    .then_with(|| left.displacement[2].total_cmp(&right.displacement[2]))
+            });
         }
-        let nearest_count = atoms.saturating_sub(1).min(12);
-        let nearest = match periodic_cell.as_ref() {
-            Some(cell) if nearest_count > 0 => knearest(
-                &positions,
-                cell,
-                nearest_count,
-                None,
-                Some(geometry.length_scale),
-            )
-            .map_err(|_| DescriptorError::NeighborSearch)?
-            .into_iter()
-            .map(|neighbors| neighbors.indices)
-            .collect(),
-            _ => nearest_from_distances(&distances, atoms, nearest_count),
-        };
         Ok(Self {
             atoms,
-            displacements,
-            distances,
             species: species
                 .map(<[u32]>::to_vec)
                 .unwrap_or_else(|| vec![0; atoms]),
-            nearest,
+            neighbors,
         })
     }
+}
 
-    fn displacement(&self, i: usize, j: usize) -> [f64; 3] {
-        self.displacements[i * self.atoms + j]
+fn periodic_image_bounds(
+    cell: &Cell,
+    geometry: DescriptorGeometry,
+    maximum_cutoff: f64,
+) -> Result<[i32; 3], DescriptorError> {
+    let physical_cutoff = maximum_cutoff * geometry.length_scale;
+    let widths = cell.widths();
+    let mut bounds = [0; 3];
+    for axis in 0..3 {
+        if !geometry.periodic[axis] {
+            continue;
+        }
+        let bound = (physical_cutoff / widths[axis] + 0.5).ceil();
+        if !bound.is_finite() || bound > i32::MAX as f64 {
+            return Err(DescriptorError::NeighborSearch);
+        }
+        bounds[axis] = bound as i32;
     }
-
-    fn distance(&self, i: usize, j: usize) -> f64 {
-        self.distances[i * self.atoms + j]
-    }
+    Ok(bounds)
 }
 
 fn pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {
@@ -296,18 +334,23 @@ fn pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64
     let cutoff = block.cutoff();
     let width = cutoff / radial_bins as f64;
     let mut spectrum = vec![0.0; radial_bins * PAIR_CHANNELS];
-    for i in 0..environment.atoms {
-        for j in i + 1..environment.atoms {
-            let distance = environment.distance(i, j);
+    let centre_weight = 1.0 / environment.atoms.max(1) as f64;
+    for centre in 0..environment.atoms {
+        for neighbor in &environment.neighbors[centre] {
+            let distance = neighbor.distance;
             if distance <= 1e-12 || distance >= cutoff {
                 continue;
             }
             let cutoff_weight = cosine_cutoff(distance, cutoff);
-            let species = pair_species(environment.species[i], environment.species[j]);
+            let species = pair_species(
+                environment.species[centre],
+                environment.species[neighbor.atom],
+            );
             for radial in 0..radial_bins {
                 let centre = (radial as f64 + 0.5) * width;
                 let scaled = (distance - centre) / (0.65 * width);
-                let basis = (-0.5 * scaled * scaled).exp() * cutoff_weight;
+                let basis =
+                    (-0.5 * scaled * scaled).exp() * cutoff_weight * centre_weight;
                 for channel in 0..PAIR_CHANNELS {
                     spectrum[channel * radial_bins + radial] += basis * species[channel];
                 }
@@ -324,24 +367,23 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
     let width = cutoff / radial_bins as f64;
     let mut spectrum = vec![0.0; radial_bins * angular_orders * TRIPLE_CHANNELS];
     for centre in 0..environment.atoms {
-        for left in 0..environment.atoms {
-            if left == centre {
-                continue;
-            }
-            let left_distance = environment.distance(centre, left);
+        let neighbors = environment.neighbors[centre]
+            .iter()
+            .filter(|neighbor| neighbor.distance < cutoff)
+            .collect::<Vec<_>>();
+        for left_index in 0..neighbors.len() {
+            let left = neighbors[left_index];
+            let left_distance = left.distance;
             if left_distance <= 1e-12 || left_distance >= cutoff {
                 continue;
             }
-            for right in left + 1..environment.atoms {
-                if right == centre {
-                    continue;
-                }
-                let right_distance = environment.distance(centre, right);
+            for &right in neighbors.iter().skip(left_index + 1) {
+                let right_distance = right.distance;
                 if right_distance <= 1e-12 || right_distance >= cutoff {
                     continue;
                 }
-                let left_vector = environment.displacement(centre, left);
-                let right_vector = environment.displacement(centre, right);
+                let left_vector = left.displacement;
+                let right_vector = right.displacement;
                 let cosine = (dot(left_vector, right_vector) / (left_distance * right_distance))
                     .clamp(-1.0, 1.0);
                 let angular = legendre_values(cosine, block.l_max());
@@ -350,8 +392,8 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
                     cosine_cutoff(left_distance, cutoff) * cosine_cutoff(right_distance, cutoff);
                 let species = triple_species(
                     environment.species[centre],
-                    environment.species[left],
-                    environment.species[right],
+                    environment.species[left.atom],
+                    environment.species[right.atom],
                 );
                 for radial in 0..radial_bins {
                     let shell = (radial as f64 + 0.5) * width;
@@ -360,7 +402,8 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
                     for (order, &angular_value) in angular.iter().enumerate() {
                         for channel in 0..TRIPLE_CHANNELS {
                             let index = (channel * radial_bins + radial) * angular_orders + order;
-                            spectrum[index] += radial_weight * angular_value * species[channel];
+                            spectrum[index] += radial_weight * angular_value * species[channel]
+                                / environment.atoms.max(1) as f64;
                         }
                     }
                 }
@@ -375,181 +418,115 @@ fn graph_topology(environment: &Environment, block: DescriptorBlockSpec) -> Vec<
     let mut spectrum = Vec::with_capacity(scales * GRAPH_FEATURES);
     for scale in 1..=scales {
         let threshold = block.cutoff() * scale as f64 / scales as f64;
-        spectrum.extend(graph_features(environment, threshold, 2 * scale));
+        let mut averaged = [0.0; GRAPH_FEATURES];
+        for centre in 0..environment.atoms {
+            let local = graph_features(environment, centre, threshold);
+            for (value, contribution) in averaged.iter_mut().zip(local) {
+                *value += contribution / environment.atoms.max(1) as f64;
+            }
+        }
+        spectrum.extend(averaged);
     }
     spectrum
 }
 
 fn graph_features(
     environment: &Environment,
+    centre: usize,
     threshold: f64,
-    neighbor_rank: usize,
 ) -> [f64; GRAPH_FEATURES] {
-    let atoms = environment.atoms;
-    let mut adjacency = vec![false; atoms * atoms];
-    let mut degree = vec![0usize; atoms];
-    let mut edges = 0usize;
-    let mut species_edge = 0.0;
-    for i in 0..atoms {
-        for j in i + 1..atoms {
-            if environment.distance(i, j) < threshold {
-                adjacency[i * atoms + j] = true;
-                adjacency[j * atoms + i] = true;
-                degree[i] += 1;
-                degree[j] += 1;
-                edges += 1;
-                species_edge +=
-                    species_scalar(environment.species[i]) * species_scalar(environment.species[j]);
-            }
-        }
-    }
-    let possible_edges = atoms.saturating_mul(atoms.saturating_sub(1)) / 2;
-    let degree_scale = atoms.saturating_sub(1).max(1) as f64;
-    let mean_degree = degree.iter().sum::<usize>() as f64 / atoms.max(1) as f64;
-    let degree_variance = degree
+    let neighbors = environment.neighbors[centre]
         .iter()
-        .map(|&value| {
-            let delta = value as f64 - mean_degree;
-            delta * delta
-        })
-        .sum::<f64>()
-        / atoms.max(1) as f64;
-    let mut mutual_nearest_edges = 0usize;
-    for i in 0..atoms {
-        for &j in environment.nearest[i]
-            .iter()
-            .take(neighbor_rank.min(environment.nearest[i].len()))
-        {
-            if i < j
-                && environment.nearest[j]
-                    .iter()
-                    .take(neighbor_rank.min(environment.nearest[j].len()))
-                    .any(|&neighbor| neighbor == i)
-            {
-                mutual_nearest_edges += 1;
-            }
-        }
+        .filter(|neighbor| neighbor.distance < threshold)
+        .collect::<Vec<_>>();
+    let count = neighbors.len();
+    if count == 0 {
+        return [0.0; GRAPH_FEATURES];
     }
-    let isolated = degree.iter().filter(|&&value| value == 0).count();
-    let mut triangles = 0usize;
-    for i in 0..atoms {
-        for j in i + 1..atoms {
-            if !adjacency[i * atoms + j] {
+    let centre_weights = neighbors
+        .iter()
+        .map(|neighbor| cosine_cutoff(neighbor.distance, threshold))
+        .collect::<Vec<_>>();
+    let mut adjacency = vec![0.0; count * count];
+    for left in 0..count {
+        for right in left + 1..count {
+            let displacement = [
+                neighbors[right].displacement[0] - neighbors[left].displacement[0],
+                neighbors[right].displacement[1] - neighbors[left].displacement[1],
+                neighbors[right].displacement[2] - neighbors[left].displacement[2],
+            ];
+            let distance = dot(displacement, displacement).sqrt();
+            if distance >= threshold {
                 continue;
             }
-            for k in j + 1..atoms {
-                if adjacency[i * atoms + k] && adjacency[j * atoms + k] {
-                    triangles += 1;
-                }
-            }
+            let weight = cosine_cutoff(distance, threshold);
+            adjacency[left * count + right] = weight;
+            adjacency[right * count + left] = weight;
         }
     }
-    let triples = atoms
-        .saturating_mul(atoms.saturating_sub(1))
-        .saturating_mul(atoms.saturating_sub(2))
-        / 6;
-    let wedges = degree
+    let degree = centre_weights.iter().sum::<f64>();
+    let second_moment = centre_weights
         .iter()
-        .map(|&value| value.saturating_mul(value.saturating_sub(1)) / 2)
-        .sum::<usize>();
-    let mut fourth_moment = 0.0;
-    for i in 0..atoms {
-        for j in 0..atoms {
-            let common = (0..atoms)
-                .filter(|&k| adjacency[i * atoms + k] && adjacency[k * atoms + j])
-                .count() as f64;
-            fourth_moment += common * common;
-        }
+        .map(|weight| weight * weight)
+        .sum::<f64>();
+    let mut row_two = vec![0.0; count];
+    let mut neighbor_degree_moment = 0.0;
+    for neighbor in 0..count {
+        let graph_degree = centre_weights[neighbor]
+            + (0..count)
+                .map(|other| adjacency[neighbor * count + other])
+                .sum::<f64>();
+        neighbor_degree_moment += centre_weights[neighbor] * graph_degree;
+        row_two[neighbor] = (0..count)
+            .map(|other| centre_weights[other] * adjacency[other * count + neighbor])
+            .sum::<f64>();
     }
-    let (components, largest_component) = component_summary(&adjacency, atoms);
-    [
-        ratio(edges, possible_edges),
-        mean_degree / degree_scale,
-        degree_variance.sqrt() / degree_scale,
-        ratio(mutual_nearest_edges, possible_edges),
-        ratio(isolated, atoms),
-        ratio(triangles, triples),
-        if wedges == 0 {
-            0.0
-        } else {
-            3.0 * triangles as f64 / wedges as f64
-        },
-        fourth_moment / (atoms.max(1) as f64 * degree_scale.powi(4)),
-        ratio(components, atoms),
-        if edges == 0 {
-            0.0
-        } else {
-            0.5 * (ratio(largest_component, atoms) + species_edge / edges as f64)
-        },
-    ]
-}
-
-fn linkcell_displacement(
-    cell: &Cell,
-    left: [f64; 3],
-    right: [f64; 3],
-    geometry: DescriptorGeometry,
-) -> [f64; 3] {
-    let left_fractional = cell.fractional(left);
-    let right_fractional = cell.fractional(right);
-    let mut displacement = [0.0; 3];
-    for axis in 0..3 {
-        displacement[axis] = right_fractional[axis] - left_fractional[axis];
-        displacement[axis] -= displacement[axis].round();
-    }
-    let cartesian = cell.cartesian(displacement);
-    [
-        cartesian[0] / geometry.length_scale,
-        cartesian[1] / geometry.length_scale,
-        cartesian[2] / geometry.length_scale,
-    ]
-}
-
-fn nearest_from_distances(distances: &[f64], atoms: usize, count: usize) -> Vec<Vec<usize>> {
-    (0..atoms)
-        .map(|source| {
-            let mut neighbors = (0..atoms)
-                .filter(|&candidate| candidate != source)
-                .map(|candidate| (distances[source * atoms + candidate], candidate))
-                .collect::<Vec<_>>();
-            neighbors.sort_by(|left, right| {
-                left.0
-                    .total_cmp(&right.0)
-                    .then_with(|| left.1.cmp(&right.1))
-            });
-            neighbors
-                .into_iter()
-                .take(count)
-                .map(|(_, index)| index)
-                .collect()
+    let third_moment = centre_weights
+        .iter()
+        .zip(&row_two)
+        .map(|(weight, return_walk)| weight * return_walk)
+        .sum::<f64>();
+    let fourth_moment = second_moment * second_moment
+        + row_two.iter().map(|value| value * value).sum::<f64>();
+    let radial_moment = neighbors
+        .iter()
+        .zip(&centre_weights)
+        .map(|(neighbor, weight)| weight * neighbor.distance / threshold)
+        .sum::<f64>();
+    let rank_affinity = centre_weights
+        .iter()
+        .take(12)
+        .enumerate()
+        .map(|(rank, weight)| weight / (rank + 1) as f64)
+        .sum::<f64>();
+    let centre_species = species_scalar(environment.species[centre]);
+    let species_degree = neighbors
+        .iter()
+        .zip(&centre_weights)
+        .map(|(neighbor, weight)| {
+            weight * species_scalar(environment.species[neighbor.atom])
         })
-        .collect()
-}
-
-fn component_summary(adjacency: &[bool], atoms: usize) -> (usize, usize) {
-    let mut seen = vec![false; atoms];
-    let mut components = 0usize;
-    let mut largest = 0usize;
-    for root in 0..atoms {
-        if seen[root] {
-            continue;
-        }
-        components += 1;
-        seen[root] = true;
-        let mut stack = vec![root];
-        let mut size = 0usize;
-        while let Some(vertex) = stack.pop() {
-            size += 1;
-            for neighbor in 0..atoms {
-                if adjacency[vertex * atoms + neighbor] && !seen[neighbor] {
-                    seen[neighbor] = true;
-                    stack.push(neighbor);
-                }
-            }
-        }
-        largest = largest.max(size);
-    }
-    (components, largest)
+        .sum::<f64>();
+    let species_contrast = neighbors
+        .iter()
+        .zip(&centre_weights)
+        .map(|(neighbor, weight)| {
+            weight
+                * (centre_species - species_scalar(environment.species[neighbor.atom])).abs()
+        })
+        .sum::<f64>();
+    [
+        degree,
+        second_moment,
+        third_moment,
+        fourth_moment,
+        neighbor_degree_moment,
+        (degree * degree - second_moment).max(0.0),
+        radial_moment,
+        rank_affinity,
+        species_degree,
+        species_contrast,
+    ]
 }
 
 fn invariant_spectrum(
@@ -565,16 +542,16 @@ fn invariant_spectrum(
     let mut spectrum = vec![0.0; per_channel * SPECIES_CHANNELS];
     for centre in 0..environment.atoms {
         for channel in 0..SPECIES_CHANNELS {
-            let mut neighbors = Vec::with_capacity(environment.atoms.saturating_sub(1));
-            for neighbor in 0..environment.atoms {
-                if neighbor == centre {
-                    continue;
-                }
-                neighbors.push((
-                    environment.displacement(centre, neighbor),
-                    species_sketch(environment.species[neighbor])[channel],
-                ));
-            }
+            let neighbors = environment.neighbors[centre]
+                .iter()
+                .filter(|neighbor| neighbor.distance < block.cutoff())
+                .map(|neighbor| {
+                    (
+                        neighbor.displacement,
+                        species_sketch(environment.species[neighbor.atom])[channel],
+                    )
+                })
+                .collect::<Vec<_>>();
             let (soap, coefficients) = central_spectrum_from_displacements(&neighbors, block.soap);
             let local = if ace {
                 crate::ace::from_c(&coefficients, block.n_max(), block.l_max())
@@ -641,7 +618,8 @@ fn legendre_values(cosine: f64, maximum: usize) -> Vec<f64> {
 }
 
 fn cosine_cutoff(distance: f64, cutoff: f64) -> f64 {
-    0.5 * (1.0 + (PI * distance / cutoff).cos())
+    let phase = 0.5 * PI * (1.0 - distance / cutoff).clamp(0.0, 1.0);
+    phase.sin().powi(2)
 }
 
 fn determinant(cell: [f64; 9]) -> f64 {
@@ -661,14 +639,6 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 
 fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
     left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-}
-
-fn ratio(numerator: usize, denominator: usize) -> f64 {
-    if denominator == 0 {
-        0.0
-    } else {
-        numerator as f64 / denominator as f64
-    }
 }
 
 fn norm(values: &[f64]) -> f64 {
