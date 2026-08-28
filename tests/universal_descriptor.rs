@@ -19,6 +19,10 @@ fn distance(left: &[f64], right: &[f64]) -> f64 {
         .sqrt()
 }
 
+fn norm(values: &[f64]) -> f64 {
+    values.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
 fn rigid_transform(coordinates: &Array1<f64>) -> Array1<f64> {
     let angle = 0.731_f64;
     let (sine, cosine) = angle.sin_cos();
