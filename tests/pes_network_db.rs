@@ -83,10 +83,12 @@ fn provenance() -> PesProvenance {
         exploration: serde_json::json!({"ride": "dimer", "hessian_step": 1e-4}),
         software: BTreeMap::from([
             ("anneal-core".into(), env!("CARGO_PKG_VERSION").into()),
-            ("rgsaddle".into(), "3015f68b12ebac9b7950469efa86d0f1ecfa001d".into()),
+            (
+                "rgsaddle".into(),
+                "3015f68b12ebac9b7950469efa86d0f1ecfa001d".into(),
+            ),
         ]),
-        units: PesUnits::new(2.5, 0.0103, 1.0, "sigma", "epsilon", "reduced-mass")
-            .unwrap(),
+        units: PesUnits::new(2.5, 0.0103, 1.0, "sigma", "epsilon", "reduced-mass").unwrap(),
     }
 }
 
@@ -131,11 +133,8 @@ fn readcon_db_rejects_a_descriptor_geometry_mismatch() {
     let (network, _) = network();
     let directory = tempfile::tempdir().unwrap();
     let database = PesNetworkDatabase::open(directory.path()).unwrap();
-    database
-        .write_snapshot(9, &network, &provenance())
-        .unwrap();
-    let incompatible =
-        universal_descriptor_space(DescriptorGeometry::finite(2.0).unwrap());
+    database.write_snapshot(9, &network, &provenance()).unwrap();
+    let incompatible = universal_descriptor_space(DescriptorGeometry::finite(2.0).unwrap());
 
     let error = database.read_snapshot(9, &incompatible).unwrap_err();
     assert!(error.to_string().contains("descriptor payload"));
