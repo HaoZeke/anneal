@@ -64,7 +64,7 @@ for executable in "$BIN" "$SERVER"; do
     echo "missing executable: $executable" >&2
     exit 1
   fi
-  if ldd "$executable" | grep -q "not found"; then
+  if ldd "$executable" | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 1

@@ -26,11 +26,11 @@ mv -f "$IRA/lib/libira.so.new" "$IRA/lib/libira.so"
 ln -sfn "$IRA/lib/libira.so" "$IRA/src/libira.so"
 echo "=== ldd libira.so ==="
 ldd "$IRA/lib/libira.so"
-if ldd "$IRA/lib/libira.so" | grep -q "not found"; then
+if ldd "$IRA/lib/libira.so" | grep -F "not found" >/dev/null; then
   echo "libira still has unresolved deps" >&2
   exit 1
 fi
-if ldd "$IRA/lib/libira.so" | grep -q mkl; then
+if ldd "$IRA/lib/libira.so" | grep -F mkl >/dev/null; then
   echo "libira still needs MKL" >&2
   exit 1
 fi

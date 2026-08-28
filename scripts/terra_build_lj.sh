@@ -13,7 +13,7 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   echo "missing $IRA_LIB_DIR/libira.so; run scripts/terra_rebuild_ira.sh" >&2
   exit 1
 fi
-if ldd "$IRA_LIB_DIR/libira.so" | grep -q "not found"; then
+if ldd "$IRA_LIB_DIR/libira.so" | grep -F "not found" >/dev/null; then
   echo "libira unresolved" >&2
   ldd "$IRA_LIB_DIR/libira.so"
   exit 1

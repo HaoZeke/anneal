@@ -21,12 +21,12 @@ if [[ ! -x $SRV ]]; then
   echo "missing $SRV; build with --features featomic,ira,bank-rpc" >&2
   exit 1
 fi
-if ldd "$SRV" | grep -q "not found"; then
+if ldd "$SRV" | grep -F "not found" >/dev/null; then
   echo "bank_server unresolved libs" >&2
   ldd "$SRV"
   exit 1
 fi
-if ! ldd "$SRV" | grep -q libira; then
+if ! ldd "$SRV" | grep -F libira >/dev/null; then
   echo "bank_server is not linked to libira; rebuild with --features ira" >&2
   exit 1
 fi
@@ -38,7 +38,7 @@ export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 start_bank() {
   local port=$1 out=$2
   mkdir -p "$out"
-  if ! ss -ltn | grep -q ":${port} "; then
+  if ! ss -ltn | grep -F ":${port} " >/dev/null; then
     nohup "$SRV" "0.0.0.0:${port}" "$CAP" >"$out/bank_server.log" 2>&1 &
     echo $! >"$out/bank_server.pid"
     sleep 1

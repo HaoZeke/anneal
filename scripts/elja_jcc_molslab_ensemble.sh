@@ -159,7 +159,7 @@ export MKL_NUM_THREADS=1
 export BLIS_NUM_THREADS=1
 export RAYON_NUM_THREADS=1
 for executable in "$BIN" "$SERVER" "$PEEK"; do
-  if ldd "$executable" | grep -q "not found"; then
+  if ldd "$executable" | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 1
@@ -302,7 +302,7 @@ for replica in 0 1 2 3; do
   grep -q "encounter target=" "$output"
   test -s "$worker/resolved-config.json"
   if grep -q "best inf eV" "$output"; then
-    if find "$worker" -maxdepth 1 -name 'best_*.xyz' -print -quit | grep -q .; then
+    if find "$worker" -maxdepth 1 -name 'best_*.xyz' -print -quit | grep . >/dev/null; then
       echo "replica $replica wrote an unvalidated infinite-best structure" >&2
       exit 1
     fi

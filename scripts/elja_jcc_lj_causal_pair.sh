@@ -145,7 +145,7 @@ for executable in "$BIN" "$SERVER"; do
     echo "missing executable: $executable" >&2
     exit 2
   fi
-  if ldd "$executable" | grep -q "not found"; then
+  if ldd "$executable" | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 2
@@ -380,7 +380,7 @@ for replica in $(seq 0 $((REPLICAS - 1))); do
   fi
   qualification_traces+=("$trace")
   if ! head -n 1 "$trace" \
-    | grep -F -q "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING"; then
+    | grep -F "\"ensemble\":\"$ENSEMBLE\",\"sharing\":$TRACE_SHARING" >/dev/null; then
     echo "trace manifest does not match $ENSEMBLE sharing=$TRACE_SHARING: $trace" >&2
     exit 1
   fi

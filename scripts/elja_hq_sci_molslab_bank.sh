@@ -47,7 +47,7 @@ export LD_LIBRARY_PATH="${XTBLIB}:${IRA_LIB_DIR}:${GCCLIB}:${LD_LIBRARY_PATH:-}"
 start_bank() {
   local port=$1 out=$2
   mkdir -p "$out"
-  if ! ss -ltn | grep -q ":${port} "; then
+  if ! ss -ltn | grep -F ":${port} " >/dev/null; then
     nohup "$SRV" "0.0.0.0:${port}" "$CAP" >"$out/bank_server.log" 2>&1 &
     echo $! >"$out/bank_server.pid"
     sleep 1
