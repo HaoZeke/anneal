@@ -39,6 +39,12 @@
 
 use ndarray::{Array1, Array2, ArrayView1};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DescriptorMetric {
+    AutoSimplex,
+    Euclidean,
+}
+
 /// A Gaussian process over a structural descriptor.
 ///
 /// Squared-exponential kernel with a single length scale, which is right when
@@ -52,6 +58,7 @@ pub struct FunnelModel {
     pub amplitude: f64,
     /// Observation noise standard deviation.
     pub noise: f64,
+    metric: DescriptorMetric,
     /// Prior mean, used where nothing has been observed.
     ///
     /// Set to the mean of the observations on each refit rather than to zero.
@@ -72,6 +79,34 @@ pub struct FunnelModel {
 impl FunnelModel {
     /// A model over descriptors, with a length scale in descriptor units.
     pub fn new(length_scale: f64, amplitude: f64, noise: f64) -> Self {
+        Self::with_metric(
+            length_scale,
+            amplitude,
+            noise,
+            DescriptorMetric::AutoSimplex,
+        )
+    }
+
+    /// A model that always uses Euclidean distance between descriptor vectors.
+    ///
+    /// Universal multiblock descriptors are not probability simplices even
+    /// when every coordinate happens to be nonnegative. This constructor keeps
+    /// their block amplitudes and concatenated geometry intact.
+    pub fn new_euclidean(length_scale: f64, amplitude: f64, noise: f64) -> Self {
+        Self::with_metric(
+            length_scale,
+            amplitude,
+            noise,
+            DescriptorMetric::Euclidean,
+        )
+    }
+
+    fn with_metric(
+        length_scale: f64,
+        amplitude: f64,
+        noise: f64,
+        metric: DescriptorMetric,
+    ) -> Self {
         assert!(length_scale > 0.0, "the length scale is a distance");
         assert!(amplitude > 0.0, "the amplitude is a standard deviation");
         assert!(
@@ -82,6 +117,7 @@ impl FunnelModel {
             length_scale,
             amplitude,
             noise,
+            metric,
             prior_mean: 0.0,
             xs: Vec::new(),
             ys: Vec::new(),
@@ -116,9 +152,19 @@ impl FunnelModel {
     fn kernel(&self, a: ArrayView1<f64>, b: ArrayView1<f64>) -> f64 {
         let amp2 = self.amplitude * self.amplitude;
         let ell2 = self.length_scale * self.length_scale;
-        match (simplex_weights(a), simplex_weights(b)) {
-            (Some(p), Some(q)) => amp2 * (-hellinger2(&p, &q) / ell2).exp(),
-            _ => {
+        match self.metric {
+            DescriptorMetric::AutoSimplex => match (simplex_weights(a), simplex_weights(b)) {
+                (Some(p), Some(q)) => amp2 * (-hellinger2(&p, &q) / ell2).exp(),
+                _ => {
+                    let d2: f64 = a
+                        .iter()
+                        .zip(b.iter())
+                        .map(|(u, v)| (u - v) * (u - v))
+                        .sum();
+                    amp2 * (-0.5 * d2 / ell2).exp()
+                }
+            },
+            DescriptorMetric::Euclidean => {
                 let d2: f64 = a.iter().zip(b.iter()).map(|(u, v)| (u - v) * (u - v)).sum();
                 amp2 * (-0.5 * d2 / ell2).exp()
             }
