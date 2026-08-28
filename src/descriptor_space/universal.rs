@@ -118,6 +118,8 @@ pub fn universal_descriptor_space(geometry: DescriptorGeometry) -> DescriptorSpa
         block(DescriptorBlockKind::InvariantSoapMean, 3, 6, 6.0),
         block(DescriptorBlockKind::InvariantAceNu3Mean, 2, 3, 3.0),
         block(DescriptorBlockKind::InvariantAceNu3Mean, 2, 4, 6.0),
+        block(DescriptorBlockKind::ChiralMoment, 3, 0, 3.0),
+        block(DescriptorBlockKind::ChiralMoment, 3, 0, 6.0),
     ];
     let schema = DescriptorSchema::new(
         UNIVERSAL_DESCRIPTOR_SCHEMA,
@@ -163,6 +165,7 @@ pub(super) fn describe(
             DescriptorBlockKind::InvariantAceNu3Mean => {
                 invariant_spectrum(&environment, block, true)
             }
+            DescriptorBlockKind::ChiralMoment => chiral_moments(&environment, block),
             DescriptorBlockKind::SoapMean
             | DescriptorBlockKind::SoapVariance
             | DescriptorBlockKind::AceNu3Mean
@@ -556,6 +559,61 @@ fn invariant_spectrum(
             };
             for (index, value) in local.into_iter().enumerate() {
                 spectrum[channel * per_channel + index] += value / environment.atoms.max(1) as f64;
+            }
+        }
+    }
+    spectrum
+}
+
+fn chiral_moments(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64> {
+    let radial_channels = block.n_max();
+    let moment_channels = radial_channels * SPECIES_CHANNELS;
+    let triple_count = moment_channels
+        .saturating_mul(moment_channels.saturating_sub(1))
+        .saturating_mul(moment_channels.saturating_sub(2))
+        / 6;
+    let mut spectrum = vec![0.0; triple_count * SPECIES_CHANNELS];
+    let radial_width = 1.0 / radial_channels as f64;
+    let centre_scale = 1.0 / environment.atoms.max(1) as f64;
+    for centre in 0..environment.atoms {
+        let mut moments = vec![[0.0; 3]; moment_channels];
+        for neighbor in environment.neighbors[centre]
+            .iter()
+            .filter(|neighbor| neighbor.distance < block.cutoff())
+        {
+            let direction = [
+                neighbor.displacement[0] / neighbor.distance,
+                neighbor.displacement[1] / neighbor.distance,
+                neighbor.displacement[2] / neighbor.distance,
+            ];
+            let reduced_distance = neighbor.distance / block.cutoff();
+            let envelope = cosine_cutoff(neighbor.distance, block.cutoff());
+            let species = species_sketch(environment.species[neighbor.atom]);
+            for radial in 0..radial_channels {
+                let radial_centre = (radial as f64 + 0.5) * radial_width;
+                let scaled = (reduced_distance - radial_centre) / (0.65 * radial_width);
+                let radial_weight = (-0.5 * scaled * scaled).exp() * envelope;
+                for channel in 0..SPECIES_CHANNELS {
+                    let weight = radial_weight * species[channel];
+                    let moment = &mut moments[radial * SPECIES_CHANNELS + channel];
+                    for axis in 0..3 {
+                        moment[axis] += weight * direction[axis];
+                    }
+                }
+            }
+        }
+        let centre_species = species_sketch(environment.species[centre]);
+        let mut triple = 0;
+        for left in 0..moment_channels {
+            for middle in left + 1..moment_channels {
+                for right in middle + 1..moment_channels {
+                    let pseudoscalar = dot(moments[left], cross(moments[middle], moments[right]));
+                    for channel in 0..SPECIES_CHANNELS {
+                        spectrum[channel * triple_count + triple] +=
+                            centre_scale * centre_species[channel] * pseudoscalar;
+                    }
+                    triple += 1;
+                }
             }
         }
     }
