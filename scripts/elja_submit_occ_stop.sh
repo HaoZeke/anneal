@@ -7,7 +7,7 @@ SERVER=$ROOT/target/release/examples/catalog_server
 test -x "$BIN"
 test -x "$SERVER"
 test -s "$ROOT/SOURCE_COMMIT"
-if ldd "$BIN" | grep -q "not found"; then
+if ldd "$BIN" | grep -F "not found" >/dev/null; then
   echo "unresolved libraries in $BIN" >&2
   ldd "$BIN" >&2
   exit 2

@@ -138,14 +138,14 @@ for executable in \
     echo "missing molecular campaign executable: $executable" >&2
     exit 1
   fi
-  if ldd "$executable" | grep -q "not found"; then
+  if ldd "$executable" | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $executable" >&2
     ldd "$executable" >&2
     exit 1
   fi
 done
 for engine in engines/libxtb_engine.so engines/librgpot_cuh2.so; do
-  if ldd "$engine" | grep -q "not found"; then
+  if ldd "$engine" | grep -F "not found" >/dev/null; then
     echo "unresolved libraries in $engine" >&2
     ldd "$engine" >&2
     exit 1

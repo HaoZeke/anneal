@@ -34,7 +34,7 @@ if [[ -e $OUT75 ]]; then
 fi
 
 cd "$ROOT"
-if squeue -u "$USER" -h -n lj75-occ-marks 2>/dev/null | grep -q .; then
+if squeue -u "$USER" -h -n lj75-occ-marks 2>/dev/null | grep . >/dev/null; then
   j75=$(squeue -u "$USER" -h -n lj75-occ-marks -o '%i' | head -1)
   echo "already queued lj75-occ-marks $j75"
 else
