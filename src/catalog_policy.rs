@@ -296,9 +296,11 @@ impl CatalogPolicy {
     /// incumbent of a known well leaves once it stalls, so the ensemble
     /// does not keep relaxing one funnel for the rest of the budget.
     ///
-    /// A FamilyExtra of a crowded packing Leaves it. The champion
-    /// stays and walks isomers. Collapse also forces extras of the
-    /// occupied packing to Leave. A walk rematched to a different
+    /// While leftover SOAP is unsaturated every replica Walks: Marks
+    /// is a long hop, not a census Leave or a remote yank. After
+    /// leftover dwell, a FamilyExtra of a crowded packing Leaves it.
+    /// The champion stays and walks isomers. Collapse also forces
+    /// extras of the occupied packing to Leave. A walk rematched to a different
     /// DECAF family is not collapse: yanking it would abandon the
     /// second funnel. Surplus extras are pruned at occupancy rungs
     /// and reseed. A better isomer of the occupied packing may be
@@ -323,18 +325,14 @@ impl CatalogPolicy {
                     PolicyReason::CertifiedAttractor,
                 )
             }
-            _ if input.mixing.pruned => {
-                decision(PolicyAction::Leave, PolicyReason::HyperbandPruned)
-            }
             _ if input.local_deepened => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
             }
-            _ if !input.leftover_dwell
-                && (matches!(input.relation, ActiveCatalogRelation::Incumbent)
-                    || (matches!(input.relation, ActiveCatalogRelation::SameBasin)
-                        && input.census.local_basin_visits() < LOCAL_CENSUS_LEAVE)) =>
-            {
+            _ if !input.leftover_dwell => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
+            }
+            _ if input.mixing.pruned => {
+                decision(PolicyAction::Leave, PolicyReason::HyperbandPruned)
             }
             _ if input.interface_rank != u32::MAX
                 && input.on_published_prize

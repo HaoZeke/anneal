@@ -54,7 +54,7 @@ fn leftover_unsaturated_extra_walks_like_serial() {
 }
 
 #[test]
-fn exact_census_exhaustion_precedes_leftover_dwell() {
+fn leftover_unsaturated_walks_through_census_exhaustion() {
     let (census, basin_id) = census_with_repeated_visits(8);
     let mut state = input(
         ActiveCatalogRelation::SameBasin,
@@ -64,12 +64,12 @@ fn exact_census_exhaustion_precedes_leftover_dwell() {
     state.leftover_dwell = false;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Leave);
-    assert_eq!(decision.reason, PolicyReason::LocalCensusExhausted);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
 }
 
 #[test]
-fn leftover_unsaturated_remote_anchor_is_still_exploited() {
+fn leftover_unsaturated_does_not_yank_to_a_remote_anchor() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let mut state = input(
         ActiveCatalogRelation::Unrelated {
@@ -81,12 +81,12 @@ fn leftover_unsaturated_remote_anchor_is_still_exploited() {
     state.leftover_dwell = false;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Exploit { win_only: false });
-    assert_eq!(decision.reason, PolicyReason::RemoteAnchorOpen);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
 }
 
 #[test]
-fn leftover_unsaturated_unrelated_replica_still_explores() {
+fn leftover_unsaturated_does_not_explore_off_the_walk() {
     let (census, basin_id) = census_with_repeated_visits(1);
     let mut state = input(
         ActiveCatalogRelation::Unrelated {
@@ -98,8 +98,23 @@ fn leftover_unsaturated_unrelated_replica_still_explores() {
     state.leftover_dwell = false;
 
     let decision = CatalogPolicy::decide(state);
-    assert_eq!(decision.action, PolicyAction::Explore);
-    assert_eq!(decision.reason, PolicyReason::UnrelatedCatalogExplore);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
+}
+
+#[test]
+fn leftover_unsaturated_pruned_extra_still_walks() {
+    let (census, basin_id) = census_with_repeated_visits(1);
+    let mut extra = input(
+        ActiveCatalogRelation::SameBasin,
+        CensusEvidence::from_census(&census, Some(basin_id)),
+        AggregateProgress::new(20, 100).unwrap(),
+    );
+    extra.leftover_dwell = false;
+    extra.mixing.pruned = true;
+    let decision = CatalogPolicy::decide(extra);
+    assert_eq!(decision.action, PolicyAction::ContinueLocal);
+    assert_eq!(decision.reason, PolicyReason::IsomerWalk);
 }
 
 #[test]
