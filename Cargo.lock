@@ -45,9 +45,10 @@ dependencies = [
  "cc",
  "criterion",
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
  "featomic",
  "libloading",
+ "linkcell 0.3.3 (git+https://github.com/d-SEAMS/linkcell?rev=a46717c564d01ea4f3dab09c07bd2d215290b2ab)",
  "metatensor",
  "nauty-pet",
  "ndarray 0.17.2",
@@ -63,6 +64,7 @@ dependencies = [
  "readcon-core",
  "rgmin",
  "rgpot-core",
+ "rgsaddle",
  "serde",
  "serde_json",
  "sha2",
@@ -477,6 +479,21 @@ dependencies = [
  "dlpk",
  "ndarray 0.17.2",
  "num-traits",
+ "rand",
+ "rand_distr",
+ "rayon",
+ "thiserror",
+]
+
+[[package]]
+name = "eindir-core"
+version = "0.6.0"
+source = "git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9#f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9"
+dependencies = [
+ "cbindgen 0.29.4",
+ "dlpk",
+ "ndarray 0.17.2",
+ "num-traits",
  "numpy",
  "pyo3",
  "rand",
@@ -785,6 +802,16 @@ name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
+name = "linkcell"
+version = "0.3.3"
+source = "git+https://github.com/d-SEAMS/linkcell?rev=a46717c564d01ea4f3dab09c07bd2d215290b2ab#a46717c564d01ea4f3dab09c07bd2d215290b2ab"
+
+[[package]]
+name = "linkcell"
+version = "0.3.3"
+source = "git+https://github.com/d-SEAMS/linkcell#a7c717b6ba7ba7f264b9229160147e28ba9d29e2"
 
 [[package]]
 name = "linux-raw-sys"
@@ -1383,11 +1410,11 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "rgmin"
 version = "0.2.0"
-source = "git+https://github.com/HaoZeke/rgmin.git?rev=1bbc5100a4b08270bd77d02cb7b6fbcaf906b94f#1bbc5100a4b08270bd77d02cb7b6fbcaf906b94f"
+source = "git+https://github.com/HaoZeke/rgmin.git?rev=20832fd169932a1cd0d47ac84dc77fa9b435f940#20832fd169932a1cd0d47ac84dc77fa9b435f940"
 dependencies = [
  "cbindgen 0.29.4",
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
  "ndarray 0.17.2",
  "rand",
  "thiserror",
@@ -1399,7 +1426,19 @@ version = "3.0.2"
 source = "git+https://github.com/HaoZeke/potlib.git?rev=65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf#65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf"
 dependencies = [
  "dlpk",
- "eindir-core",
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=091c6f7d6ea70821c3374152481fb9500e799af2)",
+]
+
+[[package]]
+name = "rgsaddle"
+version = "0.1.0"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=41207a57ea8a85b94d51dd28b1bc147f662a5cd2#41207a57ea8a85b94d51dd28b1bc147f662a5cd2"
+dependencies = [
+ "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
+ "linkcell 0.3.3 (git+https://github.com/d-SEAMS/linkcell)",
+ "ndarray 0.17.2",
+ "rgmin",
+ "thiserror",
 ]
 
 [[package]]
