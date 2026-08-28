@@ -619,8 +619,8 @@ impl CatalogClient {
         })
     }
 
-    /// Read-only aggregate status; any observer naming the right campaign
-    /// and ensemble may ask, with no replica identity and no signature.
+    /// Read-only aggregate status for an observer bound to the coordinator's
+    /// campaign, ensemble, and system signature. The replica id is ignored.
     pub fn observer_status(
         &mut self,
         event_sequence: u64,
