@@ -238,7 +238,7 @@ start_catalog() {
   server_prefixes+=("$prefix")
   for _ in $(seq 1 200); do
     endpoint=$(grep -o '"addr":"[^"]*"' "${prefix}.jsonl" 2>/dev/null \
-      | head -1 | cut -d '"' -f4 || true)
+      | awk -F '"' 'NR == 1 { print $4 }' || true)
     if [[ -n $endpoint ]]; then
       last_started_endpoint=$endpoint
       return

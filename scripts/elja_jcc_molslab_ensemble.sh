@@ -198,7 +198,7 @@ start_bank() {
   server_prefixes+=("$prefix")
   for _ in $(seq 1 100); do
     endpoint=$(grep -oE 'bank listening on [^ ]+' "${prefix}.err" 2>/dev/null \
-      | head -1 | awk '{print $4}' || true)
+      | awk 'NR == 1 { print $4 }' || true)
     if [[ -n $endpoint ]]; then
       last_started_endpoint=$endpoint
       return

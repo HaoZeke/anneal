@@ -12,7 +12,7 @@ if [[ ! -d $IRA/src ]]; then
   exit 1
 fi
 echo "host=$(hostname) job=$SLURM_JOB_ID"
-gfortran --version | head -1
+gfortran --version | awk 'NR == 1 { print }'
 rm -rf "$IRA/src/Obj"
 mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"
 FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops"
