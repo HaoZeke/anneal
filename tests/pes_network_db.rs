@@ -93,6 +93,34 @@ fn provenance() -> PesProvenance {
 }
 
 #[test]
+fn network_descriptors_reproduce_from_exact_records() {
+    let (network, descriptor_space) = network();
+    for minimum in network.minima() {
+        let reproduced = descriptor_space
+            .describe(minimum.coordinates.view(), minimum.context.species())
+            .unwrap();
+        assert_eq!(
+            reproduced, minimum.descriptor,
+            "minimum {} descriptor is not bound to its retained coordinates",
+            minimum.id
+        );
+    }
+    for saddle in network.saddles() {
+        let reproduced = descriptor_space
+            .describe(
+                saddle.saddle_coordinates.view(),
+                saddle.context.species(),
+            )
+            .unwrap();
+        assert_eq!(
+            reproduced, saddle.descriptor,
+            "saddle {} descriptor is not bound to its retained coordinates",
+            saddle.id
+        );
+    }
+}
+
+#[test]
 fn readcon_db_round_trips_minima_saddles_descriptors_and_provenance() {
     let (network, descriptor_space) = network();
     let directory = tempfile::tempdir().unwrap();
