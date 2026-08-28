@@ -18,7 +18,9 @@ const PAIR_CHANNELS: usize = 4;
 const TRIPLE_CHANNELS: usize = 3;
 const SPECIES_CHANNELS: usize = 3;
 const GRAPH_FEATURES: usize = 10;
-const NORMALIZATION_EPSILON: f64 = 1e-12;
+// Numerical-scale cutoff remnants fade to zero instead of being promoted to a
+// unit vector; resolved intensive blocks still approach ordinary L2 scaling.
+const NORMALIZATION_EPSILON: f64 = 1.490_116_119_384_765_6e-8;
 
 /// Length scale, simulation cell, and periodic axes used by one descriptor space.
 #[derive(Debug, Clone, Copy, PartialEq)]
