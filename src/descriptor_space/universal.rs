@@ -2,7 +2,7 @@
 
 use super::{
     DescriptorBlockKind, DescriptorBlockMetadata, DescriptorBlockSpec, DescriptorError,
-    DescriptorSchema, DescriptorSpace, DescriptorVector,
+    DescriptorSchema, DescriptorSpace, DescriptorVector, SOFT_L2_NORMALIZATION_SCHEMA,
 };
 use crate::soap::central_spectrum_from_displacements;
 use linkcell::{Cell, knearest};
@@ -18,6 +18,7 @@ const PAIR_CHANNELS: usize = 4;
 const TRIPLE_CHANNELS: usize = 3;
 const SPECIES_CHANNELS: usize = 3;
 const GRAPH_FEATURES: usize = 10;
+const NORMALIZATION_EPSILON: f64 = 1e-12;
 
 /// Length scale, simulation cell, and periodic axes used by one descriptor space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -171,10 +172,9 @@ pub(super) fn describe(
             });
         }
         let raw_norm = norm(&aggregated);
-        if raw_norm > 0.0 {
-            for value in &mut aggregated {
-                *value /= raw_norm;
-            }
+        let denominator = raw_norm.hypot(NORMALIZATION_EPSILON);
+        for value in &mut aggregated {
+            *value /= denominator;
         }
         let offset = values.len();
         let len = aggregated.len();
@@ -187,6 +187,7 @@ pub(super) fn describe(
             offset,
             len,
             raw_norm,
+            normalization: SOFT_L2_NORMALIZATION_SCHEMA,
         });
     }
     Ok(DescriptorVector {

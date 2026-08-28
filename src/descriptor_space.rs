@@ -11,7 +11,8 @@ pub use universal::{
 use crate::soap::{SoapSpec, jacobian_ace, jacobian_z, local_nu3_z, local_spectra_z};
 use ndarray::{Array2, ArrayView1};
 
-const NORMALIZATION_SCHEMA: &str = "l2-v1";
+const L2_NORMALIZATION_SCHEMA: &str = "l2-v1";
+pub(super) const SOFT_L2_NORMALIZATION_SCHEMA: &str = "soft-l2-eps-v1";
 
 /// Invariant aggregation used by one descriptor block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +160,7 @@ pub struct DescriptorBlockMetadata {
     offset: usize,
     len: usize,
     raw_norm: f64,
+    normalization: &'static str,
 }
 
 impl DescriptorBlockMetadata {
@@ -204,7 +206,7 @@ impl DescriptorBlockMetadata {
 
     /// Versioned normalization convention.
     pub fn normalization(&self) -> &'static str {
-        NORMALIZATION_SCHEMA
+        self.normalization
     }
 }
 
@@ -251,6 +253,7 @@ impl DescriptorVector {
                     && left.cutoff == right.cutoff
                     && left.offset == right.offset
                     && left.len == right.len
+                    && left.normalization == right.normalization
             });
         if !compatible {
             return Err(DescriptorError::IncompatibleDescriptorVectors);
@@ -457,6 +460,7 @@ impl DescriptorSpace {
                 offset,
                 len,
                 raw_norm,
+                normalization: L2_NORMALIZATION_SCHEMA,
             });
         }
         Ok(DescriptorVector {
