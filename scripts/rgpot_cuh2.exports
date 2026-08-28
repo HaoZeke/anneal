@@ -1,0 +1,6 @@
+{
+  global:
+    rgpot_cuh2_force;
+    rgpot_fortran_last_error;
+  local: *;
+};

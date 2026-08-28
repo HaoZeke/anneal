@@ -29,8 +29,9 @@ if [[ $MAIN_COMMIT != "$EXPECTED_COMMIT" ]]; then
   echo "EXPECTED_COMMIT=$EXPECTED_COMMIT does not match anneal HEAD=$MAIN_COMMIT" >&2
   exit 2
 fi
-if ! (cd "$ROOT" && git diff --quiet HEAD --); then
-  echo "anneal tracked source differs from HEAD=$MAIN_COMMIT" >&2
+MAIN_STATUS=$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)
+if [[ -n $MAIN_STATUS ]]; then
+  echo "anneal source tree differs from HEAD=$MAIN_COMMIT" >&2
   (cd "$ROOT" && git status --short >&2)
   exit 2
 fi
@@ -40,8 +41,9 @@ if [[ $RGPOT_COMMIT != "$RGPOT_EXPECTED_COMMIT" ]]; then
   echo "RGPOT_EXPECTED_COMMIT=$RGPOT_EXPECTED_COMMIT does not match rgpot HEAD=$RGPOT_COMMIT" >&2
   exit 2
 fi
-if ! git -C "$RGPOT" diff --quiet HEAD --; then
-  echo "rgpot tracked source differs from HEAD=$RGPOT_COMMIT" >&2
+RGPOT_STATUS=$(git -C "$RGPOT" status --porcelain=v1 --untracked-files=all)
+if [[ -n $RGPOT_STATUS ]]; then
+  echo "rgpot source tree differs from HEAD=$RGPOT_COMMIT" >&2
   git -C "$RGPOT" status --short >&2
   exit 2
 fi
@@ -66,21 +68,20 @@ cd "$RGPOT"
   --buildtype=release
 "$PIXI" run --locked -e xtbbld meson compile -C "$RGPOT_BDIR"
 
+cuh2so=$RGPOT_BDIR/CppCore/rgpot/fortran/librgpot_cuh2.so
+"$PIXI" run --locked -e xtbbld \
+  "$ROOT/scripts/link_rgpot_cuh2_engine.sh" \
+  "$RGPOT" \
+  "$RGPOT_BDIR" \
+  "$ROOT/scripts/rgpot_cuh2.exports" \
+  "$cuh2so"
+
 xtbso=
-cuh2so=
 for candidate in \
   "$RGPOT_BDIR/CppCore/rgpot/XTBPot/libxtb_engine.so" \
   "$RGPOT_BDIR/CppCore/libxtb_engine.so"; do
   if [[ -e $candidate ]]; then
     xtbso=$candidate
-    break
-  fi
-done
-for candidate in \
-  "$RGPOT_BDIR/CppCore/rgpot/fortran/librgpot_cuh2.so" \
-  "$RGPOT_BDIR/CppCore/librgpot_cuh2.so"; do
-  if [[ -e $candidate ]]; then
-    cuh2so=$candidate
     break
   fi
 done
@@ -153,6 +154,8 @@ sha256sum \
   target/release/examples/bank_peek \
   engines/libxtb_engine.so \
   engines/librgpot_cuh2.so \
+  scripts/link_rgpot_cuh2_engine.sh \
+  scripts/rgpot_cuh2.exports \
   SOURCE_COMMIT \
   RGPOT_SOURCE_COMMIT \
   RGPOT_PIXI_LOCK_SHA256 \
@@ -164,8 +167,10 @@ if ! (cd "$ROOT" && git diff --quiet HEAD --); then
   echo "anneal tracked source changed during the build" >&2
   exit 2
 fi
-if ! git -C "$RGPOT" diff --quiet HEAD --; then
-  echo "rgpot tracked source changed during the build" >&2
+RGPOT_STATUS=$(git -C "$RGPOT" status --porcelain=v1 --untracked-files=all)
+if [[ -n $RGPOT_STATUS ]]; then
+  echo "rgpot source tree changed during the build" >&2
+  git -C "$RGPOT" status --short >&2
   exit 2
 fi
 
