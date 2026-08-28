@@ -146,6 +146,8 @@ pub mod noise_accept;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
+/// rgmin quenches and rgsaddle minimum--saddle--minimum connections.
+pub mod pes_exploration;
 pub mod potentials;
 pub mod quench;
 /// Leader consensus over exploration decrees between server brains.
