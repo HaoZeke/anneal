@@ -10,8 +10,8 @@ use std::fmt::Display;
 use ndarray::{Array1, ArrayView1};
 use rgmin::{GradNorm, Lbfgs};
 use rgsaddle::{
-    IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession,
-    MinModeStatus, PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession,
+    IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
+    PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession,
 };
 
 use crate::descriptor_space::{DescriptorError, DescriptorSpace, DescriptorVector};
@@ -22,10 +22,7 @@ pub trait PesSurface: Sync {
     type Error: Display;
 
     /// Return energy and a gradient matching the Cartesian input dimension.
-    fn evaluate(
-        &self,
-        coordinates: ArrayView1<f64>,
-    ) -> Result<(f64, Array1<f64>), Self::Error>;
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error>;
 }
 
 /// Symmetry-aware final witness for structural identity.
@@ -135,8 +132,7 @@ impl PesExplorationConfig {
                 return Err(PesExplorationError::InvalidConfig(name));
             }
         }
-        if !self.negative_curvature_tolerance.is_finite()
-            || self.negative_curvature_tolerance < 0.0
+        if !self.negative_curvature_tolerance.is_finite() || self.negative_curvature_tolerance < 0.0
         {
             return Err(PesExplorationError::InvalidConfig(
                 "negative curvature tolerance",
@@ -372,10 +368,7 @@ impl<S> PointSurface for SaddleSurface<'_, S>
 where
     S: PesSurface,
 {
-    fn eval(
-        &self,
-        coordinates: ArrayView1<f64>,
-    ) -> Result<(f64, Array1<f64>), SaddleError> {
+    fn eval(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), SaddleError> {
         checked_evaluate(self.0, coordinates)
             .map_err(|error| SaddleError::Surface(error.to_string()))
     }
@@ -411,10 +404,7 @@ fn checked_evaluate<S: PesSurface + ?Sized>(
 }
 
 fn max_abs(values: ArrayView1<f64>) -> f64 {
-    values
-        .iter()
-        .map(|value| value.abs())
-        .fold(0.0, f64::max)
+    values.iter().map(|value| value.abs()).fold(0.0, f64::max)
 }
 
 fn quench<S: PesSurface + ?Sized>(
@@ -587,12 +577,9 @@ where
             force_tol: config.saddle_force_tolerance,
             ..SellaSaddleConfig::default()
         };
-        let mut prfo = SellaSaddleSession::new(
-            prfo_config,
-            saddle_coordinates.clone(),
-            masses.to_owned(),
-        )
-        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+        let mut prfo =
+            SellaSaddleSession::new(prfo_config, saddle_coordinates.clone(), masses.to_owned())
+                .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
         let report = prfo
             .run(&adapter, config.prfo_steps)
             .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
