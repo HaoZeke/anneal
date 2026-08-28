@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    discover_mode_connection,
+    discover_mode_connection, stationary_index,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -18,6 +18,24 @@ impl PesSurface for DoubleWell {
         let mut gradient = Array1::zeros(coordinates.len());
         gradient[0] = 4.0 * reaction * (reaction * reaction - 1.0);
         for index in 1..coordinates.len() {
+            energy += coordinates[index] * coordinates[index];
+            gradient[index] = 2.0 * coordinates[index];
+        }
+        Ok((energy, gradient))
+    }
+}
+
+struct IndexTwoSaddle;
+
+impl PesSurface for IndexTwoSaddle {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let mut energy = -coordinates[0] * coordinates[0] - 2.0 * coordinates[1] * coordinates[1];
+        let mut gradient = Array1::zeros(coordinates.len());
+        gradient[0] = -2.0 * coordinates[0];
+        gradient[1] = -4.0 * coordinates[1];
+        for index in 2..coordinates.len() {
             energy += coordinates[index] * coordinates[index];
             gradient[index] = 2.0 * coordinates[index];
         }
@@ -77,13 +95,38 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
     assert_eq!(network.minimum_count(), 2);
     assert_eq!(network.saddle_count(), 1);
     assert_ne!(connection.endpoints[0], connection.endpoints[1]);
+    assert_eq!(connection.negative_modes, 1);
     assert!(connection.curvature < 0.0);
     assert!(connection.saddle_energy > 0.9);
+    let (_, saddle_gradient) = DoubleWell
+        .evaluate(connection.saddle_coordinates.view())
+        .unwrap();
+    let receiving_force = saddle_gradient
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0, f64::max);
+    assert!((connection.saddle_max_gradient - receiving_force).abs() < 1e-12);
     for minimum in network.minima() {
         assert!(minimum.energy < 1e-10);
         assert!((minimum.coordinates[0].abs() - 1.0).abs() < 1e-5);
         assert!(minimum.max_gradient < config.quench_gradient_tolerance);
     }
+}
+
+#[test]
+fn finite_difference_index_counts_every_unstable_mode() {
+    let report = stationary_index(
+        &IndexTwoSaddle,
+        Array1::zeros(6).view(),
+        1e-4,
+        1e-7,
+    )
+    .unwrap();
+
+    assert_eq!(report.negative_modes, 2);
+    assert!((report.eigenvalues[0] + 4.0).abs() < 1e-8);
+    assert!((report.eigenvalues[1] + 2.0).abs() < 1e-8);
+    assert!(report.eigenvalues[2] > 1.9);
 }
 
 #[test]
