@@ -2567,8 +2567,8 @@ mod run {
             assert_eq!(value["engine"]["protocol"]["major"], 1);
             assert_eq!(value["engine"]["protocol"]["minor"], 2);
             assert_eq!(value["engine"]["abi"]["abi_major"], 1);
-            assert_eq!(value["engine"]["abi"]["abi_minor"], 0);
-            assert_eq!(value["engine"]["abi"]["layout_revision"], 1);
+            assert_eq!(value["engine"]["abi"]["abi_minor"], 1);
+            assert_eq!(value["engine"]["abi"]["layout_revision"], 3);
         }
     }
 }
