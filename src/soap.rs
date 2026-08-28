@@ -2250,6 +2250,57 @@ fn atom_expand(
     (p, c)
 }
 
+/// One fixed-channel SOAP spectrum and spherical expansion from centre-relative vectors.
+///
+/// The displacement list admits minimum-image vectors and deterministic neighbour
+/// weights without changing the public Cartesian SOAP map.
+pub(crate) fn central_spectrum_from_displacements(
+    displacements: &[([f64; 3], f64)],
+    spec: SoapSpec,
+) -> (Vec<f64>, Vec<f64>) {
+    let n_lm = (spec.l_max + 1) * (spec.l_max + 1);
+    let mut coefficients = vec![0.0; spec.n_max * n_lm];
+    for &(displacement, neighbor_weight) in displacements {
+        let distance = (displacement[0] * displacement[0]
+            + displacement[1] * displacement[1]
+            + displacement[2] * displacement[2])
+            .sqrt();
+        if distance >= spec.rcut_nn || distance < 1e-12 {
+            continue;
+        }
+        let direction = [
+            displacement[0] / distance,
+            displacement[1] / distance,
+            displacement[2] / distance,
+        ];
+        let (harmonics, _) = tesseral(direction, spec.l_max);
+        let cutoff = fcut(distance, spec.rcut_nn);
+        for radial_index in 0..spec.n_max {
+            let weight = neighbor_weight * radial(radial_index, distance, spec.rcut_nn) * cutoff;
+            let base = radial_index * n_lm;
+            for (harmonic, value) in harmonics.iter().copied().enumerate() {
+                coefficients[base + harmonic] += weight * value;
+            }
+        }
+    }
+
+    let mut spectrum = vec![0.0; spec.dim()];
+    let mut feature = 0usize;
+    for radial in 0..spec.n_max {
+        for radial_prime in radial..spec.n_max {
+            for angular in 0..=spec.l_max {
+                for magnetic in -(angular as i32)..=(angular as i32) {
+                    let harmonic = lm_index(angular, magnetic);
+                    spectrum[feature] += coefficients[radial * n_lm + harmonic]
+                        * coefficients[radial_prime * n_lm + harmonic];
+                }
+                feature += 1;
+            }
+        }
+    }
+    (spectrum, coefficients)
+}
+
 fn radial(n: usize, r: f64, rcut: f64) -> f64 {
     if r <= 0.0 {
         return if n == 0 { 1.0 } else { 0.0 };
