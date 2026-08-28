@@ -703,6 +703,63 @@ pub mod wire {
         pub assignments: Vec<ReplicaAssignment>,
     }
 
+    /// Allocate one deterministic wave across both sides of a landscape seam.
+    ///
+    /// Community population is evidence of explored support, so seats are
+    /// apportioned inversely to the two observed community sizes. Both sides
+    /// retain a seat when the wave has at least two replicas. Rotating the
+    /// sorted membership by decree index prevents a fixed replica from owning
+    /// the same role for the whole campaign without introducing another random
+    /// stream into the replicated state machine.
+    pub fn assign_seam_work(
+        members: &[u32],
+        left_basin: u64,
+        right_basin: u64,
+        community_left: u32,
+        community_right: u32,
+        decree_index: u64,
+    ) -> Vec<ReplicaAssignment> {
+        let mut members = members.to_vec();
+        members.sort_unstable();
+        members.dedup();
+        let count = members.len();
+        if count == 0 {
+            return Vec::new();
+        }
+
+        let left_slots = if count == 1 {
+            usize::from(community_left <= community_right)
+        } else {
+            let left_weight = u64::from(community_right.max(1));
+            let right_weight = u64::from(community_left.max(1));
+            let total_weight = left_weight + right_weight;
+            let rounded = ((count as u64) * left_weight + total_weight / 2) / total_weight;
+            usize::try_from(rounded)
+                .unwrap_or(count - 1)
+                .clamp(1, count - 1)
+        };
+        let rotation = usize::try_from(decree_index % count as u64)
+            .expect("decree rotation is bounded by membership");
+
+        (0..count)
+            .map(|slot| {
+                let replica = members[(slot + rotation) % count];
+                let left_before = slot * left_slots / count;
+                let left_after = (slot + 1) * left_slots / count;
+                let right_side = left_after == left_before;
+                ReplicaAssignment {
+                    replica,
+                    right_side,
+                    histogram_classes: Vec::new(),
+                    histogram_masses: Vec::new(),
+                    anchor_basin: if right_side { right_basin } else { left_basin },
+                    bridge_duty: false,
+                    decree_index,
+                }
+            })
+            .collect()
+    }
+
     /// Encode a decree payload.
     pub fn encode_decree(decree: &ExplorationDecree) -> Vec<u8> {
         let mut message = Builder::new_default();
