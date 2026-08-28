@@ -406,6 +406,38 @@ fn strict_pipefail_scripts_do_not_short_circuit_producers() {
 }
 
 #[test]
+fn legacy_campaigns_preserve_seal_and_peer_failures() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let runner = fs::read_to_string(root.join("scripts/elja_jcc_lj_ensemble.sh"))
+        .expect("failed to read legacy LJ ensemble runner");
+    for required in [
+        r#"mapfile -d '' artifacts"#,
+        r#"find . -type f ! -name SHA256SUMS -print0 | sort -z"#,
+        r#"sha256sum "${artifacts[@]}" >SHA256SUMS"#,
+    ] {
+        assert!(
+            runner.contains(required),
+            "legacy LJ ensemble runner is missing {required}"
+        );
+    }
+    assert!(
+        !runner.contains("xargs -0 sha256sum"),
+        "legacy LJ ensemble sealing must preserve sha256sum failures"
+    );
+
+    let many = fs::read_to_string(root.join("scripts/elja_jcc_lj_many_chains.sh"))
+        .expect("failed to read many-chain runner");
+    assert!(
+        many.contains("brain_peer_list=$(brain_peers"),
+        "many-chain runner must observe brain peer construction failure"
+    );
+    assert!(
+        many.contains("export CATALOG_BRAIN_PEERS=$brain_peer_list"),
+        "many-chain runner must export the checked brain peer list"
+    );
+}
+
+#[test]
 fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
