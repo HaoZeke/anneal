@@ -524,6 +524,12 @@ mod tests {
     }
 
     #[test]
+    fn decree_members_preserve_absolute_replica_ids() {
+        assert_eq!(decree_members(27, &[]), vec![27]);
+        assert_eq!(decree_members(26, &[24, 25, 27]), vec![24, 25, 26, 27]);
+    }
+
+    #[test]
     fn a_quiet_cluster_elects_exactly_one_leader() {
         let mut cluster = Cluster::new(3);
         cluster.run(60);
