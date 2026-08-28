@@ -357,10 +357,7 @@ impl PesNetwork {
         &self.saddles
     }
 
-    pub(crate) fn from_records(
-        minima: Vec<MinimumRecord>,
-        saddles: Vec<SaddleConnection>,
-    ) -> Self {
+    pub(crate) fn from_records(minima: Vec<MinimumRecord>, saddles: Vec<SaddleConnection>) -> Self {
         Self { minima, saddles }
     }
 
@@ -600,12 +597,23 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
 
     let (eigenvalues, eigenvectors) = exact_eigh(hessian.view())
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let mut order = (0..eigenvalues.len()).collect::<Vec<_>>();
+    order.sort_by(|&left, &right| eigenvalues[left].total_cmp(&eigenvalues[right]));
+    let eigenvalues = Array1::from_iter(order.iter().map(|&index| eigenvalues[index]));
+    let lowest_mode = match order.first().copied() {
+        Some(index) => eigenvectors.column(index).to_owned(),
+        None => {
+            return Err(PesExplorationError::InvalidShape(
+                "stationary Hessian has no eigenvalues",
+            ));
+        }
+    };
     let negative_modes = eigenvalues
         .iter()
         .filter(|eigenvalue| **eigenvalue < -negative_tolerance)
         .count();
     Ok(StationaryIndex {
-        lowest_mode: eigenvectors.column(0).to_owned(),
+        lowest_mode,
         eigenvalues,
         negative_modes,
     })

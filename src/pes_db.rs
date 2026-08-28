@@ -257,8 +257,7 @@ impl PesNetworkDatabase {
                     "descriptor payload geometry disagrees with the requested space".into(),
                 ));
             }
-            let descriptor =
-                descriptor_space.describe(coordinates.view(), context.species())?;
+            let descriptor = descriptor_space.describe(coordinates.view(), context.species())?;
             envelope.descriptor.validate(&descriptor)?;
 
             match envelope.record {
@@ -378,20 +377,14 @@ impl ContextMetadata {
             .geometry
             .as_ref()
             .map(|geometry| {
-                DescriptorGeometry::new(
-                    geometry.length_scale,
-                    geometry.cell,
-                    geometry.periodic,
-                )
-                .map_err(PesDbError::from)
+                DescriptorGeometry::new(geometry.length_scale, geometry.cell, geometry.periodic)
+                    .map_err(PesDbError::from)
             })
             .transpose()?;
-        Ok(StructureContext::new(
-            self.species.clone(),
-            geometry,
-            self.identity_domain.clone(),
+        Ok(
+            StructureContext::new(self.species.clone(), geometry, self.identity_domain.clone())
+                .with_masses(self.masses.clone()),
         )
-        .with_masses(self.masses.clone()))
     }
 }
 
@@ -646,9 +639,7 @@ fn decode_finite_bits(
         .map(|bits| f64::from_bits(*bits))
         .collect::<Vec<_>>();
     if values.iter().any(|value| !value.is_finite()) {
-        return Err(PesDbError::InvalidRecord(format!(
-            "{field} is nonfinite"
-        )));
+        return Err(PesDbError::InvalidRecord(format!("{field} is nonfinite")));
     }
     Ok(Array1::from_vec(values))
 }
@@ -702,17 +693,16 @@ fn validate_context(context: &StructureContext, coordinate_len: usize) -> Result
         ));
     }
     let atoms = coordinate_len / 3;
-    if context.species().is_some_and(|species| species.len() != atoms) {
+    if context
+        .species()
+        .is_some_and(|species| species.len() != atoms)
+    {
         return Err(PesDbError::InvalidRecord(
             "species count does not match coordinates".into(),
         ));
     }
     if let Some(masses) = context.masses() {
-        if masses.len() != atoms
-            || masses
-                .iter()
-                .any(|mass| !mass.is_finite() || *mass <= 0.0)
-        {
+        if masses.len() != atoms || masses.iter().any(|mass| !mass.is_finite() || *mass <= 0.0) {
             return Err(PesDbError::InvalidRecord(
                 "masses must be finite, positive, and one per atom".into(),
             ));
