@@ -7,11 +7,11 @@
 
 use std::fmt::Display;
 
-use ndarray::{Array1, ArrayView1};
+use ndarray::{Array1, Array2, ArrayView1};
 use rgmin::{GradNorm, Lbfgs};
 use rgsaddle::{
     IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
-    PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession,
+    PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
 };
 
 use crate::descriptor_space::{DescriptorError, DescriptorSpace, DescriptorVector};
@@ -79,6 +79,8 @@ pub struct PesExplorationConfig {
     pub saddle_displacement: f64,
     /// Curvature must be below the negative of this value.
     pub negative_curvature_tolerance: f64,
+    /// Cartesian finite-difference step used to certify stationary index.
+    pub hessian_step: f64,
     /// Maximum Cartesian move used by minimum-mode and IRC steppers.
     pub maximum_move: f64,
     /// IRC mass-weighted outer radius.
@@ -101,6 +103,7 @@ impl Default for PesExplorationConfig {
             saddle_force_tolerance: 1e-3,
             saddle_displacement: 0.1,
             negative_curvature_tolerance: 1e-6,
+            hessian_step: 1e-4,
             maximum_move: 0.2,
             irc_step: 0.1,
             irc_force_tolerance: 0.05,
@@ -124,6 +127,7 @@ impl PesExplorationConfig {
             ("quench gradient tolerance", self.quench_gradient_tolerance),
             ("saddle force tolerance", self.saddle_force_tolerance),
             ("saddle displacement", self.saddle_displacement),
+            ("Hessian finite-difference step", self.hessian_step),
             ("maximum move", self.maximum_move),
             ("IRC step", self.irc_step),
             ("IRC force tolerance", self.irc_force_tolerance),
@@ -169,11 +173,15 @@ pub enum PesExplorationError {
         /// Saddle stage that stopped.
         stage: &'static str,
     },
-    /// The stationary candidate lacks a negative mode.
-    #[error("stationary candidate has lowest curvature {curvature}")]
+    /// The stationary candidate is not an index-one saddle.
+    #[error(
+        "stationary candidate has index {negative_modes} and lowest curvature {lowest_curvature}"
+    )]
     NotFirstOrder {
-        /// Reported lowest curvature.
-        curvature: f64,
+        /// Number of eigenvalues below the negative-curvature tolerance.
+        negative_modes: usize,
+        /// Lowest certified Hessian eigenvalue.
+        lowest_curvature: f64,
     },
     /// Both IRC branches resolved to one exact minimum.
     #[error("forward and reverse IRC branches resolved to one minimum")]
@@ -227,6 +235,8 @@ pub struct SaddleConnection {
     pub saddle_coordinates: Array1<f64>,
     /// Lowest curvature reported at the force-converged candidate.
     pub curvature: f64,
+    /// Number of certified negative Hessian eigenvalues.
+    pub negative_modes: usize,
     /// Saddle gradient infinity norm.
     pub saddle_max_gradient: f64,
     /// Descriptor retained for saddle deduplication and novelty.
@@ -407,6 +417,80 @@ fn max_abs(values: ArrayView1<f64>) -> f64 {
     values.iter().map(|value| value.abs()).fold(0.0, f64::max)
 }
 
+/// Dense receiving-side Hessian eigensystem and stationary-point index.
+#[derive(Debug, Clone)]
+pub struct StationaryIndex {
+    /// Hessian eigenvalues in ascending order.
+    pub eigenvalues: Array1<f64>,
+    /// Normalized eigenvector belonging to the lowest eigenvalue.
+    pub lowest_mode: Array1<f64>,
+    /// Number of eigenvalues below `-negative_tolerance`.
+    pub negative_modes: usize,
+}
+
+/// Certify a stationary-point index from central differences of PES gradients.
+pub fn stationary_index<S: PesSurface + ?Sized>(
+    surface: &S,
+    coordinates: ArrayView1<f64>,
+    step: f64,
+    negative_tolerance: f64,
+) -> Result<StationaryIndex, PesExplorationError> {
+    if coordinates.is_empty() {
+        return Err(PesExplorationError::InvalidShape(
+            "stationary coordinates must be nonempty",
+        ));
+    }
+    if coordinates.iter().any(|value| !value.is_finite()) {
+        return Err(PesExplorationError::InvalidShape(
+            "stationary coordinates are nonfinite",
+        ));
+    }
+    if !step.is_finite() || step <= 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "Hessian finite-difference step",
+        ));
+    }
+    if !negative_tolerance.is_finite() || negative_tolerance < 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "negative curvature tolerance",
+        ));
+    }
+
+    let dimension = coordinates.len();
+    let mut hessian = Array2::zeros((dimension, dimension));
+    for column in 0..dimension {
+        let mut plus = coordinates.to_owned();
+        let mut minus = coordinates.to_owned();
+        plus[column] += step;
+        minus[column] -= step;
+        let (_, plus_gradient) = checked_evaluate(surface, plus.view())?;
+        let (_, minus_gradient) = checked_evaluate(surface, minus.view())?;
+        for row in 0..dimension {
+            hessian[(row, column)] =
+                (plus_gradient[row] - minus_gradient[row]) / (2.0 * step);
+        }
+    }
+    for row in 0..dimension {
+        for column in 0..row {
+            let symmetric = 0.5 * (hessian[(row, column)] + hessian[(column, row)]);
+            hessian[(row, column)] = symmetric;
+            hessian[(column, row)] = symmetric;
+        }
+    }
+
+    let (eigenvalues, eigenvectors) = exact_eigh(hessian.view())
+        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let negative_modes = eigenvalues
+        .iter()
+        .filter(|eigenvalue| **eigenvalue < -negative_tolerance)
+        .count();
+    Ok(StationaryIndex {
+        lowest_mode: eigenvectors.column(0).to_owned(),
+        eigenvalues,
+        negative_modes,
+    })
+}
+
 fn quench<S: PesSurface + ?Sized>(
     surface: &S,
     start: ArrayView1<f64>,
@@ -559,7 +643,7 @@ where
     let adapter = SaddleSurface(surface);
     let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode.clone())
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-    let mut min_mode_report = min_mode
+    let min_mode_report = min_mode
         .run(&adapter, config.saddle_steps)
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     if min_mode_report.status != MinModeStatus::Converged {
@@ -568,9 +652,6 @@ where
         });
     }
     let mut saddle_coordinates = min_mode.position().to_owned();
-    let mut saddle_mode = min_mode.mode().to_owned();
-    let mut saddle_energy = checked_evaluate(surface, saddle_coordinates.view())?.0;
-    let mut saddle_max_gradient = min_mode_report.max_force;
 
     if config.refine_with_prfo {
         let prfo_config = SellaSaddleConfig {
@@ -589,25 +670,30 @@ where
             });
         }
         saddle_coordinates = prfo.position().to_owned();
-        saddle_energy = report.energy;
-        saddle_max_gradient = report.max_force;
-
-        let mut curvature_probe = MinModeSession::new(
-            min_mode_config(config),
-            saddle_coordinates.clone(),
-            saddle_mode.clone(),
-        )
-        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-        min_mode_report = curvature_probe
-            .step(&adapter)
-            .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
-        saddle_mode = curvature_probe.mode().to_owned();
     }
-    if min_mode_report.curvature >= -config.negative_curvature_tolerance {
-        return Err(PesExplorationError::NotFirstOrder {
-            curvature: min_mode_report.curvature,
+
+    let (saddle_energy, saddle_gradient) =
+        checked_evaluate(surface, saddle_coordinates.view())?;
+    let saddle_max_gradient = max_abs(saddle_gradient.view());
+    if saddle_max_gradient > config.saddle_force_tolerance {
+        return Err(PesExplorationError::SaddleNotConverged {
+            stage: "receiving-side force certification",
         });
     }
+    let index = stationary_index(
+        surface,
+        saddle_coordinates.view(),
+        config.hessian_step,
+        config.negative_curvature_tolerance,
+    )?;
+    let curvature = index.eigenvalues[0];
+    if index.negative_modes != 1 {
+        return Err(PesExplorationError::NotFirstOrder {
+            negative_modes: index.negative_modes,
+            lowest_curvature: curvature,
+        });
+    }
+    let saddle_mode = index.lowest_mode;
 
     let (forward, forward_irc) = roll_branch(
         surface,
@@ -654,7 +740,8 @@ where
                 endpoints: [forward_id.id, reverse_id.id],
                 saddle_energy,
                 saddle_coordinates,
-                curvature: min_mode_report.curvature,
+                curvature,
+                negative_modes: index.negative_modes,
                 saddle_max_gradient,
                 descriptor: saddle_descriptor,
                 ride_method: config.ride_method,
