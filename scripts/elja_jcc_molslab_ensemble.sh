@@ -302,7 +302,14 @@ for replica in 0 1 2 3; do
   grep -q "encounter target=" "$output"
   test -s "$worker/resolved-config.json"
   if grep -q "best inf eV" "$output"; then
-    if find "$worker" -maxdepth 1 -name 'best_*.xyz' -print -quit | grep . >/dev/null; then
+    has_best_structure=false
+    for candidate in "$worker"/best_*.xyz; do
+      if [[ -f $candidate ]]; then
+        has_best_structure=true
+        break
+      fi
+    done
+    if [[ $has_best_structure == true ]]; then
       echo "replica $replica wrote an unvalidated infinite-best structure" >&2
       exit 1
     fi
