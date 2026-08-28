@@ -140,6 +140,7 @@ while (( replica < REPLICAS )); do
     worker=$OUT/workers/replica-${replica}
     mkdir -p "$worker"
     (
+      brain_peer_list=$(brain_peers "$replica" "$wave_start" "$wave_end")
       export CATALOG_CAMPAIGN="$CAMPAIGN"
       export CATALOG_ENSEMBLE="$ENSEMBLE"
       export CATALOG_REPLICA="$replica"
@@ -155,7 +156,7 @@ while (( replica < REPLICAS )); do
       export SEED_OFFSET="$seed"
       export CATALOG_RPC="$endpoint"
       export CATALOG_BRAIN_LISTEN="tcp://127.0.0.1:$((BRAIN_PORT_BASE + replica))"
-      export CATALOG_BRAIN_PEERS="$(brain_peers "$replica" "$wave_start" "$wave_end")"
+      export CATALOG_BRAIN_PEERS=$brain_peer_list
       exec "$BIN" "$N" "$PER_REPLICA_BUDGET" 1 rec
     ) >"$OUT/workers/replica-${replica}.out" 2>"$OUT/workers/replica-${replica}.err" &
     pids+=("$!")
