@@ -112,7 +112,7 @@ where
 }
 
 /// Lowest-mode ride used to approach a saddle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RideMethod {
     /// Jónsson dimer rotation with finite-difference Hessian actions.
     Dimer,

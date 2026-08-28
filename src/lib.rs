@@ -158,6 +158,8 @@ pub mod raft;
 pub mod region_assignment;
 /// Temperature spread across a cooperative ensemble and its exchange.
 pub mod replica_exchange;
+/// Shared same-system scheduling evidence for minimum-mode transition searches.
+pub mod ride_ledger;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
 /// Deterministic provenance records for engine-backed runs.
