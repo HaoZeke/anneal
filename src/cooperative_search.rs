@@ -16,13 +16,14 @@ mod run {
     use crate::catalog_rpc::mailbox::CatalogMailbox;
     use crate::catalog_rpc::{
         BoundaryCrossingRecord, BridgeAssignmentRecord, BridgeCrossingRecord, CatalogCandidate,
-        CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation, CatalogSnapshot,
-        DescriptorHoleProposal, INCUMBENT_SAMPLE_DRAW, PolicyState, PopulationEpochState,
-        PopulationPlan, PopulationSelection, ProtocolRejection, SPARSE_SAMPLE_DRAW,
-        TransitionDestination,
+        CatalogFrontierPost, CatalogLedgerEvent, CatalogMutation, CatalogRelation,
+        CatalogRideReport, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal,
+        INCUMBENT_SAMPLE_DRAW, PolicyState, PopulationEpochState, PopulationPlan,
+        PopulationSelection, ProtocolRejection, SPARSE_SAMPLE_DRAW, TransitionDestination,
     };
     use crate::compatibility::EngineDescriptor;
     use crate::methods::feynman_kac::population_family_position;
+    use crate::ride_ledger::RideCredit;
 
     use super::ledger::{ChargeKind, CooperativeLedger, LedgerError, ReplicaLedgerEvent};
 
@@ -59,6 +60,10 @@ mod run {
         Transition,
         /// One validated perturb--quench execution before coordinator registration.
         TransitionExecution,
+        /// One exclusive transition-search arm claimed from the coordinator.
+        RideClaim,
+        /// One charged transition-search result accepted by the coordinator.
+        RideReport,
     }
 
     impl TraceKind {
@@ -79,6 +84,8 @@ mod run {
                 Self::Slice => "slice",
                 Self::Transition => "transition",
                 Self::TransitionExecution => "transition_execution",
+                Self::RideClaim => "ride_claim",
+                Self::RideReport => "ride_report",
             }
         }
     }
@@ -361,6 +368,34 @@ mod run {
         /// Communication failed and local search remains authoritative.
         LocalFallback,
         /// No coordinator exists for this run arm.
+        SharingDisabled,
+    }
+
+    /// Availability and validation result of claiming transition-search work.
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum RideClaimOutcome {
+        /// Exclusive same-system work and its validated source minimum.
+        Work(CatalogRideWork),
+        /// No unclaimed portfolio arm is available.
+        Empty,
+        /// The coordinator rejected the claim.
+        Rejected,
+        /// Communication failed and the local trajectory remains authoritative.
+        LocalFallback,
+        /// Sharing is disabled for the independent control arm.
+        SharingDisabled,
+    }
+
+    /// Availability and validation result of reporting transition-search work.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum RideReportOutcome {
+        /// The coordinator accepted the evidence and computed edge novelty.
+        Credited(RideCredit),
+        /// The coordinator rejected the report.
+        Rejected,
+        /// Communication failed and the local trajectory remains authoritative.
+        LocalFallback,
+        /// Sharing is disabled for the independent control arm.
         SharingDisabled,
     }
 
@@ -1251,6 +1286,86 @@ mod run {
                 Some(Err(_)) => {
                     self.push_event(replica, TraceKind::RpcFallback, None, None)?;
                     Ok(CatalogSampleOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Claim one exclusive same-system transition-search experiment.
+        pub fn claim_ride(
+            &mut self,
+            replica: u32,
+            seed: u64,
+        ) -> Result<RideClaimOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.claim_ride(rpc_sequence, seed))
+                })
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(RideClaimOutcome::SharingDisabled)
+                }
+                Some(Ok(Some(work))) => {
+                    self.push_event(replica, TraceKind::RideClaim, None, None)?;
+                    Ok(RideClaimOutcome::Work(work))
+                }
+                Some(Ok(None)) => {
+                    self.push_event(replica, TraceKind::RideClaim, None, Some("ride_empty"))?;
+                    Ok(RideClaimOutcome::Empty)
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(RideClaimOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(RideClaimOutcome::LocalFallback)
+                }
+            }
+        }
+
+        /// Report charged transition-search evidence for receiving-side certification.
+        pub fn report_ride(
+            &mut self,
+            replica: u32,
+            report: CatalogRideReport,
+        ) -> Result<RideReportOutcome, CooperativeRunError> {
+            let rpc_sequence = self.next_rpc_sequence(replica)?;
+            let result = {
+                let state = self.replica_mut(replica)?;
+                state.client.as_ref().map(|mailbox| {
+                    mailbox.exec(move |client| client.report_ride(rpc_sequence, report))
+                })
+            };
+            match result {
+                None => {
+                    self.push_event(replica, TraceKind::SharingDisabled, None, None)?;
+                    Ok(RideReportOutcome::SharingDisabled)
+                }
+                Some(Ok(credit)) => {
+                    self.push_event(replica, TraceKind::RideReport, None, None)?;
+                    Ok(RideReportOutcome::Credited(credit))
+                }
+                Some(Err(CatalogClientError::Rejected(reason))) => {
+                    self.push_event(
+                        replica,
+                        TraceKind::Rejection,
+                        None,
+                        Some(rejection_code(reason)),
+                    )?;
+                    Ok(RideReportOutcome::Rejected)
+                }
+                Some(Err(_)) => {
+                    self.push_event(replica, TraceKind::RpcFallback, None, None)?;
+                    Ok(RideReportOutcome::LocalFallback)
                 }
             }
         }
