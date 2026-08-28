@@ -9,6 +9,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use ndarray::ArrayView2;
+
 use crate::pes_exploration::RideMethod;
 
 /// One sign of a localized initial mode.
@@ -27,6 +29,100 @@ pub struct EnvironmentTarget {
     pub class: u32,
     /// Representative atom in the source structure.
     pub atom: u32,
+}
+
+/// Leader-clustered invariant local environments for one system signature.
+#[derive(Debug, Clone)]
+pub struct EnvironmentBook {
+    radius_squared: f64,
+    feature_dim: Option<usize>,
+    leaders: Vec<Vec<f64>>,
+}
+
+impl EnvironmentBook {
+    /// Construct a codebook with a fixed within-system feature radius.
+    pub fn new(radius: f64) -> Result<Self, RideLedgerError> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(RideLedgerError::InvalidEnvironmentRadius);
+        }
+        Ok(Self {
+            radius_squared: radius * radius,
+            feature_dim: None,
+            leaders: Vec::new(),
+        })
+    }
+
+    /// Assign every atom and return one representative for each present class.
+    ///
+    /// Rows must be rotation/permutation-invariant local features produced by
+    /// the caller's descriptor contract. Classes are coordinator-local and
+    /// therefore cannot identify or compare environments from another PES.
+    pub fn observe(
+        &mut self,
+        features: ArrayView2<'_, f64>,
+    ) -> Result<Vec<EnvironmentTarget>, RideLedgerError> {
+        if features.nrows() == 0 || features.ncols() == 0 {
+            return Err(RideLedgerError::EmptyEnvironmentFeatures);
+        }
+        if features.iter().any(|value| !value.is_finite()) {
+            return Err(RideLedgerError::NonfiniteEnvironmentFeature);
+        }
+        match self.feature_dim {
+            Some(expected) if expected != features.ncols() => {
+                return Err(RideLedgerError::EnvironmentFeatureDimension {
+                    expected,
+                    actual: features.ncols(),
+                });
+            }
+            None => self.feature_dim = Some(features.ncols()),
+            Some(_) => {}
+        }
+
+        let mut representatives = BTreeMap::<u32, u32>::new();
+        for (atom, row) in features.rows().into_iter().enumerate() {
+            let nearest = self
+                .leaders
+                .iter()
+                .enumerate()
+                .map(|(class, leader)| {
+                    let squared = row
+                        .iter()
+                        .zip(leader)
+                        .map(|(left, right)| {
+                            let delta = left - right;
+                            delta * delta
+                        })
+                        .sum::<f64>();
+                    (class, squared)
+                })
+                .filter(|(_, squared)| *squared <= self.radius_squared)
+                .min_by(|left, right| {
+                    left.1
+                        .total_cmp(&right.1)
+                        .then_with(|| left.0.cmp(&right.0))
+                })
+                .map(|(class, _)| class);
+            let class = match nearest {
+                Some(class) => class,
+                None => {
+                    self.leaders.push(row.to_vec());
+                    self.leaders.len() - 1
+                }
+            };
+            let class = u32::try_from(class).map_err(|_| RideLedgerError::CounterOverflow)?;
+            let atom = u32::try_from(atom).map_err(|_| RideLedgerError::CounterOverflow)?;
+            representatives.entry(class).or_insert(atom);
+        }
+        Ok(representatives
+            .into_iter()
+            .map(|(class, atom)| EnvironmentTarget { class, atom })
+            .collect())
+    }
+
+    /// Number of invariant local-environment classes observed in this system.
+    pub fn class_count(&self) -> usize {
+        self.leaders.len()
+    }
 }
 
 /// A quenched minimum eligible for transition exploration.
@@ -164,6 +260,23 @@ pub enum RideLedgerError {
     /// A source needs at least one local target.
     #[error("ride source has no local-environment targets")]
     EmptyEnvironmentSet,
+    /// Environment clustering needs a finite positive radius.
+    #[error("local-environment radius must be finite and positive")]
+    InvalidEnvironmentRadius,
+    /// A local descriptor must contain at least one atom and one feature.
+    #[error("local-environment feature matrix must be nonempty")]
+    EmptyEnvironmentFeatures,
+    /// All local descriptors in one codebook use one feature schema.
+    #[error("local-environment feature dimension is {actual}, expected {expected}")]
+    EnvironmentFeatureDimension {
+        /// Dimension established by the first observation.
+        expected: usize,
+        /// Dimension supplied by this observation.
+        actual: usize,
+    },
+    /// Local descriptor rows must contain only finite values.
+    #[error("local-environment feature matrix contains a nonfinite value")]
+    NonfiniteEnvironmentFeature,
     /// A work identifier is unknown to this ledger.
     #[error("unknown ride work order {0}")]
     UnknownWork(u64),
