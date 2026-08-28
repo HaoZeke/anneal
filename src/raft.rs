@@ -925,5 +925,32 @@ pub mod wire {
             let bytes = encode_decree(&decree);
             assert_eq!(decode_decree(&bytes).unwrap(), decree);
         }
+
+        #[test]
+        fn seam_work_covers_both_communities_and_rotates_replica_roles() {
+            let members = [7, 2, 9, 4, 1];
+            let first = assign_seam_work(&members, 11, 29, 12, 3, 4);
+            let second = assign_seam_work(&members, 11, 29, 12, 3, 5);
+
+            assert_eq!(first.len(), members.len());
+            assert_eq!(first.iter().filter(|row| row.right_side).count(), 4);
+            assert_eq!(first.iter().filter(|row| !row.right_side).count(), 1);
+            assert!(first.iter().all(|row| {
+                row.anchor_basin == if row.right_side { 29 } else { 11 } && row.decree_index == 4
+            }));
+            let mut assigned = first.iter().map(|row| row.replica).collect::<Vec<_>>();
+            assigned.sort_unstable();
+            assert_eq!(assigned, vec![1, 2, 4, 7, 9]);
+            assert_ne!(
+                first
+                    .iter()
+                    .map(|row| (row.replica, row.right_side))
+                    .collect::<Vec<_>>(),
+                second
+                    .iter()
+                    .map(|row| (row.replica, row.right_side))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 }
