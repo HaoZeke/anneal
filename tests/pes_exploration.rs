@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    discover_mode_connection, stationary_index,
+    StructureContext, discover_mode_connection, stationary_index,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -168,4 +168,85 @@ fn descriptor_distance_orders_checks_but_exact_witness_decides_identity() {
     assert!(!duplicate.is_new);
     assert_eq!(duplicate.id, first.id);
     assert_eq!(distinct.nearest_descriptor_distance, Some(0.0));
+}
+
+#[test]
+fn exact_admission_preserves_species_and_identity_domain() {
+    let geometry = DescriptorGeometry::finite(1.0).unwrap();
+    let descriptor_space = universal_descriptor_space(geometry);
+    let coordinates = Array1::from_vec(vec![0.0, 0.0, 0.0, 1.2, 0.0, 0.0]);
+    let witness = CartesianWitness { tolerance: 1e-6 };
+    let mut network = PesNetwork::new();
+
+    let carbon_oxygen = StructureContext::new(
+        Some(vec![6, 8]),
+        Some(geometry),
+        Some("molecular-test".into()),
+    );
+    let oxygen_carbon = StructureContext::new(
+        Some(vec![8, 6]),
+        Some(geometry),
+        Some("molecular-test".into()),
+    );
+    let other_domain = StructureContext::new(
+        Some(vec![6, 8]),
+        Some(geometry),
+        Some("surface-test".into()),
+    );
+
+    let first = network
+        .admit_minimum_with_context(
+            -1.0,
+            coordinates.clone(),
+            0.0,
+            descriptor_space
+                .describe(coordinates.view(), carbon_oxygen.species())
+                .unwrap(),
+            carbon_oxygen.clone(),
+            &witness,
+        )
+        .unwrap();
+    let swapped = network
+        .admit_minimum_with_context(
+            -1.0,
+            coordinates.clone(),
+            0.0,
+            descriptor_space
+                .describe(coordinates.view(), oxygen_carbon.species())
+                .unwrap(),
+            oxygen_carbon,
+            &witness,
+        )
+        .unwrap();
+    let different_system = network
+        .admit_minimum_with_context(
+            -1.0,
+            coordinates.clone(),
+            0.0,
+            descriptor_space
+                .describe(coordinates.view(), other_domain.species())
+                .unwrap(),
+            other_domain,
+            &witness,
+        )
+        .unwrap();
+    let duplicate = network
+        .admit_minimum_with_context(
+            -1.0,
+            coordinates.clone(),
+            0.0,
+            descriptor_space
+                .describe(coordinates.view(), carbon_oxygen.species())
+                .unwrap(),
+            carbon_oxygen,
+            &witness,
+        )
+        .unwrap();
+
+    assert!(first.is_new);
+    assert!(swapped.is_new);
+    assert!(different_system.is_new);
+    assert!(!duplicate.is_new);
+    assert_eq!(duplicate.id, first.id);
+    assert_eq!(network.minimum_count(), 3);
 }
