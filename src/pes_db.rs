@@ -432,10 +432,55 @@ impl DescriptorMetadata {
     }
 
     fn validate(&self, descriptor: &DescriptorVector) -> Result<(), PesDbError> {
-        if self != &Self::from_descriptor(descriptor) {
-            return Err(PesDbError::InvalidRecord(
-                "descriptor payload does not reproduce from the stored structure".into(),
-            ));
+        let reproduced = Self::from_descriptor(descriptor);
+        if self.schema_name != reproduced.schema_name
+            || self.schema_version != reproduced.schema_version
+        {
+            return Err(PesDbError::InvalidRecord(format!(
+                "descriptor schema {:?}/{} reproduces as {:?}/{}",
+                self.schema_name,
+                self.schema_version,
+                reproduced.schema_name,
+                reproduced.schema_version
+            )));
+        }
+        if self.values.len() != reproduced.values.len() {
+            return Err(PesDbError::InvalidRecord(format!(
+                "descriptor value count {} reproduces as {}",
+                self.values.len(),
+                reproduced.values.len()
+            )));
+        }
+        if let Some((index, (stored, computed))) = self
+            .values
+            .iter()
+            .zip(&reproduced.values)
+            .enumerate()
+            .find(|(_, (stored, computed))| stored.to_bits() != computed.to_bits())
+        {
+            return Err(PesDbError::InvalidRecord(format!(
+                "descriptor value {index} has bits {:016x}, reproduced {:016x}",
+                stored.to_bits(),
+                computed.to_bits()
+            )));
+        }
+        if self.blocks.len() != reproduced.blocks.len() {
+            return Err(PesDbError::InvalidRecord(format!(
+                "descriptor block count {} reproduces as {}",
+                self.blocks.len(),
+                reproduced.blocks.len()
+            )));
+        }
+        if let Some((index, (stored, computed))) = self
+            .blocks
+            .iter()
+            .zip(&reproduced.blocks)
+            .enumerate()
+            .find(|(_, (stored, computed))| stored != computed)
+        {
+            return Err(PesDbError::InvalidRecord(format!(
+                "descriptor block {index} metadata differs: stored {stored:?}, reproduced {computed:?}"
+            )));
         }
         Ok(())
     }
