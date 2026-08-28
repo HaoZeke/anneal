@@ -257,6 +257,9 @@ pub enum PesExplorationError {
     /// Both IRC branches resolved to one exact minimum.
     #[error("forward and reverse IRC branches resolved to one minimum")]
     CollapsedConnection,
+    /// A one-sided minimum-mode ride did not reconnect to its source basin.
+    #[error("saddle descent endpoints do not contain the source minimum")]
+    DisconnectedConnection,
     /// Universal descriptor evaluation or comparison failed.
     #[error(transparent)]
     Descriptor(#[from] DescriptorError),
@@ -490,6 +493,147 @@ impl PesNetwork {
     }
 }
 
+/// One rgmin-certified minimum on an arbitrary-dimensional point surface.
+#[derive(Debug, Clone)]
+pub struct NdMinimumRecord {
+    /// Stable index in the owning [`NdPesNetwork`].
+    pub id: usize,
+    /// Receiving-side energy evaluated at the stored point.
+    pub energy: f64,
+    /// Point in the native coordinates of the optimization problem.
+    pub coordinates: Array1<f64>,
+    /// Final gradient infinity norm.
+    pub max_gradient: f64,
+}
+
+/// One certified index-one connection on an arbitrary-dimensional surface.
+#[derive(Debug, Clone)]
+pub struct NdSaddleConnection {
+    /// Stable index in the owning [`NdPesNetwork`].
+    pub id: usize,
+    /// Minimum from which the mode ride started.
+    pub origin: usize,
+    /// Exact-witness endpoint minimum indices, positive then negative branch.
+    pub endpoints: [usize; 2],
+    /// Receiving-side saddle energy.
+    pub saddle_energy: f64,
+    /// Saddle point in the native coordinates of the optimization problem.
+    pub saddle_coordinates: Array1<f64>,
+    /// Lowest certified Hessian eigenvalue.
+    pub curvature: f64,
+    /// Receiving-side lowest Hessian eigenvector.
+    pub lowest_mode: Array1<f64>,
+    /// Number of certified negative Hessian eigenvalues.
+    pub negative_modes: usize,
+    /// Saddle gradient infinity norm.
+    pub saddle_max_gradient: f64,
+    /// Lowest-mode solver used for this connection.
+    pub ride_method: RideMethod,
+}
+
+/// Exact stationary-point graph for a single arbitrary-dimensional surface.
+///
+/// Point coordinates are used only to order exact-witness checks. The graph
+/// has no atom, species, Cartesian-geometry, or universal-descriptor contract,
+/// and it is never comparable with a graph belonging to another surface.
+#[derive(Debug, Clone, Default)]
+pub struct NdPesNetwork {
+    minima: Vec<NdMinimumRecord>,
+    saddles: Vec<NdSaddleConnection>,
+}
+
+impl NdPesNetwork {
+    /// Empty stationary-point graph for one point surface.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of exact-witness minimum identities.
+    pub fn minimum_count(&self) -> usize {
+        self.minima.len()
+    }
+
+    /// Number of exact-witness saddle identities.
+    pub fn saddle_count(&self) -> usize {
+        self.saddles.len()
+    }
+
+    /// Stored minima in stable admission order.
+    pub fn minima(&self) -> &[NdMinimumRecord] {
+        &self.minima
+    }
+
+    /// Stored saddle connections in stable admission order.
+    pub fn saddles(&self) -> &[NdSaddleConnection] {
+        &self.saddles
+    }
+
+    fn admit_minimum<W: ExactStructureWitness + ?Sized>(
+        &mut self,
+        minimum: Quenched,
+        witness: &W,
+    ) -> usize {
+        let mut ordered = self
+            .minima
+            .iter()
+            .enumerate()
+            .map(|(index, existing)| {
+                let distance = existing
+                    .coordinates
+                    .iter()
+                    .zip(&minimum.coordinates)
+                    .map(|(left, right)| (left - right).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                (distance, index)
+            })
+            .collect::<Vec<_>>();
+        ordered.sort_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        for (_, index) in ordered {
+            if witness.equivalent(
+                self.minima[index].coordinates.view(),
+                minimum.coordinates.view(),
+            ) {
+                return index;
+            }
+        }
+        let id = self.minima.len();
+        self.minima.push(NdMinimumRecord {
+            id,
+            energy: minimum.energy,
+            coordinates: minimum.coordinates,
+            max_gradient: minimum.max_gradient,
+        });
+        id
+    }
+
+    fn admit_saddle<W: ExactStructureWitness + ?Sized>(
+        &mut self,
+        mut candidate: NdSaddleConnection,
+        witness: &W,
+    ) -> NdSaddleConnection {
+        for existing in &self.saddles {
+            let same_endpoints = existing.endpoints == candidate.endpoints
+                || existing.endpoints == [candidate.endpoints[1], candidate.endpoints[0]];
+            if same_endpoints
+                && witness.equivalent(
+                    existing.saddle_coordinates.view(),
+                    candidate.saddle_coordinates.view(),
+                )
+            {
+                return existing.clone();
+            }
+        }
+        candidate.id = self.saddles.len();
+        self.saddles.push(candidate.clone());
+        candidate
+    }
+}
+
 struct SaddleSurface<'a, S>(&'a S);
 
 impl<S> PointSurface for SaddleSurface<'_, S>
@@ -502,6 +646,7 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
 struct Quenched {
     energy: f64,
     coordinates: Array1<f64>,
@@ -714,6 +859,106 @@ fn roll_branch<S: PesSurface>(
         .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
     let endpoint = session.position().to_owned();
     Ok((quench(surface, endpoint.view(), config)?, report.at_minimum))
+}
+
+/// Quench a point, ride one supplied mode to an index-one saddle, and quench
+/// both downhill branches on an arbitrary-dimensional surface.
+///
+/// This path deliberately has no atomistic descriptor, mass, species, or 3N
+/// requirement. The two branches use small signed displacements along the
+/// receiving-side unstable eigenvector followed by rgmin certification. A
+/// molecular caller needing a mass-weighted IRC uses
+/// [`discover_mode_connection`] instead.
+pub fn discover_nd_connection<S, W>(
+    surface: &S,
+    network: &mut NdPesNetwork,
+    start: ArrayView1<f64>,
+    mode: ArrayView1<f64>,
+    config: &PesExplorationConfig,
+    witness: &W,
+) -> Result<NdSaddleConnection, PesExplorationError>
+where
+    S: PesSurface,
+    W: ExactStructureWitness + ?Sized,
+{
+    config.validate()?;
+    if start.is_empty() {
+        return Err(PesExplorationError::InvalidShape(
+            "point coordinates must be nonempty",
+        ));
+    }
+    if mode.len() != start.len() {
+        return Err(PesExplorationError::InvalidShape(
+            "mode must match the point dimension",
+        ));
+    }
+
+    let origin_minimum = quench(surface, start, config)?;
+    let origin = network.admit_minimum(origin_minimum.clone(), witness);
+    let mode = normalize_mode(mode)?;
+    let saddle_start = &origin_minimum.coordinates + &(&mode * config.saddle_displacement);
+    let adapter = SaddleSurface(surface);
+    let mut min_mode = MinModeSession::new(min_mode_config(config), saddle_start, mode)
+        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    let min_mode_report = min_mode
+        .run(&adapter, config.saddle_steps)
+        .map_err(|error| PesExplorationError::Saddle(error.to_string()))?;
+    if min_mode_report.status != MinModeStatus::Converged {
+        return Err(PesExplorationError::SaddleNotConverged {
+            stage: "minimum-mode ride",
+        });
+    }
+
+    let saddle_coordinates = min_mode.position().to_owned();
+    let (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
+    let saddle_max_gradient = max_abs(saddle_gradient.view());
+    if saddle_max_gradient > config.saddle_force_tolerance {
+        return Err(PesExplorationError::SaddleNotConverged {
+            stage: "receiving-side force certification",
+        });
+    }
+    let index = stationary_index(
+        surface,
+        saddle_coordinates.view(),
+        config.hessian_step,
+        config.negative_curvature_tolerance,
+    )?;
+    let curvature = index.eigenvalues[0];
+    if index.negative_modes != 1 {
+        return Err(PesExplorationError::NotFirstOrder {
+            negative_modes: index.negative_modes,
+            lowest_curvature: curvature,
+        });
+    }
+    let lowest_mode = index.lowest_mode;
+    let positive_start = &saddle_coordinates + &(&lowest_mode * config.irc_step);
+    let negative_start = &saddle_coordinates - &(&lowest_mode * config.irc_step);
+    let positive = quench(surface, positive_start.view(), config)?;
+    let negative = quench(surface, negative_start.view(), config)?;
+    let positive_id = network.admit_minimum(positive, witness);
+    let negative_id = network.admit_minimum(negative, witness);
+    if positive_id == negative_id {
+        return Err(PesExplorationError::CollapsedConnection);
+    }
+    if positive_id != origin && negative_id != origin {
+        return Err(PesExplorationError::DisconnectedConnection);
+    }
+
+    Ok(network.admit_saddle(
+        NdSaddleConnection {
+            id: usize::MAX,
+            origin,
+            endpoints: [positive_id, negative_id],
+            saddle_energy,
+            saddle_coordinates,
+            curvature,
+            lowest_mode,
+            negative_modes: index.negative_modes,
+            saddle_max_gradient,
+            ride_method: config.ride_method,
+        },
+        witness,
+    ))
 }
 
 /// Quench a basin, ride one supplied mode, roll both IRC branches, and admit
