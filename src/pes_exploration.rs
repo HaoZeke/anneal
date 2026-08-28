@@ -31,6 +31,7 @@ pub trait PesSurface: Sync {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct StructureContext {
     species: Option<Vec<u32>>,
+    masses: Option<Vec<f64>>,
     geometry: Option<DescriptorGeometry>,
     identity_domain: Option<String>,
 }
@@ -44,6 +45,7 @@ impl StructureContext {
     ) -> Self {
         Self {
             species,
+            masses: None,
             geometry,
             identity_domain,
         }
@@ -52,6 +54,17 @@ impl StructureContext {
     /// Ordered atomic numbers, when chemical identities are known.
     pub fn species(&self) -> Option<&[u32]> {
         self.species.as_deref()
+    }
+
+    /// Per-atom masses in the native PES unit system, when known.
+    pub fn masses(&self) -> Option<&[f64]> {
+        self.masses.as_deref()
+    }
+
+    /// Attach per-atom native masses to the identity and persistence context.
+    pub fn with_masses(mut self, masses: Option<Vec<f64>>) -> Self {
+        self.masses = masses;
+        self
     }
 
     /// Descriptor geometry, including cell and periodic axes.
@@ -731,7 +744,8 @@ where
         species.map(<[u32]>::to_vec),
         descriptor_space.geometry(),
         None,
-    );
+    )
+    .with_masses(Some(masses.to_vec()));
     let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
     let origin = network.admit_minimum_with_context(
         origin_minimum.energy,
