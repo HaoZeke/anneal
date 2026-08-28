@@ -15,6 +15,12 @@ RGPOT_EXPECTED_COMMIT=${RGPOT_EXPECTED_COMMIT:?set RGPOT_EXPECTED_COMMIT}
 RGPOT_BDIR=${RGPOT_BDIR:-$HOME/.cache/anneal-audit/rgpot-${RGPOT_EXPECTED_COMMIT:0:12}-${SLURM_JOB_ID}}
 IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 
+dynamic_symbol_is_defined() {
+  local library=$1 symbol=$2
+  nm -D --defined-only "$library" |
+    awk -v symbol="$symbol" '$NF == symbol { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 if [[ ! -x $PIXI ]]; then
   echo "missing Pixi executable: $PIXI" >&2
   exit 1
@@ -89,11 +95,11 @@ if [[ -z $xtbso || -z $cuh2so ]]; then
   echo "rgpot engine build did not produce both required libraries" >&2
   exit 1
 fi
-nm -D "$xtbso" | grep -q rgpot_xtb_force || {
+dynamic_symbol_is_defined "$xtbso" rgpot_xtb_force || {
   echo "$xtbso has no rgpot_xtb_force" >&2
   exit 1
 }
-nm -D "$cuh2so" | grep -q rgpot_cuh2_force || {
+dynamic_symbol_is_defined "$cuh2so" rgpot_cuh2_force || {
   echo "$cuh2so has no rgpot_cuh2_force" >&2
   exit 1
 }

@@ -17,7 +17,7 @@ vesin_fortran=$build_dir/libvesin_fortran.a
 vesin_internal=$build_dir/libvesin_internal.a
 gfortran=${GFORTRAN:-gfortran}
 
-git -C "$rgpot" ls-files --error-unmatch "$capi_rel" >/dev/null
+(cd "$rgpot" && git ls-files --error-unmatch "$capi_rel" >/dev/null)
 if ! grep -F 'bind(c, name="rgpot_cuh2_force")' "$rgpot/$capi_rel" >/dev/null; then
   echo "$rgpot/$capi_rel does not define rgpot_cuh2_force" >&2
   exit 2

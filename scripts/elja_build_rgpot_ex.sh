@@ -13,6 +13,12 @@ BDIR=${RGPOT_BDIR:-$RGPOT/bdir-xtb-${RGPOT_EXPECTED_COMMIT:0:12}}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 
+dynamic_symbol_is_defined() {
+  local library=$1 symbol=$2
+  nm -D --defined-only "$library" |
+    awk -v symbol="$symbol" '$NF == symbol { found = 1 } END { exit found ? 0 : 1 }'
+}
+
 if [[ -z ${SLURM_JOB_ID:-} && ${1:-} != login-cargo ]]; then
   echo "elja_build_rgpot_ex.sh: engines under srun, cargo as login-cargo" >&2
   exit 1
@@ -74,12 +80,12 @@ build_engines() {
     echo "libxtb_engine.so missing under $BDIR" >&2
     exit 1
   fi
-  nm -D "$cuh2so" | grep -F rgpot_cuh2_force >/dev/null || {
+  dynamic_symbol_is_defined "$cuh2so" rgpot_cuh2_force || {
     echo "$cuh2so has no rgpot_cuh2_force" >&2
-    nm -D "$cuh2so" | head >&2
+    nm -D --defined-only "$cuh2so" >&2
     exit 1
   }
-  nm -D "$xtbso" | grep -F rgpot_xtb_force >/dev/null || {
+  dynamic_symbol_is_defined "$xtbso" rgpot_xtb_force || {
     echo "$xtbso has no rgpot_xtb_force" >&2
     exit 1
   }
