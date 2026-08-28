@@ -35,7 +35,11 @@ fn rigid_transform(coordinates: &Array1<f64>) -> Array1<f64> {
 }
 
 fn proper_transform(coordinates: &Array1<f64>) -> Array1<f64> {
-    let axis = [1.0_f64 / 6.0_f64.sqrt(), 2.0 / 6.0_f64.sqrt(), -1.0 / 6.0_f64.sqrt()];
+    let axis = [
+        1.0_f64 / 6.0_f64.sqrt(),
+        2.0 / 6.0_f64.sqrt(),
+        -1.0 / 6.0_f64.sqrt(),
+    ];
     let angle = 0.643_f64;
     let (sine, cosine) = angle.sin_cos();
     let one_minus_cosine = 1.0 - cosine;
