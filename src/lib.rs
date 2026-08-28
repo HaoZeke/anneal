@@ -148,6 +148,8 @@ pub mod noise_accept;
 pub mod path;
 /// rgmin quenches and rgsaddle minimum--saddle--minimum connections.
 pub mod pes_exploration;
+/// Durable readcon-db snapshots of exact minimum--saddle networks.
+pub mod pes_db;
 pub mod potentials;
 pub mod quench;
 /// Leader consensus over exploration decrees between server brains.
