@@ -222,6 +222,8 @@ pub enum RideFailure {
     Surface,
     /// The charged-work budget ended during the experiment.
     BudgetExhausted,
+    /// Both downhill branches miss the minimum from which the ride started.
+    DisconnectedConnection,
 }
 
 /// Receiving-side result of a claimed experiment.
