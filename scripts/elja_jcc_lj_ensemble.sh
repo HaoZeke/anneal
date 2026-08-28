@@ -263,7 +263,6 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
 } >"$OUT/run.manifest"
 
 touch "$OUT/TERMINAL_OK"
-(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 \
-  | sort -z \
-  | xargs -0 sha256sum >SHA256SUMS)
+mapfile -d '' artifacts < <(cd "$OUT" && find . -type f ! -name SHA256SUMS -print0 | sort -z)
+(cd "$OUT" && sha256sum "${artifacts[@]}" >SHA256SUMS)
 printf '%s\n' "$OUT"
