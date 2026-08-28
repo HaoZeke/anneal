@@ -25,8 +25,10 @@ verify_rgpot_source() {
     echo "RGPOT_EXPECTED_COMMIT=$RGPOT_EXPECTED_COMMIT does not match rgpot HEAD=$head" >&2
     exit 2
   fi
-  if ! git -C "$RGPOT" diff --quiet HEAD --; then
-    echo "rgpot tracked source differs from HEAD=$head" >&2
+  local source_status
+  source_status=$(git -C "$RGPOT" status --porcelain=v1 --untracked-files=all)
+  if [[ -n $source_status ]]; then
+    echo "rgpot source tree differs from HEAD=$head" >&2
     git -C "$RGPOT" status --short >&2
     exit 2
   fi
@@ -55,23 +57,21 @@ build_engines() {
       --buildtype=release
   fi
   "$PIXI" run --locked -e xtbbld meson compile -C "$BDIR"
-  local xtbso="" cuh2so=""
+  local xtbso="" cuh2so
+  cuh2so=$BDIR/CppCore/rgpot/fortran/librgpot_cuh2.so
+  "$PIXI" run --locked -e xtbbld \
+    "$ROOT/scripts/link_rgpot_cuh2_engine.sh" \
+    "$RGPOT" \
+    "$BDIR" \
+    "$ROOT/scripts/rgpot_cuh2.exports" \
+    "$cuh2so"
   if [[ -e $BDIR/CppCore/rgpot/XTBPot/libxtb_engine.so ]]; then
     xtbso=$BDIR/CppCore/rgpot/XTBPot/libxtb_engine.so
   elif [[ -e $BDIR/CppCore/libxtb_engine.so ]]; then
     xtbso=$BDIR/CppCore/libxtb_engine.so
   fi
-  if [[ -e $BDIR/CppCore/rgpot/fortran/librgpot_cuh2.so ]]; then
-    cuh2so=$BDIR/CppCore/rgpot/fortran/librgpot_cuh2.so
-  elif [[ -e $BDIR/CppCore/librgpot_cuh2.so ]]; then
-    cuh2so=$BDIR/CppCore/librgpot_cuh2.so
-  fi
   if [[ -z $xtbso ]]; then
     echo "libxtb_engine.so missing under $BDIR" >&2
-    exit 1
-  fi
-  if [[ -z $cuh2so ]]; then
-    echo "librgpot_cuh2.so missing under $BDIR" >&2
     exit 1
   fi
   nm -D "$cuh2so" | grep -F rgpot_cuh2_force >/dev/null || {
@@ -139,6 +139,8 @@ build_examples() {
     target/release/examples/bank_peek \
     engines/libxtb_engine.so \
     engines/librgpot_cuh2.so \
+    scripts/link_rgpot_cuh2_engine.sh \
+    scripts/rgpot_cuh2.exports \
     SOURCE_COMMIT \
     RGPOT_SOURCE_COMMIT \
     RGPOT_PIXI_LOCK_SHA256 \
