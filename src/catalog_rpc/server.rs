@@ -2318,7 +2318,10 @@ impl PesSurface for ReceivingRideSurface<'_> {
     ) -> Result<(f64, Array1<f64>), Self::Error> {
         let point = coordinates.to_vec();
         let fresh = (self.0)(&point)?;
-        Ok((fresh.energy, Array1::from(fresh.forces)))
+        // FreshEvaluation carries physical forces, while PesSurface and
+        // rgsaddle consume the Cartesian gradient of the potential energy.
+        let gradient = Array1::from_iter(fresh.forces.into_iter().map(|force| -force));
+        Ok((fresh.energy, gradient))
     }
 }
 
