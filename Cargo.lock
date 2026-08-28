@@ -48,7 +48,7 @@ dependencies = [
  "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
  "featomic",
  "libloading",
- "linkcell 0.3.3 (git+https://github.com/d-SEAMS/linkcell?rev=a46717c564d01ea4f3dab09c07bd2d215290b2ab)",
+ "linkcell",
  "metatensor",
  "nauty-pet",
  "ndarray 0.17.2",
@@ -809,11 +809,6 @@ version = "0.3.3"
 source = "git+https://github.com/d-SEAMS/linkcell?rev=a46717c564d01ea4f3dab09c07bd2d215290b2ab#a46717c564d01ea4f3dab09c07bd2d215290b2ab"
 
 [[package]]
-name = "linkcell"
-version = "0.3.3"
-source = "git+https://github.com/d-SEAMS/linkcell#a7c717b6ba7ba7f264b9229160147e28ba9d29e2"
-
-[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1432,10 +1427,10 @@ dependencies = [
 [[package]]
 name = "rgsaddle"
 version = "0.1.0"
-source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=41207a57ea8a85b94d51dd28b1bc147f662a5cd2#41207a57ea8a85b94d51dd28b1bc147f662a5cd2"
+source = "git+https://github.com/OmniPotentRPC/rgsaddle.git?rev=3015f68b12ebac9b7950469efa86d0f1ecfa001d#3015f68b12ebac9b7950469efa86d0f1ecfa001d"
 dependencies = [
  "eindir-core 0.6.0 (git+https://github.com/HaoZeke/eindir.git?rev=f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9)",
- "linkcell 0.3.3 (git+https://github.com/d-SEAMS/linkcell)",
+ "linkcell",
  "ndarray 0.17.2",
  "rgmin",
  "thiserror",
