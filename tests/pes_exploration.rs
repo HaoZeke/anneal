@@ -12,10 +12,7 @@ struct DoubleWell;
 impl PesSurface for DoubleWell {
     type Error = Infallible;
 
-    fn evaluate(
-        &self,
-        coordinates: ArrayView1<f64>,
-    ) -> Result<(f64, Array1<f64>), Self::Error> {
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
         let reaction = coordinates[0];
         let mut energy = (reaction * reaction - 1.0).powi(2);
         let mut gradient = Array1::zeros(coordinates.len());
