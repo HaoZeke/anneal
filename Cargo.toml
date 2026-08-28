@@ -44,7 +44,7 @@ nauty-pet = { version = "0.14", optional = true }
 thiserror   = "2"
 ndarray     = "0.17"
 dlpk        = { version = "0.1.5", features = ["ndarray", "half"] }
-linkcell    = { version = "0.3.3", default-features = false }
+linkcell    = { version = "0.3.3", git = "https://github.com/d-SEAMS/linkcell", rev = "a46717c564d01ea4f3dab09c07bd2d215290b2ab", default-features = false }
 # Sibling checkouts provide the local development surface; the Git revisions
 # are the reproducible source selected when this crate is consumed elsewhere.
 eindir-core = { git = "https://github.com/HaoZeke/eindir.git", rev = "091c6f7d6ea70821c3374152481fb9500e799af2", version = "0.6.0", features = ["capi"] }
