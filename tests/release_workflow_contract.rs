@@ -13,7 +13,7 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
 
     assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/HaoZeke/potlib.git\", rev = \"65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf\""));
     assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"091c6f7d6ea70821c3374152481fb9500e799af2\", version = \"0.6.0\", features = [\"capi\"]"));
-    assert!(manifest.contains("rgmin = { git = \"https://github.com/HaoZeke/rgmin.git\", rev = \"2b99087d0bd493b8e91fc41ba73ee89c7eecad3a\""));
+    assert!(manifest.contains("rgmin = { git = \"https://github.com/HaoZeke/rgmin.git\", rev = \"1bbc5100a4b08270bd77d02cb7b6fbcaf906b94f\""));
     assert!(workflow.contains("cargo publish --dry-run"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
 }
