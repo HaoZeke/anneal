@@ -325,14 +325,14 @@ impl CatalogPolicy {
                     PolicyReason::CertifiedAttractor,
                 )
             }
-            _ if input.local_deepened => {
-                decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
-            }
             _ if !input.leftover_dwell => {
                 decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
             _ if input.mixing.pruned => {
                 decision(PolicyAction::Leave, PolicyReason::HyperbandPruned)
+            }
+            _ if input.local_deepened => {
+                decision(PolicyAction::ContinueLocal, PolicyReason::LocalDescent)
             }
             _ if input.interface_rank != u32::MAX
                 && input.on_published_prize
