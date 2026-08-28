@@ -483,30 +483,32 @@ impl RideLedger {
     }
 
     fn arms(&self) -> impl Iterator<Item = (RideArm, u32)> + '_ {
-        self.sources.iter().flat_map(|(&source_basin, source)| {
-            source
-                .representatives
-                .iter()
-                .flat_map(move |(&environment_class, &atom)| {
-                    (0..self.portfolio.mode_ranks).flat_map(move |mode_rank| {
-                        [RideDirection::Negative, RideDirection::Positive]
-                            .into_iter()
-                            .flat_map(move |direction| {
-                                self.portfolio.methods.iter().copied().map(move |method| {
-                                    (
-                                        RideArm {
-                                            source_basin,
-                                            environment_class,
-                                            mode_rank,
-                                            direction,
-                                            method,
-                                        },
-                                        atom,
-                                    )
+        self.sources
+            .iter()
+            .flat_map(move |(&source_basin, source)| {
+                source
+                    .representatives
+                    .iter()
+                    .flat_map(move |(&environment_class, &atom)| {
+                        (0..self.portfolio.mode_ranks).flat_map(move |mode_rank| {
+                            [RideDirection::Negative, RideDirection::Positive]
+                                .into_iter()
+                                .flat_map(move |direction| {
+                                    self.portfolio.methods.iter().copied().map(move |method| {
+                                        (
+                                            RideArm {
+                                                source_basin,
+                                                environment_class,
+                                                mode_rank,
+                                                direction,
+                                                method,
+                                            },
+                                            atom,
+                                        )
+                                    })
                                 })
-                            })
+                        })
                     })
-                })
-        })
+            })
     }
 }
