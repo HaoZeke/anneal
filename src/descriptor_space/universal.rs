@@ -349,8 +349,7 @@ fn pair_radial(environment: &Environment, block: DescriptorBlockSpec) -> Vec<f64
             for radial in 0..radial_bins {
                 let centre = (radial as f64 + 0.5) * width;
                 let scaled = (distance - centre) / (0.65 * width);
-                let basis =
-                    (-0.5 * scaled * scaled).exp() * cutoff_weight * centre_weight;
+                let basis = (-0.5 * scaled * scaled).exp() * cutoff_weight * centre_weight;
                 for channel in 0..PAIR_CHANNELS {
                     spectrum[channel * radial_bins + radial] += basis * species[channel];
                 }
@@ -486,8 +485,8 @@ fn graph_features(
         .zip(&row_two)
         .map(|(weight, return_walk)| weight * return_walk)
         .sum::<f64>();
-    let fourth_moment = second_moment * second_moment
-        + row_two.iter().map(|value| value * value).sum::<f64>();
+    let fourth_moment =
+        second_moment * second_moment + row_two.iter().map(|value| value * value).sum::<f64>();
     let radial_moment = neighbors
         .iter()
         .zip(&centre_weights)
@@ -503,16 +502,13 @@ fn graph_features(
     let species_degree = neighbors
         .iter()
         .zip(&centre_weights)
-        .map(|(neighbor, weight)| {
-            weight * species_scalar(environment.species[neighbor.atom])
-        })
+        .map(|(neighbor, weight)| weight * species_scalar(environment.species[neighbor.atom]))
         .sum::<f64>();
     let species_contrast = neighbors
         .iter()
         .zip(&centre_weights)
         .map(|(neighbor, weight)| {
-            weight
-                * (centre_species - species_scalar(environment.species[neighbor.atom])).abs()
+            weight * (centre_species - species_scalar(environment.species[neighbor.atom])).abs()
         })
         .sum::<f64>();
     [
