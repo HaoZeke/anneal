@@ -363,6 +363,25 @@ fn molecular_builders_reject_nonignored_source_changes() {
 }
 
 #[test]
+fn molecular_builders_scan_complete_dynamic_symbol_tables() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
+        let source = fs::read_to_string(root.join("scripts").join(builder))
+            .unwrap_or_else(|error| panic!("failed to read {builder}: {error}"));
+        assert!(
+            source.contains("dynamic_symbol_is_defined"),
+            "{builder} must inspect dynamic symbols without an early-exit pipeline"
+        );
+        assert!(
+            !source.lines().any(|line| {
+                line.contains("nm -D") && line.contains('|') && line.contains("grep")
+            }),
+            "{builder} must not combine nm with an early-exit grep under pipefail"
+        );
+    }
+}
+
+#[test]
 fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
