@@ -70,7 +70,10 @@ impl CoverageConfig {
             self.residual_weight,
             self.improvement_weight,
         ];
-        if weights.iter().any(|value| !value.is_finite() || *value < 0.0) {
+        if weights
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
             return Err(CoverageError::InvalidConfig(
                 "acquisition weights must be finite and nonnegative",
             ));
@@ -108,11 +111,7 @@ pub struct StableDeepKernel {
 
 impl StableDeepKernel {
     /// Construct normalized tanh layers from a reproducible seed.
-    pub fn seeded(
-        input_dim: usize,
-        widths: &[usize],
-        seed: u64,
-    ) -> Result<Self, CoverageError> {
+    pub fn seeded(input_dim: usize, widths: &[usize], seed: u64) -> Result<Self, CoverageError> {
         if input_dim == 0 {
             return Err(CoverageError::InvalidDeepKernel(
                 "input dimension must be positive",
@@ -131,9 +130,7 @@ impl StableDeepKernel {
             let weights = (0..input * output)
                 .map(|_| signed_unit(&mut state) * scale)
                 .collect();
-            let biases = (0..output)
-                .map(|_| 0.1 * signed_unit(&mut state))
-                .collect();
+            let biases = (0..output).map(|_| 0.1 * signed_unit(&mut state)).collect();
             layers.push(DenseLayer {
                 input,
                 output,
@@ -401,7 +398,8 @@ impl UniversalCoverage {
             };
         let nearest_block_distances = self.nearest_block_distances(descriptor);
         let block_novelty = novelty(&nearest_block_distances);
-        let mut means = Vec::with_capacity(1 + block_means.len() + usize::from(deep_kernel_mean.is_some()));
+        let mut means =
+            Vec::with_capacity(1 + block_means.len() + usize::from(deep_kernel_mean.is_some()));
         means.push(energy_mean);
         means.extend(block_means.iter().copied());
         means.extend(deep_kernel_mean);
@@ -416,9 +414,8 @@ impl UniversalCoverage {
                 .iter()
                 .map(|value| value / self.config.amplitude),
         );
-        uncertainties.extend(
-            deep_kernel_standard_deviation.map(|value| value / self.config.amplitude),
-        );
+        uncertainties
+            .extend(deep_kernel_standard_deviation.map(|value| value / self.config.amplitude));
         let posterior_uncertainty = root_mean_square(&uncertainties);
         let residual_variance = assigned_class
             .map(|class| self.residual.score(class))
