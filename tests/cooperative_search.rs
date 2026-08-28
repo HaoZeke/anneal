@@ -261,6 +261,31 @@ fn try_policy_input_does_not_block_the_hop() {
 }
 
 #[test]
+fn pending_policy_input_is_not_an_rpc_failure() {
+    let server = server();
+    let digest = signature().digest();
+    let mut run = CooperativeRun::new([0], 400).unwrap();
+    run.attach_client(
+        0,
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap(),
+    )
+    .unwrap();
+    let admitted = candidate(0, 1, 1.2);
+
+    assert_eq!(
+        run.try_policy_input(0, admitted.descriptor, admitted.energy, 0, false)
+            .unwrap(),
+        PolicyEvidenceOutcome::LocalFallback
+    );
+    assert!(
+        !run.events()
+            .iter()
+            .any(|event| event.kind == TraceKind::RpcFallback)
+    );
+}
+
+#[test]
 fn try_policy_input_delivers_each_rpc_result_once() {
     let server = server();
     let digest = signature().digest();
