@@ -2240,6 +2240,7 @@ struct CallableDiffObjective {
     fn_: Py<PyAny>,
     grad_fn: Py<PyAny>,
     bounds: Bounds<f64>,
+    gradient_scale: f64,
 }
 
 impl Objective<f64> for CallableDiffObjective {
@@ -2271,7 +2272,13 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
             match self.grad_fn.call1(py, (py_arr,)) {
                 Ok(r) => {
                     if let Ok(arr) = r.extract::<PyReadonlyArray1<f64>>(py) {
-                        Array1::from_vec(arr.as_slice().expect("contiguous").to_vec())
+                        Array1::from_vec(
+                            arr.as_slice()
+                                .expect("contiguous")
+                                .iter()
+                                .map(|value| self.gradient_scale * value)
+                                .collect(),
+                        )
                     } else {
                         Array1::zeros(Objective::dim(self))
                     }
@@ -2287,6 +2294,74 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
 }
 
 impl eindir_core::gradient::DifferentiableObjective<f64> for CallableDiffObjective {}
+
+fn cluster_gradient_scale(
+    py: Python<'_>,
+    obj_fn: &Py<PyAny>,
+    grad_fn: &Py<PyAny>,
+    cfg: &crate::methods::cluster_hopping::Config,
+    seed: u64,
+) -> PyResult<f64> {
+    use crate::methods::cluster_hopping::random_cluster_in_radius;
+
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed ^ 0x6a09_e667_f3bc_c909);
+    let probe = random_cluster_in_radius(
+        cfg.n_points,
+        cfg.start_radius(),
+        cfg.min_separation,
+        &mut rng,
+    );
+    if probe.len() != 3 * cfg.n_points {
+        return Err(PyValueError::new_err(
+            "could not construct a gradient-orientation probe",
+        ));
+    }
+
+    let py_probe = PyArray1::from_vec(py, probe.to_vec());
+    let gradient_result = grad_fn.call1(py, (py_probe,))?;
+    let gradient_array = gradient_result.extract::<PyReadonlyArray1<f64>>(py)?;
+    let gradient = gradient_array.as_slice()?;
+    if gradient.len() != probe.len() || gradient.iter().any(|value| !value.is_finite()) {
+        return Err(PyValueError::new_err(
+            "gradient callback must return one finite value per coordinate",
+        ));
+    }
+    let Some((index, component)) = gradient
+        .iter()
+        .enumerate()
+        .max_by(|(_, left), (_, right)| left.abs().total_cmp(&right.abs()))
+    else {
+        return Ok(1.0);
+    };
+    if component.abs() <= f64::EPSILON.sqrt() {
+        return Ok(1.0);
+    }
+
+    let step = f64::EPSILON.cbrt() * (1.0 + probe[index].abs());
+    let mut plus = probe.clone();
+    let mut minus = probe;
+    plus[index] += step;
+    minus[index] -= step;
+    let plus_array = PyArray1::from_vec(py, plus.to_vec());
+    let minus_array = PyArray1::from_vec(py, minus.to_vec());
+    let plus_value = obj_fn.call1(py, (plus_array,))?.extract::<f64>(py)?;
+    let minus_value = obj_fn.call1(py, (minus_array,))?.extract::<f64>(py)?;
+    if !plus_value.is_finite() || !minus_value.is_finite() {
+        return Err(PyValueError::new_err(
+            "objective callback returned a non-finite orientation probe",
+        ));
+    }
+    let numerical = (plus_value - minus_value) / (2.0 * step);
+    let noise_floor = f64::EPSILON.sqrt() * (1.0 + component.abs());
+    if !numerical.is_finite() || numerical.abs() <= noise_floor {
+        return Ok(1.0);
+    }
+    Ok(if component * numerical < 0.0 {
+        -1.0
+    } else {
+        1.0
+    })
+}
 
 fn cluster_bounds(n: usize) -> Bounds<f64> {
     let extent = 4.0 * 2.0_f64.powf(1.0 / 6.0) * (n as f64).cbrt();
@@ -2393,14 +2468,16 @@ fn cluster_archive_search(
 /// Runs the measured cluster-search layer on a user energy and gradient.
 ///
 /// `recommended=True` uses `Config.recommended(n)`; otherwise
-/// `Config.for_cluster(n)`. Every objective or gradient evaluation is charged
-/// to a ledger of `budget` units. Returns `{best, best_energy, hops}`.
+/// `Config.for_cluster(n)`. A charged central-difference probe distinguishes
+/// gradients from force-valued callbacks when the budget can cover it. Every
+/// objective or gradient evaluation is charged to a ledger of `budget` units.
+/// Returns `{best, best_energy, hops}`.
 /// `ras=True` runs residual archive search on `Config.recommended(n)` and
 /// also reports `charged`, `floors`, `returned`, and `events`.
 ///
 /// Args:
 ///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
-///   grad_fn: Python callable `g(numpy.ndarray) -> numpy.ndarray`.
+///   grad_fn: Python gradient or force callable `g(numpy.ndarray) -> numpy.ndarray`.
 ///   n: number of points; the state is a flat `3n` vector.
 ///   budget: charged evaluations.
 ///   seed: RNG seed.
@@ -2438,10 +2515,20 @@ fn cluster_search(
         crate::methods::cluster_hopping::Config::for_cluster(n)
     };
     let mut ledger = crate::methods::cluster_hopping::Ledger::new(budget);
+    let gradient_scale = if budget >= 4 {
+        let scale = cluster_gradient_scale(py, &obj_fn, &grad_fn, &cfg, seed)?;
+        for _ in 0..3 {
+            assert!(ledger.charge());
+        }
+        scale
+    } else {
+        1.0
+    };
     let obj = CallableDiffObjective {
         fn_: obj_fn,
         grad_fn,
         bounds: cluster_bounds(n),
+        gradient_scale,
     };
     if ras {
         return cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
