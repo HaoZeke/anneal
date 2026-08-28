@@ -299,6 +299,63 @@ fn terra_molecular_builder_seals_exact_sources_engines_and_drivers() {
 }
 
 #[test]
+fn molecular_builders_link_the_tracked_cuh2_c_abi() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let linker = root.join("scripts/link_rgpot_cuh2_engine.sh");
+    let linker_source = fs::read_to_string(&linker)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", linker.display()));
+
+    for required in [
+        "CppCore/rgpot/fortran/rgpot_cuh2_capi.f90",
+        "git ls-files --error-unmatch",
+        "librgpot_fortran_kernels.a",
+        "libvesin_fortran.a",
+        "libvesin_internal.a",
+        "-Wl,-u,rgpot_cuh2_force",
+        "--version-script",
+        "rgpot_cuh2_force",
+        "rgpot_fortran_last_error",
+        "nm -D --defined-only",
+    ] {
+        assert!(
+            linker_source.contains(required),
+            "CuH2 engine linker is missing {required}"
+        );
+    }
+
+    for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
+        let source = fs::read_to_string(root.join("scripts").join(builder))
+            .unwrap_or_else(|error| panic!("failed to read {builder}: {error}"));
+        for required in [
+            "scripts/link_rgpot_cuh2_engine.sh",
+            "scripts/rgpot_cuh2.exports",
+            "run --locked -e xtbbld",
+        ] {
+            assert!(source.contains(required), "{builder} is missing {required}");
+        }
+    }
+
+    let exports = fs::read_to_string(root.join("scripts/rgpot_cuh2.exports"))
+        .expect("failed to read the CuH2 export map");
+    for symbol in ["rgpot_cuh2_force;", "rgpot_fortran_last_error;", "local: *;"] {
+        assert!(exports.contains(symbol), "CuH2 export map is missing {symbol}");
+    }
+}
+
+#[test]
+fn molecular_builders_reject_nonignored_source_changes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
+        let source = fs::read_to_string(root.join("scripts").join(builder))
+            .unwrap_or_else(|error| panic!("failed to read {builder}: {error}"));
+        assert!(
+            source.contains("status --porcelain=v1 --untracked-files=all"),
+            "{builder} must reject tracked and nonignored untracked source changes"
+        );
+    }
+}
+
+#[test]
 fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
