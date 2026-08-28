@@ -20,7 +20,7 @@ pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 15;
+pub const PROTOCOL_VERSION: u16 = 16;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -1705,6 +1705,7 @@ impl From<RideFailure> for WireRideFailure {
             RideFailure::CollapsedConnection => Self::CollapsedConnection,
             RideFailure::Surface => Self::Surface,
             RideFailure::BudgetExhausted => Self::BudgetExhausted,
+            RideFailure::DisconnectedConnection => Self::DisconnectedConnection,
         }
     }
 }
@@ -1720,6 +1721,7 @@ impl From<WireRideFailure> for RideFailure {
             WireRideFailure::CollapsedConnection => Self::CollapsedConnection,
             WireRideFailure::Surface => Self::Surface,
             WireRideFailure::BudgetExhausted => Self::BudgetExhausted,
+            WireRideFailure::DisconnectedConnection => Self::DisconnectedConnection,
         }
     }
 }

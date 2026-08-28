@@ -269,6 +269,7 @@ enum RideFailure {
   collapsedConnection @5;
   surface @6;
   budgetExhausted @7;
+  disconnectedConnection @8;
 }
 
 # Exclusive transition experiment plus the validated minimum from which it
