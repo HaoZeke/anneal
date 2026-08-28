@@ -115,13 +115,7 @@ fn rgmin_rgsaddle_connection_finds_both_double_well_minima() {
 
 #[test]
 fn finite_difference_index_counts_every_unstable_mode() {
-    let report = stationary_index(
-        &IndexTwoSaddle,
-        Array1::zeros(6).view(),
-        1e-4,
-        1e-7,
-    )
-    .unwrap();
+    let report = stationary_index(&IndexTwoSaddle, Array1::zeros(6).view(), 1e-4, 1e-7).unwrap();
 
     assert_eq!(report.negative_modes, 2);
     assert!((report.eigenvalues[0] + 4.0).abs() < 1e-8);
