@@ -325,7 +325,15 @@ impl CatalogPolicy {
                     PolicyReason::CertifiedAttractor,
                 )
             }
-            _ if !input.leftover_dwell => {
+            _ if !input.leftover_dwell
+                && !(input.census.local_basin_visits() >= LOCAL_CENSUS_LEAVE
+                    && matches!(
+                        input.relation,
+                        ActiveCatalogRelation::Unrelated {
+                            lower_energy_anchor: true
+                        }
+                    )) =>
+            {
                 decision(PolicyAction::ContinueLocal, PolicyReason::IsomerWalk)
             }
             _ if input.mixing.pruned => {
