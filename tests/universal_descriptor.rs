@@ -34,6 +34,39 @@ fn rigid_transform(coordinates: &Array1<f64>) -> Array1<f64> {
     transformed
 }
 
+fn proper_transform(coordinates: &Array1<f64>) -> Array1<f64> {
+    let axis = [1.0_f64 / 6.0_f64.sqrt(), 2.0 / 6.0_f64.sqrt(), -1.0 / 6.0_f64.sqrt()];
+    let angle = 0.643_f64;
+    let (sine, cosine) = angle.sin_cos();
+    let one_minus_cosine = 1.0 - cosine;
+    let rotation = [
+        cosine + axis[0] * axis[0] * one_minus_cosine,
+        axis[0] * axis[1] * one_minus_cosine - axis[2] * sine,
+        axis[0] * axis[2] * one_minus_cosine + axis[1] * sine,
+        axis[1] * axis[0] * one_minus_cosine + axis[2] * sine,
+        cosine + axis[1] * axis[1] * one_minus_cosine,
+        axis[1] * axis[2] * one_minus_cosine - axis[0] * sine,
+        axis[2] * axis[0] * one_minus_cosine - axis[1] * sine,
+        axis[2] * axis[1] * one_minus_cosine + axis[0] * sine,
+        cosine + axis[2] * axis[2] * one_minus_cosine,
+    ];
+    let mut transformed = coordinates.clone();
+    for atom in 0..coordinates.len() / 3 {
+        let point = [
+            coordinates[3 * atom],
+            coordinates[3 * atom + 1],
+            coordinates[3 * atom + 2],
+        ];
+        transformed[3 * atom] =
+            rotation[0] * point[0] + rotation[1] * point[1] + rotation[2] * point[2] + 0.7;
+        transformed[3 * atom + 1] =
+            rotation[3] * point[0] + rotation[4] * point[1] + rotation[5] * point[2] - 1.4;
+        transformed[3 * atom + 2] =
+            rotation[6] * point[0] + rotation[7] * point[1] + rotation[8] * point[2] + 2.1;
+    }
+    transformed
+}
+
 fn permute(coordinates: &Array1<f64>, species: &[u32], order: &[usize]) -> (Array1<f64>, Vec<u32>) {
     let mut permuted = Vec::with_capacity(coordinates.len());
     let mut permuted_species = Vec::with_capacity(species.len());
@@ -122,6 +155,7 @@ fn one_schema_has_one_dimension_for_lj_molecules_and_surfaces() {
     assert!(kinds.contains(&DescriptorBlockKind::GraphTopology));
     assert!(kinds.contains(&DescriptorBlockKind::InvariantSoapMean));
     assert!(kinds.contains(&DescriptorBlockKind::InvariantAceNu3Mean));
+    assert!(kinds.contains(&DescriptorBlockKind::ChiralMoment));
 }
 
 #[test]
@@ -137,12 +171,16 @@ fn universal_descriptor_is_rigid_motion_and_like_species_permutation_invariant()
     let moved = descriptor_space
         .describe(rigid_transform(&coordinates).view(), Some(&species))
         .unwrap();
+    let generally_rotated = descriptor_space
+        .describe(proper_transform(&coordinates).view(), Some(&species))
+        .unwrap();
     let (permuted, permuted_species) = permute(&coordinates, &species, &[4, 1, 2, 3, 0]);
     let reordered = descriptor_space
         .describe(permuted.view(), Some(&permuted_species))
         .unwrap();
 
     assert!(distance(original.values(), moved.values()) < 1e-9);
+    assert!(distance(original.values(), generally_rotated.values()) < 1e-9);
     assert!(distance(original.values(), reordered.values()) < 1e-9);
 }
 
@@ -269,7 +307,7 @@ fn equivalent_periodic_primitive_and_supercells_have_the_same_descriptor() {
 }
 
 #[test]
-fn universal_descriptor_is_reflection_invariant() {
+fn universal_descriptor_distinguishes_mirror_minima() {
     let coordinates = Array1::from_vec(vec![
         0.0, 0.0, 0.0, 1.1, 0.2, -0.1, -0.3, 1.3, 0.4, 0.4, -0.5, 1.5, -1.0, -0.7, 0.2,
     ]);
@@ -286,7 +324,7 @@ fn universal_descriptor_is_reflection_invariant() {
         .describe(reflected.view(), Some(&species))
         .unwrap();
 
-    assert!(distance(original.values(), mirror.values()) < 1e-8);
+    assert!(distance(original.values(), mirror.values()) > 1e-4);
 }
 
 #[test]
