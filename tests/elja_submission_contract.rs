@@ -382,6 +382,30 @@ fn molecular_builders_scan_complete_dynamic_symbol_tables() {
 }
 
 #[test]
+fn strict_pipefail_scripts_do_not_short_circuit_producers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for entry in fs::read_dir(root.join("scripts")).expect("failed to list scripts") {
+        let path = entry.expect("failed to inspect script entry").path();
+        if !matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("sh" | "sbatch")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for (index, line) in source.lines().enumerate() {
+            assert!(
+                !(line.contains('|') && line.contains("grep") && line.contains("-q")),
+                "{}:{} uses early-exit grep on a pipefail producer",
+                path.display(),
+                index + 1
+            );
+        }
+    }
+}
+
+#[test]
 fn molecular_campaigns_bind_rgpot_source_and_lockfile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for builder in ["elja_build_rgpot_ex.sh", "terra_build_rgpot_ex.sh"] {
