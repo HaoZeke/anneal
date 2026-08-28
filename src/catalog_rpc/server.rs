@@ -18,9 +18,10 @@ use rand::SeedableRng;
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
-    CatalogRequest, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
-    PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection,
-    TransitionDestination, decode_request, decode_request_reader, encode_reply, encode_request,
+    CatalogRequest, CatalogRideConnection, CatalogRideOutcome, CatalogRideWork, CatalogSnapshot,
+    DescriptorHoleProposal, PolicyState, PopulationEpochState, PopulationPlan, PopulationSelection,
+    ProtocolError, ProtocolRejection, TransitionDestination, decode_request, decode_request_reader,
+    encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -44,9 +45,9 @@ use crate::methods::feynman_kac::{
 };
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
-use crate::pes_exploration::RideMethod;
+use crate::pes_exploration::{PesExplorationConfig, PesSurface, RideMethod, stationary_index};
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
-use crate::ride_ledger::{EnvironmentBook, RideLedger, RidePortfolio, RideSource};
+use crate::ride_ledger::{EnvironmentBook, RideLedger, RideOutcome, RidePortfolio, RideSource};
 use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
@@ -257,6 +258,14 @@ struct OccupancyGtKey {
 const FRONTIER_POOL_CAP: usize = 256;
 
 #[derive(Clone)]
+struct CertifiedRideSaddle {
+    candidate: CatalogCandidate,
+    lowest_curvature: f64,
+    lowest_mode: Vec<f64>,
+    negative_modes: usize,
+}
+
+#[derive(Clone)]
 struct ScientificState {
     signature: SystemSignature,
     validator: CandidateValidator,
@@ -280,6 +289,8 @@ struct ScientificState {
     ride_environments: EnvironmentBook,
     ride_ledger: RideLedger,
     ride_candidates: BTreeMap<u64, CatalogCandidate>,
+    ride_saddles: BTreeMap<u64, CertifiedRideSaddle>,
+    next_ride_saddle: u64,
     energy_history: BTreeMap<u32, VecDeque<f64>>,
     family_history: BTreeMap<u32, VecDeque<f64>>,
     trial_hops: BTreeMap<u32, u64>,
@@ -418,6 +429,8 @@ impl CoordinatorState {
                             .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
                     ),
                     ride_candidates: BTreeMap::new(),
+                    ride_saddles: BTreeMap::new(),
+                    next_ride_saddle: 0,
                     energy_history: BTreeMap::new(),
                     family_history: BTreeMap::new(),
                     trial_hops: BTreeMap::new(),
@@ -1987,22 +2000,38 @@ fn apply_request(
                 );
             };
             let mut next_scientific = scientific.clone();
-            if let crate::ride_ledger::RideOutcome::Certified { endpoints, .. } = &report.outcome
-                && endpoints
-                    .iter()
-                    .any(|endpoint| !next_scientific.ride_candidates.contains_key(endpoint))
-            {
+            let (outcome, receiving_evaluations) = match &report.outcome {
+                CatalogRideOutcome::Certified(connection) => {
+                    let Ok(certified) = certify_ride_connection(
+                        &mut next_scientific,
+                        &request.identity,
+                        connection,
+                    ) else {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    };
+                    certified
+                }
+                CatalogRideOutcome::Failed(failure) => (RideOutcome::Failed(*failure), 0),
+            };
+            let Some(charged_evaluations) = report
+                .charged_evaluations
+                .checked_add(receiving_evaluations)
+            else {
                 return rejected(
                     state,
                     request.event_sequence,
                     ProtocolRejection::ValidationRejected,
                 );
-            }
+            };
             let Ok(credit) = next_scientific.ride_ledger.report(
                 request.identity.replica,
                 report.work,
-                report.charged_evaluations,
-                report.outcome.clone(),
+                charged_evaluations,
+                outcome.clone(),
             ) else {
                 return rejected(
                     state,
@@ -2010,7 +2039,7 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
-            if let crate::ride_ledger::RideOutcome::Certified { endpoints, .. } = &report.outcome {
+            if let RideOutcome::Certified { endpoints, .. } = &outcome {
                 let left = BasinId::from_raw(endpoints[0]);
                 let right = BasinId::from_raw(endpoints[1]);
                 let Some(left_node) = transition_node(&mut next_scientific, left) else {
@@ -2061,8 +2090,13 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            let census_visits = next_scientific.census.total_visits();
+            let active_entries = u32::try_from(next_scientific.catalog.len())
+                .expect("catalog capacity is checked against u32");
             *scientific = next_scientific;
             payload = AcceptedPayload::RideCredit(credit);
+            state.census_visits = census_visits;
+            state.active_entries = active_entries;
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::LedgerEvent {
@@ -2271,6 +2305,105 @@ fn validate_candidate(
     validator
         .validate(&record, |coordinates| evaluate(coordinates))
         .map_err(|_| ())
+}
+
+struct ReceivingRideSurface<'a>(&'a FreshEvaluator);
+
+impl PesSurface for ReceivingRideSurface<'_> {
+    type Error = String;
+
+    fn evaluate(
+        &self,
+        coordinates: ArrayView1<'_, f64>,
+    ) -> Result<(f64, Array1<f64>), Self::Error> {
+        let point = coordinates.to_vec();
+        let fresh = (self.0)(&point)?;
+        Ok((fresh.energy, Array1::from(fresh.forces)))
+    }
+}
+
+fn certify_ride_connection(
+    scientific: &mut ScientificState,
+    identity: &CatalogIdentity,
+    connection: &CatalogRideConnection,
+) -> Result<(RideOutcome, u64), ()> {
+    let signature = scientific.signature.clone();
+    let validator = scientific.validator.clone();
+    let evaluate = Arc::clone(&scientific.evaluate);
+    let saddle = validate_candidate(
+        &signature,
+        &validator,
+        evaluate.as_ref(),
+        identity,
+        &connection.saddle,
+    )?;
+    let endpoints = [
+        validate_candidate(
+            &signature,
+            &validator,
+            evaluate.as_ref(),
+            identity,
+            &connection.endpoints[0],
+        )?,
+        validate_candidate(
+            &signature,
+            &validator,
+            evaluate.as_ref(),
+            identity,
+            &connection.endpoints[1],
+        )?,
+    ];
+
+    let config = PesExplorationConfig::default();
+    let index = stationary_index(
+        &ReceivingRideSurface(evaluate.as_ref()),
+        ArrayView1::from(&saddle.candidate.coordinates),
+        config.hessian_step,
+        config.negative_curvature_tolerance,
+    )
+    .map_err(|_| ())?;
+    if index.negative_modes != 1 {
+        return Err(());
+    }
+
+    let saddle_id = scientific.next_ride_saddle;
+    scientific.next_ride_saddle = saddle_id.checked_add(1).ok_or(())?;
+    scientific.ride_saddles.insert(
+        saddle_id,
+        CertifiedRideSaddle {
+            candidate: candidate_from_validated(&saddle, None),
+            lowest_curvature: index.eigenvalues[0],
+            lowest_mode: index.lowest_mode.to_vec(),
+            negative_modes: index.negative_modes,
+        },
+    );
+
+    let mut endpoint_ids = [0_u64; 2];
+    for (slot, validated) in endpoints.into_iter().enumerate() {
+        let observation = scientific
+            .census
+            .observe(&validated.candidate.descriptor)
+            .map_err(|_| ())?;
+        let canonical = candidate_from_validated(&validated, Some(observation.basin_id));
+        observe_ride_source(scientific, &canonical)?;
+        scientific
+            .catalog
+            .admit(observation.basin_id, observation.basin_visits, validated);
+        endpoint_ids[slot] = observation.basin_id.as_raw();
+    }
+
+    let dimension = u64::try_from(connection.saddle.coordinates.len()).map_err(|_| ())?;
+    let receiving_evaluations = dimension
+        .checked_mul(2)
+        .and_then(|calls| calls.checked_add(3))
+        .ok_or(())?;
+    Ok((
+        RideOutcome::Certified {
+            saddle: saddle_id,
+            endpoints: endpoint_ids,
+        },
+        receiving_evaluations,
+    ))
 }
 
 fn candidate_from_validated(
