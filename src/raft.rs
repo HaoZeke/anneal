@@ -23,6 +23,18 @@ pub type NodeId = u32;
 /// Election term.
 pub type Term = u64;
 
+/// Sorted identities participating in one consensus group.
+///
+/// Peer lists exclude the local node and may use absolute campaign replica
+/// identities, so group membership cannot be reconstructed as `0..len`.
+pub fn decree_members(local: NodeId, peers: &[NodeId]) -> Vec<NodeId> {
+    let mut members = peers.to_vec();
+    members.push(local);
+    members.sort_unstable();
+    members.dedup();
+    members
+}
+
 /// One replicated decree: an opaque payload the state machine above
 /// interprets (the wire format is the capnp decree, never inspected
 /// here).

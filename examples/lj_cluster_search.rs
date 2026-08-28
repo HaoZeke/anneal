@@ -2522,7 +2522,7 @@ fn run_capnp_catalog(
         let brain_endpoint = endpoint.map(str::to_owned);
         let brain_campaign = campaign.clone();
         let brain_ensemble = ensemble.clone();
-        let replica_count = peer_ids.len() + 1;
+        let decree_members = anneal_core::raft::decree_members(replica, &peer_ids);
         let brain_publish = std::env::var("CATALOG_BRAIN_PUBLISH").ok();
         Some(std::thread::spawn(move || {
             let bus = anneal_core::decree_bus::DecreeBus::new(replica, &listen, &peers)
@@ -2588,7 +2588,9 @@ fn run_capnp_catalog(
                                 *sequence += 1;
                                 if let Some(seam) = status.seam {
                                     decree_sequence += 1;
-                                    let assignments = (0..replica_count as u32)
+                                    let assignments = decree_members
+                                        .iter()
+                                        .copied()
                                         .map(|member| DecreeAssignment {
                                             replica: member,
                                             right_side: false,
