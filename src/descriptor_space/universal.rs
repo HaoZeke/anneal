@@ -126,7 +126,12 @@ pub fn universal_descriptor_space(geometry: DescriptorGeometry) -> DescriptorSpa
     DescriptorSpace::with_geometry(schema, geometry)
 }
 
-fn block(kind: DescriptorBlockKind, n_max: usize, l_max: usize, cutoff: f64) -> DescriptorBlockSpec {
+fn block(
+    kind: DescriptorBlockKind,
+    n_max: usize,
+    l_max: usize,
+    cutoff: f64,
+) -> DescriptorBlockSpec {
     DescriptorBlockSpec::new(kind, n_max, l_max, cutoff)
         .expect("the built-in universal descriptor block is valid")
 }
@@ -145,7 +150,9 @@ pub(super) fn describe(
             DescriptorBlockKind::PairRadial => pair_radial(&environment, block),
             DescriptorBlockKind::ThreeBodyAngular => three_body_angular(&environment, block),
             DescriptorBlockKind::GraphTopology => graph_topology(&environment, block),
-            DescriptorBlockKind::InvariantSoapMean => invariant_spectrum(&environment, block, false),
+            DescriptorBlockKind::InvariantSoapMean => {
+                invariant_spectrum(&environment, block, false)
+            }
             DescriptorBlockKind::InvariantAceNu3Mean => {
                 invariant_spectrum(&environment, block, true)
             }
@@ -295,8 +302,8 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
                     .clamp(-1.0, 1.0);
                 let angular = legendre_values(cosine, block.l_max());
                 let mean_distance = 0.5 * (left_distance + right_distance);
-                let cutoff_weight = cosine_cutoff(left_distance, cutoff)
-                    * cosine_cutoff(right_distance, cutoff);
+                let cutoff_weight =
+                    cosine_cutoff(left_distance, cutoff) * cosine_cutoff(right_distance, cutoff);
                 let species = triple_species(
                     environment.species[centre],
                     environment.species[left],
@@ -308,10 +315,8 @@ fn three_body_angular(environment: &Environment, block: DescriptorBlockSpec) -> 
                     let radial_weight = (-0.5 * scaled * scaled).exp() * cutoff_weight;
                     for (order, &angular_value) in angular.iter().enumerate() {
                         for channel in 0..TRIPLE_CHANNELS {
-                            let index =
-                                (channel * radial_bins + radial) * angular_orders + order;
-                            spectrum[index] +=
-                                radial_weight * angular_value * species[channel];
+                            let index = (channel * radial_bins + radial) * angular_orders + order;
+                            spectrum[index] += radial_weight * angular_value * species[channel];
                         }
                     }
                 }
@@ -345,8 +350,8 @@ fn graph_features(environment: &Environment, threshold: f64) -> [f64; GRAPH_FEAT
                 degree[i] += 1;
                 degree[j] += 1;
                 edges += 1;
-                species_edge += species_scalar(environment.species[i])
-                    * species_scalar(environment.species[j]);
+                species_edge +=
+                    species_scalar(environment.species[i]) * species_scalar(environment.species[j]);
             }
         }
     }
@@ -469,16 +474,14 @@ fn invariant_spectrum(
                     species_sketch(environment.species[neighbor])[channel],
                 ));
             }
-            let (soap, coefficients) =
-                central_spectrum_from_displacements(&neighbors, block.soap);
+            let (soap, coefficients) = central_spectrum_from_displacements(&neighbors, block.soap);
             let local = if ace {
                 crate::ace::from_c(&coefficients, block.n_max(), block.l_max())
             } else {
                 soap
             };
             for (index, value) in local.into_iter().enumerate() {
-                spectrum[channel * per_channel + index] +=
-                    value / environment.atoms.max(1) as f64;
+                spectrum[channel * per_channel + index] += value / environment.atoms.max(1) as f64;
             }
         }
     }
@@ -488,7 +491,12 @@ fn invariant_spectrum(
 fn pair_species(left: u32, right: u32) -> [f64; PAIR_CHANNELS] {
     let left = species_scalar(left);
     let right = species_scalar(right);
-    [1.0, 0.5 * (left + right), (left - right).abs(), left * right]
+    [
+        1.0,
+        0.5 * (left + right),
+        (left - right).abs(),
+        left * right,
+    ]
 }
 
 fn triple_species(centre: u32, left: u32, right: u32) -> [f64; TRIPLE_CHANNELS] {
@@ -504,7 +512,11 @@ fn triple_species(centre: u32, left: u32, right: u32) -> [f64; TRIPLE_CHANNELS] 
 
 fn species_sketch(species: u32) -> [f64; SPECIES_CHANNELS] {
     let atomic = species_scalar(species);
-    [1.0, atomic, (species as f64 * 0.618_033_988_749_894_8 * TAU).cos()]
+    [
+        1.0,
+        atomic,
+        (species as f64 * 0.618_033_988_749_894_8 * TAU).cos(),
+    ]
 }
 
 fn species_scalar(species: u32) -> f64 {
@@ -534,10 +546,7 @@ fn cosine_cutoff(distance: f64, cutoff: f64) -> f64 {
 fn determinant(cell: [f64; 9]) -> f64 {
     dot(
         [cell[0], cell[1], cell[2]],
-        cross(
-            [cell[3], cell[4], cell[5]],
-            [cell[6], cell[7], cell[8]],
-        ),
+        cross([cell[3], cell[4], cell[5]], [cell[6], cell[7], cell[8]]),
     )
 }
 
