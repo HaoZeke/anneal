@@ -248,6 +248,64 @@ struct TransitionRecord {
   }
 }
 
+# Minimum-mode portfolio labels are carried explicitly so a failed dimer
+# experiment cannot be conflated with a Lanczos attempt on another mode/sign.
+enum RideMethod {
+  dimer @0;
+  lanczos @1;
+}
+
+enum RideDirection {
+  negative @0;
+  positive @1;
+}
+
+enum RideFailure {
+  quenchNotConverged @0;
+  saddleNotConverged @1;
+  noNegativeMode @2;
+  higherIndex @3;
+  ircNotConverged @4;
+  collapsedConnection @5;
+  surface @6;
+  budgetExhausted @7;
+}
+
+# Exclusive transition experiment plus the validated minimum from which it
+# must start. The source belongs to the request's system signature.
+struct RideWorkOrder {
+  id @0 :UInt64;
+  sourceBasin @1 :UInt64;
+  environmentClass @2 :UInt32;
+  representativeAtom @3 :UInt32;
+  modeRank @4 :UInt16;
+  direction @5 :RideDirection;
+  method @6 :RideMethod;
+  attempt @7 :UInt64;
+  seed @8 :UInt64;
+  source @9 :CandidateRecord;
+  replica @10 :UInt32;
+}
+
+struct RideCertifiedConnection {
+  saddle @0 :UInt64;
+  endpointA @1 :UInt64;
+  endpointB @2 :UInt64;
+}
+
+struct RideReportRequest {
+  work @0 :UInt64;
+  chargedEvaluations @1 :UInt64;
+  outcome :union {
+    certified @2 :RideCertifiedConnection;
+    failed @3 :RideFailure;
+  }
+}
+
+struct RideReportReply {
+  novelEdge @0 :Bool;
+}
+
 # Which selection produced a barrier's parent map. The two branches carry
 # different weights, so a reader that cannot tell them apart cannot
 # interpret the weights it is given. Zero is unspecified rather than a
@@ -308,6 +366,8 @@ struct CatalogRequest {
     postFrontier @20 :FrontierPost;
     drawFrontier @21 :UInt64;
     ledgerBatch @22 :List(LedgerBatchEvent);
+    claimRide @23 :UInt64;
+    reportRide @24 :RideReportRequest;
   }
 }
 
@@ -362,6 +422,8 @@ struct AcceptedReply {
     coordinatorStatus @12 :CoordinatorStatus;
     bridgeAssignment @13 :BridgeAssignment;
     frontierPost @14 :FrontierPost;
+    rideWork @15 :RideWorkOrder;
+    rideCredit @16 :RideReportReply;
   }
   aggregateCharged @7 :UInt64;
   aggregateBudget @8 :UInt64;
