@@ -107,10 +107,7 @@ fn network_descriptors_reproduce_from_exact_records() {
     }
     for saddle in network.saddles() {
         let reproduced = descriptor_space
-            .describe(
-                saddle.saddle_coordinates.view(),
-                saddle.context.species(),
-            )
+            .describe(saddle.saddle_coordinates.view(), saddle.context.species())
             .unwrap();
         assert_eq!(
             reproduced, saddle.descriptor,
