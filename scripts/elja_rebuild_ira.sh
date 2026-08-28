@@ -28,7 +28,7 @@ if [[ ! -e $GCCLIB/libgfortran.so.5 || ! -e $GCCLIB/libquadmath.so.0 ]]; then
   echo "missing gfortran/quadmath under $GCCLIB" >&2
   exit 1
 fi
-echo "gfortran=$(gfortran --version | head -1)"
+echo "gfortran=$(gfortran --version | awk 'NR == 1 { print }')"
 # Do not `make clean` the live lib/: HQ tasks keep the inode open and
 # NFS leaves a .nfs* that makes `rm -rf lib` fail.
 rm -rf "$IRA/src/Obj"

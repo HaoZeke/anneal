@@ -116,7 +116,8 @@ if [[ $ARM == shared ]]; then
     >"$OUT/coordinator.jsonl" 2>"$OUT/coordinator.err" &
   server_pid=$!
   for _ in $(seq 1 100); do
-    endpoint=$(grep -o '"addr":"[^"]*"' "$OUT/coordinator.jsonl" 2>/dev/null | head -1 | cut -d '"' -f4 || true)
+    endpoint=$(grep -o '"addr":"[^"]*"' "$OUT/coordinator.jsonl" 2>/dev/null \
+      | awk -F '"' 'NR == 1 { print $4 }' || true)
     if [[ -n $endpoint ]]; then
       break
     fi

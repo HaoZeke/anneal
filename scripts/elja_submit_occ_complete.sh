@@ -38,13 +38,13 @@ cd "$ROOT"
 j75=""
 j98=""
 if squeue -u "$USER" -h -n lj75-occ-hops 2>/dev/null | grep . >/dev/null; then
-  j75=$(squeue -u "$USER" -h -n lj75-occ-hops -o '%i' | head -1)
+  j75=$(squeue -u "$USER" -h -n lj75-occ-hops -o '%i' | awk 'NR == 1 { print }')
   echo "already queued lj75-occ-hops $j75"
 else
   j75=$(sbatch --parsable scripts/elja_lj75_occ_hops.sbatch)
 fi
 if squeue -u "$USER" -h -n lj98-occ-hops 2>/dev/null | grep . >/dev/null; then
-  j98=$(squeue -u "$USER" -h -n lj98-occ-hops -o '%i' | head -1)
+  j98=$(squeue -u "$USER" -h -n lj98-occ-hops -o '%i' | awk 'NR == 1 { print }')
   echo "already queued lj98-occ-hops $j98"
 else
   j98=$(sbatch --parsable scripts/elja_lj98_occ_hops.sbatch)

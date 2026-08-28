@@ -30,7 +30,7 @@ fi
 
 cd "$ROOT"
 if squeue -u "$USER" -h -n lj38-occ-hops 2>/dev/null | grep . >/dev/null; then
-  j38=$(squeue -u "$USER" -h -n lj38-occ-hops -o '%i' | head -1)
+  j38=$(squeue -u "$USER" -h -n lj38-occ-hops -o '%i' | awk 'NR == 1 { print }')
   echo "already queued lj38-occ-hops $j38"
 else
   j38=$(sbatch --parsable scripts/elja_lj38_occ_hops.sbatch)

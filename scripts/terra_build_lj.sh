@@ -28,8 +28,8 @@ git rev-parse HEAD >SOURCE_COMMIT
 echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "rustc=$(rustc --version)"
-echo "gcc=$(gcc --version | head -1)"
-echo "cmake=$(cmake --version | head -1)"
+echo "gcc=$(gcc --version | awk 'NR == 1 { print }')"
+echo "cmake=$(cmake --version | awk 'NR == 1 { print }')"
 cargo build --locked --release --features featomic,ira,bank-rpc \
   --example lj_cluster_search \
   --example catalog_server \

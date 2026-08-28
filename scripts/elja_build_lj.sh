@@ -51,9 +51,9 @@ if [[ -e "$BIN" ]] && ! ldd "$BIN" >/dev/null 2>&1; then
   mv -f "$BIN" "${BIN}.foreign-glibc"
 fi
 echo "rustc=$(rustc --version)"
-echo "gcc=$(gcc --version | head -1)"
-echo "cmake=$($CMAKE_BIN --version | head -1) path=$(command -v cmake)"
-echo "glibc=$(ldd --version | head -1)"
+echo "gcc=$(gcc --version | awk 'NR == 1 { print }')"
+echo "cmake=$($CMAKE_BIN --version | awk 'NR == 1 { print }') path=$(command -v cmake)"
+echo "glibc=$(ldd --version | awk 'NR == 1 { print }')"
 export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 GCCLIB=${GCCLIB:-/opt/ohpc/pub/compiler/gcc/12.4.0/lib64}
 if [[ ! -e "$IRA_LIB_DIR/libira.so" ]]; then

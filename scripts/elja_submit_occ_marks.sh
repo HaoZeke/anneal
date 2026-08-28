@@ -35,7 +35,7 @@ fi
 
 cd "$ROOT"
 if squeue -u "$USER" -h -n lj75-occ-marks 2>/dev/null | grep . >/dev/null; then
-  j75=$(squeue -u "$USER" -h -n lj75-occ-marks -o '%i' | head -1)
+  j75=$(squeue -u "$USER" -h -n lj75-occ-marks -o '%i' | awk 'NR == 1 { print }')
   echo "already queued lj75-occ-marks $j75"
 else
   j75=$(sbatch --parsable scripts/elja_lj75_occ_marks.sbatch)

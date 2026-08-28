@@ -31,7 +31,7 @@ echo "host=$(hostname) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "pixi=$($PIXI --version)"
 echo "rustc=$($PIXI run -e cluster rustc --version)"
-echo "gcc=$($PIXI run -e cluster gcc --version | head -1)"
+echo "gcc=$($PIXI run -e cluster gcc --version | awk 'NR == 1 { print }')"
 # Occupancy contract, not crate CI.
 if command -v rustfmt >/dev/null 2>&1; then
   "$PIXI" run -e cluster cargo fmt --all -- --check
