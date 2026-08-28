@@ -18,9 +18,9 @@ use rand::SeedableRng;
 use super::{
     AcceptedPayload, AcceptedReply, BoundaryCrossingRecord, CatalogCandidate, CatalogIdentity,
     CatalogMutation, CatalogMutationKind, CatalogOperation, CatalogRelation, CatalogReply,
-    CatalogRequest, CatalogSnapshot, DescriptorHoleProposal, PolicyState, PopulationEpochState,
-    PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection, TransitionDestination,
-    decode_request, decode_request_reader, encode_reply, encode_request,
+    CatalogRequest, CatalogRideWork, CatalogSnapshot, DescriptorHoleProposal, PolicyState,
+    PopulationEpochState, PopulationPlan, PopulationSelection, ProtocolError, ProtocolRejection,
+    TransitionDestination, decode_request, decode_request_reader, encode_reply, encode_request,
 };
 use crate::Catalog_capnp::catalog_request;
 use crate::catalog::{
@@ -44,7 +44,10 @@ use crate::methods::feynman_kac::{
 };
 use crate::methods::landscape_graph::LandscapeGraph;
 use crate::methods::neus_bridge::{BridgeString, EntryLists, WeightLedger};
+use crate::pes_exploration::RideMethod;
 use crate::region_assignment::{RegionCandidate, RegionUtility, diversity_constrained_assignment};
+use crate::ride_ledger::{EnvironmentBook, RideLedger, RidePortfolio, RideSource};
+use crate::soap::local_nu3_z;
 use crate::transition_graph::{AttractionRegionConfig, TransitionGraph, TransitionOutcome};
 
 type FreshEvaluator = dyn Fn(&[f64]) -> Result<FreshEvaluation, String> + Send + Sync;
@@ -274,6 +277,9 @@ struct ScientificState {
     population_candidates: BTreeMap<u64, BTreeMap<u32, CatalogCandidate>>,
     population_plans: BTreeMap<u64, PopulationPlan>,
     packing: PackingBook,
+    ride_environments: EnvironmentBook,
+    ride_ledger: RideLedger,
+    ride_candidates: BTreeMap<u64, CatalogCandidate>,
     energy_history: BTreeMap<u32, VecDeque<f64>>,
     family_history: BTreeMap<u32, VecDeque<f64>>,
     trial_hops: BTreeMap<u32, u64>,
@@ -403,6 +409,15 @@ impl CoordinatorState {
                     population_candidates: BTreeMap::new(),
                     population_plans: BTreeMap::new(),
                     packing: PackingBook::default(),
+                    ride_environments: EnvironmentBook::new(
+                        crate::catalog::packing::ENVIRONMENT_RADIUS,
+                    )
+                    .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    ride_ledger: RideLedger::new(
+                        RidePortfolio::new(2, vec![RideMethod::Dimer, RideMethod::Lanczos])
+                            .map_err(|_| CatalogServerError::InvalidScientificConfiguration)?,
+                    ),
+                    ride_candidates: BTreeMap::new(),
                     energy_history: BTreeMap::new(),
                     family_history: BTreeMap::new(),
                     trial_hops: BTreeMap::new(),
@@ -1256,6 +1271,13 @@ fn apply_request(
                 |fp| scientific.packing.novelty(fp),
             );
             let canonical = candidate_from_validated(&validated, Some(basin_id));
+            if observe_ride_source(scientific, &canonical).is_err() {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
             let epoch_candidates = scientific.population_candidates.entry(*epoch).or_default();
             let inserted = match epoch_candidates.get(&request.identity.replica) {
                 Some(stored) if stored == &canonical => false,
@@ -1582,6 +1604,13 @@ fn apply_request(
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
                 }
+                if observe_ride_source(scientific, &canonical).is_err() {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
                 remember_candidate(scientific, request.identity.replica, canonical);
                 let arrival = scientific
                     .arrival_basin_by_replica
@@ -1666,6 +1695,13 @@ fn apply_request(
                     scientific
                         .best_candidate_by_replica
                         .insert(request.identity.replica, canonical.clone());
+                }
+                if observe_ride_source(scientific, &canonical).is_err() {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
                 }
                 remember_candidate(scientific, request.identity.replica, canonical);
                 let arrival = scientific
@@ -1834,12 +1870,19 @@ fn apply_request(
                             ProtocolRejection::ValidationRejected,
                         );
                     };
+                    let destination_candidate =
+                        candidate_from_validated(&validated, Some(observation.basin_id));
+                    if observe_ride_source(scientific, &destination_candidate).is_err() {
+                        return rejected(
+                            state,
+                            request.event_sequence,
+                            ProtocolRejection::ValidationRejected,
+                        );
+                    }
                     if *adopted {
                         scientific
                             .last_basin_by_replica
                             .insert(request.identity.replica, observation.basin_id);
-                        let destination_candidate =
-                            candidate_from_validated(&validated, Some(observation.basin_id));
                         remember_candidate(
                             scientific,
                             request.identity.replica,
@@ -1900,6 +1943,126 @@ fn apply_request(
                     ProtocolRejection::ValidationRejected,
                 );
             };
+            state.snapshot_version = snapshot_version;
+        }
+        CatalogOperation::ClaimRide { seed } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let mut ride_ledger = scientific.ride_ledger.clone();
+            if let Some(order) = ride_ledger.claim(request.identity.replica, *seed) {
+                let Some(source) = scientific
+                    .ride_candidates
+                    .get(&order.arm.source_basin)
+                    .cloned()
+                else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                scientific.ride_ledger = ride_ledger;
+                payload = AcceptedPayload::RideWork(CatalogRideWork { order, source });
+                state.snapshot_version = snapshot_version;
+            }
+        }
+        CatalogOperation::ReportRide { report } => {
+            let Some(scientific) = state.scientific.as_mut() else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            let mut next_scientific = scientific.clone();
+            if let crate::ride_ledger::RideOutcome::Certified { endpoints, .. } = &report.outcome
+                && endpoints
+                    .iter()
+                    .any(|endpoint| !next_scientific.ride_candidates.contains_key(endpoint))
+            {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            }
+            let Ok(credit) = next_scientific.ride_ledger.report(
+                request.identity.replica,
+                report.work,
+                report.charged_evaluations,
+                report.outcome.clone(),
+            ) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            if let crate::ride_ledger::RideOutcome::Certified { endpoints, .. } = &report.outcome {
+                let left = BasinId::from_raw(endpoints[0]);
+                let right = BasinId::from_raw(endpoints[1]);
+                let Some(left_node) = transition_node(&mut next_scientific, left) else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                let Some(right_node) = transition_node(&mut next_scientific, right) else {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                };
+                if next_scientific
+                    .transition_graph
+                    .observe(
+                        "certified_ride",
+                        left_node,
+                        TransitionOutcome::Resolved(right_node),
+                    )
+                    .is_err()
+                    || next_scientific
+                        .transition_graph
+                        .observe(
+                            "certified_ride",
+                            right_node,
+                            TransitionOutcome::Resolved(left_node),
+                        )
+                        .is_err()
+                {
+                    return rejected(
+                        state,
+                        request.event_sequence,
+                        ProtocolRejection::ValidationRejected,
+                    );
+                }
+                next_scientific
+                    .landscape
+                    .observe_crossing(endpoints[0], endpoints[1], 1.0);
+            }
+            let Some(snapshot_version) = state.snapshot_version.checked_add(1) else {
+                return rejected(
+                    state,
+                    request.event_sequence,
+                    ProtocolRejection::ValidationRejected,
+                );
+            };
+            *scientific = next_scientific;
+            payload = AcceptedPayload::RideCredit(credit);
             state.snapshot_version = snapshot_version;
         }
         CatalogOperation::LedgerEvent {
@@ -2645,6 +2808,38 @@ fn observe_packing(
             history.pop_front();
         }
     }
+}
+
+fn observe_ride_source(
+    scientific: &mut ScientificState,
+    candidate: &CatalogCandidate,
+) -> Result<(), ()> {
+    let basin = candidate.census_basin.ok_or(())?;
+    let local = local_nu3_z(
+        ArrayView1::from(&candidate.coordinates),
+        crate::catalog::packing::PACKING_SPEC,
+        Some(&scientific.signature.atomic_numbers),
+    );
+    let environments = scientific
+        .ride_environments
+        .observe(local.view())
+        .map_err(|_| ())?;
+    scientific
+        .ride_ledger
+        .register_source(RideSource {
+            basin,
+            energy: candidate.energy,
+            environments,
+        })
+        .map_err(|_| ())?;
+    let replace = scientific
+        .ride_candidates
+        .get(&basin)
+        .is_none_or(|stored| candidate.energy < stored.energy);
+    if replace {
+        scientific.ride_candidates.insert(basin, candidate.clone());
+    }
+    Ok(())
 }
 
 /// Catalog representative of the packing family the fewest live
