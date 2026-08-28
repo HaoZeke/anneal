@@ -16,8 +16,8 @@ use anneal_core::catalog_rpc::CatalogRelation;
 use anneal_core::catalog_rpc::client::{CatalogClient, CatalogClientError, ClientConfig};
 use anneal_core::catalog_rpc::server::{CatalogServer, ServerConfig};
 use anneal_core::catalog_rpc::{
-    CatalogCandidate, CatalogIdentity, CatalogMutationKind, ProtocolRejection, SPARSE_SAMPLE_DRAW,
-    TransitionDestination,
+    CatalogCandidate, CatalogIdentity, CatalogMutationKind, CatalogRideReport, ProtocolRejection,
+    SPARSE_SAMPLE_DRAW, TransitionDestination,
 };
 use anneal_core::cooperative_search::ledger::ChargeKind;
 use anneal_core::cooperative_search::{
@@ -29,6 +29,7 @@ use anneal_core::cooperative_search::{
 use anneal_core::descriptor_space::{
     DescriptorBlockKind, DescriptorBlockSpec, DescriptorSchema, DescriptorSpace,
 };
+use anneal_core::ride_ledger::RideOutcome;
 use anneal_core::transition_graph::AttractionRegionConfig;
 use ndarray::ArrayView1;
 
@@ -173,6 +174,66 @@ fn coordinator_validates_before_census_and_catalog_mutation() {
     assert_eq!(unchanged.version, 1);
     assert_eq!(unchanged.census_visits, 1);
     assert_eq!(unchanged.active_entries, 1);
+}
+
+#[test]
+fn replicas_share_exclusive_ride_arms_and_coordinator_computes_edge_novelty() {
+    let server = server();
+    let digest = signature().digest();
+    let mut first =
+        CatalogClient::connect(server.addr(), identity(0, digest), ClientConfig::default())
+            .unwrap();
+    let mut second =
+        CatalogClient::connect(server.addr(), identity(1, digest), ClientConfig::default())
+            .unwrap();
+    let source_a = first
+        .offer_candidate(1, candidate(0, 1, 1.2))
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+    let source_b = second
+        .offer_candidate(1, candidate(1, 1, 2.0))
+        .unwrap()
+        .catalog
+        .unwrap()
+        .basin_id;
+
+    let first_work = first.claim_ride(2, 8001).unwrap().unwrap();
+    let second_work = second.claim_ride(2, 8002).unwrap().unwrap();
+
+    assert_ne!(first_work.order.arm, second_work.order.arm);
+    assert_eq!(first_work.order.arm.source_basin, source_b);
+    assert_eq!(first_work.source.census_basin, Some(source_b));
+    let first_credit = first
+        .report_ride(
+            3,
+            CatalogRideReport {
+                work: first_work.order.id,
+                charged_evaluations: 144,
+                outcome: RideOutcome::Certified {
+                    saddle: 700,
+                    endpoints: [source_a, source_b],
+                },
+            },
+        )
+        .unwrap();
+    let duplicate_credit = second
+        .report_ride(
+            3,
+            CatalogRideReport {
+                work: second_work.order.id,
+                charged_evaluations: 133,
+                outcome: RideOutcome::Certified {
+                    saddle: 701,
+                    endpoints: [source_b, source_a],
+                },
+            },
+        )
+        .unwrap();
+
+    assert!(first_credit.novel_edge);
+    assert!(!duplicate_credit.novel_edge);
 }
 
 #[test]
