@@ -37,7 +37,7 @@ mkdir -p "$IRA/src/Obj" "$IRA/include" "$IRA/lib"
 # Portable ISA: Intel and AMD compute share this .so.
 FFLAGS="-fPIC -cpp -O3 -ffree-line-length-512 -funroll-loops -B${SYS}"
 cd "$IRA/src"
-LIBLAPACK= make shlib FFLAGS="$FFLAGS"
+LIBLAPACK='' make shlib FFLAGS="$FFLAGS"
 # Relink with rpath; write a new inode so mapped tasks keep the old file.
 gfortran -B"$SYS" -o "$IRA/lib/libira.so.new" -shared \
   -J"$IRA/include" -I"$IRA/include" \
