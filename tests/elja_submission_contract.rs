@@ -337,8 +337,15 @@ fn molecular_builders_link_the_tracked_cuh2_c_abi() {
 
     let exports = fs::read_to_string(root.join("scripts/rgpot_cuh2.exports"))
         .expect("failed to read the CuH2 export map");
-    for symbol in ["rgpot_cuh2_force;", "rgpot_fortran_last_error;", "local: *;"] {
-        assert!(exports.contains(symbol), "CuH2 export map is missing {symbol}");
+    for symbol in [
+        "rgpot_cuh2_force;",
+        "rgpot_fortran_last_error;",
+        "local: *;",
+    ] {
+        assert!(
+            exports.contains(symbol),
+            "CuH2 export map is missing {symbol}"
+        );
     }
 }
 
