@@ -155,7 +155,7 @@ fn ride_candidate(replica: u32, sequence: u64, separation: f64) -> CatalogCandid
     let mut record = candidate(replica, sequence, separation);
     let reaction = (separation - 1.6) / 0.4;
     record.energy = (reaction * reaction - 1.0).powi(2);
-    record.forces[3] = 4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+    record.forces[3] = -4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
     record.gradient_norm = record.forces[3].abs();
     record
 }
@@ -183,11 +183,11 @@ fn ride_server() -> CatalogServer {
             |coordinates| {
                 let separation = coordinates[3];
                 let reaction = (separation - 1.6) / 0.4;
-                let mut gradient = vec![0.0; coordinates.len()];
-                gradient[3] = 4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
+                let mut forces = vec![0.0; coordinates.len()];
+                forces[3] = -4.0 * reaction * (reaction * reaction - 1.0) / 0.4;
                 Ok(FreshEvaluation {
                     energy: (reaction * reaction - 1.0).powi(2),
-                    forces: gradient,
+                    forces,
                 })
             },
         )
