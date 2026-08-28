@@ -13,14 +13,14 @@ use crate::Catalog_capnp::{
     policy_state_reply, population_epoch_reply, ride_report_request, transition_record,
 };
 use crate::pes_exploration::RideMethod;
-use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideOutcome, RideWorkOrder};
+use crate::ride_ledger::{RideCredit, RideDirection, RideFailure, RideWorkOrder};
 
 pub mod client;
 pub mod mailbox;
 pub mod server;
 
 /// Wire protocol version accepted by this release.
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 15;
 /// `Sample` draw that returns the active-catalog incumbent.
 pub const INCUMBENT_SAMPLE_DRAW: u64 = u64::MAX;
 
@@ -119,15 +119,33 @@ pub enum TransitionDestination {
     Resolved(CatalogCandidate),
 }
 
-/// Charged receiving-side result for one claimed transition experiment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Producer-side stationary structures proposed as one connection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CatalogRideConnection {
+    /// Force-converged saddle candidate requiring receiving-side index certification.
+    pub saddle: CatalogCandidate,
+    /// Force-converged downhill endpoints requiring receiving-side basin assignment.
+    pub endpoints: [CatalogCandidate; 2],
+}
+
+/// Producer evidence for one claimed transition experiment.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CatalogRideOutcome {
+    /// Stationary structures requiring fresh receiving-side certification.
+    Certified(CatalogRideConnection),
+    /// Explicit local failure retained as shared negative evidence.
+    Failed(RideFailure),
+}
+
+/// Charged producer report for one claimed transition experiment.
+#[derive(Debug, Clone, PartialEq)]
 pub struct CatalogRideReport {
     /// Coordinator-issued work identifier.
     pub work: u64,
     /// PES evaluations consumed by the complete ride and certification.
     pub charged_evaluations: u64,
-    /// Certified connection or explicit failure class.
-    pub outcome: RideOutcome,
+    /// Candidate connection or explicit failure class.
+    pub outcome: CatalogRideOutcome,
 }
 
 /// Exclusive ride assignment and its validated source minimum.
@@ -901,13 +919,16 @@ pub fn encode_request(request: &CatalogRequest) -> Result<Vec<u8>, ProtocolError
             wire.set_charged_evaluations(report.charged_evaluations);
             let mut outcome = wire.init_outcome();
             match &report.outcome {
-                RideOutcome::Certified { saddle, endpoints } => {
+                CatalogRideOutcome::Certified(connection) => {
                     let mut certified = outcome.init_certified();
-                    certified.set_saddle(*saddle);
-                    certified.set_endpoint_a(endpoints[0]);
-                    certified.set_endpoint_b(endpoints[1]);
+                    fill_candidate(certified.reborrow().init_saddle(), &connection.saddle);
+                    fill_candidate(
+                        certified.reborrow().init_endpoint_a(),
+                        &connection.endpoints[0],
+                    );
+                    fill_candidate(certified.init_endpoint_b(), &connection.endpoints[1]);
                 }
-                RideOutcome::Failed(failure) => outcome.set_failed((*failure).into()),
+                CatalogRideOutcome::Failed(failure) => outcome.set_failed((*failure).into()),
             }
         }
     }
@@ -1073,13 +1094,16 @@ pub(crate) fn decode_request_reader(
             let outcome = match report.get_outcome().which().map_err(wire_error)? {
                 ride_report_request::outcome::Certified(certified) => {
                     let certified = certified.map_err(wire_error)?;
-                    RideOutcome::Certified {
-                        saddle: certified.get_saddle(),
-                        endpoints: [certified.get_endpoint_a(), certified.get_endpoint_b()],
-                    }
+                    CatalogRideOutcome::Certified(CatalogRideConnection {
+                        saddle: read_candidate(certified.get_saddle().map_err(wire_error)?)?,
+                        endpoints: [
+                            read_candidate(certified.get_endpoint_a().map_err(wire_error)?)?,
+                            read_candidate(certified.get_endpoint_b().map_err(wire_error)?)?,
+                        ],
+                    })
                 }
                 ride_report_request::outcome::Failed(failure) => {
-                    RideOutcome::Failed(failure.map_err(wire_error)?.into())
+                    CatalogRideOutcome::Failed(failure.map_err(wire_error)?.into())
                 }
             };
             CatalogOperation::ReportRide {
