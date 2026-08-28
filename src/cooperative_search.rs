@@ -1170,7 +1170,6 @@ mod run {
                     state.policy_pending = true;
                 }
             }
-            self.push_event(replica, TraceKind::RpcFallback, None, None)?;
             Ok(PolicyEvidenceOutcome::LocalFallback)
         }
 
