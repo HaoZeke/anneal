@@ -14,7 +14,9 @@ use rgsaddle::{
     PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
 };
 
-use crate::descriptor_space::{DescriptorError, DescriptorSpace, DescriptorVector};
+use crate::descriptor_space::{
+    DescriptorError, DescriptorGeometry, DescriptorSpace, DescriptorVector,
+};
 
 /// Energy and Cartesian-gradient evaluator used by all exploration stages.
 pub trait PesSurface: Sync {
@@ -25,10 +27,66 @@ pub trait PesSurface: Sync {
     fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error>;
 }
 
+/// Species, boundary geometry, and caller domain carried by exact identity.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StructureContext {
+    species: Option<Vec<u32>>,
+    geometry: Option<DescriptorGeometry>,
+    identity_domain: Option<String>,
+}
+
+impl StructureContext {
+    /// Construct an owned identity context for a stationary structure.
+    pub fn new(
+        species: Option<Vec<u32>>,
+        geometry: Option<DescriptorGeometry>,
+        identity_domain: Option<String>,
+    ) -> Self {
+        Self {
+            species,
+            geometry,
+            identity_domain,
+        }
+    }
+
+    /// Ordered atomic numbers, when chemical identities are known.
+    pub fn species(&self) -> Option<&[u32]> {
+        self.species.as_deref()
+    }
+
+    /// Descriptor geometry, including cell and periodic axes.
+    pub fn geometry(&self) -> Option<DescriptorGeometry> {
+        self.geometry
+    }
+
+    /// Caller-defined namespace preventing cross-system identity merges.
+    pub fn identity_domain(&self) -> Option<&str> {
+        self.identity_domain.as_deref()
+    }
+}
+
+/// Borrowed structure and identity metadata presented to an exact witness.
+#[derive(Debug, Clone, Copy)]
+pub struct StructureView<'a> {
+    /// Cartesian coordinates.
+    pub coordinates: ArrayView1<'a, f64>,
+    /// Species, boundary geometry, and caller identity namespace.
+    pub context: &'a StructureContext,
+}
+
 /// Symmetry-aware final witness for structural identity.
 pub trait ExactStructureWitness {
     /// Whether two Cartesian structures represent the same stationary point.
     fn equivalent(&self, left: ArrayView1<f64>, right: ArrayView1<f64>) -> bool;
+
+    /// Whether two fully contextualized structures represent one identity.
+    ///
+    /// The default rejects species, cell/PBC, or identity-domain mismatches
+    /// before applying the coordinate witness. Implementations may override
+    /// this method to canonicalize symmetry-equivalent cells or domains.
+    fn equivalent_structures(&self, left: StructureView<'_>, right: StructureView<'_>) -> bool {
+        left.context == right.context && self.equivalent(left.coordinates, right.coordinates)
+    }
 }
 
 impl<F> ExactStructureWitness for F
@@ -203,6 +261,8 @@ pub struct MinimumRecord {
     pub energy: f64,
     /// Cartesian stationary point.
     pub coordinates: Array1<f64>,
+    /// Species, cell/PBC, and system namespace used for exact identity.
+    pub context: StructureContext,
     /// Final gradient infinity norm.
     pub max_gradient: f64,
     /// Universal descriptor used for retrieval and novelty.
@@ -233,6 +293,8 @@ pub struct SaddleConnection {
     pub saddle_energy: f64,
     /// Cartesian saddle coordinates.
     pub saddle_coordinates: Array1<f64>,
+    /// Species, cell/PBC, and system namespace used for exact identity.
+    pub context: StructureContext,
     /// Lowest curvature reported at the force-converged candidate.
     pub curvature: f64,
     /// Number of certified negative Hessian eigenvalues.
@@ -289,6 +351,26 @@ impl PesNetwork {
         descriptor: DescriptorVector,
         witness: &W,
     ) -> Result<MinimumAdmission, DescriptorError> {
+        self.admit_minimum_with_context(
+            energy,
+            coordinates,
+            max_gradient,
+            descriptor,
+            StructureContext::default(),
+            witness,
+        )
+    }
+
+    /// Admit a certified minimum with its complete exact-identity context.
+    pub fn admit_minimum_with_context<W: ExactStructureWitness + ?Sized>(
+        &mut self,
+        energy: f64,
+        coordinates: Array1<f64>,
+        max_gradient: f64,
+        descriptor: DescriptorVector,
+        context: StructureContext,
+        witness: &W,
+    ) -> Result<MinimumAdmission, DescriptorError> {
         let mut ordered = self
             .minima
             .iter()
@@ -307,10 +389,20 @@ impl PesNetwork {
         });
         let nearest_descriptor_distance = ordered.first().map(|entry| entry.0);
         for (_, index) in ordered {
-            if witness.equivalent(self.minima[index].coordinates.view(), coordinates.view()) {
+            if witness.equivalent_structures(
+                StructureView {
+                    coordinates: self.minima[index].coordinates.view(),
+                    context: &self.minima[index].context,
+                },
+                StructureView {
+                    coordinates: coordinates.view(),
+                    context: &context,
+                },
+            ) {
                 if energy < self.minima[index].energy {
                     self.minima[index].energy = energy;
                     self.minima[index].coordinates = coordinates;
+                    self.minima[index].context = context;
                     self.minima[index].max_gradient = max_gradient;
                     self.minima[index].descriptor = descriptor;
                 }
@@ -326,6 +418,7 @@ impl PesNetwork {
             id,
             energy,
             coordinates,
+            context,
             max_gradient,
             descriptor,
         });
@@ -358,9 +451,15 @@ impl PesNetwork {
             let same_endpoints = existing.endpoints == candidate.endpoints
                 || existing.endpoints == [candidate.endpoints[1], candidate.endpoints[0]];
             if same_endpoints
-                && witness.equivalent(
-                    existing.saddle_coordinates.view(),
-                    candidate.saddle_coordinates.view(),
+                && witness.equivalent_structures(
+                    StructureView {
+                        coordinates: existing.saddle_coordinates.view(),
+                        context: &existing.context,
+                    },
+                    StructureView {
+                        coordinates: candidate.saddle_coordinates.view(),
+                        context: &candidate.context,
+                    },
                 )
             {
                 return Ok(existing.clone());
@@ -628,12 +727,18 @@ where
     }
 
     let origin_minimum = quench(surface, start, config)?;
-    let origin_descriptor = descriptor(descriptor_space, &origin_minimum, species)?;
-    let origin = network.admit_minimum(
+    let context = StructureContext::new(
+        species.map(<[u32]>::to_vec),
+        descriptor_space.geometry(),
+        None,
+    );
+    let origin_descriptor = descriptor(descriptor_space, &origin_minimum, context.species())?;
+    let origin = network.admit_minimum_with_context(
         origin_minimum.energy,
         origin_minimum.coordinates.clone(),
         origin_minimum.max_gradient,
         origin_descriptor,
+        context.clone(),
         witness,
     )?;
 
@@ -709,27 +814,30 @@ where
         IrcDirection::Reverse,
         config,
     )?;
-    let forward_descriptor = descriptor(descriptor_space, &forward, species)?;
-    let reverse_descriptor = descriptor(descriptor_space, &reverse, species)?;
-    let forward_id = network.admit_minimum(
+    let forward_descriptor = descriptor(descriptor_space, &forward, context.species())?;
+    let reverse_descriptor = descriptor(descriptor_space, &reverse, context.species())?;
+    let forward_id = network.admit_minimum_with_context(
         forward.energy,
         forward.coordinates,
         forward.max_gradient,
         forward_descriptor,
+        context.clone(),
         witness,
     )?;
-    let reverse_id = network.admit_minimum(
+    let reverse_id = network.admit_minimum_with_context(
         reverse.energy,
         reverse.coordinates,
         reverse.max_gradient,
         reverse_descriptor,
+        context.clone(),
         witness,
     )?;
     if forward_id.id == reverse_id.id {
         return Err(PesExplorationError::CollapsedConnection);
     }
 
-    let saddle_descriptor = descriptor_space.describe(saddle_coordinates.view(), species)?;
+    let saddle_descriptor =
+        descriptor_space.describe(saddle_coordinates.view(), context.species())?;
     network
         .admit_saddle(
             SaddleConnection {
@@ -738,6 +846,7 @@ where
                 endpoints: [forward_id.id, reverse_id.id],
                 saddle_energy,
                 saddle_coordinates,
+                context,
                 curvature,
                 negative_modes: index.negative_modes,
                 saddle_max_gradient,

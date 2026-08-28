@@ -371,6 +371,11 @@ impl DescriptorSpace {
         &self.schema
     }
 
+    /// Geometry contract carried by universal descriptor spaces.
+    pub fn geometry(&self) -> Option<DescriptorGeometry> {
+        self.geometry
+    }
+
     /// Evaluate all invariant blocks and concatenate their normalized values.
     pub fn describe(
         &self,
