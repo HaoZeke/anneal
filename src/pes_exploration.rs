@@ -466,8 +466,7 @@ pub fn stationary_index<S: PesSurface + ?Sized>(
         let (_, plus_gradient) = checked_evaluate(surface, plus.view())?;
         let (_, minus_gradient) = checked_evaluate(surface, minus.view())?;
         for row in 0..dimension {
-            hessian[(row, column)] =
-                (plus_gradient[row] - minus_gradient[row]) / (2.0 * step);
+            hessian[(row, column)] = (plus_gradient[row] - minus_gradient[row]) / (2.0 * step);
         }
     }
     for row in 0..dimension {
@@ -672,8 +671,7 @@ where
         saddle_coordinates = prfo.position().to_owned();
     }
 
-    let (saddle_energy, saddle_gradient) =
-        checked_evaluate(surface, saddle_coordinates.view())?;
+    let (saddle_energy, saddle_gradient) = checked_evaluate(surface, saddle_coordinates.view())?;
     let saddle_max_gradient = max_abs(saddle_gradient.view());
     if saddle_max_gradient > config.saddle_force_tolerance {
         return Err(PesExplorationError::SaddleNotConverged {
