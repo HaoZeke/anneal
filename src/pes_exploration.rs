@@ -8,12 +8,15 @@
 use std::fmt::Display;
 
 use ndarray::{Array1, Array2, ArrayView1};
+use rand::{SeedableRng, rngs::StdRng};
+use rand_distr::{Distribution, StandardNormal};
 use rgmin::{GradNorm, Lbfgs};
 use rgsaddle::{
     IrcConfig, IrcDirection, IrcSession, MinModeConfig, MinModeKind, MinModeSession, MinModeStatus,
     PointSurface, SaddleError, SellaSaddleConfig, SellaSaddleSession, exact_eigh,
 };
 
+use crate::curvature::{project_rigid_with, rigid_basis};
 use crate::descriptor_space::{
     DescriptorError, DescriptorGeometry, DescriptorSpace, DescriptorVector,
 };
@@ -127,6 +130,163 @@ impl RideMethod {
             Self::Lanczos => MinModeKind::Lanczos,
         }
     }
+}
+
+/// Sign of a deterministic transition-search initialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RideModeDirection {
+    /// Reverse the generated mode.
+    Negative,
+    /// Use the generated mode as sampled.
+    Positive,
+}
+
+impl RideModeDirection {
+    fn sign(self) -> f64 {
+        match self {
+            Self::Negative => -1.0,
+            Self::Positive => 1.0,
+        }
+    }
+}
+
+fn ranked_seed(seed: u64, rank: u16) -> u64 {
+    let mut mixed = seed ^ (u64::from(rank) + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^ (mixed >> 31)
+}
+
+fn normalized_gaussian(
+    dimension: usize,
+    seed: u64,
+    rank: u16,
+) -> Result<Array1<f64>, PesExplorationError> {
+    if dimension == 0 {
+        return Err(PesExplorationError::InvalidShape(
+            "ride dimension must be nonempty",
+        ));
+    }
+    let mut rng = StdRng::seed_from_u64(ranked_seed(seed, rank));
+    let mode = Array1::from_shape_simple_fn(dimension, || {
+        let sample: f64 = StandardNormal.sample(&mut rng);
+        sample
+    });
+    normalize_mode(mode.view())
+}
+
+/// Generate a deterministic normalized Gaussian mode for an arbitrary-N surface.
+pub fn gaussian_nd_mode(
+    dimension: usize,
+    seed: u64,
+    rank: u16,
+    direction: RideModeDirection,
+) -> Result<Array1<f64>, PesExplorationError> {
+    Ok(normalized_gaussian(dimension, seed, rank)? * direction.sign())
+}
+
+fn translation_basis(atom_count: usize) -> Vec<Array1<f64>> {
+    let mut basis = Vec::with_capacity(3);
+    let scale = (atom_count as f64).sqrt().recip();
+    for axis in 0..3 {
+        let mut translation = Array1::zeros(3 * atom_count);
+        for atom in 0..atom_count {
+            translation[3 * atom + axis] = scale;
+        }
+        basis.push(translation);
+    }
+    basis
+}
+
+/// Generate an atom-local Gaussian mode with physical constraints applied.
+///
+/// Gaussian components are attenuated by scaled minimum-image distance from
+/// `representative_atom`. Fully mobile finite clusters lose translations and
+/// rotations; periodic structures lose translations only. Frozen atoms remain
+/// exactly stationary and make the external constraints authoritative instead
+/// of applying whole-structure rigid-motion projection.
+#[allow(clippy::too_many_arguments)]
+pub fn localized_cartesian_mode(
+    coordinates: ArrayView1<f64>,
+    representative_atom: usize,
+    frozen_atoms: &[bool],
+    geometry: DescriptorGeometry,
+    localization_radius: f64,
+    seed: u64,
+    rank: u16,
+    direction: RideModeDirection,
+) -> Result<Array1<f64>, PesExplorationError> {
+    if coordinates.is_empty() || !coordinates.len().is_multiple_of(3) {
+        return Err(PesExplorationError::InvalidShape(
+            "coordinates must be nonempty 3N Cartesian",
+        ));
+    }
+    if coordinates.iter().any(|value| !value.is_finite()) {
+        return Err(PesExplorationError::InvalidShape(
+            "coordinates are nonfinite",
+        ));
+    }
+    let atom_count = coordinates.len() / 3;
+    if frozen_atoms.len() != atom_count {
+        return Err(PesExplorationError::InvalidShape(
+            "frozen mask must contain one value per atom",
+        ));
+    }
+    if representative_atom >= atom_count {
+        return Err(PesExplorationError::InvalidShape(
+            "representative atom is outside the structure",
+        ));
+    }
+    if frozen_atoms[representative_atom] {
+        return Err(PesExplorationError::InvalidShape(
+            "representative atom is frozen",
+        ));
+    }
+    if !localization_radius.is_finite() || localization_radius <= 0.0 {
+        return Err(PesExplorationError::InvalidConfig(
+            "mode localization radius",
+        ));
+    }
+
+    let mut mode = normalized_gaussian(coordinates.len(), seed, rank)?;
+    let target = [
+        coordinates[3 * representative_atom],
+        coordinates[3 * representative_atom + 1],
+        coordinates[3 * representative_atom + 2],
+    ];
+    let radius_squared = localization_radius * localization_radius;
+    for atom in 0..atom_count {
+        if frozen_atoms[atom] {
+            mode[3 * atom] = 0.0;
+            mode[3 * atom + 1] = 0.0;
+            mode[3 * atom + 2] = 0.0;
+            continue;
+        }
+        let displacement = geometry.displacement([
+            coordinates[3 * atom] - target[0],
+            coordinates[3 * atom + 1] - target[1],
+            coordinates[3 * atom + 2] - target[2],
+        ]);
+        let distance_squared = displacement
+            .iter()
+            .map(|component| component * component)
+            .sum::<f64>();
+        let weight = (-0.5 * distance_squared / radius_squared).exp();
+        for axis in 0..3 {
+            mode[3 * atom + axis] *= weight;
+        }
+    }
+
+    if frozen_atoms.iter().all(|frozen| !frozen) {
+        let basis = if geometry.periodic().iter().any(|periodic| *periodic) {
+            translation_basis(atom_count)
+        } else {
+            rigid_basis(coordinates)
+        };
+        project_rigid_with(&mut mode, &basis);
+    }
+    let mode = normalize_mode(mode.view())?;
+    Ok(mode * direction.sign())
 }
 
 /// Controls for one minimum--saddle--minimum connection attempt.
