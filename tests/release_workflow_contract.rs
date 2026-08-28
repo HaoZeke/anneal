@@ -11,9 +11,9 @@ fn crate_publication_has_a_registry_fallback_for_git_dependencies() {
     let manifest = include_str!("../Cargo.toml");
     let workflow = include_str!("../.github/workflows/ci.yml");
 
-    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/HaoZeke/potlib.git\", rev = \"b19227f9197a4c927633f1225f1e7546794a6f1e\""));
-    assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"f3c42130bb389ba6cd6e4cfdc8b2e182f4a764e9\", version = \"0.6.0\", features = [\"capi\"]"));
-    assert!(manifest.contains("rgmin = { git = \"https://github.com/OmniPotentRPC/rgmin.git\", rev = \"5be2e963d2239fd2bf6f7f2ae3b9a4e54f2a3aaf\""));
+    assert!(manifest.contains("rgpot-core = { version = \"=3.0.2\", git = \"https://github.com/HaoZeke/potlib.git\", rev = \"65d5488f202e0c7b1b3aeddeb388b3d3ba707fcf\""));
+    assert!(manifest.contains("eindir-core = { git = \"https://github.com/HaoZeke/eindir.git\", rev = \"091c6f7d6ea70821c3374152481fb9500e799af2\", version = \"0.6.0\", features = [\"capi\"]"));
+    assert!(manifest.contains("rgmin = { git = \"https://github.com/HaoZeke/rgmin.git\", rev = \"2b99087d0bd493b8e91fc41ba73ee89c7eecad3a\""));
     assert!(workflow.contains("cargo publish --dry-run"));
     assert!(!workflow.contains("cargo publish --dry-run --no-verify"));
 }
