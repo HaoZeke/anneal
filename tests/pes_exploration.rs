@@ -3,7 +3,7 @@ use std::convert::Infallible;
 use anneal_core::descriptor_space::{DescriptorGeometry, universal_descriptor_space};
 use anneal_core::pes_exploration::{
     ExactStructureWitness, PesExplorationConfig, PesNetwork, PesSurface, RideMethod,
-    StructureContext, discover_mode_connection, stationary_index,
+    StructureContext, discover_mode_connection, stationary_index, stationary_index_cartesian,
 };
 use ndarray::{Array1, ArrayView1};
 
@@ -39,6 +39,57 @@ impl PesSurface for IndexTwoSaddle {
             energy += coordinates[index] * coordinates[index];
             gradient[index] = 2.0 * coordinates[index];
         }
+        Ok((energy, gradient))
+    }
+}
+
+struct RadialPairBarrier;
+
+impl PesSurface for RadialPairBarrier {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let displacement = [
+            coordinates[3] - coordinates[0],
+            coordinates[4] - coordinates[1],
+            coordinates[5] - coordinates[2],
+        ];
+        let distance = displacement
+            .iter()
+            .map(|component| component * component)
+            .sum::<f64>()
+            .sqrt();
+        let shifted = distance - 1.0;
+        let energy = (shifted * shifted - 0.25).powi(2);
+        let radial_gradient = 4.0 * shifted * (shifted * shifted - 0.25);
+        let mut gradient = Array1::zeros(6);
+        for axis in 0..3 {
+            let component = radial_gradient * displacement[axis] / distance;
+            gradient[axis] = -component;
+            gradient[3 + axis] = component;
+        }
+        Ok((energy, gradient))
+    }
+}
+
+struct FrozenContaminatedIndex;
+
+impl PesSurface for FrozenContaminatedIndex {
+    type Error = Infallible;
+
+    fn evaluate(&self, coordinates: ArrayView1<f64>) -> Result<(f64, Array1<f64>), Self::Error> {
+        let signs = [-1.0, 1.0, 1.0, -2.0, 1.0, 1.0];
+        let energy = coordinates
+            .iter()
+            .zip(signs)
+            .map(|(coordinate, sign)| sign * coordinate * coordinate)
+            .sum();
+        let gradient = Array1::from_iter(
+            coordinates
+                .iter()
+                .zip(signs)
+                .map(|(coordinate, sign)| 2.0 * sign * coordinate),
+        );
         Ok((energy, gradient))
     }
 }
@@ -121,6 +172,47 @@ fn finite_difference_index_counts_every_unstable_mode() {
     assert!((report.eigenvalues[0] + 4.0).abs() < 1e-8);
     assert!((report.eigenvalues[1] + 2.0).abs() < 1e-8);
     assert!(report.eigenvalues[2] > 1.9);
+}
+
+#[test]
+fn cartesian_index_excludes_finite_cluster_rigid_modes() {
+    let coordinates = Array1::from_vec(vec![-0.5, 0.0, 0.0, 0.5, 0.0, 0.0]);
+    let report = stationary_index_cartesian(
+        &RadialPairBarrier,
+        coordinates.view(),
+        &[false, false],
+        [false; 3],
+        1e-4,
+        1e-7,
+    )
+    .unwrap();
+
+    assert_eq!(report.negative_modes, 1);
+    assert!((report.eigenvalues[0] + 2.0).abs() < 1e-6);
+    assert!(report.lowest_mode[0] * report.lowest_mode[3] < 0.0);
+}
+
+#[test]
+fn cartesian_index_excludes_frozen_surface_coordinates() {
+    let report = stationary_index_cartesian(
+        &FrozenContaminatedIndex,
+        Array1::zeros(6).view(),
+        &[true, false],
+        [true; 3],
+        1e-4,
+        1e-7,
+    )
+    .unwrap();
+
+    assert_eq!(report.negative_modes, 1);
+    assert!(
+        report
+            .lowest_mode
+            .iter()
+            .take(3)
+            .all(|component| component.abs() < 1e-12)
+    );
+    assert!(report.eigenvalues[0] < -3.9);
 }
 
 #[test]
