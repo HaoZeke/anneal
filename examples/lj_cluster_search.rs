@@ -223,6 +223,72 @@ mod option_tests {
 
     #[cfg(feature = "bank-rpc")]
     #[test]
+    fn certified_duplicate_ride_enters_the_live_chain_as_a_counted_proposal() {
+        use anneal_core::cooperative_search::RideReportOutcome;
+        use anneal_core::ride_ledger::RideCredit;
+
+        let destination = Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        let action = ride_checkpoint_action(
+            RideReportOutcome::Credited(RideCredit {
+                certified_connection: true,
+                novel_edge: false,
+                total_charged_evaluations: 140,
+            }),
+            Some(destination.clone()),
+            81,
+        );
+
+        assert_eq!(
+            action,
+            CheckpointAction::ExternalProposal {
+                state: destination,
+                action: "certified_ride".into(),
+                external_calls: 140,
+            }
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn uncertified_ride_charges_the_receiver_without_proposing_a_transition() {
+        use anneal_core::cooperative_search::RideReportOutcome;
+        use anneal_core::ride_ledger::RideCredit;
+
+        let action = ride_checkpoint_action(
+            RideReportOutcome::Credited(RideCredit {
+                certified_connection: false,
+                novel_edge: false,
+                total_charged_evaluations: 97,
+            }),
+            Some(Array1::from(vec![0.0, 0.0, 0.0, 2.0, 0.0, 0.0])),
+            81,
+        );
+
+        assert_eq!(
+            action,
+            CheckpointAction::ExternalWork {
+                external_calls: 97,
+            }
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn rejected_ride_report_charges_only_known_producer_work() {
+        use anneal_core::cooperative_search::RideReportOutcome;
+
+        let action = ride_checkpoint_action(RideReportOutcome::Rejected, None, 81);
+
+        assert_eq!(
+            action,
+            CheckpointAction::ExternalWork {
+                external_calls: 81,
+            }
+        );
+    }
+
+    #[cfg(feature = "bank-rpc")]
+    #[test]
     fn fixed_probe_is_seeded_target_blind_and_translation_free() {
         let current = Array1::from(vec![0.0; 12]);
         let mut first_rng = <rand::rngs::StdRng as rand::SeedableRng>::seed_from_u64(71);
