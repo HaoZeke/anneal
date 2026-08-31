@@ -81,3 +81,37 @@ fn generic_nd_ride_certifies_both_minima_without_atomistic_metadata() {
         assert!(minimum.max_gradient < config.quench_gradient_tolerance);
     }
 }
+
+#[test]
+fn bowl_breakout_reaches_negative_curvature_before_minimum_mode_following() {
+    let mut network = NdPesNetwork::new();
+    let config = PesExplorationConfig {
+        ride_method: RideMethod::Lanczos,
+        quench_steps: 300,
+        saddle_steps: 500,
+        activation_attempts: 8,
+        activation_growth: 2.0,
+        quench_gradient_tolerance: 1e-8,
+        saddle_force_tolerance: 0.1,
+        saddle_displacement: 0.01,
+        irc_step: 0.08,
+        refine_with_prfo: false,
+        ..PesExplorationConfig::default()
+    };
+    let start = Array1::from_vec(vec![-0.83, 0.12, -0.07, 0.03, 0.09]);
+    let mode = Array1::from_vec(vec![1.0, 0.0, 0.0, 0.0, 0.0]);
+
+    let connection = discover_nd_connection(
+        &FiveDimensionalDoubleWell,
+        &mut network,
+        start.view(),
+        mode.view(),
+        &config,
+        &PointWitness,
+    )
+    .unwrap();
+
+    assert_eq!(connection.negative_modes, 1);
+    assert!(connection.curvature < 0.0);
+    assert_eq!(network.minimum_count(), 2);
+}
