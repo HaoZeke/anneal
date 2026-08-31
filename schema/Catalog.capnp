@@ -309,6 +309,7 @@ struct RideReportRequest {
 
 struct RideReportReply {
   novelEdge @0 :Bool;
+  totalChargedEvaluations @1 :UInt64;
 }
 
 # Which selection produced a barrier's parent map. The two branches carry
