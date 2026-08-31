@@ -158,10 +158,13 @@ pub mod raft;
 pub mod region_assignment;
 /// Temperature spread across a cooperative ensemble and its exchange.
 pub mod replica_exchange;
-/// Shared same-system scheduling evidence for minimum-mode transition searches.
-pub mod ride_ledger;
 /// GMRF residual intensity on the class graph.
 pub mod residual_field;
+/// Budgeted execution of coordinator-issued transition-search work.
+#[cfg(feature = "bank-rpc")]
+pub mod ride_execution;
+/// Shared same-system scheduling evidence for minimum-mode transition searches.
+pub mod ride_ledger;
 /// Deterministic provenance records for engine-backed runs.
 pub mod run_manifest;
 pub mod runner;

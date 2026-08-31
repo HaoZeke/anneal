@@ -1271,6 +1271,9 @@ where
     if forward_id.id == reverse_id.id {
         return Err(PesExplorationError::CollapsedConnection);
     }
+    if forward_id.id != origin.id && reverse_id.id != origin.id {
+        return Err(PesExplorationError::DisconnectedConnection);
+    }
 
     let saddle_descriptor =
         descriptor_space.describe(saddle_coordinates.view(), context.species())?;
